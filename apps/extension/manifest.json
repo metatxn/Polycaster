@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "Knoww - Prediction Markets for Social Media",
+  "version": "2.5.6",
+  "description": "Discover and navigate prediction markets",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    },
+    "default_title": "Knoww Settings"
+  },
+  "permissions": ["storage", "offscreen"],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://www.linkedin.com/*",
+    "https://www.reddit.com/*",
+    "https://reddit.com/*",
+    "https://old.reddit.com/*",
+    "https://gamma-api.polymarket.com/*",
+    "https://api.elections.kalshi.com/*",
+    "https://knoww.app/*",
+    "http://localhost/*",
+    "https://clob.polymarket.com/*",
+    "https://data-api.polymarket.com/*",
+    "https://polygon-bor-rpc.publicnode.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/icon-16.png",
+        "icons/icon-32.png",
+        "icons/icon-48.png",
+        "icons/icon-128.png",
+        "icons/icon-256.png",
+        "knoww-inline.css",
+        "page-bridge.js"
+      ],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://www.linkedin.com/*",
+        "https://www.reddit.com/*",
+        "https://reddit.com/*",
+        "https://old.reddit.com/*",
+        "https://farcaster.com/*"
+      ]
+    }
+  ],
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://www.linkedin.com/*",
+        "https://www.reddit.com/*",
+        "https://reddit.com/*",
+        "https://old.reddit.com/*",
+        "https://farcaster.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

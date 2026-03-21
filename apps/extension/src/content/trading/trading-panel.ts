@@ -5,13 +5,13 @@
  * Layout (order view):
  *   Header → Wallet bar → [Market/Limit toggle + "..." menu] →
  *   [Buy/Sell toggle] → Price (limit) / Slippage (market) →
- *   Amount presets → Order summary → Submit
+ *   Shares input → Order summary → Submit
  *
  * Split/Merge accessible via "..." dropdown menu.
  */
 
 import { USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
-import { calculateSlippage } from "@knoww/shared-types/slippage";
+import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import type { ClobOrderType } from "../../types/chrome-messages";
 import type { Market } from "../../types/market";
 import { escapeHtml } from "../utils";
@@ -59,6 +59,7 @@ interface PanelOptions {
   side: "BUY" | "SELL";
   tokenId: string;
   negRisk?: boolean;
+  isMultiOutcome?: boolean;
   anchorElement: HTMLElement;
   conditionId?: string;
   yesTokenId?: string;
@@ -95,7 +96,7 @@ let activeUnsubscribe: (() => void) | null = null;
 let activeSide: TradeSide = "buy";
 let activeView: ActiveView = "order";
 let orderMode: OrderMode = "market";
-let selectedAmount = 10;
+let selectedShares = 10;
 let limitPrice = 0;
 let expirationPreset: ExpirationPreset = "GTC";
 let splitMergeAmount = 0;
@@ -104,6 +105,7 @@ let outcomeBalances: {
   noBalance: number;
   minBalance: number;
 } | null = null;
+let outcomeBalancesLoaded = false;
 let moreMenuOpen = false;
 
 let orderSettling = false;
@@ -118,8 +120,18 @@ let depositError: string | null = null;
 let selectedOutcome: "yes" | "no" = "yes";
 let yesPrice = 0;
 
-const PRESET_AMOUNTS = [1, 5, 10, 25];
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+
+function getTickSize(): number {
+  return TradingService.getContext().tickSize || 0.01;
+}
+
+function normalizePrice(price: number, tick?: number): number {
+  const t = tick ?? getTickSize();
+  const rounded = roundToTick(price, t);
+  return Math.max(t, Math.min(1 - t, Number(rounded.toFixed(4))));
+}
+
 const EXPIRATION_MAP: Record<ExpirationPreset, number> = {
   GTC: 0,
   "1h": 3600,
@@ -181,6 +193,68 @@ function rerender(): void {
     render(activePanel, panelOpts, TradingService.getContext());
 }
 
+function getEffectivePrice(opts: PanelOptions): number {
+  return orderMode === "limit" ? limitPrice || opts.price : opts.price;
+}
+
+function getCost(opts: PanelOptions): number {
+  const price = getEffectivePrice(opts);
+  if (activeSide === "buy") return price * selectedShares;
+  const sellPrice = 1 - price;
+  return sellPrice * selectedShares;
+}
+
+function refreshDynamicUI(): void {
+  if (!activePanel || !panelOpts) return;
+  const ctx = TradingService.getContext();
+  const opts = panelOpts;
+  const cost = getCost(opts);
+
+  const form = activePanel.querySelector(".knoww-tp-form");
+  if (!form) return;
+
+  const costDisp = form.querySelector(".knoww-tp-cost-display");
+  if (costDisp) costDisp.textContent = `$${cost.toFixed(2)}`;
+
+  const sharesInput = form.querySelector(
+    ".knoww-tp-shares-input"
+  ) as HTMLInputElement | null;
+  if (sharesInput && document.activeElement !== sharesInput) {
+    sharesInput.value = String(selectedShares);
+  }
+
+  const limitInput = form.querySelector(
+    ".knoww-tp-price-field"
+  ) as HTMLInputElement | null;
+  if (limitInput && document.activeElement !== limitInput) {
+    limitInput.value = String(Math.round((limitPrice || opts.price) * 100));
+  }
+
+  // Update order position indicator
+  const posIndicator = form.querySelector(".knoww-tp-order-position");
+  if (posIndicator) {
+    const { bestBid, bestAsk } = getBestBidAsk(ctx);
+    if (bestBid !== undefined || bestAsk !== undefined) {
+      const currentPrice = limitPrice || opts.price;
+      const info = getOrderPositionInfo(currentPrice, bestBid, bestAsk);
+      posIndicator.textContent = info.label;
+      posIndicator.className = `knoww-tp-order-position ${info.cls}`;
+      (posIndicator as HTMLElement).style.display = "";
+    } else {
+      (posIndicator as HTMLElement).style.display = "none";
+    }
+  }
+
+  const oldDynamic = form.querySelector(".knoww-tp-dynamic");
+  const dynamic = el("div", "knoww-tp-dynamic");
+  addOrderSummary(dynamic, opts, ctx);
+  addBalanceWarning(dynamic, ctx.balance);
+  addSubmitButton(dynamic, opts, ctx);
+  if (oldDynamic) {
+    oldDynamic.replaceWith(dynamic);
+  }
+}
+
 // ── Panel Lifecycle ──
 
 function createPanel(opts: PanelOptions): HTMLElement {
@@ -193,11 +267,12 @@ function createPanel(opts: PanelOptions): HTMLElement {
   activeSide = opts.side === "SELL" ? "sell" : "buy";
   activeView = "order";
   orderMode = "market";
-  selectedAmount = 10;
-  limitPrice = opts.price;
+  selectedShares = 10;
+  limitPrice = normalizePrice(opts.price);
   expirationPreset = "GTC";
   splitMergeAmount = 0;
   outcomeBalances = null;
+  outcomeBalancesLoaded = false;
   moreMenuOpen = false;
   depositState = "idle";
   depositTokens = [];
@@ -205,8 +280,14 @@ function createPanel(opts: PanelOptions): HTMLElement {
   depositAmount = "";
   depositError = null;
 
-  selectedOutcome = opts.outcomeIndex === 1 ? "no" : "yes";
-  yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
+  if (opts.isMultiOutcome) {
+    selectedOutcome = "yes";
+    yesPrice = opts.price;
+    opts.outcomeIndex = 0;
+  } else {
+    selectedOutcome = opts.outcomeIndex === 1 ? "no" : "yes";
+    yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
+  }
 
   const currentCtx = TradingService.getContext();
   if (
@@ -247,9 +328,15 @@ function createPanel(opts: PanelOptions): HTMLElement {
     TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
       .then((b) => {
         outcomeBalances = b;
+        outcomeBalancesLoaded = true;
         rerender();
       })
-      .catch(() => {});
+      .catch(() => {
+        outcomeBalancesLoaded = true;
+        rerender();
+      });
+  } else {
+    outcomeBalancesLoaded = true;
   }
 
   const closeMenu = () => {
@@ -299,7 +386,7 @@ function switchOutcome(side: "yes" | "no"): void {
     panelOpts.outcomeIndex = 1;
   }
 
-  limitPrice = panelOpts.price;
+  limitPrice = normalizePrice(panelOpts.price);
   TradingService.fetchOrderBook(panelOpts.tokenId);
   rerender();
 }
@@ -628,6 +715,10 @@ function addBuySellToggle(form: HTMLElement): void {
   sellBtn.onclick = (e) => {
     e.stopPropagation();
     activeSide = "sell";
+    if (panelOpts) {
+      const pos = getPositionSize(panelOpts);
+      if (pos > 0) selectedShares = pos;
+    }
     rerender();
   };
   toggle.appendChild(buyBtn);
@@ -637,20 +728,118 @@ function addBuySellToggle(form: HTMLElement): void {
 
 // ── Limit Price Input with +/- Steppers ──
 
-function addLimitPrice(form: HTMLElement, opts: PanelOptions): void {
+function getBestBidAsk(ctx: TradingContext): {
+  bestBid: number | undefined;
+  bestAsk: number | undefined;
+} {
+  const ob = ctx.orderBook;
+  if (!ob) return { bestBid: undefined, bestAsk: undefined };
+
+  let bestBid: number | undefined;
+  if (ob.bids?.length) {
+    const parsed = ob.bids
+      .map((l) => parseFloat(l.price))
+      .filter((p) => Number.isFinite(p) && p > 0);
+    if (parsed.length > 0) bestBid = Math.max(...parsed);
+  }
+
+  let bestAsk: number | undefined;
+  if (ob.asks?.length) {
+    const parsed = ob.asks
+      .map((l) => parseFloat(l.price))
+      .filter((p) => Number.isFinite(p) && p > 0);
+    if (parsed.length > 0) bestAsk = Math.min(...parsed);
+  }
+
+  return { bestBid, bestAsk };
+}
+
+function getOrderPositionInfo(
+  price: number,
+  bestBid: number | undefined,
+  bestAsk: number | undefined
+): { label: string; cls: string } {
+  if (activeSide === "buy") {
+    if (bestAsk !== undefined && price >= bestAsk) {
+      return {
+        label: "Crosses spread - will execute immediately",
+        cls: "green",
+      };
+    }
+    if (bestBid !== undefined && price > bestBid) {
+      return { label: "Above best bid - near top of book", cls: "blue" };
+    }
+    if (bestBid !== undefined && price === bestBid) {
+      return { label: "At best bid - joins queue", cls: "muted" };
+    }
+    return { label: "Below best bid - deeper in book", cls: "amber" };
+  }
+  if (bestBid !== undefined && price <= bestBid) {
+    return { label: "Crosses spread - will execute immediately", cls: "green" };
+  }
+  if (bestAsk !== undefined && price < bestAsk) {
+    return { label: "Below best ask - near top of book", cls: "blue" };
+  }
+  if (bestAsk !== undefined && price === bestAsk) {
+    return { label: "At best ask - joins queue", cls: "muted" };
+  }
+  return { label: "Above best ask - deeper in book", cls: "amber" };
+}
+
+function addLimitPrice(
+  form: HTMLElement,
+  opts: PanelOptions,
+  ctx: TradingContext
+): void {
   if (orderMode !== "limit") return;
+
+  const { bestBid, bestAsk } = getBestBidAsk(ctx);
+  const tickSize = ctx.tickSize || 0.01;
 
   const section = el("div", "knoww-tp-price-section");
 
   const header = el("div", "knoww-tp-section-header");
   header.appendChild(el("span", "knoww-tp-section-label", "Limit Price"));
+
+  // Bid/Ask quick-set buttons
+  const bidAskWrap = el("div", "knoww-tp-bidask-wrap");
+  if (bestBid !== undefined) {
+    const bidBtn = el(
+      "button",
+      "knoww-tp-bidask-btn bid",
+      `Bid: ${(bestBid * 100).toFixed(1)}¢`
+    );
+    bidBtn.onclick = (e) => {
+      e.stopPropagation();
+      limitPrice = normalizePrice(bestBid, tickSize);
+      rerender();
+    };
+    bidAskWrap.appendChild(bidBtn);
+  }
+  if (bestAsk !== undefined) {
+    const askBtn = el(
+      "button",
+      "knoww-tp-bidask-btn ask",
+      `Ask: ${(bestAsk * 100).toFixed(1)}¢`
+    );
+    askBtn.onclick = (e) => {
+      e.stopPropagation();
+      limitPrice = normalizePrice(bestAsk, tickSize);
+      rerender();
+    };
+    bidAskWrap.appendChild(askBtn);
+  }
+  header.appendChild(bidAskWrap);
   section.appendChild(header);
 
   const controls = el("div", "knoww-tp-price-controls");
   const minus = el("button", "knoww-tp-price-btn", "−");
   minus.onclick = (e) => {
     e.stopPropagation();
-    limitPrice = Math.max(0.01, (limitPrice || opts.price) - 0.01);
+    limitPrice = normalizePrice(
+      (limitPrice || opts.price) - tickSize,
+      tickSize
+    );
     rerender();
   };
 
@@ -658,13 +847,30 @@ function addLimitPrice(form: HTMLElement, opts: PanelOptions): void {
   const input = document.createElement("input");
   input.className = "knoww-tp-price-field";
   input.type = "number";
-  input.min = "1";
-  input.max = "99";
-  input.step = "1";
-  input.value = String(Math.round((limitPrice || opts.price) * 100));
+  const tickCents = tickSize * 100;
+  input.min = String(tickCents);
+  input.max = String(100 - tickCents);
+  input.step = String(tickCents);
+  const displayPrice = normalizePrice(limitPrice || opts.price, tickSize);
+  input.value =
+    tickSize < 0.01
+      ? (displayPrice * 100).toFixed(2)
+      : (displayPrice * 100).toFixed(1);
   input.oninput = () => {
     const v = parseFloat(input.value);
-    if (v >= 1 && v <= 99) limitPrice = v / 100;
+    if (v >= 1 && v <= 99) {
+      limitPrice = v / 100;
+      refreshDynamicUI();
+    }
+  };
+  input.onblur = () => {
+    limitPrice = normalizePrice(limitPrice, tickSize);
+    const centsDisplay =
+      tickSize < 0.01
+        ? (limitPrice * 100).toFixed(2)
+        : (limitPrice * 100).toFixed(1);
+    input.value = centsDisplay;
+    refreshDynamicUI();
   };
   wrap.appendChild(input);
   wrap.appendChild(el("span", "knoww-tp-price-cent", "¢"));
@@ -672,7 +878,10 @@ function addLimitPrice(form: HTMLElement, opts: PanelOptions): void {
   const plus = el("button", "knoww-tp-price-btn", "+");
   plus.onclick = (e) => {
     e.stopPropagation();
-    limitPrice = Math.min(0.99, (limitPrice || opts.price) + 0.01);
+    limitPrice = normalizePrice(
+      (limitPrice || opts.price) + tickSize,
+      tickSize
+    );
     rerender();
   };
 
@@ -680,6 +889,28 @@ function addLimitPrice(form: HTMLElement, opts: PanelOptions): void {
   controls.appendChild(wrap);
   controls.appendChild(plus);
   section.appendChild(controls);
+
+  // Order position indicator (updated live by refreshDynamicUI)
+  if (bestBid !== undefined || bestAsk !== undefined) {
+    const currentPrice = limitPrice || opts.price;
+    const info = getOrderPositionInfo(currentPrice, bestBid, bestAsk);
+    section.appendChild(
+      el("div", `knoww-tp-order-position ${info.cls}`, info.label)
+    );
+  } else {
+    const posPlaceholder = el("div", "knoww-tp-order-position muted");
+    posPlaceholder.style.display = "none";
+    section.appendChild(posPlaceholder);
+  }
+
+  // Tick size info
+  section.appendChild(
+    el(
+      "div",
+      "knoww-tp-tick-info",
+      `Tick size: ${(tickSize * 100).toFixed(1)}¢`
+    )
+  );
 
   // Expiration
   const expBlock = el("div", "knoww-tp-expiration");
@@ -720,14 +951,13 @@ function addLimitPrice(form: HTMLElement, opts: PanelOptions): void {
 
 function addSlippageInfo(
   form: HTMLElement,
-  opts: PanelOptions,
+  _opts: PanelOptions,
   ctx: TradingContext
 ): void {
-  if (orderMode !== "market" || !ctx.orderBook || selectedAmount <= 0) return;
+  if (orderMode !== "market" || !ctx.orderBook || selectedShares <= 0) return;
 
   const side = activeSide === "sell" ? "SELL" : "BUY";
-  const shares = opts.price > 0 ? selectedAmount / opts.price : 0;
-  const slip = calculateSlippage(ctx.orderBook, side, shares);
+  const slip = calculateSlippage(ctx.orderBook, side, selectedShares);
   if (slip.fills.length === 0) return;
 
   const row = el("div", "knoww-tp-execution-info");
@@ -765,81 +995,17 @@ function addAmountSection(
   ctx: TradingContext
 ): void {
   const section = el("div", "knoww-tp-amount-section");
-  const effectivePrice =
-    orderMode === "limit" ? limitPrice || opts.price : opts.price;
+  const effectivePrice = getEffectivePrice(opts);
   const isSell = activeSide === "sell";
   const positionSize = getPositionSize(opts);
+  const cost = getCost(opts);
+  const minShares = isSell ? 1 : Math.max(1, Math.ceil(ctx.minOrderSize));
 
-  const header = el("div", "knoww-tp-section-header");
-  header.appendChild(el("span", "knoww-tp-section-label", "Amount"));
-  header.appendChild(
-    el("span", "knoww-tp-amount-display", `$${selectedAmount}`)
-  );
-  section.appendChild(header);
-
-  const row = el("div", "knoww-tp-presets");
-  for (const amt of PRESET_AMOUNTS) {
-    const btn = el(
-      "button",
-      `knoww-tp-preset${amt === selectedAmount ? " active" : ""}`,
-      `$${amt}`
-    );
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      selectedAmount = amt;
-      rerender();
-    };
-    row.appendChild(btn);
-  }
-
-  const cwrap = el(
-    "div",
-    `knoww-tp-custom-wrap${!PRESET_AMOUNTS.includes(selectedAmount) ? " active" : ""}`
-  );
-  const ci = document.createElement("input");
-  ci.className = "knoww-tp-custom-input";
-  ci.type = "number";
-  ci.min = "0.1";
-  ci.step = "0.1";
-  ci.placeholder = "$ Custom";
-  if (!PRESET_AMOUNTS.includes(selectedAmount))
-    ci.value = String(selectedAmount);
-  ci.onfocus = () => {
-    cwrap.classList.add("active");
-    for (const b of row.querySelectorAll(".knoww-tp-preset")) {
-      b.classList.remove("active");
-    }
-  };
-  ci.oninput = () => {
-    const v = Number(ci.value);
-    if (v > 0) {
-      selectedAmount = v;
-      const disp = form.querySelector(".knoww-tp-amount-display");
-      if (disp) disp.textContent = `$${v}`;
-    }
-  };
-  cwrap.appendChild(ci);
-  row.appendChild(cwrap);
-  section.appendChild(row);
-
-  // Shares +/- controls
-  const shares = effectivePrice > 0 ? selectedAmount / effectivePrice : 0;
+  // Shares header with Max button
   const sharesHeader = el("div", "knoww-tp-section-header");
   sharesHeader.appendChild(el("span", "knoww-tp-section-label", "Shares"));
-  const maxBtn = el("button", "knoww-tp-max-btn", "Max");
-  maxBtn.onclick = (e) => {
-    e.stopPropagation();
-    if (isSell && positionSize > 0) {
-      selectedAmount = positionSize * effectivePrice;
-    } else if (!isSell && ctx.balance > 0) {
-      selectedAmount = Math.floor(ctx.balance * 100) / 100;
-    }
-    rerender();
-  };
-  if ((isSell && positionSize <= 0) || (!isSell && ctx.balance <= 0)) {
-    maxBtn.disabled = true;
-  }
-  sharesHeader.appendChild(maxBtn);
+  const costLabel = el("span", "knoww-tp-cost-display", `$${cost.toFixed(2)}`);
+  sharesHeader.appendChild(costLabel);
   section.appendChild(sharesHeader);
 
   const sharesRow = el("div", "knoww-tp-shares-row");
@@ -847,31 +1013,32 @@ function addAmountSection(
   const m10 = el("button", "knoww-tp-shares-btn", "-10");
   m10.onclick = (e) => {
     e.stopPropagation();
-    adjustShares(-10, effectivePrice);
+    adjustShares(-10, minShares);
   };
-  if (shares - 10 < 1) m10.disabled = true;
+  if (selectedShares - 10 < minShares) m10.disabled = true;
   sharesRow.appendChild(m10);
 
   const m1 = el("button", "knoww-tp-shares-btn", "-1");
   m1.onclick = (e) => {
     e.stopPropagation();
-    adjustShares(-1, effectivePrice);
+    adjustShares(-1, minShares);
   };
-  if (shares - 1 < 1) m1.disabled = true;
+  if (selectedShares - 1 < minShares) m1.disabled = true;
   sharesRow.appendChild(m1);
 
   const sharesInput = document.createElement("input");
   sharesInput.className = "knoww-tp-shares-input";
   sharesInput.type = "number";
-  sharesInput.min = "1";
-  sharesInput.step = "1";
-  sharesInput.value = Math.round(shares).toString();
+  sharesInput.min = String(minShares);
+  sharesInput.step = isSell ? "0.01" : "1";
+  sharesInput.value = String(selectedShares);
   sharesInput.oninput = () => {
     const v = Number(sharesInput.value);
-    if (v > 0 && effectivePrice > 0) {
-      selectedAmount = Math.round(v * effectivePrice * 100) / 100;
-      const disp = form.querySelector(".knoww-tp-amount-display");
-      if (disp) disp.textContent = `$${selectedAmount}`;
+    if (!Number.isNaN(v) && v > 0) {
+      let capped = Math.max(isSell ? 0.01 : minShares, v);
+      if (isSell && positionSize > 0) capped = Math.min(capped, positionSize);
+      selectedShares = capped;
+      refreshDynamicUI();
     }
   };
   sharesRow.appendChild(sharesInput);
@@ -879,18 +1046,40 @@ function addAmountSection(
   const p1 = el("button", "knoww-tp-shares-btn", "+1");
   p1.onclick = (e) => {
     e.stopPropagation();
-    adjustShares(1, effectivePrice);
+    adjustShares(1, minShares);
   };
   sharesRow.appendChild(p1);
 
   const p10 = el("button", "knoww-tp-shares-btn", "+10");
   p10.onclick = (e) => {
     e.stopPropagation();
-    adjustShares(10, effectivePrice);
+    adjustShares(10, minShares);
   };
   sharesRow.appendChild(p10);
 
   section.appendChild(sharesRow);
+
+  // Max button row
+  const maxRow = el("div", "knoww-tp-max-row");
+  const maxBtn = el("button", "knoww-tp-max-btn", "Max");
+  maxBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (isSell && positionSize > 0) {
+      selectedShares = positionSize;
+    } else if (!isSell && ctx.balance > 0 && effectivePrice > 0) {
+      selectedShares = Math.max(
+        minShares,
+        Math.floor(ctx.balance / effectivePrice)
+      );
+    }
+    rerender();
+  };
+  if ((isSell && positionSize <= 0) || (!isSell && ctx.balance <= 0)) {
+    maxBtn.disabled = true;
+  }
+  maxRow.appendChild(maxBtn);
+  section.appendChild(maxRow);
+
   form.appendChild(section);
 }
 
@@ -900,11 +1089,13 @@ function getPositionSize(opts: PanelOptions): number {
   return outcomeBalances.noBalance;
 }
 
-function adjustShares(delta: number, price: number): void {
-  if (price <= 0) return;
-  const currentShares = price > 0 ? selectedAmount / price : 0;
-  const newShares = Math.max(1, Math.round(currentShares) + delta);
-  selectedAmount = Math.round(newShares * price * 100) / 100;
+function adjustShares(delta: number, minShares: number): void {
+  let next = Math.max(minShares, selectedShares + delta);
+  if (activeSide === "sell" && panelOpts) {
+    const pos = getPositionSize(panelOpts);
+    if (pos > 0) next = Math.min(next, pos);
+  }
+  selectedShares = next;
   rerender();
 }
 
@@ -916,9 +1107,9 @@ function addOrderSummary(
   ctx: TradingContext
 ): void {
   const isBuy = activeSide === "buy";
-  const effectivePrice =
-    orderMode === "limit" ? limitPrice || opts.price : opts.price;
-  const shares = effectivePrice > 0 ? selectedAmount / effectivePrice : 0;
+  const effectivePrice = getEffectivePrice(opts);
+  const shares = selectedShares;
+  const cost = getCost(opts);
   const minShares = Math.max(1, Math.ceil(ctx.minOrderSize));
   const positionSize = getPositionSize(opts);
 
@@ -944,6 +1135,7 @@ function addOrderSummary(
     summary.appendChild(posRow);
   }
 
+  // Total Cost (buy) or You Receive (sell)
   const r1 = el("div", "knoww-tp-summary-row");
   r1.appendChild(
     el("span", "knoww-tp-summary-label", isBuy ? "Total Cost" : "You Receive")
@@ -952,17 +1144,12 @@ function addOrderSummary(
     el(
       "span",
       `knoww-tp-summary-value lg${!isBuy ? " positive" : ""}`,
-      `$${selectedAmount.toFixed(2)}`
+      `$${cost.toFixed(2)}`
     )
   );
   summary.appendChild(r1);
 
-  const r2 = el("div", "knoww-tp-summary-row");
-  r2.appendChild(el("span", "knoww-tp-summary-label", "Est. Shares"));
-  r2.appendChild(el("span", "knoww-tp-summary-value", shares.toFixed(2)));
-  summary.appendChild(r2);
-
-  if (isBuy && shares > 0 && Math.round(shares) < minShares) {
+  if (isBuy && shares > 0 && shares < minShares) {
     const minRow = el("div", "knoww-tp-summary-row knoww-tp-warn-row");
     minRow.appendChild(
       el(
@@ -978,15 +1165,22 @@ function addOrderSummary(
   }
 
   if (isBuy) {
+    // Potential Return = shares (each share pays $1 if outcome wins)
+    const potentialReturn = shares;
     const r3 = el("div", "knoww-tp-summary-row");
     r3.appendChild(el("span", "knoww-tp-summary-label", "Potential Return"));
     r3.appendChild(
-      el("span", "knoww-tp-summary-value positive lg", `$${shares.toFixed(2)}`)
+      el(
+        "span",
+        "knoww-tp-summary-value positive lg",
+        `$${potentialReturn.toFixed(2)}`
+      )
     );
     summary.appendChild(r3);
 
-    const profit = shares - selectedAmount;
-    const pct = selectedAmount > 0 ? (profit / selectedAmount) * 100 : 0;
+    // Profit = potential return - cost
+    const profit = potentialReturn - cost;
+    const pct = cost > 0 ? (profit / cost) * 100 : 0;
     const r4 = el("div", "knoww-tp-summary-row");
     r4.appendChild(
       el("span", "knoww-tp-summary-label", `Profit if ${opts.outcomeName}`)
@@ -1041,7 +1235,9 @@ function addOrderSummary(
 // ── Balance Warning ──
 
 function addBalanceWarning(form: HTMLElement, balance: number): void {
-  if (selectedAmount <= balance || balance < 0) return;
+  if (!panelOpts || activeSide === "sell") return;
+  const cost = getCost(panelOpts);
+  if (cost <= balance || balance < 0) return;
 
   const w = el("div", "knoww-tp-balance-warn");
 
@@ -1052,7 +1248,7 @@ function addBalanceWarning(form: HTMLElement, balance: number): void {
     el(
       "span",
       "knoww-tp-warn-text",
-      `Need $${(selectedAmount - balance).toFixed(2)} more`
+      `Need $${(cost - balance).toFixed(2)} more`
     )
   );
   top.appendChild(left);
@@ -1069,7 +1265,7 @@ function addBalanceWarning(form: HTMLElement, balance: number): void {
   }
   w.appendChild(top);
 
-  const progress = Math.min(100, (balance / selectedAmount) * 100);
+  const progress = Math.min(100, (balance / cost) * 100);
   const barBg = el("div", "knoww-tp-warn-bar-bg");
   const barFill = el("div", "knoww-tp-warn-bar-fill");
   barFill.style.width = `${progress}%`;
@@ -1080,7 +1276,7 @@ function addBalanceWarning(form: HTMLElement, balance: number): void {
     el(
       "div",
       "knoww-tp-warn-detail",
-      `$${balance.toFixed(2)} / $${selectedAmount.toFixed(2)} USDC.e`
+      `$${balance.toFixed(2)} / $${cost.toFixed(2)} USDC.e`
     )
   );
   form.appendChild(w);
@@ -1094,43 +1290,36 @@ function addSubmitButton(
   ctx: TradingContext
 ): void {
   const side = activeSide === "sell" ? "SELL" : "BUY";
-  const {
-    balance,
-    state,
-    orderBook,
-    minOrderSize,
-    usdcAllowance,
-    usdcAllowanceNegRisk,
-  } = ctx;
+  const { balance, state, minOrderSize, usdcAllowance, usdcAllowanceNegRisk } =
+    ctx;
   const isSubmitting = state === "placing-order" || state === "approving";
-  const noFunds = activeSide === "buy" && selectedAmount > balance;
-  const noAmount = selectedAmount <= 0;
-  const effectivePrice =
-    orderMode === "limit" ? limitPrice || opts.price : opts.price;
-  const shares = effectivePrice > 0 ? selectedAmount / effectivePrice : 0;
+  const cost = getCost(opts);
+  const noFunds = activeSide === "buy" && cost > balance;
+  const noShares = selectedShares <= 0;
+  const shares = selectedShares;
   const minShares = Math.max(1, Math.ceil(minOrderSize));
-  const belowMinShares = activeSide === "buy" && Math.round(shares) < minShares;
+  const belowMinShares = activeSide === "buy" && shares < minShares;
   const relevantAllowance = opts.negRisk ? usdcAllowanceNegRisk : usdcAllowance;
   const needsApproval =
-    activeSide === "buy" &&
-    selectedAmount > 0 &&
-    relevantAllowance < selectedAmount;
+    activeSide === "buy" && cost > 0 && relevantAllowance < cost;
+  const { bestAsk } = getBestBidAsk(ctx);
   const isMarketableBuy =
     activeSide === "buy" &&
     (orderMode === "market" ||
       (orderMode === "limit" &&
-        orderBook &&
-        limitPrice >= parseFloat(orderBook.asks?.[0]?.price ?? "1")));
+        bestAsk !== undefined &&
+        limitPrice >= bestAsk));
   const belowMinNotional =
-    isMarketableBuy && selectedAmount < MIN_MARKETABLE_BUY_NOTIONAL_USD;
+    isMarketableBuy && cost < MIN_MARKETABLE_BUY_NOTIONAL_USD;
   const positionSize = getPositionSize(opts);
+  const sellBalancesLoading = activeSide === "sell" && !outcomeBalancesLoaded;
   const noPosition =
-    activeSide === "sell" && outcomeBalances && positionSize <= 0;
+    activeSide === "sell" && outcomeBalancesLoaded && positionSize <= 0;
   const overPosition =
     activeSide === "sell" &&
     outcomeBalances &&
     positionSize > 0 &&
-    shares - positionSize > positionSize * 0.01;
+    shares > positionSize;
 
   const btn = el("button", `knoww-tp-submit ${activeSide}`);
 
@@ -1142,8 +1331,12 @@ function addSubmitButton(
     btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> ${state === "approving" ? "Approving..." : "Placing Order..."}`;
     btn.disabled = true;
     btn.classList.add("loading");
-  } else if (noAmount) {
-    btn.textContent = "Enter Amount";
+  } else if (sellBalancesLoading) {
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Loading position...`;
+    btn.disabled = true;
+    btn.classList.add("loading");
+  } else if (noShares) {
+    btn.textContent = "Enter Shares";
     btn.disabled = true;
   } else if (noPosition) {
     btn.textContent = "No position to sell";
@@ -1169,7 +1362,7 @@ function addSubmitButton(
       orderMode === "limit"
         ? `${((limitPrice || opts.price) * 100).toFixed(1)}¢`
         : "Market";
-    btn.innerHTML = `${icon} ${side} ${shares.toFixed(0)} @ ${modeLabel}`;
+    btn.innerHTML = `${icon} ${side} ${shares} @ ${modeLabel}`;
   }
 
   btn.onclick = async (e) => {
@@ -1179,7 +1372,7 @@ function addSubmitButton(
 
     if (needsApproval) {
       try {
-        await TradingService.approveUsdc();
+        await TradingService.approveUsdc(!!opts.negRisk);
         showToast(panel, "USDC approved!", "success");
         TradingService.refreshBalance().catch(() => {});
       } catch (err) {
@@ -1198,10 +1391,9 @@ function addSubmitButton(
 
     if (orderMode === "market") {
       clobOrderType = "FAK";
-      // Let the ClobClient auto-calculate the optimal market price from live order book
       price = undefined;
     } else {
-      price = limitPrice || opts.price;
+      price = normalizePrice(limitPrice || opts.price);
       if (expirationPreset === "GTC") {
         clobOrderType = "GTC";
       } else {
@@ -1212,83 +1404,97 @@ function addSubmitButton(
     }
 
     try {
-      let sellShares = shares;
+      let effectiveSize = shares;
       if (side === "SELL" && positionSize > 0) {
         const diff = Math.abs(shares - positionSize);
         if (diff < positionSize * 0.01 || shares >= positionSize) {
-          sellShares = positionSize;
+          effectiveSize = positionSize;
         }
       }
-      const effectiveSize = side === "SELL" ? sellShares : shares;
-      const marketAmount = side === "BUY" ? selectedAmount : effectiveSize;
       await TradingService.placeOrder({
         tokenId: opts.tokenId,
         outcomeIndex: opts.outcomeIndex,
         side,
         price: price ?? 0,
         size: effectiveSize,
-        amount: marketAmount,
+        amount: cost,
         orderType: clobOrderType,
         expiration,
         negRisk: opts.negRisk,
       });
 
-      orderSettling = true;
-      rerender();
+      const isLimitOrder = clobOrderType === "GTC" || clobOrderType === "GTD";
 
-      const prevBalance = ctx.balance;
-      const prevYes = outcomeBalances?.yesBalance ?? 0;
-      const prevNo = outcomeBalances?.noBalance ?? 0;
-      const POLL_INTERVAL = 3000;
-      const TIMEOUT = 30000;
-      const startTime = Date.now();
+      if (isLimitOrder) {
+        showToast(panel, "Limit order placed!", "success");
+        TradingService.refreshBalance().catch(() => {});
+        if (opts.yesTokenId && opts.noTokenId) {
+          TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
+            .then((b) => {
+              outcomeBalances = b;
+              rerender();
+            })
+            .catch(() => {});
+        }
+        rerender();
+      } else {
+        orderSettling = true;
+        rerender();
 
-      const poll = async () => {
-        if (!orderSettling) return;
+        const prevBalance = ctx.balance;
+        const prevYes = outcomeBalances?.yesBalance ?? 0;
+        const prevNo = outcomeBalances?.noBalance ?? 0;
+        const POLL_INTERVAL = 3000;
+        const TIMEOUT = 30000;
+        const startTime = Date.now();
 
-        try {
-          await TradingService.refreshBalance();
-          if (opts.yesTokenId && opts.noTokenId) {
-            const newBal = await TradingService.getOutcomeBalances(
-              opts.yesTokenId,
-              opts.noTokenId
+        const poll = async () => {
+          if (!orderSettling) return;
+
+          try {
+            await TradingService.refreshBalance();
+            if (opts.yesTokenId && opts.noTokenId) {
+              const newBal = await TradingService.getOutcomeBalances(
+                opts.yesTokenId,
+                opts.noTokenId
+              );
+              outcomeBalances = newBal;
+            }
+          } catch {
+            /* ignore poll errors */
+          }
+
+          const newCtx = TradingService.getContext();
+          const newYes = outcomeBalances?.yesBalance ?? 0;
+          const newNo = outcomeBalances?.noBalance ?? 0;
+          const balanceChanged = Math.abs(newCtx.balance - prevBalance) > 0.001;
+          const positionChanged =
+            Math.abs(newYes - prevYes) > 0.001 ||
+            Math.abs(newNo - prevNo) > 0.001;
+          const timedOut = Date.now() - startTime >= TIMEOUT;
+
+          if (balanceChanged || positionChanged || timedOut) {
+            orderSettling = false;
+            if (settleTimer) {
+              clearTimeout(settleTimer);
+              settleTimer = null;
+            }
+            showToast(
+              panel,
+              timedOut && !balanceChanged && !positionChanged
+                ? "Order submitted"
+                : "Order filled!",
+              "success"
             );
-            outcomeBalances = newBal;
+            rerender();
+            return;
           }
-        } catch {
-          /* ignore poll errors */
-        }
 
-        const newCtx = TradingService.getContext();
-        const newYes = outcomeBalances?.yesBalance ?? 0;
-        const newNo = outcomeBalances?.noBalance ?? 0;
-        const balanceChanged = Math.abs(newCtx.balance - prevBalance) > 0.001;
-        const positionChanged =
-          Math.abs(newYes - prevYes) > 0.001 ||
-          Math.abs(newNo - prevNo) > 0.001;
-        const timedOut = Date.now() - startTime >= TIMEOUT;
-
-        if (balanceChanged || positionChanged || timedOut) {
-          orderSettling = false;
-          if (settleTimer) {
-            clearTimeout(settleTimer);
-            settleTimer = null;
-          }
-          showToast(
-            panel,
-            timedOut && !balanceChanged && !positionChanged
-              ? "Order submitted"
-              : "Order filled!",
-            "success"
-          );
-          rerender();
-          return;
-        }
+          settleTimer = setTimeout(poll, POLL_INTERVAL);
+        };
 
         settleTimer = setTimeout(poll, POLL_INTERVAL);
-      };
-
-      settleTimer = setTimeout(poll, POLL_INTERVAL);
+      }
     } catch (err) {
       orderSettling = false;
       showToast(
@@ -1314,12 +1520,16 @@ function renderOrderForm(
   addOrderTypeRow(form, opts);
   addBuySellToggle(form);
   addOutcomeToggle(form, opts);
-  addLimitPrice(form, opts);
+  addLimitPrice(form, opts, ctx);
   addSlippageInfo(form, opts, ctx);
   addAmountSection(form, opts, ctx);
-  addOrderSummary(form, opts, ctx);
-  addBalanceWarning(form, ctx.balance);
-  addSubmitButton(form, opts, ctx);
+
+  const dynamic = el("div", "knoww-tp-dynamic");
+  addOrderSummary(dynamic, opts, ctx);
+  addBalanceWarning(dynamic, ctx.balance);
+  addSubmitButton(dynamic, opts, ctx);
+  form.appendChild(dynamic);
+
   form.appendChild(
     el(
       "div",

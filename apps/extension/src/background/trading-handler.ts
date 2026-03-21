@@ -7,6 +7,7 @@
 import {
   CTF_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
+  NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
@@ -30,6 +31,7 @@ import { ethers } from "ethers";
 import type {
   TradingDeriveCredentialsMessage,
   TradingErrorResponse,
+  TradingGetAllAllowancesMessage,
   TradingGetAllowanceMessage,
   TradingGetBalanceMessage,
   TradingGetFeeRateMessage,
@@ -91,6 +93,10 @@ export async function handleTradingMessage(
       case "trading:get-allowance":
         return await handleGetAllowance(
           message as unknown as TradingGetAllowanceMessage
+        );
+      case "trading:get-all-allowances":
+        return await handleGetAllAllowances(
+          message as unknown as TradingGetAllAllowancesMessage
         );
       case "trading:derive-proxy-address":
         return await handleDeriveProxyAddress(
@@ -318,8 +324,25 @@ async function handlePlaceOrder(
   const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
   const orderType = msg.orderType || "GTC";
 
+  try {
+    await client.updateBalanceAllowance({
+      asset_type: "COLLATERAL" as any,
+    });
+    await client.updateBalanceAllowance({
+      asset_type: "CONDITIONAL" as any,
+      token_id: msg.tokenId,
+    });
+    console.log("[PlaceOrder] Balance/allowance synced with CLOB");
+  } catch (syncErr) {
+    console.warn(
+      "[PlaceOrder] updateBalanceAllowance failed (non-fatal):",
+      syncErr
+    );
+  }
+
   if (orderType === "FAK" || orderType === "FOK") {
-    const marketAmount = msg.amount ?? msg.size;
+    const marketAmount =
+      msg.side === "SELL" ? msg.size : (msg.amount ?? msg.size);
     const marketOrder: Record<string, unknown> = {
       tokenID: msg.tokenId,
       amount: marketAmount,
@@ -330,6 +353,15 @@ async function handlePlaceOrder(
     if (msg.price && msg.price > 0) {
       marketOrder.price = msg.price;
     }
+
+    console.log("[PlaceOrder] Market order params:", {
+      side: msg.side,
+      amount: marketAmount,
+      price: marketOrder.price,
+      msgSize: msg.size,
+      msgAmount: msg.amount,
+    });
+
     const order = await client.createMarketOrder(
       marketOrder as any,
       orderOptions
@@ -337,6 +369,17 @@ async function handlePlaceOrder(
     const response = await client.postOrder(order, orderType as any);
     return ok(response);
   }
+
+  console.log("[PlaceOrder] Limit order params:", {
+    tokenID: msg.tokenId,
+    price: msg.price,
+    size: msg.size,
+    side: msg.side,
+    feeRateBps,
+    orderType,
+    expiration: orderType === "GTD" ? msg.expiration : 0,
+    negRisk: !!msg.negRisk,
+  });
 
   const order = await client.createOrder(
     {
@@ -350,7 +393,24 @@ async function handlePlaceOrder(
     orderOptions
   );
 
+  console.log("[PlaceOrder] Signed order:", JSON.stringify(order));
+
   const response = await client.postOrder(order, orderType as any);
+
+  console.log("[PlaceOrder] CLOB response:", JSON.stringify(response));
+
+  if (
+    response &&
+    typeof response === "object" &&
+    "error" in (response as Record<string, unknown>)
+  ) {
+    const errorMsg =
+      typeof (response as Record<string, unknown>).error === "string"
+        ? ((response as Record<string, unknown>).error as string)
+        : JSON.stringify((response as Record<string, unknown>).error);
+    return fail(`CLOB rejected order: ${errorMsg}`);
+  }
+
   return ok(response);
 }
 
@@ -411,6 +471,67 @@ async function handleGetAllowance(
     allowance: Number(ethers.utils.formatUnits(allowance, 6)),
     allowanceRaw: allowance.toString(),
   });
+}
+
+// ── All Allowances ──
+
+const ERC1155_IS_APPROVED_ABI = [
+  "function isApprovedForAll(address owner, address operator) view returns (bool)",
+];
+
+async function handleGetAllAllowances(
+  msg: TradingGetAllAllowancesMessage
+): Promise<TradingResponse> {
+  const provider = new ethers.providers.StaticJsonRpcProvider(
+    POLYGON_RPC,
+    POLYGON_CHAIN_ID
+  );
+  const usdc = new ethers.Contract(
+    USDC_E_ADDRESS,
+    ERC20_ALLOWANCE_ABI,
+    provider
+  );
+  const ctf = new ethers.Contract(
+    CTF_ADDRESS,
+    ERC1155_IS_APPROVED_ABI,
+    provider
+  );
+
+  const erc20Targets = [
+    CTF_ADDRESS,
+    CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_ADAPTER_ADDRESS,
+  ];
+  const erc1155Operators = [
+    CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_ADAPTER_ADDRESS,
+  ];
+
+  const allowances: Record<string, number> = {};
+
+  const erc20Results = await Promise.all(
+    erc20Targets.map((t) =>
+      usdc.allowance(msg.ownerAddress, t).catch(() => ethers.BigNumber.from(0))
+    )
+  );
+  for (let i = 0; i < erc20Targets.length; i++) {
+    allowances[erc20Targets[i]] = Number(
+      ethers.utils.formatUnits(erc20Results[i], 6)
+    );
+  }
+
+  const erc1155Results = await Promise.all(
+    erc1155Operators.map((op) =>
+      ctf.isApprovedForAll(msg.ownerAddress, op).catch(() => false)
+    )
+  );
+  for (let i = 0; i < erc1155Operators.length; i++) {
+    allowances[`erc1155:${erc1155Operators[i]}`] = erc1155Results[i] ? 1 : 0;
+  }
+
+  return ok({ allowances });
 }
 
 // ── Order Book ──

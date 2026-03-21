@@ -130,6 +130,8 @@ async function resolveTokenAndShowPanel(
       price,
       side: "BUY",
       tokenId,
+      negRisk: isMultiOutcome || !!(market as Record<string, unknown>).negRisk,
+      isMultiOutcome,
       anchorElement,
       conditionId,
       yesTokenId,

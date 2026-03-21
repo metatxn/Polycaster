@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { requireExtensionSession } from "@/lib/auth/extension-session";
 import { checkOriginAndFetchSite } from "@/lib/origin-guard";
 
 /**
@@ -14,8 +15,8 @@ import { checkOriginAndFetchSite } from "@/lib/origin-guard";
  *   Extension (BG)  → POST /api/sign → this route → signing.knoww.app/sign
  *
  * Security layers:
- *   1. Origin + Sec-Fetch-Site validation (blocks external / cross-origin callers)
- *      — OR —  HMAC authentication (for Chrome extension requests)
+ *   1. Origin + Sec-Fetch-Site validation for first-party web requests
+ *      — OR —  signed extension bearer session for extension requests
  *   2. Per-IP rate limiting (30 req/min)
  *   3. Body size limit (10 KB)
  *   4. Request timeout (15 s)
@@ -23,7 +24,7 @@ import { checkOriginAndFetchSite } from "@/lib/origin-guard";
  * Environment variables (server-only, NO NEXT_PUBLIC_ prefix):
  *   BUILDER_SIGNING_SERVER_URL – the upstream signing server URL
  *   INTERNAL_AUTH_TOKEN         – bearer token for the signing server
- *   KNOWW_EXTENSION_SECRET      – shared HMAC secret with the Chrome extension
+ *   EXTENSION_SESSION_SECRET    – extension session signing secret
  */
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -37,55 +38,15 @@ function getAuthToken(): string | null {
   return process.env.INTERNAL_AUTH_TOKEN || null;
 }
 
-/**
- * Verify an HMAC-signed request from the Chrome extension.
- * Returns true if the signature matches, false otherwise.
- */
-async function verifyExtensionHmac(
-  request: NextRequest,
-  rawBody: string
-): Promise<boolean> {
-  const secret = process.env.KNOWW_EXTENSION_SECRET;
-  if (!secret) return false;
-
-  const signature = request.headers.get("X-Knoww-Signature");
-  const timestamp = request.headers.get("X-Knoww-Timestamp");
-  if (!signature || !timestamp) return false;
-
-  // Reject timestamps older than 5 minutes
-  const ts = Number.parseInt(timestamp, 10);
-  if (Number.isNaN(ts) || Math.abs(Date.now() - ts) > 5 * 60 * 1000) {
-    return false;
-  }
-
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-
-  const message = `${timestamp}:${rawBody}`;
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
-  const expected = Array.from(new Uint8Array(sig), (b) =>
-    b.toString(16).padStart(2, "0")
-  ).join("");
-
-  return expected === signature;
-}
-
 export async function POST(request: NextRequest) {
-  // Read body early so we can use it for both HMAC check and forwarding.
-  // We clone the request to avoid consuming the body stream.
   const rawBody = await request.text();
 
   // Layer 1: Verify caller identity.
-  // First check for extension HMAC auth (X-Knoww-Signature header).
-  // Falls back to same-origin check for web app requests.
-  const isExtensionRequest = await verifyExtensionHmac(request, rawBody);
-  if (!isExtensionRequest) {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const { response } = await requireExtensionSession(request, "builder:sign");
+    if (response) return response;
+  } else {
     const originResponse = checkOriginAndFetchSite(request);
     if (originResponse) return originResponse;
   }

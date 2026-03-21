@@ -1,10 +1,16 @@
 // ============================================
 // BACKGROUND SERVICE WORKER
 // Thin message router — delegates trading to offscreen document,
-// handles fetch proxying and HMAC signing directly.
+// handles fetch proxying, and attaches extension auth headers.
 // ============================================
 
-import { computeHmacHex } from "@knoww/shared-types/crypto";
+import {
+  clearExtensionAccessToken,
+  getExtensionAccessToken,
+  getExtensionAuthorizationHeader,
+  isKnowwApiUrl,
+  setExtensionAccessToken,
+} from "./background/extension-session";
 import type {
   BackgroundResponse,
   FetchJsonMessage,
@@ -27,22 +33,6 @@ const ALLOWED_DOMAINS = [
   "polygon-bor-rpc.publicnode.com",
   ...(__DEV_MODE__ ? ["localhost"] : []),
 ] as const;
-
-// ── HMAC Request Signing ──
-declare const __KNOWW_EXTENSION_SECRET__: string;
-const KNOWW_API_SECRET: string = __KNOWW_EXTENSION_SECRET__;
-
-function isKnowwAiEndpoint(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    const isKnowwHost =
-      parsed.hostname === "knoww.app" ||
-      (__DEV_MODE__ && parsed.hostname === "localhost");
-    return isKnowwHost && parsed.pathname.startsWith("/api/ai/");
-  } catch {
-    return false;
-  }
-}
 
 function isAllowedUrl(urlString: string): { valid: boolean; error?: string } {
   try {
@@ -102,6 +92,8 @@ function isTradingMessage(message: unknown): boolean {
 
 const OFFSCREEN_URL = "offscreen.html";
 let offscreenCreating: Promise<void> | null = null;
+const OFFSCREEN_SEND_RETRY_DELAY_MS = 150;
+const OFFSCREEN_SEND_MAX_ATTEMPTS = 3;
 
 async function ensureOffscreen(): Promise<void> {
   const existingContexts = await chrome.runtime.getContexts({
@@ -133,13 +125,7 @@ function forwardToOffscreen(
   const tabId = sender.tab?.id;
 
   ensureOffscreen()
-    .then(() =>
-      chrome.runtime.sendMessage({
-        type: "offscreen:trading",
-        payload: message,
-        tabId,
-      })
-    )
+    .then(() => sendOffscreenMessage(message, tabId))
     .then((result) => {
       sendResponse(
         result ?? { ok: false, error: "No response from offscreen" }
@@ -151,6 +137,35 @@ function forwardToOffscreen(
         error: err instanceof Error ? err.message : String(err),
       });
     });
+}
+
+async function sendOffscreenMessage(
+  payload: unknown,
+  tabId: number | undefined,
+  attempt = 1
+): Promise<BackgroundResponse> {
+  try {
+    return (await chrome.runtime.sendMessage({
+      type: "offscreen:trading",
+      payload,
+      tabId,
+    })) as BackgroundResponse;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error ?? "");
+    const isRetryable =
+      message.includes("Receiving end does not exist") &&
+      attempt < OFFSCREEN_SEND_MAX_ATTEMPTS;
+
+    if (!isRetryable) {
+      throw error;
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, OFFSCREEN_SEND_RETRY_DELAY_MS)
+    );
+    return sendOffscreenMessage(payload, tabId, attempt + 1);
+  }
 }
 
 // ── Message handler ──
@@ -170,6 +185,7 @@ chrome.runtime.onMessage.addListener(
       error?: string;
       key?: string;
       value?: unknown;
+      token?: string;
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -225,6 +241,24 @@ chrome.runtime.onMessage.addListener(
     }
     if (msg?.type === "creds:remove" && typeof msg.key === "string") {
       chrome.storage.session.remove(msg.key, () => {
+        sendResponse({ ok: true, data: null } as BackgroundResponse);
+      });
+      return true;
+    }
+    if (msg?.type === "auth:get-token") {
+      getExtensionAccessToken().then((token) => {
+        sendResponse({ ok: true, data: token } as BackgroundResponse);
+      });
+      return true;
+    }
+    if (msg?.type === "auth:set-token" && typeof msg.token === "string") {
+      setExtensionAccessToken(msg.token).then(() => {
+        sendResponse({ ok: true, data: null } as BackgroundResponse);
+      });
+      return true;
+    }
+    if (msg?.type === "auth:clear-token") {
+      clearExtensionAccessToken().then(() => {
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
       return true;
@@ -294,14 +328,14 @@ chrome.runtime.onMessage.addListener(
             ...message.headers,
           };
 
-          if (isKnowwAiEndpoint(message.url) && KNOWW_API_SECRET) {
-            const timestamp = Date.now().toString();
-            const hmac = await computeHmacHex(
-              KNOWW_API_SECRET,
-              `${timestamp}:${bodyStr}`
-            );
-            headers["X-Knoww-Signature"] = hmac;
-            headers["X-Knoww-Timestamp"] = timestamp;
+          const hasAuthorizationHeader =
+            typeof headers.Authorization === "string" ||
+            typeof headers.authorization === "string";
+          if (!hasAuthorizationHeader && isKnowwApiUrl(message.url)) {
+            const authorization = await getExtensionAuthorizationHeader();
+            if (authorization) {
+              headers.Authorization = authorization;
+            }
           }
 
           const options: RequestInit = {
@@ -313,6 +347,9 @@ chrome.runtime.onMessage.addListener(
 
           const res = await fetch(message.url, options);
           clearTimeout(timeoutId);
+          if (res.status === 401 && isKnowwApiUrl(message.url)) {
+            await clearExtensionAccessToken();
+          }
           const text = await res.text();
           try {
             const data = JSON.parse(text);

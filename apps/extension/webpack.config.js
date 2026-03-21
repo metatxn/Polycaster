@@ -61,9 +61,6 @@ module.exports = (env, argv) => {
     },
     plugins: [
       new webpack.DefinePlugin({
-        __KNOWW_EXTENSION_SECRET__: JSON.stringify(
-          process.env.KNOWW_EXTENSION_SECRET || ""
-        ),
         __DEV_MODE__: JSON.stringify(process.env.DEV_MODE === "true"),
         "process.env.NODE_DEBUG": JSON.stringify(""),
         "process.env.NODE_ENV": JSON.stringify(

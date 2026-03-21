@@ -126,6 +126,10 @@ export const WalletBridge = {
     ])) as string;
   },
 
+  async signMessage(address: string, message: string): Promise<string> {
+    return (await request("personal_sign", [message, address])) as string;
+  },
+
   async sendTransaction(txParams: Record<string, unknown>): Promise<string> {
     return (await request("eth_sendTransaction", [txParams])) as string;
   },

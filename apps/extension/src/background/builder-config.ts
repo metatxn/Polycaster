@@ -1,19 +1,48 @@
 /**
  * RemoteBuilderConfig for the Chrome extension.
  *
- * Delegates order signing to knoww.app/api/sign, authenticating via
- * the same HMAC scheme used for AI endpoints. This avoids exposing
- * the builder signing server token in the extension bundle.
+ * Delegates order signing to knoww.app/api/sign using the extension's
+ * signed extension bearer session. This keeps the builder signing server token
+ * server-side and avoids bundling extension secrets.
+ *
+ * This runs inside the offscreen document where chrome.storage.session is NOT
+ * available. The access token is retrieved via message passing to the service
+ * worker which owns session storage.
  */
 
-import { computeHmacHex } from "@knoww/shared-types/crypto";
+import { getKnowwAppUrl } from "./extension-session";
 
-declare const __KNOWW_EXTENSION_SECRET__: string;
-declare const __DEV_MODE__: boolean;
+const SIGN_PROXY_URL = `${getKnowwAppUrl()}/api/sign`;
 
-const SIGN_PROXY_URL = __DEV_MODE__
-  ? "http://localhost:8787/api/sign"
-  : "https://knoww.app/api/sign";
+/**
+ * Get the extension access token via message to the service worker.
+ * The offscreen document cannot access chrome.storage.session directly.
+ */
+async function getAccessTokenViaMessage(): Promise<string | null> {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "auth:get-token",
+    });
+    if (
+      response?.ok &&
+      typeof response.data === "string" &&
+      response.data.length > 0
+    ) {
+      return response.data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearAccessTokenViaMessage(): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({ type: "auth:clear-token" });
+  } catch {
+    // ignore
+  }
+}
 
 /**
  * A BuilderConfig-compatible object that the ClobClient can use
@@ -41,23 +70,26 @@ export function createExtensionBuilderConfig() {
     ) {
       try {
         const bodyStr = JSON.stringify({ method, path, body, timestamp });
+        const token = await getAccessTokenViaMessage();
+        if (!token) {
+          console.error("[ExtBuilderConfig] Missing extension session token");
+          return undefined;
+        }
+
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         };
-
-        const secret: string = __KNOWW_EXTENSION_SECRET__;
-        if (secret) {
-          const ts = Date.now().toString();
-          const hmac = await computeHmacHex(secret, `${ts}:${bodyStr}`);
-          headers["X-Knoww-Signature"] = hmac;
-          headers["X-Knoww-Timestamp"] = ts;
-        }
 
         const response = await fetch(SIGN_PROXY_URL, {
           method: "POST",
           headers,
           body: bodyStr,
         });
+
+        if (response.status === 401) {
+          await clearAccessTokenViaMessage();
+        }
 
         if (!response.ok) {
           console.error(

@@ -56,3 +56,4 @@ test-results/
 tmp/
 lighthouse-output.json
 lighthouse-report*
+Auth-plan.md

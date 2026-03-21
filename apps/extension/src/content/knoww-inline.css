@@ -2180,6 +2180,67 @@
   pointer-events: none !important;
 }
 
+/* ── Bid/Ask Quick-Set ── */
+
+.knoww-tp-bidask-wrap {
+  display: flex !important;
+  gap: 8px !important;
+}
+.knoww-tp-bidask-btn {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  font-family: inherit !important;
+  transition: opacity 0.12s !important;
+}
+.knoww-tp-bidask-btn:hover {
+  opacity: 0.7 !important;
+}
+.knoww-tp-bidask-btn.bid {
+  color: rgb(0, 200, 117) !important;
+}
+.knoww-tp-bidask-btn.ask {
+  color: rgb(255, 99, 99) !important;
+}
+
+/* ── Order Position Indicator ── */
+
+.knoww-tp-order-position {
+  padding: 5px 8px !important;
+  border-radius: 8px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  margin-top: 6px !important;
+}
+.knoww-tp-order-position.green {
+  background: rgba(0, 200, 117, 0.1) !important;
+  color: rgb(0, 200, 117) !important;
+}
+.knoww-tp-order-position.blue {
+  background: rgba(59, 130, 246, 0.1) !important;
+  color: rgb(96, 165, 250) !important;
+}
+.knoww-tp-order-position.muted {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-tp-order-position.amber {
+  background: rgba(245, 158, 11, 0.1) !important;
+  color: rgb(245, 158, 11) !important;
+}
+
+/* ── Tick Size Info ── */
+
+.knoww-tp-tick-info {
+  font-size: 10px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  text-align: center !important;
+  margin-top: 4px !important;
+}
+
 /* ── Expiration ── */
 
 .knoww-tp-expiration {
@@ -2244,75 +2305,15 @@
 
 /* ── Amount Section ── */
 
-.knoww-tp-amount-display {
-  font-size: 16px !important;
-  font-weight: 700 !important;
-  color: var(--knoww-text, rgb(231, 233, 234)) !important;
-}
-.knoww-tp-presets {
-  display: flex !important;
-  gap: 6px !important;
-}
-.knoww-tp-preset {
-  flex: 1 !important;
-  padding: 8px 0 !important;
-  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
-  border-radius: 8px !important;
-  background: transparent !important;
+.knoww-tp-cost-display {
+  font-size: 14px !important;
+  font-weight: 600 !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  cursor: pointer !important;
-  transition: all 0.12s ease !important;
-  font-family: inherit !important;
-  text-align: center !important;
 }
-.knoww-tp-preset:hover {
-  border-color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
-  color: var(--knoww-text, rgb(231, 233, 234)) !important;
-}
-.knoww-tp-preset.active {
-  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
-  background: rgba(29, 155, 240, 0.1) !important;
-  color: var(--knoww-accent, rgb(29, 155, 240)) !important;
-}
-.knoww-tp-custom-wrap {
-  flex: 1 !important;
+.knoww-tp-max-row {
   display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 0 !important;
-  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
-  border-radius: 8px !important;
-  background: transparent !important;
-  transition: border-color 0.12s !important;
-}
-.knoww-tp-custom-wrap.active {
-  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
-  background: rgba(29, 155, 240, 0.05) !important;
-}
-.knoww-tp-custom-input {
-  width: 100% !important;
-  padding: 8px 4px !important;
-  border: none !important;
-  background: transparent !important;
-  color: var(--knoww-text, rgb(231, 233, 234)) !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  outline: none !important;
-  font-family: inherit !important;
-  text-align: center !important;
-  -moz-appearance: textfield !important;
-}
-.knoww-tp-custom-input::-webkit-inner-spin-button,
-.knoww-tp-custom-input::-webkit-outer-spin-button {
-  -webkit-appearance: none !important;
-  margin: 0 !important;
-}
-.knoww-tp-custom-input::placeholder {
-  color: var(--knoww-text-secondary) !important;
-  font-weight: 500 !important;
-  text-align: center !important;
+  justify-content: flex-end !important;
+  margin-top: 4px !important;
 }
 
 /* ── Shares Controls ── */

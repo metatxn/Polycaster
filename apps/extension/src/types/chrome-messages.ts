@@ -65,6 +65,11 @@ export interface TradingGetAllowanceMessage {
   negRisk?: boolean;
 }
 
+export interface TradingGetAllAllowancesMessage {
+  type: "trading:get-all-allowances";
+  ownerAddress: string;
+}
+
 export interface TradingGetOrderBookMessage {
   type: "trading:get-orderbook";
   tokenId: string;
@@ -115,6 +120,7 @@ export type TradingMessage =
   | TradingPlaceOrderMessage
   | TradingGetFeeRateMessage
   | TradingGetAllowanceMessage
+  | TradingGetAllAllowancesMessage
   | TradingGetOrderBookMessage
   | TradingSplitPositionMessage
   | TradingMergePositionsMessage

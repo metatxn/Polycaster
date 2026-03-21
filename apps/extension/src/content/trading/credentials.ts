@@ -17,6 +17,7 @@ import {
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
 
 import { WalletBridge } from "./bridge";
+import { ExtensionSession } from "./extension-session";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
@@ -107,9 +108,10 @@ export const CredentialManager = {
    * 3. Caches the resulting credentials
    */
   async derive(address: string): Promise<ApiKeyCreds> {
-    // Check cache first
     const cached = await this.getStored(address);
     if (cached) return cached;
+
+    await ExtensionSession.ensureAuthorized(address);
 
     const timestamp = Math.floor(Date.now() / 1000);
     const nonce = 0;

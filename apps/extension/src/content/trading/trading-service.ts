@@ -7,7 +7,9 @@
  */
 
 import {
+  CTF_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
+  NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   USDC_E_ADDRESS,
 } from "@knoww/shared-types/contracts";
@@ -16,6 +18,7 @@ import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import type { OrderBook } from "@knoww/shared-types/slippage";
 import { WalletBridge } from "./bridge";
 import { type ApiKeyCreds, CredentialManager } from "./credentials";
+import { ExtensionSession } from "./extension-session";
 import { ProxyWallet } from "./proxy-wallet";
 
 export type TradingState =
@@ -48,6 +51,7 @@ export interface TradingContext {
   error: string | null;
   orderBook: OrderBook | null;
   minOrderSize: number;
+  tickSize: number;
   usdcAllowance: number;
   usdcAllowanceNegRisk: number;
 }
@@ -68,6 +72,7 @@ let ctx: TradingContext = {
   error: null,
   orderBook: null,
   minOrderSize: 1,
+  tickSize: 0.01,
   usdcAllowance: 0,
   usdcAllowanceNegRisk: 0,
 };
@@ -268,7 +273,9 @@ export const TradingService = {
 
   async fetchOrderBook(tokenId: string): Promise<OrderBook | null> {
     try {
-      const data = await sendMsg<OrderBook & { min_order_size?: string }>(
+      const data = await sendMsg<
+        OrderBook & { min_order_size?: string; tick_size?: string }
+      >(
         { type: "trading:get-orderbook", tokenId },
         "Failed to fetch order book"
       );
@@ -277,7 +284,9 @@ export const TradingService = {
         1,
         Math.ceil(Number.isFinite(rawMin) ? rawMin : 1)
       );
-      update({ orderBook: data, minOrderSize });
+      const rawTick = parseFloat(data.tick_size ?? "0.01");
+      const tickSize = Number.isFinite(rawTick) && rawTick > 0 ? rawTick : 0.01;
+      update({ orderBook: data, minOrderSize, tickSize });
       return data;
     } catch {
       return null;
@@ -304,6 +313,8 @@ export const TradingService = {
     update({ state: "placing-order", error: null });
 
     try {
+      await ExtensionSession.ensureAuthorized(ctx.address);
+
       const result = await sendMsg(
         {
           type: "trading:place-order",
@@ -327,9 +338,9 @@ export const TradingService = {
     }
   },
 
-  // ── USDC Approval ──
+  // ── USDC & Token Approvals ──
 
-  async approveUsdc(): Promise<string> {
+  async approveUsdc(_negRisk = false): Promise<string> {
     if (!ctx.address) throw new Error("Wallet not connected");
 
     update({ state: "approving", error: null });
@@ -337,28 +348,85 @@ export const TradingService = {
     try {
       const MAX_UINT256 =
         "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-      const approveSelector = "0x095ea7b3";
+      const approveSelector = "0x095ea7b3"; // ERC20 approve(address,uint256)
+      const setApprovalForAllSelector = "0xa22cb465"; // ERC1155 setApprovalForAll(address,bool)
+
       const encodeApprove = (spender: string) => {
         const sp = spender.toLowerCase().replace("0x", "").padStart(64, "0");
         const am = MAX_UINT256.replace("0x", "").padStart(64, "0");
         return `${approveSelector}${sp}${am}`;
       };
 
-      await WalletBridge.sendTransaction({
-        from: ctx.address,
-        to: USDC_E_ADDRESS,
-        data: encodeApprove(CTF_EXCHANGE_ADDRESS),
-        value: "0x0",
-      });
-      const hash2 = await WalletBridge.sendTransaction({
-        from: ctx.address,
-        to: USDC_E_ADDRESS,
-        data: encodeApprove(NEG_RISK_CTF_EXCHANGE_ADDRESS),
-        value: "0x0",
-      });
+      const encodeSetApprovalForAll = (operator: string) => {
+        const op = operator.toLowerCase().replace("0x", "").padStart(64, "0");
+        const approved = "1".padStart(64, "0");
+        return `${setApprovalForAllSelector}${op}${approved}`;
+      };
+
+      const erc20Targets = [
+        CTF_ADDRESS,
+        CTF_EXCHANGE_ADDRESS,
+        NEG_RISK_CTF_EXCHANGE_ADDRESS,
+        NEG_RISK_ADAPTER_ADDRESS,
+      ];
+      const erc1155Operators = [
+        CTF_EXCHANGE_ADDRESS,
+        NEG_RISK_CTF_EXCHANGE_ADDRESS,
+        NEG_RISK_ADAPTER_ADDRESS,
+      ];
+
+      const allowanceResults = await sendMsg<{
+        allowances: Record<string, number>;
+      }>(
+        {
+          type: "trading:get-all-allowances",
+          ownerAddress: ctx.proxyAddress || ctx.address,
+        },
+        "Check all allowances"
+      ).catch(() => null);
+
+      const THRESHOLD = 1_000_000;
+      const needsErc20: string[] = [];
+      const needsErc1155: string[] = [];
+
+      if (allowanceResults?.allowances) {
+        for (const target of erc20Targets) {
+          if ((allowanceResults.allowances[target] ?? 0) < THRESHOLD) {
+            needsErc20.push(target);
+          }
+        }
+        for (const op of erc1155Operators) {
+          if (!allowanceResults.allowances[`erc1155:${op}`]) {
+            needsErc1155.push(op);
+          }
+        }
+      } else {
+        needsErc20.push(...erc20Targets);
+        needsErc1155.push(...erc1155Operators);
+      }
+
+      let lastHash = "";
+
+      for (const spender of needsErc20) {
+        lastHash = await WalletBridge.sendTransaction({
+          from: ctx.address,
+          to: USDC_E_ADDRESS,
+          data: encodeApprove(spender),
+          value: "0x0",
+        });
+      }
+
+      for (const operator of needsErc1155) {
+        lastHash = await WalletBridge.sendTransaction({
+          from: ctx.address,
+          to: CTF_ADDRESS,
+          data: encodeSetApprovalForAll(operator),
+          value: "0x0",
+        });
+      }
 
       update({ state: "ready" });
-      return hash2;
+      return lastHash;
     } catch (err) {
       update({
         state: "ready",

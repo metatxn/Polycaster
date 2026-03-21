@@ -7,6 +7,53 @@ import { checkRateLimit } from "@/lib/api-rate-limit";
 const GAMMA_API = "https://gamma-api.polymarket.com";
 
 /**
+ * Resolve the parent event slug for a market.
+ *
+ * The Gamma API nests the parent event inside `market.events[]`.
+ * We prefer `events[0].slug` (the actual event slug) over the market's own slug,
+ * since these differ for multi-outcome events.
+ * Falls back to top-level `eventSlug` fields, then fetching by event ID.
+ */
+async function resolveEventSlug(
+  market: Record<string, unknown>
+): Promise<string> {
+  // 1. Preferred: embedded events array from Gamma API
+  const events = market.events as
+    | Array<{ id?: string; slug?: string }>
+    | undefined;
+  if (Array.isArray(events) && events.length > 0 && events[0].slug) {
+    return events[0].slug;
+  }
+
+  // 2. Direct top-level field (some API shapes include this)
+  const direct = (market.eventSlug as string) || (market.event_slug as string);
+  if (direct) return direct;
+
+  // 3. Fetch parent event by numeric ID as last resort
+  const eventId =
+    (market.events_id as string) ||
+    (market.eventId as string) ||
+    (market.event_id as string);
+
+  if (eventId) {
+    try {
+      const res = await fetch(`${GAMMA_API}/events/${eventId}`, {
+        headers: { Accept: "application/json" },
+        next: { revalidate: 300 },
+      });
+      if (res.ok) {
+        const event = (await res.json()) as Record<string, unknown>;
+        if (event.slug) return event.slug as string;
+      }
+    } catch {
+      // fall through to market slug
+    }
+  }
+
+  return (market.slug as string) || "";
+}
+
+/**
  * GET /api/markets/by-token/:tokenId
  * Get market information by token ID (CLOB token ID)
  *
@@ -31,7 +78,7 @@ export async function GET(
       `${GAMMA_API}/markets?clob_token_ids=${tokenId}`,
       {
         headers: { Accept: "application/json" },
-        next: { revalidate: 300 }, // Cache for 5 minutes
+        next: { revalidate: 300 },
       }
     );
 
@@ -41,9 +88,6 @@ export async function GET(
       if (Array.isArray(gammaData) && gammaData.length > 0) {
         const market = gammaData[0];
 
-        // Determine outcome based on which token matches
-        // clobTokenIds is a comma-separated string like "tokenId1,tokenId2"
-        // outcomes is a string like "Yes,No"
         let outcome = "Yes";
         if (market.clobTokenIds && market.outcomes) {
           const tokenIds = market.clobTokenIds.split(",");
@@ -56,13 +100,14 @@ export async function GET(
           }
         }
 
+        const eventSlug = await resolveEventSlug(market);
+
         return NextResponse.json({
           success: true,
           market: {
             question: market.question || market.title || "Unknown Market",
             slug: market.slug || market.marketSlug || "",
-            eventSlug:
-              market.eventSlug || market.event_slug || market.slug || "",
+            eventSlug,
             conditionId: market.conditionId || "",
             outcome,
             endDate: market.endDate || market.endDateIso || null,

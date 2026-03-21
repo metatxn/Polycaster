@@ -31,6 +31,7 @@ const ALLOWED_DOMAINS = [
   "clob.polymarket.com",
   "data-api.polymarket.com",
   "polygon-bor-rpc.publicnode.com",
+  "relayer-v2.polymarket.com",
   ...(__DEV_MODE__ ? ["localhost"] : []),
 ] as const;
 
@@ -322,8 +323,9 @@ chrome.runtime.onMessage.addListener(
               : JSON.stringify(message.body)
             : "";
 
+          const isGet = (message.method || "POST").toUpperCase() === "GET";
           const headers: Record<string, string> = {
-            "Content-Type": "application/json",
+            ...(isGet ? {} : { "Content-Type": "application/json" }),
             Accept: "application/json",
             ...message.headers,
           };

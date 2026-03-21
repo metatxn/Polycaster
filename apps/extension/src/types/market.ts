@@ -47,6 +47,11 @@ export interface PolymarketNestedMarket {
   question?: string;
   slug?: string;
   spread?: number;
+  negRisk?: boolean;
+  enableNegRisk?: boolean;
+  negRiskAugmented?: boolean;
+  neg_risk?: boolean;
+  enable_neg_risk?: boolean;
 }
 
 /**
@@ -71,6 +76,11 @@ export interface PolymarketSearchEvent {
   startDate?: string;
   tags?: Tag[];
   _source?: "search" | "tag";
+  negRisk?: boolean;
+  enableNegRisk?: boolean;
+  negRiskAugmented?: boolean;
+  neg_risk?: boolean;
+  enable_neg_risk?: boolean;
 }
 
 /**
@@ -207,6 +217,11 @@ export interface NestedMarket {
   last_price?: number;
   image_url_dark_mode?: string;
   image_url_light_mode?: string;
+  negRisk?: boolean;
+  enableNegRisk?: boolean;
+  negRiskAugmented?: boolean;
+  neg_risk?: boolean;
+  enable_neg_risk?: boolean;
 }
 
 /**
@@ -236,6 +251,11 @@ export interface Market {
   endDate?: string;
   liquidity?: number;
   _source?: "search" | "tag";
+  negRisk?: boolean;
+  enableNegRisk?: boolean;
+  negRiskAugmented?: boolean;
+  neg_risk?: boolean;
+  enable_neg_risk?: boolean;
 
   // Kalshi-specific
   ticker?: string;

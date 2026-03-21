@@ -39,11 +39,13 @@ import type {
   TradingGetOutcomeBalancesMessage,
   TradingMergePositionsMessage,
   TradingPlaceOrderMessage,
+  TradingRelayerApproveMessage,
   TradingSplitPositionMessage,
   TradingSuccessResponse,
 } from "../types/chrome-messages";
 import { BridgeSigner } from "./bridge-signer";
 import { createExtensionBuilderConfig } from "./builder-config";
+import { executeViaRelayer } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
@@ -119,6 +121,11 @@ export async function handleTradingMessage(
       case "trading:get-outcome-balances":
         return await handleGetOutcomeBalances(
           message as unknown as TradingGetOutcomeBalancesMessage
+        );
+      case "trading:relayer-approve":
+        return await handleRelayerApprove(
+          message as unknown as TradingRelayerApproveMessage,
+          sender
         );
       default:
         return fail(`Unknown trading message type: ${type}`);
@@ -430,7 +437,7 @@ async function handleDeriveProxyAddress(msg: {
   eoaAddress: string;
 }): Promise<TradingResponse> {
   const addressClean = msg.eoaAddress.toLowerCase().replace("0x", "");
-  const encoded = "0x" + "0".repeat(24) + addressClean;
+  const encoded = `0x${"0".repeat(24)}${addressClean}`;
   const salt = ethers.utils.keccak256(encoded);
   const proxyAddress = ethers.utils.getCreate2Address(
     SAFE_FACTORY_ADDRESS,
@@ -545,7 +552,111 @@ async function handleGetOrderBook(
   return ok(data);
 }
 
-// ── Split Position (USDC → YES + NO) ──
+// ── Post-split/merge: tell the CLOB about updated on-chain balances ──
+// Uses direct HTTP + HMAC auth to avoid any wallet/signer interaction.
+
+async function buildHmacHeaders(
+  address: string,
+  creds: { apiKey: string; apiSecret: string; apiPassphrase: string },
+  method: string,
+  requestPath: string
+): Promise<Record<string, string>> {
+  const ts = Math.floor(Date.now() / 1000);
+  const message = `${ts}${method}${requestPath}`;
+  const keyData = base64ToArrayBuffer(creds.apiSecret);
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sigBuf = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    cryptoKey,
+    new TextEncoder().encode(message)
+  );
+  const sig = arrayBufferToBase64(sigBuf)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+  return {
+    POLY_ADDRESS: address,
+    POLY_SIGNATURE: sig,
+    POLY_TIMESTAMP: String(ts),
+    POLY_API_KEY: creds.apiKey,
+    POLY_PASSPHRASE: creds.apiPassphrase,
+  };
+}
+
+function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const s = b64
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .replace(/[^A-Za-z0-9+/=]/g, "");
+  const bin = atob(s);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++)
+    binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+async function clobUpdateBalanceAllowance(
+  address: string,
+  creds: { apiKey: string; apiSecret: string; apiPassphrase: string },
+  assetType: string,
+  tokenId?: string
+): Promise<void> {
+  const endpoint = "/balance-allowance/update";
+  const headers = await buildHmacHeaders(address, creds, "GET", endpoint);
+  const params = new URLSearchParams({
+    asset_type: assetType,
+    signature_type: String(SIGNATURE_TYPES.POLY_GNOSIS_SAFE),
+  });
+  if (tokenId) params.set("token_id", tokenId);
+  await fetch(`${CLOB_HOST}${endpoint}?${params}`, { method: "GET", headers });
+}
+
+async function syncBalancesAfterCTF(msg: {
+  address: string;
+  credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
+  proxyAddress?: string;
+  yesTokenId?: string;
+  noTokenId?: string;
+}): Promise<void> {
+  if (!msg.credentials || !msg.proxyAddress) return;
+
+  await clobUpdateBalanceAllowance(
+    msg.proxyAddress,
+    msg.credentials,
+    "COLLATERAL"
+  );
+  if (msg.yesTokenId) {
+    await clobUpdateBalanceAllowance(
+      msg.proxyAddress,
+      msg.credentials,
+      "CONDITIONAL",
+      msg.yesTokenId
+    );
+  }
+  if (msg.noTokenId) {
+    await clobUpdateBalanceAllowance(
+      msg.proxyAddress,
+      msg.credentials,
+      "CONDITIONAL",
+      msg.noTokenId
+    );
+  }
+  console.log("[CTF] Balance/allowance synced with CLOB after split/merge");
+}
+
+// ── Split Position (USDC → YES + NO) via Relayer (gasless) ──
 
 async function handleSplitPosition(
   msg: TradingSplitPositionMessage,
@@ -560,22 +671,28 @@ async function handleSplitPosition(
   );
   const signer = new BridgeSigner(msg.address, tabId, provider);
 
-  const ctf = new ethers.Contract(CTF_ADDRESS, CTF_SPLIT_ABI, signer);
+  const ctfIface = new ethers.utils.Interface(CTF_SPLIT_ABI);
   const amountWei = ethers.utils.parseUnits(String(msg.amount), 6);
-
-  const tx = await ctf.splitPosition(
+  const calldata = ctfIface.encodeFunctionData("splitPosition", [
     USDC_E_ADDRESS,
     PARENT_COLLECTION_ID,
     msg.conditionId,
     BINARY_PARTITION,
-    amountWei
+    amountWei,
+  ]);
+
+  const result = await executeViaRelayer(signer, [
+    { to: CTF_ADDRESS, data: calldata, value: "0" },
+  ]);
+
+  syncBalancesAfterCTF(msg).catch((e) =>
+    console.warn("[Split] post-sync failed (non-fatal):", e)
   );
 
-  const receipt = await tx.wait();
-  return ok({ txHash: receipt.transactionHash, success: true });
+  return ok({ txHash: result.txHash, success: true });
 }
 
-// ── Merge Positions (YES + NO → USDC) ──
+// ── Merge Positions (YES + NO → USDC) via Relayer (gasless) ──
 
 async function handleMergePositions(
   msg: TradingMergePositionsMessage,
@@ -590,19 +707,150 @@ async function handleMergePositions(
   );
   const signer = new BridgeSigner(msg.address, tabId, provider);
 
-  const ctf = new ethers.Contract(CTF_ADDRESS, CTF_MERGE_ABI, signer);
+  const ctfIface = new ethers.utils.Interface(CTF_MERGE_ABI);
   const amountWei = ethers.utils.parseUnits(String(msg.amount), 6);
-
-  const tx = await ctf.mergePositions(
+  const calldata = ctfIface.encodeFunctionData("mergePositions", [
     USDC_E_ADDRESS,
     PARENT_COLLECTION_ID,
     msg.conditionId,
     BINARY_PARTITION,
-    amountWei
+    amountWei,
+  ]);
+
+  const result = await executeViaRelayer(signer, [
+    { to: CTF_ADDRESS, data: calldata, value: "0" },
+  ]);
+
+  syncBalancesAfterCTF(msg).catch((e) =>
+    console.warn("[Merge] post-sync failed (non-fatal):", e)
   );
 
-  const receipt = await tx.wait();
-  return ok({ txHash: receipt.transactionHash, success: true });
+  return ok({ txHash: result.txHash, success: true });
+}
+
+// ── Gasless Approvals via Relayer ──
+
+const ERC20_APPROVE_ABI = [
+  "function approve(address spender, uint256 amount) returns (bool)",
+];
+const ERC1155_SET_APPROVAL_ABI = [
+  "function setApprovalForAll(address operator, bool approved)",
+];
+
+async function handleRelayerApprove(
+  msg: TradingRelayerApproveMessage,
+  sender: chrome.runtime.MessageSender
+): Promise<TradingResponse> {
+  const tabId = sender.tab?.id;
+  if (!tabId) return fail("No active tab for signing");
+
+  const provider = new ethers.providers.StaticJsonRpcProvider(
+    POLYGON_RPC,
+    POLYGON_CHAIN_ID
+  );
+  const signer = new BridgeSigner(msg.address, tabId, provider);
+
+  const erc20Iface = new ethers.utils.Interface(ERC20_APPROVE_ABI);
+  const erc1155Iface = new ethers.utils.Interface(ERC1155_SET_APPROVAL_ABI);
+  const MAX_UINT256 = ethers.constants.MaxUint256;
+
+  const erc20Targets = [
+    CTF_ADDRESS,
+    CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_ADAPTER_ADDRESS,
+  ];
+  const erc1155Operators = [
+    CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_ADAPTER_ADDRESS,
+  ];
+
+  const proxyAddress = deriveProxyAddressSync(msg.address);
+
+  const needsErc20: string[] = [];
+  const needsErc1155: string[] = [];
+
+  try {
+    const usdc = new ethers.Contract(
+      USDC_E_ADDRESS,
+      ERC20_ALLOWANCE_ABI,
+      provider
+    );
+    const ctf = new ethers.Contract(
+      CTF_ADDRESS,
+      ERC1155_IS_APPROVED_ABI,
+      provider
+    );
+    const THRESHOLD = ethers.utils.parseUnits("1000000", 6);
+
+    const [erc20Results, erc1155Results] = await Promise.all([
+      Promise.all(
+        erc20Targets.map((t) =>
+          usdc.allowance(proxyAddress, t).catch(() => ethers.BigNumber.from(0))
+        )
+      ),
+      Promise.all(
+        erc1155Operators.map((op) =>
+          ctf.isApprovedForAll(proxyAddress, op).catch(() => false)
+        )
+      ),
+    ]);
+
+    for (let i = 0; i < erc20Targets.length; i++) {
+      if (erc20Results[i].lt(THRESHOLD)) needsErc20.push(erc20Targets[i]);
+    }
+    for (let i = 0; i < erc1155Operators.length; i++) {
+      if (!erc1155Results[i]) needsErc1155.push(erc1155Operators[i]);
+    }
+  } catch {
+    needsErc20.push(...erc20Targets);
+    needsErc1155.push(...erc1155Operators);
+  }
+
+  if (needsErc20.length === 0 && needsErc1155.length === 0) {
+    return ok({ txHash: "", alreadyApproved: true });
+  }
+
+  const txns: Array<{ to: string; data: string; value: string }> = [];
+
+  for (const spender of needsErc20) {
+    txns.push({
+      to: USDC_E_ADDRESS,
+      data: erc20Iface.encodeFunctionData("approve", [spender, MAX_UINT256]),
+      value: "0",
+    });
+  }
+
+  for (const operator of needsErc1155) {
+    txns.push({
+      to: CTF_ADDRESS,
+      data: erc1155Iface.encodeFunctionData("setApprovalForAll", [
+        operator,
+        true,
+      ]),
+      value: "0",
+    });
+  }
+
+  console.log(
+    `[RelayerApprove] Submitting ${txns.length} approval txns via relayer`
+  );
+  const result = await executeViaRelayer(signer, txns);
+  return ok({ txHash: result.txHash, success: true });
+}
+
+function deriveProxyAddressSync(eoaAddress: string): string {
+  const encoded = ethers.utils.defaultAbiCoder.encode(
+    ["address"],
+    [eoaAddress]
+  );
+  const salt = ethers.utils.keccak256(encoded);
+  return ethers.utils.getCreate2Address(
+    SAFE_FACTORY_ADDRESS,
+    salt,
+    SAFE_INIT_CODE_HASH
+  );
 }
 
 // ── Outcome Token Balances ──

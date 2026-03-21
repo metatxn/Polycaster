@@ -1,3 +1,4 @@
+import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import { cache } from "react";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import type { Event } from "@/hooks/use-event-detail";
@@ -147,7 +148,7 @@ export const getInitialEvents = cache(
           live: event.live,
           ended: event.ended,
           competitive: event.competitive,
-          negRisk: event.enableNegRisk || event.negRiskAugmented,
+          negRisk: resolveNegRisk(event),
           startDate: event.startDate,
           endDate: event.endDate,
           markets: event.markets?.map((m) => ({ id: m.id })),
@@ -241,14 +242,16 @@ export const getInitialLeaderboard = cache(
  * is needed for both generateMetadata() and the page component
  */
 export const getEvent = cache(
-  async (slug: string): Promise<GammaEventFull | null> => {
+  async (slugOrId: string): Promise<GammaEventFull | null> => {
     try {
-      const res = await fetch(
-        `${POLYMARKET_API.GAMMA.EVENTS}/slug/${encodeURIComponent(slug)}`,
-        {
-          next: { revalidate: CACHE_DURATION.EVENTS },
-        }
-      );
+      const isNumericId = /^\d+$/.test(slugOrId);
+      const url = isNumericId
+        ? `${POLYMARKET_API.GAMMA.EVENTS}/${slugOrId}`
+        : `${POLYMARKET_API.GAMMA.EVENTS}/slug/${encodeURIComponent(slugOrId)}`;
+
+      const res = await fetch(url, {
+        next: { revalidate: CACHE_DURATION.EVENTS },
+      });
       if (!res.ok) {
         console.error("Failed to fetch event:", res.status, res.statusText);
         return null;

@@ -32,7 +32,8 @@
     "http://localhost/*",
     "https://clob.polymarket.com/*",
     "https://data-api.polymarket.com/*",
-    "https://polygon-bor-rpc.publicnode.com/*"
+    "https://polygon-bor-rpc.publicnode.com/*",
+    "https://relayer-v2.polymarket.com/*"
   ],
   "background": {
     "service_worker": "background.js"

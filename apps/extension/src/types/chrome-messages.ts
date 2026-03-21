@@ -80,6 +80,10 @@ export interface TradingSplitPositionMessage {
   conditionId: string;
   amount: number;
   address: string;
+  proxyAddress?: string;
+  credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
+  yesTokenId?: string;
+  noTokenId?: string;
 }
 
 export interface TradingMergePositionsMessage {
@@ -87,6 +91,10 @@ export interface TradingMergePositionsMessage {
   conditionId: string;
   amount: number;
   address: string;
+  proxyAddress?: string;
+  credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
+  yesTokenId?: string;
+  noTokenId?: string;
 }
 
 export interface TradingGetOutcomeBalancesMessage {
@@ -94,6 +102,11 @@ export interface TradingGetOutcomeBalancesMessage {
   yesTokenId: string;
   noTokenId: string;
   ownerAddress: string;
+}
+
+export interface TradingRelayerApproveMessage {
+  type: "trading:relayer-approve";
+  address: string;
 }
 
 // ── Signing delegation (background ↔ content) ──
@@ -124,7 +137,8 @@ export type TradingMessage =
   | TradingGetOrderBookMessage
   | TradingSplitPositionMessage
   | TradingMergePositionsMessage
-  | TradingGetOutcomeBalancesMessage;
+  | TradingGetOutcomeBalancesMessage
+  | TradingRelayerApproveMessage;
 
 export type BackgroundMessage =
   | FetchTextMessage

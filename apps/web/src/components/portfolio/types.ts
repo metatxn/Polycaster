@@ -44,6 +44,7 @@ export interface Order {
     question: string;
     slug: string;
     eventSlug: string;
+    conditionId?: string;
     outcome: string;
     icon?: string;
   };
@@ -65,6 +66,7 @@ export interface Trade {
     conditionId?: string;
     title: string;
     slug: string;
+    eventSlug?: string;
     icon: string;
   };
 }

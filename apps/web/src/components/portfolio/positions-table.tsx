@@ -153,7 +153,7 @@ export function PositionsTable({
               className="bg-background border border-border rounded-xl p-4 space-y-3"
             >
               <Link
-                href={`/events/detail/${position.market.eventSlug}`}
+                href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
                 className="flex items-start gap-3"
               >
                 <div className="relative w-12 h-12 rounded-full overflow-hidden bg-muted shrink-0">
@@ -264,7 +264,9 @@ export function PositionsTable({
                   Sell
                 </Button>
                 <Button asChild size="sm" variant="outline" className="flex-1">
-                  <Link href={`/events/detail/${position.market.eventSlug}`}>
+                  <Link
+                    href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
+                  >
                     Trade
                   </Link>
                 </Button>
@@ -365,7 +367,7 @@ export function PositionsTable({
                 >
                   <TableCell>
                     <Link
-                      href={`/events/detail/${position.market.eventSlug}`}
+                      href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
                       className="flex items-center gap-3"
                     >
                       <div className="relative w-10 h-10 rounded-full overflow-hidden bg-muted shrink-0">
@@ -460,7 +462,7 @@ export function PositionsTable({
                         className="h-8"
                       >
                         <Link
-                          href={`/events/detail/${position.market.eventSlug}`}
+                          href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
                         >
                           Trade
                         </Link>

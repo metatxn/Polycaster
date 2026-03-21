@@ -1572,6 +1572,36 @@
 .knoww-tp-bal-label.knoww-tp-low {
   color: rgb(255, 152, 0) !important;
 }
+.knoww-tp-refresh-btn {
+  all: unset !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  color: rgba(255, 255, 255, 0.45) !important;
+  transition:
+    color 0.15s,
+    background 0.15s !important;
+  flex-shrink: 0 !important;
+}
+.knoww-tp-refresh-btn:hover {
+  color: rgba(255, 255, 255, 0.8) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+.knoww-tp-refresh-btn.spinning svg {
+  animation: knoww-spin 0.8s linear infinite !important;
+}
+@keyframes knoww-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
 /* ── Portfolio Bar ── */
 
 .knoww-tp-portfolio-bar {

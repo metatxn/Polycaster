@@ -12,6 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -186,23 +187,53 @@ export function HistoryTable({
 
               {/* Market info row - aligned with activity icon */}
               <div className="flex items-center gap-2">
-                <div className="relative w-8 h-8 rounded-full overflow-hidden bg-muted shrink-0">
-                  {trade.market.icon ? (
-                    <Image
-                      src={trade.market.icon}
-                      alt={trade.market.title}
-                      fill
-                      sizes="32px"
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
-                    </div>
-                  )}
-                </div>
+                {trade.market.eventSlug || trade.market.slug ? (
+                  <Link
+                    href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
+                    className="relative w-8 h-8 rounded-full overflow-hidden bg-muted shrink-0"
+                  >
+                    {trade.market.icon ? (
+                      <Image
+                        src={trade.market.icon}
+                        alt={trade.market.title}
+                        fill
+                        sizes="32px"
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+                      </div>
+                    )}
+                  </Link>
+                ) : (
+                  <div className="relative w-8 h-8 rounded-full overflow-hidden bg-muted shrink-0">
+                    {trade.market.icon ? (
+                      <Image
+                        src={trade.market.icon}
+                        alt={trade.market.title}
+                        fill
+                        sizes="32px"
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm truncate">{trade.market.title}</p>
+                  {trade.market.eventSlug || trade.market.slug ? (
+                    <Link
+                      href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
+                      className="text-sm truncate block hover:text-primary transition-colors"
+                    >
+                      {trade.market.title}
+                    </Link>
+                  ) : (
+                    <p className="text-sm truncate">{trade.market.title}</p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     <span
                       className={
@@ -303,25 +334,55 @@ export function HistoryTable({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <div className="relative w-9 h-9 rounded-full overflow-hidden bg-muted shrink-0">
-                          {trade.market.icon ? (
-                            <Image
-                              src={trade.market.icon}
-                              alt={trade.market.title}
-                              fill
-                              sizes="36px"
-                              className="object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                            </div>
-                          )}
-                        </div>
+                        {trade.market.eventSlug || trade.market.slug ? (
+                          <Link
+                            href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
+                            className="relative w-9 h-9 rounded-full overflow-hidden bg-muted shrink-0"
+                          >
+                            {trade.market.icon ? (
+                              <Image
+                                src={trade.market.icon}
+                                alt={trade.market.title}
+                                fill
+                                sizes="36px"
+                                className="object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            )}
+                          </Link>
+                        ) : (
+                          <div className="relative w-9 h-9 rounded-full overflow-hidden bg-muted shrink-0">
+                            {trade.market.icon ? (
+                              <Image
+                                src={trade.market.icon}
+                                alt={trade.market.title}
+                                fill
+                                sizes="36px"
+                                className="object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <div className="min-w-0">
-                          <p className="font-medium text-sm truncate max-w-[300px]">
-                            {trade.market.title}
-                          </p>
+                          {trade.market.eventSlug || trade.market.slug ? (
+                            <Link
+                              href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
+                              className="font-medium text-sm truncate max-w-[300px] block hover:text-primary transition-colors"
+                            >
+                              {trade.market.title}
+                            </Link>
+                          ) : (
+                            <p className="font-medium text-sm truncate max-w-[300px]">
+                              {trade.market.title}
+                            </p>
+                          )}
                           <p className="text-xs text-muted-foreground">
                             <span
                               className={

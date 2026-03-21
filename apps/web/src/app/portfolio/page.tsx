@@ -290,6 +290,7 @@ export default function PortfolioPage() {
           conditionId: lp.conditionId,
           title: lp.market.title,
           slug: lp.market.slug,
+          eventSlug: lp.market.eventSlug,
           icon: lp.market.icon,
         },
       };

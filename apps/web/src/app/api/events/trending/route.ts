@@ -1,3 +1,4 @@
+import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest) {
       live: event.live,
       ended: event.ended,
       competitive: event.competitive,
-      negRisk: event.enableNegRisk || event.negRiskAugmented,
+      negRisk: resolveNegRisk(event),
       startDate: event.startDate,
       endDate: event.endDate,
       markets: event.markets?.map((m: GammaMarket) => ({ id: m.id })),

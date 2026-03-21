@@ -6,13 +6,6 @@
  * Also supports split (USDC→YES+NO) and merge (YES+NO→USDC) operations.
  */
 
-import {
-  CTF_ADDRESS,
-  CTF_EXCHANGE_ADDRESS,
-  NEG_RISK_ADAPTER_ADDRESS,
-  NEG_RISK_CTF_EXCHANGE_ADDRESS,
-  USDC_E_ADDRESS,
-} from "@knoww/shared-types/contracts";
 import type { ClobOrderType } from "@knoww/shared-types/polymarket";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import type { OrderBook } from "@knoww/shared-types/slippage";
@@ -94,12 +87,24 @@ function update(partial: Partial<TradingContext>): void {
 
 function sendMsg<T>(
   message: Record<string, unknown>,
-  label: string
+  label: string,
+  timeoutMs = 120_000
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`${label} (timed out after ${timeoutMs / 1000}s)`));
+      }
+    }, timeoutMs);
+
     chrome.runtime.sendMessage(
       message,
       (response: { ok: boolean; data?: T; error?: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message || label));
           return;
@@ -338,7 +343,7 @@ export const TradingService = {
     }
   },
 
-  // ── USDC & Token Approvals ──
+  // ── USDC & Token Approvals (gasless via Relayer) ──
 
   async approveUsdc(_negRisk = false): Promise<string> {
     if (!ctx.address) throw new Error("Wallet not connected");
@@ -346,87 +351,16 @@ export const TradingService = {
     update({ state: "approving", error: null });
 
     try {
-      const MAX_UINT256 =
-        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-      const approveSelector = "0x095ea7b3"; // ERC20 approve(address,uint256)
-      const setApprovalForAllSelector = "0xa22cb465"; // ERC1155 setApprovalForAll(address,bool)
-
-      const encodeApprove = (spender: string) => {
-        const sp = spender.toLowerCase().replace("0x", "").padStart(64, "0");
-        const am = MAX_UINT256.replace("0x", "").padStart(64, "0");
-        return `${approveSelector}${sp}${am}`;
-      };
-
-      const encodeSetApprovalForAll = (operator: string) => {
-        const op = operator.toLowerCase().replace("0x", "").padStart(64, "0");
-        const approved = "1".padStart(64, "0");
-        return `${setApprovalForAllSelector}${op}${approved}`;
-      };
-
-      const erc20Targets = [
-        CTF_ADDRESS,
-        CTF_EXCHANGE_ADDRESS,
-        NEG_RISK_CTF_EXCHANGE_ADDRESS,
-        NEG_RISK_ADAPTER_ADDRESS,
-      ];
-      const erc1155Operators = [
-        CTF_EXCHANGE_ADDRESS,
-        NEG_RISK_CTF_EXCHANGE_ADDRESS,
-        NEG_RISK_ADAPTER_ADDRESS,
-      ];
-
-      const allowanceResults = await sendMsg<{
-        allowances: Record<string, number>;
+      const result = await sendMsg<{
+        txHash: string;
+        alreadyApproved?: boolean;
       }>(
-        {
-          type: "trading:get-all-allowances",
-          ownerAddress: ctx.proxyAddress || ctx.address,
-        },
-        "Check all allowances"
-      ).catch(() => null);
-
-      const THRESHOLD = 1_000_000;
-      const needsErc20: string[] = [];
-      const needsErc1155: string[] = [];
-
-      if (allowanceResults?.allowances) {
-        for (const target of erc20Targets) {
-          if ((allowanceResults.allowances[target] ?? 0) < THRESHOLD) {
-            needsErc20.push(target);
-          }
-        }
-        for (const op of erc1155Operators) {
-          if (!allowanceResults.allowances[`erc1155:${op}`]) {
-            needsErc1155.push(op);
-          }
-        }
-      } else {
-        needsErc20.push(...erc20Targets);
-        needsErc1155.push(...erc1155Operators);
-      }
-
-      let lastHash = "";
-
-      for (const spender of needsErc20) {
-        lastHash = await WalletBridge.sendTransaction({
-          from: ctx.address,
-          to: USDC_E_ADDRESS,
-          data: encodeApprove(spender),
-          value: "0x0",
-        });
-      }
-
-      for (const operator of needsErc1155) {
-        lastHash = await WalletBridge.sendTransaction({
-          from: ctx.address,
-          to: CTF_ADDRESS,
-          data: encodeSetApprovalForAll(operator),
-          value: "0x0",
-        });
-      }
+        { type: "trading:relayer-approve", address: ctx.address },
+        "Approval failed"
+      );
 
       update({ state: "ready" });
-      return lastHash;
+      return result.txHash;
     } catch (err) {
       update({
         state: "ready",
@@ -438,7 +372,12 @@ export const TradingService = {
 
   // ── Split (USDC → YES + NO) ──
 
-  async splitPosition(conditionId: string, amount: number): Promise<unknown> {
+  async splitPosition(
+    conditionId: string,
+    amount: number,
+    yesTokenId?: string,
+    noTokenId?: string
+  ): Promise<unknown> {
     if (!ctx.address) throw new Error("Wallet not connected");
 
     update({ state: "splitting", error: null });
@@ -450,6 +389,10 @@ export const TradingService = {
           conditionId,
           amount,
           address: ctx.address,
+          proxyAddress: ctx.proxyAddress ?? undefined,
+          credentials: ctx.credentials ?? undefined,
+          yesTokenId,
+          noTokenId,
         },
         "Split failed"
       );
@@ -467,7 +410,12 @@ export const TradingService = {
 
   // ── Merge (YES + NO → USDC) ──
 
-  async mergePositions(conditionId: string, amount: number): Promise<unknown> {
+  async mergePositions(
+    conditionId: string,
+    amount: number,
+    yesTokenId?: string,
+    noTokenId?: string
+  ): Promise<unknown> {
     if (!ctx.address) throw new Error("Wallet not connected");
 
     update({ state: "merging", error: null });
@@ -479,6 +427,10 @@ export const TradingService = {
           conditionId,
           amount,
           address: ctx.address,
+          proxyAddress: ctx.proxyAddress ?? undefined,
+          credentials: ctx.credentials ?? undefined,
+          yesTokenId,
+          noTokenId,
         },
         "Merge failed"
       );
@@ -533,6 +485,7 @@ export const TradingService = {
       error: null,
       orderBook: null,
       minOrderSize: 1,
+      tickSize: 0.01,
       usdcAllowance: 0,
       usdcAllowanceNegRisk: 0,
     };

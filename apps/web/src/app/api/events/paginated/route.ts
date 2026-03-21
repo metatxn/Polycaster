@@ -1,3 +1,4 @@
+import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
@@ -177,7 +178,7 @@ export async function GET(request: NextRequest) {
       live: event.live,
       ended: event.ended,
       competitive: event.competitive,
-      negRisk: event.enableNegRisk || event.negRiskAugmented,
+      negRisk: resolveNegRisk(event),
       score: event.score,
       startDate: event.startDate,
       endDate: event.endDate,

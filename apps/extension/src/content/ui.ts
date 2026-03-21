@@ -2,6 +2,7 @@
 // UI COMPONENTS - Multi-Source Market Cards
 // ============================================
 
+import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import type {
   InjectedMarketEntry,
   Market,
@@ -130,7 +131,7 @@ async function resolveTokenAndShowPanel(
       price,
       side: "BUY",
       tokenId,
-      negRisk: isMultiOutcome || !!(market as Record<string, unknown>).negRisk,
+      negRisk: resolveNegRisk(nestedMarket, market),
       isMultiOutcome,
       anchorElement,
       conditionId,

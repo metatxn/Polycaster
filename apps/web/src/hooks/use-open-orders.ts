@@ -25,6 +25,7 @@ export interface OpenOrder {
     question: string;
     slug: string;
     eventSlug: string;
+    conditionId?: string;
     outcome: string;
     icon?: string;
   };
@@ -51,6 +52,7 @@ interface MarketInfoResponse {
     question: string;
     slug: string;
     eventSlug: string;
+    conditionId?: string;
     outcome: string;
     icon?: string;
   };
@@ -64,6 +66,7 @@ async function fetchMarketInfo(tokenId: string): Promise<{
   question: string;
   slug: string;
   eventSlug: string;
+  conditionId?: string;
   outcome: string;
   icon?: string;
 } | null> {
@@ -77,6 +80,7 @@ async function fetchMarketInfo(tokenId: string): Promise<{
         question: data.market.question,
         slug: data.market.slug,
         eventSlug: data.market.eventSlug,
+        conditionId: data.market.conditionId,
         outcome: data.market.outcome,
         icon: data.market.icon,
       };
@@ -218,6 +222,7 @@ export function useOpenOrders(options: UseOpenOrdersOptions = {}) {
             question: string;
             slug: string;
             eventSlug: string;
+            conditionId?: string;
             outcome: string;
             icon?: string;
           }

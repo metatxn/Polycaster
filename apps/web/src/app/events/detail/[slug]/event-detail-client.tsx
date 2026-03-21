@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -426,7 +427,7 @@ export default function EventDetailClient({
         noPrice: noPrice || "0",
         yesTokenId: yesTokenId || "",
         noTokenId: noTokenId || "",
-        negRisk: market.negRisk || false,
+        negRisk: resolveNegRisk(market),
         orderMinSize,
         change,
         volume: market.volume || "0",
@@ -1014,7 +1015,7 @@ export default function EventDetailClient({
                   outcomes={tradingOutcomes}
                   selectedOutcomeIndex={selectedOutcomeIndex}
                   onOutcomeChange={setSelectedOutcomeIndex}
-                  negRisk={selectedMarket.negRisk || event.negRisk}
+                  negRisk={resolveNegRisk(selectedMarket, event)}
                   tickSize={tickSize}
                   minOrderSize={minOrderSize}
                   bestBid={bestBid}

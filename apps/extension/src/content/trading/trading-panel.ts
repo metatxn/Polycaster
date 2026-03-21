@@ -106,6 +106,7 @@ let outcomeBalances: {
   minBalance: number;
 } | null = null;
 let outcomeBalancesLoaded = false;
+let outcomeBalancesFetching = false;
 let moreMenuOpen = false;
 
 let orderSettling = false;
@@ -158,6 +159,7 @@ const I = {
   check: `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`,
   error: `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
   back: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
+  refresh: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
 };
 
 // ── DOM Helpers ──
@@ -255,6 +257,51 @@ function refreshDynamicUI(): void {
   }
 }
 
+function refreshSplitMergeState(
+  opts: PanelOptions,
+  {
+    refreshWallet = true,
+    refreshOutcomeBalances = false,
+    resetOutcomeBalances = false,
+  }: {
+    refreshWallet?: boolean;
+    refreshOutcomeBalances?: boolean;
+    resetOutcomeBalances?: boolean;
+  } = {}
+): void {
+  if (refreshWallet) {
+    TradingService.refreshBalance().catch(() => {});
+  }
+
+  if (!refreshOutcomeBalances || !opts.yesTokenId || !opts.noTokenId) {
+    return;
+  }
+
+  if (resetOutcomeBalances) {
+    outcomeBalances = null;
+    outcomeBalancesLoaded = false;
+    rerender();
+  }
+
+  if (outcomeBalancesFetching) {
+    return;
+  }
+
+  outcomeBalancesFetching = true;
+  TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
+    .then((balances) => {
+      outcomeBalances = balances;
+      outcomeBalancesLoaded = true;
+    })
+    .catch(() => {
+      outcomeBalancesLoaded = true;
+    })
+    .finally(() => {
+      outcomeBalancesFetching = false;
+      rerender();
+    });
+}
+
 // ── Panel Lifecycle ──
 
 function createPanel(opts: PanelOptions): HTMLElement {
@@ -273,6 +320,7 @@ function createPanel(opts: PanelOptions): HTMLElement {
   splitMergeAmount = 0;
   outcomeBalances = null;
   outcomeBalancesLoaded = false;
+  outcomeBalancesFetching = false;
   moreMenuOpen = false;
   depositState = "idle";
   depositTokens = [];
@@ -301,7 +349,21 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
   render(panel, opts, TradingService.getContext());
 
-  const unsub = TradingService.onStateChange((ctx) => render(panel, opts, ctx));
+  const unsub = TradingService.onStateChange((ctx) => {
+    if (
+      opts.yesTokenId &&
+      opts.noTokenId &&
+      ctx.proxyAddress &&
+      !outcomeBalancesLoaded &&
+      !outcomeBalancesFetching
+    ) {
+      refreshSplitMergeState(opts, {
+        refreshWallet: false,
+        refreshOutcomeBalances: true,
+      });
+    }
+    render(panel, opts, ctx);
+  });
   activeUnsubscribe = unsub;
 
   WalletBridge.init();
@@ -325,17 +387,11 @@ function createPanel(opts: PanelOptions): HTMLElement {
     opts.noTokenId &&
     TradingService.getContext().proxyAddress
   ) {
-    TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
-      .then((b) => {
-        outcomeBalances = b;
-        outcomeBalancesLoaded = true;
-        rerender();
-      })
-      .catch(() => {
-        outcomeBalancesLoaded = true;
-        rerender();
-      });
-  } else {
+    refreshSplitMergeState(opts, {
+      refreshWallet: false,
+      refreshOutcomeBalances: true,
+    });
+  } else if (!opts.yesTokenId || !opts.noTokenId) {
     outcomeBalancesLoaded = true;
   }
 
@@ -474,6 +530,31 @@ function addWalletBar(
     `$${formatTokenAmount(ctx.balance)}`
   );
   right.appendChild(balLabel);
+
+  const refreshBtn = elHtml("button", "knoww-tp-refresh-btn", I.refresh);
+  refreshBtn.title = "Refresh balance";
+  refreshBtn.onclick = (e) => {
+    e.stopPropagation();
+    refreshBtn.classList.add("spinning");
+    TradingService.refreshBalance()
+      .then(() => {
+        if (panelOpts?.yesTokenId && panelOpts?.noTokenId) {
+          return TradingService.getOutcomeBalances(
+            panelOpts.yesTokenId,
+            panelOpts.noTokenId
+          ).then((b) => {
+            outcomeBalances = b;
+            outcomeBalancesLoaded = true;
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        refreshBtn.classList.remove("spinning");
+        rerender();
+      });
+  };
+  right.appendChild(refreshBtn);
 
   const depositBtn = el("button", "knoww-tp-deposit-btn", "Deposit");
   depositBtn.onclick = (e) => {
@@ -660,6 +741,7 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
         moreMenuOpen = false;
         activeView = "split";
         splitMergeAmount = 0;
+        refreshSplitMergeState(opts, { refreshWallet: true });
         rerender();
       };
       menu.appendChild(splitBtn);
@@ -674,14 +756,11 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
         moreMenuOpen = false;
         activeView = "merge";
         splitMergeAmount = 0;
-        if (opts.yesTokenId && opts.noTokenId) {
-          TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
-            .then((b) => {
-              outcomeBalances = b;
-              rerender();
-            })
-            .catch(() => {});
-        }
+        refreshSplitMergeState(opts, {
+          refreshWallet: true,
+          refreshOutcomeBalances: true,
+          resetOutcomeBalances: true,
+        });
         rerender();
       };
       menu.appendChild(mergeBtn);
@@ -1403,6 +1482,11 @@ function addSubmitButton(
       }
     }
 
+    // Immediately show loading state on the button before the async call
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Placing Order...`;
+    btn.disabled = true;
+    btn.classList.add("loading");
+
     try {
       let effectiveSize = shares;
       if (side === "SELL" && positionSize > 0) {
@@ -1446,19 +1530,47 @@ function addSubmitButton(
         const prevNo = outcomeBalances?.noBalance ?? 0;
         const POLL_INTERVAL = 3000;
         const TIMEOUT = 30000;
+        const PER_POLL_TIMEOUT = 8000;
         const startTime = Date.now();
+
+        const finishSettling = (message: string, type: "success" | "error") => {
+          orderSettling = false;
+          if (settleTimer) {
+            clearTimeout(settleTimer);
+            settleTimer = null;
+          }
+          showToast(panel, message, type);
+          rerender();
+        };
+
+        const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
+          Promise.race([
+            p,
+            new Promise<null>((r) => setTimeout(() => r(null), ms)),
+          ]);
 
         const poll = async () => {
           if (!orderSettling) return;
 
+          if (Date.now() - startTime >= TIMEOUT) {
+            finishSettling("Order submitted", "success");
+            return;
+          }
+
           try {
-            await TradingService.refreshBalance();
+            await withTimeout(
+              TradingService.refreshBalance(),
+              PER_POLL_TIMEOUT
+            );
             if (opts.yesTokenId && opts.noTokenId) {
-              const newBal = await TradingService.getOutcomeBalances(
-                opts.yesTokenId,
-                opts.noTokenId
+              const newBal = await withTimeout(
+                TradingService.getOutcomeBalances(
+                  opts.yesTokenId,
+                  opts.noTokenId
+                ),
+                PER_POLL_TIMEOUT
               );
-              outcomeBalances = newBal;
+              if (newBal) outcomeBalances = newBal;
             }
           } catch {
             /* ignore poll errors */
@@ -1471,22 +1583,9 @@ function addSubmitButton(
           const positionChanged =
             Math.abs(newYes - prevYes) > 0.001 ||
             Math.abs(newNo - prevNo) > 0.001;
-          const timedOut = Date.now() - startTime >= TIMEOUT;
 
-          if (balanceChanged || positionChanged || timedOut) {
-            orderSettling = false;
-            if (settleTimer) {
-              clearTimeout(settleTimer);
-              settleTimer = null;
-            }
-            showToast(
-              panel,
-              timedOut && !balanceChanged && !positionChanged
-                ? "Order submitted"
-                : "Order filled!",
-              "success"
-            );
-            rerender();
+          if (balanceChanged || positionChanged) {
+            finishSettling("Order filled!", "success");
             return;
           }
 
@@ -1497,11 +1596,16 @@ function addSubmitButton(
       }
     } catch (err) {
       orderSettling = false;
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
       showToast(
         panel,
         err instanceof Error ? err.message : "Order failed",
         "error"
       );
+      rerender();
     }
   };
 
@@ -1589,12 +1693,14 @@ function renderSplitForm(
   if (splitMergeAmount > 0) input.value = String(splitMergeAmount);
   input.oninput = () => {
     splitMergeAmount = Math.max(0, Number(input.value));
+    rerender();
   };
   const maxBtn = el("button", "knoww-tp-max-btn", "Max");
   maxBtn.onclick = (e) => {
     e.stopPropagation();
     splitMergeAmount = balance;
     input.value = String(balance);
+    rerender();
   };
   inputRow.appendChild(input);
   inputRow.appendChild(maxBtn);
@@ -1657,17 +1763,17 @@ function renderSplitForm(
     if (btn.disabled || !opts.conditionId || !activePanel) return;
     const panel = activePanel;
     try {
-      await TradingService.splitPosition(opts.conditionId, splitMergeAmount);
+      await TradingService.splitPosition(
+        opts.conditionId,
+        splitMergeAmount,
+        opts.yesTokenId,
+        opts.noTokenId
+      );
       showToast(panel, "Split completed!", "success");
-      if (opts.yesTokenId && opts.noTokenId) {
-        TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
-          .then((b) => {
-            outcomeBalances = b;
-            rerender();
-          })
-          .catch(() => {});
-      }
-      TradingService.refreshBalance().catch(() => {});
+      refreshSplitMergeState(opts, {
+        refreshWallet: true,
+        refreshOutcomeBalances: true,
+      });
     } catch (err) {
       showToast(
         panel,
@@ -1741,7 +1847,13 @@ function renderMergeForm(
     summary.appendChild(mRow);
     form.appendChild(summary);
   } else {
-    form.appendChild(el("div", "knoww-tp-info-msg", "Loading balances..."));
+    form.appendChild(
+      el(
+        "div",
+        "knoww-tp-info-msg",
+        outcomeBalancesLoaded ? "Balances unavailable." : "Loading balances..."
+      )
+    );
   }
 
   const header = el("div", "knoww-tp-section-header");
@@ -1758,12 +1870,14 @@ function renderMergeForm(
   if (splitMergeAmount > 0) input.value = String(splitMergeAmount);
   input.oninput = () => {
     splitMergeAmount = Math.max(0, Number(input.value));
+    rerender();
   };
   const maxBtn = el("button", "knoww-tp-max-btn", "Max");
   maxBtn.onclick = (e) => {
     e.stopPropagation();
     splitMergeAmount = maxMerge;
     input.value = String(maxMerge);
+    rerender();
   };
   inputRow.appendChild(input);
   inputRow.appendChild(maxBtn);
@@ -1826,16 +1940,17 @@ function renderMergeForm(
     if (btn.disabled || !opts.conditionId || !activePanel) return;
     const panel = activePanel;
     try {
-      await TradingService.mergePositions(opts.conditionId, splitMergeAmount);
+      await TradingService.mergePositions(
+        opts.conditionId,
+        splitMergeAmount,
+        opts.yesTokenId,
+        opts.noTokenId
+      );
       showToast(panel, "Merge completed!", "success");
-      if (opts.yesTokenId && opts.noTokenId) {
-        TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
-          .then((b) => {
-            outcomeBalances = b;
-            rerender();
-          })
-          .catch(() => {});
-      }
+      refreshSplitMergeState(opts, {
+        refreshWallet: true,
+        refreshOutcomeBalances: true,
+      });
     } catch (err) {
       showToast(
         panel,

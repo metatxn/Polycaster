@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import { AnimatePresence, motion } from "framer-motion";
 import { CircleDot, Radio, Sparkles, Wifi, WifiOff } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -452,8 +453,7 @@ export default function LiveMarketsPage() {
       marketImage: market.image ?? market.icon ?? event.image,
       outcomes: refreshedOutcomes,
       conditionId: market.conditionId,
-      negRisk:
-        event.negRisk ?? event.enableNegRisk ?? event.negRiskAugmented ?? false,
+      negRisk: resolveNegRisk(event),
     };
 
     const isSame =

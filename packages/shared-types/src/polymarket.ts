@@ -29,6 +29,56 @@ export interface CreateOrderParams {
   negRisk?: boolean;
 }
 
+export interface NegRiskLike {
+  negRisk?: unknown;
+  enableNegRisk?: unknown;
+  negRiskAugmented?: unknown;
+  neg_risk?: unknown;
+  enable_neg_risk?: unknown;
+}
+
+function parseBooleanLike(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0" || normalized === "") {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolves Polymarket's neg-risk flag across the field names used by
+ * different Gamma and market-detail payloads.
+ */
+export function resolveNegRisk(
+  ...sources: Array<NegRiskLike | null | undefined>
+): boolean {
+  for (const source of sources) {
+    if (!source) continue;
+
+    const values = [
+      source.negRisk,
+      source.enableNegRisk,
+      source.negRiskAugmented,
+      source.neg_risk,
+      source.enable_neg_risk,
+    ];
+
+    for (const value of values) {
+      const parsed = parseBooleanLike(value);
+      if (parsed) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export const POLYMARKET_API = {
   GAMMA: {
     BASE: "https://gamma-api.polymarket.com",

@@ -115,7 +115,7 @@ export function OrdersTable({
               {/* Avatar */}
               {order.market?.icon && (
                 <Link
-                  href={`/events/detail/${order.market.eventSlug}`}
+                  href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
                   className="relative w-10 h-10 shrink-0 rounded-full overflow-hidden bg-muted"
                 >
                   <Image
@@ -130,7 +130,7 @@ export function OrdersTable({
               <div className="flex-1 min-w-0">
                 {order.market?.eventSlug ? (
                   <Link
-                    href={`/events/detail/${order.market.eventSlug}`}
+                    href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
                     className="font-medium text-sm leading-tight hover:text-primary transition-colors line-clamp-2"
                   >
                     {order.market?.question ||
@@ -276,7 +276,7 @@ export function OrdersTable({
                     {/* Avatar */}
                     {order.market?.icon && (
                       <Link
-                        href={`/events/detail/${order.market.eventSlug}`}
+                        href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
                         className="relative w-8 h-8 shrink-0 rounded-full overflow-hidden bg-muted"
                       >
                         <Image
@@ -290,7 +290,7 @@ export function OrdersTable({
                     )}
                     {order.market?.eventSlug ? (
                       <Link
-                        href={`/events/detail/${order.market.eventSlug}`}
+                        href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
                         className="font-medium text-sm hover:text-primary transition-colors line-clamp-2"
                       >
                         {order.market?.question ||

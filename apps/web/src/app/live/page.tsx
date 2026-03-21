@@ -1,7 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { CircleDot, Radio, Sparkles, Wifi, WifiOff } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -747,27 +747,25 @@ export default function LiveMarketsPage() {
           <div className="hidden lg:block">
             <div className="sticky top-4 self-start space-y-3">
               {selectedMarket && tradingOutcomes.length > 0 ? (
-                <>
-                  <ErrorBoundary name="Trading Form">
-                    <TradingForm
-                      marketTitle={selectedMarket.marketTitle}
-                      tokenId={
-                        tradingOutcomes[selectedOutcomeIndex]?.tokenId || ""
-                      }
-                      outcomes={tradingOutcomes}
-                      selectedOutcomeIndex={selectedOutcomeIndex}
-                      onOutcomeChange={setSelectedOutcomeIndex}
-                      conditionId={selectedMarket.conditionId}
-                      marketImage={selectedMarket.marketImage}
-                      yesProbability={tradingOutcomes[0]?.probability}
-                      bestBid={bestBid ?? undefined}
-                      bestAsk={bestAsk ?? undefined}
-                      isLiveData={isConnected}
-                      maxSlippagePercent={2}
-                      disableSticky
-                    />
-                  </ErrorBoundary>
-                </>
+                <ErrorBoundary name="Trading Form">
+                  <TradingForm
+                    marketTitle={selectedMarket.marketTitle}
+                    tokenId={
+                      tradingOutcomes[selectedOutcomeIndex]?.tokenId || ""
+                    }
+                    outcomes={tradingOutcomes}
+                    selectedOutcomeIndex={selectedOutcomeIndex}
+                    onOutcomeChange={setSelectedOutcomeIndex}
+                    conditionId={selectedMarket.conditionId}
+                    marketImage={selectedMarket.marketImage}
+                    yesProbability={tradingOutcomes[0]?.probability}
+                    bestBid={bestBid ?? undefined}
+                    bestAsk={bestAsk ?? undefined}
+                    isLiveData={isConnected}
+                    maxSlippagePercent={2}
+                    disableSticky
+                  />
+                </ErrorBoundary>
               ) : (
                 <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-6 text-center">
                   <div className="mx-auto w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">

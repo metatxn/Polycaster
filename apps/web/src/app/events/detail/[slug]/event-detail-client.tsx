@@ -1,7 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";

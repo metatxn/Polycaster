@@ -448,7 +448,7 @@ function getEventEmoji(event: Market): string {
   const tags = (event.tags || []).map((t) =>
     (t.slug || t.label || "").toLowerCase()
   );
-  const allText = title + " " + tags.join(" ");
+  const allText = `${title} ${tags.join(" ")}`;
 
   if (
     /trump|biden|election|president|congress|democrat|republican|vote|kamala/.test(

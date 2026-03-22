@@ -248,7 +248,7 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
     // We can't do a perfect extraction, so just use the full question
     // truncated to a reasonable label length.
     return m.question.length > 60
-      ? m.question.slice(0, 57) + "..."
+      ? `${m.question.slice(0, 57)}...`
       : m.question;
   }
 

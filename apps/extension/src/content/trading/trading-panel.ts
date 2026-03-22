@@ -241,9 +241,12 @@ function refreshDynamicUI(): void {
       const info = getOrderPositionInfo(currentPrice, bestBid, bestAsk);
       posIndicator.textContent = info.label;
       posIndicator.className = `knoww-tp-order-position ${info.cls}`;
-      (posIndicator as HTMLElement).style.display = "";
+    } else if (!ctx.orderBook) {
+      posIndicator.textContent = "Loading order book...";
+      posIndicator.className = "knoww-tp-order-position muted";
     } else {
-      (posIndicator as HTMLElement).style.display = "none";
+      posIndicator.textContent = "Order book is empty";
+      posIndicator.className = "knoww-tp-order-position muted";
     }
   }
 
@@ -880,7 +883,7 @@ function addLimitPrice(
   const header = el("div", "knoww-tp-section-header");
   header.appendChild(el("span", "knoww-tp-section-label", "Limit Price"));
 
-  // Bid/Ask quick-set buttons
+  // Bid/Ask quick-set buttons (always show, even while loading)
   const bidAskWrap = el("div", "knoww-tp-bidask-wrap");
   if (bestBid !== undefined) {
     const bidBtn = el(
@@ -977,9 +980,9 @@ function addLimitPrice(
       el("div", `knoww-tp-order-position ${info.cls}`, info.label)
     );
   } else {
-    const posPlaceholder = el("div", "knoww-tp-order-position muted");
-    posPlaceholder.style.display = "none";
-    section.appendChild(posPlaceholder);
+    section.appendChild(
+      el("div", "knoww-tp-order-position muted", "Loading order book...")
+    );
   }
 
   // Tick size info
@@ -1080,13 +1083,14 @@ function addAmountSection(
   const cost = getCost(opts);
   const minShares = isSell ? 1 : Math.max(1, Math.ceil(ctx.minOrderSize));
 
-  // Shares header with Max button
+  // Shares header: "Shares" label on left, cost on right
   const sharesHeader = el("div", "knoww-tp-section-header");
   sharesHeader.appendChild(el("span", "knoww-tp-section-label", "Shares"));
   const costLabel = el("span", "knoww-tp-cost-display", `$${cost.toFixed(2)}`);
   sharesHeader.appendChild(costLabel);
   section.appendChild(sharesHeader);
 
+  // Shares row: [-10] [-1] [input] [+1] [+10] [Max]
   const sharesRow = el("div", "knoww-tp-shares-row");
 
   const m10 = el("button", "knoww-tp-shares-btn", "-10");
@@ -1136,10 +1140,6 @@ function addAmountSection(
   };
   sharesRow.appendChild(p10);
 
-  section.appendChild(sharesRow);
-
-  // Max button row
-  const maxRow = el("div", "knoww-tp-max-row");
   const maxBtn = el("button", "knoww-tp-max-btn", "Max");
   maxBtn.onclick = (e) => {
     e.stopPropagation();
@@ -1156,8 +1156,9 @@ function addAmountSection(
   if ((isSell && positionSize <= 0) || (!isSell && ctx.balance <= 0)) {
     maxBtn.disabled = true;
   }
-  maxRow.appendChild(maxBtn);
-  section.appendChild(maxRow);
+  sharesRow.appendChild(maxBtn);
+
+  section.appendChild(sharesRow);
 
   form.appendChild(section);
 }

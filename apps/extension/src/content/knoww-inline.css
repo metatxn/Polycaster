@@ -1361,7 +1361,7 @@
   background: var(--knoww-bg, rgb(0, 0, 0)) !important;
   border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
   border-top: none !important;
-  border-radius: 0 0 16px 16px !important;
+  border-radius: 0 0 var(--knoww-radius, 16px) var(--knoww-radius, 16px) !important;
   margin: -1px 0 12px 0 !important;
   padding: 0 !important;
   font-family: var(
@@ -1376,6 +1376,13 @@
   ) !important;
   overflow: visible !important;
   animation: knoww-panel-enter 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+}
+.knoww-trading-panel *,
+.knoww-trading-panel *::before,
+.knoww-trading-panel *::after {
+  box-sizing: border-box !important;
 }
 
 @keyframes knoww-panel-enter {
@@ -1859,8 +1866,11 @@
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
+  justify-content: center !important;
   gap: 12px !important;
   padding: 28px 20px !important;
+  width: 100% !important;
+  text-align: center !important;
 }
 .knoww-tp-wallet-icon {
   color: var(--knoww-text-secondary) !important;
@@ -1914,7 +1924,7 @@
 
 .knoww-tp-btn-enable {
   display: block !important;
-  width: 100% !important;
+  width: auto !important;
   max-width: 220px !important;
   padding: 10px 20px !important;
   text-align: center !important;
@@ -1930,6 +1940,8 @@
     color 0.15s,
     transform 0.1s !important;
   font-family: inherit !important;
+  align-self: center !important;
+  margin: 0 auto !important;
 }
 .knoww-tp-btn-enable:hover {
   background: rgba(29, 155, 240, 0.1) !important;
@@ -2134,6 +2146,9 @@
   align-items: center !important;
   justify-content: space-between !important;
   margin-bottom: 8px !important;
+  flex-wrap: wrap !important;
+  gap: 4px !important;
+  width: 100% !important;
 }
 .knoww-tp-section-label {
   font-size: 14px !important;
@@ -2368,13 +2383,15 @@
 }
 .knoww-tp-shares-row {
   display: flex !important;
-  align-items: stretch !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
   gap: 4px !important;
   margin-top: 4px !important;
+  width: 100% !important;
 }
 .knoww-tp-shares-btn {
-  padding: 8px 6px !important;
-  min-width: 36px !important;
+  padding: 6px 8px !important;
+  min-width: 0 !important;
   font-size: 12px !important;
   font-weight: 600 !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
@@ -2385,6 +2402,8 @@
   transition: all 0.12s ease !important;
   flex-shrink: 0 !important;
   text-align: center !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
 }
 .knoww-tp-shares-btn:hover:not(:disabled) {
   border-color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
@@ -2398,7 +2417,7 @@
 .knoww-tp-shares-input {
   flex: 1 !important;
   min-width: 0 !important;
-  padding: 8px 4px !important;
+  padding: 6px 4px !important;
   border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
   border-radius: 8px !important;
   background: rgba(255, 255, 255, 0.03) !important;
@@ -2418,6 +2437,10 @@
 .knoww-tp-shares-input::-webkit-outer-spin-button {
   -webkit-appearance: none !important;
   margin: 0 !important;
+}
+.knoww-tp-shares-row .knoww-tp-max-btn {
+  flex-shrink: 0 !important;
+  margin-left: 2px !important;
 }
 
 /* ── Order Summary ── */
@@ -2748,4 +2771,162 @@
 }
 .knoww-tp-max-btn:hover {
   background: rgba(0, 186, 124, 0.15) !important;
+}
+
+/* ============================================ */
+/* REDDIT — Trading Panel Overrides             */
+/* Reddit containers are significantly narrower */
+/* than Twitter, so we need aggressive overrides*/
+/* ============================================ */
+
+.knoww-platform-reddit .knoww-trading-panel {
+  border-radius: 0 0 var(--knoww-radius, 8px) var(--knoww-radius, 8px) !important;
+  margin: -1px 0 8px 0 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.knoww-platform-reddit .knoww-tp-form {
+  padding: 10px 10px 12px !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.knoww-platform-reddit .knoww-tp-header {
+  padding: 8px 10px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-wallet-bar {
+  padding: 6px 10px !important;
+  flex-wrap: wrap !important;
+  gap: 4px !important;
+  font-size: 12px !important;
+}
+
+/* Shares row: tighter gaps for narrower Reddit container */
+.knoww-platform-reddit .knoww-tp-shares-row {
+  gap: 3px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-shares-btn {
+  padding: 5px 5px !important;
+  font-size: 11px !important;
+  border-radius: 6px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-shares-input {
+  font-size: 13px !important;
+  padding: 5px 2px !important;
+}
+
+/* Enable/Connect states — must stay within panel bounds */
+.knoww-platform-reddit .knoww-tp-enable-section,
+.knoww-platform-reddit .knoww-tp-connect-section,
+.knoww-platform-reddit .knoww-tp-loading-section {
+  padding: 20px 12px !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.knoww-platform-reddit .knoww-tp-enable-msg,
+.knoww-platform-reddit .knoww-tp-connect-msg,
+.knoww-platform-reddit .knoww-tp-loading-text {
+  max-width: 100% !important;
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
+  font-size: 12px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-btn-enable {
+  max-width: 180px !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-btn-connect {
+  max-width: 200px !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+}
+
+/* Order type tabs — tighter spacing */
+.knoww-platform-reddit .knoww-tp-ordertype-row {
+  gap: 4px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-ordertype-btn {
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+}
+
+/* Limit price controls — tighter for narrow panel */
+.knoww-platform-reddit .knoww-tp-price-controls {
+  gap: 3px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-price-btn {
+  width: 32px !important;
+  height: 32px !important;
+  font-size: 14px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-price-input {
+  font-size: 13px !important;
+}
+
+/* Bid/Ask quick-set buttons */
+.knoww-platform-reddit .knoww-tp-bidask-btn {
+  font-size: 10px !important;
+  padding: 3px 6px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-section-header {
+  gap: 3px !important;
+  flex-wrap: nowrap !important;
+}
+
+.knoww-platform-reddit .knoww-tp-section-label {
+  font-size: 12px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-shares-row .knoww-tp-max-btn {
+  font-size: 11px !important;
+  padding: 5px 10px !important;
+}
+
+/* Summary section — tighter */
+.knoww-platform-reddit .knoww-tp-summary {
+  gap: 4px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-summary-row {
+  font-size: 12px !important;
+}
+
+/* Buy/Sell action button */
+.knoww-platform-reddit .knoww-tp-btn-submit {
+  padding: 10px 12px !important;
+  font-size: 13px !important;
+}
+
+/* Side tabs (Buy/Sell) */
+.knoww-platform-reddit .knoww-tp-side-btn {
+  padding: 8px 0 !important;
+  font-size: 13px !important;
+}
+
+/* Position indicator */
+.knoww-platform-reddit .knoww-tp-order-position {
+  font-size: 11px !important;
+}
+
+/* Expiration section */
+.knoww-platform-reddit .knoww-tp-expiration-row {
+  gap: 3px !important;
+}
+
+.knoww-platform-reddit .knoww-tp-expiration-btn {
+  padding: 4px 8px !important;
+  font-size: 11px !important;
 }

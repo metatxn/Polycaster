@@ -236,12 +236,12 @@ async function analyzePostAndFindMarket(
   }
 
   if (!isEnglishText(text)) {
-    log("Skipping non-English post:", text.slice(0, 50) + "...");
+    log("Skipping non-English post:", `${text.slice(0, 50)}...`);
     return null;
   }
 
   if (isDebug) {
-    log("Analyzing single post:", text.slice(0, 100) + "...");
+    log("Analyzing single post:", `${text.slice(0, 100)}...`);
   }
 
   const result = await extractSearchKeywords(text);

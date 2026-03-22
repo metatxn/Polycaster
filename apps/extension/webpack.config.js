@@ -1,10 +1,10 @@
-const path = require("path");
+const path = require("node:path");
 const webpack = require("webpack");
 const CopyPlugin = require("copy-webpack-plugin");
 
 require("dotenv").config();
 
-module.exports = (env, argv) => {
+module.exports = (_env, argv) => {
   const isProduction = argv.mode === "production";
 
   return {

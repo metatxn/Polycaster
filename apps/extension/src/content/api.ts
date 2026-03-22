@@ -998,7 +998,7 @@ async function searchAllMarkets(
     const kalshiCategories = await window.KNOWW_KALSHI.fetchKalshiCategories();
     const kalshiMatchedCategories = kalshiCategories
       ? window.KNOWW_KALSHI.extractMatchingKalshiCategories(
-          query + " " + matchedTags.join(" "),
+          `${query} ${matchedTags.join(" ")}`,
           kalshiCategories
         )
       : [];

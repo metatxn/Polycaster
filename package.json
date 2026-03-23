@@ -8,7 +8,7 @@
     "build:ext": "pnpm --filter @knoww/extension build",
     "build": "pnpm -r build",
     "preview": "pnpm --filter @knoww/web preview",
-    "deploy": "pnpm --filter @knoww/web deploy",
+    "deploy": "pnpm --filter @knoww/web run deploy",
     "lint": "biome check",
     "lint:ext": "pnpm --filter @knoww/extension lint",
     "lint:web": "pnpm --filter @knoww/web lint",

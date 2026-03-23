@@ -1,0 +1,297 @@
+// ============================================
+// CONFIGURATION
+// ============================================
+
+import {
+  type Config,
+  DEFAULT_USER_SETTINGS,
+  type EnabledSources,
+  type UserSettings,
+} from "../types/settings";
+
+// ============================================
+// BUILD MODE
+// Injected by webpack DefinePlugin: true for development, false for production.
+// ============================================
+declare const __DEV_MODE__: boolean;
+const DEV_MODE = __DEV_MODE__;
+
+// Current user settings (will be populated from chrome.storage)
+let USER_SETTINGS: UserSettings = { ...DEFAULT_USER_SETTINGS };
+
+// ============================================
+// POLYMARKET API URLs (HTTPS only)
+// ============================================
+const POLYMARKET_SEARCH_API_URL =
+  "https://gamma-api.polymarket.com/public-search";
+const POLYMARKET_TAGS_API_URL = "https://gamma-api.polymarket.com/tags";
+const POLYMARKET_EVENTS_API_URL = "https://gamma-api.polymarket.com/events";
+
+// ============================================
+// KALSHI API URLs (HTTPS only)
+// ============================================
+const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
+const KALSHI_EVENTS_API_URL = `${KALSHI_BASE_URL}/events`;
+const KALSHI_MARKETS_API_URL = `${KALSHI_BASE_URL}/markets`;
+const KALSHI_TAGS_API_URL = `${KALSHI_BASE_URL}/search/tags_by_categories`;
+const KALSHI_SERIES_API_URL = `${KALSHI_BASE_URL}/series`;
+
+// Kalshi v1 Search API (used by Kalshi platform for text search)
+const KALSHI_SEARCH_API_URL =
+  "https://api.elections.kalshi.com/v1/search/series";
+
+// Kalshi website URL for market links
+const KALSHI_WEB_URL = "https://kalshi.com";
+
+// ============================================
+// APP URLs
+// ============================================
+const KNOWW_APP_URL = DEV_MODE ? "http://localhost:8787" : "https://knoww.app";
+
+// ============================================
+// ENABLED MARKET SOURCES (dynamic based on user settings)
+// ============================================
+const ENABLED_SOURCES: EnabledSources = {
+  get polymarket() {
+    return (
+      USER_SETTINGS.sources?.polymarket ??
+      DEFAULT_USER_SETTINGS.sources.polymarket
+    );
+  },
+  get kalshi() {
+    return (
+      USER_SETTINGS.sources?.kalshi ?? DEFAULT_USER_SETTINGS.sources.kalshi
+    );
+  },
+};
+
+// ============================================
+// CONFIGURATION FOR AUTO-INJECTION (dynamic based on user settings)
+// ============================================
+const CONFIG: Config = {
+  POSTS_TO_ANALYZE: 3,
+  get MIN_RELEVANCE_SCORE() {
+    return (
+      USER_SETTINGS.relevanceThreshold ??
+      DEFAULT_USER_SETTINGS.relevanceThreshold
+    );
+  },
+  get MIN_AI_CONFIDENCE() {
+    return (
+      USER_SETTINGS.aiConfidenceThreshold ??
+      DEFAULT_USER_SETTINGS.aiConfidenceThreshold
+    );
+  },
+  get COOLDOWN_POSTS() {
+    return USER_SETTINGS.cooldownPosts ?? DEFAULT_USER_SETTINGS.cooldownPosts;
+  },
+  get USE_AI_EXTRACTION() {
+    return (
+      USER_SETTINGS.aiExtractionEnabled ??
+      DEFAULT_USER_SETTINGS.aiExtractionEnabled
+    );
+  },
+};
+
+// Cache duration for tags (24 hours)
+const TAGS_CACHE_DURATION = 24 * 60 * 60 * 1000;
+
+// ============================================
+// SETTINGS LOADER
+// ============================================
+
+/**
+ * Load user settings from chrome.storage.sync
+ */
+async function loadUserSettings(): Promise<UserSettings> {
+  return new Promise((resolve) => {
+    if (typeof chrome !== "undefined" && chrome.storage?.sync) {
+      chrome.storage.sync.get(
+        { knowwSettings: DEFAULT_USER_SETTINGS },
+        (result) => {
+          const storedSettings = result.knowwSettings as
+            | Partial<UserSettings>
+            | undefined;
+          // Merge with defaults to ensure all properties exist
+          USER_SETTINGS = {
+            ...DEFAULT_USER_SETTINGS,
+            ...(storedSettings || {}),
+            platforms: {
+              ...DEFAULT_USER_SETTINGS.platforms,
+              ...(storedSettings?.platforms || {}),
+            },
+            sources: {
+              ...DEFAULT_USER_SETTINGS.sources,
+              ...(storedSettings?.sources || {}),
+              // Force-align with defaults for sources that are disabled at the code level.
+              // This ensures DEFAULT_USER_SETTINGS is the single source of truth,
+              // even when chrome.storage.sync has a stale value from a previous version.
+              kalshi: DEFAULT_USER_SETTINGS.sources.kalshi,
+            },
+          };
+
+          if (USER_SETTINGS.debugMode || DEV_MODE) {
+            console.log("[KnowwConfig] Loaded user settings:", USER_SETTINGS);
+          }
+
+          resolve(USER_SETTINGS);
+        }
+      );
+    } else {
+      USER_SETTINGS = { ...DEFAULT_USER_SETTINGS };
+      resolve(USER_SETTINGS);
+    }
+  });
+}
+
+/**
+ * Get current user settings
+ */
+function getUserSettings(): UserSettings {
+  return USER_SETTINGS;
+}
+
+/**
+ * Check if a platform is enabled
+ */
+function isPlatformEnabled(platformName: string): boolean {
+  const platforms = USER_SETTINGS.platforms as Record<string, boolean>;
+  const defaultPlatforms = DEFAULT_USER_SETTINGS.platforms as Record<
+    string,
+    boolean
+  >;
+  return platforms?.[platformName] ?? defaultPlatforms[platformName] ?? true;
+}
+
+/**
+ * Check if a market source is enabled
+ */
+function isSourceEnabled(sourceName: string): boolean {
+  const sources = USER_SETTINGS.sources as Record<string, boolean>;
+  const defaultSources = DEFAULT_USER_SETTINGS.sources as Record<
+    string,
+    boolean
+  >;
+  return sources?.[sourceName] ?? defaultSources[sourceName] ?? true;
+}
+
+/**
+ * Check if notification stack should be shown
+ */
+function isNotificationStackEnabled(): boolean {
+  return (
+    USER_SETTINGS.showNotificationStack ??
+    DEFAULT_USER_SETTINGS.showNotificationStack
+  );
+}
+
+/**
+ * Get theme override setting
+ */
+function getThemeOverride(): string {
+  return USER_SETTINGS.themeOverride ?? DEFAULT_USER_SETTINGS.themeOverride;
+}
+
+/**
+ * Check if debug mode is enabled
+ */
+function isDebugMode(): boolean {
+  return USER_SETTINGS.debugMode ?? DEFAULT_USER_SETTINGS.debugMode ?? DEV_MODE;
+}
+
+/**
+ * Listen for settings updates from the options page
+ */
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener(
+    (
+      message: { type: string; settings?: UserSettings },
+      _sender: chrome.runtime.MessageSender,
+      sendResponse: (response: { success: boolean }) => void
+    ) => {
+      if (message.type === "KNOWW_SETTINGS_UPDATED" && message.settings) {
+        USER_SETTINGS = {
+          ...DEFAULT_USER_SETTINGS,
+          ...message.settings,
+          platforms: {
+            ...DEFAULT_USER_SETTINGS.platforms,
+            ...(message.settings.platforms || {}),
+          },
+          sources: {
+            ...DEFAULT_USER_SETTINGS.sources,
+            ...(message.settings.sources || {}),
+          },
+        };
+
+        // Notify other modules that settings have changed
+        if (window.KNOWW_SETTINGS_LISTENERS) {
+          for (const listener of window.KNOWW_SETTINGS_LISTENERS) {
+            try {
+              listener(USER_SETTINGS);
+            } catch (e) {
+              console.error("[KnowwConfig] Error in settings listener:", e);
+            }
+          }
+        }
+
+        sendResponse({ success: true });
+        return; // Response sent synchronously, no need to return true
+      }
+
+      // For unhandled message types, respond with success: false
+      sendResponse({ success: false });
+      // Do not return true since sendResponse is called synchronously
+    }
+  );
+}
+
+// Initialize settings listeners array
+if (typeof window !== "undefined") {
+  window.KNOWW_SETTINGS_LISTENERS = window.KNOWW_SETTINGS_LISTENERS || [];
+}
+
+/**
+ * Register a callback to be notified when settings change
+ */
+function onSettingsChange(callback: (settings: UserSettings) => void): void {
+  if (typeof callback === "function" && typeof window !== "undefined") {
+    window.KNOWW_SETTINGS_LISTENERS.push(callback);
+  }
+}
+
+// Export for use in other modules
+export const KNOWW_CONFIG = {
+  DEV_MODE,
+  // Polymarket
+  POLYMARKET_SEARCH_API_URL,
+  POLYMARKET_TAGS_API_URL,
+  POLYMARKET_EVENTS_API_URL,
+  // Kalshi
+  KALSHI_BASE_URL,
+  KALSHI_EVENTS_API_URL,
+  KALSHI_MARKETS_API_URL,
+  KALSHI_TAGS_API_URL,
+  KALSHI_SERIES_API_URL,
+  KALSHI_SEARCH_API_URL,
+  KALSHI_WEB_URL,
+  // App
+  KNOWW_APP_URL,
+  // Settings (dynamic getters)
+  ENABLED_SOURCES,
+  CONFIG,
+  TAGS_CACHE_DURATION,
+  // User settings
+  DEFAULT_USER_SETTINGS,
+  getUserSettings,
+  loadUserSettings,
+  isPlatformEnabled,
+  isSourceEnabled,
+  isNotificationStackEnabled,
+  getThemeOverride,
+  isDebugMode,
+  onSettingsChange,
+};
+
+if (typeof window !== "undefined") {
+  window.KNOWW_CONFIG = KNOWW_CONFIG;
+}

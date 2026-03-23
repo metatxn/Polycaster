@@ -1,0 +1,2426 @@
+// ============================================
+// UI COMPONENTS - Multi-Source Market Cards
+// ============================================
+
+import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+import type {
+  InjectedMarketEntry,
+  Market,
+  NestedMarket,
+} from "../types/market";
+import { TradingPanel } from "./trading/trading-panel";
+import { escapeHtml } from "./utils";
+
+/**
+ * Extract the CLOB token ID for a given outcome index from a market.
+ * Returns null if the market is Kalshi or the token ID is unavailable.
+ */
+function getTokenIdForOutcome(
+  market: Market,
+  outcomeIndex: number
+): string | null {
+  if (market.source === "kalshi") return null;
+  if (!market.markets || market.markets.length === 0) return null;
+
+  const nestedMarket = market.markets[0];
+  if (!nestedMarket?.clobTokenIds) return null;
+
+  try {
+    const tokenIds =
+      typeof nestedMarket.clobTokenIds === "string"
+        ? JSON.parse(nestedMarket.clobTokenIds)
+        : nestedMarket.clobTokenIds;
+    if (Array.isArray(tokenIds) && tokenIds[outcomeIndex]) {
+      return tokenIds[outcomeIndex];
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return null;
+}
+
+/**
+ * Extract token ID for a multi-outcome item by its market index.
+ */
+function getTokenIdForMultiOutcome(
+  market: Market,
+  marketIndex: number
+): string | null {
+  if (market.source === "kalshi") return null;
+  if (!market.markets) return null;
+
+  const nestedMarket = market.markets[marketIndex];
+  if (!nestedMarket?.clobTokenIds) return null;
+
+  try {
+    const tokenIds =
+      typeof nestedMarket.clobTokenIds === "string"
+        ? JSON.parse(nestedMarket.clobTokenIds)
+        : nestedMarket.clobTokenIds;
+    if (Array.isArray(tokenIds) && tokenIds[0]) {
+      return tokenIds[0]; // For multi-outcome, the "Yes" token of each sub-market
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return null;
+}
+
+/**
+ * Resolve a token ID — tries locally first, then fetches from the events API.
+ * Opens the TradingPanel once resolved, or logs a warning if it can't.
+ */
+async function resolveTokenAndShowPanel(
+  market: Market,
+  outcomeName: string,
+  outcomeIndex: number,
+  price: number,
+  anchorElement: HTMLElement,
+  isMultiOutcome: boolean,
+  marketIndex?: number
+): Promise<void> {
+  const { log } = window.KNOWW_UTILS;
+
+  let tokenId = isMultiOutcome
+    ? getTokenIdForMultiOutcome(market, marketIndex ?? outcomeIndex)
+    : getTokenIdForOutcome(market, outcomeIndex);
+
+  if (!tokenId) {
+    anchorElement.style.opacity = "0.6";
+    anchorElement.style.pointerEvents = "none";
+    try {
+      tokenId = await window.KNOWW_API.fetchClobTokenIds(
+        market,
+        outcomeIndex,
+        isMultiOutcome,
+        marketIndex
+      );
+    } finally {
+      anchorElement.style.opacity = "";
+      anchorElement.style.pointerEvents = "";
+    }
+  }
+
+  if (tokenId) {
+    const idx = isMultiOutcome ? (marketIndex ?? 0) : 0;
+    const nestedMarket = market.markets?.[idx];
+    let conditionId: string | undefined;
+    let yesTokenId: string | undefined;
+    let noTokenId: string | undefined;
+
+    if (nestedMarket) {
+      conditionId = nestedMarket.conditionId as string | undefined;
+      try {
+        const ids =
+          typeof nestedMarket.clobTokenIds === "string"
+            ? JSON.parse(nestedMarket.clobTokenIds)
+            : nestedMarket.clobTokenIds;
+        if (Array.isArray(ids) && ids.length >= 2) {
+          yesTokenId = ids[0];
+          noTokenId = ids[1];
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    TradingPanel.show({
+      market,
+      outcomeName,
+      outcomeIndex,
+      price,
+      side: "BUY",
+      tokenId,
+      negRisk: resolveNegRisk(nestedMarket, market),
+      isMultiOutcome,
+      anchorElement,
+      conditionId,
+      yesTokenId,
+      noTokenId,
+    });
+    log(`Trading panel opened for ${outcomeName}`);
+  } else {
+    log(
+      "Could not resolve tokenId for",
+      outcomeName,
+      "— cannot open trading panel"
+    );
+  }
+}
+
+// Color palette for multi-option markets (matching Polymarket)
+const OPTION_COLORS = [
+  "#f23645", // Red
+  "#089981", // Teal/Green
+  "#2962ff", // Blue
+  "#ff9800", // Orange
+  "#9c27b0", // Purple
+  "#00bcd4", // Cyan
+  "#e91e63", // Pink
+  "#4caf50", // Green
+];
+
+// Source branding configuration
+interface SourceConfigItem {
+  name: string;
+  color: string;
+  bgColor: string;
+  icon: string;
+}
+
+const SOURCE_CONFIG: Record<string, SourceConfigItem> = {
+  polymarket: {
+    name: "Polymarket",
+    color: "#7c3aed", // Purple
+    bgColor: "rgba(124, 58, 237, 0.1)",
+    icon: "P",
+  },
+  kalshi: {
+    name: "Kalshi",
+    color: "#f59e0b", // Amber/Orange
+    bgColor: "rgba(245, 158, 11, 0.1)",
+    icon: "K",
+  },
+};
+
+// Multi-outcome data structure
+interface MultiOutcomeItem {
+  name: string;
+  price: number;
+  marketIndex: number;
+  conditionId?: string;
+}
+
+interface ParsedOutcomeData {
+  isMultiOutcome: boolean;
+  outcomes: string[];
+  prices: number[];
+  multiOutcomeData: MultiOutcomeItem[];
+}
+
+/**
+ * Safely resolve extension asset URLs.
+ * Guards against "Extension context invalidated" after hot-reload/update.
+ */
+function getSafeRuntimeUrl(path: string): string | null {
+  try {
+    if (
+      typeof chrome !== "undefined" &&
+      chrome.runtime &&
+      typeof chrome.runtime.getURL === "function"
+    ) {
+      return chrome.runtime.getURL(path);
+    }
+  } catch {
+    // Extension context invalidated; caller should use fallback.
+  }
+  return null;
+}
+
+/**
+ * Parse multi-outcome data from a market's markets array
+ */
+function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
+  const result: ParsedOutcomeData = {
+    isMultiOutcome: false,
+    outcomes: ["Yes", "No"],
+    prices: [0.5, 0.5],
+    multiOutcomeData: [],
+  };
+
+  if (!market.markets || market.markets.length <= 1) {
+    return result;
+  }
+
+  // Derive an outcome label from a sub-market. The search API sometimes
+  // returns `groupItemTitle`, sometimes only `question`. Fall back to
+  // extracting a short label from the question by stripping the common
+  // "Will … [verb] <OUTCOME>?" wrapper.
+  function getOutcomeLabel(
+    m: NonNullable<typeof market.markets>[number]
+  ): string | null {
+    if (m.groupItemTitle) return m.groupItemTitle;
+    if (!m.question) return null;
+    // If the event title is embedded in the question, try to extract the
+    // differing suffix as the outcome label. Example:
+    //   event.title = "Which club will Cristiano Ronaldo play for next?"
+    //   m.question  = "Will Cristiano Ronaldo play for Atlanta United FC next?"
+    // We can't do a perfect extraction, so just use the full question
+    // truncated to a reasonable label length.
+    return m.question.length > 60
+      ? `${m.question.slice(0, 57)}...`
+      : m.question;
+  }
+
+  const marketsWithLabel = market.markets.filter((m) => getOutcomeLabel(m));
+
+  if (marketsWithLabel.length <= 1) {
+    return result;
+  }
+
+  // This is a multi-outcome event
+  result.isMultiOutcome = true;
+
+  // Extract outcome data from each market
+  for (let i = 0; i < market.markets.length; i++) {
+    const m = market.markets[i];
+    const label = getOutcomeLabel(m);
+    if (label) {
+      if (m.active === false) continue;
+
+      const name = label;
+      if (name.startsWith("Individual ")) continue;
+
+      let outcomePrice = 0.5;
+
+      if (m.outcomePrices) {
+        try {
+          const parsedPrices =
+            typeof m.outcomePrices === "string"
+              ? JSON.parse(m.outcomePrices)
+              : m.outcomePrices;
+          if (Array.isArray(parsedPrices) && parsedPrices.length >= 1) {
+            const parsed = parseFloat(String(parsedPrices[0]));
+            if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 1) {
+              outcomePrice = parsed;
+            }
+          }
+        } catch {
+          // Parse error, keep default
+        }
+      }
+
+      result.multiOutcomeData.push({
+        name,
+        price: outcomePrice,
+        marketIndex: i,
+        conditionId: m.conditionId,
+      });
+    }
+  }
+
+  // Sort by price descending (highest probability first)
+  result.multiOutcomeData.sort((a, b) => b.price - a.price);
+
+  // Use top 2 outcomes for display
+  if (result.multiOutcomeData.length >= 2) {
+    result.outcomes = [
+      result.multiOutcomeData[0].name,
+      result.multiOutcomeData[1].name,
+    ];
+    result.prices = [
+      result.multiOutcomeData[0].price,
+      result.multiOutcomeData[1].price,
+    ];
+  }
+
+  return result;
+}
+
+/**
+ * Build market URL based on source (Polymarket via Knoww, or Kalshi direct)
+ */
+function buildMarketUrl(
+  market: Market,
+  outcomeIndex = 0,
+  side = "BUY"
+): string {
+  if (market.source === "kalshi") {
+    return buildKalshiUrl(market);
+  }
+  return buildKnowwUrl(market, outcomeIndex, side);
+}
+
+/**
+ * Build Kalshi market URL
+ */
+function buildKalshiUrl(market: Market): string {
+  const { KALSHI_WEB_URL } = window.KNOWW_CONFIG;
+  const baseUrl = KALSHI_WEB_URL || "https://kalshi.com";
+
+  if (market.eventTicker) {
+    return `${baseUrl}/events/${market.eventTicker}`;
+  }
+
+  return `${baseUrl}/markets/${market.ticker || market.id}`;
+}
+
+/**
+ * Build Knoww.app URL for a specific outcome (Polymarket)
+ */
+function buildKnowwUrl(market: Market, outcomeIndex = 0, side = "BUY"): string {
+  const { KNOWW_APP_URL } = window.KNOWW_CONFIG;
+  const baseUrl = KNOWW_APP_URL || "https://knoww.app";
+
+  let conditionId: string | null = null;
+  if (market.markets && market.markets.length > 0) {
+    conditionId = market.markets[0].conditionId || null;
+  }
+
+  if (market.slug) {
+    const url = `${baseUrl}/events/detail/${market.slug}`;
+    const params = new URLSearchParams();
+    params.set("side", side.toUpperCase());
+    params.set("outcome", outcomeIndex === 0 ? "yes" : "no");
+    if (conditionId) {
+      params.set("conditionId", conditionId);
+    }
+    return `${url}?${params.toString()}`;
+  }
+
+  if (market.id) {
+    const url = `${baseUrl}/events/detail/${market.id}`;
+    const params = new URLSearchParams();
+    params.set("side", side.toUpperCase());
+    params.set("outcome", outcomeIndex === 0 ? "yes" : "no");
+    if (conditionId) {
+      params.set("conditionId", conditionId);
+    }
+    return `${url}?${params.toString()}`;
+  }
+
+  return baseUrl;
+}
+
+/**
+ * Build Knoww.app URL for a multi-outcome event's specific outcome
+ */
+function buildKnowwUrlForOutcome(
+  market: Market,
+  outcomeData: unknown,
+  side = "BUY"
+): string {
+  const data = outcomeData as MultiOutcomeItem;
+  const { KNOWW_APP_URL } = window.KNOWW_CONFIG;
+  const baseUrl = KNOWW_APP_URL || "https://knoww.app";
+
+  const slug = market.slug || market.id;
+  if (!slug) return baseUrl;
+
+  const url = `${baseUrl}/events/detail/${slug}`;
+  const params = new URLSearchParams();
+  params.set("side", side.toUpperCase());
+  params.set("outcome", "yes");
+  if (data.conditionId) {
+    params.set("conditionId", data.conditionId);
+  }
+
+  return `${url}?${params.toString()}`;
+}
+
+/**
+ * Create a market card (supports multiple sources: Polymarket, Kalshi)
+ */
+function createInlineMarketCard(
+  market: Market,
+  _relevanceScore: number,
+  _contextTopics: string[]
+): HTMLElement {
+  const { log } = window.KNOWW_UTILS;
+  const { KNOWW_APP_URL } = window.KNOWW_CONFIG;
+
+  const marketSource = market.source || "polymarket";
+  const sourceConfig = SOURCE_CONFIG[marketSource] || SOURCE_CONFIG.polymarket;
+
+  const card = document.createElement("div");
+  card.className = `knoww-market-card knoww-source-${marketSource}`;
+  card.setAttribute("data-knoww-market-id", market.id);
+  card.setAttribute("data-knoww-source", marketSource);
+  card.setAttribute("data-nth-injector-card", "true");
+
+  const parsed = parseMultiOutcomeData(market);
+  let outcomes = parsed.outcomes;
+  let prices: number[] = parsed.prices;
+  const isMultiOutcomeEvent = parsed.isMultiOutcome;
+  const multiOutcomeData = parsed.multiOutcomeData;
+  let hasMultipleOptions = multiOutcomeData.length > 2;
+
+  // If not a multi-outcome event, try standard parsing
+  if (!isMultiOutcomeEvent && market.markets && market.markets.length > 0) {
+    const firstMarket = market.markets[0];
+
+    if (firstMarket.outcomePrices) {
+      try {
+        const parsed =
+          typeof firstMarket.outcomePrices === "string"
+            ? JSON.parse(firstMarket.outcomePrices)
+            : firstMarket.outcomePrices;
+        if (Array.isArray(parsed)) {
+          prices = parsed.map((p) => {
+            const val = parseFloat(String(p));
+            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
+          });
+        }
+      } catch (e) {
+        log("Failed to parse outcomePrices:", e);
+      }
+    }
+
+    if (firstMarket.outcomes) {
+      try {
+        const parsedOutcomes =
+          typeof firstMarket.outcomes === "string"
+            ? JSON.parse(firstMarket.outcomes)
+            : firstMarket.outcomes;
+        if (Array.isArray(parsedOutcomes)) {
+          outcomes = parsedOutcomes;
+          hasMultipleOptions = outcomes.length > 2;
+        }
+      } catch (e) {
+        log("Failed to parse outcomes:", e);
+      }
+    }
+
+    if (prices.length >= 2 && outcomes.length === 0) {
+      outcomes = ["Yes", "No"];
+    }
+
+    if (outcomes.length === 0 || prices.length === 0) {
+      if (firstMarket.groupItemTitle) {
+        outcomes = [firstMarket.groupItemTitle];
+        if (firstMarket.outcomePrices) {
+          try {
+            const parsedPrices =
+              typeof firstMarket.outcomePrices === "string"
+                ? JSON.parse(firstMarket.outcomePrices)
+                : firstMarket.outcomePrices;
+            if (Array.isArray(parsedPrices) && parsedPrices.length >= 1) {
+              prices = parsedPrices.map((p) => {
+                const val = parseFloat(String(p));
+                return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
+              });
+            }
+          } catch {
+            // Keep default
+          }
+        }
+      } else {
+        outcomes = ["Yes", "No"];
+        prices = [0.5, 0.5];
+      }
+    }
+  }
+
+  // Fallback: check if outcomes/prices are directly on the market object
+  if (outcomes.length === 0 && market.outcomes) {
+    outcomes = market.outcomes.map((o) => o.title || o.name || "Unknown");
+    prices = market.outcomes.map((o) => o.price || 0.5);
+    hasMultipleOptions = outcomes.length > 2;
+  }
+
+  // Ensure we always have at least Yes/No for display
+  if (outcomes.length === 0) {
+    outcomes = ["Yes", "No"];
+    prices = [0.5, 0.5];
+  }
+
+  // Ensure prices array matches outcomes length
+  while (prices.length < outcomes.length) {
+    prices.push(0.5);
+  }
+
+  // Header
+  const header = document.createElement("div");
+  header.className = "knoww-card-header";
+
+  const icon = document.createElement("div");
+  icon.className = "knoww-card-icon";
+
+  let imageUrl = market.image;
+  if (!imageUrl && market.markets && market.markets.length > 0) {
+    imageUrl = (market.markets[0] as NestedMarket & { image?: string }).image;
+  }
+
+  // Build a data URI fallback for when chrome.runtime is unavailable
+  const kalshiFallbackIcon =
+    getSafeRuntimeUrl("icons/icon-48.png") ||
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect fill='%234a5568' width='48' height='48' rx='8'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='white'%3EK%3C/text%3E%3C/svg%3E";
+
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.src = imageUrl;
+    img.alt = "";
+    img.onerror = () => {
+      log("Image failed to load:", imageUrl);
+      icon.innerHTML = "";
+      if (marketSource === "kalshi") {
+        const fallbackImg = document.createElement("img");
+        fallbackImg.src = kalshiFallbackIcon;
+        fallbackImg.alt = "Kalshi";
+        icon.appendChild(fallbackImg);
+      } else {
+        icon.textContent = getMarketEmoji(market);
+      }
+    };
+    icon.appendChild(img);
+    log("Using event image:", imageUrl);
+  } else {
+    log("No image found, using fallback. Market data:", {
+      hasImage: !!market.image,
+      hasMarkets: !!market.markets,
+      marketsCount: market.markets?.length,
+      source: marketSource,
+    });
+    if (marketSource === "kalshi") {
+      const img = document.createElement("img");
+      img.src = kalshiFallbackIcon;
+      img.alt = "Kalshi";
+      icon.appendChild(img);
+    } else {
+      icon.textContent = getMarketEmoji(market);
+    }
+  }
+
+  const titleSection = document.createElement("div");
+  titleSection.className = "knoww-card-title-section";
+
+  const title = document.createElement("div");
+  title.className = "knoww-card-title";
+  title.textContent = market.title || "Untitled Market";
+
+  const volume = document.createElement("div");
+  volume.className = "knoww-card-volume";
+  if (market.volume24hr) {
+    const volumeFormatted =
+      market.volume24hr >= 1000000
+        ? `${(market.volume24hr / 1000000).toFixed(1)}M`
+        : market.volume24hr >= 1000
+          ? `${(market.volume24hr / 1000).toFixed(1)}K`
+          : `${market.volume24hr.toFixed(0)}`;
+    volume.innerHTML = `<span>$</span> ${volumeFormatted} 24h vol`;
+  }
+
+  titleSection.appendChild(title);
+  titleSection.appendChild(volume);
+
+  // Context line — shows why this market was matched to the post
+  const contextReason = market._contextReason;
+  if (contextReason) {
+    const contextLine = document.createElement("div");
+    contextLine.className = "knoww-card-context";
+    contextLine.textContent = contextReason;
+    titleSection.appendChild(contextLine);
+  }
+
+  header.appendChild(icon);
+  header.appendChild(titleSection);
+
+  // Outcome buttons
+  const outcomesDiv = document.createElement("div");
+  outcomesDiv.className = "knoww-card-outcomes";
+
+  if (outcomes.length >= 2 && prices.length >= 2) {
+    const isBinaryMarket =
+      !isMultiOutcomeEvent &&
+      outcomes[0].toLowerCase() === "yes" &&
+      outcomes[1].toLowerCase() === "no";
+
+    const btn1 = document.createElement("button");
+    btn1.className = `knoww-outcome-btn ${isBinaryMarket ? "yes" : "option-1"}`;
+    const percent1 = Math.round(prices[0] * 100);
+    const label1 = document.createElement("span");
+    label1.className = "knoww-outcome-label";
+    label1.textContent = outcomes[0];
+    const price1 = document.createElement("span");
+    price1.className = "knoww-outcome-price";
+    price1.textContent = `${percent1}%`;
+    btn1.appendChild(label1);
+    btn1.appendChild(price1);
+    btn1.onclick = (e) => {
+      e.stopPropagation();
+
+      if (marketSource === "kalshi") {
+        const url = buildKalshiUrl(market);
+        log(`Opening Kalshi (${outcomes[0]}):`, url);
+        window.open(url, "_blank", "noopener,noreferrer");
+        window.KNOWW_PREFERENCES?.recordClick(market);
+        return;
+      }
+
+      const isMulti = isMultiOutcomeEvent && multiOutcomeData.length > 0;
+      resolveTokenAndShowPanel(
+        market,
+        outcomes[0],
+        0,
+        prices[0],
+        btn1,
+        isMulti,
+        isMulti ? multiOutcomeData[0].marketIndex : undefined
+      );
+      window.KNOWW_PREFERENCES?.recordClick(market);
+    };
+
+    const btn2 = document.createElement("button");
+    btn2.className = `knoww-outcome-btn ${isBinaryMarket ? "no" : "option-2"}`;
+    const percent2 = Math.round(prices[1] * 100);
+    const label2 = document.createElement("span");
+    label2.className = "knoww-outcome-label";
+    label2.textContent = outcomes[1];
+    const price2 = document.createElement("span");
+    price2.className = "knoww-outcome-price";
+    price2.textContent = `${percent2}%`;
+    btn2.appendChild(label2);
+    btn2.appendChild(price2);
+    btn2.onclick = (e) => {
+      e.stopPropagation();
+
+      if (marketSource === "kalshi") {
+        const url = buildKalshiUrl(market);
+        log(`Opening Kalshi (${outcomes[1]}):`, url);
+        window.open(url, "_blank", "noopener,noreferrer");
+        window.KNOWW_PREFERENCES?.recordClick(market);
+        return;
+      }
+
+      const isMulti = isMultiOutcomeEvent && multiOutcomeData.length > 1;
+      resolveTokenAndShowPanel(
+        market,
+        outcomes[1],
+        1,
+        prices[1],
+        btn2,
+        isMulti,
+        isMulti ? multiOutcomeData[1].marketIndex : undefined
+      );
+      window.KNOWW_PREFERENCES?.recordClick(market);
+    };
+
+    outcomesDiv.appendChild(btn1);
+    outcomesDiv.appendChild(btn2);
+  }
+
+  // Toggle options button (for multi-option markets)
+  let toggleBtn: HTMLButtonElement | null = null;
+  let optionsList: HTMLDivElement | null = null;
+
+  if (isMultiOutcomeEvent && multiOutcomeData.length > 2) {
+    toggleBtn = document.createElement("button");
+    toggleBtn.className = "knoww-toggle-options";
+    toggleBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="6 9 12 15 18 9"></polyline>
+      </svg>
+      <span>+${multiOutcomeData.length - 2} more options</span>
+    `;
+
+    optionsList = document.createElement("div");
+    optionsList.className = "knoww-options-list";
+
+    for (let i = 2; i < multiOutcomeData.length; i++) {
+      const option = multiOutcomeData[i];
+      const optionRow = document.createElement("div");
+      optionRow.className = "knoww-option-row";
+      optionRow.style.cursor = "pointer";
+
+      const colorBar = document.createElement("div");
+      colorBar.className = "knoww-option-color";
+      colorBar.style.backgroundColor = OPTION_COLORS[i % OPTION_COLORS.length];
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "knoww-option-name";
+      nameSpan.textContent = option.name;
+
+      const percentSpan = document.createElement("span");
+      percentSpan.className = "knoww-option-percent";
+      percentSpan.textContent = `${Math.round(option.price * 100)}%`;
+
+      optionRow.onclick = (e) => {
+        e.stopPropagation();
+        if (marketSource === "polymarket") {
+          resolveTokenAndShowPanel(
+            market,
+            option.name,
+            option.marketIndex,
+            option.price,
+            optionRow,
+            true,
+            option.marketIndex
+          );
+        } else {
+          const url = buildKnowwUrlForOutcome(market, option);
+          window.open(url, "_blank", "noopener,noreferrer");
+          log(`Opening Knoww (${option.name}):`, url);
+        }
+        window.KNOWW_PREFERENCES?.recordClick(market);
+      };
+
+      optionRow.appendChild(colorBar);
+      optionRow.appendChild(nameSpan);
+      optionRow.appendChild(percentSpan);
+      optionsList.appendChild(optionRow);
+    }
+
+    const currentToggleBtn = toggleBtn;
+    const currentOptionsList = optionsList;
+    toggleBtn.onclick = (e) => {
+      e.stopPropagation();
+      const isExpanded = currentOptionsList.classList.contains("visible");
+      if (isExpanded) {
+        currentOptionsList.classList.remove("visible");
+        currentToggleBtn.classList.remove("expanded");
+        const spanEl = currentToggleBtn.querySelector("span");
+        if (spanEl)
+          spanEl.textContent = `+${multiOutcomeData.length - 2} more options`;
+        const svgEl = currentToggleBtn.querySelector("svg");
+        if (svgEl)
+          svgEl.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+      } else {
+        currentOptionsList.classList.add("visible");
+        currentToggleBtn.classList.add("expanded");
+        const spanEl = currentToggleBtn.querySelector("span");
+        if (spanEl) spanEl.textContent = "Hide options";
+        const svgEl = currentToggleBtn.querySelector("svg");
+        if (svgEl)
+          svgEl.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+      }
+    };
+  } else if (
+    hasMultipleOptions &&
+    outcomes.length > 2 &&
+    !isMultiOutcomeEvent
+  ) {
+    toggleBtn = document.createElement("button");
+    toggleBtn.className = "knoww-toggle-options expanded";
+    toggleBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="18 15 12 9 6 15"></polyline>
+      </svg>
+      <span>Hide options</span>
+    `;
+
+    optionsList = document.createElement("div");
+    optionsList.className = "knoww-options-list visible";
+
+    const optionsData = outcomes.map((outcome, i) => ({
+      name: outcome,
+      percent: Math.round(prices[i] * 100),
+      color: OPTION_COLORS[i % OPTION_COLORS.length],
+      index: i,
+    }));
+
+    optionsData.sort((a, b) => b.percent - a.percent);
+
+    for (const option of optionsData) {
+      const optionRow = document.createElement("div");
+      optionRow.className = "knoww-option-row";
+      optionRow.style.cursor = "pointer";
+
+      const colorBar = document.createElement("div");
+      colorBar.className = "knoww-option-color";
+      colorBar.style.backgroundColor = option.color;
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "knoww-option-name";
+      nameSpan.textContent = option.name;
+
+      const percentSpan = document.createElement("span");
+      percentSpan.className = "knoww-option-percent";
+      percentSpan.textContent = `${option.percent}%`;
+
+      optionRow.onclick = (e) => {
+        e.stopPropagation();
+        if (marketSource === "polymarket") {
+          resolveTokenAndShowPanel(
+            market,
+            option.name,
+            option.index,
+            prices[option.index],
+            optionRow,
+            false
+          );
+        } else {
+          const url = buildKnowwUrl(market, option.index, "BUY");
+          window.open(url, "_blank", "noopener,noreferrer");
+          log(`Opening Knoww (${option.name}):`, url);
+        }
+        window.KNOWW_PREFERENCES?.recordClick(market);
+      };
+
+      optionRow.appendChild(colorBar);
+      optionRow.appendChild(nameSpan);
+      optionRow.appendChild(percentSpan);
+      optionsList.appendChild(optionRow);
+    }
+
+    const currentToggleBtn = toggleBtn;
+    const currentOptionsList = optionsList;
+    toggleBtn.onclick = (e) => {
+      e.stopPropagation();
+      const isExpanded = currentOptionsList.classList.contains("visible");
+      if (isExpanded) {
+        currentOptionsList.classList.remove("visible");
+        currentToggleBtn.classList.remove("expanded");
+        const spanEl = currentToggleBtn.querySelector("span");
+        if (spanEl) spanEl.textContent = "Show options";
+        const svgEl = currentToggleBtn.querySelector("svg");
+        if (svgEl)
+          svgEl.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+      } else {
+        currentOptionsList.classList.add("visible");
+        currentToggleBtn.classList.add("expanded");
+        const spanEl = currentToggleBtn.querySelector("span");
+        if (spanEl) spanEl.textContent = "Hide options";
+        const svgEl = currentToggleBtn.querySelector("svg");
+        if (svgEl)
+          svgEl.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+      }
+    };
+  }
+
+  // Footer
+  const footer = document.createElement("div");
+  footer.className = "knoww-card-footer";
+
+  const sourceBadge = document.createElement("div");
+  sourceBadge.className = `knoww-source-badge knoww-source-${marketSource}`;
+  sourceBadge.innerHTML = `
+    <div class="knoww-source-icon" style="background-color: ${sourceConfig.color};">${sourceConfig.icon}</div>
+    <span>${sourceConfig.name}</span>
+  `;
+
+  const viewMarket = document.createElement("button");
+  viewMarket.className = "knoww-view-market";
+  viewMarket.innerHTML = `
+    View market
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M7 17L17 7M17 7H7M17 7V17"/>
+    </svg>
+  `;
+  viewMarket.onclick = (e) => {
+    e.stopPropagation();
+    let marketUrl: string;
+
+    if (marketSource === "kalshi") {
+      marketUrl = buildKalshiUrl(market);
+      log("Opening Kalshi:", marketUrl);
+    } else {
+      marketUrl = market.slug
+        ? `${KNOWW_APP_URL}/events/detail/${market.slug}`
+        : KNOWW_APP_URL;
+      log("Opening Knoww:", marketUrl);
+    }
+
+    window.open(marketUrl, "_blank", "noopener,noreferrer");
+    window.KNOWW_PREFERENCES?.recordClick(market);
+  };
+
+  footer.appendChild(sourceBadge);
+  footer.appendChild(viewMarket);
+
+  // Assemble card
+  card.appendChild(header);
+  if (outcomesDiv.children.length > 0) card.appendChild(outcomesDiv);
+  if (toggleBtn) card.appendChild(toggleBtn);
+  if (optionsList) card.appendChild(optionsList);
+  card.appendChild(footer);
+
+  return card;
+}
+
+/**
+ * Get appropriate emoji for market based on tags/title
+ */
+function getMarketEmoji(market: Market): string {
+  const title = (market.title || "").toLowerCase();
+  const tags = (market.tags || []).map((t) =>
+    (t.slug || t.label || "").toLowerCase()
+  );
+  const combined = `${title} ${tags.join(" ")}`;
+
+  // Politics
+  if (
+    combined.includes("republican") ||
+    combined.includes("gop") ||
+    combined.includes("trump")
+  )
+    return "🐘";
+  if (combined.includes("democrat") || combined.includes("biden")) return "🫏";
+  if (
+    combined.includes("election") ||
+    combined.includes("vote") ||
+    combined.includes("president")
+  )
+    return "🗳️";
+
+  // Crypto
+  if (combined.includes("bitcoin") || combined.includes("btc")) return "₿";
+  if (combined.includes("ethereum") || combined.includes("eth")) return "⟠";
+  if (combined.includes("crypto")) return "🪙";
+
+  // Sports
+  if (combined.includes("nfl") || combined.includes("football")) return "🏈";
+  if (combined.includes("nba") || combined.includes("basketball")) return "🏀";
+  if (combined.includes("mlb") || combined.includes("baseball")) return "⚾";
+  if (combined.includes("soccer")) return "⚽";
+  if (combined.includes("ufc") || combined.includes("mma")) return "🥊";
+  if (combined.includes("f1") || combined.includes("formula")) return "🏎️";
+
+  // Tech
+  if (combined.includes("ai") || combined.includes("openai")) return "🤖";
+  if (combined.includes("apple")) return "🍎";
+  if (combined.includes("tesla") || combined.includes("musk")) return "🚗";
+  if (combined.includes("space") || combined.includes("nasa")) return "🚀";
+
+  // Geopolitics
+  if (combined.includes("ukraine") || combined.includes("russia")) return "🌍";
+  if (combined.includes("china")) return "🇨🇳";
+  if (combined.includes("war") || combined.includes("military")) return "⚔️";
+
+  // Economy
+  if (
+    combined.includes("fed") ||
+    combined.includes("interest") ||
+    combined.includes("inflation")
+  )
+    return "📈";
+  if (combined.includes("stock") || combined.includes("market")) return "📊";
+
+  // Entertainment
+  if (combined.includes("oscar") || combined.includes("movie")) return "🎬";
+  if (combined.includes("grammy") || combined.includes("music")) return "🎵";
+
+  // Weather/Climate
+  if (combined.includes("weather") || combined.includes("climate")) return "🌡️";
+  if (combined.includes("hurricane") || combined.includes("storm")) return "🌀";
+
+  // Default
+  return "📊";
+}
+
+// ============================================
+// NOTIFICATION STACK COMPONENT
+// ============================================
+
+let notificationStackContainer: HTMLElement | null = null;
+let notificationStackListenersAttached = false; // Guard to prevent duplicate listeners on re-init
+const MAX_NOTIFICATION_ITEMS = 12;
+const MAX_ACTIVE_NOTIFICATION_ITEMS = 4;
+const MAX_SCROLLED_NOTIFICATION_ITEMS =
+  MAX_NOTIFICATION_ITEMS - MAX_ACTIVE_NOTIFICATION_ITEMS;
+const SCROLLED_OUT_GRACE_MS = 8000;
+
+// Trending markets state
+const TRENDING_FETCH_DELAY_MS = 10_000;
+const TRENDING_SHUFFLE_INTERVAL_MS = 60_000;
+const MAX_TRENDING_DISPLAY = 2;
+let trendingFetchTimer: ReturnType<typeof setTimeout> | null = null;
+let trendingShuffleTimer: ReturnType<typeof setInterval> | null = null;
+let trendingPool: Market[] = [];
+let visibleTrending: Market[] = [];
+
+/**
+ * Create the notification stack container
+ */
+function createNotificationStack(): HTMLElement {
+  const { log } = window.KNOWW_UTILS;
+
+  if (notificationStackContainer) {
+    return notificationStackContainer;
+  }
+
+  // Remove any stale notification stacks left behind by a previous
+  // script context (e.g. after extension hot-reload or update).
+  const stale = document.querySelectorAll("#knoww-notification-stack");
+  for (const el of Array.from(stale)) {
+    el.remove();
+    log("Removed stale notification stack from previous context");
+  }
+
+  const container = document.createElement("div");
+  container.id = "knoww-notification-stack";
+
+  const platformName = window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown";
+
+  // Detect theme - try multiple methods
+  let theme: "dark" | "light" | "dim" = "dark"; // Default to dark for Twitter
+
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  if (platform && typeof platform.detectTheme === "function") {
+    theme = platform.detectTheme();
+  } else {
+    // Fallback theme detection for Twitter if platform not ready
+    if (platformName === "twitter" || platformName === "unknown") {
+      try {
+        const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+        const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+        if (rgbMatch) {
+          const r = parseInt(rgbMatch[1], 10);
+          const g = parseInt(rgbMatch[2], 10);
+          const b = parseInt(rgbMatch[3], 10);
+          if (r === 0 && g === 0 && b === 0) {
+            theme = "dark";
+          } else if (r < 30 && g < 40 && b < 50 && b > r) {
+            theme = "dim";
+          } else if (r > 240 && g > 240 && b > 240) {
+            theme = "light";
+          }
+        }
+      } catch {
+        // Keep default dark theme
+      }
+    }
+  }
+
+  const themeClass = ` knoww-theme-${theme}`;
+  container.className = `knoww-notification-stack knoww-notification-stack-${platformName}${themeClass}`;
+
+  log(
+    `Creating notification stack with platform: ${platformName}, theme: ${theme}`
+  );
+
+  // Header
+  const header = document.createElement("div");
+  header.className = "knoww-stack-header";
+
+  const headerTitle = document.createElement("div");
+  headerTitle.className = "knoww-stack-title";
+
+  const logoUrl = getSafeRuntimeUrl("icons/icon-48.png") || "icons/icon-48.png";
+
+  headerTitle.innerHTML = `
+    <div class="knoww-stack-icon"><img src="${logoUrl}" alt="Knoww" /></div>
+    <span>Markets</span>
+  `;
+
+  const headerRight = document.createElement("div");
+  headerRight.className = "knoww-stack-header-right";
+
+  const searchToggle = document.createElement("button");
+  searchToggle.className = "knoww-search-toggle";
+  searchToggle.id = "knoww-search-toggle";
+  searchToggle.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"></circle>
+      <path d="M21 21l-4.35-4.35"></path>
+    </svg>
+  `;
+  searchToggle.title = "Search markets";
+
+  headerRight.appendChild(searchToggle);
+  header.appendChild(headerTitle);
+  header.appendChild(headerRight);
+
+  // Search container
+  const searchContainer = document.createElement("div");
+  searchContainer.className = "knoww-search-container";
+  searchContainer.id = "knoww-search-container";
+
+  const searchInputWrapper = document.createElement("div");
+  searchInputWrapper.className = "knoww-search-input-wrapper";
+
+  const searchInput = document.createElement("input");
+  searchInput.type = "text";
+  searchInput.className = "knoww-search-input";
+  searchInput.id = "knoww-search-input";
+  searchInput.placeholder = "Search Polymarket...";
+
+  const clearBtn = document.createElement("button");
+  clearBtn.className = "knoww-search-clear";
+  clearBtn.id = "knoww-search-clear";
+  clearBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M18 6L6 18M6 6l12 12"/>
+    </svg>
+  `;
+  clearBtn.style.display = "none";
+
+  searchInputWrapper.appendChild(searchInput);
+  searchInputWrapper.appendChild(clearBtn);
+
+  const searchResults = document.createElement("div");
+  searchResults.className = "knoww-search-results";
+  searchResults.id = "knoww-search-results";
+
+  searchContainer.appendChild(searchInputWrapper);
+  searchContainer.appendChild(searchResults);
+
+  // Content area — single container that holds EITHER the empty state
+  // OR the market items. Never both at the same time.
+  const contentArea = document.createElement("div");
+  contentArea.className = "knoww-stack-content";
+  contentArea.id = "knoww-stack-content";
+
+  // Items container (hidden initially, shown when markets exist)
+  const itemsContainer = document.createElement("div");
+  itemsContainer.className = "knoww-stack-items";
+  itemsContainer.id = "knoww-stack-items";
+  itemsContainer.style.setProperty("display", "none", "important");
+
+  // Empty state (visible initially)
+  const emptyState = document.createElement("div");
+  emptyState.className = "knoww-stack-empty";
+  emptyState.id = "knoww-stack-empty";
+  emptyState.innerHTML = `
+    <div class="knoww-stack-empty-title-row">
+      <span class="knoww-stack-empty-pulse" aria-hidden="true"></span>
+      <span class="knoww-stack-empty-title">Searching for markets</span>
+      <span class="knoww-stack-empty-dots" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </span>
+    </div>
+    <span class="knoww-stack-empty-sub">Scroll your feed to discover markets</span>
+  `;
+
+  contentArea.appendChild(itemsContainer);
+  contentArea.appendChild(emptyState);
+
+  container.appendChild(header);
+  container.appendChild(searchContainer);
+  container.appendChild(contentArea);
+
+  // Append to body with fixed positioning (all platforms)
+  document.body.appendChild(container);
+  log("Notification stack created with fixed position");
+
+  setupSearchFunctionality(
+    searchToggle,
+    searchContainer,
+    searchInput,
+    searchResults,
+    clearBtn
+  );
+
+  notificationStackContainer = container;
+  return container;
+}
+
+/**
+ * Set up search functionality
+ */
+function setupSearchFunctionality(
+  toggleBtn: HTMLButtonElement,
+  container: HTMLElement,
+  input: HTMLInputElement,
+  resultsContainer: HTMLElement,
+  clearBtn: HTMLButtonElement
+): void {
+  const { log } = window.KNOWW_UTILS;
+
+  let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+  let isSearchOpen = false;
+  let currentSearchQuery = ""; // Track current query to ignore stale results
+
+  toggleBtn.onclick = () => {
+    isSearchOpen = !isSearchOpen;
+    container.classList.toggle("knoww-search-open", isSearchOpen);
+    toggleBtn.classList.toggle("knoww-search-active", isSearchOpen);
+
+    if (isSearchOpen) {
+      input.focus();
+      clearBtn.style.display = "flex";
+    } else {
+      input.value = "";
+      resultsContainer.innerHTML = "";
+      clearBtn.style.display = "none";
+      currentSearchQuery = "";
+    }
+  };
+
+  clearBtn.onclick = () => {
+    if (input.value.trim() === "") {
+      isSearchOpen = false;
+      container.classList.remove("knoww-search-open");
+      toggleBtn.classList.remove("knoww-search-active");
+      clearBtn.style.display = "none";
+      currentSearchQuery = "";
+    } else {
+      input.value = "";
+      resultsContainer.innerHTML = "";
+      input.focus();
+      currentSearchQuery = "";
+    }
+  };
+
+  input.oninput = () => {
+    const query = input.value.trim();
+    currentSearchQuery = query;
+
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    if (query.length < 2) {
+      resultsContainer.innerHTML = "";
+      return;
+    }
+
+    resultsContainer.innerHTML =
+      '<div class="knoww-search-loading">Searching...</div>';
+
+    const searchQuery = query; // Capture query for this search request
+    searchTimeout = setTimeout(async () => {
+      try {
+        const { searchPolymarketEvents } = window.KNOWW_API;
+        const events = await searchPolymarketEvents(searchQuery, []);
+
+        // Ignore stale results if query has changed
+        if (currentSearchQuery !== searchQuery) {
+          return;
+        }
+
+        if (events.length === 0) {
+          resultsContainer.innerHTML =
+            '<div class="knoww-search-empty">No markets found</div>';
+          return;
+        }
+
+        resultsContainer.innerHTML = "";
+
+        events.slice(0, 5).forEach((event) => {
+          const resultItem = createSearchResultItem(event);
+          resultsContainer.appendChild(resultItem);
+        });
+      } catch (e) {
+        // Ignore errors for stale queries
+        if (currentSearchQuery !== searchQuery) {
+          return;
+        }
+        log("Search error:", e);
+        resultsContainer.innerHTML =
+          '<div class="knoww-search-empty">Search failed</div>';
+      }
+    }, 300);
+  };
+
+  document.addEventListener("click", (e) => {
+    const target = e.target as Node;
+    if (
+      isSearchOpen &&
+      !container.contains(target) &&
+      !toggleBtn.contains(target)
+    ) {
+      isSearchOpen = false;
+      container.classList.remove("knoww-search-open");
+      toggleBtn.classList.remove("knoww-search-active");
+    }
+  });
+}
+
+/**
+ * Create a search result item
+ */
+function createSearchResultItem(market: Market): HTMLElement {
+  const { KNOWW_APP_URL } = window.KNOWW_CONFIG;
+
+  const marketSource = market.source || "polymarket";
+  const sourceConfig = SOURCE_CONFIG[marketSource] || SOURCE_CONFIG.polymarket;
+
+  const item = document.createElement("div");
+  item.className = `knoww-search-result-item knoww-source-${marketSource}`;
+
+  const icon = document.createElement("div");
+  icon.className = "knoww-search-result-icon";
+
+  let imageUrl = market.image;
+  if (!imageUrl && market.markets && market.markets.length > 0) {
+    imageUrl = (market.markets[0] as NestedMarket & { image?: string }).image;
+  }
+
+  // Build a data URI fallback for when chrome.runtime is unavailable
+  const kalshiFallbackIcon =
+    getSafeRuntimeUrl("icons/icon-48.png") ||
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect fill='%234a5568' width='48' height='48' rx='8'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='white'%3EK%3C/text%3E%3C/svg%3E";
+
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.src = imageUrl;
+    img.alt = "";
+    img.onerror = () => {
+      icon.innerHTML = "";
+      if (marketSource === "kalshi") {
+        const fallbackImg = document.createElement("img");
+        fallbackImg.src = kalshiFallbackIcon;
+        fallbackImg.alt = "Kalshi";
+        icon.appendChild(fallbackImg);
+      } else {
+        icon.textContent = getMarketEmoji(market);
+      }
+    };
+    icon.appendChild(img);
+  } else {
+    if (marketSource === "kalshi") {
+      const img = document.createElement("img");
+      img.src = kalshiFallbackIcon;
+      img.alt = "Kalshi";
+      icon.appendChild(img);
+    } else {
+      icon.textContent = getMarketEmoji(market);
+    }
+  }
+
+  const content = document.createElement("div");
+  content.className = "knoww-search-result-content";
+
+  const title = document.createElement("div");
+  title.className = "knoww-search-result-title";
+  title.textContent = truncateText(market.title || "Untitled Market", 45);
+
+  const parsed = parseMultiOutcomeData(market);
+  let outcomes = parsed.outcomes;
+  let priceData: number[] = parsed.prices;
+
+  if (!parsed.isMultiOutcome && market.markets && market.markets.length > 0) {
+    const firstMarket = market.markets[0];
+    if (firstMarket.outcomePrices) {
+      try {
+        const parsedPrices =
+          typeof firstMarket.outcomePrices === "string"
+            ? JSON.parse(firstMarket.outcomePrices)
+            : firstMarket.outcomePrices;
+        if (Array.isArray(parsedPrices)) {
+          priceData = parsedPrices.map((p) => {
+            const val = parseFloat(String(p));
+            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
+          });
+        }
+      } catch {
+        // Keep default
+      }
+    }
+    if (firstMarket.outcomes) {
+      try {
+        const parsedOutcomes =
+          typeof firstMarket.outcomes === "string"
+            ? JSON.parse(firstMarket.outcomes)
+            : firstMarket.outcomes;
+        if (Array.isArray(parsedOutcomes)) {
+          outcomes = parsedOutcomes;
+        }
+      } catch {
+        // Keep default
+      }
+    }
+    if (outcomes.length === 0) outcomes = ["Yes", "No"];
+    if (priceData.length === 0) {
+      priceData = [0.5, 0.5];
+    }
+  }
+
+  const prices = document.createElement("div");
+  prices.className = "knoww-search-result-prices";
+  const percent1 = Math.round((priceData[0] || 0.5) * 100);
+  const percent2 = Math.round((priceData[1] || 0.5) * 100);
+
+  const isBinary =
+    outcomes[0].toLowerCase() === "yes" && outcomes[1].toLowerCase() === "no";
+
+  if (isBinary) {
+    prices.innerHTML = `
+      <span class="knoww-price-yes">${escapeHtml(outcomes[0])} ${percent1}%</span>
+      <span class="knoww-price-no">${escapeHtml(outcomes[1] || "No")} ${percent2}%</span>
+    `;
+  } else {
+    prices.classList.add("knoww-multi-outcome");
+    prices.innerHTML = `
+      <div class="knoww-outcome-row">
+        <div class="knoww-outcome-indicator option-1"></div>
+        <span class="knoww-outcome-name">${escapeHtml(outcomes[0])}</span>
+        <span class="knoww-outcome-percent option-1">${percent1}%</span>
+      </div>
+      <div class="knoww-outcome-row">
+        <div class="knoww-outcome-indicator option-2"></div>
+        <span class="knoww-outcome-name">${escapeHtml(outcomes[1] || "No")}</span>
+        <span class="knoww-outcome-percent option-2">${percent2}%</span>
+      </div>
+    `;
+  }
+
+  content.appendChild(title);
+  content.appendChild(prices);
+
+  item.appendChild(icon);
+  item.appendChild(content);
+
+  const sourceIndicator = document.createElement("div");
+  sourceIndicator.className = "knoww-search-source-indicator";
+  sourceIndicator.style.backgroundColor = sourceConfig.color;
+  sourceIndicator.textContent = sourceConfig.icon;
+  sourceIndicator.title = sourceConfig.name;
+  item.appendChild(sourceIndicator);
+
+  item.onclick = () => {
+    let marketUrl: string;
+
+    if (marketSource === "kalshi") {
+      marketUrl = buildKalshiUrl(market);
+    } else {
+      marketUrl = market.slug
+        ? `${KNOWW_APP_URL}/events/detail/${market.slug}`
+        : KNOWW_APP_URL;
+    }
+
+    window.open(marketUrl, "_blank", "noopener,noreferrer");
+  };
+
+  return item;
+}
+
+/**
+ * Create a notification item for a market
+ */
+function createNotificationItem(
+  marketData: InjectedMarketEntry,
+  index: number,
+  isActive = true
+): HTMLElement {
+  const { log } = window.KNOWW_UTILS;
+  const { market, cardRef } = marketData;
+
+  const marketSource = market.source || "polymarket";
+
+  const item = document.createElement("div");
+  item.className = `knoww-notification-item knoww-source-${marketSource} ${
+    isActive ? "knoww-notification-active" : "knoww-notification-unavailable"
+  }`;
+  item.setAttribute("data-market-id", market.id);
+  item.setAttribute("data-market-source", marketSource);
+  item.setAttribute("data-market-status", isActive ? "active" : "scrolled-out");
+  item.style.animationDelay = `${index * 50}ms`;
+
+  const icon = document.createElement("div");
+  icon.className = "knoww-notification-icon";
+
+  let imageUrl = market.image;
+  if (!imageUrl && market.markets && market.markets.length > 0) {
+    imageUrl = (market.markets[0] as NestedMarket & { image?: string }).image;
+  }
+
+  // Build a data URI fallback for when chrome.runtime is unavailable
+  const kalshiFallbackIcon =
+    getSafeRuntimeUrl("icons/icon-48.png") ||
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect fill='%234a5568' width='48' height='48' rx='8'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='white'%3EK%3C/text%3E%3C/svg%3E";
+
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.src = imageUrl;
+    img.alt = "";
+    img.onerror = () => {
+      icon.innerHTML = "";
+      if (marketSource === "kalshi") {
+        const fallbackImg = document.createElement("img");
+        fallbackImg.src = kalshiFallbackIcon;
+        fallbackImg.alt = "Kalshi";
+        icon.appendChild(fallbackImg);
+      } else {
+        icon.textContent = getMarketEmoji(market);
+      }
+    };
+    icon.appendChild(img);
+  } else {
+    if (marketSource === "kalshi") {
+      const img = document.createElement("img");
+      img.src = kalshiFallbackIcon;
+      img.alt = "Kalshi";
+      icon.appendChild(img);
+    } else {
+      icon.textContent = getMarketEmoji(market);
+    }
+  }
+
+  const content = document.createElement("div");
+  content.className = "knoww-notification-content";
+
+  const title = document.createElement("div");
+  title.className = "knoww-notification-title";
+  title.textContent = truncateText(market.title || "Untitled Market", 50);
+
+  const pricesDiv = document.createElement("div");
+  pricesDiv.className = "knoww-notification-prices";
+
+  const parsed = parseMultiOutcomeData(market);
+  let outcomes = parsed.outcomes;
+  let priceData: number[] = parsed.prices;
+  const isMultiOutcome = parsed.isMultiOutcome;
+
+  if (!isMultiOutcome && market.markets && market.markets.length > 0) {
+    const firstMarket = market.markets[0];
+
+    if (firstMarket.outcomePrices) {
+      try {
+        const parsedPrices =
+          typeof firstMarket.outcomePrices === "string"
+            ? JSON.parse(firstMarket.outcomePrices)
+            : firstMarket.outcomePrices;
+        if (Array.isArray(parsedPrices)) {
+          priceData = parsedPrices.map((p) => {
+            const val = parseFloat(String(p));
+            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
+          });
+        }
+      } catch {
+        // Keep default
+      }
+    }
+
+    if (firstMarket.outcomes) {
+      try {
+        const parsedOutcomes =
+          typeof firstMarket.outcomes === "string"
+            ? JSON.parse(firstMarket.outcomes)
+            : firstMarket.outcomes;
+        if (Array.isArray(parsedOutcomes)) {
+          outcomes = parsedOutcomes;
+        }
+      } catch {
+        // Keep default
+      }
+    }
+
+    if (priceData.length >= 2 && outcomes.length === 0) {
+      outcomes = ["Yes", "No"];
+    }
+
+    if (outcomes.length === 0 || priceData.length === 0) {
+      outcomes = ["Yes", "No"];
+      priceData = [0.5, 0.5];
+    }
+  }
+
+  if (outcomes.length === 0) {
+    outcomes = ["Yes", "No"];
+    priceData = [0.5, 0.5];
+  }
+
+  while (priceData.length < 2) {
+    priceData.push(0.5);
+  }
+
+  const percent1 = Math.round(priceData[0] * 100);
+  const percent2 = Math.round(priceData[1] * 100);
+
+  const isBinary =
+    outcomes[0].toLowerCase() === "yes" && outcomes[1].toLowerCase() === "no";
+
+  if (isBinary) {
+    pricesDiv.innerHTML = `
+      <span class="knoww-price-yes">${escapeHtml(outcomes[0])} ${percent1}%</span>
+      <span class="knoww-price-no">${escapeHtml(outcomes[1])} ${percent2}%</span>
+    `;
+  } else {
+    pricesDiv.classList.add("knoww-multi-outcome");
+    pricesDiv.innerHTML = `
+      <div class="knoww-outcome-row">
+        <div class="knoww-outcome-indicator option-1"></div>
+        <span class="knoww-outcome-name">${escapeHtml(outcomes[0])}</span>
+        <span class="knoww-outcome-percent option-1">${percent1}%</span>
+      </div>
+      <div class="knoww-outcome-row">
+        <div class="knoww-outcome-indicator option-2"></div>
+        <span class="knoww-outcome-name">${escapeHtml(outcomes[1])}</span>
+        <span class="knoww-outcome-percent option-2">${percent2}%</span>
+      </div>
+    `;
+  }
+
+  content.appendChild(title);
+  content.appendChild(pricesDiv);
+
+  const arrow = document.createElement("div");
+  arrow.className = "knoww-notification-arrow";
+  arrow.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M5 12h14M12 5l7 7-7 7"/>
+    </svg>
+  `;
+
+  item.appendChild(icon);
+  item.appendChild(content);
+  item.appendChild(arrow);
+
+  // Click handler to scroll to the market card, or open URL if card is gone
+  item.onclick = () => {
+    if (!isActive) {
+      const marketUrl = buildMarketUrl(market);
+      log("Opening scrolled-out market directly:", marketUrl);
+      window.open(marketUrl, "_blank", "noopener,noreferrer");
+      window.KNOWW_PREFERENCES?.recordClick(market);
+      return;
+    }
+    scrollToMarket(cardRef as WeakRef<HTMLElement> | null, market.id, market);
+    window.KNOWW_PREFERENCES?.recordClick(market);
+  };
+
+  return item;
+}
+
+/**
+ * Create a section header within the notification stack list
+ */
+function createNotificationSectionHeader(
+  title: string,
+  count: number
+): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "knoww-stack-section-header";
+  header.innerHTML = `
+    <span class="knoww-stack-section-title">${title}</span>
+    <span class="knoww-stack-section-count">${count}</span>
+  `;
+  return header;
+}
+
+/**
+ * Truncate text with ellipsis
+ */
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3)}...`;
+}
+
+/**
+ * Scroll to a market card in the feed.
+ * If the card has been removed from the DOM (host site virtualization / GC),
+ * opens the market URL directly in a new tab so the user is never stuck.
+ */
+function scrollToMarket(
+  cardRefOrElement: WeakRef<HTMLElement> | HTMLElement | null | undefined,
+  marketId: string,
+  market?: Market
+): void {
+  const { log } = window.KNOWW_UTILS;
+
+  let targetCard: HTMLElement | undefined | null =
+    cardRefOrElement && "deref" in cardRefOrElement
+      ? cardRefOrElement.deref()
+      : (cardRefOrElement as HTMLElement | null);
+
+  if (
+    !targetCard ||
+    !(targetCard instanceof Node) ||
+    !document.body.contains(targetCard)
+  ) {
+    targetCard = document.querySelector(
+      `[data-knoww-market-id="${marketId}"]`
+    ) as HTMLElement | null;
+  }
+
+  if (
+    !targetCard ||
+    !(targetCard instanceof Node) ||
+    !document.body.contains(targetCard)
+  ) {
+    // Card is no longer in the DOM — open the market URL directly
+    log("Card not in DOM, opening market URL in new tab");
+    if (market) {
+      const url = buildMarketUrl(market);
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+    }
+    // Final fallback: no market data available
+    log("No market data available to build URL");
+    return;
+  }
+
+  targetCard.scrollIntoView({
+    behavior: "smooth",
+    block: "center",
+  });
+
+  targetCard.classList.add("knoww-highlight");
+
+  setTimeout(() => {
+    if (targetCard) {
+      targetCard.classList.remove("knoww-highlight");
+    }
+  }, 2000);
+}
+
+/**
+ * Check if a card element is still in the DOM and visible
+ */
+function isCardStillAvailable(
+  cardRef: InjectedMarketEntry["cardRef"],
+  marketTitle?: string
+): boolean {
+  const noop = () => {};
+  const { log } = window.KNOWW_UTILS || { log: noop };
+  const shortTitle = marketTitle ? marketTitle.slice(0, 30) : "Unknown";
+
+  const cardElement = cardRef?.deref?.();
+
+  // Card was garbage collected or doesn't exist
+  if (!cardElement) {
+    log(`🗑️ [NotificationFilter] Card GC'd/missing: "${shortTitle}..."`);
+    return false;
+  }
+
+  // Card is no longer in the DOM
+  if (!document.body.contains(cardElement)) {
+    log(
+      `📜 [NotificationFilter] Card scrolled away (not in DOM): "${shortTitle}..."`
+    );
+    return false;
+  }
+
+  log(`✅ [NotificationFilter] Card still available: "${shortTitle}..."`);
+  return true;
+}
+
+/**
+ * Switch the notification stack content area between the empty state
+ * and the items list. Only one is visible at a time.
+ *
+ * Uses setProperty with "important" because the stylesheet declares
+ * display with !important to resist host-page overrides — a plain
+ * inline style (element.style.display = "none") would lose to it.
+ */
+function showNotificationContent(view: "empty" | "items"): void {
+  const itemsContainer = document.getElementById("knoww-stack-items");
+  const emptyState = document.getElementById("knoww-stack-empty");
+  if (!itemsContainer || !emptyState) return;
+
+  if (view === "items") {
+    emptyState.style.setProperty("display", "none", "important");
+    itemsContainer.style.removeProperty("display");
+  } else {
+    itemsContainer.style.setProperty("display", "none", "important");
+    emptyState.style.removeProperty("display");
+  }
+}
+
+/**
+ * Create a notification item for a trending market (fallback display)
+ */
+function createTrendingMarketItem(market: Market, index: number): HTMLElement {
+  const marketSource = market.source || "polymarket";
+
+  const item = document.createElement("div");
+  item.className = `knoww-notification-item knoww-trending-item knoww-source-${marketSource} knoww-notification-active`;
+  item.setAttribute("data-market-id", market.id);
+  item.setAttribute("data-market-source", marketSource);
+  item.style.animationDelay = `${index * 60}ms`;
+
+  const icon = document.createElement("div");
+  icon.className = "knoww-notification-icon";
+
+  let imageUrl = market.image;
+  if (!imageUrl && market.markets && market.markets.length > 0) {
+    imageUrl = (market.markets[0] as NestedMarket & { image?: string }).image;
+  }
+
+  const kalshiFallbackIcon =
+    getSafeRuntimeUrl("icons/icon-48.png") ||
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect fill='%234a5568' width='48' height='48' rx='8'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='white'%3EK%3C/text%3E%3C/svg%3E";
+
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.src = imageUrl;
+    img.alt = "";
+    img.onerror = () => {
+      icon.innerHTML = "";
+      if (marketSource === "kalshi") {
+        const fallbackImg = document.createElement("img");
+        fallbackImg.src = kalshiFallbackIcon;
+        fallbackImg.alt = "Kalshi";
+        icon.appendChild(fallbackImg);
+      } else {
+        icon.textContent = getMarketEmoji(market);
+      }
+    };
+    icon.appendChild(img);
+  } else {
+    if (marketSource === "kalshi") {
+      const img = document.createElement("img");
+      img.src = kalshiFallbackIcon;
+      img.alt = "Kalshi";
+      icon.appendChild(img);
+    } else {
+      icon.textContent = getMarketEmoji(market);
+    }
+  }
+
+  const content = document.createElement("div");
+  content.className = "knoww-notification-content";
+
+  const title = document.createElement("div");
+  title.className = "knoww-notification-title";
+  title.textContent = truncateText(market.title || "Untitled Market", 50);
+
+  const pricesDiv = document.createElement("div");
+  pricesDiv.className = "knoww-notification-prices";
+
+  const parsed = parseMultiOutcomeData(market);
+  let outcomes = parsed.outcomes;
+  let priceData: number[] = parsed.prices;
+
+  if (!parsed.isMultiOutcome && market.markets && market.markets.length > 0) {
+    const firstMarket = market.markets[0];
+    if (firstMarket.outcomePrices) {
+      try {
+        const parsedPrices =
+          typeof firstMarket.outcomePrices === "string"
+            ? JSON.parse(firstMarket.outcomePrices)
+            : firstMarket.outcomePrices;
+        if (Array.isArray(parsedPrices)) {
+          priceData = parsedPrices.map((p) => {
+            const val = parseFloat(String(p));
+            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
+          });
+        }
+      } catch {
+        // Keep default
+      }
+    }
+    if (firstMarket.outcomes) {
+      try {
+        const parsedOutcomes =
+          typeof firstMarket.outcomes === "string"
+            ? JSON.parse(firstMarket.outcomes)
+            : firstMarket.outcomes;
+        if (Array.isArray(parsedOutcomes)) {
+          outcomes = parsedOutcomes;
+        }
+      } catch {
+        // Keep default
+      }
+    }
+    if (priceData.length >= 2 && outcomes.length === 0) {
+      outcomes = ["Yes", "No"];
+    }
+    if (outcomes.length === 0 || priceData.length === 0) {
+      outcomes = ["Yes", "No"];
+      priceData = [0.5, 0.5];
+    }
+  }
+
+  if (outcomes.length === 0) {
+    outcomes = ["Yes", "No"];
+    priceData = [0.5, 0.5];
+  }
+  while (priceData.length < 2) {
+    priceData.push(0.5);
+  }
+
+  const percent1 = Math.round(priceData[0] * 100);
+  const percent2 = Math.round(priceData[1] * 100);
+  const isBinary =
+    outcomes[0].toLowerCase() === "yes" && outcomes[1].toLowerCase() === "no";
+
+  if (isBinary) {
+    pricesDiv.innerHTML = `
+      <span class="knoww-price-yes">${escapeHtml(outcomes[0])} ${percent1}%</span>
+      <span class="knoww-price-no">${escapeHtml(outcomes[1])} ${percent2}%</span>
+    `;
+  } else {
+    pricesDiv.classList.add("knoww-multi-outcome");
+    pricesDiv.innerHTML = `
+      <div class="knoww-outcome-row">
+        <div class="knoww-outcome-indicator option-1"></div>
+        <span class="knoww-outcome-name">${escapeHtml(outcomes[0])}</span>
+        <span class="knoww-outcome-percent option-1">${percent1}%</span>
+      </div>
+      <div class="knoww-outcome-row">
+        <div class="knoww-outcome-indicator option-2"></div>
+        <span class="knoww-outcome-name">${escapeHtml(outcomes[1])}</span>
+        <span class="knoww-outcome-percent option-2">${percent2}%</span>
+      </div>
+    `;
+  }
+
+  content.appendChild(title);
+  content.appendChild(pricesDiv);
+
+  const arrow = document.createElement("div");
+  arrow.className = "knoww-notification-arrow";
+  arrow.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M5 12h14M12 5l7 7-7 7"/>
+    </svg>
+  `;
+
+  item.appendChild(icon);
+  item.appendChild(content);
+  item.appendChild(arrow);
+
+  item.onclick = () => {
+    const marketUrl = buildMarketUrl(market);
+    window.open(marketUrl, "_blank", "noopener,noreferrer");
+    window.KNOWW_PREFERENCES?.recordClick(market);
+  };
+
+  return item;
+}
+
+/**
+ * Pick MAX_TRENDING_DISPLAY random markets from the pool
+ * using a Fisher-Yates partial shuffle (no array copy needed).
+ */
+function pickRandomTrending(): Market[] {
+  if (trendingPool.length <= MAX_TRENDING_DISPLAY) return [...trendingPool];
+
+  const indices = Array.from({ length: trendingPool.length }, (_, i) => i);
+  for (
+    let i = indices.length - 1;
+    i > indices.length - 1 - MAX_TRENDING_DISPLAY;
+    i--
+  ) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+
+  return indices
+    .slice(indices.length - MAX_TRENDING_DISPLAY)
+    .map((i) => trendingPool[i]);
+}
+
+/**
+ * Shuffle the visible trending pair and refresh the notification stack.
+ */
+function shuffleTrending(): void {
+  const { log } = window.KNOWW_UTILS;
+
+  if (trendingPool.length <= MAX_TRENDING_DISPLAY) return;
+
+  visibleTrending = pickRandomTrending();
+  log(
+    `🔀 [Trending] Shuffled — now showing: ${visibleTrending.map((m) => m.title?.slice(0, 30)).join(", ")}`
+  );
+
+  const currentMarkets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+  updateNotificationStack(currentMarkets);
+}
+
+/**
+ * Fetch trending markets, cache the full pool, pick 2 to display,
+ * and start the 60-second shuffle interval.
+ */
+async function fetchAndCacheTrending(): Promise<void> {
+  const { log } = window.KNOWW_UTILS;
+
+  log("🔥 [Trending] Fetching trending markets...");
+
+  try {
+    const { fetchTrendingMarkets } = window.KNOWW_API;
+    const trending = await fetchTrendingMarkets();
+    trendingPool = trending;
+    visibleTrending = pickRandomTrending();
+    log(
+      `🔥 [Trending] Pool: ${trendingPool.length}, showing: ${visibleTrending.length}`
+    );
+
+    startTrendingShuffleTimer();
+
+    const currentMarkets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+    updateNotificationStack(currentMarkets);
+  } catch (e) {
+    log("🔥 [Trending] Failed to fetch trending markets:", e);
+  }
+}
+
+/**
+ * Start the 60-second shuffle interval.
+ */
+function startTrendingShuffleTimer(): void {
+  if (trendingShuffleTimer) return;
+  if (trendingPool.length <= MAX_TRENDING_DISPLAY) return;
+
+  trendingShuffleTimer = setInterval(
+    shuffleTrending,
+    TRENDING_SHUFFLE_INTERVAL_MS
+  );
+}
+
+/**
+ * Stop the shuffle interval.
+ */
+function stopTrendingShuffleTimer(): void {
+  if (trendingShuffleTimer) {
+    clearInterval(trendingShuffleTimer);
+    trendingShuffleTimer = null;
+  }
+}
+
+/**
+ * Append the trending section to the items container.
+ * Skips any trending market whose id already appears in the
+ * real-market set to avoid duplicates.
+ */
+function appendTrendingSection(
+  itemsContainer: HTMLElement,
+  realMarketIds: Set<string>,
+  animationIndex: number
+): void {
+  const trendingToShow = visibleTrending
+    .filter((m) => !realMarketIds.has(m.id))
+    .slice(0, MAX_TRENDING_DISPLAY);
+
+  if (trendingToShow.length === 0) return;
+
+  const header = document.createElement("div");
+  header.className = "knoww-stack-section-header knoww-trending-header";
+  header.innerHTML = `
+    <span class="knoww-stack-section-title">
+      <span class="knoww-trending-icon" aria-hidden="true">🔥</span>
+      Trending now
+    </span>
+    <span class="knoww-stack-section-count">${trendingToShow.length}</span>
+  `;
+  itemsContainer.appendChild(header);
+
+  trendingToShow.forEach((market, index) => {
+    const item = createTrendingMarketItem(market, animationIndex + index);
+    itemsContainer.appendChild(item);
+  });
+}
+
+/**
+ * Schedule the initial trending fetch.
+ * Fires after TRENDING_FETCH_DELAY_MS so the extension has time
+ * to discover feed-relevant markets first.
+ */
+function startTrendingFetchTimer(): void {
+  cancelTrendingFetchTimer();
+
+  trendingFetchTimer = setTimeout(() => {
+    trendingFetchTimer = null;
+    fetchAndCacheTrending();
+  }, TRENDING_FETCH_DELAY_MS);
+}
+
+/**
+ * Cancel the trending fetch timer and shuffle interval.
+ */
+function cancelTrendingFetchTimer(): void {
+  stopTrendingShuffleTimer();
+  if (trendingFetchTimer) {
+    clearTimeout(trendingFetchTimer);
+    trendingFetchTimer = null;
+  }
+}
+
+/**
+ * Update the notification stack with current markets
+ */
+function updateNotificationStack(markets: InjectedMarketEntry[]): void {
+  const { log } = window.KNOWW_UTILS;
+
+  log(`\n📋 [NotificationStack] ========== UPDATE START ==========`);
+  log(
+    `📋 [NotificationStack] Total markets in tracking array: ${markets.length}`
+  );
+
+  if (!notificationStackContainer) {
+    createNotificationStack();
+  }
+
+  const itemsContainer = document.getElementById("knoww-stack-items");
+  const emptyState = document.getElementById("knoww-stack-empty");
+
+  if (!itemsContainer || !emptyState) {
+    log(`⏳ [NotificationStack] Containers not ready, retrying in 100ms...`);
+    setTimeout(() => updateNotificationStack(markets), 100);
+    return;
+  }
+
+  // Deduplicate by market id (keep most recent entry)
+  const dedupedMarkets: InjectedMarketEntry[] = [];
+  const seenMarketIds = new Set<string>();
+  for (let i = markets.length - 1; i >= 0; i--) {
+    const entry = markets[i];
+    if (!entry?.market?.id || seenMarketIds.has(entry.market.id)) continue;
+    seenMarketIds.add(entry.market.id);
+    dedupedMarkets.push(entry);
+  }
+  dedupedMarkets.reverse();
+
+  log(
+    `🔍 [NotificationFilter] Checking availability for ${dedupedMarkets.length} unique markets:`
+  );
+
+  // Split into active (in DOM) vs recently scrolled out (not in DOM anymore)
+  const activeMarkets: InjectedMarketEntry[] = [];
+  const scrolledOutMarkets: InjectedMarketEntry[] = [];
+
+  dedupedMarkets.forEach((marketData) => {
+    const now = Date.now();
+    const isCardAvailable = isCardStillAvailable(
+      marketData.cardRef,
+      marketData.market.title
+    );
+    const isVisible =
+      typeof marketData.isInViewport === "boolean"
+        ? marketData.isInViewport
+        : true;
+    const lastVisibleAt = marketData.lastVisibleAt ?? marketData.timestamp;
+    const recentlyVisible = now - lastVisibleAt <= SCROLLED_OUT_GRACE_MS;
+
+    if (isCardAvailable && (isVisible || recentlyVisible)) {
+      activeMarkets.push(marketData);
+    } else {
+      scrolledOutMarkets.push(marketData);
+    }
+  });
+
+  // Keep bounded lists for readability
+  const recentActiveMarkets = activeMarkets
+    .slice(-MAX_ACTIVE_NOTIFICATION_ITEMS)
+    .reverse();
+  const recentScrolledMarkets = scrolledOutMarkets
+    .slice(-MAX_SCROLLED_NOTIFICATION_ITEMS)
+    .reverse();
+
+  const totalDisplayed =
+    recentActiveMarkets.length + recentScrolledMarkets.length;
+
+  if (totalDisplayed === 0 && visibleTrending.length === 0) {
+    log(`📭 [NotificationStack] No markets to show, displaying empty state`);
+    itemsContainer.innerHTML = "";
+    showNotificationContent("empty");
+    log(`📋 [NotificationStack] ========== UPDATE END ==========\n`);
+    return;
+  }
+
+  // Markets to display (real and/or trending)
+  itemsContainer.innerHTML = "";
+  showNotificationContent("items");
+
+  log(`\n📊 [NotificationFilter] SUMMARY:`);
+  log(`   • Total markets tracked: ${markets.length}`);
+  log(`   • Unique markets tracked: ${dedupedMarkets.length}`);
+  log(`   • Active markets: ${activeMarkets.length}`);
+  log(`   • Scrolled-out markets: ${scrolledOutMarkets.length}`);
+  log(`   • Displayed in stack: ${totalDisplayed}`);
+
+  let animationIndex = 0;
+
+  if (recentActiveMarkets.length > 0) {
+    itemsContainer.appendChild(
+      createNotificationSectionHeader("Active now", recentActiveMarkets.length)
+    );
+    recentActiveMarkets.forEach((marketData) => {
+      const item = createNotificationItem(marketData, animationIndex, true);
+      animationIndex++;
+      itemsContainer.appendChild(item);
+    });
+  }
+
+  if (recentScrolledMarkets.length > 0) {
+    itemsContainer.appendChild(
+      createNotificationSectionHeader(
+        "Recently scrolled out",
+        recentScrolledMarkets.length
+      )
+    );
+    recentScrolledMarkets.forEach((marketData) => {
+      const item = createNotificationItem(marketData, animationIndex, false);
+      animationIndex++;
+      itemsContainer.appendChild(item);
+    });
+  }
+
+  // Trending section — always appended at the bottom when available.
+  // Collect real market IDs so we can skip duplicates.
+  const realMarketIds = new Set<string>();
+  for (const entry of dedupedMarkets) {
+    realMarketIds.add(entry.market.id);
+  }
+  appendTrendingSection(itemsContainer, realMarketIds, animationIndex);
+
+  setTimeout(() => {
+    if (itemsContainer.scrollHeight > itemsContainer.clientHeight) {
+      itemsContainer.classList.add("knoww-has-overflow");
+    } else {
+      itemsContainer.classList.remove("knoww-has-overflow");
+    }
+  }, 50);
+
+  log(`📋 [NotificationStack] ========== UPDATE END ==========\n`);
+}
+
+/**
+ * Update the notification stack theme based on current platform theme
+ */
+function updateNotificationStackTheme(): void {
+  if (!notificationStackContainer) return;
+
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  if (!platform || typeof platform.detectTheme !== "function") return;
+
+  const theme = platform.detectTheme();
+  const platformName = window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown";
+
+  // Remove existing theme classes
+  notificationStackContainer.classList.remove(
+    "knoww-theme-dark",
+    "knoww-theme-light",
+    "knoww-theme-dim"
+  );
+
+  // Add the current theme class
+  notificationStackContainer.classList.add(`knoww-theme-${theme}`);
+
+  // Ensure the platform class is set
+  if (
+    !notificationStackContainer.classList.contains(
+      `knoww-notification-stack-${platformName}`
+    )
+  ) {
+    notificationStackContainer.classList.add(
+      `knoww-notification-stack-${platformName}`
+    );
+  }
+}
+
+/**
+ * Initialize the notification stack
+ */
+function initNotificationStack(): void {
+  const { log } = window.KNOWW_UTILS;
+
+  if (!notificationStackContainer) {
+    createNotificationStack();
+    log("Notification stack initialized");
+  }
+
+  // Fetch trending markets after a short delay so they appear in
+  // the notification stack alongside (or in place of) feed-discovered markets.
+  startTrendingFetchTimer();
+  log("Trending markets fetch scheduled (10s)");
+
+  // Update theme immediately after creation (DOM might be more ready now)
+  setTimeout(() => {
+    updateNotificationStackTheme();
+    log("Notification stack theme updated");
+  }, 100);
+
+  // Also update theme after a longer delay to catch late theme detection
+  setTimeout(() => {
+    updateNotificationStackTheme();
+  }, 1000);
+
+  // Guard: only attach global listeners/observers once to prevent accumulation on re-init
+  if (!notificationStackListenersAttached) {
+    notificationStackListenersAttached = true;
+
+    // PERFORMANCE: Debounce theme observer — theme changes are rare,
+    // but body class/style mutations fire frequently on Twitter.
+    let themeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedThemeUpdate = (): void => {
+      if (themeDebounceTimer) clearTimeout(themeDebounceTimer);
+      themeDebounceTimer = setTimeout(updateNotificationStackTheme, 500);
+    };
+
+    // Watch for theme changes via MutationObserver on body/html
+    const observer = new MutationObserver(debouncedThemeUpdate);
+
+    // Observe body for class/style changes (Twitter changes body background for themes)
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
+
+    // Also observe html element
+    if (document.documentElement) {
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+    }
+
+    // Watch for prefers-color-scheme changes
+    if (window.matchMedia) {
+      window
+        .matchMedia("(prefers-color-scheme: dark)")
+        .addEventListener("change", debouncedThemeUpdate);
+    }
+
+    // ============================================
+    // DRAGGABLE NOTIFICATION STACK (all platforms)
+    // ============================================
+    setupDraggable(log);
+  }
+}
+
+// ============================================
+// DRAGGABLE NOTIFICATION STACK
+// Makes the notification stack draggable via its header
+// ============================================
+
+/**
+ * Make the notification stack draggable via its header.
+ */
+function setupDraggable(log: (...args: unknown[]) => void): void {
+  if (!notificationStackContainer) return;
+
+  const header = notificationStackContainer.querySelector(
+    ".knoww-stack-header"
+  ) as HTMLElement | null;
+  if (!header) return;
+
+  let isDragging = false;
+  let dragOffsetX = 0;
+  let dragOffsetY = 0;
+
+  header.addEventListener("mousedown", (e: MouseEvent) => {
+    if (!notificationStackContainer || e.button !== 0) return;
+
+    // Don't drag if clicking on a button inside the header
+    if ((e.target as Element).closest("button")) return;
+
+    isDragging = true;
+    dragOffsetX =
+      e.clientX - notificationStackContainer.getBoundingClientRect().left;
+    dragOffsetY =
+      e.clientY - notificationStackContainer.getBoundingClientRect().top;
+
+    notificationStackContainer.classList.add("knoww-dragging");
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e: MouseEvent) => {
+    if (!isDragging || !notificationStackContainer) return;
+
+    const newLeft = e.clientX - dragOffsetX;
+    const newTop = e.clientY - dragOffsetY;
+
+    // Clamp to viewport
+    const rect = notificationStackContainer.getBoundingClientRect();
+    const maxLeft = window.innerWidth - rect.width;
+    const maxTop = window.innerHeight - rect.height;
+
+    // Use setProperty with 'important' to override the !important in CSS
+    notificationStackContainer.style.setProperty(
+      "left",
+      `${Math.max(0, Math.min(newLeft, maxLeft))}px`,
+      "important"
+    );
+    notificationStackContainer.style.setProperty(
+      "top",
+      `${Math.max(0, Math.min(newTop, maxTop))}px`,
+      "important"
+    );
+    notificationStackContainer.style.setProperty("right", "auto", "important");
+
+    e.preventDefault();
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!isDragging || !notificationStackContainer) return;
+    isDragging = false;
+    notificationStackContainer.classList.remove("knoww-dragging");
+  });
+
+  log("Draggable behavior initialized on notification stack header");
+}
+
+// Export UI functions
+export const KNOWW_UI = {
+  createInlineMarketCard,
+  getMarketEmoji,
+  buildMarketUrl,
+  buildKnowwUrl,
+  buildKnowwUrlForOutcome,
+  buildKalshiUrl,
+  createNotificationStack,
+  createNotificationItem,
+  updateNotificationStack,
+  scrollToMarket,
+  initNotificationStack,
+  fetchAndCacheTrending,
+  cancelTrendingFetchTimer,
+  SOURCE_CONFIG,
+};
+
+window.KNOWW_UI = KNOWW_UI;

@@ -1,14 +1,37 @@
 #!/bin/sh
 
-echo "🔍 Running pre-push checks..."
+echo "Running pre-push checks..."
 
-# Run build
-echo "🏗️  Running build check..."
-pnpm build
+echo "Type-checking all packages..."
+pnpm typecheck
 if [ $? -ne 0 ]; then
-  echo "❌ Build failed. Please fix the errors before pushing."
+  echo "TypeScript check failed. Please fix type errors before pushing."
   exit 1
 fi
-echo "✅ Build passed!"
+echo "TypeScript check passed!"
 
-echo "🎉 Pre-push checks passed! Proceeding with push..."
+echo "Running linter..."
+pnpm lint --diagnostic-level=error
+if [ $? -ne 0 ]; then
+  echo "Lint check failed. Please fix lint errors before pushing."
+  exit 1
+fi
+echo "Lint check passed!"
+
+echo "Building web app..."
+pnpm build:web
+if [ $? -ne 0 ]; then
+  echo "Web build failed. Please fix the errors before pushing."
+  exit 1
+fi
+echo "Web build passed!"
+
+echo "Building extension..."
+pnpm build:ext
+if [ $? -ne 0 ]; then
+  echo "Extension build failed. Please fix the errors before pushing."
+  exit 1
+fi
+echo "Extension build passed!"
+
+echo "Pre-push checks passed! Proceeding with push..."

@@ -1,7 +1,5 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
-/node_modules
+node_modules/
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -10,11 +8,12 @@
 /coverage
 
 # next.js
-/.next/
+.next/
 /out/
 
 # production
 /build
+dist/
 
 # misc
 .DS_Store
@@ -24,11 +23,15 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 .cursor/
 
 # local env files
+.env
 .env*.local
 .env.*
+!.env.example
+!.dev.vars.example
 
 # vercel
 .vercel
@@ -37,15 +40,21 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# OpenNext
-/.open-next
-
-# wrangler files
-.wrangler
+# OpenNext / Cloudflare
+.open-next/
+.wrangler/
 .dev.vars*
 !.dev.vars.example
-!.env.example
+
+# extension build
+*.zip
+
+# misc build
+artifacts/
+output/
+test-results/
+tmp/
 lighthouse-output.json
 lighthouse-report*
-
-artifacts/
+Auth-plan.md
+CHROME_WEB_STORE_PRIVACY_PRACTICES.md

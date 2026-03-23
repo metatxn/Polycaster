@@ -6,6 +6,30 @@ import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
+const ALLOWED_HOSTS = new Set([
+  "twitter.com",
+  "www.twitter.com",
+  "mobile.twitter.com",
+  "x.com",
+  "www.x.com",
+  "linkedin.com",
+  "www.linkedin.com",
+  "reddit.com",
+  "www.reddit.com",
+  "new.reddit.com",
+  "old.reddit.com",
+]);
+
+function isSupportedSocialHost(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const { hostname } = new URL(url);
+    return ALLOWED_HOSTS.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
 // Toggle Switch Component
 interface ToggleProps {
   id: string;
@@ -128,14 +152,7 @@ function OptionsApp() {
       // Notify content scripts
       chrome.tabs.query({}, (tabs) => {
         for (const tab of tabs) {
-          if (
-            tab.url &&
-            tab.id &&
-            (tab.url.includes("twitter.com") ||
-              tab.url.includes("x.com") ||
-              tab.url.includes("linkedin.com") ||
-              tab.url.includes("reddit.com"))
-          ) {
+          if (tab.id && isSupportedSocialHost(tab.url)) {
             chrome.tabs.sendMessage(
               tab.id,
               {
@@ -191,6 +208,7 @@ function OptionsApp() {
       {/* Header */}
       <div className="header">
         <div className="logo">
+          {/* biome-ignore lint/performance/noImgElement: Not a Next.js app */}
           <img src="icons/icon-256.png" alt="Knoww Logo" />
         </div>
         <h1>Knoww Settings</h1>
@@ -453,14 +471,7 @@ function OptionsApp() {
                   showStatus("Personalization data cleared!");
                   chrome.tabs.query({}, (tabs) => {
                     for (const tab of tabs) {
-                      if (
-                        tab.url &&
-                        tab.id &&
-                        (tab.url.includes("twitter.com") ||
-                          tab.url.includes("x.com") ||
-                          tab.url.includes("linkedin.com") ||
-                          tab.url.includes("reddit.com"))
-                      ) {
+                      if (tab.id && isSupportedSocialHost(tab.url)) {
                         chrome.tabs.sendMessage(
                           tab.id,
                           { type: "KNOWW_PREFERENCES_RESET" },

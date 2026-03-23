@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.4",
+  "version": "2.5.8",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
@@ -8,7 +8,10 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
-    "format": "biome format --write"
+    "format": "biome format --write",
+    "version:bump": "node scripts/bump-version.mjs",
+    "zip": "rm -f knoww-extension.zip && cd dist && zip -r ../knoww-extension.zip . -x '.*' '*.LICENSE.txt'",
+    "release": "node scripts/bump-version.mjs && pnpm run build && pnpm run zip"
   },
   "dependencies": {
     "@knoww/shared-types": "workspace:*",

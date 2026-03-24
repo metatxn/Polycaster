@@ -834,6 +834,8 @@ interface RawPolymarketEvent {
     clobTokenIds?: string;
     slug?: string;
     active?: boolean;
+    closed?: boolean;
+    archived?: boolean;
     volume?: string | number;
   }>;
   image?: string;

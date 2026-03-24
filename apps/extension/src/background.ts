@@ -180,6 +180,7 @@ chrome.runtime.onMessage.addListener(
       type?: string;
       tabId?: number;
       id?: string;
+      url?: string;
       method?: string;
       params?: unknown[];
       result?: unknown;
@@ -379,4 +380,10 @@ chrome.runtime.onMessage.addListener(
 
 chrome.action.onClicked.addListener(() => {
   chrome.runtime.openOptionsPage();
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
+    chrome.runtime.openOptionsPage();
+  }
 });

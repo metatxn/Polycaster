@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Knoww - Prediction Markets for Social Media",
-  "version": "2.5.8",
+  "version": "2.5.10",
   "description": "Discover and navigate prediction markets",
   "icons": {
     "16": "icons/icon-16.png",

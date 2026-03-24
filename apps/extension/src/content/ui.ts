@@ -196,6 +196,7 @@ interface ParsedOutcomeData {
   outcomes: string[];
   prices: number[];
   multiOutcomeData: MultiOutcomeItem[];
+  firstActiveMarketIndex: number;
 }
 
 /**
@@ -226,6 +227,7 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
     outcomes: ["Yes", "No"],
     prices: [0.5, 0.5],
     multiOutcomeData: [],
+    firstActiveMarketIndex: 0,
   };
 
   if (!market.markets || market.markets.length <= 1) {
@@ -252,21 +254,35 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
       : m.question;
   }
 
-  const marketsWithLabel = market.markets.filter((m) => getOutcomeLabel(m));
+  const activeMarketsWithLabel = market.markets.filter(
+    (m) =>
+      getOutcomeLabel(m) &&
+      m.active !== false &&
+      !(m as { closed?: boolean }).closed
+  );
 
-  if (marketsWithLabel.length <= 1) {
+  if (activeMarketsWithLabel.length === 0) {
     return result;
   }
 
-  // This is a multi-outcome event
-  result.isMultiOutcome = true;
+  const firstActiveIdx = market.markets.findIndex(
+    (m) =>
+      getOutcomeLabel(m) &&
+      m.active !== false &&
+      !(m as { closed?: boolean }).closed
+  );
+  if (firstActiveIdx >= 0) {
+    result.firstActiveMarketIndex = firstActiveIdx;
+  }
 
-  // Extract outcome data from each market
+  result.isMultiOutcome = activeMarketsWithLabel.length >= 2;
+
   for (let i = 0; i < market.markets.length; i++) {
     const m = market.markets[i];
     const label = getOutcomeLabel(m);
     if (label) {
-      if (m.active === false) continue;
+      if (m.active === false || (m as { closed?: boolean }).closed === true)
+        continue;
 
       const name = label;
       if (name.startsWith("Individual ")) continue;
@@ -302,19 +318,72 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
   // Sort by price descending (highest probability first)
   result.multiOutcomeData.sort((a, b) => b.price - a.price);
 
-  // Use top 2 outcomes for display
-  if (result.multiOutcomeData.length >= 2) {
-    result.outcomes = [
-      result.multiOutcomeData[0].name,
-      result.multiOutcomeData[1].name,
-    ];
-    result.prices = [
-      result.multiOutcomeData[0].price,
-      result.multiOutcomeData[1].price,
-    ];
+  if (result.multiOutcomeData.length <= 1) {
+    result.isMultiOutcome = false;
+    result.multiOutcomeData = [];
+    return result;
   }
 
+  result.outcomes = result.multiOutcomeData.map((d) => d.name);
+  result.prices = result.multiOutcomeData.map((d) => d.price);
+
   return result;
+}
+
+const OPTION_INDICATOR_CLASSES = [
+  "option-1",
+  "option-2",
+  "option-3",
+  "option-4",
+  "option-5",
+];
+
+/**
+ * Render outcome prices into a container element.
+ * Handles any count: 0 (empty), 1 (single row), 2 binary Yes/No,
+ * 2 multi-outcome, or N outcomes.
+ * @param maxItems - cap the number of displayed outcomes (0 = no limit)
+ */
+function renderOutcomePrices(
+  container: HTMLElement,
+  outcomes: string[],
+  priceData: number[],
+  maxItems = 0
+): void {
+  if (outcomes.length === 0) return;
+
+  const displayOutcomes = maxItems > 0 ? outcomes.slice(0, maxItems) : outcomes;
+  const displayPrices = maxItems > 0 ? priceData.slice(0, maxItems) : priceData;
+
+  const isBinary =
+    displayOutcomes.length === 2 &&
+    displayOutcomes[0].toLowerCase() === "yes" &&
+    displayOutcomes[1].toLowerCase() === "no";
+
+  if (isBinary) {
+    const p1 = Math.round(displayPrices[0] * 100);
+    const p2 = Math.round((displayPrices[1] ?? 1 - displayPrices[0]) * 100);
+    container.innerHTML = `
+      <span class="knoww-price-yes">${escapeHtml(displayOutcomes[0])} ${p1}%</span>
+      <span class="knoww-price-no">${escapeHtml(displayOutcomes[1])} ${p2}%</span>
+    `;
+    return;
+  }
+
+  container.classList.add("knoww-multi-outcome");
+  const rows: string[] = [];
+  for (let i = 0; i < displayOutcomes.length; i++) {
+    const cls = OPTION_INDICATOR_CLASSES[i % OPTION_INDICATOR_CLASSES.length];
+    const pct = Math.round((displayPrices[i] ?? 0.5) * 100);
+    rows.push(`
+      <div class="knoww-outcome-row">
+        <div class="knoww-outcome-indicator ${cls}"></div>
+        <span class="knoww-outcome-name">${escapeHtml(displayOutcomes[i])}</span>
+        <span class="knoww-outcome-percent ${cls}">${pct}%</span>
+      </div>
+    `);
+  }
+  container.innerHTML = rows.join("");
 }
 
 /**
@@ -437,7 +506,8 @@ function createInlineMarketCard(
 
   // If not a multi-outcome event, try standard parsing
   if (!isMultiOutcomeEvent && market.markets && market.markets.length > 0) {
-    const firstMarket = market.markets[0];
+    const firstMarket =
+      market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
 
     if (firstMarket.outcomePrices) {
       try {
@@ -574,9 +644,57 @@ function createInlineMarketCard(
   const titleSection = document.createElement("div");
   titleSection.className = "knoww-card-title-section";
 
+  const titleRow = document.createElement("div");
+  titleRow.className = "knoww-card-title-row";
+  titleRow.style.display = "flex";
+  titleRow.style.justifyContent = "space-between";
+  titleRow.style.alignItems = "flex-start";
+  titleRow.style.gap = "8px";
+
   const title = document.createElement("div");
   title.className = "knoww-card-title";
   title.textContent = market.title || "Untitled Market";
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.className = "knoww-card-dismiss-btn";
+  dismissBtn.innerHTML = "✕";
+  dismissBtn.title = "Dismiss this market";
+  dismissBtn.style.background = "none";
+  dismissBtn.style.border = "none";
+  dismissBtn.style.color = "var(--knoww-text-muted, #888)";
+  dismissBtn.style.cursor = "pointer";
+  dismissBtn.style.padding = "2px 4px";
+  dismissBtn.style.fontSize = "14px";
+  dismissBtn.style.lineHeight = "1";
+  dismissBtn.style.opacity = "0.5";
+  dismissBtn.style.transition = "opacity 0.2s";
+  dismissBtn.onmouseenter = () => (dismissBtn.style.opacity = "1");
+  dismissBtn.onmouseleave = () => (dismissBtn.style.opacity = "0.5");
+  dismissBtn.onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    TradingPanel.hide();
+
+    card.style.height = `${card.offsetHeight}px`;
+    card.style.overflow = "hidden";
+    card.style.transition = "all 0.3s ease-out";
+
+    void card.offsetHeight;
+
+    card.style.height = "0px";
+    card.style.opacity = "0";
+    card.style.margin = "0";
+    card.style.padding = "0";
+    card.style.border = "none";
+
+    setTimeout(() => {
+      card.remove();
+    }, 300);
+  };
+
+  titleRow.appendChild(title);
+  titleRow.appendChild(dismissBtn);
 
   const volume = document.createElement("div");
   volume.className = "knoww-card-volume";
@@ -590,7 +708,7 @@ function createInlineMarketCard(
     volume.innerHTML = `<span>$</span> ${volumeFormatted} 24h vol`;
   }
 
-  titleSection.appendChild(title);
+  titleSection.appendChild(titleRow);
   titleSection.appendChild(volume);
 
   // Context line — shows why this market was matched to the post
@@ -609,84 +727,59 @@ function createInlineMarketCard(
   const outcomesDiv = document.createElement("div");
   outcomesDiv.className = "knoww-card-outcomes";
 
-  if (outcomes.length >= 2 && prices.length >= 2) {
+  {
     const isBinaryMarket =
       !isMultiOutcomeEvent &&
+      outcomes.length === 2 &&
       outcomes[0].toLowerCase() === "yes" &&
       outcomes[1].toLowerCase() === "no";
 
-    const btn1 = document.createElement("button");
-    btn1.className = `knoww-outcome-btn ${isBinaryMarket ? "yes" : "option-1"}`;
-    const percent1 = Math.round(prices[0] * 100);
-    const label1 = document.createElement("span");
-    label1.className = "knoww-outcome-label";
-    label1.textContent = outcomes[0];
-    const price1 = document.createElement("span");
-    price1.className = "knoww-outcome-price";
-    price1.textContent = `${percent1}%`;
-    btn1.appendChild(label1);
-    btn1.appendChild(price1);
-    btn1.onclick = (e) => {
-      e.stopPropagation();
+    const displayCount = Math.min(outcomes.length, 2);
+    const binaryClasses = ["yes", "no"];
+    const multiClasses = ["option-1", "option-2"];
 
-      if (marketSource === "kalshi") {
-        const url = buildKalshiUrl(market);
-        log(`Opening Kalshi (${outcomes[0]}):`, url);
-        window.open(url, "_blank", "noopener,noreferrer");
+    for (let idx = 0; idx < displayCount; idx++) {
+      const btn = document.createElement("button");
+      btn.className = `knoww-outcome-btn ${isBinaryMarket ? binaryClasses[idx] : multiClasses[idx] || `option-${idx + 1}`}`;
+      if (displayCount === 1) btn.style.flex = "1";
+      const percent = Math.round(prices[idx] * 100);
+      const label = document.createElement("span");
+      label.className = "knoww-outcome-label";
+      label.textContent = outcomes[idx];
+      const price = document.createElement("span");
+      price.className = "knoww-outcome-price";
+      price.textContent = `${percent}%`;
+      btn.appendChild(label);
+      btn.appendChild(price);
+
+      const capturedIdx = idx;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+
+        if (marketSource === "kalshi") {
+          const url = buildKalshiUrl(market);
+          log(`Opening Kalshi (${outcomes[capturedIdx]}):`, url);
+          window.open(url, "_blank", "noopener,noreferrer");
+          window.KNOWW_PREFERENCES?.recordClick(market);
+          return;
+        }
+
+        const isMulti =
+          isMultiOutcomeEvent && multiOutcomeData.length > capturedIdx;
+        resolveTokenAndShowPanel(
+          market,
+          outcomes[capturedIdx],
+          capturedIdx,
+          prices[capturedIdx],
+          btn,
+          isMulti,
+          isMulti ? multiOutcomeData[capturedIdx].marketIndex : undefined
+        );
         window.KNOWW_PREFERENCES?.recordClick(market);
-        return;
-      }
+      };
 
-      const isMulti = isMultiOutcomeEvent && multiOutcomeData.length > 0;
-      resolveTokenAndShowPanel(
-        market,
-        outcomes[0],
-        0,
-        prices[0],
-        btn1,
-        isMulti,
-        isMulti ? multiOutcomeData[0].marketIndex : undefined
-      );
-      window.KNOWW_PREFERENCES?.recordClick(market);
-    };
-
-    const btn2 = document.createElement("button");
-    btn2.className = `knoww-outcome-btn ${isBinaryMarket ? "no" : "option-2"}`;
-    const percent2 = Math.round(prices[1] * 100);
-    const label2 = document.createElement("span");
-    label2.className = "knoww-outcome-label";
-    label2.textContent = outcomes[1];
-    const price2 = document.createElement("span");
-    price2.className = "knoww-outcome-price";
-    price2.textContent = `${percent2}%`;
-    btn2.appendChild(label2);
-    btn2.appendChild(price2);
-    btn2.onclick = (e) => {
-      e.stopPropagation();
-
-      if (marketSource === "kalshi") {
-        const url = buildKalshiUrl(market);
-        log(`Opening Kalshi (${outcomes[1]}):`, url);
-        window.open(url, "_blank", "noopener,noreferrer");
-        window.KNOWW_PREFERENCES?.recordClick(market);
-        return;
-      }
-
-      const isMulti = isMultiOutcomeEvent && multiOutcomeData.length > 1;
-      resolveTokenAndShowPanel(
-        market,
-        outcomes[1],
-        1,
-        prices[1],
-        btn2,
-        isMulti,
-        isMulti ? multiOutcomeData[1].marketIndex : undefined
-      );
-      window.KNOWW_PREFERENCES?.recordClick(market);
-    };
-
-    outcomesDiv.appendChild(btn1);
-    outcomesDiv.appendChild(btn2);
+      outcomesDiv.appendChild(btn);
+    }
   }
 
   // Toggle options button (for multi-option markets)
@@ -1360,7 +1453,8 @@ function createSearchResultItem(market: Market): HTMLElement {
   let priceData: number[] = parsed.prices;
 
   if (!parsed.isMultiOutcome && market.markets && market.markets.length > 0) {
-    const firstMarket = market.markets[0];
+    const firstMarket =
+      market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
     if (firstMarket.outcomePrices) {
       try {
         const parsedPrices =
@@ -1398,32 +1492,8 @@ function createSearchResultItem(market: Market): HTMLElement {
 
   const prices = document.createElement("div");
   prices.className = "knoww-search-result-prices";
-  const percent1 = Math.round((priceData[0] || 0.5) * 100);
-  const percent2 = Math.round((priceData[1] || 0.5) * 100);
 
-  const isBinary =
-    outcomes[0].toLowerCase() === "yes" && outcomes[1].toLowerCase() === "no";
-
-  if (isBinary) {
-    prices.innerHTML = `
-      <span class="knoww-price-yes">${escapeHtml(outcomes[0])} ${percent1}%</span>
-      <span class="knoww-price-no">${escapeHtml(outcomes[1] || "No")} ${percent2}%</span>
-    `;
-  } else {
-    prices.classList.add("knoww-multi-outcome");
-    prices.innerHTML = `
-      <div class="knoww-outcome-row">
-        <div class="knoww-outcome-indicator option-1"></div>
-        <span class="knoww-outcome-name">${escapeHtml(outcomes[0])}</span>
-        <span class="knoww-outcome-percent option-1">${percent1}%</span>
-      </div>
-      <div class="knoww-outcome-row">
-        <div class="knoww-outcome-indicator option-2"></div>
-        <span class="knoww-outcome-name">${escapeHtml(outcomes[1] || "No")}</span>
-        <span class="knoww-outcome-percent option-2">${percent2}%</span>
-      </div>
-    `;
-  }
+  renderOutcomePrices(prices, outcomes, priceData, 2);
 
   content.appendChild(title);
   content.appendChild(prices);
@@ -1533,7 +1603,8 @@ function createNotificationItem(
   const isMultiOutcome = parsed.isMultiOutcome;
 
   if (!isMultiOutcome && market.markets && market.markets.length > 0) {
-    const firstMarket = market.markets[0];
+    const firstMarket =
+      market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
 
     if (firstMarket.outcomePrices) {
       try {
@@ -1566,10 +1637,6 @@ function createNotificationItem(
       }
     }
 
-    if (priceData.length >= 2 && outcomes.length === 0) {
-      outcomes = ["Yes", "No"];
-    }
-
     if (outcomes.length === 0 || priceData.length === 0) {
       outcomes = ["Yes", "No"];
       priceData = [0.5, 0.5];
@@ -1581,36 +1648,7 @@ function createNotificationItem(
     priceData = [0.5, 0.5];
   }
 
-  while (priceData.length < 2) {
-    priceData.push(0.5);
-  }
-
-  const percent1 = Math.round(priceData[0] * 100);
-  const percent2 = Math.round(priceData[1] * 100);
-
-  const isBinary =
-    outcomes[0].toLowerCase() === "yes" && outcomes[1].toLowerCase() === "no";
-
-  if (isBinary) {
-    pricesDiv.innerHTML = `
-      <span class="knoww-price-yes">${escapeHtml(outcomes[0])} ${percent1}%</span>
-      <span class="knoww-price-no">${escapeHtml(outcomes[1])} ${percent2}%</span>
-    `;
-  } else {
-    pricesDiv.classList.add("knoww-multi-outcome");
-    pricesDiv.innerHTML = `
-      <div class="knoww-outcome-row">
-        <div class="knoww-outcome-indicator option-1"></div>
-        <span class="knoww-outcome-name">${escapeHtml(outcomes[0])}</span>
-        <span class="knoww-outcome-percent option-1">${percent1}%</span>
-      </div>
-      <div class="knoww-outcome-row">
-        <div class="knoww-outcome-indicator option-2"></div>
-        <span class="knoww-outcome-name">${escapeHtml(outcomes[1])}</span>
-        <span class="knoww-outcome-percent option-2">${percent2}%</span>
-      </div>
-    `;
-  }
+  renderOutcomePrices(pricesDiv, outcomes, priceData, 2);
 
   content.appendChild(title);
   content.appendChild(pricesDiv);
@@ -1846,7 +1884,8 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
   let priceData: number[] = parsed.prices;
 
   if (!parsed.isMultiOutcome && market.markets && market.markets.length > 0) {
-    const firstMarket = market.markets[0];
+    const firstMarket =
+      market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
     if (firstMarket.outcomePrices) {
       try {
         const parsedPrices =
@@ -1876,9 +1915,6 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
         // Keep default
       }
     }
-    if (priceData.length >= 2 && outcomes.length === 0) {
-      outcomes = ["Yes", "No"];
-    }
     if (outcomes.length === 0 || priceData.length === 0) {
       outcomes = ["Yes", "No"];
       priceData = [0.5, 0.5];
@@ -1889,35 +1925,8 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
     outcomes = ["Yes", "No"];
     priceData = [0.5, 0.5];
   }
-  while (priceData.length < 2) {
-    priceData.push(0.5);
-  }
 
-  const percent1 = Math.round(priceData[0] * 100);
-  const percent2 = Math.round(priceData[1] * 100);
-  const isBinary =
-    outcomes[0].toLowerCase() === "yes" && outcomes[1].toLowerCase() === "no";
-
-  if (isBinary) {
-    pricesDiv.innerHTML = `
-      <span class="knoww-price-yes">${escapeHtml(outcomes[0])} ${percent1}%</span>
-      <span class="knoww-price-no">${escapeHtml(outcomes[1])} ${percent2}%</span>
-    `;
-  } else {
-    pricesDiv.classList.add("knoww-multi-outcome");
-    pricesDiv.innerHTML = `
-      <div class="knoww-outcome-row">
-        <div class="knoww-outcome-indicator option-1"></div>
-        <span class="knoww-outcome-name">${escapeHtml(outcomes[0])}</span>
-        <span class="knoww-outcome-percent option-1">${percent1}%</span>
-      </div>
-      <div class="knoww-outcome-row">
-        <div class="knoww-outcome-indicator option-2"></div>
-        <span class="knoww-outcome-name">${escapeHtml(outcomes[1])}</span>
-        <span class="knoww-outcome-percent option-2">${percent2}%</span>
-      </div>
-    `;
-  }
+  renderOutcomePrices(pricesDiv, outcomes, priceData, 2);
 
   content.appendChild(title);
   content.appendChild(pricesDiv);

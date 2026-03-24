@@ -107,6 +107,7 @@ function OptionsApp() {
   const [status, setStatus] = useState<string>("");
   const [statusVisible, setStatusVisible] = useState(false);
   const [version] = useState(() => chrome.runtime.getManifest().version);
+  const [hasToken, setHasToken] = useState(false);
 
   // Load settings on mount
   useEffect(() => {
@@ -135,6 +136,13 @@ function OptionsApp() {
         setSettings(loadedSettings);
       }
     );
+
+    // Check if user is logged in
+    chrome.runtime.sendMessage({ type: "auth:get-token" }, (response) => {
+      if (response?.ok && response.data) {
+        setHasToken(true);
+      }
+    });
   }, []);
 
   // Show status message
@@ -202,6 +210,21 @@ function OptionsApp() {
     },
     []
   );
+
+  const handleDisconnectWallet = useCallback(() => {
+    if (
+      confirm(
+        "Are you sure you want to disconnect your wallet? You will need to sign in again to trade."
+      )
+    ) {
+      chrome.runtime.sendMessage({ type: "auth:clear-token" }, (response) => {
+        if (response?.ok) {
+          setHasToken(false);
+          showStatus("Wallet disconnected");
+        }
+      });
+    }
+  }, [showStatus]);
 
   return (
     <div className="container">
@@ -293,7 +316,13 @@ function OptionsApp() {
       <Section title="Display Settings">
         <SettingRow
           label="Relevance Threshold"
-          description="How closely a market must match the post content (lower = more cards)"
+          description={
+            settings.relevanceThreshold <= 0.3
+              ? "Shows more markets, but some might be loosely related to the post."
+              : settings.relevanceThreshold >= 0.6
+                ? "Shows fewer markets, but they will be highly accurate matches."
+                : "Balanced: Shows a good mix of relevant markets."
+          }
         >
           <div className="range-container">
             <input
@@ -322,7 +351,13 @@ function OptionsApp() {
 
         <SettingRow
           label="AI Confidence Threshold"
-          description="Minimum AI confidence to search for markets (lower = more posts analyzed, may be less accurate)"
+          description={
+            settings.aiConfidenceThreshold <= 0.15
+              ? "Analyzes almost all posts, even if they don't seem like news."
+              : settings.aiConfidenceThreshold >= 0.35
+                ? "Only analyzes posts that clearly sound like news or predictions."
+                : "Balanced: Analyzes posts that are likely to have relevant markets."
+          }
         >
           <div className="range-container">
             <input
@@ -411,6 +446,33 @@ function OptionsApp() {
               setSettings((prev) => ({ ...prev, personalizationEnabled: v }))
             }
           />
+        </SettingRow>
+      </Section>
+
+      {/* Wallet & Security Section */}
+      <Section title="Wallet & Security">
+        <SettingRow
+          label="Trading Session"
+          description={
+            hasToken
+              ? "Your wallet is currently connected for trading."
+              : "No wallet connected. Connect via the inline trading panel on any supported site."
+          }
+        >
+          {hasToken ? (
+            <button
+              type="button"
+              className="reset-link"
+              style={{ marginTop: 0, fontSize: "13px", color: "#e91e63" }}
+              onClick={handleDisconnectWallet}
+            >
+              Disconnect
+            </button>
+          ) : (
+            <span style={{ fontSize: "13px", color: "#888" }}>
+              Disconnected
+            </span>
+          )}
         </SettingRow>
       </Section>
 

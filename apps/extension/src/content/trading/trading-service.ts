@@ -132,11 +132,12 @@ export const TradingService = {
     };
   },
 
-  async connectWallet(): Promise<void> {
+  async connectWallet(walletUuid?: string): Promise<void> {
     update({ state: "connecting", error: null });
 
     try {
-      const accounts = await WalletBridge.connect();
+      const accounts = await WalletBridge.connect(walletUuid);
+
       if (!accounts || accounts.length === 0) {
         update({ state: "error", error: "No accounts returned" });
         return;

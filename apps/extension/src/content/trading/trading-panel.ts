@@ -121,6 +121,8 @@ let depositError: string | null = null;
 let selectedOutcome: "yes" | "no" = "yes";
 let yesPrice = 0;
 
+let sessionRestoreAttempted = false;
+
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 
 function getTickSize(): number {
@@ -371,7 +373,8 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
   WalletBridge.init();
 
-  if (!TradingService.getContext().address) {
+  if (!TradingService.getContext().address && !sessionRestoreAttempted) {
+    sessionRestoreAttempted = true;
     WalletBridge.getAccounts()
       .then((accounts) => {
         if (accounts.length > 0) TradingService.connectWallet();
@@ -635,22 +638,70 @@ function addWalletBar(
   p.appendChild(portfolio);
 }
 
+let disconnectedUnsub: (() => void) | null = null;
+
 function addDisconnected(p: HTMLElement): void {
+  if (disconnectedUnsub) {
+    disconnectedUnsub();
+    disconnectedUnsub = null;
+  }
+
+  const existing = p.querySelector(".knoww-tp-connect-section");
+  if (existing) existing.remove();
+
   const s = el("div", "knoww-tp-connect-section");
   s.appendChild(elHtml("div", "knoww-tp-wallet-icon", I.wallet));
   s.appendChild(
     el("div", "knoww-tp-connect-msg", "Connect your wallet to start trading")
   );
-  const btn = elHtml(
-    "button",
-    "knoww-tp-btn-connect",
-    `${I.wallet} Connect Wallet`
-  );
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    TradingService.connectWallet();
-  };
-  s.appendChild(btn);
+
+  const discovered = WalletBridge.getDiscoveredWallets();
+
+  if (discovered.length > 1) {
+    const list = el("div", "knoww-tp-wallet-list");
+    for (const w of discovered) {
+      const item = document.createElement("button");
+      item.className = "knoww-tp-wallet-item";
+      item.innerHTML = `<img src="${escapeHtml(w.icon)}" alt="" class="knoww-tp-wallet-item-icon" /><span>${escapeHtml(w.name)}</span>`;
+      item.onclick = (e) => {
+        e.stopPropagation();
+        item.style.opacity = "0.6";
+        item.style.pointerEvents = "none";
+        TradingService.connectWallet(w.uuid);
+      };
+      list.appendChild(item);
+    }
+    s.appendChild(list);
+  } else {
+    const btn = elHtml(
+      "button",
+      "knoww-tp-btn-connect",
+      `${I.wallet} Connect Wallet`
+    );
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      btn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span> Connecting…`;
+      btn.style.pointerEvents = "none";
+      btn.style.opacity = "0.7";
+
+      window.postMessage({ type: "KNOWW_LIST_WALLETS" }, "*");
+
+      setTimeout(() => {
+        const fresh = WalletBridge.getDiscoveredWallets();
+        TradingService.connectWallet(
+          fresh.length >= 1 ? fresh[0].uuid : undefined
+        );
+      }, 300);
+    };
+    s.appendChild(btn);
+  }
+
+  disconnectedUnsub = WalletBridge.onWalletsChanged((newWallets) => {
+    if (newWallets.length > 0 && s.isConnected) {
+      addDisconnected(p);
+    }
+  });
+
   p.appendChild(s);
 }
 
@@ -737,7 +788,7 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
       const splitBtn = elHtml(
         "button",
         "knoww-tp-more-item",
-        `${I.split} Split`
+        `${I.split} Split <span class="knoww-tp-tooltip-icon" title="Convert 1 USDC into 1 Yes and 1 No share">(?)</span>`
       );
       splitBtn.onclick = (e) => {
         e.stopPropagation();
@@ -752,7 +803,7 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
       const mergeBtn = elHtml(
         "button",
         "knoww-tp-more-item",
-        `${I.merge} Merge`
+        `${I.merge} Merge <span class="knoww-tp-tooltip-icon" title="Combine 1 Yes and 1 No share to get 1 USDC back">(?)</span>`
       );
       mergeBtn.onclick = (e) => {
         e.stopPropagation();
@@ -1587,6 +1638,21 @@ function addSubmitButton(
 
           if (balanceChanged || positionChanged) {
             finishSettling("Order filled!", "success");
+
+            // Show a success overlay
+            const overlay = el("div", "knoww-tp-success-overlay");
+            overlay.innerHTML = `
+              <div class="knoww-tp-success-icon">${I.check}</div>
+              <div class="knoww-tp-success-text">Order Placed Successfully</div>
+            `;
+            panel.appendChild(overlay);
+
+            // Fade out and remove after 1.5s
+            setTimeout(() => {
+              overlay.style.opacity = "0";
+              setTimeout(() => overlay.remove(), 300);
+            }, 1500);
+
             return;
           }
 

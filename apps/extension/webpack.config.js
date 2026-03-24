@@ -6,6 +6,7 @@ require("dotenv").config();
 
 module.exports = (_env, argv) => {
   const isProduction = argv.mode === "production";
+  const devMode = isProduction ? false : process.env.DEV_MODE === "true";
 
   return {
     entry: {
@@ -61,7 +62,7 @@ module.exports = (_env, argv) => {
     },
     plugins: [
       new webpack.DefinePlugin({
-        __DEV_MODE__: JSON.stringify(process.env.DEV_MODE === "true"),
+        __DEV_MODE__: JSON.stringify(devMode),
         "process.env.NODE_DEBUG": JSON.stringify(""),
         "process.env.NODE_ENV": JSON.stringify(
           isProduction ? "production" : "development"
@@ -71,6 +72,7 @@ module.exports = (_env, argv) => {
         Buffer: ["buffer", "Buffer"],
         process: "process/browser",
       }),
+      new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
       new CopyPlugin({
         patterns: [
           { from: "manifest.json", to: "manifest.json" },

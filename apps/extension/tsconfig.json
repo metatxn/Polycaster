@@ -19,7 +19,6 @@
     }
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../../packages/shared-types" }],
   "exclude": [
     "node_modules",
     "dist",

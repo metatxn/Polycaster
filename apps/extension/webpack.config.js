@@ -6,7 +6,7 @@ require("dotenv").config();
 
 module.exports = (_env, argv) => {
   const isProduction = argv.mode === "production";
-  const devMode = isProduction ? false : process.env.DEV_MODE === "true";
+  const devMode = isProduction ? false : process.env.DEV_MODE !== "false";
 
   return {
     entry: {

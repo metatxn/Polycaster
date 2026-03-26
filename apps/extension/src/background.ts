@@ -17,6 +17,15 @@ import type {
   FetchTextMessage,
 } from "./types/chrome-messages";
 
+// Lazy-loaded to avoid eagerly compiling WASM on service worker startup
+let embeddingsModule: typeof import("./background/embeddings") | null = null;
+async function getEmbeddingsModule() {
+  if (!embeddingsModule) {
+    embeddingsModule = await import("./background/embeddings");
+  }
+  return embeddingsModule;
+}
+
 // ── Build mode (injected by webpack DefinePlugin) ──
 declare const __DEV_MODE__: boolean;
 
@@ -295,6 +304,31 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ ok: true, status: res.status, text });
         } catch (e) {
           clearTimeout(timeoutId);
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
+      return true;
+    }
+
+    // Compute Embeddings Similarities
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      (message as any).type === "compute-similarities"
+    ) {
+      (async () => {
+        try {
+          const { postText, marketTexts } = message as any;
+          const { computeSimilarities } = await getEmbeddingsModule();
+          const similarities = await computeSimilarities(postText, marketTexts);
+          (sendResponse as (resp: any) => void)({
+            ok: true,
+            similarities,
+          });
+        } catch (e) {
           sendResponse({
             ok: false,
             error: e instanceof Error ? e.message : String(e),

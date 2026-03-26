@@ -139,8 +139,18 @@ function OptionsApp() {
 
     // Check if user is logged in
     chrome.runtime.sendMessage({ type: "auth:get-token" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error(
+          "auth:get-token failed:",
+          chrome.runtime.lastError.message
+        );
+        setHasToken(false);
+        return;
+      }
       if (response?.ok && response.data) {
         setHasToken(true);
+      } else {
+        setHasToken(false);
       }
     });
   }, []);
@@ -218,9 +228,20 @@ function OptionsApp() {
       )
     ) {
       chrome.runtime.sendMessage({ type: "auth:clear-token" }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "auth:clear-token failed:",
+            chrome.runtime.lastError.message
+          );
+          setHasToken(false);
+          return;
+        }
         if (response?.ok) {
           setHasToken(false);
           showStatus("Wallet disconnected");
+        } else {
+          console.error("auth:clear-token returned non-ok response:", response);
+          setHasToken(false);
         }
       });
     }

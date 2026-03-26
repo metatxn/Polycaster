@@ -53,7 +53,7 @@ function broadcastWallets(): void {
 function getProvider(uuid?: string): EIP1193Provider | null {
   if (uuid) {
     const w = discoveredWallets.get(uuid);
-    if (w) return w.provider;
+    return w ? w.provider : null;
   }
   if (activeProvider) return activeProvider;
 

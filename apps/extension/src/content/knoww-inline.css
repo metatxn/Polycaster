@@ -13,6 +13,16 @@
     sans-serif;
   --knoww-radius: 16px;
   --knoww-card-bg: rgb(32, 35, 39);
+  --knoww-header-chip-bg: rgba(255, 255, 255, 0.05);
+  --knoww-accent-green: rgb(0, 186, 124);
+  --knoww-accent-green-glow: rgba(0, 186, 124, 0.5);
+  --knoww-accent-warn: rgb(255, 152, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(16, 185, 129),
+    rgb(20, 184, 166)
+  );
+  --knoww-deposit-text: #fff;
 }
 
 /* Twitter/X Dark Mode (default for Twitter) */
@@ -36,6 +46,16 @@
   --knoww-text: rgb(15, 20, 25);
   --knoww-text-secondary: rgb(83, 100, 113);
   --knoww-card-bg: rgb(247, 249, 249);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(230, 126, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(5, 150, 105),
+    rgb(13, 148, 136)
+  );
+  --knoww-deposit-text: #fff;
 }
 
 /* Twitter/X Dim Mode (blue-tinted dark) */
@@ -58,6 +78,16 @@
     -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Fira Sans", Ubuntu, Oxygen, "Oxygen Sans", Cantarell, "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", Helvetica, Arial, sans-serif;
   --knoww-radius: 8px;
   --knoww-card-bg: rgb(245, 245, 245);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(230, 126, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(5, 150, 105),
+    rgb(13, 148, 136)
+  );
+  --knoww-deposit-text: #fff;
 }
 
 /* LinkedIn Dark Mode */
@@ -82,6 +112,16 @@
     "Helvetica Neue", Arial, sans-serif;
   --knoww-radius: 8px;
   --knoww-card-bg: rgb(246, 247, 248);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(230, 126, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(5, 150, 105),
+    rgb(13, 148, 136)
+  );
+  --knoww-deposit-text: #fff;
 }
 
 /* Reddit Dark Mode */
@@ -1430,6 +1470,7 @@
 /* ============================================ */
 
 .knoww-trading-panel {
+  position: relative !important;
   background: var(--knoww-bg, rgb(0, 0, 0)) !important;
   border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
   border-top: none !important;
@@ -1503,8 +1544,8 @@
   gap: 5px !important;
   padding: 3px 8px !important;
   border-radius: 20px !important;
-  background: rgba(255, 255, 255, 0.05) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.05)) !important;
+  border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.08)) !important;
 }
 
 .knoww-tp-header-dot {
@@ -1512,8 +1553,8 @@
   width: 5px !important;
   height: 5px !important;
   border-radius: 50% !important;
-  background: rgb(0, 186, 124) !important;
-  box-shadow: 0 0 4px rgba(0, 186, 124, 0.5) !important;
+  background: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  box-shadow: 0 0 4px var(--knoww-accent-green-glow, rgba(0, 186, 124, 0.5)) !important;
   flex-shrink: 0 !important;
 }
 
@@ -1528,12 +1569,12 @@
 .knoww-tp-header-bal {
   font-size: 11px !important;
   font-weight: 700 !important;
-  color: rgb(0, 186, 124) !important;
+  color: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
   font-variant-numeric: tabular-nums !important;
   white-space: nowrap !important;
 }
 .knoww-tp-header-bal.low {
-  color: rgb(255, 152, 0) !important;
+  color: var(--knoww-accent-warn, rgb(255, 152, 0)) !important;
 }
 
 .knoww-tp-header-deposit {
@@ -1546,14 +1587,13 @@
   border-radius: 12px !important;
   border: none !important;
   cursor: pointer !important;
-  background: linear-gradient(
-    135deg,
-    rgb(16, 185, 129),
-    rgb(20, 184, 166)
+  background: var(
+    --knoww-deposit-bg,
+    linear-gradient(135deg, rgb(16, 185, 129), rgb(20, 184, 166))
   ) !important;
-  color: #fff !important;
+  color: var(--knoww-deposit-text, #fff) !important;
   transition: opacity 0.15s !important;
-  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3) !important;
+  box-shadow: 0 1px 3px var(--knoww-accent-green-glow, rgba(16, 185, 129, 0.3)) !important;
   white-space: nowrap !important;
   line-height: 1.6 !important;
 }
@@ -1570,15 +1610,15 @@
   height: 22px !important;
   border-radius: 4px !important;
   cursor: pointer !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.4)) !important;
   transition:
     color 0.15s,
     background 0.15s !important;
   flex-shrink: 0 !important;
 }
 .knoww-tp-header-action:hover {
-  color: rgba(255, 255, 255, 0.8) !important;
-  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--knoww-text, rgba(255, 255, 255, 0.8)) !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.08)) !important;
 }
 .knoww-tp-header-action.spinning svg {
   animation: knoww-spin 0.8s linear infinite !important;
@@ -1687,7 +1727,7 @@
 }
 .knoww-tp-portfolio-value {
   font-size: 10px !important;
-  color: var(--knoww-text-primary, rgb(231, 233, 234)) !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
   font-weight: 600 !important;
   font-variant-numeric: tabular-nums !important;
 }
@@ -1957,7 +1997,7 @@
   padding: 10px 14px !important;
   border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.12)) !important;
   border-radius: 10px !important;
-  background: var(--knoww-surface, rgba(255, 255, 255, 0.04)) !important;
+  background: var(--knoww-card-bg, rgba(255, 255, 255, 0.04)) !important;
   color: var(--knoww-text, #e7e9ea) !important;
   font-size: 13px !important;
   font-weight: 500 !important;
@@ -1969,7 +2009,7 @@
   line-height: 1.3 !important;
 }
 .knoww-tp-wallet-item:hover {
-  background: var(--knoww-surface-hover, rgba(255, 255, 255, 0.08)) !important;
+  background: var(--knoww-card-bg, rgba(255, 255, 255, 0.08)) !important;
   border-color: var(--knoww-accent, rgb(0, 186, 124)) !important;
 }
 .knoww-tp-wallet-item:active {
@@ -1983,6 +2023,8 @@
   object-fit: contain !important;
 }
 .knoww-tp-wallet-item span {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;

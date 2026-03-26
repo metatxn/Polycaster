@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.11",
+  "version": "2.5.13",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
@@ -14,6 +14,7 @@
     "release": "node scripts/bump-version.mjs && pnpm run build && pnpm run zip"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@knoww/shared-types": "workspace:*",
     "@polymarket/clob-client": "5.8.1",
     "@polymarket/order-utils": "3.0.1",

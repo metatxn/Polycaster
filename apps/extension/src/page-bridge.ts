@@ -4,6 +4,10 @@
  * Discovers installed wallets via EIP-6963 and bridges EIP-1193 RPC
  * requests from the content script.  No third-party UI libraries — all
  * heavy rendering lives in the content script's isolated world.
+ *
+ * Security: a per-injection nonce (_n) is embedded in the injecting
+ * <script> tag's data-knoww-nonce attribute. Both sides include the
+ * nonce in every message and drop anything that doesn't match.
  */
 
 type EIP1193Provider = {
@@ -30,6 +34,16 @@ const LEGACY_INJECTED_UUID = "__injected__";
 
 /** The provider the user chose (or the only one available). */
 let activeProvider: EIP1193Provider | null = null;
+
+const BRIDGE_NONCE: string | undefined = (() => {
+  const el = document.getElementById("knoww-page-bridge");
+  return el?.dataset?.knowwNonce || undefined;
+})();
+
+function stamp<T extends Record<string, unknown>>(msg: T): T & { _n?: string } {
+  if (BRIDGE_NONCE) return { ...msg, _n: BRIDGE_NONCE };
+  return msg as T & { _n?: string };
+}
 
 function discoverWallets(): void {
   window.addEventListener("eip6963:announceProvider", (event: Event) => {
@@ -63,7 +77,7 @@ function broadcastWallets(): void {
   }
 
   window.postMessage(
-    { type: "KNOWW_WALLETS_DISCOVERED", wallets },
+    stamp({ type: "KNOWW_WALLETS_DISCOVERED" as const, wallets }),
     window.location.origin
   );
 }
@@ -90,14 +104,14 @@ function getProvider(uuid?: string): EIP1193Provider | null {
 
 function postError(id: string, message: string, code?: number): void {
   window.postMessage(
-    { type: "KNOWW_BRIDGE_RESPONSE", id, error: message, code },
+    stamp({ type: "KNOWW_BRIDGE_RESPONSE" as const, id, error: message, code }),
     window.location.origin
   );
 }
 
 function postResult(id: string, result: unknown): void {
   window.postMessage(
-    { type: "KNOWW_BRIDGE_RESPONSE", id, result },
+    stamp({ type: "KNOWW_BRIDGE_RESPONSE" as const, id, result }),
     window.location.origin
   );
 }
@@ -114,18 +128,20 @@ function postResult(id: string, result: unknown): void {
       if (event.source !== window) return;
 
       const data = event.data as
-        | { type: "KNOWW_SELECT_WALLET"; uuid: string }
-        | { type: "KNOWW_LIST_WALLETS" }
+        | { type: "KNOWW_SELECT_WALLET"; uuid: string; _n?: string }
+        | { type: "KNOWW_LIST_WALLETS"; _n?: string }
         | {
             type: "KNOWW_BRIDGE_REQUEST";
             id: string;
             method: string;
             params?: unknown[];
             walletUuid?: string;
+            _n?: string;
           }
         | undefined;
 
       if (!data) return;
+      if (BRIDGE_NONCE && data._n !== BRIDGE_NONCE) return;
 
       if (data.type === "KNOWW_LIST_WALLETS") {
         broadcastWallets();
@@ -145,17 +161,21 @@ function postResult(id: string, result: unknown): void {
         if (provider) {
           activeProvider = provider;
           window.postMessage(
-            { type: "KNOWW_SELECT_WALLET_RESULT", uuid: data.uuid, ok: true },
+            stamp({
+              type: "KNOWW_SELECT_WALLET_RESULT" as const,
+              uuid: data.uuid,
+              ok: true as const,
+            }),
             window.location.origin
           );
         } else {
           window.postMessage(
-            {
-              type: "KNOWW_SELECT_WALLET_RESULT",
+            stamp({
+              type: "KNOWW_SELECT_WALLET_RESULT" as const,
               uuid: data.uuid,
-              ok: false,
+              ok: false as const,
               error: "WALLET_NOT_FOUND",
-            },
+            }),
             window.location.origin
           );
         }
@@ -188,7 +208,7 @@ function postResult(id: string, result: unknown): void {
         const error = e?.message || String(err);
         const code = e?.code;
         window.postMessage(
-          { type: "KNOWW_BRIDGE_RESPONSE", id, error, code },
+          stamp({ type: "KNOWW_BRIDGE_RESPONSE" as const, id, error, code }),
           window.location.origin
         );
       }

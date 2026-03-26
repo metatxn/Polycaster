@@ -12,8 +12,8 @@ import {
 // ============================================
 // BUILD MODE
 // Injected by webpack DefinePlugin: true for development, false for production.
+// Ambient type declared in env.d.ts.
 // ============================================
-declare const __DEV_MODE__: boolean;
 const DEV_MODE = __DEV_MODE__;
 
 // Current user settings (will be populated from chrome.storage)

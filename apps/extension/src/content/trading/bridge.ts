@@ -10,6 +10,9 @@
  *
  * Also handles signing delegation from the background service worker:
  * background → chrome.tabs.sendMessage → here → page bridge → wallet → back.
+ *
+ * Security: every message carries a per-injection nonce (_n) that both
+ * sides validate. Messages without a matching nonce are silently dropped.
  */
 
 export interface DiscoveredWallet {
@@ -38,6 +41,10 @@ let initialized = false;
 let wallets: DiscoveredWallet[] = [];
 let walletListeners: Array<(w: DiscoveredWallet[]) => void> = [];
 
+function getNonce(): string | undefined {
+  return window.__KNOWW_BRIDGE_NONCE__;
+}
+
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -46,13 +53,21 @@ function init(): void {
   if (initialized) return;
   initialized = true;
 
+  const nonce = getNonce();
+
   window.addEventListener("message", (event: MessageEvent) => {
     if (event.source !== window) return;
     const data = event.data as
-      | BridgeResponse
-      | { type: "KNOWW_WALLETS_DISCOVERED"; wallets: DiscoveredWallet[] }
+      | (BridgeResponse & { _n?: string })
+      | {
+          type: "KNOWW_WALLETS_DISCOVERED";
+          wallets: DiscoveredWallet[];
+          _n?: string;
+        }
       | undefined;
-    if (!data || !data.type) return;
+    if (!data?.type) return;
+
+    if (nonce && data._n !== nonce) return;
 
     if (data.type === "KNOWW_BRIDGE_RESPONSE") {
       const p = pending.get(data.id);
@@ -104,8 +119,10 @@ function init(): void {
     return false;
   });
 
-  // Trigger wallet discovery in page-bridge
-  window.postMessage({ type: "KNOWW_LIST_WALLETS" }, window.location.origin);
+  window.postMessage(
+    { type: "KNOWW_LIST_WALLETS", _n: nonce },
+    window.location.origin
+  );
 }
 
 function request(
@@ -114,12 +131,20 @@ function request(
   walletUuid?: string
 ): Promise<unknown> {
   init();
+  const nonce = getNonce();
   return new Promise((resolve, reject) => {
     const id = generateId();
     pending.set(id, { resolve, reject });
 
     window.postMessage(
-      { type: "KNOWW_BRIDGE_REQUEST", id, method, params, walletUuid },
+      {
+        type: "KNOWW_BRIDGE_REQUEST",
+        id,
+        method,
+        params,
+        walletUuid,
+        _n: nonce,
+      },
       window.location.origin
     );
 
@@ -149,7 +174,7 @@ export const WalletBridge = {
 
   selectWallet(uuid: string): void {
     window.postMessage(
-      { type: "KNOWW_SELECT_WALLET", uuid },
+      { type: "KNOWW_SELECT_WALLET", uuid, _n: getNonce() },
       window.location.origin
     );
   },

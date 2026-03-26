@@ -17,12 +17,13 @@ import { escapeHtml } from "./utils";
  */
 function getTokenIdForOutcome(
   market: Market,
-  outcomeIndex: number
+  outcomeIndex: number,
+  marketIndex = 0
 ): string | null {
   if (market.source === "kalshi") return null;
   if (!market.markets || market.markets.length === 0) return null;
 
-  const nestedMarket = market.markets[0];
+  const nestedMarket = market.markets[marketIndex] ?? market.markets[0];
   if (!nestedMarket?.clobTokenIds) return null;
 
   try {
@@ -83,7 +84,7 @@ async function resolveTokenAndShowPanel(
 
   let tokenId = isMultiOutcome
     ? getTokenIdForMultiOutcome(market, marketIndex ?? outcomeIndex)
-    : getTokenIdForOutcome(market, outcomeIndex);
+    : getTokenIdForOutcome(market, outcomeIndex, marketIndex ?? 0);
 
   if (!tokenId) {
     anchorElement.style.opacity = "0.6";
@@ -102,7 +103,7 @@ async function resolveTokenAndShowPanel(
   }
 
   if (tokenId) {
-    const idx = isMultiOutcome ? (marketIndex ?? 0) : 0;
+    const idx = marketIndex ?? 0;
     const nestedMarket = market.markets?.[idx];
     let conditionId: string | undefined;
     let yesTokenId: string | undefined;
@@ -258,7 +259,8 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
     (m) =>
       getOutcomeLabel(m) &&
       m.active !== false &&
-      !(m as { closed?: boolean }).closed
+      !(m as { closed?: boolean }).closed &&
+      !(m as { archived?: boolean }).archived
   );
 
   if (activeMarketsWithLabel.length === 0) {
@@ -269,7 +271,8 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
     (m) =>
       getOutcomeLabel(m) &&
       m.active !== false &&
-      !(m as { closed?: boolean }).closed
+      !(m as { closed?: boolean }).closed &&
+      !(m as { archived?: boolean }).archived
   );
   if (firstActiveIdx >= 0) {
     result.firstActiveMarketIndex = firstActiveIdx;
@@ -502,6 +505,7 @@ function createInlineMarketCard(
   let prices: number[] = parsed.prices;
   const isMultiOutcomeEvent = parsed.isMultiOutcome;
   const multiOutcomeData = parsed.multiOutcomeData;
+  const firstActiveMarketIdx = parsed.firstActiveMarketIndex;
   let hasMultipleOptions = multiOutcomeData.length > 2;
 
   // If not a multi-outcome event, try standard parsing
@@ -773,7 +777,9 @@ function createInlineMarketCard(
           prices[capturedIdx],
           btn,
           isMulti,
-          isMulti ? multiOutcomeData[capturedIdx].marketIndex : undefined
+          isMulti
+            ? multiOutcomeData[capturedIdx].marketIndex
+            : firstActiveMarketIdx
         );
         window.KNOWW_PREFERENCES?.recordClick(market);
       };

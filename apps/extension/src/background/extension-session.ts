@@ -1,5 +1,3 @@
-declare const __DEV_MODE__: boolean;
-
 const KNOWW_APP_URL = __DEV_MODE__
   ? "http://localhost:8787"
   : "https://knoww.app";

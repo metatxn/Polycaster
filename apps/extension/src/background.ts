@@ -26,8 +26,7 @@ async function getEmbeddingsModule() {
   return embeddingsModule;
 }
 
-// ── Build mode (injected by webpack DefinePlugin) ──
-declare const __DEV_MODE__: boolean;
+// ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
 // ── Session storage stays TRUSTED_CONTEXTS only (default).
 // Content scripts access credentials via message passing below. ──

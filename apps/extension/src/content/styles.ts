@@ -1271,6 +1271,11 @@ function injectMetamaskBridge(): void {
     const script = document.createElement("script");
     script.id = "knoww-page-bridge";
     script.type = "text/javascript";
+
+    const nonce = crypto.randomUUID();
+    script.dataset.knowwNonce = nonce;
+    window.__KNOWW_BRIDGE_NONCE__ = nonce;
+
     try {
       script.src = chrome.runtime.getURL("page-bridge.js");
     } catch {

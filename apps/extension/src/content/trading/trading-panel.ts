@@ -597,7 +597,7 @@ function addPortfolioBar(
       el(
         "span",
         "knoww-tp-portfolio-value positive",
-        `${yesPos.toFixed(1)} @ $${yesValue.toFixed(2)}`
+        `${yesPos.toFixed(1)} @ $${yesPrice.toFixed(2)} · $${yesValue.toFixed(2)}`
       )
     );
     portfolio.appendChild(yRow);
@@ -609,7 +609,7 @@ function addPortfolioBar(
       el(
         "span",
         "knoww-tp-portfolio-value positive",
-        `${noPos.toFixed(1)} @ $${noValue.toFixed(2)}`
+        `${noPos.toFixed(1)} @ $${noPrice.toFixed(2)} · $${noValue.toFixed(2)}`
       )
     );
     portfolio.appendChild(nRow);
@@ -669,12 +669,26 @@ function addDisconnected(p: HTMLElement): void {
         window.location.origin
       );
 
-      setTimeout(() => {
+      let settled = false;
+      const unsub = WalletBridge.onWalletsChanged((newWallets) => {
+        if (settled) return;
+        settled = true;
+        unsub();
+        clearTimeout(fallback);
+        TradingService.connectWallet(
+          newWallets.length >= 1 ? newWallets[0].uuid : undefined
+        );
+      });
+
+      const fallback = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        unsub();
         const fresh = WalletBridge.getDiscoveredWallets();
         TradingService.connectWallet(
           fresh.length >= 1 ? fresh[0].uuid : undefined
         );
-      }, 300);
+      }, 2000);
     };
     s.appendChild(btn);
   }

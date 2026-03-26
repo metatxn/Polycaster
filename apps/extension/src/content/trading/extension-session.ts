@@ -1,5 +1,3 @@
-declare const __DEV_MODE__: boolean;
-
 import type {
   BackgroundResponse,
   FetchJsonSuccessResponse,

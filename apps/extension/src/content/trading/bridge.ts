@@ -105,7 +105,7 @@ function init(): void {
   });
 
   // Trigger wallet discovery in page-bridge
-  window.postMessage({ type: "KNOWW_LIST_WALLETS" }, "*");
+  window.postMessage({ type: "KNOWW_LIST_WALLETS" }, window.location.origin);
 }
 
 function request(
@@ -120,7 +120,7 @@ function request(
 
     window.postMessage(
       { type: "KNOWW_BRIDGE_REQUEST", id, method, params, walletUuid },
-      "*"
+      window.location.origin
     );
 
     setTimeout(() => {
@@ -148,7 +148,10 @@ export const WalletBridge = {
   },
 
   selectWallet(uuid: string): void {
-    window.postMessage({ type: "KNOWW_SELECT_WALLET", uuid }, "*");
+    window.postMessage(
+      { type: "KNOWW_SELECT_WALLET", uuid },
+      window.location.origin
+    );
   },
 
   async connect(walletUuid?: string): Promise<string[]> {

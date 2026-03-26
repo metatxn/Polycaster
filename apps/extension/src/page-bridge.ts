@@ -47,7 +47,10 @@ function broadcastWallets(): void {
     icon: w.info.icon,
     rdns: w.info.rdns,
   }));
-  window.postMessage({ type: "KNOWW_WALLETS_DISCOVERED", wallets }, "*");
+  window.postMessage(
+    { type: "KNOWW_WALLETS_DISCOVERED", wallets },
+    window.location.origin
+  );
 }
 
 function getProvider(uuid?: string): EIP1193Provider | null {
@@ -70,12 +73,15 @@ function getProvider(uuid?: string): EIP1193Provider | null {
 function postError(id: string, message: string, code?: number): void {
   window.postMessage(
     { type: "KNOWW_BRIDGE_RESPONSE", id, error: message, code },
-    "*"
+    window.location.origin
   );
 }
 
 function postResult(id: string, result: unknown): void {
-  window.postMessage({ type: "KNOWW_BRIDGE_RESPONSE", id, result }, "*");
+  window.postMessage(
+    { type: "KNOWW_BRIDGE_RESPONSE", id, result },
+    window.location.origin
+  );
 }
 
 (() => {
@@ -143,7 +149,7 @@ function postResult(id: string, result: unknown): void {
         const code = e?.code;
         window.postMessage(
           { type: "KNOWW_BRIDGE_RESPONSE", id, error, code },
-          "*"
+          window.location.origin
         );
       }
     },

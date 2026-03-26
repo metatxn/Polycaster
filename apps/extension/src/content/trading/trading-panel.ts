@@ -664,7 +664,10 @@ function addDisconnected(p: HTMLElement): void {
       btn.style.pointerEvents = "none";
       btn.style.opacity = "0.7";
 
-      window.postMessage({ type: "KNOWW_LIST_WALLETS" }, "*");
+      window.postMessage(
+        { type: "KNOWW_LIST_WALLETS" },
+        window.location.origin
+      );
 
       setTimeout(() => {
         const fresh = WalletBridge.getDiscoveredWallets();

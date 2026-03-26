@@ -26,6 +26,7 @@ const ALLOWED_METHODS = new Set([
 ]);
 
 const discoveredWallets = new Map<string, EIP6963Detail>();
+const LEGACY_INJECTED_UUID = "__injected__";
 
 /** The provider the user chose (or the only one available). */
 let activeProvider: EIP1193Provider | null = null;
@@ -47,27 +48,44 @@ function broadcastWallets(): void {
     icon: w.info.icon,
     rdns: w.info.rdns,
   }));
+
+  const eth = getLegacyProvider();
+  const alreadyDiscovered = eth
+    ? [...discoveredWallets.values()].some((w) => w.provider === eth)
+    : true;
+  if (eth && !alreadyDiscovered) {
+    wallets.push({
+      uuid: LEGACY_INJECTED_UUID,
+      name: "Injected Provider",
+      icon: "",
+      rdns: "",
+    });
+  }
+
   window.postMessage(
     { type: "KNOWW_WALLETS_DISCOVERED", wallets },
     window.location.origin
   );
 }
 
+function getLegacyProvider(): EIP1193Provider | null {
+  const eth = (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
+  return eth && typeof eth.request === "function" ? eth : null;
+}
+
 function getProvider(uuid?: string): EIP1193Provider | null {
   if (uuid) {
+    if (uuid === LEGACY_INJECTED_UUID) return getLegacyProvider();
     const w = discoveredWallets.get(uuid);
     return w ? w.provider : null;
   }
   if (activeProvider) return activeProvider;
 
-  const eth = (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
-  if (eth && typeof eth.request === "function") return eth;
-
   if (discoveredWallets.size > 0) {
     return [...discoveredWallets.values()][0].provider;
   }
 
-  return null;
+  return getLegacyProvider();
 }
 
 function postError(id: string, message: string, code?: number): void {
@@ -115,9 +133,17 @@ function postResult(id: string, result: unknown): void {
       }
 
       if (data.type === "KNOWW_SELECT_WALLET") {
-        const w = discoveredWallets.get(data.uuid);
-        if (w) {
-          activeProvider = w.provider;
+        let provider: EIP1193Provider | null = null;
+
+        if (data.uuid === LEGACY_INJECTED_UUID) {
+          provider = getLegacyProvider();
+        } else {
+          const w = discoveredWallets.get(data.uuid);
+          if (w) provider = w.provider;
+        }
+
+        if (provider) {
+          activeProvider = provider;
           window.postMessage(
             { type: "KNOWW_SELECT_WALLET_RESULT", uuid: data.uuid, ok: true },
             window.location.origin

@@ -9,24 +9,39 @@
   --knoww-text-secondary: rgb(113, 118, 123);
   --knoww-accent: rgb(29, 155, 240);
   --knoww-font:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
+    -apple-system, "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica",
+    "Arial", sans-serif;
   --knoww-radius: 16px;
   --knoww-card-bg: rgb(32, 35, 39);
+  --knoww-header-chip-bg: rgba(255, 255, 255, 0.05);
+  --knoww-accent-green: rgb(0, 186, 124);
+  --knoww-accent-green-glow: rgba(0, 186, 124, 0.5);
+  --knoww-accent-warn: rgb(255, 152, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(16, 185, 129),
+    rgb(20, 184, 166)
+  );
+  --knoww-deposit-text: #fff;
+  --knoww-option-1: rgb(96, 165, 250);
+  --knoww-option-2: rgb(192, 132, 252);
+  --knoww-option-3: rgb(251, 191, 36);
+  --knoww-option-4: rgb(34, 211, 238);
+  --knoww-option-5: rgb(251, 113, 133);
 }
 
 /* Twitter/X Dark Mode (default for Twitter) */
 .knoww-platform-twitter {
-  --knoww-bg: rgb(0, 0, 0);
-  --knoww-border: rgb(47, 51, 54);
+  --knoww-bg: rgb(22, 24, 28);
+  --knoww-border: rgb(52, 56, 60);
   --knoww-text: rgb(231, 233, 234);
   --knoww-text-secondary: rgb(113, 118, 123);
   --knoww-accent: rgb(29, 155, 240);
   --knoww-font:
-    "TwitterChirp", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
+    "TwitterChirp", -apple-system, "BlinkMacSystemFont", "Segoe UI", "Roboto",
+    "Helvetica", "Arial", sans-serif;
   --knoww-radius: 16px;
-  --knoww-card-bg: rgb(32, 35, 39);
+  --knoww-card-bg: rgb(36, 39, 44);
 }
 
 /* Twitter/X Light Mode */
@@ -36,6 +51,21 @@
   --knoww-text: rgb(15, 20, 25);
   --knoww-text-secondary: rgb(83, 100, 113);
   --knoww-card-bg: rgb(247, 249, 249);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(230, 126, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(5, 150, 105),
+    rgb(13, 148, 136)
+  );
+  --knoww-deposit-text: #fff;
+  --knoww-option-1: rgb(37, 99, 195);
+  --knoww-option-2: rgb(126, 58, 205);
+  --knoww-option-3: rgb(180, 130, 0);
+  --knoww-option-4: rgb(8, 145, 170);
+  --knoww-option-5: rgb(205, 55, 80);
 }
 
 /* Twitter/X Dim Mode (blue-tinted dark) */
@@ -55,9 +85,24 @@
   --knoww-text-secondary: rgba(0, 0, 0, 0.6);
   --knoww-accent: #0a66c2;
   --knoww-font:
-    -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Fira Sans", Ubuntu, Oxygen, "Oxygen Sans", Cantarell, "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", Helvetica, Arial, sans-serif;
+    -apple-system, system-ui, "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Fira Sans", "Ubuntu", "Oxygen", "Oxygen Sans", "Cantarell", "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", "Helvetica", "Arial", sans-serif;
   --knoww-radius: 8px;
   --knoww-card-bg: rgb(245, 245, 245);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(230, 126, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(5, 150, 105),
+    rgb(13, 148, 136)
+  );
+  --knoww-deposit-text: #fff;
+  --knoww-option-1: rgb(37, 99, 195);
+  --knoww-option-2: rgb(126, 58, 205);
+  --knoww-option-3: rgb(180, 130, 0);
+  --knoww-option-4: rgb(8, 145, 170);
+  --knoww-option-5: rgb(205, 55, 80);
 }
 
 /* LinkedIn Dark Mode */
@@ -78,10 +123,25 @@
   --knoww-text-secondary: rgb(120, 124, 126);
   --knoww-accent: #ff4500;
   --knoww-font:
-    IBMPlexSans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+    "IBMPlexSans", -apple-system, "BlinkMacSystemFont", "Segoe UI", "Roboto",
+    "Helvetica Neue", "Arial", sans-serif;
   --knoww-radius: 8px;
   --knoww-card-bg: rgb(246, 247, 248);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(230, 126, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(5, 150, 105),
+    rgb(13, 148, 136)
+  );
+  --knoww-deposit-text: #fff;
+  --knoww-option-1: rgb(37, 99, 195);
+  --knoww-option-2: rgb(126, 58, 205);
+  --knoww-option-3: rgb(180, 130, 0);
+  --knoww-option-4: rgb(8, 145, 170);
+  --knoww-option-5: rgb(205, 55, 80);
 }
 
 /* Reddit Dark Mode */
@@ -93,6 +153,30 @@
   --knoww-text: rgb(215, 218, 220);
   --knoww-text-secondary: rgb(129, 131, 132);
   --knoww-card-bg: rgb(39, 39, 41);
+}
+
+/* Market card - Base styles with CSS variables */
+.knoww-market-card {
+  background: var(--knoww-bg, rgb(0, 0, 0)) !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: var(--knoww-radius, 16px) !important;
+  margin: 12px 0 0 0 !important;
+  padding: 0 !important;
+  font-family: var(
+    --knoww-font,
+    -apple-system,
+    "BlinkMacSystemFont",
+    "Segoe UI",
+    "Roboto",
+    "Helvetica",
+    "Arial",
+    sans-serif
+  ) !important;
+  overflow: hidden !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  animation: knoww-card-slide-down 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
 }
 
 /* Stacked cards container - for multi-source display */
@@ -110,27 +194,20 @@
   margin-top: 0 !important;
 }
 
-/* Market card - Base styles with CSS variables */
-.knoww-market-card {
-  background: var(--knoww-bg, rgb(0, 0, 0)) !important;
-  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
-  border-radius: var(--knoww-radius, 16px) !important;
-  margin: 12px 0 0 0 !important;
-  padding: 0 !important;
-  font-family: var(
-    --knoww-font,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif
-  ) !important;
-  overflow: hidden !important;
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
+@keyframes knoww-card-slide-down {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+    max-height: 0;
+    margin-top: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: none;
+  }
 }
 
 /* LinkedIn-specific card styles */
@@ -192,6 +269,13 @@
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   line-height: 1.4 !important;
   margin: 0 0 4px 0 !important;
+  flex: 1 !important;
+}
+
+.knoww-card-dismiss-btn:hover {
+  opacity: 1 !important;
+  background: var(--knoww-border, rgba(255, 255, 255, 0.1)) !important;
+  border-radius: 4px !important;
 }
 
 .knoww-card-volume {
@@ -262,21 +346,37 @@
 
 /* Multi-outcome buttons (non Yes/No) */
 .knoww-outcome-btn.option-1 {
-  background: rgba(41, 98, 255, 0.1) !important;
-  color: rgb(41, 98, 255) !important;
+  background: color-mix(
+    in srgb,
+    var(--knoww-option-1, rgb(96, 165, 250)) 10%,
+    transparent
+  ) !important;
+  color: var(--knoww-option-1, rgb(96, 165, 250)) !important;
 }
 
 .knoww-outcome-btn.option-1:hover {
-  background: rgba(41, 98, 255, 0.2) !important;
+  background: color-mix(
+    in srgb,
+    var(--knoww-option-1, rgb(96, 165, 250)) 20%,
+    transparent
+  ) !important;
 }
 
 .knoww-outcome-btn.option-2 {
-  background: rgba(156, 39, 176, 0.1) !important;
-  color: rgb(156, 39, 176) !important;
+  background: color-mix(
+    in srgb,
+    var(--knoww-option-2, rgb(192, 132, 252)) 10%,
+    transparent
+  ) !important;
+  color: var(--knoww-option-2, rgb(192, 132, 252)) !important;
 }
 
 .knoww-outcome-btn.option-2:hover {
-  background: rgba(156, 39, 176, 0.2) !important;
+  background: color-mix(
+    in srgb,
+    var(--knoww-option-2, rgb(192, 132, 252)) 20%,
+    transparent
+  ) !important;
 }
 
 .knoww-outcome-label {
@@ -500,11 +600,11 @@
   font-family: var(
     --knoww-font,
     -apple-system,
-    BlinkMacSystemFont,
+    "BlinkMacSystemFont",
     "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
+    "Roboto",
+    "Helvetica",
+    "Arial",
     sans-serif
   ) !important;
   width: 300px !important;
@@ -515,15 +615,15 @@
 /* Twitter/X notification stack - Dark Mode (default) */
 .knoww-notification-stack-twitter {
   top: 54px !important; /* Account for Twitter's header */
-  --knoww-bg: rgb(0, 0, 0) !important;
-  --knoww-border: rgb(47, 51, 54) !important;
+  --knoww-bg: rgb(22, 24, 28) !important;
+  --knoww-border: rgb(52, 56, 60) !important;
   --knoww-text: rgb(231, 233, 234) !important;
   --knoww-text-secondary: rgb(113, 118, 123) !important;
   --knoww-accent: rgb(29, 155, 240) !important;
-  --knoww-card-bg: rgb(32, 35, 39) !important;
+  --knoww-card-bg: rgb(36, 39, 44) !important;
   font-family:
-    "TwitterChirp", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif !important;
+    "TwitterChirp", -apple-system, "BlinkMacSystemFont", "Segoe UI", "Roboto",
+    "Helvetica", "Arial", sans-serif !important;
 }
 
 /* Twitter/X notification stack - Light Mode */
@@ -584,8 +684,8 @@
   --knoww-card-bg: rgb(246, 247, 248) !important;
   border-radius: 8px !important;
   font-family:
-    IBMPlexSans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif !important;
+    "IBMPlexSans", -apple-system, "BlinkMacSystemFont", "Segoe UI", "Roboto",
+    "Helvetica Neue", "Arial", sans-serif !important;
 }
 
 /* Reddit Dark Mode - detected via html/body classes or color scheme */
@@ -874,11 +974,23 @@
 }
 
 .knoww-search-result-prices .knoww-outcome-indicator.option-1 {
-  background: rgb(41, 98, 255) !important;
+  background: var(--knoww-option-1, rgb(96, 165, 250)) !important;
 }
 
 .knoww-search-result-prices .knoww-outcome-indicator.option-2 {
-  background: rgb(156, 39, 176) !important;
+  background: var(--knoww-option-2, rgb(192, 132, 252)) !important;
+}
+
+.knoww-search-result-prices .knoww-outcome-indicator.option-3 {
+  background: var(--knoww-option-3, rgb(251, 191, 36)) !important;
+}
+
+.knoww-search-result-prices .knoww-outcome-indicator.option-4 {
+  background: var(--knoww-option-4, rgb(34, 211, 238)) !important;
+}
+
+.knoww-search-result-prices .knoww-outcome-indicator.option-5 {
+  background: var(--knoww-option-5, rgb(251, 113, 133)) !important;
 }
 
 .knoww-search-result-prices .knoww-outcome-name {
@@ -900,11 +1012,23 @@
 }
 
 .knoww-search-result-prices .knoww-outcome-percent.option-1 {
-  color: rgb(41, 98, 255) !important;
+  color: var(--knoww-option-1, rgb(96, 165, 250)) !important;
 }
 
 .knoww-search-result-prices .knoww-outcome-percent.option-2 {
-  color: rgb(156, 39, 176) !important;
+  color: var(--knoww-option-2, rgb(192, 132, 252)) !important;
+}
+
+.knoww-search-result-prices .knoww-outcome-percent.option-3 {
+  color: var(--knoww-option-3, rgb(251, 191, 36)) !important;
+}
+
+.knoww-search-result-prices .knoww-outcome-percent.option-4 {
+  color: var(--knoww-option-4, rgb(34, 211, 238)) !important;
+}
+
+.knoww-search-result-prices .knoww-outcome-percent.option-5 {
+  color: var(--knoww-option-5, rgb(251, 113, 133)) !important;
 }
 
 /* Items container */
@@ -1196,11 +1320,23 @@
 }
 
 .knoww-notification-prices .knoww-outcome-indicator.option-1 {
-  background: rgb(41, 98, 255) !important;
+  background: var(--knoww-option-1, rgb(96, 165, 250)) !important;
 }
 
 .knoww-notification-prices .knoww-outcome-indicator.option-2 {
-  background: rgb(156, 39, 176) !important;
+  background: var(--knoww-option-2, rgb(192, 132, 252)) !important;
+}
+
+.knoww-notification-prices .knoww-outcome-indicator.option-3 {
+  background: var(--knoww-option-3, rgb(251, 191, 36)) !important;
+}
+
+.knoww-notification-prices .knoww-outcome-indicator.option-4 {
+  background: var(--knoww-option-4, rgb(34, 211, 238)) !important;
+}
+
+.knoww-notification-prices .knoww-outcome-indicator.option-5 {
+  background: var(--knoww-option-5, rgb(251, 113, 133)) !important;
 }
 
 .knoww-notification-prices .knoww-outcome-name {
@@ -1222,11 +1358,23 @@
 }
 
 .knoww-notification-prices .knoww-outcome-percent.option-1 {
-  color: rgb(41, 98, 255) !important;
+  color: var(--knoww-option-1, rgb(96, 165, 250)) !important;
 }
 
 .knoww-notification-prices .knoww-outcome-percent.option-2 {
-  color: rgb(156, 39, 176) !important;
+  color: var(--knoww-option-2, rgb(192, 132, 252)) !important;
+}
+
+.knoww-notification-prices .knoww-outcome-percent.option-3 {
+  color: var(--knoww-option-3, rgb(251, 191, 36)) !important;
+}
+
+.knoww-notification-prices .knoww-outcome-percent.option-4 {
+  color: var(--knoww-option-4, rgb(34, 211, 238)) !important;
+}
+
+.knoww-notification-prices .knoww-outcome-percent.option-5 {
+  color: var(--knoww-option-5, rgb(251, 113, 133)) !important;
 }
 
 .knoww-price-yes {
@@ -1238,11 +1386,11 @@
 }
 
 .knoww-price-option1 {
-  color: rgb(41, 98, 255) !important;
+  color: rgb(96, 165, 250) !important;
 }
 
 .knoww-price-option2 {
-  color: rgb(156, 39, 176) !important;
+  color: rgb(192, 132, 252) !important;
 }
 
 /* Arrow indicator */
@@ -1358,6 +1506,7 @@
 /* ============================================ */
 
 .knoww-trading-panel {
+  position: relative !important;
   background: var(--knoww-bg, rgb(0, 0, 0)) !important;
   border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
   border-top: none !important;
@@ -1367,11 +1516,11 @@
   font-family: var(
     --knoww-font,
     -apple-system,
-    BlinkMacSystemFont,
+    "BlinkMacSystemFont",
     "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
+    "Roboto",
+    "Helvetica",
+    "Arial",
     sans-serif
   ) !important;
   overflow: visible !important;
@@ -1402,17 +1551,124 @@
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  padding: 10px 16px !important;
+  padding: 8px 12px !important;
   border-bottom: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  gap: 8px !important;
 }
 
 .knoww-tp-title {
-  font-size: 14px !important;
+  font-size: 13px !important;
   font-weight: 600 !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
+  flex-shrink: 1 !important;
+  min-width: 0 !important;
+}
+
+.knoww-tp-header-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-shrink: 0 !important;
+}
+
+.knoww-tp-header-wallet {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 3px 8px !important;
+  border-radius: 20px !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.05)) !important;
+  border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.08)) !important;
+}
+
+.knoww-tp-header-dot {
+  display: inline-block !important;
+  width: 5px !important;
+  height: 5px !important;
+  border-radius: 50% !important;
+  background: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  box-shadow: 0 0 4px var(--knoww-accent-green-glow, rgba(0, 186, 124, 0.5)) !important;
+  flex-shrink: 0 !important;
+}
+
+.knoww-tp-header-addr {
+  font-size: 10px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-family:
+    "SF Mono", "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo",
+    monospace !important;
+  white-space: nowrap !important;
+}
+
+.knoww-tp-header-bal {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  font-variant-numeric: tabular-nums !important;
+  white-space: nowrap !important;
+}
+.knoww-tp-header-bal.low {
+  color: var(--knoww-accent-warn, rgb(255, 152, 0)) !important;
+}
+
+.knoww-tp-header-deposit {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 2px 8px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  border-radius: 12px !important;
+  border: none !important;
+  cursor: pointer !important;
+  background: var(
+    --knoww-deposit-bg,
+    linear-gradient(135deg, rgb(16, 185, 129), rgb(20, 184, 166))
+  ) !important;
+  color: var(--knoww-deposit-text, #fff) !important;
+  transition: opacity 0.15s !important;
+  box-shadow: 0 1px 3px var(--knoww-accent-green-glow, rgba(16, 185, 129, 0.3)) !important;
+  white-space: nowrap !important;
+  line-height: 1.6 !important;
+}
+.knoww-tp-header-deposit:hover {
+  opacity: 0.85 !important;
+}
+.knoww-tp-header-deposit:focus-visible {
+  outline: 2px solid var(--knoww-accent, rgb(29, 155, 240)) !important;
+  outline-offset: 2px !important;
+}
+
+.knoww-tp-header-action {
+  all: unset !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.4)) !important;
+  transition:
+    color 0.15s,
+    background 0.15s !important;
+  flex-shrink: 0 !important;
+}
+.knoww-tp-header-action:hover {
+  color: var(--knoww-text, rgba(255, 255, 255, 0.8)) !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.08)) !important;
+}
+.knoww-tp-header-action:focus-visible {
+  outline: 2px solid var(--knoww-accent, rgb(29, 155, 240)) !important;
+  outline-offset: 1px !important;
+  color: var(--knoww-text, rgba(255, 255, 255, 0.8)) !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.08)) !important;
+}
+.knoww-tp-header-action.spinning svg {
+  animation: knoww-spin 0.8s linear infinite !important;
 }
 
 /* ── Outcome Yes/No Toggle ── */
@@ -1488,119 +1744,6 @@
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
 }
 
-/* ── Wallet Bar ── */
-
-.knoww-tp-wallet-bar {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  padding: 8px 16px !important;
-  background: var(--knoww-card-bg, rgb(32, 35, 39)) !important;
-}
-.knoww-tp-wallet-left {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-}
-.knoww-tp-addr-col {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 2px !important;
-}
-.knoww-tp-addr-row {
-  display: flex !important;
-  align-items: center !important;
-  gap: 5px !important;
-}
-.knoww-tp-addr-tag {
-  font-size: 9px !important;
-  font-weight: 700 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
-  padding: 1px 4px !important;
-  border-radius: 3px !important;
-  background: rgba(0, 186, 124, 0.15) !important;
-  color: rgb(0, 186, 124) !important;
-  line-height: 1.3 !important;
-}
-.knoww-tp-addr-tag.proxy {
-  background: rgba(99, 102, 241, 0.15) !important;
-  color: rgb(129, 140, 248) !important;
-}
-.knoww-tp-status-dot {
-  display: inline-block !important;
-  width: 6px !important;
-  height: 6px !important;
-  border-radius: 50% !important;
-  background: rgb(0, 186, 124) !important;
-  box-shadow: 0 0 4px rgba(0, 186, 124, 0.5) !important;
-  flex-shrink: 0 !important;
-}
-.knoww-tp-status-dot.proxy {
-  background: rgb(129, 140, 248) !important;
-  box-shadow: 0 0 4px rgba(99, 102, 241, 0.4) !important;
-}
-.knoww-tp-address {
-  font-size: 11px !important;
-  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
-  font-family:
-    "SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace !important;
-}
-.knoww-tp-disconnect-btn {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: transparent !important;
-  border: none !important;
-  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
-  cursor: pointer !important;
-  padding: 2px !important;
-  border-radius: 4px !important;
-  opacity: 0.6 !important;
-  transition:
-    opacity 0.15s,
-    color 0.15s !important;
-}
-.knoww-tp-disconnect-btn:hover {
-  opacity: 1 !important;
-  color: rgb(239, 68, 68) !important;
-}
-.knoww-tp-wallet-right {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-}
-.knoww-tp-bal-label {
-  font-size: 13px !important;
-  font-weight: 700 !important;
-  color: rgb(0, 186, 124) !important;
-  font-variant-numeric: tabular-nums !important;
-}
-.knoww-tp-bal-label.knoww-tp-low {
-  color: rgb(255, 152, 0) !important;
-}
-.knoww-tp-refresh-btn {
-  all: unset !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 22px !important;
-  height: 22px !important;
-  border-radius: 4px !important;
-  cursor: pointer !important;
-  color: rgba(255, 255, 255, 0.45) !important;
-  transition:
-    color 0.15s,
-    background 0.15s !important;
-  flex-shrink: 0 !important;
-}
-.knoww-tp-refresh-btn:hover {
-  color: rgba(255, 255, 255, 0.8) !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-}
-.knoww-tp-refresh-btn.spinning svg {
-  animation: knoww-spin 0.8s linear infinite !important;
-}
 @keyframes knoww-spin {
   from {
     transform: rotate(0deg);
@@ -1609,73 +1752,36 @@
     transform: rotate(360deg);
   }
 }
-/* ── Portfolio Bar ── */
+/* ── Portfolio Bar (positions only) ── */
 
 .knoww-tp-portfolio-bar {
   display: flex !important;
-  flex-direction: column !important;
-  gap: 0 !important;
-  padding: 8px 16px !important;
-  background: var(--knoww-card-bg, rgb(32, 35, 39)) !important;
-  border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 5px 12px !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 .knoww-tp-portfolio-row {
-  display: flex !important;
+  display: inline-flex !important;
   align-items: center !important;
-  justify-content: space-between !important;
-  padding: 3px 0 !important;
-}
-.knoww-tp-portfolio-row.total {
-  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
-  margin-top: 4px !important;
-  padding-top: 6px !important;
+  gap: 4px !important;
 }
 .knoww-tp-portfolio-label {
-  font-size: 11px !important;
+  font-size: 10px !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
   font-weight: 500 !important;
 }
-.knoww-tp-portfolio-row.total .knoww-tp-portfolio-label {
-  font-size: 12px !important;
-  color: var(--knoww-text-primary, rgb(231, 233, 234)) !important;
-  font-weight: 600 !important;
-}
 .knoww-tp-portfolio-value {
-  font-size: 11px !important;
-  color: var(--knoww-text-primary, rgb(231, 233, 234)) !important;
+  font-size: 10px !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
   font-weight: 600 !important;
   font-variant-numeric: tabular-nums !important;
 }
 .knoww-tp-portfolio-value.positive {
   color: rgb(0, 186, 124) !important;
 }
-.knoww-tp-portfolio-value.lg {
-  font-size: 13px !important;
-  font-weight: 700 !important;
-}
 
-.knoww-tp-deposit-btn {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 4px !important;
-  padding: 3px 10px !important;
-  font-size: 11px !important;
-  font-weight: 600 !important;
-  border-radius: 6px !important;
-  border: none !important;
-  cursor: pointer !important;
-  background: linear-gradient(
-    135deg,
-    rgb(16, 185, 129),
-    rgb(20, 184, 166)
-  ) !important;
-  color: #fff !important;
-  transition: opacity 0.15s !important;
-  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.3) !important;
-}
-.knoww-tp-deposit-btn:hover {
-  opacity: 0.85 !important;
-}
 .knoww-tp-warn-deposit-btn {
   display: inline-flex !important;
   align-items: center !important;
@@ -1922,6 +2028,55 @@
   height: 16px !important;
 }
 
+.knoww-tp-wallet-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  width: 100% !important;
+  max-width: 280px !important;
+}
+
+.knoww-tp-wallet-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  padding: 10px 14px !important;
+  border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.12)) !important;
+  border-radius: 10px !important;
+  background: var(--knoww-card-bg, rgba(255, 255, 255, 0.04)) !important;
+  color: var(--knoww-text, #e7e9ea) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s,
+    border-color 0.15s !important;
+  text-align: left !important;
+  line-height: 1.3 !important;
+}
+.knoww-tp-wallet-item:hover {
+  background: var(--knoww-card-bg, rgba(255, 255, 255, 0.08)) !important;
+  border-color: var(--knoww-accent, rgb(0, 186, 124)) !important;
+}
+.knoww-tp-wallet-item:active {
+  transform: scale(0.98) !important;
+}
+.knoww-tp-wallet-item-icon {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 6px !important;
+  flex-shrink: 0 !important;
+  object-fit: contain !important;
+}
+.knoww-tp-wallet-item span {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
 .knoww-tp-btn-enable {
   display: block !important;
   width: auto !important;
@@ -2093,6 +2248,13 @@
   height: 16px !important;
   color: var(--knoww-text-secondary) !important;
 }
+.knoww-tp-tooltip-icon {
+  color: var(--knoww-text-secondary) !important;
+  font-size: 12px !important;
+  font-weight: normal !important;
+  cursor: help !important;
+  margin-left: auto !important;
+}
 .knoww-tp-more-divider {
   height: 1px !important;
   background: var(--knoww-border) !important;
@@ -2198,7 +2360,8 @@
   font-size: 16px !important;
   font-weight: 600 !important;
   font-family:
-    "SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace !important;
+    "SF Mono", "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo",
+    monospace !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   background: rgba(255, 255, 255, 0.04) !important;
   border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
@@ -2341,7 +2504,7 @@
 }
 .knoww-tp-exec-value {
   font-weight: 600 !important;
-  font-family: "SF Mono", SFMono-Regular, Consolas, monospace !important;
+  font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
 }
 .knoww-tp-exec-value.warn {
@@ -2424,7 +2587,7 @@
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   font-size: 14px !important;
   font-weight: 700 !important;
-  font-family: "SF Mono", SFMono-Regular, Consolas, monospace !important;
+  font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
   text-align: center !important;
   outline: none !important;
   -moz-appearance: textfield !important;
@@ -2672,6 +2835,45 @@
   background: rgba(0, 186, 124, 0.08) !important;
   color: rgb(0, 186, 124) !important;
 }
+
+.knoww-tp-success-overlay {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background: var(--knoww-card-bg, rgb(32, 35, 39)) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 100 !important;
+  border-radius: var(--knoww-radius, 16px) !important;
+  transition: opacity 0.3s ease !important;
+}
+
+.knoww-tp-success-icon {
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 50% !important;
+  background: rgba(0, 186, 124, 0.1) !important;
+  color: #00ba7c !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-bottom: 16px !important;
+}
+
+.knoww-tp-success-icon svg {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+.knoww-tp-success-text {
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
 .knoww-tp-toast-error {
   background: rgba(249, 24, 128, 0.08) !important;
   color: rgb(249, 24, 128) !important;
@@ -2739,7 +2941,7 @@
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   font-size: 16px !important;
   font-weight: 600 !important;
-  font-family: "SF Mono", SFMono-Regular, Consolas, monospace !important;
+  font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
   outline: none !important;
   transition: border-color 0.15s !important;
   -moz-appearance: textfield !important;
@@ -2794,13 +2996,24 @@
 }
 
 .knoww-platform-reddit .knoww-tp-header {
-  padding: 8px 10px !important;
-}
-
-.knoww-platform-reddit .knoww-tp-wallet-bar {
-  padding: 6px 10px !important;
-  flex-wrap: wrap !important;
+  padding: 6px 8px !important;
   gap: 4px !important;
+}
+.knoww-platform-reddit .knoww-tp-header-wallet {
+  padding: 2px 6px !important;
+  gap: 3px !important;
+}
+.knoww-platform-reddit .knoww-tp-header-addr {
+  font-size: 9px !important;
+}
+.knoww-platform-reddit .knoww-tp-header-bal {
+  font-size: 10px !important;
+}
+.knoww-platform-reddit .knoww-tp-header-deposit {
+  font-size: 9px !important;
+  padding: 2px 6px !important;
+}
+.knoww-platform-reddit .knoww-tp-title {
   font-size: 12px !important;
 }
 

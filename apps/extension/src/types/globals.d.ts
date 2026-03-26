@@ -310,6 +310,9 @@ declare global {
     // Page bridge flag (new structured bridge)
     __KNOWW_BRIDGE__?: boolean;
 
+    // Per-injection nonce shared between content script and page bridge
+    __KNOWW_BRIDGE_NONCE__?: string;
+
     // Ethereum provider (MetaMask)
     ethereum?: EthereumProvider;
   }

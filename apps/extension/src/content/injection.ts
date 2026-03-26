@@ -266,6 +266,47 @@ async function analyzePostAndFindMarket(
     return null;
   }
 
+  // --- BATCH SCORING WITH EMBEDDINGS ---
+  let marketScores: number[] = [];
+  let usedEmbeddings = false;
+  try {
+    const marketTexts = markets.map((m) => m.title || "");
+    const response = await chrome.runtime.sendMessage({
+      type: "compute-similarities",
+      postText: text,
+      marketTexts,
+    });
+    if (response?.ok) {
+      marketScores = response.similarities;
+      usedEmbeddings = true;
+      log(
+        "🧠 Embeddings scoring succeeded —",
+        marketTexts.length,
+        "markets scored"
+      );
+      if (isDebug) {
+        const scored = marketTexts.map((title, i) => ({
+          title: title.slice(0, 50),
+          similarity: marketScores[i].toFixed(4),
+        }));
+        scored.sort(
+          (a, b) => parseFloat(b.similarity) - parseFloat(a.similarity)
+        );
+        log("🧠 Embedding scores (sorted):", scored);
+      }
+    } else {
+      log(
+        "⚠️ Embeddings scoring failed, falling back to keyword scoring:",
+        response?.error
+      );
+      marketScores = markets.map((m) => calculateRelevanceScore([text], m));
+    }
+  } catch (e) {
+    log("⚠️ Embeddings error, falling back to keyword scoring:", e);
+    marketScores = markets.map((m) => calculateRelevanceScore([text], m));
+  }
+  // -------------------------------------
+
   if (isDebug) {
     // Count markets by source for debugging
     const polymarketCount = markets.filter(
@@ -296,6 +337,15 @@ async function analyzePostAndFindMarket(
     }
   }
 
+  // When embeddings are active, cosine similarity needs a higher bar than keyword overlap.
+  // Respect the user's relevanceThreshold setting but floor at 0.5 — below that, cosine
+  // similarity between unrelated topics (e.g. "Zomato valuation" vs "OpenAI valuation")
+  // produces false positives from shared vocabulary.
+  const EMBEDDING_FLOOR = 0.5;
+  const effectiveThreshold = usedEmbeddings
+    ? Math.max(EMBEDDING_FLOOR, CONFIG.MIN_RELEVANCE_SCORE)
+    : CONFIG.MIN_RELEVANCE_SCORE;
+
   // Track best market PER SOURCE (regardless of score - we'll filter later)
   const bestBySource: Record<string, BestBySourceEntry> = {};
 
@@ -307,7 +357,8 @@ async function analyzePostAndFindMarket(
     bestBySource.kalshi = { market: null, score: 0, allScores: [] };
   }
 
-  for (const market of markets) {
+  for (let i = 0; i < markets.length; i++) {
+    const market = markets[i];
     if (injectedMarketIds.has(market.id)) {
       log(`⏭️ Skipping already injected market: ${market.id}`);
       continue;
@@ -321,15 +372,17 @@ async function analyzePostAndFindMarket(
       continue;
     }
 
-    // Calculate score using ONLY this post's text
-    const score = calculateRelevanceScore([text], market);
+    // Embeddings path: pure cosine similarity, no extra boosts — the semantic
+    // score alone is the quality signal. Keyword path already includes volume
+    // and personalization boosts internally via calculateRelevanceScore.
+    const score = marketScores[i];
 
     // Track all scores for debugging
     if (isDebug) {
       bestBySource[source].allScores.push({
         title: market.title?.slice(0, 40),
         score: score.toFixed(2),
-        meetsThreshold: score >= CONFIG.MIN_RELEVANCE_SCORE,
+        meetsThreshold: score >= effectiveThreshold,
       });
 
       if (score >= 0.1) {
@@ -361,7 +414,7 @@ async function analyzePostAndFindMarket(
         (s) => s.meetsThreshold
       ).length;
       log(
-        `  ${source}: ${data.allScores.length} scored, ${aboveThreshold} above threshold (${CONFIG.MIN_RELEVANCE_SCORE})`
+        `  ${source}: ${data.allScores.length} scored, ${aboveThreshold} above threshold (${effectiveThreshold}${usedEmbeddings ? " [embeddings]" : ""})`
       );
       if (data.market) {
         log(
@@ -377,13 +430,16 @@ async function analyzePostAndFindMarket(
   }
 
   // Check if AT LEAST ONE source has a market that meets the threshold
-  // If so, we'll show markets from ALL sources (even if below threshold)
   const hasAnyRelevantMarket = Object.values(bestBySource).some(
-    (data) => data.market && data.score >= CONFIG.MIN_RELEVANCE_SCORE
+    (data) => data.market && data.score >= effectiveThreshold
   );
 
   if (!hasAnyRelevantMarket) {
-    log("❌ No market from any source met relevance threshold for this post");
+    log(
+      `❌ No market from any source met relevance threshold (${effectiveThreshold}${
+        usedEmbeddings ? " [embeddings]" : ""
+      }) for this post`
+    );
     return null;
   }
 
@@ -393,7 +449,19 @@ async function analyzePostAndFindMarket(
 
   for (const [source, data] of Object.entries(bestBySource)) {
     if (data.market) {
-      const meetsThreshold = data.score >= CONFIG.MIN_RELEVANCE_SCORE;
+      const meetsThreshold = data.score >= effectiveThreshold;
+
+      if (usedEmbeddings && meetsThreshold && !data.market._contextReason) {
+        const pct = Math.round(data.score * 100);
+        const topicHint =
+          result.matchedTags.length > 0
+            ? result.matchedTags.slice(0, 2).join(", ")
+            : result.keywords.split(" ").slice(0, 3).join(" ").trim();
+        data.market._contextReason = topicHint
+          ? `${pct}% match · ${topicHint}`
+          : `${pct}% match`;
+      }
+
       candidateMarkets.push({
         market: data.market,
         score: data.score,

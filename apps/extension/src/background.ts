@@ -17,8 +17,16 @@ import type {
   FetchTextMessage,
 } from "./types/chrome-messages";
 
-// ── Build mode (injected by webpack DefinePlugin) ──
-declare const __DEV_MODE__: boolean;
+// Lazy-loaded to avoid eagerly compiling WASM on service worker startup
+let embeddingsModule: typeof import("./background/embeddings") | null = null;
+async function getEmbeddingsModule() {
+  if (!embeddingsModule) {
+    embeddingsModule = await import("./background/embeddings");
+  }
+  return embeddingsModule;
+}
+
+// ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
 // ── Session storage stays TRUSTED_CONTEXTS only (default).
 // Content scripts access credentials via message passing below. ──
@@ -76,6 +84,25 @@ function isFetchJsonMessage(message: unknown): message is FetchJsonMessage {
     message !== null &&
     (message as FetchJsonMessage).type === "fetch-json" &&
     typeof (message as FetchJsonMessage).url === "string"
+  );
+}
+
+interface ComputeSimilaritiesMessage {
+  type: "compute-similarities";
+  postText: string;
+  marketTexts: string[];
+}
+
+function isComputeSimilaritiesMessage(
+  message: unknown
+): message is ComputeSimilaritiesMessage {
+  if (typeof message !== "object" || message === null) return false;
+  const msg = message as Record<string, unknown>;
+  return (
+    msg.type === "compute-similarities" &&
+    typeof msg.postText === "string" &&
+    Array.isArray(msg.marketTexts) &&
+    msg.marketTexts.every((t: unknown) => typeof t === "string")
   );
 }
 
@@ -180,6 +207,7 @@ chrome.runtime.onMessage.addListener(
       type?: string;
       tabId?: number;
       id?: string;
+      url?: string;
       method?: string;
       params?: unknown[];
       result?: unknown;
@@ -303,6 +331,24 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    // Compute Embeddings Similarities
+    if (isComputeSimilaritiesMessage(message)) {
+      (async () => {
+        try {
+          const { postText, marketTexts } = message;
+          const { computeSimilarities } = await getEmbeddingsModule();
+          const similarities = await computeSimilarities(postText, marketTexts);
+          sendResponse({ ok: true, similarities });
+        } catch (e) {
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
+      return true;
+    }
+
     // Fetch JSON (POST)
     if (isFetchJsonMessage(message)) {
       (async () => {
@@ -379,4 +425,10 @@ chrome.runtime.onMessage.addListener(
 
 chrome.action.onClicked.addListener(() => {
   chrome.runtime.openOptionsPage();
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
+    chrome.runtime.openOptionsPage();
+  }
 });

@@ -1,0 +1,2 @@
+/** Webpack DefinePlugin (see webpack.config.js). */
+declare const __DEV_MODE__: boolean;

@@ -176,12 +176,18 @@ export interface TradingErrorResponse {
   error: string;
 }
 
+export interface EmbeddingsSuccessResponse {
+  ok: true;
+  similarities: number[];
+}
+
 export type BackgroundResponse =
   | FetchTextSuccessResponse
   | FetchJsonSuccessResponse
   | FetchErrorResponse
   | TradingSuccessResponse
-  | TradingErrorResponse;
+  | TradingErrorResponse
+  | EmbeddingsSuccessResponse;
 
 export interface SettingsUpdateMessage {
   type: "KNOWW_SETTINGS_UPDATED";

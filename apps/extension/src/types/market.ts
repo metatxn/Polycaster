@@ -207,6 +207,8 @@ export interface NestedMarket {
   ticker?: string;
   slug?: string;
   active?: boolean;
+  closed?: boolean;
+  archived?: boolean;
   groupItemTitle?: string;
   outcomes?: string[];
   // Kalshi-specific nested market fields

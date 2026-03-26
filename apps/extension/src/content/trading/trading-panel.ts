@@ -121,6 +121,8 @@ let depositError: string | null = null;
 let selectedOutcome: "yes" | "no" = "yes";
 let yesPrice = 0;
 
+let sessionRestoreAttempted = false;
+
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 
 function getTickSize(): number {
@@ -371,7 +373,8 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
   WalletBridge.init();
 
-  if (!TradingService.getContext().address) {
+  if (!TradingService.getContext().address && !sessionRestoreAttempted) {
+    sessionRestoreAttempted = true;
     WalletBridge.getAccounts()
       .then((accounts) => {
         if (accounts.length > 0) TradingService.connectWallet();
@@ -416,15 +419,87 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
 // ── Section Renderers ──
 
-function addHeader(p: HTMLElement, opts: PanelOptions): void {
+function addHeader(
+  p: HTMLElement,
+  opts: PanelOptions,
+  ctx?: TradingContext,
+  address?: string | null
+): void {
   const h = el("div", "knoww-tp-header");
   h.appendChild(el("span", "knoww-tp-title", opts.outcomeName));
-  const btn = elHtml("button", "knoww-tp-close", I.close);
-  btn.onclick = (e) => {
+
+  const right = el("div", "knoww-tp-header-right");
+
+  if (address && ctx && ctx.state !== "disconnected") {
+    const walletPill = el("div", "knoww-tp-header-wallet");
+
+    const dot = el("span", "knoww-tp-header-dot");
+    walletPill.appendChild(dot);
+
+    const addr = el("span", "knoww-tp-header-addr", truncAddr(address));
+    walletPill.appendChild(addr);
+
+    const balText = `$${formatTokenAmount(ctx.balance)}`;
+    const bal = el(
+      "span",
+      `knoww-tp-header-bal${ctx.balance < 1 ? " low" : ""}`,
+      balText
+    );
+    walletPill.appendChild(bal);
+
+    right.appendChild(walletPill);
+
+    const depositBtn = el("button", "knoww-tp-header-deposit", "Deposit");
+    depositBtn.onclick = (e) => {
+      e.stopPropagation();
+      activeView = "deposit";
+      startDepositFlow(address);
+    };
+    right.appendChild(depositBtn);
+
+    const refreshBtn = elHtml("button", "knoww-tp-header-action", I.refresh);
+    refreshBtn.title = "Refresh balance";
+    refreshBtn.onclick = (e) => {
+      e.stopPropagation();
+      refreshBtn.classList.add("spinning");
+      TradingService.refreshBalance()
+        .then(() => {
+          if (panelOpts?.yesTokenId && panelOpts?.noTokenId) {
+            return TradingService.getOutcomeBalances(
+              panelOpts.yesTokenId,
+              panelOpts.noTokenId
+            ).then((b) => {
+              outcomeBalances = b;
+              outcomeBalancesLoaded = true;
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          refreshBtn.classList.remove("spinning");
+          rerender();
+        });
+    };
+    right.appendChild(refreshBtn);
+
+    const dcBtn = elHtml("button", "knoww-tp-header-action", I.disconnect);
+    dcBtn.title = "Disconnect wallet";
+    dcBtn.onclick = (e) => {
+      e.stopPropagation();
+      TradingService.reset();
+      CredentialManager.clear(address).catch(() => {});
+    };
+    right.appendChild(dcBtn);
+  }
+
+  const closeBtn = elHtml("button", "knoww-tp-close", I.close);
+  closeBtn.onclick = (e) => {
     e.stopPropagation();
     TradingPanel.hide();
   };
-  h.appendChild(btn);
+  right.appendChild(closeBtn);
+
+  h.appendChild(right);
   p.appendChild(h);
 }
 
@@ -492,165 +567,138 @@ function formatTokenAmount(amount: number): string {
   return amount.toFixed(2);
 }
 
-function addWalletBar(
+function addPortfolioBar(
   p: HTMLElement,
-  address: string,
-  ctx: TradingContext,
+  _ctx: TradingContext,
   opts: PanelOptions
 ): void {
-  const bar = el("div", "knoww-tp-wallet-bar");
-
-  const left = el("div", "knoww-tp-wallet-left");
-  const addrCol = el("div", "knoww-tp-addr-col");
-  const eoaRow = el("div", "knoww-tp-addr-row");
-  eoaRow.appendChild(el("span", "knoww-tp-status-dot"));
-  eoaRow.appendChild(el("span", "knoww-tp-addr-tag", "EOA"));
-  eoaRow.appendChild(el("span", "knoww-tp-address", truncAddr(address)));
-  addrCol.appendChild(eoaRow);
-  if (ctx.proxyAddress) {
-    const proxyRow = el("div", "knoww-tp-addr-row");
-    proxyRow.appendChild(el("span", "knoww-tp-status-dot proxy"));
-    proxyRow.appendChild(el("span", "knoww-tp-addr-tag proxy", "Safe"));
-    proxyRow.appendChild(
-      el("span", "knoww-tp-address", truncAddr(ctx.proxyAddress))
-    );
-    addrCol.appendChild(proxyRow);
-  }
-  left.appendChild(addrCol);
-  const dcBtn = elHtml("button", "knoww-tp-disconnect-btn", I.disconnect);
-  dcBtn.title = "Disconnect wallet";
-  dcBtn.onclick = (e) => {
-    e.stopPropagation();
-    TradingService.reset();
-    CredentialManager.clear(address).catch(() => {});
-  };
-  left.appendChild(dcBtn);
-
-  const right = el("div", "knoww-tp-wallet-right");
-  const balLabel = el(
-    "span",
-    `knoww-tp-bal-label${ctx.balance < 1 ? " knoww-tp-low" : ""}`,
-    `$${formatTokenAmount(ctx.balance)}`
-  );
-  right.appendChild(balLabel);
-
-  const refreshBtn = elHtml("button", "knoww-tp-refresh-btn", I.refresh);
-  refreshBtn.title = "Refresh balance";
-  refreshBtn.onclick = (e) => {
-    e.stopPropagation();
-    refreshBtn.classList.add("spinning");
-    TradingService.refreshBalance()
-      .then(() => {
-        if (panelOpts?.yesTokenId && panelOpts?.noTokenId) {
-          return TradingService.getOutcomeBalances(
-            panelOpts.yesTokenId,
-            panelOpts.noTokenId
-          ).then((b) => {
-            outcomeBalances = b;
-            outcomeBalancesLoaded = true;
-          });
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        refreshBtn.classList.remove("spinning");
-        rerender();
-      });
-  };
-  right.appendChild(refreshBtn);
-
-  const depositBtn = el("button", "knoww-tp-deposit-btn", "Deposit");
-  depositBtn.onclick = (e) => {
-    e.stopPropagation();
-    activeView = "deposit";
-    startDepositFlow(address);
-  };
-  right.appendChild(depositBtn);
-
-  bar.appendChild(left);
-  bar.appendChild(right);
-  p.appendChild(bar);
-
-  // Portfolio summary
   const yesPos = outcomeBalances?.yesBalance ?? 0;
   const noPos = outcomeBalances?.noBalance ?? 0;
-  const hasPosition = yesPos > 0 || noPos > 0;
+  const POS_THRESHOLD = 0.01;
+  const showYes = yesPos >= POS_THRESHOLD;
+  const showNo = noPos >= POS_THRESHOLD;
+
+  if (!showYes && !showNo) return;
+
   const yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
   const noPrice = 1 - yesPrice;
   const yesValue = yesPos * yesPrice;
   const noValue = noPos * noPrice;
-  const positionValue = yesValue + noValue;
-  const totalValue = ctx.balance + positionValue;
 
   const yesLabel = opts.outcomeIndex === 0 ? opts.outcomeName : "Yes";
   const noLabel = opts.outcomeIndex === 0 ? "No" : opts.outcomeName;
 
   const portfolio = el("div", "knoww-tp-portfolio-bar");
 
-  const cashRow = el("div", "knoww-tp-portfolio-row");
-  cashRow.appendChild(el("span", "knoww-tp-portfolio-label", "Cash"));
-  cashRow.appendChild(
-    el("span", "knoww-tp-portfolio-value", `$${formatTokenAmount(ctx.balance)}`)
-  );
-  portfolio.appendChild(cashRow);
-
-  if (hasPosition) {
-    if (yesPos > 0) {
-      const yRow = el("div", "knoww-tp-portfolio-row");
-      yRow.appendChild(el("span", "knoww-tp-portfolio-label", `${yesLabel}`));
-      yRow.appendChild(
-        el(
-          "span",
-          "knoww-tp-portfolio-value positive",
-          `${yesPos.toFixed(1)} shares · $${yesValue.toFixed(2)}`
-        )
-      );
-      portfolio.appendChild(yRow);
-    }
-    if (noPos > 0) {
-      const nRow = el("div", "knoww-tp-portfolio-row");
-      nRow.appendChild(el("span", "knoww-tp-portfolio-label", `${noLabel}`));
-      nRow.appendChild(
-        el(
-          "span",
-          "knoww-tp-portfolio-value positive",
-          `${noPos.toFixed(1)} shares · $${noValue.toFixed(2)}`
-        )
-      );
-      portfolio.appendChild(nRow);
-    }
+  if (showYes) {
+    const yRow = el("div", "knoww-tp-portfolio-row");
+    yRow.appendChild(el("span", "knoww-tp-portfolio-label", `${yesLabel}`));
+    yRow.appendChild(
+      el(
+        "span",
+        "knoww-tp-portfolio-value positive",
+        `${yesPos.toFixed(1)} @ $${yesPrice.toFixed(2)} · $${yesValue.toFixed(2)}`
+      )
+    );
+    portfolio.appendChild(yRow);
   }
-
-  const totalRow = el("div", "knoww-tp-portfolio-row total");
-  totalRow.appendChild(el("span", "knoww-tp-portfolio-label", "Total value"));
-  totalRow.appendChild(
-    el(
-      "span",
-      "knoww-tp-portfolio-value lg",
-      `$${formatTokenAmount(totalValue)}`
-    )
-  );
-  portfolio.appendChild(totalRow);
+  if (showNo) {
+    const nRow = el("div", "knoww-tp-portfolio-row");
+    nRow.appendChild(el("span", "knoww-tp-portfolio-label", `${noLabel}`));
+    nRow.appendChild(
+      el(
+        "span",
+        "knoww-tp-portfolio-value positive",
+        `${noPos.toFixed(1)} @ $${noPrice.toFixed(2)} · $${noValue.toFixed(2)}`
+      )
+    );
+    portfolio.appendChild(nRow);
+  }
 
   p.appendChild(portfolio);
 }
 
+let disconnectedUnsub: (() => void) | null = null;
+
 function addDisconnected(p: HTMLElement): void {
+  if (disconnectedUnsub) {
+    disconnectedUnsub();
+    disconnectedUnsub = null;
+  }
+
+  const existing = p.querySelector(".knoww-tp-connect-section");
+  if (existing) existing.remove();
+
   const s = el("div", "knoww-tp-connect-section");
   s.appendChild(elHtml("div", "knoww-tp-wallet-icon", I.wallet));
   s.appendChild(
     el("div", "knoww-tp-connect-msg", "Connect your wallet to start trading")
   );
-  const btn = elHtml(
-    "button",
-    "knoww-tp-btn-connect",
-    `${I.wallet} Connect Wallet`
-  );
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    TradingService.connectWallet();
-  };
-  s.appendChild(btn);
+
+  const discovered = WalletBridge.getDiscoveredWallets();
+
+  if (discovered.length > 1) {
+    const list = el("div", "knoww-tp-wallet-list");
+    for (const w of discovered) {
+      const item = document.createElement("button");
+      item.className = "knoww-tp-wallet-item";
+      item.innerHTML = `<img src="${escapeHtml(w.icon)}" alt="" class="knoww-tp-wallet-item-icon" /><span>${escapeHtml(w.name)}</span>`;
+      item.onclick = (e) => {
+        e.stopPropagation();
+        item.style.opacity = "0.6";
+        item.style.pointerEvents = "none";
+        TradingService.connectWallet(w.uuid);
+      };
+      list.appendChild(item);
+    }
+    s.appendChild(list);
+  } else {
+    const btn = elHtml(
+      "button",
+      "knoww-tp-btn-connect",
+      `${I.wallet} Connect Wallet`
+    );
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      btn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span> Connecting…`;
+      btn.style.pointerEvents = "none";
+      btn.style.opacity = "0.7";
+
+      window.postMessage(
+        { type: "KNOWW_LIST_WALLETS" },
+        window.location.origin
+      );
+
+      let settled = false;
+      const unsub = WalletBridge.onWalletsChanged((newWallets) => {
+        if (settled) return;
+        settled = true;
+        unsub();
+        clearTimeout(fallback);
+        TradingService.connectWallet(
+          newWallets.length >= 1 ? newWallets[0].uuid : undefined
+        );
+      });
+
+      const fallback = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        unsub();
+        const fresh = WalletBridge.getDiscoveredWallets();
+        TradingService.connectWallet(
+          fresh.length >= 1 ? fresh[0].uuid : undefined
+        );
+      }, 2000);
+    };
+    s.appendChild(btn);
+  }
+
+  disconnectedUnsub = WalletBridge.onWalletsChanged((newWallets) => {
+    if (newWallets.length > 0 && s.isConnected) {
+      addDisconnected(p);
+    }
+  });
+
   p.appendChild(s);
 }
 
@@ -737,7 +785,7 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
       const splitBtn = elHtml(
         "button",
         "knoww-tp-more-item",
-        `${I.split} Split`
+        `${I.split} Split <span class="knoww-tp-tooltip-icon" title="Convert 1 USDC into 1 Yes and 1 No share">(?)</span>`
       );
       splitBtn.onclick = (e) => {
         e.stopPropagation();
@@ -752,7 +800,7 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
       const mergeBtn = elHtml(
         "button",
         "knoww-tp-more-item",
-        `${I.merge} Merge`
+        `${I.merge} Merge <span class="knoww-tp-tooltip-icon" title="Combine 1 Yes and 1 No share to get 1 USDC back">(?)</span>`
       );
       mergeBtn.onclick = (e) => {
         e.stopPropagation();
@@ -1587,6 +1635,21 @@ function addSubmitButton(
 
           if (balanceChanged || positionChanged) {
             finishSettling("Order filled!", "success");
+
+            // Show a success overlay
+            const overlay = el("div", "knoww-tp-success-overlay");
+            overlay.innerHTML = `
+              <div class="knoww-tp-success-icon">${I.check}</div>
+              <div class="knoww-tp-success-text">Order Placed Successfully</div>
+            `;
+            panel.appendChild(overlay);
+
+            // Fade out and remove after 1.5s
+            setTimeout(() => {
+              overlay.style.opacity = "0";
+              setTimeout(() => overlay.remove(), 300);
+            }, 1500);
+
             return;
           }
 
@@ -2414,7 +2477,7 @@ function render(
   const { state, address, error } = ctx;
   panel.innerHTML = "";
 
-  addHeader(panel, opts);
+  addHeader(panel, opts, ctx, address);
 
   if (state === "disconnected" || !address) {
     addDisconnected(panel);
@@ -2429,7 +2492,7 @@ function render(
     return;
   }
 
-  addWalletBar(panel, address, ctx, opts);
+  addPortfolioBar(panel, ctx, opts);
 
   if (activeView === "deposit") {
     renderDepositForm(panel, ctx);

@@ -4,9 +4,23 @@
  * Sends KNOWW_BRIDGE_REQUEST messages to the page-bridge.ts (main world)
  * via window.postMessage and correlates responses via unique IDs.
  *
+ * Wallet discovery uses EIP-6963: the page-bridge announces installed
+ * wallets and this module exposes them so the trading panel can render
+ * a picker UI.
+ *
  * Also handles signing delegation from the background service worker:
- * background → chrome.tabs.sendMessage → here → page bridge → MetaMask → back.
+ * background → chrome.tabs.sendMessage → here → page bridge → wallet → back.
+ *
+ * Security: every message carries a per-injection nonce (_n) that both
+ * sides validate. Messages without a matching nonce are silently dropped.
  */
+
+export interface DiscoveredWallet {
+  uuid: string;
+  name: string;
+  icon: string;
+  rdns: string;
+}
 
 interface BridgeResponse {
   type: "KNOWW_BRIDGE_RESPONSE";
@@ -24,6 +38,12 @@ type PendingRequest = {
 const pending = new Map<string, PendingRequest>();
 
 let initialized = false;
+let wallets: DiscoveredWallet[] = [];
+let walletListeners: Array<(w: DiscoveredWallet[]) => void> = [];
+
+function getNonce(): string | undefined {
+  return window.__KNOWW_BRIDGE_NONCE__;
+}
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -33,20 +53,43 @@ function init(): void {
   if (initialized) return;
   initialized = true;
 
-  // Listen for page bridge responses
+  const nonce = getNonce();
+
   window.addEventListener("message", (event: MessageEvent) => {
     if (event.source !== window) return;
-    const data = event.data as BridgeResponse | undefined;
-    if (!data || data.type !== "KNOWW_BRIDGE_RESPONSE") return;
+    const data = event.data as
+      | (BridgeResponse & { _n?: string })
+      | {
+          type: "KNOWW_WALLETS_DISCOVERED";
+          wallets: DiscoveredWallet[];
+          _n?: string;
+        }
+      | undefined;
+    if (!data?.type) return;
 
-    const p = pending.get(data.id);
-    if (!p) return;
-    pending.delete(data.id);
+    if (nonce && data._n !== nonce) return;
 
-    if (data.error) {
-      p.reject(new Error(data.error));
-    } else {
-      p.resolve(data.result);
+    if (data.type === "KNOWW_BRIDGE_RESPONSE") {
+      const p = pending.get(data.id);
+      if (!p) return;
+      pending.delete(data.id);
+      if (data.error) {
+        p.reject(new Error(data.error));
+      } else {
+        p.resolve(data.result);
+      }
+      return;
+    }
+
+    if (data.type === "KNOWW_WALLETS_DISCOVERED") {
+      wallets = data.wallets;
+      for (const fn of walletListeners) {
+        try {
+          fn(wallets);
+        } catch {
+          /* ignore */
+        }
+      }
     }
   });
 
@@ -56,7 +99,6 @@ function init(): void {
 
     const { id, method, params } = message;
 
-    // Forward to page bridge and wait for response
     request(method, params)
       .then((result) => {
         chrome.runtime.sendMessage({
@@ -76,17 +118,34 @@ function init(): void {
     sendResponse({ ok: true });
     return false;
   });
+
+  window.postMessage(
+    { type: "KNOWW_LIST_WALLETS", _n: nonce },
+    window.location.origin
+  );
 }
 
-function request(method: string, params?: unknown[]): Promise<unknown> {
+function request(
+  method: string,
+  params?: unknown[],
+  walletUuid?: string
+): Promise<unknown> {
   init();
+  const nonce = getNonce();
   return new Promise((resolve, reject) => {
     const id = generateId();
     pending.set(id, { resolve, reject });
 
     window.postMessage(
-      { type: "KNOWW_BRIDGE_REQUEST", id, method, params },
-      "*"
+      {
+        type: "KNOWW_BRIDGE_REQUEST",
+        id,
+        method,
+        params,
+        walletUuid,
+        _n: nonce,
+      },
+      window.location.origin
     );
 
     setTimeout(() => {
@@ -101,8 +160,34 @@ function request(method: string, params?: unknown[]): Promise<unknown> {
 export const WalletBridge = {
   init,
 
-  async connect(): Promise<string[]> {
-    const accounts = (await request("eth_requestAccounts")) as string[];
+  getDiscoveredWallets(): DiscoveredWallet[] {
+    init();
+    return wallets;
+  },
+
+  onWalletsChanged(fn: (w: DiscoveredWallet[]) => void): () => void {
+    walletListeners.push(fn);
+    return () => {
+      walletListeners = walletListeners.filter((l) => l !== fn);
+    };
+  },
+
+  selectWallet(uuid: string): void {
+    window.postMessage(
+      { type: "KNOWW_SELECT_WALLET", uuid, _n: getNonce() },
+      window.location.origin
+    );
+  },
+
+  async connect(walletUuid?: string): Promise<string[]> {
+    if (walletUuid) {
+      this.selectWallet(walletUuid);
+    }
+    const accounts = (await request(
+      "eth_requestAccounts",
+      undefined,
+      walletUuid
+    )) as string[];
     return accounts;
   },
 

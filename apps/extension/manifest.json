@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Knoww - Prediction Markets for Social Media",
-  "version": "2.5.8",
+  "version": "2.5.13",
   "description": "Discover and navigate prediction markets",
   "icons": {
     "16": "icons/icon-16.png",
@@ -33,8 +33,13 @@
     "https://clob.polymarket.com/*",
     "https://data-api.polymarket.com/*",
     "https://polygon-bor-rpc.publicnode.com/*",
-    "https://relayer-v2.polymarket.com/*"
+    "https://relayer-v2.polymarket.com/*",
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -47,7 +52,9 @@
         "icons/icon-128.png",
         "icons/icon-256.png",
         "knoww-inline.css",
-        "page-bridge.js"
+        "page-bridge.js",
+        "*.wasm",
+        "*.mjs"
       ],
       "matches": [
         "https://x.com/*",

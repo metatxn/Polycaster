@@ -1,5 +1,13 @@
 #!/bin/sh
 
+# Fix PATH for GUI clients (like Cursor/VS Code)
+export PATH="$HOME/Library/pnpm:$HOME/.nvm/versions/node/v23.4.0/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# Load NVM if it exists
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  \. "$HOME/.nvm/nvm.sh"
+fi
+
 echo "Running pre-push checks..."
 
 echo "Type-checking all packages..."

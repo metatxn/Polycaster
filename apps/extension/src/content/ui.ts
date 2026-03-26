@@ -148,16 +148,16 @@ async function resolveTokenAndShowPanel(
   }
 }
 
-// Color palette for multi-option markets (matching Polymarket)
+// Color palette for multi-option markets — bright variants for dark-theme readability
 const OPTION_COLORS = [
-  "#f23645", // Red
-  "#089981", // Teal/Green
-  "#2962ff", // Blue
-  "#ff9800", // Orange
-  "#9c27b0", // Purple
-  "#00bcd4", // Cyan
-  "#e91e63", // Pink
-  "#4caf50", // Green
+  "#fb7185", // Rose
+  "#34d399", // Emerald
+  "#60a5fa", // Sky blue
+  "#fbbf24", // Amber
+  "#c084fc", // Violet
+  "#22d3ee", // Cyan
+  "#f472b6", // Pink
+  "#a3e635", // Lime
 ];
 
 // Source branding configuration

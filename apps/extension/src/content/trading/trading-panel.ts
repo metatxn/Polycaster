@@ -419,15 +419,87 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
 // ── Section Renderers ──
 
-function addHeader(p: HTMLElement, opts: PanelOptions): void {
+function addHeader(
+  p: HTMLElement,
+  opts: PanelOptions,
+  ctx?: TradingContext,
+  address?: string | null
+): void {
   const h = el("div", "knoww-tp-header");
   h.appendChild(el("span", "knoww-tp-title", opts.outcomeName));
-  const btn = elHtml("button", "knoww-tp-close", I.close);
-  btn.onclick = (e) => {
+
+  const right = el("div", "knoww-tp-header-right");
+
+  if (address && ctx && ctx.state !== "disconnected") {
+    const walletPill = el("div", "knoww-tp-header-wallet");
+
+    const dot = el("span", "knoww-tp-header-dot");
+    walletPill.appendChild(dot);
+
+    const addr = el("span", "knoww-tp-header-addr", truncAddr(address));
+    walletPill.appendChild(addr);
+
+    const balText = `$${formatTokenAmount(ctx.balance)}`;
+    const bal = el(
+      "span",
+      `knoww-tp-header-bal${ctx.balance < 1 ? " low" : ""}`,
+      balText
+    );
+    walletPill.appendChild(bal);
+
+    right.appendChild(walletPill);
+
+    const depositBtn = el("button", "knoww-tp-header-deposit", "Deposit");
+    depositBtn.onclick = (e) => {
+      e.stopPropagation();
+      activeView = "deposit";
+      startDepositFlow(address);
+    };
+    right.appendChild(depositBtn);
+
+    const refreshBtn = elHtml("button", "knoww-tp-header-action", I.refresh);
+    refreshBtn.title = "Refresh balance";
+    refreshBtn.onclick = (e) => {
+      e.stopPropagation();
+      refreshBtn.classList.add("spinning");
+      TradingService.refreshBalance()
+        .then(() => {
+          if (panelOpts?.yesTokenId && panelOpts?.noTokenId) {
+            return TradingService.getOutcomeBalances(
+              panelOpts.yesTokenId,
+              panelOpts.noTokenId
+            ).then((b) => {
+              outcomeBalances = b;
+              outcomeBalancesLoaded = true;
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          refreshBtn.classList.remove("spinning");
+          rerender();
+        });
+    };
+    right.appendChild(refreshBtn);
+
+    const dcBtn = elHtml("button", "knoww-tp-header-action", I.disconnect);
+    dcBtn.title = "Disconnect wallet";
+    dcBtn.onclick = (e) => {
+      e.stopPropagation();
+      TradingService.reset();
+      CredentialManager.clear(address).catch(() => {});
+    };
+    right.appendChild(dcBtn);
+  }
+
+  const closeBtn = elHtml("button", "knoww-tp-close", I.close);
+  closeBtn.onclick = (e) => {
     e.stopPropagation();
     TradingPanel.hide();
   };
-  h.appendChild(btn);
+  right.appendChild(closeBtn);
+
+  h.appendChild(right);
   p.appendChild(h);
 }
 
@@ -495,145 +567,53 @@ function formatTokenAmount(amount: number): string {
   return amount.toFixed(2);
 }
 
-function addWalletBar(
+function addPortfolioBar(
   p: HTMLElement,
-  address: string,
-  ctx: TradingContext,
+  _ctx: TradingContext,
   opts: PanelOptions
 ): void {
-  const bar = el("div", "knoww-tp-wallet-bar");
-
-  const left = el("div", "knoww-tp-wallet-left");
-  const addrCol = el("div", "knoww-tp-addr-col");
-  const eoaRow = el("div", "knoww-tp-addr-row");
-  eoaRow.appendChild(el("span", "knoww-tp-status-dot"));
-  eoaRow.appendChild(el("span", "knoww-tp-addr-tag", "EOA"));
-  eoaRow.appendChild(el("span", "knoww-tp-address", truncAddr(address)));
-  addrCol.appendChild(eoaRow);
-  if (ctx.proxyAddress) {
-    const proxyRow = el("div", "knoww-tp-addr-row");
-    proxyRow.appendChild(el("span", "knoww-tp-status-dot proxy"));
-    proxyRow.appendChild(el("span", "knoww-tp-addr-tag proxy", "Safe"));
-    proxyRow.appendChild(
-      el("span", "knoww-tp-address", truncAddr(ctx.proxyAddress))
-    );
-    addrCol.appendChild(proxyRow);
-  }
-  left.appendChild(addrCol);
-  const dcBtn = elHtml("button", "knoww-tp-disconnect-btn", I.disconnect);
-  dcBtn.title = "Disconnect wallet";
-  dcBtn.onclick = (e) => {
-    e.stopPropagation();
-    TradingService.reset();
-    CredentialManager.clear(address).catch(() => {});
-  };
-  left.appendChild(dcBtn);
-
-  const right = el("div", "knoww-tp-wallet-right");
-  const balLabel = el(
-    "span",
-    `knoww-tp-bal-label${ctx.balance < 1 ? " knoww-tp-low" : ""}`,
-    `$${formatTokenAmount(ctx.balance)}`
-  );
-  right.appendChild(balLabel);
-
-  const refreshBtn = elHtml("button", "knoww-tp-refresh-btn", I.refresh);
-  refreshBtn.title = "Refresh balance";
-  refreshBtn.onclick = (e) => {
-    e.stopPropagation();
-    refreshBtn.classList.add("spinning");
-    TradingService.refreshBalance()
-      .then(() => {
-        if (panelOpts?.yesTokenId && panelOpts?.noTokenId) {
-          return TradingService.getOutcomeBalances(
-            panelOpts.yesTokenId,
-            panelOpts.noTokenId
-          ).then((b) => {
-            outcomeBalances = b;
-            outcomeBalancesLoaded = true;
-          });
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        refreshBtn.classList.remove("spinning");
-        rerender();
-      });
-  };
-  right.appendChild(refreshBtn);
-
-  const depositBtn = el("button", "knoww-tp-deposit-btn", "Deposit");
-  depositBtn.onclick = (e) => {
-    e.stopPropagation();
-    activeView = "deposit";
-    startDepositFlow(address);
-  };
-  right.appendChild(depositBtn);
-
-  bar.appendChild(left);
-  bar.appendChild(right);
-  p.appendChild(bar);
-
-  // Portfolio summary
   const yesPos = outcomeBalances?.yesBalance ?? 0;
   const noPos = outcomeBalances?.noBalance ?? 0;
-  const hasPosition = yesPos > 0 || noPos > 0;
+  const POS_THRESHOLD = 0.01;
+  const showYes = yesPos >= POS_THRESHOLD;
+  const showNo = noPos >= POS_THRESHOLD;
+
+  if (!showYes && !showNo) return;
+
   const yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
   const noPrice = 1 - yesPrice;
   const yesValue = yesPos * yesPrice;
   const noValue = noPos * noPrice;
-  const positionValue = yesValue + noValue;
-  const totalValue = ctx.balance + positionValue;
 
   const yesLabel = opts.outcomeIndex === 0 ? opts.outcomeName : "Yes";
   const noLabel = opts.outcomeIndex === 0 ? "No" : opts.outcomeName;
 
   const portfolio = el("div", "knoww-tp-portfolio-bar");
 
-  const cashRow = el("div", "knoww-tp-portfolio-row");
-  cashRow.appendChild(el("span", "knoww-tp-portfolio-label", "Cash"));
-  cashRow.appendChild(
-    el("span", "knoww-tp-portfolio-value", `$${formatTokenAmount(ctx.balance)}`)
-  );
-  portfolio.appendChild(cashRow);
-
-  if (hasPosition) {
-    if (yesPos > 0) {
-      const yRow = el("div", "knoww-tp-portfolio-row");
-      yRow.appendChild(el("span", "knoww-tp-portfolio-label", `${yesLabel}`));
-      yRow.appendChild(
-        el(
-          "span",
-          "knoww-tp-portfolio-value positive",
-          `${yesPos.toFixed(1)} shares · $${yesValue.toFixed(2)}`
-        )
-      );
-      portfolio.appendChild(yRow);
-    }
-    if (noPos > 0) {
-      const nRow = el("div", "knoww-tp-portfolio-row");
-      nRow.appendChild(el("span", "knoww-tp-portfolio-label", `${noLabel}`));
-      nRow.appendChild(
-        el(
-          "span",
-          "knoww-tp-portfolio-value positive",
-          `${noPos.toFixed(1)} shares · $${noValue.toFixed(2)}`
-        )
-      );
-      portfolio.appendChild(nRow);
-    }
+  if (showYes) {
+    const yRow = el("div", "knoww-tp-portfolio-row");
+    yRow.appendChild(el("span", "knoww-tp-portfolio-label", `${yesLabel}`));
+    yRow.appendChild(
+      el(
+        "span",
+        "knoww-tp-portfolio-value positive",
+        `${yesPos.toFixed(1)} @ $${yesValue.toFixed(2)}`
+      )
+    );
+    portfolio.appendChild(yRow);
   }
-
-  const totalRow = el("div", "knoww-tp-portfolio-row total");
-  totalRow.appendChild(el("span", "knoww-tp-portfolio-label", "Total value"));
-  totalRow.appendChild(
-    el(
-      "span",
-      "knoww-tp-portfolio-value lg",
-      `$${formatTokenAmount(totalValue)}`
-    )
-  );
-  portfolio.appendChild(totalRow);
+  if (showNo) {
+    const nRow = el("div", "knoww-tp-portfolio-row");
+    nRow.appendChild(el("span", "knoww-tp-portfolio-label", `${noLabel}`));
+    nRow.appendChild(
+      el(
+        "span",
+        "knoww-tp-portfolio-value positive",
+        `${noPos.toFixed(1)} @ $${noValue.toFixed(2)}`
+      )
+    );
+    portfolio.appendChild(nRow);
+  }
 
   p.appendChild(portfolio);
 }
@@ -2480,7 +2460,7 @@ function render(
   const { state, address, error } = ctx;
   panel.innerHTML = "";
 
-  addHeader(panel, opts);
+  addHeader(panel, opts, ctx, address);
 
   if (state === "disconnected" || !address) {
     addDisconnected(panel);
@@ -2495,7 +2475,7 @@ function render(
     return;
   }
 
-  addWalletBar(panel, address, ctx, opts);
+  addPortfolioBar(panel, ctx, opts);
 
   if (activeView === "deposit") {
     renderDepositForm(panel, ctx);

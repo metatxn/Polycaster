@@ -456,8 +456,10 @@ async function analyzePostAndFindMarket(
         const topicHint =
           result.matchedTags.length > 0
             ? result.matchedTags.slice(0, 2).join(", ")
-            : result.keywords.split(" ").slice(0, 3).join(" ");
-        data.market._contextReason = `${pct}% match · ${topicHint}`;
+            : result.keywords.split(" ").slice(0, 3).join(" ").trim();
+        data.market._contextReason = topicHint
+          ? `${pct}% match · ${topicHint}`
+          : `${pct}% match`;
       }
 
       candidateMarkets.push({

@@ -88,6 +88,25 @@ function isFetchJsonMessage(message: unknown): message is FetchJsonMessage {
   );
 }
 
+interface ComputeSimilaritiesMessage {
+  type: "compute-similarities";
+  postText: string;
+  marketTexts: string[];
+}
+
+function isComputeSimilaritiesMessage(
+  message: unknown
+): message is ComputeSimilaritiesMessage {
+  if (typeof message !== "object" || message === null) return false;
+  const msg = message as Record<string, unknown>;
+  return (
+    msg.type === "compute-similarities" &&
+    typeof msg.postText === "string" &&
+    Array.isArray(msg.marketTexts) &&
+    msg.marketTexts.every((t: unknown) => typeof t === "string")
+  );
+}
+
 function isTradingMessage(message: unknown): boolean {
   return (
     typeof message === "object" &&
@@ -314,20 +333,13 @@ chrome.runtime.onMessage.addListener(
     }
 
     // Compute Embeddings Similarities
-    if (
-      typeof message === "object" &&
-      message !== null &&
-      (message as any).type === "compute-similarities"
-    ) {
+    if (isComputeSimilaritiesMessage(message)) {
       (async () => {
         try {
-          const { postText, marketTexts } = message as any;
+          const { postText, marketTexts } = message;
           const { computeSimilarities } = await getEmbeddingsModule();
           const similarities = await computeSimilarities(postText, marketTexts);
-          (sendResponse as (resp: any) => void)({
-            ok: true,
-            similarities,
-          });
+          sendResponse({ ok: true, similarities });
         } catch (e) {
           sendResponse({
             ok: false,

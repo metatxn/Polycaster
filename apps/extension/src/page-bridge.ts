@@ -118,6 +118,20 @@ function postResult(id: string, result: unknown): void {
         const w = discoveredWallets.get(data.uuid);
         if (w) {
           activeProvider = w.provider;
+          window.postMessage(
+            { type: "KNOWW_SELECT_WALLET_RESULT", uuid: data.uuid, ok: true },
+            window.location.origin
+          );
+        } else {
+          window.postMessage(
+            {
+              type: "KNOWW_SELECT_WALLET_RESULT",
+              uuid: data.uuid,
+              ok: false,
+              error: "WALLET_NOT_FOUND",
+            },
+            window.location.origin
+          );
         }
         return;
       }

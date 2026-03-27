@@ -198,4 +198,4 @@ export type MessageHandler = (
   message: BackgroundMessage | SettingsUpdateMessage,
   sender: chrome.runtime.MessageSender,
   sendResponse: (response: BackgroundResponse | { success: boolean }) => void
-) => boolean | void;
+) => boolean | undefined;

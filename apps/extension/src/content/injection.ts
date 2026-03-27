@@ -58,6 +58,83 @@ interface AnalysisResult {
   postText: string;
 }
 
+const CONTEXT_STOP_WORDS = new Set([
+  "will",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "how",
+  "this",
+  "that",
+  "with",
+  "from",
+  "have",
+  "has",
+  "about",
+  "into",
+  "your",
+  "their",
+  "there",
+  "would",
+  "could",
+  "should",
+  "after",
+  "before",
+  "under",
+  "over",
+  "than",
+  "then",
+  "them",
+  "they",
+  "just",
+  "very",
+  "more",
+  "most",
+  "also",
+  "news",
+  "post",
+  "thread",
+]);
+
+function toContextTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !CONTEXT_STOP_WORDS.has(t));
+}
+
+function countSharedContextTokens(a: string, b: string): number {
+  const aSet = new Set(toContextTokens(a));
+  const bSet = new Set(toContextTokens(b));
+  if (aSet.size === 0 || bSet.size === 0) return 0;
+  let shared = 0;
+  for (const t of aSet) {
+    if (bSet.has(t)) shared += 1;
+  }
+  return shared;
+}
+
+function hasNamedEntityOverlap(postText: string, marketText: string): boolean {
+  const extract = (text: string): Set<string> =>
+    new Set(
+      (text.match(/\b[A-Z][a-zA-Z]{2,}\b/g) || [])
+        .map((w) => w.toLowerCase())
+        .filter((w) => !CONTEXT_STOP_WORDS.has(w))
+    );
+
+  const postEntities = extract(postText);
+  const marketEntities = extract(marketText);
+  for (const entity of postEntities) {
+    if (marketEntities.has(entity)) return true;
+  }
+  return false;
+}
+
 /**
  * Best-effort logical identity for a post element.
  * LinkedIn reuses DOM nodes, so rely on data-urn/data-id when present,
@@ -269,8 +346,19 @@ async function analyzePostAndFindMarket(
   // --- BATCH SCORING WITH EMBEDDINGS ---
   let marketScores: number[] = [];
   let usedEmbeddings = false;
+  let marketTexts: string[] = [];
   try {
-    const marketTexts = markets.map((m) => m.title || "");
+    marketTexts = markets.map((m) => {
+      let rich = m.title || "";
+      const tagStr = (m.tags || [])
+        .map((t) => t.label || t.slug || "")
+        .filter(Boolean)
+        .slice(0, 5)
+        .join(", ");
+      if (tagStr) rich += ` [${tagStr}]`;
+      if (m.description) rich += ` ${m.description.slice(0, 120)}`;
+      return rich;
+    });
     const response = await chrome.runtime.sendMessage({
       type: "compute-similarities",
       postText: text,
@@ -307,6 +395,8 @@ async function analyzePostAndFindMarket(
   }
   // -------------------------------------
 
+  // -------------------------------------
+
   if (isDebug) {
     // Count markets by source for debugging
     const polymarketCount = markets.filter(
@@ -339,8 +429,7 @@ async function analyzePostAndFindMarket(
 
   // When embeddings are active, cosine similarity needs a higher bar than keyword overlap.
   // Respect the user's relevanceThreshold setting but floor at 0.5 — below that, cosine
-  // similarity between unrelated topics (e.g. "Zomato valuation" vs "OpenAI valuation")
-  // produces false positives from shared vocabulary.
+  // similarity between unrelated topics produces false positives from shared vocabulary.
   const EMBEDDING_FLOOR = 0.5;
   const effectiveThreshold = usedEmbeddings
     ? Math.max(EMBEDDING_FLOOR, CONFIG.MIN_RELEVANCE_SCORE)
@@ -372,10 +461,23 @@ async function analyzePostAndFindMarket(
       continue;
     }
 
-    // Embeddings path: pure cosine similarity, no extra boosts — the semantic
-    // score alone is the quality signal. Keyword path already includes volume
-    // and personalization boosts internally via calculateRelevanceScore.
     const score = marketScores[i];
+    const marketText = marketTexts[i] || market.title || "";
+
+    // CONTEXT GATE: Even if cosine similarity is high, require lexical overlap
+    const sharedTokens = countSharedContextTokens(text, marketText);
+    const entityOverlap = hasNamedEntityOverlap(text, marketText);
+
+    // If there is zero lexical overlap, it's almost certainly a false positive
+    // (e.g. "Meerut pension" vs "Richest person" -> high cosine, 0 overlap)
+    if (usedEmbeddings && sharedTokens < 2 && !entityOverlap) {
+      if (isDebug && score >= 0.3) {
+        log(
+          `🛑 Context gate dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, shared=${sharedTokens}, entityOverlap=${entityOverlap})`
+        );
+      }
+      continue;
+    }
 
     // Track all scores for debugging
     if (isDebug) {
@@ -490,12 +592,24 @@ async function analyzePostAndFindMarket(
     })
   );
 
+  // When AI validation is unavailable (timeout/error/disabled), only allow
+  // markets through if their embedding score is high enough to be confident
+  // on its own. Since we now have a strict lexical Context Gate, we can safely
+  // lower this floor to match the standard embedding floor.
+  const FAIL_OPEN_FLOOR = 0.5;
+
   const relevantMarkets: MarketSearchResult[] = [];
   for (let i = 0; i < validationResults.length; i++) {
+    const candidate = candidateMarkets[i];
     const result = validationResults[i];
     if (result.status === "rejected") {
-      // Fail-open: validation errored, allow the market through
-      relevantMarkets.push(candidateMarkets[i]);
+      if (usedEmbeddings && candidate.score < FAIL_OPEN_FLOOR) {
+        log(
+          `✗ Validation errored & score too low (${candidate.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${candidate.market.title?.slice(0, 50)}"`
+        );
+        continue;
+      }
+      relevantMarkets.push(candidate);
       continue;
     }
     const { entry, validation } = result.value;
@@ -509,6 +623,11 @@ async function analyzePostAndFindMarket(
       if (validation.reason) {
         entry.market._contextReason = validation.reason;
       }
+    } else if (usedEmbeddings && entry.score < FAIL_OPEN_FLOOR) {
+      log(
+        `✗ AI unavailable & score too low (${entry.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${entry.market.title?.slice(0, 50)}"`
+      );
+      continue;
     }
     relevantMarkets.push(entry);
   }

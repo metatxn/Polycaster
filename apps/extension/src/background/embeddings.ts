@@ -11,11 +11,11 @@ let pipelineInstance: Promise<FeatureExtractionPipeline> | null = null;
 
 function getInstance() {
   if (pipelineInstance === null) {
-    console.log("[Knoww Embeddings] Loading model Xenova/all-MiniLM-L6-v2...");
+    console.log("[Knoww Embeddings] Loading model Xenova/bge-small-en-v1.5...");
     const start = Date.now();
     pipelineInstance = pipeline<"feature-extraction">(
       "feature-extraction",
-      "Xenova/all-MiniLM-L6-v2",
+      "Xenova/bge-small-en-v1.5",
       {
         dtype: "q4",
         progress_callback: (progress: any) => {
@@ -103,17 +103,19 @@ export async function computeSimilarities(
   marketTexts: string[]
 ): Promise<number[]> {
   const start = Date.now();
-  const allTexts = [postText, ...marketTexts];
+
+  // BGE models perform best when the query is prefixed with an instruction.
+  const queryText = `Represent this sentence for searching relevant prediction markets: ${postText}`;
+
+  const allTexts = [queryText, ...marketTexts];
   const textsToEmbed: string[] = [];
 
-  // 1. Check cache for existing embeddings (use has() to avoid promoting LRU order)
   for (const text of allTexts) {
     if (!embeddingCache.has(text)) {
       textsToEmbed.push(text);
     }
   }
 
-  // 2. Compute missing embeddings in one batch
   if (textsToEmbed.length > 0) {
     const newEmbeddings = await getEmbeddings(textsToEmbed);
     for (let i = 0; i < textsToEmbed.length; i++) {
@@ -121,9 +123,8 @@ export async function computeSimilarities(
     }
   }
 
-  // 3. Retrieve all embeddings from cache
-  const postEmbedding = embeddingCache.get(postText);
-  if (!postEmbedding) return []; // Should never happen
+  const postEmbedding = embeddingCache.get(queryText);
+  if (!postEmbedding) return [];
 
   const similarities = marketTexts.map((marketText) => {
     const marketEmbedding = embeddingCache.get(marketText);

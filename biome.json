@@ -86,6 +86,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["apps/extension/src/content/knoww-inline.css"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "off"
+          }
+        }
+      }
     }
   ]
 }

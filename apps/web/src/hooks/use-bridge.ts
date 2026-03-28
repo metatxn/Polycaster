@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useProxyWallet } from "./use-proxy-wallet";
 
 /**
@@ -133,6 +133,33 @@ export interface DepositStatusResponse {
 }
 
 /**
+ * Withdrawal request parameters for Bridge API
+ * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
+ */
+export interface WithdrawalRequest {
+  address: string;
+  toChainId: string;
+  toTokenAddress: string;
+  recipientAddr: string;
+}
+
+/**
+ * Response from the withdrawal endpoint — bridge deposit addresses
+ * to which you transfer USDC.e from the proxy wallet;
+ * the bridge then routes funds cross-chain to the recipient.
+ * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
+ */
+export interface WithdrawalAddressesResponse {
+  address: {
+    evm: string;
+    svm: string;
+    btc: string;
+    tvm?: string;
+  };
+  note?: string;
+}
+
+/**
  * Chain metadata for display
  */
 export const CHAIN_METADATA: Record<
@@ -147,6 +174,7 @@ export const CHAIN_METADATA: Record<
   "43114": { name: "Avalanche", icon: "🔺", color: "#E84142" },
   "56": { name: "BNB Chain", icon: "⛓️", color: "#F0B90B" },
   "324": { name: "zkSync", icon: "⚡", color: "#8C8DFC" },
+  "1151111081099710": { name: "Solana", icon: "◎", color: "#9945FF" },
 };
 
 /**
@@ -156,14 +184,8 @@ export const BRIDGE_QUERY_KEYS = {
   supportedAssets: ["bridge-supported-assets"] as const,
   depositAddresses: (address: string) =>
     ["bridge-deposit-addresses", address] as const,
-  // TODO: Reserved for future query-based caching/polling of deposit status.
-  // Currently, getDepositStatus() uses a mutation (depositStatusMutation) for on-demand fetching.
-  // Convert to useQuery with this key if automatic polling or cache invalidation is needed.
   depositStatus: (address: string) =>
     ["bridge-deposit-status", address] as const,
-  // TODO: Reserved for future query-based caching of quotes.
-  // Currently, getQuote() uses a mutation (quoteMutation) for on-demand fetching.
-  // Convert to useQuery with this key if quote caching or deduplication is needed.
   quote: (params: QuoteRequest) =>
     [
       "bridge-quote",
@@ -174,6 +196,8 @@ export const BRIDGE_QUERY_KEYS = {
       params.toChainId,
       params.toTokenAddress,
     ] as const,
+  withdrawalAddresses: (address: string, toChainId: string) =>
+    ["bridge-withdrawal-addresses", address, toChainId] as const,
 };
 
 /**
@@ -237,6 +261,36 @@ async function fetchDepositStatus(
 
   const data: DepositStatusResponse = await response.json();
   return data.transactions;
+}
+
+/**
+ * Create withdrawal addresses via Bridge API
+ * Returns bridge deposit addresses to which USDC.e should be transferred;
+ * the bridge handles cross-chain routing to the final recipient.
+ * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
+ */
+async function fetchWithdrawalAddresses(
+  params: WithdrawalRequest
+): Promise<WithdrawalAddressesResponse> {
+  const response = await fetch(`${BRIDGE_API_URL}/withdraw`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorData = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    throw new Error(
+      errorData.error ||
+        `Failed to create withdrawal addresses: ${response.status}`
+    );
+  }
+
+  return response.json();
 }
 
 /**
@@ -382,6 +436,14 @@ export function useBridge() {
     mutationFn: fetchDepositStatus,
   });
 
+  // Mutation for creating withdrawal (bridge) addresses
+  const withdrawalAddressesMutation = useMutation({
+    mutationFn: fetchWithdrawalAddresses,
+  });
+
+  const supportedAssetsQueryRef = useRef(supportedAssetsQuery);
+  supportedAssetsQueryRef.current = supportedAssetsQuery;
+
   /**
    * Get supported assets for deposits
    *
@@ -393,10 +455,10 @@ export function useBridge() {
   const getSupportedAssets = useCallback(async (): Promise<
     SupportedAsset[]
   > => {
-    // Refetch if needed, otherwise return cached data
-    await supportedAssetsQuery.refetch();
-    return supportedAssetsQuery.data || [];
-  }, [supportedAssetsQuery]);
+    const query = supportedAssetsQueryRef.current;
+    await query.refetch();
+    return query.data || [];
+  }, []);
 
   /**
    * Create deposit addresses for a wallet
@@ -458,6 +520,9 @@ export function useBridge() {
     }
   }, [proxyAddress, queryClient]);
 
+  const quoteMutationRef = useRef(quoteMutation);
+  quoteMutationRef.current = quoteMutation;
+
   /**
    * Get a quote for a deposit
    *
@@ -468,9 +533,9 @@ export function useBridge() {
    */
   const getQuote = useCallback(
     async (params: QuoteRequest): Promise<QuoteResponse> => {
-      return quoteMutation.mutateAsync(params);
+      return quoteMutationRef.current.mutateAsync(params);
     },
-    [quoteMutation]
+    []
   );
 
   /**
@@ -489,11 +554,34 @@ export function useBridge() {
    *
    * @see https://docs.polymarket.com/api-reference/bridge/get-deposit-status
    */
+  const depositStatusMutationRef = useRef(depositStatusMutation);
+  depositStatusMutationRef.current = depositStatusMutation;
+
   const getDepositStatus = useCallback(
     async (depositAddress: string): Promise<DepositTransaction[]> => {
-      return depositStatusMutation.mutateAsync(depositAddress);
+      return depositStatusMutationRef.current.mutateAsync(depositAddress);
     },
-    [depositStatusMutation]
+    []
+  );
+
+  /**
+   * Create withdrawal addresses for cross-chain withdrawals
+   *
+   * Calls POST /withdraw on the Bridge API. Returns bridge deposit addresses
+   * (evm, svm, btc) to which USDC.e should be transferred from the proxy wallet.
+   * The bridge handles converting and routing the funds to the recipient on the
+   * destination chain.
+   *
+   * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
+   */
+  const withdrawalAddressesMutationRef = useRef(withdrawalAddressesMutation);
+  withdrawalAddressesMutationRef.current = withdrawalAddressesMutation;
+
+  const getWithdrawalAddresses = useCallback(
+    async (params: WithdrawalRequest): Promise<WithdrawalAddressesResponse> => {
+      return withdrawalAddressesMutationRef.current.mutateAsync(params);
+    },
+    []
   );
 
   // Combine loading states
@@ -529,5 +617,10 @@ export function useBridge() {
     getDepositStatus,
     isLoadingDepositStatus: depositStatusMutation.isPending,
     depositStatusError: depositStatusMutation.error?.message || null,
+
+    // Withdrawal (Bridge) API
+    getWithdrawalAddresses,
+    isLoadingWithdrawal: withdrawalAddressesMutation.isPending,
+    withdrawalError: withdrawalAddressesMutation.error?.message || null,
   };
 }

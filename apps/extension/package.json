@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.13",
+  "version": "2.5.16",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
@@ -19,8 +19,11 @@
     "@polymarket/clob-client": "5.8.1",
     "@polymarket/order-utils": "3.0.1",
     "ethers": "5.8.0",
+    "minisearch": "^7.2.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "wink-eng-lite-web-model": "^1.8.1",
+    "wink-nlp": "^2.4.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.38",

@@ -181,13 +181,31 @@ export interface EmbeddingsSuccessResponse {
   similarities: number[];
 }
 
+export interface NlpContextGateSuccessResponse {
+  ok: true;
+  results: Array<{
+    pass: boolean;
+    sharedNouns: number;
+    meaningfulNouns: number;
+    sharedEntities: number;
+    details: string;
+  }>;
+}
+
+export interface Bm25SuccessResponse {
+  ok: true;
+  scores: number[];
+}
+
 export type BackgroundResponse =
   | FetchTextSuccessResponse
   | FetchJsonSuccessResponse
   | FetchErrorResponse
   | TradingSuccessResponse
   | TradingErrorResponse
-  | EmbeddingsSuccessResponse;
+  | EmbeddingsSuccessResponse
+  | NlpContextGateSuccessResponse
+  | Bm25SuccessResponse;
 
 export interface SettingsUpdateMessage {
   type: "KNOWW_SETTINGS_UPDATED";
@@ -198,4 +216,4 @@ export type MessageHandler = (
   message: BackgroundMessage | SettingsUpdateMessage,
   sender: chrome.runtime.MessageSender,
   sendResponse: (response: BackgroundResponse | { success: boolean }) => void
-) => boolean | void;
+) => boolean | undefined;

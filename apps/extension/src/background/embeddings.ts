@@ -158,7 +158,7 @@ async function idbPruneIfNeeded(): Promise<void> {
     const tx = db.transaction(IDB_STORE, "readwrite");
     const store = tx.objectStore(IDB_STORE);
 
-    // Delete expired entries
+    // Delete expired entries, then cap total entries once the cursor completes
     const cutoff = now - IDB_TTL_MS;
     const idx = store.index("ts");
     const range = IDBKeyRange.upperBound(cutoff);
@@ -170,16 +170,18 @@ async function idbPruneIfNeeded(): Promise<void> {
         cursor.delete();
         deleted++;
         cursor.continue();
-      } else if (deleted > 0) {
+        return;
+      }
+
+      if (deleted > 0) {
         console.log(`[Knoww Embeddings] IDB pruned ${deleted} expired entries`);
       }
-    };
 
-    // Cap total entries
-    const countReq = store.count();
-    countReq.onsuccess = () => {
-      const total = countReq.result;
-      if (total > IDB_MAX_ENTRIES) {
+      // Cap total entries — count now reflects the completed deletions above
+      const countReq = store.count();
+      countReq.onsuccess = () => {
+        const total = countReq.result;
+        if (total <= IDB_MAX_ENTRIES) return;
         const excess = total - IDB_MAX_ENTRIES;
         const oldestCursor = idx.openCursor();
         let removed = 0;
@@ -191,7 +193,7 @@ async function idbPruneIfNeeded(): Promise<void> {
             c.continue();
           }
         };
-      }
+      };
     };
   } catch {
     // best-effort
@@ -267,10 +269,16 @@ export async function computeSimilarities(
 
   const allTexts = [queryText, ...marketTexts];
 
+  // Local map immune to LRU eviction — used for the final similarity lookup
+  const local = new Map<string, number[]>();
+
   // L1: check in-memory cache
   const textsNotInL1: string[] = [];
   for (const text of allTexts) {
-    if (!l1Cache.has(text)) {
+    const cached = l1Cache.get(text);
+    if (cached) {
+      local.set(text, cached);
+    } else {
       textsNotInL1.push(text);
     }
   }
@@ -281,6 +289,7 @@ export async function computeSimilarities(
     const fromIdb = await idbGetMany(textsNotInL1);
     for (const [text, vector] of fromIdb) {
       l1Cache.set(text, vector);
+      local.set(text, vector);
       idbHits++;
     }
   }
@@ -288,7 +297,7 @@ export async function computeSimilarities(
   // Compute embeddings only for texts missing from both caches
   const textsToEmbed: string[] = [];
   for (const text of allTexts) {
-    if (!l1Cache.has(text)) {
+    if (!local.has(text)) {
       textsToEmbed.push(text);
     }
   }
@@ -298,19 +307,18 @@ export async function computeSimilarities(
     const idbEntries: Array<{ text: string; vector: number[] }> = [];
     for (let i = 0; i < textsToEmbed.length; i++) {
       l1Cache.set(textsToEmbed[i], newEmbeddings[i]);
+      local.set(textsToEmbed[i], newEmbeddings[i]);
       idbEntries.push({ text: textsToEmbed[i], vector: newEmbeddings[i] });
     }
-    // Persist to IndexedDB — awaited so the transaction commits
-    // before the service worker goes idle.
     await idbPutMany(idbEntries);
     idbPruneIfNeeded();
   }
 
-  const postEmbedding = l1Cache.get(queryText);
+  const postEmbedding = local.get(queryText);
   if (!postEmbedding) return [];
 
   const similarities = marketTexts.map((marketText) => {
-    const marketEmbedding = l1Cache.get(marketText);
+    const marketEmbedding = local.get(marketText);
     if (!marketEmbedding) return 0;
     return cosineSimilarity(postEmbedding, marketEmbedding);
   });

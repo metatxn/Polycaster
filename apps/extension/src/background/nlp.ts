@@ -4,6 +4,9 @@ import winkNLP, { type ItsFunction } from "wink-nlp";
 
 const nlp = winkNLP(model);
 const its = nlp.its;
+// wink-nlp's its.* properties are typed as opaque helpers that don't satisfy
+// ItsFunction<string>. The double-cast works around incomplete upstream typings.
+// TODO: remove when wink-nlp ships corrected types (see github.com/winkjs/wink-nlp/issues)
 const itsValue = its.value as unknown as ItsFunction<string>;
 const itsPos = its.pos as unknown as ItsFunction<string>;
 const itsLemma = its.lemma as unknown as ItsFunction<string>;
@@ -184,7 +187,6 @@ export function bm25Score(postText: string, marketTexts: string[]): number[] {
 
   const index = new MiniSearch<MarketDoc>({
     fields: ["text"],
-    storeFields: ["text"],
     searchOptions: {
       prefix: true,
       fuzzy: 0.2,
@@ -202,7 +204,7 @@ export function bm25Score(postText: string, marketTexts: string[]): number[] {
 
   if (!query.trim()) return new Array(marketTexts.length).fill(0);
 
-  const results = index.search(query, { prefix: true, fuzzy: 0.2 });
+  const results = index.search(query);
 
   const scoreMap = new Map<number, number>();
   let maxScore = 0;

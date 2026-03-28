@@ -26,6 +26,14 @@ async function getEmbeddingsModule() {
   return embeddingsModule;
 }
 
+let nlpModule: typeof import("./background/nlp") | null = null;
+async function getNlpModule() {
+  if (!nlpModule) {
+    nlpModule = await import("./background/nlp");
+  }
+  return nlpModule;
+}
+
 // ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
 // ── Session storage stays TRUSTED_CONTEXTS only (default).
@@ -100,6 +108,42 @@ function isComputeSimilaritiesMessage(
   const msg = message as Record<string, unknown>;
   return (
     msg.type === "compute-similarities" &&
+    typeof msg.postText === "string" &&
+    Array.isArray(msg.marketTexts) &&
+    msg.marketTexts.every((t: unknown) => typeof t === "string")
+  );
+}
+
+interface NlpContextGateMessage {
+  type: "nlp-context-gate";
+  postText: string;
+  marketTexts: string[];
+}
+
+function isNlpContextGateMessage(
+  message: unknown
+): message is NlpContextGateMessage {
+  if (typeof message !== "object" || message === null) return false;
+  const msg = message as Record<string, unknown>;
+  return (
+    msg.type === "nlp-context-gate" &&
+    typeof msg.postText === "string" &&
+    Array.isArray(msg.marketTexts) &&
+    msg.marketTexts.every((t: unknown) => typeof t === "string")
+  );
+}
+
+interface Bm25ScoreMessage {
+  type: "bm25-score";
+  postText: string;
+  marketTexts: string[];
+}
+
+function isBm25ScoreMessage(message: unknown): message is Bm25ScoreMessage {
+  if (typeof message !== "object" || message === null) return false;
+  const msg = message as Record<string, unknown>;
+  return (
+    msg.type === "bm25-score" &&
     typeof msg.postText === "string" &&
     Array.isArray(msg.marketTexts) &&
     msg.marketTexts.every((t: unknown) => typeof t === "string")
@@ -340,6 +384,57 @@ chrome.runtime.onMessage.addListener(
           const similarities = await computeSimilarities(postText, marketTexts);
           sendResponse({ ok: true, similarities });
         } catch (e) {
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
+      return true;
+    }
+
+    // NLP Context Gate
+    if (isNlpContextGateMessage(message)) {
+      (async () => {
+        try {
+          const start = Date.now();
+          const { postText, marketTexts } = message;
+          const { nlpContextGate } = await getNlpModule();
+          const results = marketTexts.map((mt) => nlpContextGate(postText, mt));
+          console.log(
+            `[Knoww NLP] Context gate: ${marketTexts.length} markets in ${Date.now() - start}ms`,
+            results.map((r, i) => ({
+              market: marketTexts[i]?.slice(0, 40),
+              pass: r.pass,
+              details: r.details,
+            }))
+          );
+          sendResponse({ ok: true, results });
+        } catch (e) {
+          console.error("[Knoww NLP] Context gate error:", e);
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
+      return true;
+    }
+
+    // BM25 Score
+    if (isBm25ScoreMessage(message)) {
+      (async () => {
+        try {
+          const start = Date.now();
+          const { postText, marketTexts } = message;
+          const { bm25Score } = await getNlpModule();
+          const scores = bm25Score(postText, marketTexts);
+          console.log(
+            `[Knoww BM25] Scored ${marketTexts.length} markets in ${Date.now() - start}ms`
+          );
+          sendResponse({ ok: true, scores });
+        } catch (e) {
+          console.error("[Knoww BM25] Scoring error:", e);
           sendResponse({
             ok: false,
             error: e instanceof Error ? e.message : String(e),

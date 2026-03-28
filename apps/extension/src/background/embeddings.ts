@@ -44,6 +44,162 @@ function getInstance() {
   return pipelineInstance;
 }
 
+// ── IndexedDB persistence layer ──────────────────────────────────────
+
+const IDB_NAME = "knoww-embeddings";
+const IDB_VERSION = 1;
+const IDB_STORE = "vectors";
+const IDB_MAX_ENTRIES = 2000;
+const IDB_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+interface IDBEntry {
+  text: string;
+  vector: number[];
+  ts: number;
+}
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+function openDB(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        const store = db.createObjectStore(IDB_STORE, { keyPath: "text" });
+        store.createIndex("ts", "ts", { unique: false });
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onclose = () => {
+        dbPromise = null;
+      };
+      resolve(db);
+    };
+    req.onerror = () => {
+      console.warn("[Knoww Embeddings] IndexedDB open failed:", req.error);
+      dbPromise = null;
+      reject(req.error);
+    };
+  });
+  return dbPromise;
+}
+
+async function idbGetMany(texts: string[]): Promise<Map<string, number[]>> {
+  const result = new Map<string, number[]>();
+  if (texts.length === 0) return result;
+  try {
+    const db = await openDB();
+    const now = Date.now();
+    return new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const store = tx.objectStore(IDB_STORE);
+      let pending = texts.length;
+      for (const text of texts) {
+        const req = store.get(text);
+        req.onsuccess = () => {
+          const entry = req.result as IDBEntry | undefined;
+          if (entry && now - entry.ts < IDB_TTL_MS) {
+            result.set(text, entry.vector);
+          }
+          if (--pending === 0) resolve(result);
+        };
+        req.onerror = () => {
+          if (--pending === 0) resolve(result);
+        };
+      }
+    });
+  } catch {
+    return result;
+  }
+}
+
+async function idbPutMany(
+  entries: Array<{ text: string; vector: number[] }>
+): Promise<void> {
+  if (entries.length === 0) return;
+  try {
+    const db = await openDB();
+    const now = Date.now();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const store = tx.objectStore(IDB_STORE);
+      for (const { text, vector } of entries) {
+        store.put({ text, vector, ts: now } satisfies IDBEntry);
+      }
+      tx.oncomplete = () => {
+        console.log(
+          `[Knoww Embeddings] IDB persisted ${entries.length} vectors`
+        );
+        resolve();
+      };
+      tx.onerror = () => {
+        console.warn("[Knoww Embeddings] IDB write error:", tx.error);
+        reject(tx.error);
+      };
+    });
+  } catch (e) {
+    console.warn("[Knoww Embeddings] IDB write failed:", e);
+  }
+}
+
+let lastPruneTime = 0;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000; // max once per hour
+
+async function idbPruneIfNeeded(): Promise<void> {
+  const now = Date.now();
+  if (now - lastPruneTime < PRUNE_INTERVAL_MS) return;
+  lastPruneTime = now;
+
+  try {
+    const db = await openDB();
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    const store = tx.objectStore(IDB_STORE);
+
+    // Delete expired entries
+    const cutoff = now - IDB_TTL_MS;
+    const idx = store.index("ts");
+    const range = IDBKeyRange.upperBound(cutoff);
+    const cursorReq = idx.openCursor(range);
+    let deleted = 0;
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (cursor) {
+        cursor.delete();
+        deleted++;
+        cursor.continue();
+      } else if (deleted > 0) {
+        console.log(`[Knoww Embeddings] IDB pruned ${deleted} expired entries`);
+      }
+    };
+
+    // Cap total entries
+    const countReq = store.count();
+    countReq.onsuccess = () => {
+      const total = countReq.result;
+      if (total > IDB_MAX_ENTRIES) {
+        const excess = total - IDB_MAX_ENTRIES;
+        const oldestCursor = idx.openCursor();
+        let removed = 0;
+        oldestCursor.onsuccess = () => {
+          const c = oldestCursor.result;
+          if (c && removed < excess) {
+            c.delete();
+            removed++;
+            c.continue();
+          }
+        };
+      }
+    };
+  } catch {
+    // best-effort
+  }
+}
+
+// ── In-memory L1 cache ───────────────────────────────────────────────
+
 class LRUCache<K, V> {
   private max: number;
   private cache: Map<K, V>;
@@ -77,7 +233,9 @@ class LRUCache<K, V> {
   }
 }
 
-const embeddingCache = new LRUCache<string, number[]>(500);
+const l1Cache = new LRUCache<string, number[]>(500);
+
+// ── Embedding computation ────────────────────────────────────────────
 
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   let dotProduct = 0;
@@ -108,33 +266,59 @@ export async function computeSimilarities(
   const queryText = `Represent this sentence for searching relevant prediction markets: ${postText}`;
 
   const allTexts = [queryText, ...marketTexts];
-  const textsToEmbed: string[] = [];
 
+  // L1: check in-memory cache
+  const textsNotInL1: string[] = [];
   for (const text of allTexts) {
-    if (!embeddingCache.has(text)) {
+    if (!l1Cache.has(text)) {
+      textsNotInL1.push(text);
+    }
+  }
+
+  // L2: check IndexedDB for anything not in L1
+  let idbHits = 0;
+  if (textsNotInL1.length > 0) {
+    const fromIdb = await idbGetMany(textsNotInL1);
+    for (const [text, vector] of fromIdb) {
+      l1Cache.set(text, vector);
+      idbHits++;
+    }
+  }
+
+  // Compute embeddings only for texts missing from both caches
+  const textsToEmbed: string[] = [];
+  for (const text of allTexts) {
+    if (!l1Cache.has(text)) {
       textsToEmbed.push(text);
     }
   }
 
   if (textsToEmbed.length > 0) {
     const newEmbeddings = await getEmbeddings(textsToEmbed);
+    const idbEntries: Array<{ text: string; vector: number[] }> = [];
     for (let i = 0; i < textsToEmbed.length; i++) {
-      embeddingCache.set(textsToEmbed[i], newEmbeddings[i]);
+      l1Cache.set(textsToEmbed[i], newEmbeddings[i]);
+      idbEntries.push({ text: textsToEmbed[i], vector: newEmbeddings[i] });
     }
+    // Persist to IndexedDB — awaited so the transaction commits
+    // before the service worker goes idle.
+    await idbPutMany(idbEntries);
+    idbPruneIfNeeded();
   }
 
-  const postEmbedding = embeddingCache.get(queryText);
+  const postEmbedding = l1Cache.get(queryText);
   if (!postEmbedding) return [];
 
   const similarities = marketTexts.map((marketText) => {
-    const marketEmbedding = embeddingCache.get(marketText);
+    const marketEmbedding = l1Cache.get(marketText);
     if (!marketEmbedding) return 0;
     return cosineSimilarity(postEmbedding, marketEmbedding);
   });
 
+  const l1Hits = allTexts.length - textsNotInL1.length;
   const timeMs = Date.now() - start;
   console.log(
-    `[Knoww Embeddings] Scored ${marketTexts.length} markets in ${timeMs}ms (Cache hits: ${allTexts.length - textsToEmbed.length}/${allTexts.length})`
+    `[Knoww Embeddings] Scored ${marketTexts.length} markets in ${timeMs}ms (L1: ${l1Hits}, IDB: ${idbHits}, computed: ${textsToEmbed.length})`
   );
   return similarities;
 }

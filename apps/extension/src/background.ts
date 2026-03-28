@@ -401,14 +401,20 @@ chrome.runtime.onMessage.addListener(
           const { postText, marketTexts } = message;
           const { nlpContextGate } = await getNlpModule();
           const results = marketTexts.map((mt) => nlpContextGate(postText, mt));
-          console.log(
-            `[Knoww NLP] Context gate: ${marketTexts.length} markets in ${Date.now() - start}ms`,
-            results.map((r, i) => ({
-              market: marketTexts[i]?.slice(0, 40),
-              pass: r.pass,
-              details: r.details,
-            }))
-          );
+          if (__DEV_MODE__) {
+            console.log(
+              `[Knoww NLP] Context gate: ${marketTexts.length} markets in ${Date.now() - start}ms`,
+              results.map((r, i) => ({
+                market: marketTexts[i]?.slice(0, 40),
+                pass: r.pass,
+                details: r.details,
+              }))
+            );
+          } else {
+            console.log(
+              `[Knoww NLP] Context gate: ${marketTexts.length} markets, ${results.filter((r) => r.pass).length} passed in ${Date.now() - start}ms`
+            );
+          }
           sendResponse({ ok: true, results });
         } catch (e) {
           console.error("[Knoww NLP] Context gate error:", e);

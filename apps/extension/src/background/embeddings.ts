@@ -308,7 +308,9 @@ export async function computeSimilarities(
     for (let i = 0; i < textsToEmbed.length; i++) {
       l1Cache.set(textsToEmbed[i], newEmbeddings[i]);
       local.set(textsToEmbed[i], newEmbeddings[i]);
-      idbEntries.push({ text: textsToEmbed[i], vector: newEmbeddings[i] });
+      if (textsToEmbed[i] !== queryText) {
+        idbEntries.push({ text: textsToEmbed[i], vector: newEmbeddings[i] });
+      }
     }
     await idbPutMany(idbEntries);
     idbPruneIfNeeded();

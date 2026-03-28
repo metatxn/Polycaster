@@ -2,7 +2,7 @@
 
 import { AnimatePresence } from "framer-motion";
 import { ArrowLeft, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { erc20Abi, parseUnits } from "viem";
 import { polygon } from "viem/chains";
 import { useConnection } from "wagmi";
@@ -57,8 +57,6 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     isLoading: loadingBridge,
     getSupportedAssets,
     createDepositAddresses,
-    getQuote,
-    isLoadingQuote,
     getDepositStatus,
     isLoadingDepositStatus,
   } = useBridge();
@@ -85,6 +83,8 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   const [depositTransactions, setDepositTransactions] = useState<
     DepositTransaction[]
   >([]);
+  const quoteFetchedRef = useRef<string | null>(null);
+  const [isLoadingQuoteLocal, setIsLoadingQuoteLocal] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -104,6 +104,8 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       setTxError(null);
       setQuote(null);
       setDepositTransactions([]);
+      quoteFetchedRef.current = null;
+      setIsLoadingQuoteLocal(false);
     }
   }, [open]);
 
@@ -382,71 +384,111 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     }
   }, [step, selectedMethod]);
 
-  // Fetch quote when moving to confirm step
-  // Using primitive dependencies to avoid unnecessary re-runs (rerender-dependencies)
-  const shouldFetchQuote =
-    step === "confirm" && !!selectedToken && !!amount && !!bridgeAddress;
+  // Fetch quote once when arriving at the confirm step.
+  // Uses a direct fetch + dedup ref to avoid re-render loops that occur when
+  // routing through useMutation (mutateAsync flips isPending which re-renders
+  // every useBridge consumer and can cascade back into this effect).
   const tokenAddress = selectedToken?.address;
   const tokenDecimals = selectedToken?.decimals;
 
   useEffect(() => {
-    if (!shouldFetchQuote || !tokenAddress || tokenDecimals === undefined)
+    if (
+      step !== "confirm" ||
+      !tokenAddress ||
+      tokenDecimals === undefined ||
+      !amount ||
+      !bridgeAddress
+    ) {
       return;
+    }
 
     const numAmount = Number.parseFloat(amount);
     if (Number.isNaN(numAmount) || numAmount <= 0) return;
 
-    // Convert amount to base units using parseUnits for precision
-    // parseUnits handles decimal conversion correctly without floating-point errors
     const amountBaseUnit = parseUnits(amount, tokenDecimals).toString();
+    const cacheKey = `${tokenAddress}-${amountBaseUnit}-${bridgeAddress}`;
 
-    getQuote({
-      fromAmountBaseUnit: amountBaseUnit,
-      fromChainId: "137", // Polygon
-      fromTokenAddress: tokenAddress,
-      recipientAddress: bridgeAddress,
-      toChainId: "137", // Polygon
-      toTokenAddress: POLYGON_USDC_E_ADDRESS,
+    if (quoteFetchedRef.current === cacheKey) return;
+    quoteFetchedRef.current = cacheKey;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    setIsLoadingQuoteLocal(true);
+
+    fetch("https://bridge.polymarket.com/quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fromAmountBaseUnit: amountBaseUnit,
+        fromChainId: "137",
+        fromTokenAddress: tokenAddress,
+        recipientAddress: bridgeAddress,
+        toChainId: "137",
+        toTokenAddress: POLYGON_USDC_E_ADDRESS,
+      }),
+      signal: controller.signal,
     })
-      .then(setQuote)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Quote request failed: ${res.status}`);
+        return res.json() as Promise<QuoteResponse>;
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setQuote(data);
+          setIsLoadingQuoteLocal(false);
+        }
+      })
       .catch((err) => {
-        // Quote is optional - don't block the deposit if it fails
-        console.warn("Failed to fetch quote:", err);
-        setQuote(null);
+        if (!cancelled) {
+          if (err.name !== "AbortError") {
+            console.warn("Failed to fetch quote:", err);
+          }
+          setQuote(null);
+          setIsLoadingQuoteLocal(false);
+        }
       });
-  }, [
-    shouldFetchQuote,
-    amount,
-    bridgeAddress,
-    tokenAddress,
-    tokenDecimals,
-    getQuote,
-  ]);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [step, amount, bridgeAddress, tokenAddress, tokenDecimals]);
+
+  // Reset the dedup key when leaving the confirm step so a fresh quote is
+  // fetched if the user navigates back and returns with different params.
+  useEffect(() => {
+    if (step !== "confirm") {
+      quoteFetchedRef.current = null;
+    }
+  }, [step]);
 
   // Poll deposit status after transaction is confirmed
-  // Using primitive dependencies (rerender-dependencies)
   const shouldPollStatus = isConfirmed && !!bridgeAddress;
 
   useEffect(() => {
     if (!shouldPollStatus) return;
 
-    // Fetch immediately
-    getDepositStatus(bridgeAddress)
-      .then(setDepositTransactions)
-      .catch((err) => {
-        console.warn("Failed to fetch deposit status:", err);
-      });
+    let cancelled = false;
 
-    // Then poll every 5 seconds for updates
-    const interval = setInterval(() => {
+    const fetchStatus = () => {
       getDepositStatus(bridgeAddress)
-        .then(setDepositTransactions)
+        .then((data) => {
+          if (!cancelled) setDepositTransactions(data);
+        })
         .catch((err) => {
-          console.warn("Failed to fetch deposit status:", err);
+          if (!cancelled) console.warn("Failed to fetch deposit status:", err);
         });
-    }, 5000);
+    };
 
-    return () => clearInterval(interval);
+    fetchStatus();
+
+    const interval = setInterval(fetchStatus, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [shouldPollStatus, bridgeAddress, getDepositStatus]);
 
   const receiveAmount = useMemo(() => {
@@ -596,7 +638,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
                 onCopy={handleCopy}
                 onDeposit={handleDeposit}
                 quote={quote}
-                isLoadingQuote={isLoadingQuote}
+                isLoadingQuote={isLoadingQuoteLocal}
                 depositTransactions={depositTransactions}
                 isLoadingDepositStatus={isLoadingDepositStatus}
               />

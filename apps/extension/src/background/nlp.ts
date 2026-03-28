@@ -286,12 +286,17 @@ export function nlpContextGate(
     }
   }
 
+  // Only non-generic nouns count toward the gate decision.
+  const meaningfulNounList = sharedNounList.filter(
+    (n) => !GENERIC_LEMMAS.has(n)
+  );
+
   // A single shared word (e.g. a city "Lucknow") can appear as both a noun
   // and an entity — count DISTINCT matching words across both signals.
-  const allSharedWords = new Set([...sharedNounList, ...sharedEntityList]);
+  const allSharedWords = new Set([...meaningfulNounList, ...sharedEntityList]);
   const distinctSignals = allSharedWords.size;
 
   const pass = distinctSignals >= 2;
-  const details = `nouns=[${sharedNounList.join(",")}] meaningful=${meaningfulNouns} entities=[${sharedEntityList.join(",")}] distinct=${distinctSignals}`;
+  const details = `nouns=[${sharedNounList.join(",")}] meaningful=[${meaningfulNounList.join(",")}] entities=[${sharedEntityList.join(",")}] distinct=${distinctSignals}`;
   return { pass, sharedNouns, meaningfulNouns, sharedEntities, details };
 }

@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "wagmi";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,10 +27,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  getAvailableTokensForChain,
+  resolveDestTokenAddress,
   useWithdraw,
-  type WithdrawState,
+  WITHDRAW_CHAIN_IDS,
+  WITHDRAW_TOKEN_CONFIGS,
   type WithdrawTokenId,
 } from "@/hooks/use-withdraw";
+
 import { cn } from "@/lib/utils";
 
 interface WithdrawModalProps {
@@ -38,29 +42,22 @@ interface WithdrawModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-// Supported tokens for withdrawal
-const WITHDRAW_TOKENS: Array<{
-  id: WithdrawTokenId;
-  symbol: string;
-  name: string;
-  icon: string;
-  decimals: number;
-}> = [
-  {
-    id: "usdc",
-    symbol: "USDC",
-    name: "USD Coin",
-    icon: "/usdc-token.webp",
-    decimals: 6,
-  },
-  {
-    id: "usdc-e",
-    symbol: "USDC.e",
-    name: "Bridged USDC",
-    icon: "/usdc-token.webp",
-    decimals: 6,
-  },
-];
+/**
+ * Display metadata for each token in the withdrawal dropdown.
+ * `icon` is either a path to a public image or null (uses `emoji` fallback).
+ */
+const TOKEN_DISPLAY: Record<
+  WithdrawTokenId,
+  { emoji: string; icon: string | null; color: string }
+> = {
+  usdc: { emoji: "$", icon: "/usdc-token.webp", color: "#2775CA" },
+  "usdc-e": { emoji: "$", icon: "/usdc-token.webp", color: "#2775CA" },
+  usdt: { emoji: "₮", icon: null, color: "#26A17B" },
+  dai: { emoji: "◈", icon: null, color: "#F5AC37" },
+  eth: { emoji: "⟠", icon: null, color: "#627EEA" },
+  pol: { emoji: "⬡", icon: null, color: "#8247E5" },
+  sol: { emoji: "◎", icon: null, color: "#9945FF" },
+};
 
 // Supported chains for withdrawal
 const WITHDRAW_CHAINS = [
@@ -108,7 +105,6 @@ const WITHDRAW_CHAINS = [
   },
 ] as const;
 
-type WithdrawToken = (typeof WITHDRAW_TOKENS)[number];
 type WithdrawChain = (typeof WITHDRAW_CHAINS)[number];
 
 // Block explorer URLs for each supported chain
@@ -136,69 +132,29 @@ const CHAIN_EXPLORER_NAMES: Record<WithdrawChain["id"], string> = {
 /**
  * Get status display info based on withdrawal state
  */
-function getStatusDisplay(state: WithdrawState): {
-  icon: React.ReactNode;
-  text: string;
-  colorClass: string;
-} {
-  switch (state) {
-    case "signing":
-      return {
-        icon: <Loader2 className="h-4 w-4 animate-spin" />,
-        text: "Waiting for signature...",
-        colorClass: "text-yellow-500",
-      };
-    case "submitting":
-      return {
-        icon: <Loader2 className="h-4 w-4 animate-spin" />,
-        text: "Submitting transaction...",
-        colorClass: "text-blue-500",
-      };
-    case "pending":
-      return {
-        icon: <Loader2 className="h-4 w-4 animate-spin" />,
-        text: "Processing withdrawal...",
-        colorClass: "text-blue-500",
-      };
-    case "confirmed":
-      return {
-        icon: <Check className="h-4 w-4" />,
-        text: "Withdrawal confirmed!",
-        colorClass: "text-emerald-500",
-      };
-    case "failed":
-      return {
-        icon: <AlertCircle className="h-4 w-4" />,
-        text: "Withdrawal failed",
-        colorClass: "text-red-500",
-      };
-    default:
-      return {
-        icon: null,
-        text: "",
-        colorClass: "",
-      };
-  }
-}
 
 export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
   const { address } = useConnection();
   const {
     withdraw,
     reset,
+    fetchWithdrawQuote,
     state,
     error,
     isWithdrawing,
     usdcBalance,
     canWithdraw,
+    bridgeTokenIndex,
+    quote,
+    isLoadingQuote,
+    bridgeTracking,
   } = useWithdraw();
 
   // Form state
   const [recipientAddress, setRecipientAddress] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
-  const [selectedToken, setSelectedToken] = useState<WithdrawToken>(
-    WITHDRAW_TOKENS[0]
-  );
+  const [selectedTokenId, setSelectedTokenId] =
+    useState<WithdrawTokenId>("usdc");
   const [selectedChain, setSelectedChain] = useState<WithdrawChain>(
     WITHDRAW_CHAINS[0]
   );
@@ -209,12 +165,27 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
   const [tokenDropdownOpen, setTokenDropdownOpen] = useState(false);
   const [chainDropdownOpen, setChainDropdownOpen] = useState(false);
 
+  const availableTokens = useMemo(
+    () => getAvailableTokensForChain(bridgeTokenIndex, selectedChain.id),
+    [bridgeTokenIndex, selectedChain.id]
+  );
+
+  const selectedTokenConfig = WITHDRAW_TOKEN_CONFIGS[selectedTokenId];
+  const selectedTokenDisplay = TOKEN_DISPLAY[selectedTokenId];
+
+  // When the chain changes, ensure the selected token is still valid
+  useEffect(() => {
+    if (!availableTokens.includes(selectedTokenId)) {
+      setSelectedTokenId(availableTokens[0]);
+    }
+  }, [availableTokens, selectedTokenId]);
+
   // Reset state when modal opens/closes
   useEffect(() => {
     if (!open) {
       setRecipientAddress("");
       setAmount("");
-      setSelectedToken(WITHDRAW_TOKENS[0]);
+      setSelectedTokenId("usdc");
       setSelectedChain(WITHDRAW_CHAINS[0]);
       setTxHash(null);
       setShowSuccess(false);
@@ -222,9 +193,13 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
     }
   }, [open, reset]);
 
-  // Handle successful withdrawal
+  // Show success view once relayer confirms (bridge tracking starts automatically)
   useEffect(() => {
-    if (state === "confirmed") {
+    if (
+      state === "confirmed" ||
+      state === "bridging" ||
+      state === "bridge_complete"
+    ) {
       setShowSuccess(true);
     }
   }, [state]);
@@ -251,15 +226,93 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
   }, [recipientAddress, selectedChain.id]);
 
   const canProceed = useMemo(() => {
-    return isValidAmount && isValidAddress && canWithdraw;
-  }, [isValidAmount, isValidAddress, canWithdraw]);
+    return isValidAmount && amountNum >= 2 && isValidAddress && canWithdraw;
+  }, [isValidAmount, amountNum, isValidAddress, canWithdraw]);
 
-  // Estimate received amount (for now, 1:1 for same token)
+  const isCrossChain = useMemo(
+    () => selectedChain.id !== "polygon",
+    [selectedChain.id]
+  );
+
+  // Debounced quote fetching
+  const quoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (quoteTimerRef.current) {
+      clearTimeout(quoteTimerRef.current);
+    }
+
+    const toChainId = WITHDRAW_CHAIN_IDS[selectedChain.id] || "137";
+    const toTokenAddress = resolveDestTokenAddress(
+      bridgeTokenIndex,
+      toChainId,
+      selectedTokenId
+    );
+
+    if (
+      !amountNum ||
+      amountNum <= 0 ||
+      !toTokenAddress ||
+      !recipientAddress ||
+      !isValidAddress
+    ) {
+      return;
+    }
+
+    quoteTimerRef.current = setTimeout(() => {
+      fetchWithdrawQuote(amount, toChainId, toTokenAddress, recipientAddress);
+    }, 600);
+
+    return () => {
+      if (quoteTimerRef.current) {
+        clearTimeout(quoteTimerRef.current);
+      }
+    };
+  }, [
+    amount,
+    amountNum,
+    selectedChain.id,
+    selectedTokenId,
+    recipientAddress,
+    isValidAddress,
+    bridgeTokenIndex,
+    fetchWithdrawQuote,
+  ]);
+
+  // Derive display values from quote or fallback
   const estimatedReceive = useMemo(() => {
+    if (quote) {
+      const tokenConfig = WITHDRAW_TOKEN_CONFIGS[selectedTokenId];
+      const baseUnit = BigInt(quote.estToTokenBaseUnit);
+      const divisor = BigInt(10 ** tokenConfig.decimals);
+      const whole = baseUnit / divisor;
+      const remainder = baseUnit % divisor;
+      const decimalStr = remainder
+        .toString()
+        .padStart(tokenConfig.decimals, "0");
+      const significantDecimals = Math.min(tokenConfig.decimals, 6);
+      return `${whole}.${decimalStr.slice(0, significantDecimals)}`;
+    }
     if (!amountNum || amountNum <= 0) return "-";
-    // In future, integrate with bridge API for cross-chain quotes
-    return amountNum.toFixed(2);
-  }, [amountNum]);
+    return `~${amountNum.toFixed(2)}`;
+  }, [quote, amountNum, selectedTokenId]);
+
+  const estimatedTime = useMemo(() => {
+    if (quote) {
+      const seconds = Math.round(quote.estCheckoutTimeMs / 1000);
+      if (seconds < 60) return `~${seconds}s`;
+      return `~${Math.round(seconds / 60)} min`;
+    }
+    return isCrossChain ? "10-30 minutes" : "~5 minutes";
+  }, [quote, isCrossChain]);
+
+  const totalFeeUsd = useMemo(() => {
+    if (!quote) return null;
+    const fee = quote.estFeeBreakdown;
+    const total = fee.appFeeUsd + fee.fillCostUsd + fee.gasUsd;
+    if (total < 0.01) return "Free";
+    return `$${total.toFixed(2)}`;
+  }, [quote]);
 
   // Handlers
   const handleUseConnected = useCallback(() => {
@@ -282,8 +335,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
     [usdcBalance]
   );
 
-  // Extract primitive dependency for rerender-dependencies best practice
-  const selectedTokenId = selectedToken.id;
+  const selectedChainId = selectedChain.id;
 
   const handleWithdraw = useCallback(async () => {
     if (!canProceed) return;
@@ -292,36 +344,75 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
       amount,
       destinationAddress: recipientAddress,
       tokenId: selectedTokenId,
+      chainId: selectedChainId,
     });
 
-    // Set transaction hash if available (for both success and pending states)
     if (result.transactionHash) {
       setTxHash(result.transactionHash);
     }
-  }, [canProceed, amount, recipientAddress, withdraw, selectedTokenId]);
+  }, [
+    canProceed,
+    amount,
+    recipientAddress,
+    withdraw,
+    selectedTokenId,
+    selectedChainId,
+  ]);
 
   const handleClose = useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
 
-  const statusDisplay = getStatusDisplay(state);
-
-  // Determine button text
-  const getButtonText = () => {
-    if (isWithdrawing) {
-      return (
-        <span className="flex items-center justify-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Processing...
-        </span>
-      );
+  const getButtonContent = (): {
+    text: string | React.ReactNode;
+    variant: "default" | "disabled" | "active";
+  } => {
+    if (state === "signing") {
+      return {
+        text: (
+          <span className="flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Creating bridge withdrawal...
+          </span>
+        ),
+        variant: "active",
+      };
     }
-    if (!recipientAddress) return "Enter Recipient Address";
-    if (!isValidAddress) return "Invalid Address";
-    if (!amount || amountNum <= 0) return "Enter Amount";
-    if (amountNum > usdcBalance) return "Insufficient Balance";
-    return "Withdraw";
+    if (state === "submitting") {
+      return {
+        text: (
+          <span className="flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Sending to bridge...
+          </span>
+        ),
+        variant: "active",
+      };
+    }
+    if (state === "pending") {
+      return {
+        text: (
+          <span className="flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Bridge is routing your funds...
+          </span>
+        ),
+        variant: "active",
+      };
+    }
+    if (!recipientAddress)
+      return { text: "Enter Recipient Address", variant: "disabled" };
+    if (!isValidAddress)
+      return { text: "Invalid Address", variant: "disabled" };
+    if (!amount || amountNum <= 0)
+      return { text: "Enter Amount", variant: "disabled" };
+    if (amountNum < 2) return { text: "Minimum $2", variant: "disabled" };
+    if (amountNum > usdcBalance)
+      return { text: "Insufficient Balance", variant: "disabled" };
+    return { text: "Withdraw", variant: "default" };
   };
+
+  const buttonContent = getButtonContent();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -377,26 +468,68 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                 className="py-8 text-center space-y-4"
               >
                 <div className="flex justify-center">
-                  <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                    <Check className="h-8 w-8 text-emerald-500" />
+                  <div
+                    className={cn(
+                      "w-16 h-16 rounded-full flex items-center justify-center",
+                      state === "bridge_complete"
+                        ? "bg-emerald-500/20"
+                        : "bg-blue-500/20"
+                    )}
+                  >
+                    {state === "bridge_complete" ? (
+                      <Check className="h-8 w-8 text-emerald-500" />
+                    ) : (
+                      <Loader2 className="h-8 w-8 text-blue-400 animate-spin" />
+                    )}
                   </div>
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-foreground">
-                    Withdrawal Complete!
+                    {state === "bridge_complete"
+                      ? "Withdrawal Complete!"
+                      : "Sent to Bridge!"}
                   </h3>
                   <p className="text-sm text-muted-foreground mt-2">
-                    {amount} {selectedToken.symbol} sent to your wallet
+                    {state === "bridge_complete"
+                      ? `Your ${selectedTokenConfig.symbol} has arrived on ${selectedChain.name}.`
+                      : `${amount} USDC.e sent to Polymarket Bridge. Your ${selectedTokenConfig.symbol} will arrive on ${selectedChain.name} shortly.`}
                   </p>
                 </div>
-                {txHash && CHAIN_EXPLORER_URLS[selectedChain.id] ? (
+
+                {/* Bridge tracking progress */}
+                {state !== "bridge_complete" && bridgeTracking.status ? (
+                  <div className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-secondary border border-border">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-400 shrink-0" />
+                    <span className="text-sm text-muted-foreground">
+                      {bridgeTracking.status === "DEPOSIT_DETECTED" &&
+                        "Deposit detected by bridge..."}
+                      {bridgeTracking.status === "PROCESSING" &&
+                        "Bridge is processing your funds..."}
+                      {bridgeTracking.status === "ORIGIN_TX_CONFIRMED" &&
+                        "Origin transaction confirmed..."}
+                      {bridgeTracking.status === "SUBMITTED" &&
+                        `Submitting to ${selectedChain.name}...`}
+                    </span>
+                  </div>
+                ) : null}
+
+                {state !== "bridge_complete" && !bridgeTracking.status ? (
+                  <div className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-secondary border border-border">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-400 shrink-0" />
+                    <span className="text-sm text-muted-foreground">
+                      Waiting for bridge to detect deposit...
+                    </span>
+                  </div>
+                ) : null}
+
+                {txHash ? (
                   <a
-                    href={`${CHAIN_EXPLORER_URLS[selectedChain.id]}${txHash}`}
+                    href={`${CHAIN_EXPLORER_URLS.polygon}${txHash}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80"
                   >
-                    View on {CHAIN_EXPLORER_NAMES[selectedChain.id]}
+                    View on {CHAIN_EXPLORER_NAMES.polygon}
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 ) : null}
@@ -404,7 +537,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                   onClick={handleClose}
                   className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl"
                 >
-                  Done
+                  {state === "bridge_complete" ? "Done" : "Close"}
                 </Button>
               </motion.div>
             ) : (
@@ -432,14 +565,16 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                       }
                       className="flex-1 min-w-0 h-12 px-4 rounded-xl bg-secondary border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary font-mono text-sm truncate"
                     />
-                    <button
-                      type="button"
-                      onClick={handleUseConnected}
-                      className="shrink-0 flex items-center gap-1.5 px-3 h-12 rounded-xl bg-secondary border border-border hover:bg-secondary/80 text-sm font-medium text-foreground transition-colors"
-                    >
-                      <span className="text-orange-400">🦊</span>
-                      <span className="hidden sm:inline">Use connected</span>
-                    </button>
+                    {selectedChain.id !== "solana" ? (
+                      <button
+                        type="button"
+                        onClick={handleUseConnected}
+                        className="shrink-0 flex items-center gap-1.5 px-3 h-12 rounded-xl bg-secondary border border-border hover:bg-secondary/80 text-sm font-medium text-foreground transition-colors"
+                      >
+                        <span className="text-orange-400">🦊</span>
+                        <span className="hidden sm:inline">Use connected</span>
+                      </button>
+                    ) : null}
                   </div>
                 </div>
 
@@ -462,7 +597,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
                       <span className="text-sm text-muted-foreground">
-                        {selectedToken.symbol}
+                        {selectedTokenConfig.symbol}
                       </span>
                       <button
                         type="button"
@@ -512,15 +647,26 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                           className="w-full h-12 px-3 rounded-xl bg-secondary border border-border flex items-center justify-between hover:bg-secondary/80 transition-colors"
                         >
                           <div className="flex items-center gap-2">
-                            <Image
-                              src={selectedToken.icon}
-                              alt={selectedToken.symbol}
-                              width={24}
-                              height={24}
-                              className="rounded-full"
-                            />
+                            {selectedTokenDisplay.icon ? (
+                              <Image
+                                src={selectedTokenDisplay.icon}
+                                alt={selectedTokenConfig.symbol}
+                                width={24}
+                                height={24}
+                                className="rounded-full"
+                              />
+                            ) : (
+                              <span
+                                className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                                style={{
+                                  backgroundColor: selectedTokenDisplay.color,
+                                }}
+                              >
+                                {selectedTokenDisplay.emoji}
+                              </span>
+                            )}
                             <span className="font-medium text-foreground">
-                              {selectedToken.symbol}
+                              {selectedTokenConfig.symbol}
                             </span>
                           </div>
                           <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -528,40 +674,58 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent
                         align="start"
-                        className="w-[200px] bg-popover border-border"
+                        className="w-[220px] bg-popover border-border"
                       >
-                        {WITHDRAW_TOKENS.map((token) => (
-                          <DropdownMenuItem
-                            key={token.id}
-                            onClick={() => setSelectedToken(token)}
-                            className={cn(
-                              "flex items-center gap-2 cursor-pointer",
-                              selectedToken.id === token.id && "bg-primary/10"
-                            )}
-                          >
-                            <Image
-                              src={token.icon}
-                              alt={token.symbol}
-                              width={20}
-                              height={20}
-                              className="rounded-full"
-                            />
-                            <span className="text-foreground">
-                              {token.symbol}
-                            </span>
-                            {selectedToken.id === token.id ? (
-                              <Check className="h-4 w-4 text-primary ml-auto" />
-                            ) : null}
-                          </DropdownMenuItem>
-                        ))}
+                        {availableTokens.map((tokenId) => {
+                          const config = WITHDRAW_TOKEN_CONFIGS[tokenId];
+                          const display = TOKEN_DISPLAY[tokenId];
+                          return (
+                            <DropdownMenuItem
+                              key={tokenId}
+                              onClick={() => setSelectedTokenId(tokenId)}
+                              className={cn(
+                                "flex items-center gap-2 cursor-pointer",
+                                selectedTokenId === tokenId && "bg-primary/10"
+                              )}
+                            >
+                              {display.icon ? (
+                                <Image
+                                  src={display.icon}
+                                  alt={config.symbol}
+                                  width={20}
+                                  height={20}
+                                  className="rounded-full"
+                                />
+                              ) : (
+                                <span
+                                  className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                                  style={{ backgroundColor: display.color }}
+                                >
+                                  {display.emoji}
+                                </span>
+                              )}
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-foreground text-sm">
+                                  {config.symbol}
+                                </span>
+                                <span className="text-muted-foreground text-[10px] truncate">
+                                  {config.name}
+                                </span>
+                              </div>
+                              {selectedTokenId === tokenId ? (
+                                <Check className="h-4 w-4 text-primary ml-auto shrink-0" />
+                              ) : null}
+                            </DropdownMenuItem>
+                          );
+                        })}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
 
-                  {/* Receive Chain */}
+                  {/* Destination Chain */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-foreground">
-                      Receive chain
+                      {isCrossChain ? "Destination chain" : "Receive chain"}
                     </label>
                     <DropdownMenu
                       open={chainDropdownOpen}
@@ -604,15 +768,14 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                   </div>
                 </div>
 
-                {/* Swap info note for native USDC */}
-                {selectedToken.id === "usdc" ? (
-                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                    <p className="text-xs text-blue-400">
-                      Your USDC.e will be automatically swapped to native USDC
-                      via Uniswap V3 (max 0.1% slippage).
-                    </p>
-                  </div>
-                ) : null}
+                {/* Info note */}
+                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                  <p className="text-xs text-blue-400">
+                    {isCrossChain
+                      ? `Cross-chain withdrawal via Polymarket Bridge. Your USDC.e will be converted to ${selectedTokenConfig.symbol} and routed to ${selectedChain.name}. This typically takes 10-30 minutes.`
+                      : `Your USDC.e will be converted to ${selectedTokenConfig.symbol} via Polymarket Bridge.`}
+                  </p>
+                </div>
 
                 {/* Summary */}
                 <div className="space-y-3 pt-2 border-t border-border">
@@ -621,53 +784,40 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                       You will receive
                     </span>
                     <span className="text-foreground font-medium">
-                      ~{estimatedReceive} {selectedToken.symbol}
+                      {isLoadingQuote ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin inline" />
+                      ) : (
+                        `${estimatedReceive} ${selectedTokenConfig.symbol}`
+                      )}
                     </span>
                   </div>
-                  {selectedToken.id === "usdc" ? (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Swap fee</span>
-                      <span className="text-muted-foreground">0.01%</span>
-                    </div>
-                  ) : null}
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Network fee</span>
+                    <span className="text-muted-foreground">Destination</span>
+                    <span className="text-foreground font-medium">
+                      {selectedChain.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Fee</span>
                     <span className="text-muted-foreground">
-                      Free (gasless)
+                      {isLoadingQuote ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin inline" />
+                      ) : (
+                        (totalFeeUsd ?? "Free (gasless)")
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Est. time</span>
+                    <span className="text-muted-foreground">
+                      {isLoadingQuote ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin inline" />
+                      ) : (
+                        estimatedTime
+                      )}
                     </span>
                   </div>
                 </div>
-
-                {/* Status display during transaction */}
-                {state !== "idle" ? (
-                  <div
-                    className={cn(
-                      "p-3 rounded-xl bg-secondary border border-border",
-                      statusDisplay.colorClass
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      {statusDisplay.icon}
-                      <span className="text-sm font-medium">
-                        {statusDisplay.text}
-                      </span>
-                    </div>
-                    {/* Show transaction link for pending state */}
-                    {state === "pending" &&
-                    txHash &&
-                    CHAIN_EXPLORER_URLS[selectedChain.id] ? (
-                      <a
-                        href={`${CHAIN_EXPLORER_URLS[selectedChain.id]}${txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80"
-                      >
-                        Track on {CHAIN_EXPLORER_NAMES[selectedChain.id]}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    ) : null}
-                  </div>
-                ) : null}
 
                 {/* Error display */}
                 {error ? (
@@ -685,28 +835,28 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                   disabled={!canProceed || isWithdrawing}
                   className={cn(
                     "w-full h-12 font-semibold rounded-xl transition-all",
-                    canProceed && !isWithdrawing
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                    isWithdrawing
+                      ? "bg-emerald-600/80 text-white cursor-wait"
+                      : canProceed
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                        : "bg-muted text-muted-foreground cursor-not-allowed"
                   )}
                 >
-                  {getButtonText()}
+                  {buttonContent.text}
                 </Button>
 
-                {/* Liquidity warning for large USDC withdrawals */}
-                {selectedToken.id === "usdc" && amountNum > 10000 ? (
-                  <p className="text-xs text-center text-amber-500">
-                    Large withdrawals may experience liquidity issues. Consider
-                    withdrawing USDC.e directly or splitting into smaller
-                    amounts.
-                  </p>
-                ) : null}
-
-                {/* Note about cross-chain */}
-                {selectedChain.id !== "polygon" ? (
-                  <p className="text-xs text-center text-amber-500">
-                    Cross-chain withdrawals may take 10-30 minutes
-                  </p>
+                {state === "pending" && txHash ? (
+                  <div className="flex justify-center">
+                    <a
+                      href={`${CHAIN_EXPLORER_URLS.polygon}${txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80"
+                    >
+                      Track on {CHAIN_EXPLORER_NAMES.polygon}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
                 ) : null}
               </motion.div>
             )}

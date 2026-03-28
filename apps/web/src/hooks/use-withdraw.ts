@@ -285,7 +285,7 @@ export function getAvailableTokensForChain(
     return [...combined];
   }
 
-  if (!chainTokens) return ["usdc"];
+  if (!chainTokens || Object.keys(chainTokens).length === 0) return ["usdc"];
   return Object.keys(chainTokens) as WithdrawTokenId[];
 }
 

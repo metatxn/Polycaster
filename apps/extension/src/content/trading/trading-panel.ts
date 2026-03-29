@@ -16,6 +16,21 @@ import type { ClobOrderType } from "../../types/chrome-messages";
 import type { Market } from "../../types/market";
 import { escapeHtml } from "../utils";
 import { WalletBridge } from "./bridge";
+import {
+  CHAIN_METADATA,
+  createDepositAddresses,
+  type DepositAddress,
+  type DepositTransaction,
+  fetchDepositStatus,
+  fetchQuote,
+  fetchSupportedAssets,
+  formatCheckoutTime,
+  getDefaultMinDeposit,
+  getDepositStatusDisplay,
+  getMinDepositForToken,
+  type QuoteResponse,
+  type SupportedAsset,
+} from "./bridge-api";
 import { CredentialManager } from "./credentials";
 import { ProxyWallet } from "./proxy-wallet";
 import { type TradingContext, TradingService } from "./trading-service";
@@ -74,13 +89,18 @@ type ExpirationPreset = "GTC" | "1h" | "4h" | "24h" | "7d" | "30d";
 interface DepositToken {
   symbol: string;
   amount: number;
+  usdValue: number;
   address: string;
   decimals: number;
 }
 
+type DepositStep = "method" | "token" | "bridge-select" | "amount" | "confirm";
+type DepositMethod = "wallet" | "bridge";
+
 type DepositState =
   | "idle"
   | "loading-balances"
+  | "loading-bridge"
   | "ready"
   | "pending"
   | "confirming"
@@ -113,10 +133,24 @@ let orderSettling = false;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
 let depositState: DepositState = "idle";
+let depositStep: DepositStep = "method";
+let depositMethod: DepositMethod | null = null;
 let depositTokens: DepositToken[] = [];
 let depositSelected: DepositToken | null = null;
 let depositAmount = "";
 let depositError: string | null = null;
+let depositBridgeAddress = "";
+let depositBridgeAssets: SupportedAsset[] = [];
+let depositSelectedBridgeAsset: SupportedAsset | null = null;
+let depositBridgeSearchQuery = "";
+let depositQuote: QuoteResponse | null = null;
+let depositIsLoadingQuote = false;
+let depositTransactions: DepositTransaction[] = [];
+let depositAddressesCache: DepositAddress[] = [];
+let depositIsPending = false;
+let depositIsConfirming = false;
+let depositIsConfirmed = false;
+let depositStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 let selectedOutcome: "yes" | "no" = "yes";
 let yesPrice = 0;
@@ -2029,15 +2063,42 @@ function renderMergeForm(
 
 // ── Deposit Flow ──
 
-function startDepositFlow(eoaAddress: string): void {
-  depositState = "loading-balances";
+function resetDepositState(): void {
+  depositState = "idle";
+  depositStep = "method";
+  depositMethod = null;
   depositTokens = [];
   depositSelected = null;
   depositAmount = "";
   depositError = null;
+  depositBridgeAddress = "";
+  depositBridgeAssets = [];
+  depositSelectedBridgeAsset = null;
+  depositBridgeSearchQuery = "";
+  depositQuote = null;
+  depositIsLoadingQuote = false;
+  depositTransactions = [];
+  depositAddressesCache = [];
+  depositIsPending = false;
+  depositIsConfirming = false;
+  depositIsConfirmed = false;
+  if (depositStatusPollTimer) {
+    clearTimeout(depositStatusPollTimer);
+    depositStatusPollTimer = null;
+  }
+  if (depositPollTimer) {
+    clearTimeout(depositPollTimer);
+    depositPollTimer = null;
+  }
+}
+
+function startDepositFlow(eoaAddress: string): void {
+  resetDepositState();
+  depositState = "loading-balances";
+  depositStep = "method";
   rerender();
 
-  ProxyWallet.getBalance(eoaAddress)
+  const loadBalances = ProxyWallet.getBalance(eoaAddress)
     .then((data) => {
       const tokens: DepositToken[] = [];
       if (data.tokenBalances && data.tokenBalances.length > 0) {
@@ -2049,6 +2110,7 @@ function startDepositFlow(eoaAddress: string): void {
             tokens.push({
               symbol: tb.symbol,
               amount: tb.amount,
+              usdValue: tb.amount, // approximate 1:1 for stables, overridden below
               address: def.address,
               decimals: def.decimals,
             });
@@ -2059,21 +2121,30 @@ function startDepositFlow(eoaAddress: string): void {
         tokens.push({
           symbol: "POL",
           amount: data.polBalance,
+          usdValue: data.polBalance * 0.4, // approximate
           address: "native",
           decimals: 18,
         });
       }
       depositTokens = tokens;
-      depositState = tokens.length > 0 ? "ready" : "ready";
-      if (tokens.length === 1) depositSelected = tokens[0];
-      rerender();
     })
     .catch((err) => {
-      depositState = "error";
       depositError =
         err instanceof Error ? err.message : "Failed to load balances";
-      rerender();
     });
+
+  const loadAssets = fetchSupportedAssets()
+    .then((assets) => {
+      depositBridgeAssets = assets;
+    })
+    .catch(() => {
+      // Non-critical: bridge selection will just show empty list
+    });
+
+  Promise.all([loadBalances, loadAssets]).then(() => {
+    depositState = "ready";
+    rerender();
+  });
 }
 
 function encodeErc20Transfer(to: string, amountHex: string): string {
@@ -2095,13 +2166,167 @@ function parseTokenAmount(input: string, decimals: number): bigint {
 
 let depositPollTimer: ReturnType<typeof setTimeout> | null = null;
 
+function depositHandleBack(): void {
+  if (depositStep === "token" || depositStep === "bridge-select") {
+    depositStep = "method";
+    depositMethod = null;
+    depositBridgeSearchQuery = "";
+  } else if (depositStep === "amount") {
+    depositStep = "token";
+    depositSelected = null;
+    depositAmount = "";
+    depositQuote = null;
+  } else if (depositStep === "confirm") {
+    if (depositMethod === "bridge") {
+      depositStep = "bridge-select";
+      depositSelectedBridgeAsset = null;
+      depositBridgeAddress = "";
+    } else {
+      depositStep = "amount";
+      depositQuote = null;
+    }
+  }
+  depositError = null;
+  rerender();
+}
+
+async function depositSelectMethod(method: DepositMethod): Promise<void> {
+  depositMethod = method;
+  if (method === "wallet") {
+    depositStep = "token";
+  } else if (method === "bridge") {
+    depositStep = "bridge-select";
+    if (depositBridgeAssets.length === 0) {
+      depositState = "loading-bridge";
+      rerender();
+      try {
+        depositBridgeAssets = await fetchSupportedAssets();
+      } catch {
+        // will show empty list
+      }
+      depositState = "ready";
+    }
+  }
+  rerender();
+}
+
+async function depositSelectToken(
+  token: DepositToken,
+  proxyAddress: string
+): Promise<void> {
+  depositSelected = token;
+  depositError = null;
+  depositBridgeAddress = "";
+  depositState = "loading-bridge";
+  rerender();
+
+  try {
+    if (depositAddressesCache.length === 0) {
+      depositAddressesCache = await createDepositAddresses(proxyAddress);
+    }
+    const addrs = depositAddressesCache;
+    if (addrs.length > 0) {
+      const matching =
+        addrs.find(
+          (a) =>
+            a.chainId === "137" &&
+            a.tokenSymbol.toUpperCase() === token.symbol.toUpperCase()
+        ) ||
+        addrs.find(
+          (a) => a.chainId === "137" && a.tokenSymbol.toUpperCase() === "USDC"
+        ) ||
+        addrs.find((a) => a.chainId === "137");
+      if (matching) depositBridgeAddress = matching.depositAddress;
+      else depositError = "No deposit address available for Polygon.";
+    } else {
+      depositError = "Failed to get deposit addresses.";
+    }
+  } catch (err) {
+    depositError =
+      err instanceof Error ? err.message : "Failed to get deposit address.";
+  }
+
+  depositState = "ready";
+  if (!depositError) depositStep = "amount";
+  rerender();
+}
+
+async function depositSelectBridgeAsset(
+  asset: SupportedAsset,
+  proxyAddress: string
+): Promise<void> {
+  depositSelectedBridgeAsset = asset;
+  depositState = "loading-bridge";
+  rerender();
+
+  try {
+    if (depositAddressesCache.length === 0) {
+      depositAddressesCache = await createDepositAddresses(proxyAddress);
+    }
+    const addrs = depositAddressesCache;
+    if (addrs.length > 0) {
+      const matching =
+        addrs.find(
+          (a) =>
+            a.chainId === asset.chainId && a.tokenSymbol === asset.token.symbol
+        ) || addrs.find((a) => a.chainId === asset.chainId);
+      if (matching) depositBridgeAddress = matching.depositAddress;
+    }
+  } catch (err) {
+    console.error("Failed to get bridge address:", err);
+  }
+
+  depositState = "ready";
+  depositStep = "confirm";
+  rerender();
+}
+
+function depositFetchQuote(): void {
+  if (
+    !depositSelected ||
+    !depositBridgeAddress ||
+    !depositAmount ||
+    depositIsLoadingQuote
+  )
+    return;
+  const numAmount = parseFloat(depositAmount);
+  if (!numAmount || numAmount <= 0) return;
+
+  const amountBaseUnit = parseTokenAmount(
+    depositAmount,
+    depositSelected.decimals
+  ).toString();
+
+  depositIsLoadingQuote = true;
+  rerender();
+
+  fetchQuote({
+    fromAmountBaseUnit: amountBaseUnit,
+    fromChainId: "137",
+    fromTokenAddress: depositSelected.address,
+    recipientAddress: depositBridgeAddress,
+    toChainId: "137",
+    toTokenAddress: USDC_E_ADDRESS,
+  })
+    .then((q) => {
+      depositQuote = q;
+      depositIsLoadingQuote = false;
+      rerender();
+    })
+    .catch(() => {
+      depositQuote = null;
+      depositIsLoadingQuote = false;
+      rerender();
+    });
+}
+
 async function executeDeposit(ctx: TradingContext): Promise<void> {
-  if (!depositSelected || !ctx.address || !ctx.proxyAddress) return;
+  if (!depositSelected || !ctx.address || !depositBridgeAddress) return;
   const numAmount = parseFloat(depositAmount);
   if (!numAmount || numAmount <= 0 || numAmount > depositSelected.amount)
     return;
 
-  depositState = "pending";
+  depositIsPending = true;
   depositError = null;
   rerender();
 
@@ -2111,11 +2336,11 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
     if (depositSelected.address === "native") {
       await WalletBridge.sendTransaction({
         from: ctx.address,
-        to: ctx.proxyAddress,
+        to: depositBridgeAddress,
         value: toHex(amountBig),
       });
     } else {
-      const data = encodeErc20Transfer(ctx.proxyAddress, toHex(amountBig));
+      const data = encodeErc20Transfer(depositBridgeAddress, toHex(amountBig));
       await WalletBridge.sendTransaction({
         from: ctx.address,
         to: depositSelected.address,
@@ -2123,12 +2348,14 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
       });
     }
 
-    depositState = "confirming";
+    depositIsPending = false;
+    depositIsConfirming = true;
     rerender();
 
+    // Poll for balance change + bridge deposit status
     const prevBalance = ctx.balance;
-    const POLL_INTERVAL = 3000;
-    const TIMEOUT = 45000;
+    const POLL_INTERVAL = 5000;
+    const TIMEOUT = 180_000;
     const startTime = Date.now();
 
     const pollBalance = async () => {
@@ -2136,6 +2363,16 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         await TradingService.refreshBalance();
       } catch {
         /* ignore */
+      }
+
+      // Also poll bridge deposit status
+      if (depositBridgeAddress) {
+        try {
+          depositTransactions = await fetchDepositStatus(depositBridgeAddress);
+          rerender();
+        } catch {
+          /* ignore */
+        }
       }
 
       const newCtx = TradingService.getContext();
@@ -2147,13 +2384,14 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
           clearTimeout(depositPollTimer);
           depositPollTimer = null;
         }
-        depositState = "success";
+        depositIsConfirming = false;
+        depositIsConfirmed = true;
         rerender();
         setTimeout(() => {
           activeView = "order";
-          depositState = "idle";
+          resetDepositState();
           rerender();
-        }, 2000);
+        }, 3000);
         return;
       }
 
@@ -2162,43 +2400,166 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
 
     depositPollTimer = setTimeout(pollBalance, POLL_INTERVAL);
   } catch (err) {
-    depositState = "error";
-    depositError = err instanceof Error ? err.message : "Transaction failed";
-    if (
-      depositError.includes("User rejected") ||
-      depositError.includes("user rejected")
-    ) {
+    depositIsPending = false;
+    depositIsConfirming = false;
+    const msg = err instanceof Error ? err.message : "Transaction failed";
+    if (msg.includes("User rejected") || msg.includes("user rejected")) {
       depositError = "Transaction rejected";
+    } else {
+      depositError = msg;
     }
     rerender();
   }
 }
 
-function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
-  const form = el("div", "knoww-tp-form");
+function computeReceiveAmount(): string {
+  if (!depositAmount || !depositSelected) return "0";
+  const numAmount = parseFloat(depositAmount);
+  if (Number.isNaN(numAmount)) return "0";
+  if (
+    ["USDC", "USDC.e", "USDC.E", "DAI", "USDT"].includes(depositSelected.symbol)
+  )
+    return numAmount.toFixed(2);
+  return (
+    (depositSelected.usdValue / depositSelected.amount) *
+    numAmount
+  ).toFixed(2);
+}
 
-  const back = elHtml(
-    "button",
-    "knoww-tp-back-btn",
-    `${I.back} Back to trading`
-  );
-  back.onclick = (e) => {
-    e.stopPropagation();
-    activeView = "order";
-    rerender();
-  };
-  form.appendChild(back);
+function computeEnteredAmountUsd(): number {
+  if (!depositAmount || !depositSelected) return 0;
+  const numAmount = parseFloat(depositAmount);
+  if (Number.isNaN(numAmount)) return 0;
+  if (
+    ["USDC", "USDC.e", "USDC.E", "DAI", "USDT"].includes(depositSelected.symbol)
+  )
+    return numAmount;
+  return (depositSelected.usdValue / depositSelected.amount) * numAmount;
+}
 
-  const title = el("div", "knoww-tp-deposit-title", "Deposit to Polymarket");
-  form.appendChild(title);
+// ── Deposit Form Renderers ──
 
-  const subtitle = el(
+function renderDepositMethodStep(form: HTMLElement, ctx: TradingContext): void {
+  // Wallet option
+  const walletBtn = el("button", "knoww-tp-deposit-method-btn");
+  const walletLeft = el("div", "knoww-tp-deposit-method-left");
+  const walletIcon = el("div", "knoww-tp-deposit-method-icon wallet");
+  walletIcon.textContent = "🦊";
+  walletLeft.appendChild(walletIcon);
+  const walletInfo = el("div", "knoww-tp-deposit-method-info");
+  const walletName = el("div", "knoww-tp-deposit-method-name");
+  walletName.textContent = ctx.address
+    ? `Wallet (${truncAddr(ctx.address)})`
+    : "Wallet (Not connected)";
+  walletInfo.appendChild(walletName);
+  const totalUsd = depositTokens.reduce((s, t) => s + t.usdValue, 0);
+  const walletSub = el(
     "div",
-    "knoww-tp-deposit-subtitle",
-    "Transfer tokens from your wallet to your trading account"
+    "knoww-tp-deposit-method-sub",
+    depositTokens.length > 0
+      ? `$${totalUsd.toFixed(2)} • Instant`
+      : "Connect wallet"
   );
-  form.appendChild(subtitle);
+  walletInfo.appendChild(walletSub);
+  walletLeft.appendChild(walletInfo);
+  walletBtn.appendChild(walletLeft);
+  walletBtn.appendChild(
+    elHtml(
+      "span",
+      "knoww-tp-deposit-method-chevron",
+      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`
+    )
+  );
+  walletBtn.onclick = (e) => {
+    e.stopPropagation();
+    depositSelectMethod("wallet");
+  };
+  form.appendChild(walletBtn);
 
+  // Divider
+  const divider = el("div", "knoww-tp-deposit-divider");
+  divider.appendChild(el("span", "knoww-tp-deposit-divider-line"));
+  divider.appendChild(el("span", "knoww-tp-deposit-divider-text", "more"));
+  divider.appendChild(el("span", "knoww-tp-deposit-divider-line"));
+  form.appendChild(divider);
+
+  // Bridge option
+  const bridgeBtn = el("button", "knoww-tp-deposit-method-btn");
+  const bridgeLeft = el("div", "knoww-tp-deposit-method-left");
+  const bridgeIcon = el("div", "knoww-tp-deposit-method-icon bridge");
+  bridgeIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>`;
+  bridgeLeft.appendChild(bridgeIcon);
+  const bridgeInfo = el("div", "knoww-tp-deposit-method-info");
+  bridgeInfo.appendChild(
+    el("div", "knoww-tp-deposit-method-name", "Transfer Crypto")
+  );
+  bridgeInfo.appendChild(
+    el("div", "knoww-tp-deposit-method-sub", "No limit • Instant")
+  );
+  bridgeLeft.appendChild(bridgeInfo);
+  bridgeBtn.appendChild(bridgeLeft);
+  const chainIcons = el("div", "knoww-tp-deposit-chain-icons");
+  for (const icon of ["⟠", "⬡", "🔷", "🔵"]) {
+    chainIcons.appendChild(el("span", "knoww-tp-deposit-chain-dot", icon));
+  }
+  bridgeBtn.appendChild(chainIcons);
+  bridgeBtn.appendChild(
+    elHtml(
+      "span",
+      "knoww-tp-deposit-method-chevron",
+      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`
+    )
+  );
+  bridgeBtn.onclick = (e) => {
+    e.stopPropagation();
+    depositSelectMethod("bridge");
+  };
+  form.appendChild(bridgeBtn);
+
+  // Card - Coming Soon
+  const cardBtn = el("button", "knoww-tp-deposit-method-btn disabled");
+  cardBtn.disabled = true;
+  const cardLeft = el("div", "knoww-tp-deposit-method-left");
+  const cardIcon = el("div", "knoww-tp-deposit-method-icon card");
+  cardIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>`;
+  cardLeft.appendChild(cardIcon);
+  const cardInfo = el("div", "knoww-tp-deposit-method-info");
+  cardInfo.appendChild(
+    el("div", "knoww-tp-deposit-method-name", "Deposit with Card")
+  );
+  cardInfo.appendChild(
+    el("div", "knoww-tp-deposit-method-sub", "$50,000 • 5 min")
+  );
+  cardLeft.appendChild(cardInfo);
+  cardBtn.appendChild(cardLeft);
+  cardBtn.appendChild(
+    el("span", "knoww-tp-deposit-coming-soon", "Coming Soon")
+  );
+  form.appendChild(cardBtn);
+
+  // Exchange - Coming Soon
+  const exchBtn = el("button", "knoww-tp-deposit-method-btn disabled");
+  exchBtn.disabled = true;
+  const exchLeft = el("div", "knoww-tp-deposit-method-left");
+  const exchIcon = el("div", "knoww-tp-deposit-method-icon exchange");
+  exchIcon.innerHTML = I.refresh;
+  exchLeft.appendChild(exchIcon);
+  const exchInfo = el("div", "knoww-tp-deposit-method-info");
+  exchInfo.appendChild(
+    el("div", "knoww-tp-deposit-method-name", "Connect Exchange")
+  );
+  exchInfo.appendChild(
+    el("div", "knoww-tp-deposit-method-sub", "No limit • 2 min")
+  );
+  exchLeft.appendChild(exchInfo);
+  exchBtn.appendChild(exchLeft);
+  exchBtn.appendChild(
+    el("span", "knoww-tp-deposit-coming-soon", "Coming Soon")
+  );
+  form.appendChild(exchBtn);
+}
+
+function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
   if (depositState === "loading-balances") {
     const loader = el("div", "knoww-tp-loading-section");
     loader.appendChild(el("div", "knoww-tp-spinner"));
@@ -2206,51 +2567,15 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
       el("div", "knoww-tp-loading-text", "Loading wallet balances...")
     );
     form.appendChild(loader);
-    p.appendChild(form);
     return;
   }
 
-  if (depositState === "confirming") {
-    const confirming = el("div", "knoww-tp-deposit-status");
-    confirming.appendChild(el("div", "knoww-tp-spinner"));
-    confirming.appendChild(
-      el("div", "knoww-tp-deposit-status-text", "Confirming deposit...")
-    );
-    const newCtx = TradingService.getContext();
-    confirming.appendChild(
-      el(
-        "div",
-        "knoww-tp-deposit-status-sub",
-        `Balance: $${formatTokenAmount(newCtx.balance)}`
-      )
-    );
-    form.appendChild(confirming);
-    p.appendChild(form);
-    return;
-  }
+  const MIN_BALANCE_USD = 2;
+  const eligibleTokens = depositTokens.filter(
+    (t) => t.usdValue >= MIN_BALANCE_USD
+  );
 
-  if (depositState === "success") {
-    const newCtx = TradingService.getContext();
-    const success = el("div", "knoww-tp-deposit-status");
-    success.appendChild(
-      elHtml("span", "knoww-tp-deposit-status-icon success", I.check)
-    );
-    success.appendChild(
-      el("div", "knoww-tp-deposit-status-text", "Deposit confirmed!")
-    );
-    success.appendChild(
-      el(
-        "div",
-        "knoww-tp-deposit-status-sub",
-        `New balance: $${formatTokenAmount(newCtx.balance)}`
-      )
-    );
-    form.appendChild(success);
-    p.appendChild(form);
-    return;
-  }
-
-  if (depositTokens.length === 0 && depositState === "ready") {
+  if (eligibleTokens.length === 0) {
     const empty = el("div", "knoww-tp-deposit-empty");
     empty.appendChild(elHtml("span", "knoww-tp-deposit-empty-icon", I.wallet));
     empty.appendChild(
@@ -2260,25 +2585,35 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
       el(
         "div",
         "knoww-tp-deposit-empty-sub",
-        "Make sure you have tokens on Polygon network."
+        depositTokens.length > 0
+          ? `Your tokens are below the $${MIN_BALANCE_USD} minimum balance. Add more funds on Polygon.`
+          : "Make sure you have tokens on Polygon network."
       )
     );
     form.appendChild(empty);
-    p.appendChild(form);
     return;
   }
 
-  // Token list
-  const tokenHeader = el("div", "knoww-tp-section-header");
-  tokenHeader.appendChild(el("span", "knoww-tp-section-label", "Select token"));
-  form.appendChild(tokenHeader);
+  // Min deposit info banner
+  const minDeposit = getDefaultMinDeposit(depositBridgeAssets);
+  const infoBanner = el("div", "knoww-tp-deposit-info-banner warn");
+  infoBanner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+  infoBanner.appendChild(
+    el(
+      "span",
+      "",
+      `Minimum balance $${MIN_BALANCE_USD} • Minimum deposit varies by token (typically $${minDeposit}+)`
+    )
+  );
+  form.appendChild(infoBanner);
 
   const tokenList = el("div", "knoww-tp-deposit-token-list");
-  for (const tok of depositTokens) {
-    const isSelected = depositSelected?.symbol === tok.symbol;
+  for (const tok of eligibleTokens) {
+    const minDep = getMinDepositForToken(depositBridgeAssets, tok.symbol);
+    const isBelowMin = tok.usdValue < minDep;
     const row = el(
       "button",
-      `knoww-tp-deposit-token-row${isSelected ? " selected" : ""}`
+      `knoww-tp-deposit-token-row${isBelowMin ? " below-min" : ""}`
     );
     const dot = el("span", "knoww-tp-deposit-token-dot");
     const colorMap: Record<string, string> = {
@@ -2291,62 +2626,169 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
     };
     dot.style.backgroundColor = colorMap[tok.symbol.toLowerCase()] ?? "#a0a0a0";
     row.appendChild(dot);
-    row.appendChild(el("span", "knoww-tp-deposit-token-sym", tok.symbol));
-    row.appendChild(
-      el("span", "knoww-tp-deposit-token-bal", formatTokenAmount(tok.amount))
+    const symCol = el("div", "knoww-tp-deposit-token-info");
+    symCol.appendChild(el("span", "knoww-tp-deposit-token-sym", tok.symbol));
+    symCol.appendChild(
+      el(
+        "span",
+        "knoww-tp-deposit-token-amt",
+        `${tok.amount.toFixed(5)} ${tok.symbol}`
+      )
     );
-    row.onclick = (e) => {
-      e.stopPropagation();
-      depositSelected = tok;
-      depositAmount = "";
-      depositError = null;
-      rerender();
-    };
+    row.appendChild(symCol);
+    const rightCol = el("div", "knoww-tp-deposit-token-right");
+    if (isBelowMin) {
+      rightCol.appendChild(
+        el("span", "knoww-tp-deposit-min-badge", `Min $${minDep}`)
+      );
+    }
+    rightCol.appendChild(
+      el("span", "knoww-tp-deposit-token-usd", `$${tok.usdValue.toFixed(2)}`)
+    );
+    row.appendChild(rightCol);
+    if (isBelowMin) {
+      row.disabled = true;
+    } else {
+      row.onclick = (e) => {
+        e.stopPropagation();
+        if (ctx.proxyAddress) {
+          depositSelectToken(tok, ctx.proxyAddress);
+        }
+      };
+    }
     tokenList.appendChild(row);
   }
   form.appendChild(tokenList);
+}
 
-  if (!depositSelected) {
-    p.appendChild(form);
+function renderDepositBridgeSelectStep(
+  form: HTMLElement,
+  ctx: TradingContext
+): void {
+  if (depositState === "loading-bridge") {
+    const loader = el("div", "knoww-tp-loading-section");
+    loader.appendChild(el("div", "knoww-tp-spinner"));
+    loader.appendChild(el("div", "knoww-tp-loading-text", "Loading assets..."));
+    form.appendChild(loader);
     return;
   }
 
-  // Amount input
-  const amtHeader = el("div", "knoww-tp-section-header");
-  amtHeader.appendChild(
-    el("span", "knoww-tp-section-label", `Amount (${depositSelected.symbol})`)
-  );
-  form.appendChild(amtHeader);
-
-  const inputRow = el("div", "knoww-tp-input-row");
-  const input = document.createElement("input");
-  input.className = "knoww-tp-input-field";
-  input.type = "number";
-  input.placeholder = "0.00";
-  input.step = "any";
-  input.value = depositAmount;
-  input.setAttribute("data-deposit-input", "true");
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  input.oninput = (e) => {
-    depositAmount = (e.target as HTMLInputElement).value;
-    depositError = null;
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      rerender();
-      const restored = activePanel?.querySelector<HTMLInputElement>(
-        "[data-deposit-input]"
-      );
-      if (restored) restored.focus();
-    }, 300);
+  // Search input
+  const searchWrap = el("div", "knoww-tp-deposit-search-wrap");
+  const searchInput = document.createElement("input");
+  searchInput.className = "knoww-tp-deposit-search";
+  searchInput.type = "text";
+  searchInput.placeholder = "Search chain or token...";
+  searchInput.value = depositBridgeSearchQuery;
+  searchInput.setAttribute("data-bridge-search", "true");
+  searchInput.oninput = (e) => {
+    depositBridgeSearchQuery = (e.target as HTMLInputElement).value;
+    rerender();
+    const restored = activePanel?.querySelector<HTMLInputElement>(
+      "[data-bridge-search]"
+    );
+    if (restored) restored.focus();
   };
-  inputRow.appendChild(input);
-  form.appendChild(inputRow);
+  searchWrap.appendChild(searchInput);
+  form.appendChild(searchWrap);
+
+  // Info banner
+  const infoBanner = el("div", "knoww-tp-deposit-info-banner info");
+  infoBanner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:var(--knoww-accent, #1d9bf0)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+  infoBanner.appendChild(
+    elHtml(
+      "span",
+      "",
+      `All deposits are automatically converted to <strong style="color:var(--knoww-accent, #1d9bf0)">USDC.e on Polygon</strong> at the best available rate.`
+    )
+  );
+  form.appendChild(infoBanner);
+
+  // Filter assets
+  const query = depositBridgeSearchQuery.toLowerCase().trim();
+  const filtered = query
+    ? depositBridgeAssets.filter(
+        (a) =>
+          a.token.symbol.toLowerCase().includes(query) ||
+          a.token.name.toLowerCase().includes(query) ||
+          a.chainName.toLowerCase().includes(query)
+      )
+    : depositBridgeAssets;
+
+  const list = el("div", "knoww-tp-deposit-bridge-list");
+  for (const asset of filtered) {
+    const meta = CHAIN_METADATA[asset.chainId] || {
+      name: `Chain ${asset.chainId}`,
+      icon: "🔗",
+      color: "#888",
+    };
+    const row = el("button", "knoww-tp-deposit-bridge-row");
+    const chainIcon = el("div", "knoww-tp-deposit-bridge-icon");
+    chainIcon.style.background = meta.color;
+    chainIcon.textContent = meta.icon;
+    row.appendChild(chainIcon);
+    const info = el("div", "knoww-tp-deposit-bridge-info");
+    info.appendChild(
+      el("div", "knoww-tp-deposit-bridge-sym", asset.token.symbol)
+    );
+    info.appendChild(
+      el("div", "knoww-tp-deposit-bridge-chain", asset.chainName)
+    );
+    row.appendChild(info);
+    const right = el("div", "knoww-tp-deposit-bridge-right");
+    right.appendChild(el("span", "knoww-tp-deposit-bridge-min-label", "MIN"));
+    right.appendChild(
+      el("span", "knoww-tp-deposit-bridge-min-val", `$${asset.minCheckoutUsd}`)
+    );
+    row.appendChild(right);
+    row.appendChild(
+      elHtml(
+        "span",
+        "knoww-tp-deposit-method-chevron",
+        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`
+      )
+    );
+    row.onclick = (e) => {
+      e.stopPropagation();
+      if (ctx.proxyAddress) {
+        depositSelectBridgeAsset(asset, ctx.proxyAddress);
+      }
+    };
+    list.appendChild(row);
+  }
+  form.appendChild(list);
+}
+
+function renderDepositAmountStep(form: HTMLElement): void {
+  if (!depositSelected) return;
+
+  // Large amount input centered
+  const amtCenter = el("div", "knoww-tp-deposit-amt-center");
+  const amtInput = document.createElement("input");
+  amtInput.className = "knoww-tp-deposit-amt-input";
+  amtInput.type = "text";
+  amtInput.placeholder = "0.00";
+  amtInput.value = depositAmount;
+  amtInput.setAttribute("data-deposit-amt", "true");
+  amtInput.oninput = (e) => {
+    depositAmount = (e.target as HTMLInputElement).value.replace(
+      /[^0-9.]/g,
+      ""
+    );
+    depositError = null;
+    rerender();
+    const restored =
+      activePanel?.querySelector<HTMLInputElement>("[data-deposit-amt]");
+    if (restored) restored.focus();
+  };
+  amtCenter.appendChild(amtInput);
+  form.appendChild(amtCenter);
 
   // Percentage presets
-  const presets = el("div", "knoww-tp-presets");
+  const presets = el("div", "knoww-tp-deposit-presets");
   for (const pct of [25, 50, 75, 100]) {
     const label = pct === 100 ? "Max" : `${pct}%`;
-    const btn = el("button", "knoww-tp-preset", label);
+    const btn = el("button", "knoww-tp-deposit-preset-btn", label);
     btn.onclick = (e) => {
       e.stopPropagation();
       if (!depositSelected) return;
@@ -2363,48 +2805,478 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
   }
   form.appendChild(presets);
 
-  // Transfer summary
-  const numAmountForSummary = parseFloat(depositAmount) || 0;
-  if (numAmountForSummary > 0 && ctx.address && ctx.proxyAddress) {
-    const summary = el("div", "knoww-tp-summary");
-    const r1 = el("div", "knoww-tp-summary-row");
-    r1.appendChild(el("span", "knoww-tp-summary-label", "From"));
-    r1.appendChild(
-      el("span", "knoww-tp-summary-value", `Wallet (${truncAddr(ctx.address)})`)
-    );
-    summary.appendChild(r1);
-    const r2 = el("div", "knoww-tp-summary-row");
-    r2.appendChild(el("span", "knoww-tp-summary-label", "To"));
-    r2.appendChild(
+  // Send → Receive summary
+  const sendRecv = el("div", "knoww-tp-deposit-send-recv");
+  const sendSide = el("span", "", `You send: ${depositSelected.symbol}`);
+  const arrow = elHtml(
+    "span",
+    "",
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`
+  );
+  const recvSide = el("span", "", "You receive: USDC.e");
+  sendRecv.appendChild(sendSide);
+  sendRecv.appendChild(arrow);
+  sendRecv.appendChild(recvSide);
+  form.appendChild(sendRecv);
+
+  // Minimum deposit/balance warnings
+  const enteredUsd = computeEnteredAmountUsd();
+  const minDep = getMinDepositForToken(
+    depositBridgeAssets,
+    depositSelected.symbol
+  );
+  const MIN_AMOUNT_USD = 2;
+  const isBelowMinBalance = enteredUsd > 0 && enteredUsd < MIN_AMOUNT_USD;
+  const isBelowMinDeposit = enteredUsd > 0 && enteredUsd < minDep;
+
+  if (depositAmount && isBelowMinBalance) {
+    const warn = el("div", "knoww-tp-deposit-info-banner warn");
+    warn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+    warn.appendChild(
       el(
         "span",
-        "knoww-tp-summary-value",
-        `Polymarket (${truncAddr(ctx.proxyAddress)})`
+        "",
+        `Minimum amount is $${MIN_AMOUNT_USD}. You entered $${enteredUsd.toFixed(2)}.`
       )
     );
-    summary.appendChild(r2);
-    const r3 = el("div", "knoww-tp-summary-row");
-    r3.appendChild(el("span", "knoww-tp-summary-label", "Amount"));
-    r3.appendChild(
+    form.appendChild(warn);
+  } else if (depositAmount && isBelowMinDeposit) {
+    const warn = el("div", "knoww-tp-deposit-info-banner warn");
+    warn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+    warn.appendChild(
       el(
         "span",
-        "knoww-tp-summary-value",
-        `${numAmountForSummary.toFixed(depositSelected.decimals > 6 ? 6 : 2)} ${depositSelected.symbol}`
+        "",
+        `Minimum deposit is $${minDep}. You entered $${enteredUsd.toFixed(2)}.`
       )
     );
-    summary.appendChild(r3);
-    form.appendChild(summary);
+    form.appendChild(warn);
   }
+
+  // Continue button
+  const numAmt = parseFloat(depositAmount) || 0;
+  const overBalance = numAmt > depositSelected.amount;
+  const isValid =
+    numAmt > 0 && !overBalance && !isBelowMinBalance && !isBelowMinDeposit;
+
+  const btn = el("button", "knoww-tp-submit deposit");
+  if (isBelowMinBalance) {
+    btn.textContent = `Min. $${MIN_AMOUNT_USD} required`;
+    btn.disabled = true;
+  } else if (isBelowMinDeposit) {
+    btn.textContent = `Min. $${minDep} required`;
+    btn.disabled = true;
+  } else if (overBalance) {
+    btn.textContent = "Insufficient balance";
+    btn.disabled = true;
+  } else if (numAmt <= 0) {
+    btn.textContent = "Enter amount";
+    btn.disabled = true;
+  } else {
+    btn.textContent = "Continue";
+  }
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (!isValid) return;
+    depositStep = "confirm";
+    depositFetchQuote();
+    rerender();
+  };
+  form.appendChild(btn);
+}
+
+function renderDepositConfirmStep(
+  form: HTMLElement,
+  ctx: TradingContext
+): void {
+  if (depositMethod === "bridge" && depositSelectedBridgeAsset) {
+    // Bridge confirmation: show deposit address
+    form.appendChild(
+      el(
+        "div",
+        "knoww-tp-deposit-confirm-title",
+        `Deposit ${depositSelectedBridgeAsset.token.symbol}`
+      )
+    );
+    form.appendChild(
+      el(
+        "div",
+        "knoww-tp-deposit-confirm-sub",
+        `on ${depositSelectedBridgeAsset.chainName}`
+      )
+    );
+
+    if (depositState === "loading-bridge") {
+      const loader = el("div", "knoww-tp-loading-section");
+      loader.appendChild(el("div", "knoww-tp-spinner"));
+      form.appendChild(loader);
+      return;
+    }
+
+    if (depositBridgeAddress) {
+      // Deposit address box
+      const addrBox = el("div", "knoww-tp-deposit-addr-box");
+      addrBox.appendChild(
+        el(
+          "div",
+          "knoww-tp-deposit-addr-label",
+          `Send ${depositSelectedBridgeAsset.token.symbol} to this address`
+        )
+      );
+      const addrRow = el("div", "knoww-tp-deposit-addr-row");
+      const code = el(
+        "code",
+        "knoww-tp-deposit-addr-code",
+        depositBridgeAddress
+      );
+      addrRow.appendChild(code);
+      const copyBtn = el("button", "knoww-tp-deposit-copy-btn");
+      copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+      copyBtn.onclick = (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(depositBridgeAddress);
+        copyBtn.innerHTML = I.check;
+        setTimeout(() => {
+          copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+        }, 2000);
+      };
+      addrRow.appendChild(copyBtn);
+      addrBox.appendChild(addrRow);
+      form.appendChild(addrBox);
+
+      // Copy full address button
+      const copyFullBtn = el("button", "knoww-tp-submit deposit");
+      copyFullBtn.textContent = "Copy Deposit Address";
+      copyFullBtn.onclick = (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(depositBridgeAddress);
+        copyFullBtn.textContent = "Address Copied!";
+        setTimeout(() => {
+          copyFullBtn.textContent = "Copy Deposit Address";
+        }, 2000);
+      };
+      form.appendChild(copyFullBtn);
+
+      // Min info
+      const minInfo = el("div", "knoww-tp-deposit-info-banner warn");
+      minInfo.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+      const minText = el("div", "");
+      minText.appendChild(
+        el("div", "", `Minimum: $${depositSelectedBridgeAsset.minCheckoutUsd}`)
+      );
+      minText.appendChild(
+        el("div", "", "Assets will be converted to USDC.e on Polygon.")
+      );
+      minText.style.fontSize = "11px";
+      minInfo.appendChild(minText);
+      form.appendChild(minInfo);
+    } else {
+      form.appendChild(
+        el(
+          "div",
+          "knoww-tp-deposit-status-sub",
+          "Failed to get deposit address. Please try again."
+        )
+      );
+    }
+    return;
+  }
+
+  // Wallet confirmation with quote
+  if (!depositSelected) return;
+
+  const displayReceiveAmt = depositQuote
+    ? (Number(depositQuote.estToTokenBaseUnit) / 1e6).toFixed(2)
+    : computeReceiveAmount();
+  const estimatedTime = depositQuote
+    ? formatCheckoutTime(depositQuote.estCheckoutTimeMs)
+    : "< 2 min";
+
+  // Amount display
+  form.appendChild(
+    el(
+      "div",
+      "knoww-tp-deposit-confirm-amount",
+      `$${parseFloat(depositAmount || "0").toFixed(2)}`
+    )
+  );
+
+  // Auto-conversion banner
+  if (depositSelected.symbol !== "USDC.e") {
+    const banner = el("div", "knoww-tp-deposit-info-banner info");
+    banner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:var(--knoww-accent, #1d9bf0)"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>`;
+    const text = el("div", "");
+    text.appendChild(el("div", "", "Auto-conversion to USDC.e"));
+    text.appendChild(
+      el(
+        "div",
+        "",
+        `Your ${depositSelected.symbol} will be automatically converted to USDC.e on Polygon via Polymarket Bridge.`
+      )
+    );
+    text.style.fontSize = "11px";
+    banner.appendChild(text);
+    form.appendChild(banner);
+  }
+
+  // Details card
+  const details = el("div", "knoww-tp-deposit-details-card");
+  const rows: Array<[string, string]> = [
+    ["Source", `🦊 Wallet (${ctx.address ? truncAddr(ctx.address) : ""})`],
+    ["Via", "🌉 Polymarket Bridge"],
+    ["Destination", "📊 Polymarket Wallet"],
+    ["Est. time", estimatedTime],
+  ];
+  for (const [label, value] of rows) {
+    const row = el("div", "knoww-tp-deposit-detail-row");
+    row.appendChild(el("span", "knoww-tp-deposit-detail-label", label));
+    row.appendChild(el("span", "knoww-tp-deposit-detail-value", value));
+    details.appendChild(row);
+  }
+  form.appendChild(details);
+
+  // Transaction breakdown
+  const breakdown = el("div", "knoww-tp-deposit-details-card");
+  const sendRow = el("div", "knoww-tp-deposit-detail-row");
+  sendRow.appendChild(el("span", "knoww-tp-deposit-detail-label", "You send"));
+  sendRow.appendChild(
+    el(
+      "span",
+      "knoww-tp-deposit-detail-value",
+      `${depositAmount} ${depositSelected.symbol}`
+    )
+  );
+  breakdown.appendChild(sendRow);
+
+  const recvRow = el("div", "knoww-tp-deposit-detail-row");
+  recvRow.appendChild(
+    el(
+      "span",
+      "knoww-tp-deposit-detail-label",
+      `You receive ${depositQuote ? "" : "(approx)"}`
+    )
+  );
+  const recvVal = el("span", "knoww-tp-deposit-detail-value");
+  if (depositIsLoadingQuote) {
+    recvVal.appendChild(el("span", "knoww-tp-deposit-inline-spinner"));
+  }
+  recvVal.appendChild(
+    document.createTextNode(
+      `${depositQuote ? "" : "~"}${displayReceiveAmt} USDC.e`
+    )
+  );
+  recvRow.appendChild(recvVal);
+  breakdown.appendChild(recvRow);
+
+  // Fee breakdown
+  const feeDivider = el("div", "knoww-tp-deposit-fee-divider");
+  breakdown.appendChild(feeDivider);
+
+  if (depositQuote?.estFeeBreakdown) {
+    const fb = depositQuote.estFeeBreakdown;
+    const feeRows: Array<[string, string]> = [
+      ["Gas fee", `$${fb.gasUsd.toFixed(4)}`],
+    ];
+    if (fb.swapImpactUsd > 0) {
+      feeRows.push(["Swap impact", `$${fb.swapImpactUsd.toFixed(4)}`]);
+    }
+    if (fb.appFeeUsd > 0) {
+      feeRows.push([
+        fb.appFeeLabel || "App fee",
+        `$${fb.appFeeUsd.toFixed(4)}`,
+      ]);
+    }
+    if (fb.maxSlippage > 0) {
+      feeRows.push(["Max slippage", `${(fb.maxSlippage * 100).toFixed(2)}%`]);
+    }
+    for (const [lbl, val] of feeRows) {
+      const r = el("div", "knoww-tp-deposit-fee-row");
+      r.appendChild(el("span", "knoww-tp-deposit-fee-label", lbl));
+      r.appendChild(el("span", "knoww-tp-deposit-fee-value", val));
+      breakdown.appendChild(r);
+    }
+    const minRecvRow = el("div", "knoww-tp-deposit-fee-row highlight");
+    minRecvRow.appendChild(
+      el("span", "knoww-tp-deposit-fee-label", "Min. received")
+    );
+    minRecvRow.appendChild(
+      el(
+        "span",
+        "knoww-tp-deposit-fee-value",
+        `${fb.minReceived.toFixed(2)} USDC.e`
+      )
+    );
+    breakdown.appendChild(minRecvRow);
+  } else {
+    const defaultFees: Array<[string, string]> = [
+      ["Network cost", "~$0.01"],
+      ["Bridge fee", "~0.1%"],
+    ];
+    for (const [lbl, val] of defaultFees) {
+      const r = el("div", "knoww-tp-deposit-fee-row");
+      r.appendChild(el("span", "knoww-tp-deposit-fee-label", lbl));
+      r.appendChild(el("span", "knoww-tp-deposit-fee-value", val));
+      breakdown.appendChild(r);
+    }
+  }
+  form.appendChild(breakdown);
 
   // Error display
   if (depositError) {
     const errRow = el("div", "knoww-tp-deposit-error");
     errRow.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
-    errRow.appendChild(el("span", "", depositError));
+    const errText =
+      depositError.length > 150
+        ? `${depositError.slice(0, 150)}...`
+        : depositError;
+    errRow.appendChild(el("span", "", errText));
     form.appendChild(errRow);
   }
 
-  // Enable trading notice
+  // No bridge address warning
+  if (!depositBridgeAddress && depositState !== "loading-bridge") {
+    const warn = el("div", "knoww-tp-deposit-info-banner warn");
+    warn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+    warn.appendChild(
+      el(
+        "span",
+        "",
+        "Failed to get bridge address. Please go back and try again."
+      )
+    );
+    form.appendChild(warn);
+  }
+
+  // Success message
+  if (depositIsConfirmed) {
+    const successBanner = el("div", "knoww-tp-deposit-info-banner success");
+    successBanner.innerHTML = I.check;
+    const successText = el("div", "");
+    successText.appendChild(el("div", "", "Transaction confirmed!"));
+    successText.appendChild(
+      el(
+        "div",
+        "",
+        "USDC.e will be credited to your Polymarket wallet shortly."
+      )
+    );
+    successText.style.fontSize = "11px";
+    successBanner.appendChild(successText);
+    form.appendChild(successBanner);
+  }
+
+  // Deposit status tracking
+  if (depositIsConfirmed && depositTransactions.length > 0) {
+    const statusCard = el("div", "knoww-tp-deposit-details-card");
+    statusCard.appendChild(
+      el("div", "knoww-tp-deposit-detail-label", "Bridge Status")
+    );
+    for (const tx of depositTransactions.slice(0, 3)) {
+      const display = getDepositStatusDisplay(tx.status);
+      const statusRow = el("div", "knoww-tp-deposit-status-row");
+      const statusDot = el("span", "knoww-tp-deposit-status-dot");
+      statusDot.style.backgroundColor = display.color;
+      statusRow.appendChild(statusDot);
+      statusRow.appendChild(el("span", "", display.text));
+      statusRow.appendChild(
+        el(
+          "span",
+          "knoww-tp-deposit-status-amt",
+          `${(Number(tx.fromAmountBaseUnit) / 1e6).toFixed(2)} USDC`
+        )
+      );
+      statusCard.appendChild(statusRow);
+    }
+    form.appendChild(statusCard);
+  }
+
+  // Terms
+  form.appendChild(
+    el(
+      "div",
+      "knoww-tp-deposit-terms",
+      "By clicking Confirm Order, you agree to our terms."
+    )
+  );
+
+  // Confirm button
+  const btn = el("button", "knoww-tp-submit deposit");
+  const isDisabled =
+    !depositBridgeAddress ||
+    depositIsPending ||
+    depositIsConfirming ||
+    depositIsConfirmed;
+
+  if (depositIsPending) {
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirm in Wallet...`;
+    btn.disabled = true;
+    btn.classList.add("loading");
+  } else if (depositIsConfirming) {
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirming...`;
+    btn.disabled = true;
+    btn.classList.add("loading");
+  } else if (depositIsConfirmed) {
+    btn.innerHTML = `${I.check} Deposit Complete!`;
+    btn.disabled = true;
+  } else if (!depositBridgeAddress) {
+    btn.textContent = "Loading Bridge...";
+    btn.disabled = true;
+  } else {
+    btn.textContent = "Confirm Order";
+  }
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (isDisabled) return;
+    executeDeposit(ctx);
+  };
+  form.appendChild(btn);
+}
+
+function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
+  const form = el("div", "knoww-tp-form");
+
+  // Header with back button
+  const headerRow = el("div", "knoww-tp-deposit-header-row");
+  const backBtn = elHtml("button", "knoww-tp-back-btn", I.back);
+  if (depositStep === "method") {
+    backBtn.onclick = (e) => {
+      e.stopPropagation();
+      activeView = "order";
+      resetDepositState();
+      rerender();
+    };
+  } else {
+    backBtn.onclick = (e) => {
+      e.stopPropagation();
+      depositHandleBack();
+    };
+  }
+  headerRow.appendChild(backBtn);
+
+  const title = el("div", "knoww-tp-deposit-title", "Deposit");
+  headerRow.appendChild(title);
+
+  const balance = el(
+    "div",
+    "knoww-tp-deposit-header-bal",
+    `Balance: $${formatTokenAmount(ctx.balance)}`
+  );
+  headerRow.appendChild(balance);
+  form.appendChild(headerRow);
+
+  // Loading state
+  if (depositState === "loading-balances" && depositStep === "method") {
+    const loader = el("div", "knoww-tp-loading-section");
+    loader.appendChild(el("div", "knoww-tp-spinner"));
+    loader.appendChild(
+      el("div", "knoww-tp-loading-text", "Loading wallet balances...")
+    );
+    form.appendChild(loader);
+    p.appendChild(form);
+    return;
+  }
+
+  // Enable trading notice (blocks all steps)
   const needsTrading = !ctx.credentials;
   if (needsTrading) {
     const notice = el("div", "knoww-tp-deposit-notice");
@@ -2437,32 +3309,24 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
     return;
   }
 
-  // Submit button
-  const numAmt = parseFloat(depositAmount) || 0;
-  const isSubmitting = depositState === "pending";
-  const overBalance = numAmt > depositSelected.amount;
-  const noAmount = numAmt <= 0;
-
-  const btn = el("button", "knoww-tp-submit deposit");
-  if (isSubmitting) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirm in MetaMask...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (noAmount) {
-    btn.textContent = "Enter amount";
-    btn.disabled = true;
-  } else if (overBalance) {
-    btn.textContent = "Insufficient balance";
-    btn.disabled = true;
-  } else {
-    btn.textContent = `Deposit ${parseFloat(depositAmount).toFixed(2)} ${depositSelected.symbol}`;
+  // Render the current step
+  switch (depositStep) {
+    case "method":
+      renderDepositMethodStep(form, ctx);
+      break;
+    case "token":
+      renderDepositTokenStep(form, ctx);
+      break;
+    case "bridge-select":
+      renderDepositBridgeSelectStep(form, ctx);
+      break;
+    case "amount":
+      renderDepositAmountStep(form);
+      break;
+    case "confirm":
+      renderDepositConfirmStep(form, ctx);
+      break;
   }
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    if (btn.disabled) return;
-    executeDeposit(ctx);
-  };
-  form.appendChild(btn);
 
   p.appendChild(form);
 }
@@ -2558,12 +3422,8 @@ export const TradingPanel = {
       clearTimeout(settleTimer);
       settleTimer = null;
     }
-    if (depositPollTimer) {
-      clearTimeout(depositPollTimer);
-      depositPollTimer = null;
-    }
+    resetDepositState();
     orderSettling = false;
-    depositState = "idle";
     if (activeUnsubscribe) {
       activeUnsubscribe();
       activeUnsubscribe = null;

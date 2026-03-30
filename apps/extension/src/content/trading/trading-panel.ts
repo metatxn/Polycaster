@@ -2107,7 +2107,11 @@ function parseBalanceHex(hex: string, decimals: number): number {
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
   if (!clean || clean === "0") return 0;
   const raw = BigInt(`0x${clean}`);
-  return Number(raw) / 10 ** decimals;
+  const scale = 10n ** BigInt(decimals);
+  const integerPart = raw / scale;
+  const remainder = raw % scale;
+  const fracStr = remainder.toString().padStart(decimals, "0");
+  return Number(`${integerPart}.${fracStr}`);
 }
 
 async function waitForTxReceipt(

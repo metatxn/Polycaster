@@ -85,7 +85,10 @@
   --knoww-text-secondary: rgba(0, 0, 0, 0.6);
   --knoww-accent: #0a66c2;
   --knoww-font:
-    -apple-system, system-ui, "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Fira Sans", "Ubuntu", "Oxygen", "Oxygen Sans", "Cantarell", "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", "Helvetica", "Arial", sans-serif;
+    -apple-system, system-ui, "BlinkMacSystemFont", "Segoe UI", "Roboto",
+    "Helvetica Neue", "Fira Sans", "Ubuntu", "Oxygen", "Oxygen Sans",
+    "Cantarell", "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Lucida Grande", "Helvetica", "Arial", sans-serif;
   --knoww-radius: 8px;
   --knoww-card-bg: rgb(245, 245, 245);
   --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
@@ -1967,15 +1970,19 @@
 /* ── Deposit Multi-Step ── */
 
 .knoww-tp-deposit-header-row {
+  position: relative !important;
   display: flex !important;
   align-items: center !important;
-  gap: 8px !important;
+  justify-content: space-between !important;
   margin-bottom: 12px !important;
+  min-height: 28px !important;
 }
 .knoww-tp-deposit-header-row .knoww-tp-deposit-title {
-  flex: 1 !important;
-  text-align: center !important;
+  position: absolute !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
   margin-bottom: 0 !important;
+  pointer-events: none !important;
 }
 .knoww-tp-deposit-header-bal {
   font-size: 11px !important;
@@ -2257,7 +2264,7 @@
   gap: 1px !important;
 }
 .knoww-tp-deposit-bridge-min-label {
-  font-size: 9px !important;
+  font-size: 10px !important;
   font-weight: 700 !important;
   text-transform: uppercase !important;
   letter-spacing: 0.06em !important;

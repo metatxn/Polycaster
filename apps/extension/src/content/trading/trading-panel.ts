@@ -11,6 +11,7 @@
  */
 
 import { USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
+import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import type { ClobOrderType } from "../../types/chrome-messages";
 import type { Market } from "../../types/market";
@@ -32,7 +33,6 @@ import {
   type SupportedAsset,
 } from "./bridge-api";
 import { CredentialManager } from "./credentials";
-import { ProxyWallet } from "./proxy-wallet";
 import { type TradingContext, TradingService } from "./trading-service";
 
 const DEPOSIT_TOKENS: Array<{
@@ -150,6 +150,7 @@ let depositAddressesCache: DepositAddress[] = [];
 let depositIsPending = false;
 let depositIsConfirming = false;
 let depositIsConfirmed = false;
+let depositTxConfirmed = false;
 let depositStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 let selectedOutcome: "yes" | "no" = "yes";
@@ -2082,6 +2083,7 @@ function resetDepositState(): void {
   depositIsPending = false;
   depositIsConfirming = false;
   depositIsConfirmed = false;
+  depositTxConfirmed = false;
   if (depositStatusPollTimer) {
     clearTimeout(depositStatusPollTimer);
     depositStatusPollTimer = null;
@@ -2092,40 +2094,166 @@ function resetDepositState(): void {
   }
 }
 
+const BALANCE_OF_SIG = "0x70a08231";
+
+function encodeBalanceOfCall(owner: string): string {
+  return (
+    BALANCE_OF_SIG + owner.toLowerCase().replace("0x", "").padStart(64, "0")
+  );
+}
+
+function parseBalanceHex(hex: string, decimals: number): number {
+  if (!hex || hex === "0x" || hex === "0x0") return 0;
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (!clean || clean === "0") return 0;
+  const raw = BigInt(`0x${clean}`);
+  return Number(raw) / 10 ** decimals;
+}
+
+async function waitForTxReceipt(
+  txHash: string,
+  pollingInterval = 5000,
+  timeout = 180_000
+): Promise<{ status: "success" | "reverted" }> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const receipt = await WalletBridge.getTransactionReceipt(txHash);
+      if (receipt?.status) {
+        return { status: receipt.status === "0x1" ? "success" : "reverted" };
+      }
+    } catch {
+      // RPC error — retry
+    }
+    await new Promise((r) => setTimeout(r, pollingInterval));
+  }
+  throw new Error(
+    "Transaction confirmation timed out. Check your wallet or Polygonscan."
+  );
+}
+
+const STABLECOINS = new Set(["USDC", "USDC.e", "USDC.E", "USDT", "DAI"]);
+
+let cachedPrices: Record<string, number> | null = null;
+let pricesFetchedAt = 0;
+const PRICE_CACHE_TTL = 5 * 60 * 1000;
+
+async function fetchTokenPrices(): Promise<Record<string, number>> {
+  if (cachedPrices && Date.now() - pricesFetchedAt < PRICE_CACHE_TTL) {
+    return cachedPrices;
+  }
+  const baseUrl = window.KNOWW_CONFIG?.KNOWW_APP_URL || "https://knoww.app";
+  const data = await new Promise<{ prices?: Record<string, number> }>(
+    (resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: "fetch-json",
+          url: `${baseUrl}/api/price/tokens`,
+          method: "GET",
+        },
+        (response: { ok: boolean; data?: unknown; error?: string }) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (!response?.ok) {
+            reject(new Error(response?.error || "Price fetch failed"));
+            return;
+          }
+          resolve(response.data as { prices?: Record<string, number> });
+        }
+      );
+    }
+  );
+  if (data?.prices) {
+    cachedPrices = data.prices;
+    pricesFetchedAt = Date.now();
+    return data.prices;
+  }
+  throw new Error("No prices in response");
+}
+
+function getTokenPrice(symbol: string, prices: Record<string, number>): number {
+  if (prices[symbol] !== undefined) return prices[symbol];
+  if (STABLECOINS.has(symbol)) return 1;
+  return 0;
+}
+
+async function ensurePolygonChain(): Promise<void> {
+  try {
+    const chainId = await WalletBridge.getChainId();
+    if (chainId !== POLYGON_CHAIN_ID_HEX) {
+      await WalletBridge.switchChain(POLYGON_CHAIN_ID_HEX);
+    }
+  } catch {
+    throw new Error("Please switch your wallet to Polygon network.");
+  }
+}
+
+async function fetchEoaBalancesViaWallet(
+  eoaAddress: string
+): Promise<DepositToken[]> {
+  await ensurePolygonChain();
+
+  let prices: Record<string, number> = {};
+  try {
+    prices = await fetchTokenPrices();
+  } catch {
+    // Price API unavailable — stablecoins still get $1 via getTokenPrice
+  }
+
+  const callData = encodeBalanceOfCall(eoaAddress);
+  const tokens: DepositToken[] = [];
+
+  const erc20Results = await Promise.allSettled(
+    DEPOSIT_TOKENS.map((tok) => WalletBridge.ethCall(tok.address, callData))
+  );
+
+  for (let i = 0; i < DEPOSIT_TOKENS.length; i++) {
+    const res = erc20Results[i];
+    if (res.status !== "fulfilled") continue;
+    const amount = parseBalanceHex(res.value, DEPOSIT_TOKENS[i].decimals);
+    if (amount > 0) {
+      const price = getTokenPrice(DEPOSIT_TOKENS[i].symbol, prices);
+      tokens.push({
+        symbol: DEPOSIT_TOKENS[i].symbol,
+        amount,
+        usdValue: amount * price,
+        address: DEPOSIT_TOKENS[i].address,
+        decimals: DEPOSIT_TOKENS[i].decimals,
+      });
+    }
+  }
+
+  try {
+    const polHex = await WalletBridge.getBalance(eoaAddress);
+    const polAmount = parseBalanceHex(polHex, 18);
+    if (polAmount > 0) {
+      const polPrice = getTokenPrice("POL", prices);
+      tokens.push({
+        symbol: "POL",
+        amount: polAmount,
+        usdValue: polAmount * polPrice,
+        address: "native",
+        decimals: 18,
+      });
+    }
+  } catch {
+    // POL balance fetch failed, skip
+  }
+
+  tokens.sort((a, b) => b.usdValue - a.usdValue);
+  return tokens;
+}
+
 function startDepositFlow(eoaAddress: string): void {
   resetDepositState();
   depositState = "loading-balances";
   depositStep = "method";
   rerender();
 
-  const loadBalances = ProxyWallet.getBalance(eoaAddress)
-    .then((data) => {
-      const tokens: DepositToken[] = [];
-      if (data.tokenBalances && data.tokenBalances.length > 0) {
-        for (const tb of data.tokenBalances) {
-          const def = DEPOSIT_TOKENS.find(
-            (d) => d.symbol.toLowerCase() === tb.symbol.toLowerCase()
-          );
-          if (def && tb.amount > 0) {
-            tokens.push({
-              symbol: tb.symbol,
-              amount: tb.amount,
-              usdValue: tb.amount, // approximate 1:1 for stables, overridden below
-              address: def.address,
-              decimals: def.decimals,
-            });
-          }
-        }
-      }
-      if (data.polBalance && data.polBalance > 0) {
-        tokens.push({
-          symbol: "POL",
-          amount: data.polBalance,
-          usdValue: data.polBalance * 0.4, // approximate
-          address: "native",
-          decimals: 18,
-        });
-      }
+  const loadBalances = fetchEoaBalancesViaWallet(eoaAddress)
+    .then((tokens) => {
       depositTokens = tokens;
     })
     .catch((err) => {
@@ -2333,15 +2461,16 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
   try {
     const amountBig = parseTokenAmount(depositAmount, depositSelected.decimals);
 
+    let txHash: string;
     if (depositSelected.address === "native") {
-      await WalletBridge.sendTransaction({
+      txHash = await WalletBridge.sendTransaction({
         from: ctx.address,
         to: depositBridgeAddress,
         value: toHex(amountBig),
       });
     } else {
       const data = encodeErc20Transfer(depositBridgeAddress, toHex(amountBig));
-      await WalletBridge.sendTransaction({
+      txHash = await WalletBridge.sendTransaction({
         from: ctx.address,
         to: depositSelected.address,
         data,
@@ -2350,22 +2479,34 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
 
     depositIsPending = false;
     depositIsConfirming = true;
+    depositTxConfirmed = false;
     rerender();
 
-    // Poll for balance change + bridge deposit status
+    // Phase 1: Wait for on-chain transaction confirmation
+    const receipt = await waitForTxReceipt(txHash);
+    if (receipt.status === "reverted") {
+      depositIsConfirming = false;
+      depositError = "Transaction reverted on-chain";
+      rerender();
+      return;
+    }
+
+    // Phase 2: On-chain confirmed — now poll for bridge credit
+    depositTxConfirmed = true;
+    rerender();
+
     const prevBalance = ctx.balance;
     const POLL_INTERVAL = 5000;
-    const TIMEOUT = 180_000;
-    const startTime = Date.now();
+    const BRIDGE_TIMEOUT = 180_000;
+    const bridgeStart = Date.now();
 
-    const pollBalance = async () => {
+    const pollBridgeCredit = async () => {
       try {
         await TradingService.refreshBalance();
       } catch {
         /* ignore */
       }
 
-      // Also poll bridge deposit status
       if (depositBridgeAddress) {
         try {
           depositTransactions = await fetchDepositStatus(depositBridgeAddress);
@@ -2377,7 +2518,7 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
 
       const newCtx = TradingService.getContext();
       const balanceChanged = newCtx.balance > prevBalance + 0.001;
-      const timedOut = Date.now() - startTime >= TIMEOUT;
+      const timedOut = Date.now() - bridgeStart >= BRIDGE_TIMEOUT;
 
       if (balanceChanged || timedOut) {
         if (depositPollTimer) {
@@ -2395,13 +2536,14 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         return;
       }
 
-      depositPollTimer = setTimeout(pollBalance, POLL_INTERVAL);
+      depositPollTimer = setTimeout(pollBridgeCredit, POLL_INTERVAL);
     };
 
-    depositPollTimer = setTimeout(pollBalance, POLL_INTERVAL);
+    depositPollTimer = setTimeout(pollBridgeCredit, POLL_INTERVAL);
   } catch (err) {
     depositIsPending = false;
     depositIsConfirming = false;
+    depositTxConfirmed = false;
     const msg = err instanceof Error ? err.message : "Transaction failed";
     if (msg.includes("User rejected") || msg.includes("user rejected")) {
       depositError = "Transaction rejected";
@@ -2453,13 +2595,15 @@ function renderDepositMethodStep(form: HTMLElement, ctx: TradingContext): void {
     : "Wallet (Not connected)";
   walletInfo.appendChild(walletName);
   const totalUsd = depositTokens.reduce((s, t) => s + t.usdValue, 0);
-  const walletSub = el(
-    "div",
-    "knoww-tp-deposit-method-sub",
-    depositTokens.length > 0
-      ? `$${totalUsd.toFixed(2)} • Instant`
-      : "Connect wallet"
-  );
+  let walletSubText: string;
+  if (depositTokens.length > 0) {
+    walletSubText = `$${totalUsd.toFixed(2)} • Instant`;
+  } else if (ctx.address) {
+    walletSubText = "No tokens found";
+  } else {
+    walletSubText = "Connect wallet";
+  }
+  const walletSub = el("div", "knoww-tp-deposit-method-sub", walletSubText);
   walletInfo.appendChild(walletSub);
   walletLeft.appendChild(walletInfo);
   walletBtn.appendChild(walletLeft);
@@ -2570,12 +2714,16 @@ function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
     return;
   }
 
-  const MIN_BALANCE_USD = 2;
-  const eligibleTokens = depositTokens.filter(
-    (t) => t.usdValue >= MIN_BALANCE_USD
-  );
+  if (depositError) {
+    const errRow = el("div", "knoww-tp-deposit-error");
+    errRow.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
+    errRow.appendChild(el("span", "", depositError));
+    form.appendChild(errRow);
+  }
 
-  if (eligibleTokens.length === 0) {
+  const MIN_BALANCE_USD = 2;
+
+  if (depositTokens.length === 0) {
     const empty = el("div", "knoww-tp-deposit-empty");
     empty.appendChild(elHtml("span", "knoww-tp-deposit-empty-icon", I.wallet));
     empty.appendChild(
@@ -2585,8 +2733,8 @@ function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
       el(
         "div",
         "knoww-tp-deposit-empty-sub",
-        depositTokens.length > 0
-          ? `Your tokens are below the $${MIN_BALANCE_USD} minimum balance. Add more funds on Polygon.`
+        depositError
+          ? "There was an issue fetching your balances. Please try again."
           : "Make sure you have tokens on Polygon network."
       )
     );
@@ -2602,18 +2750,20 @@ function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
     el(
       "span",
       "",
-      `Minimum balance $${MIN_BALANCE_USD} • Minimum deposit varies by token (typically $${minDeposit}+)`
+      `Minimum deposit varies by token (typically $${minDeposit}+)`
     )
   );
   form.appendChild(infoBanner);
 
   const tokenList = el("div", "knoww-tp-deposit-token-list");
-  for (const tok of eligibleTokens) {
+  for (const tok of depositTokens) {
     const minDep = getMinDepositForToken(depositBridgeAssets, tok.symbol);
-    const isBelowMin = tok.usdValue < minDep;
+    const isBelowMinDeposit = tok.usdValue < minDep;
+    const isBelowMinBalance = tok.usdValue < MIN_BALANCE_USD;
+    const isDisabled = isBelowMinDeposit || isBelowMinBalance;
     const row = el(
       "button",
-      `knoww-tp-deposit-token-row${isBelowMin ? " below-min" : ""}`
+      `knoww-tp-deposit-token-row${isDisabled ? " below-min" : ""}`
     );
     const dot = el("span", "knoww-tp-deposit-token-dot");
     const colorMap: Record<string, string> = {
@@ -2637,16 +2787,17 @@ function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
     );
     row.appendChild(symCol);
     const rightCol = el("div", "knoww-tp-deposit-token-right");
-    if (isBelowMin) {
+    if (isDisabled) {
+      const badgeAmount = isBelowMinBalance ? MIN_BALANCE_USD : minDep;
       rightCol.appendChild(
-        el("span", "knoww-tp-deposit-min-badge", `Min $${minDep}`)
+        el("span", "knoww-tp-deposit-min-badge", `Min $${badgeAmount}`)
       );
     }
     rightCol.appendChild(
       el("span", "knoww-tp-deposit-token-usd", `$${tok.usdValue.toFixed(2)}`)
     );
     row.appendChild(rightCol);
-    if (isBelowMin) {
+    if (isDisabled) {
       row.disabled = true;
     } else {
       row.onclick = (e) => {
@@ -3147,18 +3298,28 @@ function renderDepositConfirmStep(
     form.appendChild(warn);
   }
 
-  // Success message
+  // On-chain confirmed, now waiting for bridge credit
+  if (depositIsConfirming && depositTxConfirmed) {
+    const infoBanner = el("div", "knoww-tp-deposit-info-banner success");
+    infoBanner.innerHTML = I.check;
+    const infoText = el("div", "");
+    infoText.appendChild(el("div", "", "Transaction confirmed on-chain!"));
+    infoText.appendChild(
+      el("div", "", "Waiting for bridge to credit USDC.e to your wallet...")
+    );
+    infoText.style.fontSize = "11px";
+    infoBanner.appendChild(infoText);
+    form.appendChild(infoBanner);
+  }
+
+  // Deposit complete
   if (depositIsConfirmed) {
     const successBanner = el("div", "knoww-tp-deposit-info-banner success");
     successBanner.innerHTML = I.check;
     const successText = el("div", "");
-    successText.appendChild(el("div", "", "Transaction confirmed!"));
+    successText.appendChild(el("div", "", "Deposit complete!"));
     successText.appendChild(
-      el(
-        "div",
-        "",
-        "USDC.e will be credited to your Polymarket wallet shortly."
-      )
+      el("div", "", "USDC.e has been credited to your Polymarket wallet.")
     );
     successText.style.fontSize = "11px";
     successBanner.appendChild(successText);
@@ -3166,7 +3327,10 @@ function renderDepositConfirmStep(
   }
 
   // Deposit status tracking
-  if (depositIsConfirmed && depositTransactions.length > 0) {
+  if (
+    (depositIsConfirmed || (depositIsConfirming && depositTxConfirmed)) &&
+    depositTransactions.length > 0
+  ) {
     const statusCard = el("div", "knoww-tp-deposit-details-card");
     statusCard.appendChild(
       el("div", "knoww-tp-deposit-detail-label", "Bridge Status")
@@ -3211,8 +3375,12 @@ function renderDepositConfirmStep(
     btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirm in Wallet...`;
     btn.disabled = true;
     btn.classList.add("loading");
-  } else if (depositIsConfirming) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirming...`;
+  } else if (depositIsConfirming && !depositTxConfirmed) {
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirming on-chain...`;
+    btn.disabled = true;
+    btn.classList.add("loading");
+  } else if (depositIsConfirming && depositTxConfirmed) {
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Waiting for bridge...`;
     btn.disabled = true;
     btn.classList.add("loading");
   } else if (depositIsConfirmed) {

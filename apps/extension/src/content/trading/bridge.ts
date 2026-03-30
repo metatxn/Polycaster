@@ -218,4 +218,21 @@ export const WalletBridge = {
   async sendTransaction(txParams: Record<string, unknown>): Promise<string> {
     return (await request("eth_sendTransaction", [txParams])) as string;
   },
+
+  async ethCall(to: string, data: string): Promise<string> {
+    return (await request("eth_call", [{ to, data }, "latest"])) as string;
+  },
+
+  async getBalance(address: string): Promise<string> {
+    return (await request("eth_getBalance", [address, "latest"])) as string;
+  },
+
+  async getTransactionReceipt(
+    txHash: string
+  ): Promise<{ status: string; blockNumber: string } | null> {
+    return (await request("eth_getTransactionReceipt", [txHash])) as {
+      status: string;
+      blockNumber: string;
+    } | null;
+  },
 };

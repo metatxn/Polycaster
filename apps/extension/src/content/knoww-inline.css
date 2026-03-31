@@ -2558,6 +2558,7 @@
 .knoww-tp-wallet-item {
   display: flex !important;
   align-items: center !important;
+  justify-content: center !important;
   gap: 10px !important;
   width: 100% !important;
   padding: 10px 14px !important;
@@ -2571,7 +2572,7 @@
   transition:
     background 0.15s,
     border-color 0.15s !important;
-  text-align: left !important;
+  text-align: center !important;
   line-height: 1.3 !important;
 }
 .knoww-tp-wallet-item:hover {
@@ -2589,7 +2590,7 @@
   object-fit: contain !important;
 }
 .knoww-tp-wallet-item span {
-  flex: 1 1 0 !important;
+  flex: 0 1 auto !important;
   min-width: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;

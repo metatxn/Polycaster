@@ -20,8 +20,8 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.9",
-    "husky": "^9.1.7",
+    "@biomejs/biome": "2.4.9",
+    "husky": "9.1.7",
     "typescript": "6.0.2"
   },
   "pnpm": {
@@ -32,11 +32,11 @@
     },
     "overrides": {
       "typescript": "6.0.2",
-      "axios": "^1.13.5",
-      "@isaacs/brace-expansion": "^5.0.1",
-      "fast-xml-parser": "^5.5.7",
-      "qs": "^6.14.1",
-      "body-parser": "^2.2.1",
+      "axios": "1.13.6",
+      "@isaacs/brace-expansion": "5.0.1",
+      "fast-xml-parser": "5.5.7",
+      "qs": "6.14.1",
+      "body-parser": "2.2.1",
       "h3": "1.15.10",
       "hono": "4.12.7",
       "minimatch": "10.2.3",

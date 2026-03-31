@@ -16,7 +16,7 @@ import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import type { ClobOrderType } from "../../types/chrome-messages";
 import type { Market } from "../../types/market";
 import { escapeHtml } from "../utils";
-import { WalletBridge } from "./bridge";
+import { getNonce, WalletBridge } from "./bridge";
 import {
   CHAIN_METADATA,
   createDepositAddresses,
@@ -225,6 +225,12 @@ function elHtml<K extends keyof HTMLElementTagNameMap>(
   n.className = cls;
   n.innerHTML = html;
   return n;
+}
+
+function setButtonLoading(btn: HTMLElement, text: string): void {
+  btn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span> ${text}`;
+  btn.style.pointerEvents = "none";
+  btn.style.opacity = "0.7";
 }
 
 function rerender(): void {
@@ -695,12 +701,10 @@ function addDisconnected(p: HTMLElement): void {
     );
     btn.onclick = (e) => {
       e.stopPropagation();
-      btn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span> Connecting…`;
-      btn.style.pointerEvents = "none";
-      btn.style.opacity = "0.7";
+      setButtonLoading(btn, "Connecting…");
 
       window.postMessage(
-        { type: "KNOWW_LIST_WALLETS" },
+        { type: "KNOWW_LIST_WALLETS", _n: getNonce() },
         window.location.origin
       );
 
@@ -757,6 +761,7 @@ function addEnableTrading(p: HTMLElement): void {
   const btn = el("button", "knoww-tp-btn-enable", "Enable Trading");
   btn.onclick = (e) => {
     e.stopPropagation();
+    setButtonLoading(btn, "Waiting for signature…");
     TradingService.deriveCredentials();
   };
   s.appendChild(btn);
@@ -3473,6 +3478,7 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
     enableBtn.textContent = "Enable Trading";
     enableBtn.onclick = (e) => {
       e.stopPropagation();
+      setButtonLoading(enableBtn, "Waiting for signature…");
       activeView = "order";
       TradingService.deriveCredentials();
     };

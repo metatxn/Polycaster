@@ -414,6 +414,11 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
   WalletBridge.init();
 
+  // Pre-warm offscreen document so it's ready when the user places a trade
+  chrome.runtime
+    .sendMessage({ type: "trading:prewarm-offscreen" })
+    .catch(() => {});
+
   if (!TradingService.getContext().address && !sessionRestoreAttempted) {
     sessionRestoreAttempted = true;
     WalletBridge.getAccounts()

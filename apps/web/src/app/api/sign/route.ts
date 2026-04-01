@@ -30,6 +30,56 @@ import { checkOriginAndFetchSite } from "@/lib/origin-guard";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_BODY_SIZE = 10 * 1024;
 
+function getContentLength(request: NextRequest): number | null {
+  const header = request.headers.get("content-length");
+  if (!header) return null;
+
+  const parsed = Number.parseInt(header, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * Read the request body with a hard byte-size limit.
+ * Unlike `request.text()`, this streams the body and aborts as soon as the
+ * limit is exceeded — so a missing or spoofed Content-Length header can't
+ * force the Worker to buffer an arbitrarily large payload.
+ */
+async function readBodyWithLimit(
+  request: NextRequest,
+  maxBytes: number
+): Promise<string | null> {
+  const body = request.body;
+  if (!body) return "";
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
 function getUpstreamUrl(): string | null {
   return process.env.BUILDER_SIGNING_SERVER_URL || null;
 }
@@ -39,8 +89,6 @@ function getAuthToken(): string | null {
 }
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
-
   // Layer 1: Verify caller identity.
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
@@ -57,6 +105,15 @@ export async function POST(request: NextRequest) {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
+  // Layer 3a: Reject obviously oversized payloads before touching the body
+  const contentLength = getContentLength(request);
+  if (contentLength !== null && contentLength > MAX_BODY_SIZE) {
+    return NextResponse.json(
+      { error: "Request body too large" },
+      { status: 413 }
+    );
+  }
+
   const upstreamUrl = getUpstreamUrl();
   if (!upstreamUrl) {
     console.error("[Sign Proxy] BUILDER_SIGNING_SERVER_URL is not configured");
@@ -66,7 +123,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (rawBody.length > MAX_BODY_SIZE) {
+  // Layer 3b: Stream the body with a hard byte cap — defends against
+  // missing or spoofed Content-Length headers.
+  const rawBody = await readBodyWithLimit(request, MAX_BODY_SIZE);
+  if (rawBody === null) {
     return NextResponse.json(
       { error: "Request body too large" },
       { status: 413 }

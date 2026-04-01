@@ -15,25 +15,111 @@ import { createPublicClient, erc20Abi, http, type PublicClient } from "viem";
 import { polygon } from "viem/chains";
 import { USDC_E_ADDRESS, USDC_E_DECIMALS } from "@/constants/contracts";
 
-// Cache expiration times
-const DEPLOYMENT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-const BALANCE_CACHE_TTL = 30 * 1000; // 30 seconds
+const DEPLOYMENT_CACHE_TTL = 5 * 60 * 1000;
+const BALANCE_CACHE_TTL = 30 * 1000;
+const CACHE_MAX_ENTRIES = 1000;
+const SWEEP_INTERVAL_MS = 60 * 1000;
 
-// Singleton public client
 let publicClient: PublicClient | null = null;
 
-// Cache for deployment checks
-const deploymentCache = new Map<
-  string,
-  { isDeployed: boolean; timestamp: number }
->();
+interface TimedCacheEntry<T> {
+  timestamp: number;
+  value: T;
+}
 
-// Cache for balance checks
-const balanceCache = new Map<string, { balance: number; timestamp: number }>();
+interface BoundedCache<T> {
+  map: Map<string, TimedCacheEntry<T>>;
+  ttlMs: number;
+  maxEntries: number;
+}
 
-// Throttle state for RPC calls
+const deploymentCache: BoundedCache<boolean> = {
+  map: new Map(),
+  ttlMs: DEPLOYMENT_CACHE_TTL,
+  maxEntries: CACHE_MAX_ENTRIES,
+};
+
+const balanceCache: BoundedCache<number> = {
+  map: new Map(),
+  ttlMs: BALANCE_CACHE_TTL,
+  maxEntries: CACHE_MAX_ENTRIES,
+};
+
 let lastRpcCall = 0;
-const MIN_RPC_INTERVAL = 100; // Minimum 100ms between RPC calls
+const MIN_RPC_INTERVAL = 100;
+
+let lastSweepTime = 0;
+
+function sweepExpired<T>(cache: BoundedCache<T>): void {
+  const now = Date.now();
+  const staleKeys: string[] = [];
+  for (const [key, entry] of cache.map) {
+    if (now - entry.timestamp > cache.ttlMs) {
+      staleKeys.push(key);
+    }
+  }
+  for (const key of staleKeys) {
+    cache.map.delete(key);
+  }
+}
+
+function trimToMax<T>(cache: BoundedCache<T>): void {
+  if (cache.map.size <= cache.maxEntries) return;
+  const excess = cache.map.size - cache.maxEntries;
+  const iter = cache.map.keys();
+  for (let i = 0; i < excess; i++) {
+    const { value: key, done } = iter.next();
+    if (done) break;
+    cache.map.delete(key);
+  }
+}
+
+function maybeSweepAll(): void {
+  const now = Date.now();
+  if (now - lastSweepTime < SWEEP_INTERVAL_MS) return;
+  lastSweepTime = now;
+  sweepExpired(deploymentCache);
+  sweepExpired(balanceCache);
+}
+
+function getCachedValue<T>(
+  cache: BoundedCache<T>,
+  key: string,
+  allowExpired = false
+): T | null {
+  const cached = cache.map.get(key);
+
+  maybeSweepAll();
+
+  if (!cached) return null;
+
+  const expired = Date.now() - cached.timestamp > cache.ttlMs;
+
+  if (expired && !allowExpired) {
+    cache.map.delete(key);
+    return null;
+  }
+
+  // If the sweep removed this entry from the map but we're serving it
+  // as a stale fallback, re-insert it so subsequent fallback reads
+  // during the same upstream outage can still find it.
+  if (expired && allowExpired && !cache.map.has(key)) {
+    cache.map.set(key, cached);
+  }
+
+  return cached.value;
+}
+
+function setCachedValue<T>(
+  cache: BoundedCache<T>,
+  key: string,
+  value: T
+): void {
+  cache.map.delete(key);
+  cache.map.set(key, { value, timestamp: Date.now() });
+  trimToMax(cache);
+  maybeSweepAll();
+}
 
 /**
  * Get the RPC URL with priority:
@@ -123,12 +209,9 @@ export async function checkIsDeployed(
 ): Promise<boolean> {
   const cacheKey = address.toLowerCase();
 
-  // Check cache first
   if (!options?.skipCache) {
-    const cached = deploymentCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < DEPLOYMENT_CACHE_TTL) {
-      return cached.isDeployed;
-    }
+    const cached = getCachedValue(deploymentCache, cacheKey);
+    if (cached !== null) return cached;
   }
 
   try {
@@ -140,21 +223,13 @@ export async function checkIsDeployed(
 
     const isDeployed = code !== undefined && code !== "0x";
 
-    // Update cache
-    deploymentCache.set(cacheKey, {
-      isDeployed,
-      timestamp: Date.now(),
-    });
+    setCachedValue(deploymentCache, cacheKey, isDeployed);
 
     return isDeployed;
   } catch (err) {
     console.error("[RPC] Failed to check deployment:", err);
-    // On error, check cache even if expired
-    const cached = deploymentCache.get(cacheKey);
-    if (cached) {
-      return cached.isDeployed;
-    }
-    return false;
+    const stale = getCachedValue(deploymentCache, cacheKey, true);
+    return stale ?? false;
   }
 }
 
@@ -171,12 +246,9 @@ export async function fetchUsdcBalance(
 ): Promise<number> {
   const cacheKey = address.toLowerCase();
 
-  // Check cache first
   if (!options?.skipCache) {
-    const cached = balanceCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < BALANCE_CACHE_TTL) {
-      return cached.balance;
-    }
+    const cached = getCachedValue(balanceCache, cacheKey);
+    if (cached !== null) return cached;
   }
 
   try {
@@ -193,21 +265,13 @@ export async function fetchUsdcBalance(
 
     const balance = Number(formatUnits(rawBalance, USDC_E_DECIMALS));
 
-    // Update cache
-    balanceCache.set(cacheKey, {
-      balance,
-      timestamp: Date.now(),
-    });
+    setCachedValue(balanceCache, cacheKey, balance);
 
     return balance;
   } catch (err) {
     console.error("[RPC] Failed to fetch USDC balance:", err);
-    // On error, return cached value if available
-    const cached = balanceCache.get(cacheKey);
-    if (cached) {
-      return cached.balance;
-    }
-    return 0;
+    const stale = getCachedValue(balanceCache, cacheKey, true);
+    return stale ?? 0;
   }
 }
 
@@ -217,9 +281,9 @@ export async function fetchUsdcBalance(
  */
 export function clearDeploymentCache(address?: string): void {
   if (address) {
-    deploymentCache.delete(address.toLowerCase());
+    deploymentCache.map.delete(address.toLowerCase());
   } else {
-    deploymentCache.clear();
+    deploymentCache.map.clear();
   }
 }
 
@@ -229,9 +293,9 @@ export function clearDeploymentCache(address?: string): void {
  */
 export function clearBalanceCache(address?: string): void {
   if (address) {
-    balanceCache.delete(address.toLowerCase());
+    balanceCache.map.delete(address.toLowerCase());
   } else {
-    balanceCache.clear();
+    balanceCache.map.clear();
   }
 }
 
@@ -239,6 +303,6 @@ export function clearBalanceCache(address?: string): void {
  * Clear all caches
  */
 export function clearAllCaches(): void {
-  deploymentCache.clear();
-  balanceCache.clear();
+  deploymentCache.map.clear();
+  balanceCache.map.clear();
 }

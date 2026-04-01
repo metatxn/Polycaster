@@ -1,38 +1,50 @@
 import {
   env,
   type FeatureExtractionPipeline,
+  LogLevel,
+  type ProgressInfo,
   pipeline,
 } from "@huggingface/transformers";
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
+env.useWasmCache = true;
+env.logLevel = LogLevel.WARNING;
 
 let pipelineInstance: Promise<FeatureExtractionPipeline> | null = null;
 
 function getInstance() {
   if (pipelineInstance === null) {
-    console.log("[Knoww Embeddings] Loading model Xenova/bge-small-en-v1.5...");
+    console.log(
+      "[Knoww Embeddings] Loading model onnx-community/bge-small-en-v1.5-ONNX..."
+    );
     const start = Date.now();
     pipelineInstance = pipeline<"feature-extraction">(
       "feature-extraction",
-      "Xenova/bge-small-en-v1.5",
+      "onnx-community/bge-small-en-v1.5-ONNX",
       {
         dtype: "q4",
-        progress_callback: (progress: any) => {
-          if (
-            progress.status === "download" ||
-            progress.status === "progress"
-          ) {
-            console.log(
-              `[Knoww Embeddings] ${progress.status}: ${progress.file ?? ""} ${progress.progress ? `${Math.round(progress.progress)}%` : ""}`
-            );
-          } else if (
-            progress.status === "done" ||
-            progress.status === "ready"
-          ) {
-            console.log(
-              `[Knoww Embeddings] ${progress.status}: ${progress.file ?? ""}`
-            );
+        progress_callback: (progress: ProgressInfo) => {
+          switch (progress.status) {
+            case "progress_total":
+              console.log(
+                `[Knoww Embeddings] Overall: ${Math.round(progress.progress)}%`
+              );
+              break;
+            case "progress":
+              console.log(
+                `[Knoww Embeddings] progress: ${progress.file} ${Math.round(progress.progress)}%`
+              );
+              break;
+            case "download":
+              console.log(`[Knoww Embeddings] download: ${progress.file}`);
+              break;
+            case "done":
+              console.log(`[Knoww Embeddings] done: ${progress.file}`);
+              break;
+            case "ready":
+              console.log("[Knoww Embeddings] ready");
+              break;
           }
         },
       }
@@ -47,7 +59,7 @@ function getInstance() {
 // ── IndexedDB persistence layer ──────────────────────────────────────
 
 const IDB_NAME = "knoww-embeddings";
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 const IDB_STORE = "vectors";
 const IDB_MAX_ENTRIES = 2000;
 const IDB_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -66,10 +78,11 @@ function openDB(): Promise<IDBDatabase> {
     const req = indexedDB.open(IDB_NAME, IDB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(IDB_STORE)) {
-        const store = db.createObjectStore(IDB_STORE, { keyPath: "text" });
-        store.createIndex("ts", "ts", { unique: false });
+      if (db.objectStoreNames.contains(IDB_STORE)) {
+        db.deleteObjectStore(IDB_STORE);
       }
+      const store = db.createObjectStore(IDB_STORE, { keyPath: "text" });
+      store.createIndex("ts", "ts", { unique: false });
     };
     req.onsuccess = () => {
       const db = req.result;

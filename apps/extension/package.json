@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.16",
+  "version": "2.5.18",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
@@ -14,28 +14,28 @@
     "release": "node scripts/bump-version.mjs && pnpm run build && pnpm run zip"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "4.0.0",
     "@knoww/shared-types": "workspace:*",
     "@polymarket/clob-client": "5.8.1",
     "@polymarket/order-utils": "3.0.1",
     "ethers": "5.8.0",
-    "minisearch": "^7.2.0",
+    "minisearch": "7.2.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "wink-eng-lite-web-model": "^1.8.1",
-    "wink-nlp": "^2.4.0"
+    "wink-eng-lite-web-model": "1.8.1",
+    "wink-nlp": "2.4.0"
   },
   "devDependencies": {
-    "@types/chrome": "^0.1.38",
+    "@types/chrome": "0.1.38",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "buffer": "^6.0.3",
-    "copy-webpack-plugin": "^13.0.1",
-    "dotenv": "^17.3.1",
-    "process": "^0.11.10",
-    "ts-loader": "^9.5.4",
+    "buffer": "6.0.3",
+    "copy-webpack-plugin": "13.0.1",
+    "dotenv": "17.3.1",
+    "process": "0.11.10",
+    "ts-loader": "9.5.4",
     "typescript": "6.0.2",
-    "webpack": "^5.105.4",
+    "webpack": "5.105.4",
     "webpack-cli": "7.0.2"
   }
 }

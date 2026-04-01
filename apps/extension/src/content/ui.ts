@@ -119,6 +119,13 @@ async function resolveTokenAndShowPanel(
         if (Array.isArray(ids) && ids.length >= 2) {
           yesTokenId = ids[0];
           noTokenId = ids[1];
+          // fetchClobTokenIds may have returned a token from a different
+          // sub-market ordering than market.markets. Re-derive tokenId from
+          // the now-consistent clobTokenIds to avoid a stale mismatch.
+          const corrected: string | undefined = isMultiOutcome
+            ? ids[0]
+            : ids[outcomeIndex];
+          if (corrected) tokenId = corrected;
         }
       } catch {
         /* ignore */
@@ -131,7 +138,7 @@ async function resolveTokenAndShowPanel(
       outcomeIndex,
       price,
       side: "BUY",
-      tokenId,
+      tokenId: tokenId as string,
       negRisk: resolveNegRisk(nestedMarket, market),
       isMultiOutcome,
       anchorElement,

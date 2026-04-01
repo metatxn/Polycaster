@@ -4,6 +4,7 @@
 // handles fetch proxying, and attaches extension auth headers.
 // ============================================
 
+import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
 import {
   clearExtensionAccessToken,
   getExtensionAccessToken,
@@ -259,6 +260,7 @@ chrome.runtime.onMessage.addListener(
       key?: string;
       value?: unknown;
       token?: string;
+      tokenId?: string;
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -334,6 +336,48 @@ chrome.runtime.onMessage.addListener(
       clearExtensionAccessToken().then(() => {
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
+      return true;
+    }
+
+    // Orderbook fetch — lightweight public API call, no crypto needed.
+    // Handle directly in the service worker to avoid offscreen boot latency.
+    if (
+      msg?.type === "trading:get-orderbook" &&
+      typeof msg.tokenId === "string"
+    ) {
+      (async () => {
+        try {
+          const res = await fetch(
+            `${POLYMARKET_API.CLOB.BASE}/book?token_id=${msg.tokenId}`
+          );
+          if (!res.ok) {
+            sendResponse({
+              ok: false,
+              error: `Failed to fetch order book: ${res.statusText}`,
+            } as BackgroundResponse);
+            return;
+          }
+          const data = await res.json();
+          sendResponse({ ok: true, data } as BackgroundResponse);
+        } catch (e) {
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          } as BackgroundResponse);
+        }
+      })();
+      return true;
+    }
+
+    // Pre-warm offscreen document so it's ready when the user places a trade
+    if (msg?.type === "trading:prewarm-offscreen") {
+      ensureOffscreen()
+        .then(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        )
+        .catch(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        );
       return true;
     }
 

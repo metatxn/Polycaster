@@ -40,8 +40,9 @@ const pending = new Map<string, PendingRequest>();
 let initialized = false;
 let wallets: DiscoveredWallet[] = [];
 let walletListeners: Array<(w: DiscoveredWallet[]) => void> = [];
+let selectedWalletUuid: string | undefined;
 
-function getNonce(): string | undefined {
+export function getNonce(): string | undefined {
   return window.__KNOWW_BRIDGE_NONCE__;
 }
 
@@ -132,6 +133,7 @@ function request(
 ): Promise<unknown> {
   init();
   const nonce = getNonce();
+  const uuid = walletUuid ?? selectedWalletUuid;
   return new Promise((resolve, reject) => {
     const id = generateId();
     pending.set(id, { resolve, reject });
@@ -142,7 +144,7 @@ function request(
         id,
         method,
         params,
-        walletUuid,
+        walletUuid: uuid,
         _n: nonce,
       },
       window.location.origin
@@ -173,6 +175,7 @@ export const WalletBridge = {
   },
 
   selectWallet(uuid: string): void {
+    selectedWalletUuid = uuid;
     window.postMessage(
       { type: "KNOWW_SELECT_WALLET", uuid, _n: getNonce() },
       window.location.origin
@@ -188,6 +191,9 @@ export const WalletBridge = {
       undefined,
       walletUuid
     )) as string[];
+    if (accounts?.length > 0 && walletUuid) {
+      selectedWalletUuid = walletUuid;
+    }
     return accounts;
   },
 
@@ -217,5 +223,22 @@ export const WalletBridge = {
 
   async sendTransaction(txParams: Record<string, unknown>): Promise<string> {
     return (await request("eth_sendTransaction", [txParams])) as string;
+  },
+
+  async ethCall(to: string, data: string): Promise<string> {
+    return (await request("eth_call", [{ to, data }, "latest"])) as string;
+  },
+
+  async getBalance(address: string): Promise<string> {
+    return (await request("eth_getBalance", [address, "latest"])) as string;
+  },
+
+  async getTransactionReceipt(
+    txHash: string
+  ): Promise<{ status: string; blockNumber: string } | null> {
+    return (await request("eth_getTransactionReceipt", [txHash])) as {
+      status: string;
+      blockNumber: string;
+    } | null;
   },
 };

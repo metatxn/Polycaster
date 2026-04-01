@@ -27,6 +27,9 @@ const ALLOWED_METHODS = new Set([
   "eth_sendTransaction",
   "wallet_switchEthereumChain",
   "personal_sign",
+  "eth_call",
+  "eth_getBalance",
+  "eth_getTransactionReceipt",
 ]);
 
 const discoveredWallets = new Map<string, EIP6963Detail>();

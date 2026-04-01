@@ -85,7 +85,10 @@
   --knoww-text-secondary: rgba(0, 0, 0, 0.6);
   --knoww-accent: #0a66c2;
   --knoww-font:
-    -apple-system, system-ui, "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Fira Sans", "Ubuntu", "Oxygen", "Oxygen Sans", "Cantarell", "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Lucida Grande", "Helvetica", "Arial", sans-serif;
+    -apple-system, system-ui, "BlinkMacSystemFont", "Segoe UI", "Roboto",
+    "Helvetica Neue", "Fira Sans", "Ubuntu", "Oxygen", "Oxygen Sans",
+    "Cantarell", "Droid Sans", "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Lucida Grande", "Helvetica", "Arial", sans-serif;
   --knoww-radius: 8px;
   --knoww-card-bg: rgb(245, 245, 245);
   --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
@@ -1964,6 +1967,522 @@
   line-height: 1.4 !important;
 }
 
+/* ── Deposit Multi-Step ── */
+
+.knoww-tp-deposit-header-row {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-bottom: 12px !important;
+  min-height: 28px !important;
+}
+.knoww-tp-deposit-header-row .knoww-tp-deposit-title {
+  position: absolute !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  margin-bottom: 0 !important;
+  pointer-events: none !important;
+}
+.knoww-tp-deposit-header-bal {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  white-space: nowrap !important;
+}
+
+/* Method selection */
+.knoww-tp-deposit-method-btn {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  padding: 12px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s,
+    border-color 0.15s !important;
+  text-align: left !important;
+  font-family: inherit !important;
+  color: inherit !important;
+}
+.knoww-tp-deposit-method-btn:hover:not(.disabled) {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+.knoww-tp-deposit-method-btn.disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
+.knoww-tp-deposit-method-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+.knoww-tp-deposit-method-icon {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 10px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 18px !important;
+  flex-shrink: 0 !important;
+}
+.knoww-tp-deposit-method-icon.wallet {
+  background: rgba(249, 115, 22, 0.15) !important;
+}
+.knoww-tp-deposit-method-icon.bridge {
+  background: rgba(59, 130, 246, 0.15) !important;
+  color: rgb(96, 165, 250) !important;
+}
+.knoww-tp-deposit-method-icon.card {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--knoww-text-secondary) !important;
+}
+.knoww-tp-deposit-method-icon.exchange {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--knoww-text-secondary) !important;
+}
+.knoww-tp-deposit-method-info {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  min-width: 0 !important;
+}
+.knoww-tp-deposit-method-name {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.knoww-tp-deposit-method-sub {
+  font-size: 12px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-tp-deposit-method-chevron {
+  flex-shrink: 0 !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.3)) !important;
+  display: inline-flex !important;
+}
+.knoww-tp-deposit-coming-soon {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  padding: 3px 8px !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--knoww-text-secondary) !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+.knoww-tp-deposit-chain-icons {
+  display: flex !important;
+  gap: 0 !important;
+  margin-right: 4px !important;
+}
+.knoww-tp-deposit-chain-dot {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 10px !important;
+  margin-left: -4px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+.knoww-tp-deposit-chain-dot:first-child {
+  margin-left: 0 !important;
+}
+.knoww-tp-deposit-divider {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 6px 0 !important;
+}
+.knoww-tp-deposit-divider-line {
+  flex: 1 !important;
+  height: 1px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+.knoww-tp-deposit-divider-text {
+  font-size: 10px !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.3)) !important;
+}
+
+/* Token selection enhancements */
+.knoww-tp-deposit-token-row.below-min {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
+.knoww-tp-deposit-token-info {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1px !important;
+  flex: 1 !important;
+}
+.knoww-tp-deposit-token-amt {
+  font-size: 11px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-tp-deposit-token-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+.knoww-tp-deposit-min-badge {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  padding: 2px 6px !important;
+  border-radius: 6px !important;
+  background: rgba(245, 158, 11, 0.12) !important;
+  color: #f59e0b !important;
+}
+.knoww-tp-deposit-token-usd {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* Info banners */
+.knoww-tp-deposit-info-banner {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-tp-deposit-info-banner.warn {
+  background: rgba(245, 158, 11, 0.08) !important;
+  border: 1px solid rgba(245, 158, 11, 0.18) !important;
+}
+.knoww-tp-deposit-info-banner.info {
+  background: rgba(29, 155, 240, 0.06) !important;
+  border: 1px solid rgba(29, 155, 240, 0.15) !important;
+}
+.knoww-tp-deposit-info-banner.success {
+  background: rgba(34, 197, 94, 0.08) !important;
+  border: 1px solid rgba(34, 197, 94, 0.2) !important;
+  color: rgb(34, 197, 94) !important;
+}
+
+/* Bridge selection */
+.knoww-tp-deposit-search-wrap {
+  margin-bottom: 8px !important;
+}
+.knoww-tp-deposit-search {
+  width: 100% !important;
+  height: 36px !important;
+  padding: 0 12px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-size: 13px !important;
+  font-family: inherit !important;
+  outline: none !important;
+  transition: border-color 0.15s !important;
+  box-sizing: border-box !important;
+}
+.knoww-tp-deposit-search:focus {
+  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+}
+.knoww-tp-deposit-search::placeholder {
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.3)) !important;
+}
+.knoww-tp-deposit-bridge-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  max-height: 300px !important;
+  overflow-y: auto !important;
+}
+.knoww-tp-deposit-bridge-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  padding: 10px 12px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s,
+    border-color 0.15s !important;
+  text-align: left !important;
+  font-family: inherit !important;
+  color: inherit !important;
+}
+.knoww-tp-deposit-bridge-row:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+}
+.knoww-tp-deposit-bridge-icon {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 14px !important;
+  flex-shrink: 0 !important;
+  color: white !important;
+}
+.knoww-tp-deposit-bridge-info {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1px !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+.knoww-tp-deposit-bridge-sym {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-tp-deposit-bridge-chain {
+  font-size: 11px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-tp-deposit-bridge-right {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  gap: 1px !important;
+}
+.knoww-tp-deposit-bridge-min-label {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.3)) !important;
+}
+.knoww-tp-deposit-bridge-min-val {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+
+/* Amount step */
+.knoww-tp-deposit-amt-center {
+  text-align: center !important;
+  padding: 20px 0 !important;
+}
+.knoww-tp-deposit-amt-input {
+  font-size: 36px !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  width: 180px !important;
+  font-family: inherit !important;
+}
+.knoww-tp-deposit-amt-input::placeholder {
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.2)) !important;
+}
+.knoww-tp-deposit-presets {
+  display: flex !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  margin-bottom: 12px !important;
+}
+.knoww-tp-deposit-preset-btn {
+  padding: 6px 14px !important;
+  border-radius: 20px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: background 0.15s !important;
+  font-family: inherit !important;
+}
+.knoww-tp-deposit-preset-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+.knoww-tp-deposit-send-recv {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 10px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  font-size: 12px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  margin-bottom: 4px !important;
+}
+
+/* Confirm step */
+.knoww-tp-deposit-confirm-title {
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-tp-deposit-confirm-sub {
+  font-size: 12px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  text-align: center !important;
+  margin-bottom: 8px !important;
+}
+.knoww-tp-deposit-confirm-amount {
+  font-size: 28px !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  padding: 12px 0 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-tp-deposit-details-card {
+  padding: 10px 12px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+.knoww-tp-deposit-detail-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 4px 0 !important;
+}
+.knoww-tp-deposit-detail-label {
+  font-size: 12px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-tp-deposit-detail-value {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+.knoww-tp-deposit-fee-divider {
+  height: 1px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  margin: 6px 0 !important;
+}
+.knoww-tp-deposit-fee-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 2px 0 !important;
+}
+.knoww-tp-deposit-fee-row.highlight {
+  margin-top: 4px !important;
+  padding-top: 4px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+.knoww-tp-deposit-fee-label {
+  font-size: 11px !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.35)) !important;
+}
+.knoww-tp-deposit-fee-value {
+  font-size: 11px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-tp-deposit-fee-row.highlight .knoww-tp-deposit-fee-value {
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-weight: 600 !important;
+}
+.knoww-tp-deposit-inline-spinner {
+  display: inline-block !important;
+  width: 10px !important;
+  height: 10px !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.15) !important;
+  border-top-color: var(--knoww-text-secondary) !important;
+  border-radius: 50% !important;
+  animation: knoww-spin 0.7s linear infinite !important;
+  margin-right: 4px !important;
+}
+.knoww-tp-deposit-terms {
+  font-size: 10px !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.3)) !important;
+  text-align: center !important;
+  padding: 4px 0 !important;
+}
+.knoww-tp-deposit-status-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 4px 0 !important;
+  font-size: 12px !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-tp-deposit-status-dot {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  flex-shrink: 0 !important;
+}
+.knoww-tp-deposit-status-amt {
+  margin-left: auto !important;
+  font-size: 11px !important;
+  color: var(--knoww-text-secondary) !important;
+}
+
+/* Bridge deposit address box */
+.knoww-tp-deposit-addr-box {
+  padding: 12px !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+.knoww-tp-deposit-addr-label {
+  font-size: 11px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  margin-bottom: 6px !important;
+}
+.knoww-tp-deposit-addr-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+.knoww-tp-deposit-addr-code {
+  flex: 1 !important;
+  font-size: 11px !important;
+  font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  word-break: break-all !important;
+  line-height: 1.4 !important;
+}
+.knoww-tp-deposit-copy-btn {
+  all: unset !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  color: var(--knoww-text-secondary) !important;
+  transition:
+    background 0.15s,
+    color 0.15s !important;
+  flex-shrink: 0 !important;
+}
+.knoww-tp-deposit-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--knoww-text) !important;
+}
+
 /* ── Connect / Loading / Enable States ── */
 
 .knoww-tp-connect-section,
@@ -2039,6 +2558,7 @@
 .knoww-tp-wallet-item {
   display: flex !important;
   align-items: center !important;
+  justify-content: center !important;
   gap: 10px !important;
   width: 100% !important;
   padding: 10px 14px !important;
@@ -2052,7 +2572,7 @@
   transition:
     background 0.15s,
     border-color 0.15s !important;
-  text-align: left !important;
+  text-align: center !important;
   line-height: 1.3 !important;
 }
 .knoww-tp-wallet-item:hover {
@@ -2070,7 +2590,7 @@
   object-fit: contain !important;
 }
 .knoww-tp-wallet-item span {
-  flex: 1 1 0 !important;
+  flex: 0 1 auto !important;
   min-width: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;

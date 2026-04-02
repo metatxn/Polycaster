@@ -12,7 +12,16 @@ echo "Running pre-push checks..."
 
 # --- Security audit (fast, ~3s, runs first to fail fast) ---
 echo "Auditing dependencies for HIGH/CRITICAL vulnerabilities..."
-AUDIT_JSON=$(pnpm audit --json 2>/dev/null || true)
+AUDIT_JSON=$(pnpm audit --json)
+AUDIT_EXIT=$?
+if [ $AUDIT_EXIT -ne 0 ]; then
+  echo "BLOCKED: 'pnpm audit --json' failed (exit code $AUDIT_EXIT)."
+  exit $AUDIT_EXIT
+fi
+if [ -z "$AUDIT_JSON" ]; then
+  echo "BLOCKED: 'pnpm audit --json' returned empty output."
+  exit 1
+fi
 HIGH_CRIT=$(echo "$AUDIT_JSON" | node -e "
   let d='';
   process.stdin.on('data',c=>d+=c);
@@ -20,9 +29,17 @@ HIGH_CRIT=$(echo "$AUDIT_JSON" | node -e "
     try {
       const v=JSON.parse(d).metadata.vulnerabilities;
       process.stdout.write(String((v.high||0)+(v.critical||0)));
-    } catch { process.stdout.write('0'); }
+    } catch (err) {
+      console.error('Failed to parse audit JSON:', err instanceof Error ? err.message : String(err));
+      process.exit(2);
+    }
   });
 ")
+HIGH_CRIT_EXIT=$?
+if [ $HIGH_CRIT_EXIT -ne 0 ]; then
+  echo "BLOCKED: Unable to evaluate audit results."
+  exit $HIGH_CRIT_EXIT
+fi
 if [ "$HIGH_CRIT" -gt 0 ] 2>/dev/null; then
   echo "BLOCKED: Found $HIGH_CRIT high/critical vulnerability(ies)."
   echo "Run 'pnpm audit' for details. Fix before pushing."

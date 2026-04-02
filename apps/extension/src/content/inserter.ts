@@ -21,7 +21,7 @@ function htmlToElement(html: string): Element | null {
     return element;
   }
 
-  const nodes = Array.from(element.querySelectorAll("*"));
+  const nodes = [element, ...Array.from(element.querySelectorAll("*"))];
   const forbiddenTags = new Set([
     "script",
     "iframe",
@@ -43,9 +43,14 @@ function htmlToElement(html: string): Element | null {
       if (
         /^on/i.test(name) ||
         name === "style" ||
-        (name === "src" &&
+        ((name === "src" ||
+          name === "href" ||
+          name === "action" ||
+          name === "formaction" ||
+          name === "xlink:href" ||
+          name === "srcdoc") &&
           typeof attr.value === "string" &&
-          /^\s*javascript:/i.test(attr.value))
+          /^\s*(javascript|data):/i.test(attr.value))
       ) {
         node.removeAttribute(attr.name);
       }

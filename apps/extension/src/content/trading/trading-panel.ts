@@ -216,6 +216,49 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return n;
 }
 
+function sanitizeHtml(html: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const nodes = Array.from(doc.querySelectorAll("*"));
+
+  const forbiddenTags = new Set([
+    "script",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+    "base",
+    "form",
+    "frame",
+    "frameset",
+  ]);
+
+  for (const node of nodes) {
+    const tagName = node.tagName.toLowerCase();
+    if (forbiddenTags.has(tagName)) {
+      node.remove();
+      continue;
+    }
+
+    for (const attr of Array.from(node.attributes)) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value ?? "";
+      if (
+        /^on/i.test(name) ||
+        name === "style" ||
+        name === "srcdoc" ||
+        ((name === "src" || name === "href" || name === "xlink:href") &&
+          /^\s*javascript:/i.test(value))
+      ) {
+        node.removeAttribute(attr.name);
+      }
+    }
+  }
+
+  return doc.body.innerHTML;
+}
+
 function elHtml<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   cls: string,
@@ -223,7 +266,10 @@ function elHtml<K extends keyof HTMLElementTagNameMap>(
 ): HTMLElementTagNameMap[K] {
   const n = document.createElement(tag);
   n.className = cls;
-  n.innerHTML = html;
+  const sanitized = sanitizeHtml(html).trim();
+  if (sanitized) {
+    n.innerHTML = sanitized;
+  }
   return n;
 }
 

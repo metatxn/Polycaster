@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils";
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
+const SAFE_CSS_KEY_RE = /^[A-Za-z0-9_-]+$/;
+const SAFE_COLOR_RE =
+  /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla)\([^)]*\)|var\(--[A-Za-z0-9_-]+\)|[a-zA-Z]+)$/;
 
 export type ChartConfig = {
   [k in string]: {
@@ -126,28 +129,48 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
-  return (
-    <style
-      dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color =
-      itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
-      itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`
-          )
-          .join("\n"),
-      }}
-    />
-  );
+  const safeId = id.replace(/[^A-Za-z0-9_-]/g, "");
+  if (!safeId) {
+    return null;
+  }
+
+  const entriesByTheme = (theme: keyof typeof THEMES) =>
+    colorConfig
+      .map(([key, itemConfig]) => {
+        const color =
+          itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
+          itemConfig.color;
+        const safeKey = SAFE_CSS_KEY_RE.test(key) ? key : "";
+        const safeColor = color && SAFE_COLOR_RE.test(color) ? color : "";
+
+        if (!safeKey || !safeColor) {
+          return null;
+        }
+
+        return `  --color-${safeKey}: ${safeColor};`;
+      })
+      .filter(Boolean)
+      .join("\n");
+
+  const cssText = Object.entries(THEMES)
+    .map(([theme, prefix]) => {
+      const themeRules = entriesByTheme(theme as keyof typeof THEMES);
+      if (!themeRules) {
+        return null;
+      }
+      const baseSelector = prefix
+        ? `${prefix} [data-chart="${safeId}"]`
+        : `[data-chart="${safeId}"]`;
+      return `${baseSelector} {\n${themeRules}\n}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  if (!cssText.trim()) {
+    return null;
+  }
+
+  return <style>{cssText}</style>;
 };
 
 const ChartTooltip = RechartsPrimitive.Tooltip;

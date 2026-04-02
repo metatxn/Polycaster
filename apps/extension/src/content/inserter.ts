@@ -7,9 +7,52 @@
  * Create a DOM node from HTML string safely (no <script>).
  */
 function htmlToElement(html: string): Element | null {
-  const tpl = document.createElement("template");
-  tpl.innerHTML = String(html).trim();
-  return tpl.content.firstElementChild;
+  const text = String(html).trim();
+  if (!text) {
+    return null;
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/html");
+  const root = doc.body.firstElementChild;
+  const element = root || document.createElement("span");
+  if (!root) {
+    element.textContent = text;
+    return element;
+  }
+
+  const nodes = Array.from(element.querySelectorAll("*"));
+  const forbiddenTags = new Set([
+    "script",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+    "base",
+  ]);
+
+  for (const node of nodes) {
+    if (forbiddenTags.has(node.tagName.toLowerCase())) {
+      node.remove();
+      continue;
+    }
+
+    for (const attr of Array.from(node.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (
+        /^on/i.test(name) ||
+        name === "style" ||
+        (name === "src" &&
+          typeof attr.value === "string" &&
+          /^\s*javascript:/i.test(attr.value))
+      ) {
+        node.removeAttribute(attr.name);
+      }
+    }
+  }
+
+  return element;
 }
 
 /**
@@ -27,7 +70,7 @@ function isOurCard(el: Element | null): boolean {
  * Insert `nodeToInsert` after `target`.
  */
 function insertAfter(target: Element | null, nodeToInsert: Element): void {
-  if (!target || !target.parentNode) return;
+  if (!target?.parentNode) return;
   target.parentNode.insertBefore(nodeToInsert, target.nextSibling);
 }
 

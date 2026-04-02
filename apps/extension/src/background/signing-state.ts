@@ -27,12 +27,12 @@ export function initBridgeSigner(): void {
         result?: unknown;
         error?: string;
       };
-      if (msg?.type !== "trading:signing-response") return false;
+      if (msg?.type !== "trading:signing-response" || !msg.id) return false;
 
-      const pending = pendingRequests.get(msg.id!);
+      const pending = pendingRequests.get(msg.id);
       if (!pending) return false;
 
-      pendingRequests.delete(msg.id!);
+      pendingRequests.delete(msg.id);
       if (msg.error) {
         pending.reject(new Error(msg.error));
       } else {

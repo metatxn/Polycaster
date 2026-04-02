@@ -10,6 +10,37 @@ fi
 
 echo "Running pre-push checks..."
 
+# --- Security audit (fast, ~3s, runs first to fail fast) ---
+echo "Auditing dependencies for HIGH/CRITICAL vulnerabilities..."
+AUDIT_JSON=$(pnpm audit --json 2>/dev/null || true)
+HIGH_CRIT=$(echo "$AUDIT_JSON" | node -e "
+  let d='';
+  process.stdin.on('data',c=>d+=c);
+  process.stdin.on('end',()=>{
+    try {
+      const v=JSON.parse(d).metadata.vulnerabilities;
+      process.stdout.write(String((v.high||0)+(v.critical||0)));
+    } catch { process.stdout.write('0'); }
+  });
+")
+if [ "$HIGH_CRIT" -gt 0 ] 2>/dev/null; then
+  echo "BLOCKED: Found $HIGH_CRIT high/critical vulnerability(ies)."
+  echo "Run 'pnpm audit' for details. Fix before pushing."
+  exit 1
+fi
+echo "Dependency audit passed! (0 high/critical)"
+
+echo "Checking for compromised package versions..."
+AXIOS_BAD=$(pnpm ls axios --recursive --depth=Infinity 2>/dev/null | grep -E "axios (1\.14\.1|0\.30\.4)" || true)
+if [ -n "$AXIOS_BAD" ]; then
+  echo "BLOCKED: Compromised axios version detected in dependency tree!"
+  echo "$AXIOS_BAD"
+  echo "Update the axios override in root package.json immediately."
+  exit 1
+fi
+echo "No compromised packages found!"
+
+# --- Type checking ---
 echo "Type-checking all packages..."
 pnpm typecheck
 if [ $? -ne 0 ]; then

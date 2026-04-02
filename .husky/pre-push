@@ -12,12 +12,7 @@ echo "Running pre-push checks..."
 
 # --- Security audit (fast, ~3s, runs first to fail fast) ---
 echo "Auditing dependencies for HIGH/CRITICAL vulnerabilities..."
-AUDIT_JSON=$(pnpm audit --json)
-AUDIT_EXIT=$?
-if [ $AUDIT_EXIT -ne 0 ]; then
-  echo "BLOCKED: 'pnpm audit --json' failed (exit code $AUDIT_EXIT)."
-  exit $AUDIT_EXIT
-fi
+AUDIT_JSON=$(pnpm audit --json 2>&1) || true
 if [ -z "$AUDIT_JSON" ]; then
   echo "BLOCKED: 'pnpm audit --json' returned empty output."
   exit 1

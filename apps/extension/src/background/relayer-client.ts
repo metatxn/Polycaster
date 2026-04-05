@@ -22,6 +22,7 @@ import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
 import { ethers } from "ethers";
 import type { BridgeSigner } from "./bridge-signer";
 import { createExtensionBuilderConfig } from "./builder-config";
+import { logInfo } from "./logger";
 
 const RELAYER_URL = POLYMARKET_API.RELAYER.BASE.replace(/\/$/, "");
 const CHAIN_ID = 137;
@@ -236,7 +237,7 @@ export async function executeViaRelayer(
   const eoaAddress = await signer.getAddress();
   const safeAddress = deriveSafeAddress(eoaAddress);
 
-  console.log("[Relayer] Executing via Safe:", safeAddress);
+  logInfo("relayer.execute-safe", { safeAddress });
 
   const deployed = await sendAuthedRequest<{ deployed: boolean }>(
     "GET",
@@ -300,7 +301,10 @@ export async function executeViaRelayer(
     transactionHash: string;
   }>("POST", "/submit", requestPayload);
 
-  console.log("[Relayer] Submitted:", submitResponse);
+  logInfo("relayer.submitted", {
+    transactionID: submitResponse.transactionID,
+    state: submitResponse.state,
+  });
 
   const txHash = await pollTransaction(submitResponse.transactionID);
   return { transactionID: submitResponse.transactionID, txHash };
@@ -323,7 +327,7 @@ async function pollTransaction(transactionID: string): Promise<string> {
         );
       }
       if (SUCCESS_STATES.includes(tx.state)) {
-        console.log("[Relayer] Confirmed:", tx.transactionHash);
+        logInfo("relayer.confirmed", { transactionHash: tx.transactionHash });
         return tx.transactionHash;
       }
     }

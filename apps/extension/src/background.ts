@@ -12,28 +12,14 @@ import {
   isKnowwApiUrl,
   setExtensionAccessToken,
 } from "./background/extension-session";
+import { logWarn } from "./background/logger";
 import type {
   BackgroundResponse,
   FetchJsonMessage,
   FetchTextMessage,
+  ScoreMarketsMessage,
+  ScoreMarketsSuccessResponse,
 } from "./types/chrome-messages";
-
-// Lazy-loaded to avoid eagerly compiling WASM on service worker startup
-let embeddingsModule: typeof import("./background/embeddings") | null = null;
-async function getEmbeddingsModule() {
-  if (!embeddingsModule) {
-    embeddingsModule = await import("./background/embeddings");
-  }
-  return embeddingsModule;
-}
-
-let nlpModule: typeof import("./background/nlp") | null = null;
-async function getNlpModule() {
-  if (!nlpModule) {
-    nlpModule = await import("./background/nlp");
-  }
-  return nlpModule;
-}
 
 // ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
@@ -96,58 +82,28 @@ function isFetchJsonMessage(message: unknown): message is FetchJsonMessage {
   );
 }
 
-interface ComputeSimilaritiesMessage {
-  type: "compute-similarities";
-  postText: string;
-  marketTexts: string[];
-}
-
-function isComputeSimilaritiesMessage(
+function isScoreMarketsMessage(
   message: unknown
-): message is ComputeSimilaritiesMessage {
+): message is ScoreMarketsMessage {
   if (typeof message !== "object" || message === null) return false;
   const msg = message as Record<string, unknown>;
   return (
-    msg.type === "compute-similarities" &&
+    msg.type === "score-markets" &&
     typeof msg.postText === "string" &&
     Array.isArray(msg.marketTexts) &&
     msg.marketTexts.every((t: unknown) => typeof t === "string")
   );
 }
 
-interface NlpContextGateMessage {
-  type: "nlp-context-gate";
-  postText: string;
-  marketTexts: string[];
-}
-
-function isNlpContextGateMessage(
-  message: unknown
-): message is NlpContextGateMessage {
-  if (typeof message !== "object" || message === null) return false;
-  const msg = message as Record<string, unknown>;
+function isScoreMarketsSuccessResponse(
+  response: BackgroundResponse | { ok: false; error?: string }
+): response is ScoreMarketsSuccessResponse {
   return (
-    msg.type === "nlp-context-gate" &&
-    typeof msg.postText === "string" &&
-    Array.isArray(msg.marketTexts) &&
-    msg.marketTexts.every((t: unknown) => typeof t === "string")
-  );
-}
-
-interface Bm25ScoreMessage {
-  type: "bm25-score";
-  postText: string;
-  marketTexts: string[];
-}
-
-function isBm25ScoreMessage(message: unknown): message is Bm25ScoreMessage {
-  if (typeof message !== "object" || message === null) return false;
-  const msg = message as Record<string, unknown>;
-  return (
-    msg.type === "bm25-score" &&
-    typeof msg.postText === "string" &&
-    Array.isArray(msg.marketTexts) &&
-    msg.marketTexts.every((t: unknown) => typeof t === "string")
+    response.ok === true &&
+    "similarities" in response &&
+    "bm25Scores" in response &&
+    "contextGateResults" in response &&
+    "usedEmbeddings" in response
   );
 }
 
@@ -180,14 +136,19 @@ async function ensureOffscreen(): Promise<void> {
     return;
   }
 
-  offscreenCreating = chrome.offscreen.createDocument({
+  const creation = chrome.offscreen.createDocument({
     url: OFFSCREEN_URL,
     reasons: ["WORKERS" as chrome.offscreen.Reason],
     justification: "Trading operations require ethers.js and ClobClient",
   });
-
-  await offscreenCreating;
-  offscreenCreating = null;
+  offscreenCreating = creation;
+  try {
+    await creation;
+  } finally {
+    if (offscreenCreating === creation) {
+      offscreenCreating = null;
+    }
+  }
 }
 
 function forwardToOffscreen(
@@ -198,7 +159,7 @@ function forwardToOffscreen(
   const tabId = sender.tab?.id;
 
   ensureOffscreen()
-    .then(() => sendOffscreenMessage(message, tabId))
+    .then(() => sendOffscreenMessage("offscreen:trading", message, tabId))
     .then((result) => {
       sendResponse(
         result ?? { ok: false, error: "No response from offscreen" }
@@ -213,13 +174,14 @@ function forwardToOffscreen(
 }
 
 async function sendOffscreenMessage(
+  offscreenType: "offscreen:trading" | "offscreen:scoring",
   payload: unknown,
   tabId: number | undefined,
   attempt = 1
 ): Promise<BackgroundResponse> {
   try {
     return (await chrome.runtime.sendMessage({
-      type: "offscreen:trading",
+      type: offscreenType,
       payload,
       tabId,
     })) as BackgroundResponse;
@@ -237,7 +199,7 @@ async function sendOffscreenMessage(
     await new Promise((resolve) =>
       setTimeout(resolve, OFFSCREEN_SEND_RETRY_DELAY_MS)
     );
-    return sendOffscreenMessage(payload, tabId, attempt + 1);
+    return sendOffscreenMessage(offscreenType, payload, tabId, attempt + 1);
   }
 }
 
@@ -419,78 +381,43 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
-    // Compute Embeddings Similarities
-    if (isComputeSimilaritiesMessage(message)) {
-      (async () => {
-        try {
-          const { postText, marketTexts } = message;
-          const { computeSimilarities } = await getEmbeddingsModule();
-          const similarities = await computeSimilarities(postText, marketTexts);
-          sendResponse({ ok: true, similarities });
-        } catch (e) {
-          sendResponse({
-            ok: false,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      })();
-      return true;
-    }
-
-    // NLP Context Gate
-    if (isNlpContextGateMessage(message)) {
-      (async () => {
-        try {
-          const start = Date.now();
-          const { postText, marketTexts } = message;
-          const { nlpContextGate } = await getNlpModule();
-          const results = marketTexts.map((mt) => nlpContextGate(postText, mt));
-          if (__DEV_MODE__) {
-            console.log(
-              `[Knoww NLP] Context gate: ${marketTexts.length} markets in ${Date.now() - start}ms`,
-              results.map((r, i) => ({
-                market: marketTexts[i]?.slice(0, 40),
-                pass: r.pass,
-                details: r.details,
-              }))
-            );
-          } else {
-            console.log(
-              `[Knoww NLP] Context gate: ${marketTexts.length} markets, ${results.filter((r) => r.pass).length} passed in ${Date.now() - start}ms`
-            );
+    // Unified scoring endpoint (single RPC path)
+    if (isScoreMarketsMessage(message)) {
+      const payload = message as ScoreMarketsMessage;
+      void ensureOffscreen()
+        .then(() =>
+          sendOffscreenMessage("offscreen:scoring", payload, sender.tab?.id)
+        )
+        .then((response) => {
+          if (!response?.ok) {
+            sendResponse({
+              ok: false,
+              error: response?.error ?? "Scoring request failed",
+            });
+            return;
           }
-          sendResponse({ ok: true, results });
-        } catch (e) {
-          console.error("[Knoww NLP] Context gate error:", e);
-          sendResponse({
-            ok: false,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      })();
-      return true;
-    }
 
-    // BM25 Score
-    if (isBm25ScoreMessage(message)) {
-      (async () => {
-        try {
-          const start = Date.now();
-          const { postText, marketTexts } = message;
-          const { bm25Score } = await getNlpModule();
-          const scores = bm25Score(postText, marketTexts);
-          console.log(
-            `[Knoww BM25] Scored ${marketTexts.length} markets in ${Date.now() - start}ms`
-          );
-          sendResponse({ ok: true, scores });
-        } catch (e) {
-          console.error("[Knoww BM25] Scoring error:", e);
+          if (!isScoreMarketsSuccessResponse(response)) {
+            logWarn("background.scoring-invalid-response", {
+              type: payload.type,
+              includeEmbeddings: payload.includeEmbeddings,
+              includeBm25: payload.includeBm25,
+              includeContextGate: payload.includeContextGate,
+            });
+            sendResponse({
+              ok: false,
+              error: "Scoring response missing fields",
+            });
+            return;
+          }
+          sendResponse(response);
+        })
+        .catch((error) => {
           sendResponse({
             ok: false,
-            error: e instanceof Error ? e.message : String(e),
+            error: error instanceof Error ? error.message : String(error),
           });
-        }
-      })();
+        });
       return true;
     }
 

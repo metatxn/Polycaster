@@ -932,8 +932,9 @@ async function searchPolymarketEvents(
         const json = JSON.parse(searchResp.text) as {
           events?: RawPolymarketEvent[];
         };
+        const rawCount = json.events?.length || 0;
+        let added = 0;
         for (const event of json.events || []) {
-          // Skip closed or inactive events
           if (event.closed === true || event.active === false) continue;
           if (!seenIds.has(event.id)) {
             seenIds.add(event.id);
@@ -944,13 +945,19 @@ async function searchPolymarketEvents(
               _source: "search",
             };
             allEvents.push(market);
+            added++;
           }
         }
         log(
-          "Polymarket Search API returned",
-          json.events?.length || 0,
-          "events for:",
-          query
+          `Polymarket Search API: ${rawCount} raw events, ${added} active for: ${query}`
+        );
+      } else {
+        log(
+          "Polymarket Search API: no valid response",
+          searchResp?.ok,
+          "error" in (searchResp || {})
+            ? (searchResp as { error?: string }).error
+            : ""
         );
       }
     } catch (e) {
@@ -974,8 +981,17 @@ async function searchPolymarketEvents(
         });
         if (tagResp?.ok && "text" in tagResp && tagResp.text) {
           const events = JSON.parse(tagResp.text) as RawPolymarketEvent[];
-          return Array.isArray(events) ? events : [];
+          const list = Array.isArray(events) ? events : [];
+          log(`Tag "${tagSlug}": ${list.length} events returned`);
+          return list;
         }
+        log(
+          `Tag "${tagSlug}": no valid response`,
+          tagResp?.ok,
+          "error" in (tagResp || {})
+            ? (tagResp as { error?: string }).error
+            : ""
+        );
       } catch (e) {
         log("Tag fetch failed for slug:", tagSlug, e);
       }
@@ -983,9 +999,9 @@ async function searchPolymarketEvents(
     });
 
     const tagResults = await Promise.all(tagPromises);
+    let tagAdded = 0;
     for (const events of tagResults) {
       for (const event of events) {
-        // Skip closed or inactive events
         if (event.closed === true || event.active === false) continue;
         if (!seenIds.has(event.id)) {
           seenIds.add(event.id);
@@ -996,9 +1012,13 @@ async function searchPolymarketEvents(
             _source: "tag",
           };
           allEvents.push(market);
+          tagAdded++;
         }
       }
     }
+    log(
+      `Polymarket tag search: ${tagAdded} active events from ${matchedTags.length} tags`
+    );
   }
 
   // Final filter: ensure no closed or inactive events and sort by volume
@@ -1025,16 +1045,20 @@ async function searchAllMarkets(
 
   log("Searching all markets for:", query, "tags:", matchedTags);
 
-  const searchPromises: Promise<Market[]>[] = [];
+  const searchEntries: Array<{
+    source: string;
+    promise: Promise<Market[]>;
+  }> = [];
 
   // Search Polymarket if enabled
   if (ENABLED_SOURCES?.polymarket) {
-    searchPromises.push(
-      searchPolymarketEvents(query, matchedTags).catch((e) => {
+    searchEntries.push({
+      source: "Polymarket",
+      promise: searchPolymarketEvents(query, matchedTags).catch((e) => {
         log("Polymarket search failed:", e);
         return [];
-      })
-    );
+      }),
+    });
   }
 
   // Search Kalshi if enabled and adapter is available
@@ -1048,42 +1072,27 @@ async function searchAllMarkets(
         )
       : [];
 
-    searchPromises.push(
-      window.KNOWW_KALSHI.searchKalshiEvents(
+    searchEntries.push({
+      source: "Kalshi",
+      promise: window.KNOWW_KALSHI.searchKalshiEvents(
         query,
         kalshiMatchedCategories
       ).catch((e) => {
         log("Kalshi search failed:", e);
         return [];
-      })
-    );
+      }),
+    });
   }
 
   // Wait for all searches to complete
-  const results = await Promise.all(searchPromises);
+  const results = await Promise.all(
+    searchEntries.map((entry) => entry.promise)
+  );
 
   if (isDebug) {
-    // Debug: Log results from each source
     log("📥 Search results by source:");
-    results.forEach((sourceResults) => {
-      const sources = sourceResults.map((m) => m.source || "polymarket");
-      const uniqueSources = [...new Set(sources)];
-      // Derive friendly source name from actual data
-      let sourceName = "Unknown";
-      if (uniqueSources.includes("polymarket")) {
-        sourceName = "Polymarket";
-      } else if (uniqueSources.includes("kalshi")) {
-        sourceName = "Kalshi";
-      } else if (uniqueSources.length > 0) {
-        // Capitalize first letter of the first unique source
-        sourceName =
-          uniqueSources[0].charAt(0).toUpperCase() + uniqueSources[0].slice(1);
-      }
-      log(
-        `  ${sourceName}: ${sourceResults.length} results (sources: ${
-          uniqueSources.join(", ") || "none"
-        })`
-      );
+    results.forEach((sourceResults, i) => {
+      log(`  ${searchEntries[i].source}: ${sourceResults.length} results`);
     });
   }
 

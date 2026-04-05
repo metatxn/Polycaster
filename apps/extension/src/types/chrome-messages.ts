@@ -17,6 +17,24 @@ export interface FetchJsonMessage {
   body?: unknown;
 }
 
+export interface ScoreMarketsMessage {
+  type: "score-markets";
+  postText: string;
+  marketTexts: string[];
+  gateTexts?: string[];
+  includeEmbeddings?: boolean;
+  includeBm25?: boolean;
+  includeContextGate?: boolean;
+}
+
+export interface ContextGateResult {
+  pass: boolean;
+  sharedNouns: number;
+  meaningfulNouns: number;
+  sharedEntities: number;
+  details: string;
+}
+
 // ── Order types (from shared package) ──
 
 import type { ClobOrderType } from "@knoww/shared-types/polymarket";
@@ -143,6 +161,7 @@ export type TradingMessage =
 export type BackgroundMessage =
   | FetchTextMessage
   | FetchJsonMessage
+  | ScoreMarketsMessage
   | TradingMessage
   | SigningResponseMessage;
 
@@ -176,25 +195,12 @@ export interface TradingErrorResponse {
   error: string;
 }
 
-export interface EmbeddingsSuccessResponse {
+export interface ScoreMarketsSuccessResponse {
   ok: true;
   similarities: number[];
-}
-
-export interface NlpContextGateSuccessResponse {
-  ok: true;
-  results: Array<{
-    pass: boolean;
-    sharedNouns: number;
-    meaningfulNouns: number;
-    sharedEntities: number;
-    details: string;
-  }>;
-}
-
-export interface Bm25SuccessResponse {
-  ok: true;
-  scores: number[];
+  bm25Scores: number[];
+  contextGateResults: ContextGateResult[];
+  usedEmbeddings: boolean;
 }
 
 export type BackgroundResponse =
@@ -203,9 +209,7 @@ export type BackgroundResponse =
   | FetchErrorResponse
   | TradingSuccessResponse
   | TradingErrorResponse
-  | EmbeddingsSuccessResponse
-  | NlpContextGateSuccessResponse
-  | Bm25SuccessResponse;
+  | ScoreMarketsSuccessResponse;
 
 export interface SettingsUpdateMessage {
   type: "KNOWW_SETTINGS_UPDATED";

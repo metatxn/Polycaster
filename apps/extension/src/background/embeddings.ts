@@ -5,51 +5,122 @@ import {
   type ProgressInfo,
   pipeline,
 } from "@huggingface/transformers";
+import { logDebug, logInfo, logWarn } from "./logger";
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
-env.useWasmCache = true;
+env.useWasmCache = false;
 env.logLevel = LogLevel.WARNING;
+
+/**
+ * Pre-load the bundled ONNX WASM binary so onnxruntime-web never hits
+ * the Cache API with a chrome-extension:// URL (which throws).
+ *
+ * Called once, lazily, right before the first pipeline() call —
+ * by that point all module-scope initialisers have run and
+ * `env.backends.onnx.wasm` is the real onnxruntime-web env object.
+ */
+async function preloadOnnxWasm(): Promise<void> {
+  const getRuntimeUrl = globalThis.chrome?.runtime?.getURL;
+  if (typeof getRuntimeUrl !== "function") return;
+
+  const onnxEnv = env.backends?.onnx;
+  if (!onnxEnv?.wasm) return;
+
+  const wasmUrl = getRuntimeUrl("ort/ort-wasm-simd-threaded.asyncify.wasm");
+  const mjsUrl = getRuntimeUrl("ort/ort-wasm-simd-threaded.asyncify.mjs");
+
+  onnxEnv.wasm.proxy = false;
+
+  try {
+    const res = await fetch(wasmUrl);
+    if (res.ok) {
+      onnxEnv.wasm.wasmBinary = await res.arrayBuffer();
+    }
+  } catch (e) {
+    logWarn("embeddings.wasm-preload-failed", {
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  onnxEnv.wasm.wasmPaths = { mjs: mjsUrl, wasm: wasmUrl };
+}
+
+const EMBEDDING_MODEL_ID = "onnx-community/bge-small-en-v1.5-ONNX";
 
 let pipelineInstance: Promise<FeatureExtractionPipeline> | null = null;
 
+function buildPipelineOptions(): {
+  dtype: "q4";
+  progress_callback: (progress: ProgressInfo) => void;
+} {
+  return {
+    dtype: "q4",
+    progress_callback: (progress: ProgressInfo) => {
+      switch (progress.status) {
+        case "progress_total":
+          logDebug("embeddings.progress", {
+            status: progress.status,
+            percentage: Math.round(progress.progress),
+          });
+          break;
+        case "progress":
+          logDebug("embeddings.progress", {
+            status: progress.status,
+            file: progress.file,
+            percentage: Math.round(progress.progress),
+          });
+          break;
+        case "download":
+          logInfo("embeddings.download", { file: progress.file });
+          break;
+        case "done":
+          logInfo("embeddings.download-done", { file: progress.file });
+          break;
+        case "ready":
+          logInfo("embeddings.ready");
+          break;
+      }
+    },
+  };
+}
+
+async function createPipelineInstance(): Promise<FeatureExtractionPipeline> {
+  await preloadOnnxWasm();
+  const baseOptions = buildPipelineOptions();
+  const webgpuAvailable = Boolean(
+    (env as { IS_WEBGPU_AVAILABLE?: boolean }).IS_WEBGPU_AVAILABLE
+  );
+  if (webgpuAvailable) {
+    try {
+      return await pipeline<"feature-extraction">(
+        "feature-extraction",
+        EMBEDDING_MODEL_ID,
+        { ...baseOptions, device: "webgpu" }
+      );
+    } catch (error) {
+      logWarn("embeddings.webgpu-fallback", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return pipeline<"feature-extraction">(
+    "feature-extraction",
+    EMBEDDING_MODEL_ID,
+    {
+      ...baseOptions,
+      device: "wasm",
+    }
+  );
+}
+
 function getInstance() {
   if (pipelineInstance === null) {
-    console.log(
-      "[Knoww Embeddings] Loading model onnx-community/bge-small-en-v1.5-ONNX..."
-    );
+    logInfo("embeddings.load-start", { model: EMBEDDING_MODEL_ID });
     const start = Date.now();
-    pipelineInstance = pipeline<"feature-extraction">(
-      "feature-extraction",
-      "onnx-community/bge-small-en-v1.5-ONNX",
-      {
-        dtype: "q4",
-        progress_callback: (progress: ProgressInfo) => {
-          switch (progress.status) {
-            case "progress_total":
-              console.log(
-                `[Knoww Embeddings] Overall: ${Math.round(progress.progress)}%`
-              );
-              break;
-            case "progress":
-              console.log(
-                `[Knoww Embeddings] progress: ${progress.file} ${Math.round(progress.progress)}%`
-              );
-              break;
-            case "download":
-              console.log(`[Knoww Embeddings] download: ${progress.file}`);
-              break;
-            case "done":
-              console.log(`[Knoww Embeddings] done: ${progress.file}`);
-              break;
-            case "ready":
-              console.log("[Knoww Embeddings] ready");
-              break;
-          }
-        },
-      }
-    ).then((p) => {
-      console.log(`[Knoww Embeddings] Model loaded in ${Date.now() - start}ms`);
+    pipelineInstance = createPipelineInstance().then((p) => {
+      logInfo("embeddings.loaded", { elapsedMs: Date.now() - start });
       return p;
     });
   }
@@ -92,7 +163,7 @@ function openDB(): Promise<IDBDatabase> {
       resolve(db);
     };
     req.onerror = () => {
-      console.warn("[Knoww Embeddings] IndexedDB open failed:", req.error);
+      logWarn("embeddings.idb-open-failed", { error: req.error });
       dbPromise = null;
       reject(req.error);
     };
@@ -143,18 +214,18 @@ async function idbPutMany(
         store.put({ text, vector, ts: now } satisfies IDBEntry);
       }
       tx.oncomplete = () => {
-        console.log(
-          `[Knoww Embeddings] IDB persisted ${entries.length} vectors`
-        );
+        logDebug("embeddings.idb-put", {
+          count: entries.length,
+        });
         resolve();
       };
       tx.onerror = () => {
-        console.warn("[Knoww Embeddings] IDB write error:", tx.error);
+        logWarn("embeddings.idb-write-error", { error: tx.error });
         reject(tx.error);
       };
     });
   } catch (e) {
-    console.warn("[Knoww Embeddings] IDB write failed:", e);
+    logWarn("embeddings.idb-write-failed", { error: e });
   }
 }
 
@@ -187,7 +258,7 @@ async function idbPruneIfNeeded(): Promise<void> {
       }
 
       if (deleted > 0) {
-        console.log(`[Knoww Embeddings] IDB pruned ${deleted} expired entries`);
+        logDebug("embeddings.idb-prune", { deleted });
       }
 
       // Cap total entries — count now reflects the completed deletions above
@@ -254,15 +325,12 @@ const l1Cache = new LRUCache<string, number[]>(500);
 
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < vecA.length; i++) {
+  const maxLength = Math.min(vecA.length, vecB.length);
+  for (let i = 0; i < maxLength; i++) {
     dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
   }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  if (!Number.isFinite(dotProduct)) return 0;
+  return dotProduct;
 }
 
 async function getEmbeddings(texts: string[]): Promise<number[][]> {
@@ -281,13 +349,14 @@ export async function computeSimilarities(
   const queryText = `Represent this sentence for searching relevant prediction markets: ${postText}`;
 
   const allTexts = [queryText, ...marketTexts];
+  const uniqueTexts = Array.from(new Set(allTexts));
 
   // Local map immune to LRU eviction — used for the final similarity lookup
   const local = new Map<string, number[]>();
 
   // L1: check in-memory cache
   const textsNotInL1: string[] = [];
-  for (const text of allTexts) {
+  for (const text of uniqueTexts) {
     const cached = l1Cache.get(text);
     if (cached) {
       local.set(text, cached);
@@ -309,7 +378,7 @@ export async function computeSimilarities(
 
   // Compute embeddings only for texts missing from both caches
   const textsToEmbed: string[] = [];
-  for (const text of allTexts) {
+  for (const text of uniqueTexts) {
     if (!local.has(text)) {
       textsToEmbed.push(text);
     }
@@ -338,10 +407,14 @@ export async function computeSimilarities(
     return cosineSimilarity(postEmbedding, marketEmbedding);
   });
 
-  const l1Hits = allTexts.length - textsNotInL1.length;
+  const l1Hits = uniqueTexts.length - textsNotInL1.length;
   const timeMs = Date.now() - start;
-  console.log(
-    `[Knoww Embeddings] Scored ${marketTexts.length} markets in ${timeMs}ms (L1: ${l1Hits}, IDB: ${idbHits}, computed: ${textsToEmbed.length})`
-  );
+  logDebug("embeddings.scored", {
+    count: marketTexts.length,
+    elapsedMs: timeMs,
+    l1Hits,
+    idbHits,
+    computed: textsToEmbed.length,
+  });
   return similarities;
 }

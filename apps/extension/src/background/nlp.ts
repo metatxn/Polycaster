@@ -1,6 +1,7 @@
 import MiniSearch from "minisearch";
 import model from "wink-eng-lite-web-model";
 import winkNLP, { type ItsFunction } from "wink-nlp";
+import type { ContextGateResult } from "../types/chrome-messages";
 
 const nlp = winkNLP(model);
 const its = nlp.its;
@@ -131,7 +132,95 @@ export interface NlpTokens {
   nouns: string[];
 }
 
+class LRUCache<K, V> {
+  private readonly max: number;
+  private readonly cache: Map<K, V>;
+
+  constructor(max: number) {
+    this.max = max;
+    this.cache = new Map();
+  }
+
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value === undefined) return undefined;
+    this.cache.delete(key);
+    this.cache.set(key, value);
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.max) {
+      const oldest = this.cache.keys().next();
+      if (!oldest.done) this.cache.delete(oldest.value);
+    }
+    this.cache.set(key, value);
+  }
+}
+
+const BM25_MARKET_CACHE_SIZE = 80;
+const BM25_SCORE_CACHE_SIZE = 240;
+const TOKENIZE_CACHE_SIZE = 500;
+
+const bm25IndexCache = new LRUCache<string, MiniSearch<MarketDoc>>(
+  BM25_MARKET_CACHE_SIZE
+);
+const bm25ScoreCache = new LRUCache<string, number[]>(BM25_SCORE_CACHE_SIZE);
+const tokenizeCache = new LRUCache<string, NlpTokens>(TOKENIZE_CACHE_SIZE);
+
+function hashText(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function makeBm25Key(marketTexts: string[]): string {
+  let hash = 0x811c9dc5;
+  hash = Math.imul(hash ^ marketTexts.length, 0x01000193);
+  for (const text of marketTexts) {
+    hash = Math.imul(hash ^ hashText(text), 0x01000193);
+  }
+  return hash.toString(16);
+}
+
+function makeBm25ScoreKey(postText: string, marketTexts: string[]): string {
+  return `${makeBm25Key(marketTexts)}|${hashText(postText)}`;
+}
+
+function createBm25Index(marketTexts: string[]): MiniSearch<MarketDoc> {
+  const index = new MiniSearch<MarketDoc>({
+    fields: ["text"],
+    searchOptions: {
+      prefix: true,
+      fuzzy: 0.2,
+    },
+  });
+  const docs: MarketDoc[] = marketTexts.map((text, i) => ({ id: i, text }));
+  index.addAll(docs);
+  return index;
+}
+
+function getBm25Index(marketTexts: string[]): MiniSearch<MarketDoc> {
+  if (marketTexts.length === 0) return createBm25Index([]);
+  const key = makeBm25Key(marketTexts);
+  const cached = bm25IndexCache.get(key);
+  if (cached) return cached;
+  const created = createBm25Index(marketTexts);
+  bm25IndexCache.set(key, created);
+  return created;
+}
+
 export function tokenize(text: string): NlpTokens {
+  const cached = tokenizeCache.get(text);
+  if (cached) {
+    return cached;
+  }
+
   const doc = nlp.readDoc(text);
 
   const lemmas: string[] = [];
@@ -162,15 +251,17 @@ export function tokenize(text: string): NlpTokens {
 
   const docEntities = doc.entities();
   const entityValues = docEntities.out(itsValue) as string[];
-  for (const ent of entityValues) {
-    if (ent.length >= 2 && !NUMERIC_RE.test(ent)) entities.push(ent);
+  for (const entity of entityValues) {
+    if (entity.length >= 2 && !NUMERIC_RE.test(entity)) entities.push(entity);
   }
 
-  return {
+  const result = {
     lemmas: [...new Set(lemmas)],
     entities: [...new Set(entities)],
     nouns: [...new Set(nouns)],
   };
+  tokenizeCache.set(text, result);
+  return result;
 }
 
 interface MarketDoc {
@@ -178,46 +269,77 @@ interface MarketDoc {
   text: string;
 }
 
-/**
- * BM25 scoring: index market texts then search with post text.
- * Returns an array of scores aligned with the input marketTexts array.
- */
-export function bm25Score(postText: string, marketTexts: string[]): number[] {
-  if (marketTexts.length === 0) return [];
-
-  const index = new MiniSearch<MarketDoc>({
-    fields: ["text"],
-    searchOptions: {
-      prefix: true,
-      fuzzy: 0.2,
-    },
-  });
-
-  const docs: MarketDoc[] = marketTexts.map((text, i) => ({
-    id: i,
-    text,
-  }));
-  index.addAll(docs);
-
-  const postTokens = tokenize(postText);
-  const query = postTokens.lemmas.slice(0, 20).join(" ");
-
-  if (!query.trim()) return new Array(marketTexts.length).fill(0);
-
-  const results = index.search(query);
-
-  const scoreMap = new Map<number, number>();
-  let maxScore = 0;
-  for (const r of results) {
-    if (r.score > maxScore) maxScore = r.score;
-    scoreMap.set(r.id, r.score);
+function runContextGate(post: NlpTokens, market: NlpTokens): ContextGateResult {
+  // Use NOUNS only (NOUN + PROPN POS tags) for overlap — this structurally
+  // excludes verbs, adverbs, adjectives, question words (how, many, what),
+  // pronouns, etc. that carry no topical signal.
+  const postNounSet = new Set(post.nouns);
+  const marketNounSet = new Set(market.nouns);
+  let sharedNouns = 0;
+  let meaningfulNouns = 0;
+  const sharedNounList: string[] = [];
+  for (const noun of postNounSet) {
+    if (marketNounSet.has(noun)) {
+      sharedNouns++;
+      sharedNounList.push(noun);
+      if (!GENERIC_LEMMAS.has(noun)) {
+        meaningfulNouns++;
+      }
+    }
   }
 
-  if (maxScore === 0) return new Array(marketTexts.length).fill(0);
+  // Entity matching — only count entities that are specific enough to
+  // confirm topical overlap. Single short words like "Sam", "Max", "Will"
+  // are common first names that appear across unrelated contexts.
+  // Require either: multi-word entity ("Sam Altman") OR single word >= 5 chars.
+  const isSpecificEntity = (entity: string): boolean => {
+    if (GENERIC_LEMMAS.has(entity) || NUMERIC_RE.test(entity)) return false;
+    const words = entity.trim().split(/\s+/);
+    if (words.length >= 2) return true;
+    return entity.length >= 5;
+  };
 
-  return marketTexts.map((_, i) => {
-    const raw = scoreMap.get(i) ?? 0;
-    return raw / maxScore;
+  const postEntitySet = new Set(
+    post.entities.map((entity) => entity.toLowerCase()).filter(isSpecificEntity)
+  );
+  const marketEntitySet = new Set(
+    market.entities
+      .map((entity) => entity.toLowerCase())
+      .filter(isSpecificEntity)
+  );
+  let sharedEntities = 0;
+  const sharedEntityList: string[] = [];
+  for (const entity of postEntitySet) {
+    if (marketEntitySet.has(entity)) {
+      sharedEntities++;
+      sharedEntityList.push(entity);
+    }
+  }
+
+  // Only non-generic nouns count toward the gate decision.
+  const meaningfulNounList = sharedNounList.filter(
+    (noun) => !GENERIC_LEMMAS.has(noun)
+  );
+
+  // A single shared word (e.g. a city "Lucknow") can appear as both a noun
+  // and an entity — count DISTINCT matching words across both signals.
+  const allSharedWords = new Set([...meaningfulNounList, ...sharedEntityList]);
+  const distinctSignals = allSharedWords.size;
+
+  const pass = distinctSignals >= 2;
+  const details = `nouns=[${sharedNounList.join(",")}] meaningful=[${meaningfulNounList.join(",")}] entities=[${sharedEntityList.join(",")}] distinct=${distinctSignals}`;
+  return { pass, sharedNouns, meaningfulNouns, sharedEntities, details };
+}
+
+export function nlpContextGateBatch(
+  postText: string,
+  marketTexts: string[]
+): ContextGateResult[] {
+  if (marketTexts.length === 0) return [];
+  const postTokens = tokenize(postText);
+  return marketTexts.map((marketText) => {
+    const marketTokens = tokenize(marketText);
+    return runContextGate(postTokens, marketTokens);
   });
 }
 
@@ -232,71 +354,40 @@ export function bm25Score(postText: string, marketTexts: string[]): number[] {
 export function nlpContextGate(
   postText: string,
   marketText: string
-): {
-  pass: boolean;
-  sharedNouns: number;
-  meaningfulNouns: number;
-  sharedEntities: number;
-  details: string;
-} {
-  const post = tokenize(postText);
-  const market = tokenize(marketText);
+): ContextGateResult {
+  return runContextGate(tokenize(postText), tokenize(marketText));
+}
 
-  // Use NOUNS only (NOUN + PROPN POS tags) for overlap — this structurally
-  // excludes verbs, adverbs, adjectives, question words (how, many, what),
-  // pronouns, etc. that carry no topical signal.
-  const postNounSet = new Set(post.nouns);
-  const marketNounSet = new Set(market.nouns);
-  let sharedNouns = 0;
-  let meaningfulNouns = 0;
-  const sharedNounList: string[] = [];
-  for (const n of postNounSet) {
-    if (marketNounSet.has(n)) {
-      sharedNouns++;
-      sharedNounList.push(n);
-      if (!GENERIC_LEMMAS.has(n)) {
-        meaningfulNouns++;
-      }
-    }
+/**
+ * BM25 scoring: index market texts then search with post text.
+ * Returns an array of scores aligned with the input marketTexts array.
+ */
+export function bm25Score(postText: string, marketTexts: string[]): number[] {
+  if (marketTexts.length === 0) return [];
+
+  const cachedKey = makeBm25ScoreKey(postText, marketTexts);
+  const cached = bm25ScoreCache.get(cachedKey);
+  if (cached) return cached;
+
+  const index = getBm25Index(marketTexts);
+  const postTokens = tokenize(postText);
+  const query = postTokens.lemmas.slice(0, 20).join(" ");
+  if (!query.trim()) return new Array(marketTexts.length).fill(0);
+
+  const results = index.search(query);
+  const scoreMap = new Map<number, number>();
+  let maxScore = 0;
+  for (const result of results) {
+    if (result.score > maxScore) maxScore = result.score;
+    scoreMap.set(result.id, result.score);
   }
 
-  // Entity matching — only count entities that are specific enough to
-  // confirm topical overlap. Single short words like "Sam", "Max", "Will"
-  // are common first names that appear across unrelated contexts.
-  // Require either: multi-word entity ("Sam Altman") OR single word >= 5 chars.
-  const isSpecificEntity = (e: string): boolean => {
-    if (GENERIC_LEMMAS.has(e) || NUMERIC_RE.test(e)) return false;
-    const words = e.trim().split(/\s+/);
-    if (words.length >= 2) return true;
-    return e.length >= 5;
-  };
+  if (maxScore === 0) return new Array(marketTexts.length).fill(0);
 
-  const postEntitySet = new Set(
-    post.entities.map((e) => e.toLowerCase()).filter(isSpecificEntity)
-  );
-  const marketEntitySet = new Set(
-    market.entities.map((e) => e.toLowerCase()).filter(isSpecificEntity)
-  );
-  let sharedEntities = 0;
-  const sharedEntityList: string[] = [];
-  for (const e of postEntitySet) {
-    if (marketEntitySet.has(e)) {
-      sharedEntities++;
-      sharedEntityList.push(e);
-    }
-  }
-
-  // Only non-generic nouns count toward the gate decision.
-  const meaningfulNounList = sharedNounList.filter(
-    (n) => !GENERIC_LEMMAS.has(n)
-  );
-
-  // A single shared word (e.g. a city "Lucknow") can appear as both a noun
-  // and an entity — count DISTINCT matching words across both signals.
-  const allSharedWords = new Set([...meaningfulNounList, ...sharedEntityList]);
-  const distinctSignals = allSharedWords.size;
-
-  const pass = distinctSignals >= 2;
-  const details = `nouns=[${sharedNounList.join(",")}] meaningful=[${meaningfulNounList.join(",")}] entities=[${sharedEntityList.join(",")}] distinct=${distinctSignals}`;
-  return { pass, sharedNouns, meaningfulNouns, sharedEntities, details };
+  const scores = marketTexts.map((_, i) => {
+    const raw = scoreMap.get(i) ?? 0;
+    return raw / maxScore;
+  });
+  bm25ScoreCache.set(cachedKey, scores);
+  return scores;
 }

@@ -11,6 +11,7 @@
  */
 
 import { getKnowwAppUrl } from "./extension-session";
+import { logWarn } from "./logger";
 
 const SIGN_PROXY_URL = `${getKnowwAppUrl()}/api/sign`;
 
@@ -72,7 +73,7 @@ export function createExtensionBuilderConfig() {
         const bodyStr = JSON.stringify({ method, path, body, timestamp });
         const token = await getAccessTokenViaMessage();
         if (!token) {
-          console.error("[ExtBuilderConfig] Missing extension session token");
+          logWarn("builder-config.missing-token");
           return undefined;
         }
 
@@ -92,16 +93,19 @@ export function createExtensionBuilderConfig() {
         }
 
         if (!response.ok) {
-          console.error(
-            "[ExtBuilderConfig] sign proxy returned",
-            response.status
-          );
+          logWarn("builder-config.sign-failed", {
+            status: response.status,
+            statusText: response.statusText,
+            path,
+          });
           return undefined;
         }
 
         return await response.json();
       } catch (err) {
-        console.error("[ExtBuilderConfig] Failed:", err);
+        logWarn("builder-config.failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
         return undefined;
       }
     },

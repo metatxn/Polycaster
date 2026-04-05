@@ -2,6 +2,7 @@
 // TIMELINE INJECTION LOGIC
 // ============================================
 
+import type { ContextGateResult } from "../types/chrome-messages";
 import type {
   InjectedMarketEntry,
   Market,
@@ -58,78 +59,64 @@ interface AnalysisResult {
   postText: string;
 }
 
-interface ContextGateResult {
-  pass: boolean;
-  sharedNouns: number;
-  meaningfulNouns: number;
-  sharedEntities: number;
-  details: string;
-}
-
-interface Bm25BatchResult {
-  scores: number[];
-  available: boolean;
-}
-
-/**
- * Call the NLP context gate running in the background (wink-nlp powered).
- * Returns per-market gate results.
- * Falls back to a lightweight naive check if the background call fails.
- */
-async function nlpContextGateBatch(
+async function scoreMarketsBatch(
   postText: string,
-  marketTexts: string[]
-): Promise<ContextGateResult[]> {
+  marketTexts: string[],
+  gateTexts: string[]
+): Promise<{
+  similarities: number[];
+  bm25Scores: number[];
+  contextGateResults: ContextGateResult[];
+  usedEmbeddings: boolean;
+  source: "offscreen" | "fallback";
+}> {
   try {
     const response = await chrome.runtime.sendMessage({
-      type: "nlp-context-gate",
+      type: "score-markets",
       postText,
       marketTexts,
+      gateTexts,
+      includeEmbeddings: true,
+      includeBm25: true,
+      includeContextGate: true,
     });
-    if (response?.ok && Array.isArray(response.results)) {
-      return response.results;
-    }
-    console.warn("[Knoww NLP] Context gate call failed, using naive fallback");
-  } catch {
-    console.warn(
-      "[Knoww NLP] Context gate message error, using naive fallback"
-    );
-  }
-  return marketTexts.map((mt) => {
-    const naive = naiveContextGate(postText, mt);
-    return {
-      ...naive,
-      sharedNouns: naive.sharedLemmas,
-      meaningfulNouns: naive.sharedLemmas,
-      details: "naive-fallback",
-    };
-  });
-}
 
-/**
- * Call BM25 scoring running in the background (minisearch powered).
- * Returns normalized scores [0..1] aligned with marketTexts.
- */
-async function bm25ScoreBatch(
-  postText: string,
-  marketTexts: string[]
-): Promise<Bm25BatchResult> {
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: "bm25-score",
-      postText,
-      marketTexts,
-    });
-    if (response?.ok && Array.isArray(response.scores)) {
-      return { scores: response.scores, available: true };
+    if (
+      response?.ok &&
+      Array.isArray(response.similarities) &&
+      Array.isArray(response.bm25Scores)
+    ) {
+      const contextGateResults = Array.isArray(response.contextGateResults)
+        ? response.contextGateResults
+        : [];
+      return {
+        similarities: response.similarities,
+        bm25Scores: response.bm25Scores,
+        contextGateResults,
+        usedEmbeddings: response.usedEmbeddings ?? true,
+        source: "offscreen",
+      };
     }
-    console.warn("[Knoww BM25] Scoring call failed, returning zeros");
   } catch {
-    console.warn("[Knoww BM25] Scoring message error, returning zeros");
+    // fall through to fallback path
   }
+
+  const fallbackScores = new Array<number>(marketTexts.length).fill(0);
   return {
-    scores: new Array(marketTexts.length).fill(0),
-    available: false,
+    similarities: fallbackScores,
+    bm25Scores: fallbackScores,
+    contextGateResults: marketTexts.map((mt) => {
+      const naive = naiveContextGate(postText, mt);
+      return {
+        pass: naive.pass,
+        sharedNouns: naive.sharedLemmas,
+        meaningfulNouns: naive.sharedLemmas,
+        sharedEntities: naive.sharedEntities,
+        details: "fallback-failed",
+      };
+    }),
+    usedEmbeddings: false,
+    source: "fallback",
   };
 }
 
@@ -427,6 +414,7 @@ async function analyzePostAndFindMarket(
   // --- BATCH SCORING WITH EMBEDDINGS + BM25 ---
   let marketScores: number[] = [];
   let usedEmbeddings = false;
+  let contextGateResults: ContextGateResult[] = [];
   let marketTexts: string[] = [];
   try {
     marketTexts = markets.map((m) => {
@@ -441,41 +429,36 @@ async function analyzePostAndFindMarket(
       return rich;
     });
 
-    const [embeddingResponse, bm25Result] = await Promise.all([
-      chrome.runtime.sendMessage({
-        type: "compute-similarities",
-        postText: text,
-        marketTexts,
-      }),
-      bm25ScoreBatch(text, marketTexts),
-    ]);
+    const gateTexts = markets.map((m) => {
+      let gateText = m.title || "";
+      if (m.description) gateText += ` ${m.description.slice(0, 120)}`;
+      return gateText;
+    });
 
-    if (embeddingResponse?.ok) {
-      const embeddingScores: number[] = embeddingResponse.similarities;
-      usedEmbeddings = true;
+    const scoring = await scoreMarketsBatch(text, marketTexts, gateTexts);
+    usedEmbeddings = scoring.usedEmbeddings;
+    contextGateResults = scoring.contextGateResults;
 
-      // Only blend lexical scores when BM25 actually succeeded.
-      const SEMANTIC_WEIGHT = bm25Result.available ? 0.7 : 1;
-      const BM25_WEIGHT = bm25Result.available ? 0.3 : 0;
-      marketScores = embeddingScores.map((emb, i) => {
-        const bm = bm25Result.scores[i] ?? 0;
+    if (usedEmbeddings) {
+      const hasBm25Signal = scoring.bm25Scores.some((score) => score > 0);
+      const SEMANTIC_WEIGHT = hasBm25Signal ? 0.7 : 1;
+      const BM25_WEIGHT = hasBm25Signal ? 0.3 : 0;
+      marketScores = scoring.similarities.map((emb, i) => {
+        const bm = scoring.bm25Scores[i] ?? 0;
         return emb * SEMANTIC_WEIGHT + bm * BM25_WEIGHT;
       });
-
       log(
-        bm25Result.available
+        hasBm25Signal
           ? "🧠 Hybrid scoring succeeded —"
           : "🧠 Embedding scoring succeeded (BM25 unavailable) —",
         marketTexts.length,
-        bm25Result.available
-          ? "markets scored (embedding + BM25)"
-          : "markets scored"
+        hasBm25Signal ? "markets scored (embedding + BM25)" : "markets scored"
       );
       if (isDebug) {
         const scored = marketTexts.map((title, i) => ({
           title: title.slice(0, 50),
-          embedding: embeddingScores[i].toFixed(4),
-          bm25: (bm25Result.scores[i] ?? 0).toFixed(4),
+          embedding: scoring.similarities[i].toFixed(4),
+          bm25: (scoring.bm25Scores[i] ?? 0).toFixed(4),
           combined: marketScores[i].toFixed(4),
         }));
         scored.sort((a, b) => parseFloat(b.combined) - parseFloat(a.combined));
@@ -483,8 +466,8 @@ async function analyzePostAndFindMarket(
       }
     } else {
       log(
-        "⚠️ Embeddings scoring failed, falling back to keyword scoring:",
-        embeddingResponse?.error
+        "⚠️ Scoring unavailable, falling back to keyword scoring:",
+        scoring.source
       );
       marketScores = markets.map((m) => calculateRelevanceScore([text], m));
     }
@@ -543,19 +526,9 @@ async function analyzePostAndFindMarket(
     bestBySource.kalshi = { market: null, score: 0, allScores: [] };
   }
 
-  // Context gate uses title + description ONLY (no tags).
-  // Tags help search recall and embedding scoring, but they often contain
-  // noisy keywords that create false overlap (e.g. tag "Who Russian Ambani"
-  // on a US politics market).
-  const gateTexts = markets.map((m) => {
-    let gt = m.title || "";
-    if (m.description) gt += ` ${m.description.slice(0, 120)}`;
-    return gt;
-  });
-
-  const contextGateResults = usedEmbeddings
-    ? await nlpContextGateBatch(text, gateTexts)
-    : [];
+  if (!usedEmbeddings) {
+    contextGateResults = [];
+  }
 
   for (let i = 0; i < markets.length; i++) {
     const market = markets[i];

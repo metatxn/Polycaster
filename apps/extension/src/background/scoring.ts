@@ -42,15 +42,16 @@ function normalizeRequest(
   const includeEmbeddings = message.includeEmbeddings ?? true;
   const includeBm25 = message.includeBm25 ?? true;
   const includeContextGate = message.includeContextGate ?? false;
+  const marketTexts = message.marketTexts || [];
+  const gateTexts =
+    message.gateTexts && message.gateTexts.length === marketTexts.length
+      ? message.gateTexts
+      : marketTexts;
 
   return {
     postText: message.postText,
-    marketTexts: message.marketTexts || [],
-    gateTexts:
-      message.gateTexts &&
-      message.gateTexts.length === message.marketTexts.length
-        ? message.gateTexts
-        : message.marketTexts || [],
+    marketTexts,
+    gateTexts,
     includeEmbeddings,
     includeBm25,
     includeContextGate,

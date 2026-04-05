@@ -232,6 +232,11 @@ function sanitizeHtml(html: string): string {
     "form",
     "frame",
     "frameset",
+    "style",
+    "svg",
+    "math",
+    "noscript",
+    "template",
   ]);
 
   for (const node of nodes) {
@@ -249,7 +254,7 @@ function sanitizeHtml(html: string): string {
         name === "style" ||
         name === "srcdoc" ||
         ((name === "src" || name === "href" || name === "xlink:href") &&
-          /^\s*javascript:/i.test(value))
+          /^\s*(javascript|data):/i.test(value))
       ) {
         node.removeAttribute(attr.name);
       }

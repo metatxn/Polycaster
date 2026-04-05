@@ -57,6 +57,13 @@ function htmlToElement(html: string): Element | null {
     }
   }
 
+  if (
+    forbiddenTags.has(element.tagName.toLowerCase()) ||
+    !doc.body.contains(element)
+  ) {
+    return null;
+  }
+
   return element;
 }
 

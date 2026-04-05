@@ -51,7 +51,8 @@ function ChartContainer({
   >["children"];
 }) {
   const uniqueId = React.useId();
-  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const rawChartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const chartId = rawChartId.replace(/[^A-Za-z0-9_-]/g, "");
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = React.useState(false);
 
@@ -129,8 +130,7 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
-  const safeId = id.replace(/[^A-Za-z0-9_-]/g, "");
-  if (!safeId) {
+  if (!id) {
     return null;
   }
 
@@ -159,8 +159,8 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
         return null;
       }
       const baseSelector = prefix
-        ? `${prefix} [data-chart="${safeId}"]`
-        : `[data-chart="${safeId}"]`;
+        ? `${prefix} [data-chart="${id}"]`
+        : `[data-chart="${id}"]`;
       return `${baseSelector} {\n${themeRules}\n}`;
     })
     .filter(Boolean)

@@ -180,10 +180,10 @@ function hashText(value: string): number {
 }
 
 function makeBm25Key(marketTexts: string[]): string {
-  let hash = 0x811c9dc5;
-  hash = Math.imul(hash ^ marketTexts.length, 0x01000193);
+  let hash = 0x811c9dc5 >>> 0;
+  hash = Math.imul((hash ^ marketTexts.length) >>> 0, 0x01000193) >>> 0;
   for (const text of marketTexts) {
-    hash = Math.imul(hash ^ hashText(text), 0x01000193);
+    hash = Math.imul((hash ^ hashText(text)) >>> 0, 0x01000193) >>> 0;
   }
   return hash.toString(16);
 }

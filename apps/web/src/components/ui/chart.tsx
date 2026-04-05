@@ -8,9 +8,14 @@ import { cn } from "@/lib/utils";
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
+const SAFE_CHART_ID_RE = /^[A-Za-z0-9_-]+$/;
 const SAFE_CSS_KEY_RE = /^[A-Za-z0-9_-]+$/;
 const SAFE_COLOR_RE =
   /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla)\([^)]*\)|var\(--[A-Za-z0-9_-]+\)|[a-zA-Z]+)$/;
+
+function sanitizeChartId(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/g, "");
+}
 
 export type ChartConfig = {
   [k in string]: {
@@ -52,7 +57,7 @@ function ChartContainer({
 }) {
   const uniqueId = React.useId();
   const rawChartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
-  const chartId = rawChartId.replace(/[^A-Za-z0-9_-]/g, "");
+  const chartId = sanitizeChartId(rawChartId);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = React.useState(false);
 
@@ -134,6 +139,11 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  const safeId = sanitizeChartId(id);
+  if (!safeId || !SAFE_CHART_ID_RE.test(id)) {
+    return null;
+  }
+
   const entriesByTheme = (theme: keyof typeof THEMES) =>
     colorConfig
       .map(([key, itemConfig]) => {
@@ -159,8 +169,8 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
         return null;
       }
       const baseSelector = prefix
-        ? `${prefix} [data-chart="${id}"]`
-        : `[data-chart="${id}"]`;
+        ? `${prefix} [data-chart="${safeId}"]`
+        : `[data-chart="${safeId}"]`;
       return `${baseSelector} {\n${themeRules}\n}`;
     })
     .filter(Boolean)

@@ -10,6 +10,7 @@
  * worker which owns session storage.
  */
 
+import { EXTENSION_AUTH_REQUIRED_ERROR } from "../types/chrome-messages";
 import { getKnowwAppUrl } from "./extension-session";
 import { logWarn } from "./logger";
 
@@ -74,7 +75,7 @@ export function createExtensionBuilderConfig() {
         const token = await getAccessTokenViaMessage();
         if (!token) {
           logWarn("builder-config.missing-token");
-          return undefined;
+          throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
         }
 
         const headers: Record<string, string> = {
@@ -90,6 +91,7 @@ export function createExtensionBuilderConfig() {
 
         if (response.status === 401) {
           await clearAccessTokenViaMessage();
+          throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
         }
 
         if (!response.ok) {
@@ -103,6 +105,13 @@ export function createExtensionBuilderConfig() {
 
         return await response.json();
       } catch (err) {
+        if (
+          err instanceof Error &&
+          err.message === EXTENSION_AUTH_REQUIRED_ERROR
+        ) {
+          logWarn("builder-config.auth-required", { path });
+          throw err;
+        }
         logWarn("builder-config.failed", {
           error: err instanceof Error ? err.message : String(err),
         });

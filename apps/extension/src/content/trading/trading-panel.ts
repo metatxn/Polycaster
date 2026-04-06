@@ -2572,9 +2572,17 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         /* ignore */
       }
 
+      let bridgeCompleted = false;
+      let bridgeFailed = false;
       if (depositBridgeAddress) {
         try {
           depositTransactions = await fetchDepositStatus(depositBridgeAddress);
+          bridgeCompleted = depositTransactions.some(
+            (tx) => tx.status === "COMPLETED"
+          );
+          bridgeFailed = depositTransactions.some(
+            (tx) => tx.status === "FAILED"
+          );
           rerender();
         } catch {
           /* ignore */
@@ -2585,7 +2593,19 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
       const balanceChanged = newCtx.balance > prevBalance + 0.001;
       const timedOut = Date.now() - bridgeStart >= BRIDGE_TIMEOUT;
 
-      if (balanceChanged || timedOut) {
+      if (bridgeFailed) {
+        if (depositPollTimer) {
+          clearTimeout(depositPollTimer);
+          depositPollTimer = null;
+        }
+        depositIsConfirming = false;
+        depositError =
+          "Transaction confirmed on-chain, but bridge processing failed.";
+        rerender();
+        return;
+      }
+
+      if (bridgeCompleted || balanceChanged) {
         if (depositPollTimer) {
           clearTimeout(depositPollTimer);
           depositPollTimer = null;
@@ -2598,6 +2618,18 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
           resetDepositState();
           rerender();
         }, 3000);
+        return;
+      }
+
+      if (timedOut) {
+        if (depositPollTimer) {
+          clearTimeout(depositPollTimer);
+          depositPollTimer = null;
+        }
+        depositIsConfirming = false;
+        depositError =
+          "Transaction confirmed on-chain, but bridge credit is taking longer than expected. Please check again shortly.";
+        rerender();
         return;
       }
 

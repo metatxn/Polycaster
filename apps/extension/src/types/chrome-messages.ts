@@ -2,6 +2,10 @@
  * Message types for communication with background script
  */
 
+// ── Sentinel error used by builder-config (background) and trading-service (content)
+// to signal that re-authentication is needed. ──
+export const EXTENSION_AUTH_REQUIRED_ERROR = "Extension auth required";
+
 // ── Existing fetch messages ──
 
 export interface FetchTextMessage {

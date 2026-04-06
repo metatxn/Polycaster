@@ -9,6 +9,7 @@ import {
   clearExtensionAccessToken,
   getExtensionAccessToken,
   getExtensionAuthorizationHeader,
+  getKnowwAppUrl,
   isKnowwApiUrl,
   setExtensionAccessToken,
 } from "./background/extension-session";
@@ -298,6 +299,27 @@ chrome.runtime.onMessage.addListener(
       clearExtensionAccessToken().then(() => {
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
+      return true;
+    }
+    if (msg?.type === "auth:logout") {
+      (async () => {
+        const token = await getExtensionAccessToken();
+
+        try {
+          if (token) {
+            await fetch(`${getKnowwAppUrl()}/api/extension/session/logout`, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+            });
+          }
+        } finally {
+          await clearExtensionAccessToken();
+          sendResponse({ ok: true, data: null } as BackgroundResponse);
+        }
+      })();
       return true;
     }
 

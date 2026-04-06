@@ -730,6 +730,14 @@ async function extractKeywordsWithAI(
 
     if (resp?.ok && "data" in resp && resp.data) {
       const data = resp.data as AITopicExtractionEndpointResponse;
+      const status = "status" in resp ? resp.status : undefined;
+
+      if (typeof status === "number" && (status < 200 || status >= 300)) {
+        log("AI extraction returned non-2xx status:", status, data);
+        setCachedAIExtraction(normalizedText, null);
+        return null;
+      }
+
       log("AI endpoint response meta:", {
         success: data.success,
         cached: data.cached,
@@ -744,6 +752,17 @@ async function extractKeywordsWithAI(
           "AI endpoint returned success=false:",
           data.error || "unknown error"
         );
+        setCachedAIExtraction(normalizedText, null);
+        return null;
+      }
+
+      if (
+        typeof data.searchQuery !== "string" ||
+        !Array.isArray(data.tags) ||
+        !Array.isArray(data.entities) ||
+        typeof data.confidence !== "number"
+      ) {
+        log("AI endpoint returned unexpected payload shape:", data);
         setCachedAIExtraction(normalizedText, null);
         return null;
       }
@@ -1539,6 +1558,22 @@ async function validateMarketRelevance(
         reason?: string;
         confidence?: number;
       };
+      const status = "status" in resp ? resp.status : undefined;
+
+      if (typeof status === "number" && (status < 200 || status >= 300)) {
+        log("AI relevance validation returned non-2xx status:", status, data);
+        return null;
+      }
+
+      if (
+        typeof data.relevant !== "boolean" ||
+        typeof data.reason !== "string" ||
+        typeof data.confidence !== "number"
+      ) {
+        log("AI relevance validation returned unexpected payload shape:", data);
+        return null;
+      }
+
       log("AI relevance validation:", {
         market: market.title?.slice(0, 40),
         relevant: data.relevant,
@@ -1546,9 +1581,9 @@ async function validateMarketRelevance(
         confidence: data.confidence,
       });
       return {
-        relevant: data.relevant ?? true,
-        reason: data.reason || "",
-        confidence: data.confidence ?? 0,
+        relevant: data.relevant,
+        reason: data.reason,
+        confidence: data.confidence,
       };
     }
   } catch (e) {

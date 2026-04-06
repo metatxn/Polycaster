@@ -486,6 +486,18 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     const startedAt = Date.now();
     const BRIDGE_TIMEOUT_MS = 3 * 60 * 1000;
 
+    const checkTimeout = () => {
+      if (cancelled) return;
+      if (Date.now() - startedAt >= BRIDGE_TIMEOUT_MS) {
+        cancelled = true;
+        setDepositError(
+          "Transaction confirmed on-chain, but bridge credit is taking longer than expected. Please check again shortly."
+        );
+        setIsConfirming(false);
+        setIsProcessing(false);
+      }
+    };
+
     const fetchStatus = () => {
       getDepositStatus(bridgeAddress)
         .then((data) => {
@@ -510,22 +522,10 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
             setIsConfirming(false);
             setIsConfirmed(true);
             setIsProcessing(false);
-            return;
-          }
-
-          if (Date.now() - startedAt >= BRIDGE_TIMEOUT_MS) {
-            cancelled = true;
-            setDepositError(
-              "Transaction confirmed on-chain, but bridge credit is taking longer than expected. Please check again shortly."
-            );
-            setIsConfirming(false);
-            setIsProcessing(false);
           }
         })
-        .catch(() => {
-          // Poll continues on transient fetch failures; the interval
-          // or the timeout branch will eventually stop it.
-        });
+        .catch(() => {})
+        .finally(checkTimeout);
     };
 
     fetchStatus();

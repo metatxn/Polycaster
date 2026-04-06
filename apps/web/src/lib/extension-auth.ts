@@ -53,7 +53,10 @@ export async function verifyExtensionRequest(
 
 export async function verifyExtensionAccess(
   request: NextRequest,
-  requiredScope: ExtensionScope
+  requiredScope: ExtensionScope,
+  options?: {
+    allowLowTrustFallback?: boolean;
+  }
 ): Promise<NextResponse | null> {
   const authHeader = request.headers.get("authorization");
 
@@ -62,5 +65,9 @@ export async function verifyExtensionAccess(
     return response;
   }
 
-  return verifyExtensionRequest(request);
+  if (options?.allowLowTrustFallback) {
+    return verifyExtensionRequest(request);
+  }
+
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }

@@ -32,53 +32,66 @@ export async function POST(request: NextRequest) {
     }
 
     const walletAddress = getAddress(body.walletAddress);
-    const challenge = await verifyExtensionChallengeToken(body.challengeToken);
-    if (
-      !challenge ||
-      challenge.message !== body.message ||
-      challenge.address !== walletAddress.toLowerCase() ||
-      challenge.chainId !== body.chainId
-    ) {
-      return NextResponse.json(
-        { error: "Invalid or expired challenge" },
-        { status: 401 }
+
+    try {
+      const challenge = await verifyExtensionChallengeToken(
+        body.challengeToken
       );
-    }
+      if (
+        !challenge ||
+        challenge.message !== body.message ||
+        challenge.address !== walletAddress.toLowerCase() ||
+        challenge.chainId !== body.chainId
+      ) {
+        return NextResponse.json(
+          { error: "Invalid or expired challenge" },
+          { status: 401 }
+        );
+      }
 
-    const isValid = await verifyMessage({
-      address: walletAddress,
-      message: body.message,
-      signature: body.signature as `0x${string}`,
-    });
+      const isValid = await verifyMessage({
+        address: walletAddress,
+        message: body.message,
+        signature: body.signature as `0x${string}`,
+      });
 
-    if (!isValid) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-    }
+      if (!isValid) {
+        return NextResponse.json(
+          { error: "Invalid signature" },
+          { status: 401 }
+        );
+      }
 
-    const { token, claims } = await issueExtensionSessionToken({
-      address: walletAddress,
-      chainId: body.chainId,
-    });
+      const { token, claims } = await issueExtensionSessionToken({
+        address: walletAddress,
+        chainId: body.chainId,
+      });
 
-    return NextResponse.json(
-      {
-        success: true,
-        token,
-        expiresAt: new Date(claims.exp).toISOString(),
-      },
-      { status: 200 }
-    );
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes("EXTENSION_SESSION_SECRET")
-    ) {
       return NextResponse.json(
-        { error: "Extension session secret is not configured" },
+        {
+          success: true,
+          token,
+          expiresAt: new Date(claims.exp).toISOString(),
+        },
+        { status: 200 }
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("EXTENSION_SESSION_SECRET")
+      ) {
+        return NextResponse.json(
+          { error: "Extension session secret is not configured" },
+          { status: 503 }
+        );
+      }
+
+      return NextResponse.json(
+        { error: "Failed to establish extension session" },
         { status: 503 }
       );
     }
-
+  } catch {
     return NextResponse.json(
       { error: "Invalid request payload" },
       { status: 400 }

@@ -233,7 +233,6 @@ function sanitizeHtml(html: string): string {
     "frame",
     "frameset",
     "style",
-    "svg",
     "math",
     "noscript",
     "template",
@@ -3669,6 +3668,30 @@ function showToast(
 
 // ── Public API ──
 
+let overflowOverrides: Array<{ el: HTMLElement; prev: string }> = [];
+
+function clearOverflowOverrides(): void {
+  for (const { el: elem, prev } of overflowOverrides) {
+    if (elem.isConnected) {
+      elem.style.overflow = prev;
+    }
+  }
+  overflowOverrides = [];
+}
+
+function applyOverflowOverrides(startEl: HTMLElement): void {
+  clearOverflowOverrides();
+  let current: HTMLElement | null = startEl.parentElement;
+  while (current) {
+    const style = getComputedStyle(current);
+    if (style.overflow === "hidden" || style.overflowY === "hidden") {
+      overflowOverrides.push({ el: current, prev: current.style.overflow });
+      current.style.overflow = "visible";
+    }
+    current = current.parentElement;
+  }
+}
+
 export const TradingPanel = {
   show(opts: PanelOptions): void {
     this.hide();
@@ -3681,6 +3704,7 @@ export const TradingPanel = {
       anchor.parentNode?.insertBefore(panel, anchor.nextSibling);
     }
     activePanel = panel;
+    applyOverflowOverrides(panel);
   },
 
   hide(): void {
@@ -3694,6 +3718,7 @@ export const TradingPanel = {
       activeUnsubscribe();
       activeUnsubscribe = null;
     }
+    clearOverflowOverrides();
     if (activePanel) {
       activePanel.remove();
       activePanel = null;

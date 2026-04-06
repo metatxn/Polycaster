@@ -227,10 +227,10 @@ function OptionsApp() {
         "Are you sure you want to disconnect your wallet? You will need to sign in again to trade."
       )
     ) {
-      chrome.runtime.sendMessage({ type: "auth:clear-token" }, (response) => {
+      chrome.runtime.sendMessage({ type: "auth:logout" }, (response) => {
         if (chrome.runtime.lastError) {
           console.error(
-            "auth:clear-token failed:",
+            "auth:logout failed:",
             chrome.runtime.lastError.message
           );
           setHasToken(false);
@@ -240,7 +240,7 @@ function OptionsApp() {
           setHasToken(false);
           showStatus("Wallet disconnected");
         } else {
-          console.error("auth:clear-token returned non-ok response:", response);
+          console.error("auth:logout returned non-ok response:", response);
           setHasToken(false);
         }
       });

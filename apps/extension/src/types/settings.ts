@@ -6,6 +6,7 @@ export interface UserSettings {
     twitter: boolean;
     linkedin: boolean;
     reddit: boolean;
+    quora: boolean;
   };
   sources: {
     polymarket: boolean;
@@ -29,6 +30,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     twitter: true,
     linkedin: true,
     reddit: true,
+    quora: true,
   },
   sources: {
     polymarket: true,

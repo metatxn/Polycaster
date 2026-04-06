@@ -37,6 +37,10 @@ interface NthInserterApi {
     itemSelector: string;
     containerSelector: string;
   };
+  getQuoraSelectors: () => {
+    itemSelector: string;
+    containerSelector: string;
+  };
   getPlatformSelectors: () => {
     itemSelector: string;
     containerSelector: string;
@@ -292,6 +296,7 @@ declare global {
     KNOWW_TWITTER: PlatformAdapter;
     KNOWW_LINKEDIN: PlatformAdapter;
     KNOWW_REDDIT: PlatformAdapter;
+    KNOWW_QUORA: PlatformAdapter;
 
     // Settings listeners
     KNOWW_SETTINGS_LISTENERS: Array<(settings: UserSettings) => void>;

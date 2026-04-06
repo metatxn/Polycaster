@@ -26,6 +26,8 @@
     "https://www.reddit.com/*",
     "https://reddit.com/*",
     "https://old.reddit.com/*",
+    "https://www.quora.com/*",
+    "https://quora.com/*",
     "https://gamma-api.polymarket.com/*",
     "https://api.elections.kalshi.com/*",
     "https://knoww.app/*",
@@ -63,6 +65,8 @@
         "https://www.reddit.com/*",
         "https://reddit.com/*",
         "https://old.reddit.com/*",
+        "https://www.quora.com/*",
+        "https://quora.com/*",
         "https://farcaster.com/*"
       ]
     }
@@ -77,6 +81,8 @@
         "https://www.reddit.com/*",
         "https://reddit.com/*",
         "https://old.reddit.com/*",
+        "https://www.quora.com/*",
+        "https://quora.com/*",
         "https://farcaster.com/*"
       ],
       "js": ["content.js"],

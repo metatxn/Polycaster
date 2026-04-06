@@ -144,6 +144,29 @@ function injectInlineStyles(): void {
         --knoww-card-bg: rgb(39, 39, 41);
       }
 
+      /* Quora Light Mode (default) */
+      .knoww-platform-quora {
+        --knoww-bg: rgb(255, 255, 255);
+        --knoww-border: rgba(0, 0, 0, 0.12);
+        --knoww-text: rgb(40, 40, 41);
+        --knoww-text-secondary: rgb(99, 99, 100);
+        --knoww-accent: #b92b27;
+        --knoww-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --knoww-radius: 12px;
+        --knoww-card-bg: rgb(247, 247, 248);
+      }
+
+      /* Quora Dark Mode */
+      .dark .knoww-platform-quora,
+      [data-theme="dark"] .knoww-platform-quora,
+      .knoww-platform-quora.knoww-theme-dark {
+        --knoww-bg: rgb(38, 38, 39);
+        --knoww-border: rgba(255, 255, 255, 0.12);
+        --knoww-text: rgb(240, 240, 240);
+        --knoww-text-secondary: rgba(255, 255, 255, 0.7);
+        --knoww-card-bg: rgb(48, 48, 49);
+      }
+
       /* Stacked cards container - for multi-source display */
       .knoww-stacked-cards {
         display: flex !important;
@@ -631,6 +654,35 @@ function injectInlineStyles(): void {
 
       .knoww-notification-stack-reddit .knoww-stack-item-outcomes {
         font-size: 11px !important;
+      }
+
+      /* Quora-specific notification stack styling */
+      .knoww-notification-stack-quora {
+        top: 60px !important;
+        width: 280px !important;
+        --knoww-bg: rgb(255, 255, 255) !important;
+        --knoww-border: rgba(0, 0, 0, 0.12) !important;
+        --knoww-text: rgb(40, 40, 41) !important;
+        --knoww-text-secondary: rgb(99, 99, 100) !important;
+        --knoww-accent: #b92b27 !important;
+        --knoww-radius: 12px !important;
+        --knoww-card-bg: rgb(247, 247, 248) !important;
+        border-radius: 12px !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+      }
+
+      .dark .knoww-notification-stack-quora,
+      [data-theme="dark"] .knoww-notification-stack-quora,
+      .knoww-notification-stack-quora.knoww-theme-dark {
+        --knoww-bg: rgb(38, 38, 39) !important;
+        --knoww-border: rgba(255, 255, 255, 0.12) !important;
+        --knoww-text: rgb(240, 240, 240) !important;
+        --knoww-text-secondary: rgba(255, 255, 255, 0.7) !important;
+        --knoww-card-bg: rgb(48, 48, 49) !important;
+      }
+
+      .knoww-notification-stack-quora .knoww-stack-badge {
+        background: #b92b27 !important;
       }
 
       /* Header */

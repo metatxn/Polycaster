@@ -49,10 +49,22 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const sig = body.signature;
+      if (
+        typeof sig !== "string" ||
+        !sig.startsWith("0x") ||
+        !/^[0-9a-fA-F]+$/.test(sig.slice(2))
+      ) {
+        return NextResponse.json(
+          { error: "Malformed signature" },
+          { status: 400 }
+        );
+      }
+
       const isValid = await verifyMessage({
         address: walletAddress,
         message: body.message,
-        signature: body.signature as `0x${string}`,
+        signature: sig as `0x${string}`,
       });
 
       if (!isValid) {

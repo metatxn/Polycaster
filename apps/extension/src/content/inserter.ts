@@ -137,6 +137,33 @@ function getLinkedInSelectors(): {
 }
 
 /**
+ * Returns a selector set for Quora answers.
+ * - itemSelector: answer content blocks
+ * - containerSelector: main content area
+ */
+function getQuoraSelectors(): {
+  itemSelector: string;
+  containerSelector: string;
+} {
+  const itemSelector = [
+    ".puppeteer_test_answer_content",
+    "[data-testid='answer_content']",
+  ].join(", ");
+
+  const containerSelectorCandidates = [
+    'main[role="main"]',
+    "main",
+    '[role="main"]',
+    "body",
+  ];
+
+  const containerSelector =
+    containerSelectorCandidates.find((sel) => document.querySelector(sel)) ||
+    "body";
+  return { itemSelector, containerSelector };
+}
+
+/**
  * Get selectors for the current platform (auto-detect)
  * Uses platform registry if available, otherwise falls back to manual detection
  */
@@ -155,9 +182,13 @@ function getPlatformSelectors(): {
   // Fallback to manual detection
   const host = (typeof location !== "undefined" && location.hostname) || "";
   const isLinkedIn = /(^|\.)linkedin\.com$/.test(host);
+  const isQuora = /(^|\.)quora\.com$/.test(host);
 
   if (isLinkedIn) {
     return getLinkedInSelectors();
+  }
+  if (isQuora) {
+    return getQuoraSelectors();
   }
   return getXSelectors();
 }
@@ -169,6 +200,7 @@ interface NthInserterApi {
   insertAfter: typeof insertAfter;
   getXSelectors: typeof getXSelectors;
   getLinkedInSelectors: typeof getLinkedInSelectors;
+  getQuoraSelectors: typeof getQuoraSelectors;
   getPlatformSelectors: typeof getPlatformSelectors;
 }
 
@@ -179,6 +211,7 @@ const api: NthInserterApi = {
   insertAfter,
   getXSelectors,
   getLinkedInSelectors,
+  getQuoraSelectors,
   getPlatformSelectors,
 };
 
@@ -191,6 +224,7 @@ if (typeof window !== "undefined") {
 export {
   getLinkedInSelectors,
   getPlatformSelectors,
+  getQuoraSelectors,
   getXSelectors,
   htmlToElement,
   insertAfter,

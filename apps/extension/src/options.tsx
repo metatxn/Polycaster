@@ -18,6 +18,8 @@ const ALLOWED_HOSTS = new Set([
   "www.reddit.com",
   "new.reddit.com",
   "old.reddit.com",
+  "quora.com",
+  "www.quora.com",
 ]);
 
 function isSupportedSocialHost(url: string | undefined): boolean {
@@ -298,6 +300,20 @@ function OptionsApp() {
             id="platform-reddit"
             checked={settings.platforms.reddit}
             onChange={(v) => updatePlatform("reddit", v)}
+          />
+        </SettingRow>
+
+        <Divider />
+
+        <SettingRow
+          label="Quora"
+          description="Show prediction markets on Quora answers"
+          icon="Q"
+        >
+          <Toggle
+            id="platform-quora"
+            checked={settings.platforms.quora}
+            onChange={(v) => updatePlatform("quora", v)}
           />
         </SettingRow>
       </Section>

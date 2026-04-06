@@ -26,6 +26,7 @@ import "./platform-registry";
 import "./platforms/twitter";
 import "./platforms/linkedin";
 import "./platforms/reddit";
+import "./platforms/quora";
 
 // 6. Kalshi adapter (market source)
 import "./kalshi-adapter";

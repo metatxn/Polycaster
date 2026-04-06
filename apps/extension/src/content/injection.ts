@@ -213,6 +213,14 @@ function naiveContextGate(
  * triggering expensive layout/style computations.
  */
 function getPostIdentityKey(post: Element): string | null {
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  if (platform && typeof platform.getPostId === "function") {
+    const platformPostId = platform.getPostId(post);
+    if (platformPostId) {
+      return `${platform.name}:${platformPostId}`;
+    }
+  }
+
   // Reddit: shreddit-post has id="t3_xxxxx" directly on the element
   if (post.tagName?.toLowerCase() === "shreddit-post") {
     const redditId = post.getAttribute("id") || post.getAttribute("post-id");

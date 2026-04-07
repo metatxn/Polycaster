@@ -46,7 +46,8 @@
       "@polymarket/builder-signing-sdk": "1.0.0",
       "undici": "7.24.0",
       "socket.io-parser": "4.2.6",
-      "path-to-regexp": "8.4.0"
+      "path-to-regexp": "8.4.0",
+      "defu": "6.1.5"
     }
   }
 }

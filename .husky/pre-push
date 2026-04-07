@@ -12,17 +12,17 @@ echo "Running pre-push checks..."
 
 # --- Security audit (fast, ~3s, runs first to fail fast) ---
 echo "Auditing dependencies for HIGH/CRITICAL vulnerabilities..."
-AUDIT_JSON=$(pnpm audit --json 2>&1) || true
-if [ -z "$AUDIT_JSON" ]; then
-  echo "BLOCKED: 'pnpm audit --json' returned empty output."
-  exit 1
-fi
-HIGH_CRIT=$(echo "$AUDIT_JSON" | node -e "
-  let d='';
-  process.stdin.on('data',c=>d+=c);
+HIGH_CRIT=$(pnpm audit --json 2>/dev/null | node -e "
+  const chunks=[];
+  process.stdin.on('data',c=>chunks.push(c));
   process.stdin.on('end',()=>{
+    const raw=Buffer.concat(chunks).toString('utf-8');
+    if(!raw.trim()){
+      console.error('pnpm audit returned empty output');
+      process.exit(2);
+    }
     try {
-      const v=JSON.parse(d).metadata.vulnerabilities;
+      const v=JSON.parse(raw).metadata.vulnerabilities;
       process.stdout.write(String((v.high||0)+(v.critical||0)));
     } catch (err) {
       console.error('Failed to parse audit JSON:', err instanceof Error ? err.message : String(err));

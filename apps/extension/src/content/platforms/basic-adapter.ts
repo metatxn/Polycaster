@@ -40,12 +40,44 @@ export interface BasicAdapterConfig {
   >;
 }
 
+function getRequiredSelectors(
+  adapterName: string,
+  selectorType: "item" | "container" | "text",
+  selectors: string[]
+): string[] {
+  const validSelectors = selectors
+    .map((selector) => selector.trim())
+    .filter(Boolean);
+  if (validSelectors.length === 0) {
+    throw new Error(
+      `Platform adapter "${adapterName}" requires at least one ${selectorType} selector`
+    );
+  }
+
+  return validSelectors;
+}
+
 export function createBasicAdapter(
   config: BasicAdapterConfig
 ): PlatformAdapter {
-  const itemSelector = config.itemSelectors.join(", ");
-  const containerSelector = config.containerSelectors.join(", ");
-  const textSelector = config.textSelectors.join(", ");
+  const itemSelectors = getRequiredSelectors(
+    config.name,
+    "item",
+    config.itemSelectors
+  );
+  const containerSelectors = getRequiredSelectors(
+    config.name,
+    "container",
+    config.containerSelectors
+  );
+  const textSelectors = getRequiredSelectors(
+    config.name,
+    "text",
+    config.textSelectors
+  );
+  const itemSelector = itemSelectors.join(", ");
+  const containerSelector = containerSelectors.join(", ");
+  const textSelector = textSelectors.join(", ");
 
   const adapter: PlatformAdapter = {
     name: config.name,
@@ -64,7 +96,7 @@ export function createBasicAdapter(
         ...(config.contextSelectors
           ? collectTextParts(document, config.contextSelectors)
           : []),
-        ...collectTextParts(postElement, config.textSelectors),
+        ...collectTextParts(postElement, textSelectors),
       ];
 
       return combineTextParts(parts);
@@ -83,7 +115,7 @@ export function createBasicAdapter(
 
       return findInjectionAfterSelectors(
         postElement,
-        config.referenceSelectors || config.textSelectors
+        config.referenceSelectors || textSelectors
       );
     },
     detectTheme(): "dark" | "light" {
@@ -113,7 +145,7 @@ export function createBasicAdapter(
         return config.getDynamicSelectors();
       }
 
-      return buildDynamicSelectors(itemSelector, config.containerSelectors);
+      return buildDynamicSelectors(itemSelector, containerSelectors);
     },
     getWrapperStyles(): string {
       if (config.getWrapperStyles) {

@@ -19,9 +19,11 @@ function isRedditDarkMode(): boolean {
 
   if (!htmlDark && !bodyDark) {
     const bgColor = getComputedStyle(document.body).backgroundColor;
-    const match = bgColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    const match = bgColor.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/i);
     if (match) {
-      const [, r, g, b] = match.map(Number);
+      const r = Number(match[1]);
+      const g = Number(match[2]);
+      const b = Number(match[3]);
       return r < 50 && g < 50 && b < 50;
     }
   }

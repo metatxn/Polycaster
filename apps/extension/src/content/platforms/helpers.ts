@@ -86,14 +86,18 @@ export function detectGenericTheme(): "dark" | "light" {
   }
 
   const bodyBg = window.getComputedStyle(document.body).backgroundColor;
-  const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+  const rgbMatch = bodyBg.match(
+    /rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*[\d.]+)?\s*\)/i
+  );
   if (rgbMatch) {
-    const [, r, g, b] = rgbMatch.map(Number);
+    const r = Number(rgbMatch[1]);
+    const g = Number(rgbMatch[2]);
+    const b = Number(rgbMatch[3]);
     const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
     return luminance < 145 ? "dark" : "light";
   }
 
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+  return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
     ? "dark"
     : "light";
 }
@@ -145,8 +149,16 @@ export function findFirstMatchingSelector(
   selectors: string[],
   scope: ParentNode = document
 ): string {
+  const validSelectors = selectors
+    .map((selector) => selector.trim())
+    .filter(Boolean);
+  if (validSelectors.length === 0) {
+    throw new Error("findFirstMatchingSelector requires at least one selector");
+  }
+
   return (
-    selectors.find((selector) => scope.querySelector(selector)) || selectors[0]
+    validSelectors.find((selector) => scope.querySelector(selector)) ||
+    validSelectors[0]
   );
 }
 
@@ -200,7 +212,7 @@ export function findInjectionAfterSelectors(
 export function findInjectionBeforeSelectors(
   postElement: Element,
   selectors: string[]
-): InjectionPoint | null {
+): InjectionPoint {
   for (const selector of selectors) {
     const reference = postElement.querySelector(selector);
     if (reference?.parentElement) {
@@ -226,11 +238,18 @@ export function extractPostIdFromAttributes(
   attributeNames: string[]
 ): string | null {
   for (const attributeName of attributeNames) {
-    const value =
-      postElement.getAttribute(attributeName) ||
-      postElement
-        .querySelector?.(`[${attributeName}]`)
-        ?.getAttribute(attributeName);
+    const directValue = postElement.getAttribute(attributeName);
+    if (directValue) {
+      return directValue;
+    }
+
+    const descendant =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? postElement.querySelector(`[${CSS.escape(attributeName)}]`)
+        : Array.from(postElement.querySelectorAll("*")).find((element) =>
+            element.hasAttribute(attributeName)
+          );
+    const value = descendant?.getAttribute(attributeName);
     if (value) {
       return value;
     }

@@ -165,7 +165,9 @@ const ProductHuntAdapter = createBasicAdapter({
       }
     }
 
-    if (parts.join(" ").trim().length < 20) {
+    const combined = parts.join(" ").trim();
+
+    if (combined.length < 20) {
       const textParts: string[] = [];
       const walker = document.createTreeWalker(
         postElement,
@@ -189,12 +191,13 @@ const ProductHuntAdapter = createBasicAdapter({
         .replace(/\s+/g, " ")
         .trim();
 
-      if (cleaned.length >= 20) {
-        return cleaned.slice(0, 300);
+      const bestFallback =
+        cleaned.length > combined.length ? cleaned : combined;
+      if (bestFallback.length >= 15) {
+        return bestFallback.slice(0, 300);
       }
     }
 
-    const combined = parts.join(" ").trim();
     return combined.length >= 15 ? combined : "";
   },
   getPostId(postElement: Element): string | null {

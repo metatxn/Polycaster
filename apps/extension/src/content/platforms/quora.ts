@@ -34,7 +34,8 @@ function detectQuoraTheme(): "dark" | "light" {
 }
 
 function getQuoraCardStyles(theme?: string): CardStyles {
-  const activeTheme = (theme || detectQuoraTheme()) as "dark" | "light";
+  const activeTheme =
+    theme === "dark" || theme === "light" ? theme : detectQuoraTheme();
 
   return buildGenericCardStyles(
     {

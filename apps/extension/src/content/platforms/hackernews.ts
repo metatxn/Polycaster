@@ -51,6 +51,14 @@ const HackerNewsAdapter = createBasicAdapter({
 
         return {
           container: cell,
+          cleanup: () => {
+            if (
+              wrapperRow.isConnected &&
+              !wrapperRow.querySelector(".knoww-stacked-cards")
+            ) {
+              wrapperRow.remove();
+            }
+          },
           insertPosition: "append",
           postWrapper: postElement,
         };

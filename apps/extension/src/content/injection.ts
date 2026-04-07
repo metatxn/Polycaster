@@ -17,6 +17,7 @@ interface InjectionPoint {
   container: Element;
   cellInnerDiv?: Element;
   postWrapper?: Element;
+  cleanup?: () => void;
   referenceElement?: Element | null | undefined;
   insertPosition: "append" | "before" | "after";
 }
@@ -982,6 +983,7 @@ function injectMarketCards(
     container,
     cellInnerDiv,
     postWrapper,
+    cleanup,
     referenceElement,
     insertPosition,
   } = injectionPoint;
@@ -990,6 +992,7 @@ function injectMarketCards(
   const wrapperToCheck = cellInnerDiv || postWrapper || container;
   if (wrapperToCheck?.querySelector(".knoww-market-card")) {
     log("Post already has a Knoww card");
+    cleanup?.();
     return false;
   }
 
@@ -1000,6 +1003,7 @@ function injectMarketCards(
 
   if (newMarkets.length === 0) {
     log("All markets already injected");
+    cleanup?.();
     return false;
   }
 
@@ -1103,6 +1107,7 @@ function injectMarketCards(
     );
     return true;
   } catch (e) {
+    cleanup?.();
     log("Failed to inject cards:", e);
     return false;
   }

@@ -11,11 +11,21 @@ import type {
 import { registerAdapterWithRetry } from "../platform-registry";
 import { createBasicAdapter } from "./basic-adapter";
 
+function isTwitterTheme(
+  theme: string | undefined
+): theme is "dark" | "dim" | "light" {
+  return theme === "dark" || theme === "dim" || theme === "light";
+}
+
 function detectTwitterTheme(): "dark" | "dim" | "light" {
   try {
     const themeOverride = window.KNOWW_CONFIG?.getThemeOverride?.();
-    if (themeOverride && themeOverride !== "auto") {
-      return themeOverride as "dark" | "dim" | "light";
+    if (
+      themeOverride &&
+      themeOverride !== "auto" &&
+      isTwitterTheme(themeOverride)
+    ) {
+      return themeOverride;
     }
 
     const bodyBg = window.getComputedStyle(document.body).backgroundColor;
@@ -50,10 +60,7 @@ function detectTwitterTheme(): "dark" | "dim" | "light" {
 }
 
 function getTwitterCardStyles(theme?: string): CardStyles {
-  const activeTheme = (theme || detectTwitterTheme()) as
-    | "dark"
-    | "dim"
-    | "light";
+  const activeTheme = isTwitterTheme(theme) ? theme : detectTwitterTheme();
 
   const baseStyles = {
     fontFamily:

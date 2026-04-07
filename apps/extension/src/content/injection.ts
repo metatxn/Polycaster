@@ -59,6 +59,31 @@ interface AnalysisResult {
   postText: string;
 }
 
+function applyPlatformStyleVariables(
+  element: HTMLElement,
+  styles: Record<string, unknown> | null | undefined
+): void {
+  if (!styles) return;
+
+  const styleMap: Record<string, string> = {
+    "--knoww-bg": "backgroundColor",
+    "--knoww-border": "borderColor",
+    "--knoww-text": "textColor",
+    "--knoww-text-secondary": "secondaryTextColor",
+    "--knoww-card-bg": "cardBg",
+    "--knoww-accent": "accentColor",
+    "--knoww-font": "fontFamily",
+    "--knoww-radius": "borderRadius",
+  };
+
+  for (const [cssVariable, key] of Object.entries(styleMap)) {
+    const value = styles[key];
+    if (typeof value === "string" && value) {
+      element.style.setProperty(cssVariable, value);
+    }
+  }
+}
+
 async function scoreMarketsBatch(
   postText: string,
   marketTexts: string[],
@@ -538,6 +563,13 @@ async function analyzePostAndFindMarket(
     contextGateResults = [];
   }
 
+  const AI_GATE_RETRY_FLOOR = 0.6;
+  const gateBlockedHighScorers: Array<{
+    index: number;
+    score: number;
+    gateText: string;
+  }> = [];
+
   for (let i = 0; i < markets.length; i++) {
     const market = markets[i];
     if (injectedMarketIds.has(market.id)) {
@@ -561,6 +593,12 @@ async function analyzePostAndFindMarket(
         log(
           `🛑 Context gate dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
         );
+        if (score >= AI_GATE_RETRY_FLOOR) {
+          let gateText = market.title || "";
+          if (market.description)
+            gateText += ` ${market.description.slice(0, 120)}`;
+          gateBlockedHighScorers.push({ index: i, score, gateText });
+        }
         continue;
       }
       if (isDebug) {
@@ -593,6 +631,88 @@ async function analyzePostAndFindMarket(
         score,
       };
     }
+  }
+
+  // AI-assisted retry: if no market passed the gate but high-scoring markets
+  // were blocked, use AI extraction to enrich the post text with better
+  // entities/keywords and re-evaluate the gate for those candidates.
+  const hasPassedMarket = Object.values(bestBySource).some(
+    (data) => data.market && data.score >= effectiveThreshold
+  );
+
+  if (
+    !hasPassedMarket &&
+    gateBlockedHighScorers.length > 0 &&
+    usedEmbeddings &&
+    CONFIG.USE_AI_EXTRACTION &&
+    window.KNOWW_API?.extractKeywordsWithAI
+  ) {
+    log(
+      `🤖 [AI Retry] ${gateBlockedHighScorers.length} high-scoring market(s) blocked by gate, attempting AI extraction...`
+    );
+
+    try {
+      const aiResult = await window.KNOWW_API.extractKeywordsWithAI(text);
+
+      if (aiResult?.keywords) {
+        const enrichedText = [
+          text,
+          aiResult.keywords,
+          ...aiResult.entities,
+          ...aiResult.topics,
+        ].join(" ");
+
+        log(
+          `🤖 [AI Retry] Enriched text with AI: +${aiResult.entities.length} entities, +${aiResult.topics.length} topics`
+        );
+
+        const blockedGateTexts = gateBlockedHighScorers.map((b) => b.gateText);
+        const retryScoring = await scoreMarketsBatch(
+          enrichedText,
+          blockedGateTexts,
+          blockedGateTexts
+        );
+
+        for (let j = 0; j < gateBlockedHighScorers.length; j++) {
+          const { index, score } = gateBlockedHighScorers[j];
+          const gate = retryScoring.contextGateResults[j];
+          const market = markets[index];
+          const source = market.source || "polymarket";
+
+          if (!gate?.pass) {
+            log(
+              `🤖 [AI Retry] Still blocked: "${market.title?.slice(0, 50)}..." (${gate?.details || "no gate result"})`
+            );
+            continue;
+          }
+
+          log(
+            `🤖 [AI Retry] ✅ Gate passed with AI: "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
+          );
+
+          if (bestBySource[source] && score > bestBySource[source].score) {
+            bestBySource[source] = {
+              ...bestBySource[source],
+              market,
+              score,
+            };
+          }
+        }
+      } else {
+        log("🤖 [AI Retry] AI extraction returned no usable result");
+      }
+    } catch (e) {
+      log("🤖 [AI Retry] Failed:", e);
+    }
+  } else if (
+    !hasPassedMarket &&
+    gateBlockedHighScorers.length > 0 &&
+    usedEmbeddings &&
+    !CONFIG.USE_AI_EXTRACTION
+  ) {
+    log(
+      `🤖 [AI Retry] Skipped — AI-assisted matching is disabled in settings (${gateBlockedHighScorers.length} high-scoring market(s) blocked by gate)`
+    );
   }
 
   if (isDebug) {
@@ -915,6 +1035,7 @@ function injectMarketCards(
   wrapper.setAttribute("data-knoww-platform", platformName);
   wrapper.className = `knoww-stacked-cards knoww-platform-${platformName}${themeClass}`;
   wrapper.style.cssText = wrapperStyles;
+  applyPlatformStyleVariables(wrapper, platform?.getCardStyles?.());
 
   const injectedCards: Array<{ market: Market; card: HTMLElement }> = [];
 

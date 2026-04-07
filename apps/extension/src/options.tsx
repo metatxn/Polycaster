@@ -2,31 +2,149 @@
 // KNOWW SETTINGS - Options Page
 // ============================================
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
-const ALLOWED_HOSTS = new Set([
-  "twitter.com",
-  "www.twitter.com",
-  "mobile.twitter.com",
-  "x.com",
-  "www.x.com",
-  "linkedin.com",
-  "www.linkedin.com",
-  "reddit.com",
-  "www.reddit.com",
-  "new.reddit.com",
-  "old.reddit.com",
-  "quora.com",
-  "www.quora.com",
-]);
+const SUPPORTED_HOST_PATTERNS = [
+  /(^|\.)twitter\.com$/i,
+  /(^|\.)x\.com$/i,
+  /(^|\.)linkedin\.com$/i,
+  /(^|\.)reddit\.com$/i,
+  /(^|\.)quora\.com$/i,
+  /^news\.ycombinator\.com$/i,
+  /(^|\.)stackoverflow\.com$/i,
+  /(^|\.)stackexchange\.com$/i,
+  /(^|\.)superuser\.com$/i,
+  /(^|\.)serverfault\.com$/i,
+  /(^|\.)askubuntu\.com$/i,
+  /(^|\.)mathoverflow\.net$/i,
+  /(^|\.)stackapps\.com$/i,
+  /(^|\.)producthunt\.com$/i,
+  /(^|\.)slashdot\.org$/i,
+  /(^|\.)lemmy\.world$/i,
+  /(^|\.)lemmy\.ml$/i,
+  /(^|\.)sh\.itjust\.works$/i,
+  /(^|\.)programming\.dev$/i,
+  /(^|\.)beehaw\.org$/i,
+  /(^|\.)feddit\.org$/i,
+  /(^|\.)lemm\.ee$/i,
+  /(^|\.)threads\.net$/i,
+  /^bsky\.app$/i,
+  /(^|\.)mastodon\.social$/i,
+  /(^|\.)mstdn\.social$/i,
+  /(^|\.)fosstodon\.org$/i,
+  /(^|\.)hachyderm\.io$/i,
+  /(^|\.)mas\.to$/i,
+  /(^|\.)infosec\.exchange$/i,
+  /(^|\.)discord\.com$/i,
+  /(^|\.)youtube\.com$/i,
+];
+
+const PLATFORM_OPTIONS: Array<{
+  key: keyof UserSettings["platforms"];
+  label: string;
+  description: string;
+  icon: string;
+}> = [
+  {
+    key: "twitter",
+    label: "Twitter / X",
+    description: "Show prediction markets on Twitter/X posts",
+    icon: "𝕏",
+  },
+  {
+    key: "linkedin",
+    label: "LinkedIn",
+    description: "Show prediction markets on LinkedIn posts",
+    icon: "in",
+  },
+  {
+    key: "reddit",
+    label: "Reddit",
+    description: "Show prediction markets on Reddit posts",
+    icon: "📱",
+  },
+  {
+    key: "quora",
+    label: "Quora",
+    description: "Show prediction markets on Quora answers",
+    icon: "Q",
+  },
+  {
+    key: "hackernews",
+    label: "Hacker News",
+    description: "Show prediction markets on Hacker News stories and comments",
+    icon: "Y",
+  },
+  {
+    key: "stackoverflow",
+    label: "Stack Overflow",
+    description:
+      "Show prediction markets on Stack Overflow questions and answers",
+    icon: "SO",
+  },
+  {
+    key: "stackexchange",
+    label: "Stack Exchange",
+    description: "Show prediction markets on Stack Exchange network posts",
+    icon: "SE",
+  },
+  {
+    key: "producthunt",
+    label: "Product Hunt",
+    description: "Show prediction markets on Product Hunt posts and comments",
+    icon: "PH",
+  },
+  {
+    key: "slashdot",
+    label: "Slashdot",
+    description: "Show prediction markets on Slashdot stories and comments",
+    icon: "SD",
+  },
+  {
+    key: "lemmy",
+    label: "Lemmy",
+    description: "Show prediction markets on supported Lemmy instances",
+    icon: "L",
+  },
+  {
+    key: "threads",
+    label: "Threads",
+    description: "Show prediction markets on Threads posts",
+    icon: "@",
+  },
+  {
+    key: "bluesky",
+    label: "Bluesky",
+    description: "Show prediction markets on Bluesky posts",
+    icon: "B",
+  },
+  {
+    key: "mastodon",
+    label: "Mastodon",
+    description: "Show prediction markets on supported Mastodon instances",
+    icon: "M",
+  },
+  {
+    key: "discord",
+    label: "Discord",
+    description: "Show prediction markets on Discord messages",
+    icon: "C",
+  },
+  {
+    key: "youtube",
+    label: "YouTube Comments",
+    description: "Show prediction markets in YouTube comments",
+    icon: "▶",
+  },
+];
 
 function isSupportedSocialHost(url: string | undefined): boolean {
   if (!url) return false;
   try {
     const { hostname } = new URL(url);
-    return ALLOWED_HOSTS.has(hostname);
+    return SUPPORTED_HOST_PATTERNS.some((pattern) => pattern.test(hostname));
   } catch {
     return false;
   }
@@ -263,59 +381,22 @@ function OptionsApp() {
 
       {/* Platforms Section */}
       <Section title="Platforms">
-        <SettingRow
-          label="Twitter / X"
-          description="Show prediction markets on Twitter/X posts"
-          icon="𝕏"
-        >
-          <Toggle
-            id="platform-twitter"
-            checked={settings.platforms.twitter}
-            onChange={(v) => updatePlatform("twitter", v)}
-          />
-        </SettingRow>
-
-        <Divider />
-
-        <SettingRow
-          label="LinkedIn"
-          description="Show prediction markets on LinkedIn posts"
-          icon="in"
-        >
-          <Toggle
-            id="platform-linkedin"
-            checked={settings.platforms.linkedin}
-            onChange={(v) => updatePlatform("linkedin", v)}
-          />
-        </SettingRow>
-
-        <Divider />
-
-        <SettingRow
-          label="Reddit"
-          description="Show prediction markets on Reddit posts"
-          icon="📱"
-        >
-          <Toggle
-            id="platform-reddit"
-            checked={settings.platforms.reddit}
-            onChange={(v) => updatePlatform("reddit", v)}
-          />
-        </SettingRow>
-
-        <Divider />
-
-        <SettingRow
-          label="Quora"
-          description="Show prediction markets on Quora answers"
-          icon="Q"
-        >
-          <Toggle
-            id="platform-quora"
-            checked={settings.platforms.quora}
-            onChange={(v) => updatePlatform("quora", v)}
-          />
-        </SettingRow>
+        {PLATFORM_OPTIONS.map((platform, index) => (
+          <Fragment key={platform.key}>
+            <SettingRow
+              label={platform.label}
+              description={platform.description}
+              icon={platform.icon}
+            >
+              <Toggle
+                id={`platform-${platform.key}`}
+                checked={settings.platforms[platform.key]}
+                onChange={(v) => updatePlatform(platform.key, v)}
+              />
+            </SettingRow>
+            {index < PLATFORM_OPTIONS.length - 1 && <Divider />}
+          </Fragment>
+        ))}
       </Section>
 
       {/* Market Sources Section */}
@@ -387,41 +468,6 @@ function OptionsApp() {
         <Divider />
 
         <SettingRow
-          label="AI Confidence Threshold"
-          description={
-            settings.aiConfidenceThreshold <= 0.15
-              ? "Analyzes almost all posts, even if they don't seem like news."
-              : settings.aiConfidenceThreshold >= 0.35
-                ? "Only analyzes posts that clearly sound like news or predictions."
-                : "Balanced: Analyzes posts that are likely to have relevant markets."
-          }
-        >
-          <div className="range-container">
-            <input
-              type="range"
-              id="ai-confidence-threshold"
-              min="0.05"
-              max="0.5"
-              step="0.05"
-              value={settings.aiConfidenceThreshold}
-              onInput={(e) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  aiConfidenceThreshold: parseFloat(
-                    (e.target as HTMLInputElement).value
-                  ),
-                }))
-              }
-            />
-            <span className="range-value" id="ai-confidence-value">
-              {settings.aiConfidenceThreshold.toFixed(2)}
-            </span>
-          </div>
-        </SettingRow>
-
-        <Divider />
-
-        <SettingRow
           label="Injection Frequency"
           description="Check for markets every N posts (lower = more frequent)"
         >
@@ -458,8 +504,8 @@ function OptionsApp() {
         <Divider />
 
         <SettingRow
-          label="AI Keyword Extraction"
-          description="Use AI to improve keyword/topic detection before fallback rules"
+          label="AI-Assisted Matching"
+          description="When a market scores high but lacks keyword overlap, use AI to verify relevance"
         >
           <Toggle
             id="ai-extraction-enabled"

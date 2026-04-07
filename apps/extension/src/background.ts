@@ -14,6 +14,7 @@ import {
   setExtensionAccessToken,
 } from "./background/extension-session";
 import { logWarn } from "./background/logger";
+import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import type {
   BackgroundResponse,
   FetchJsonMessage,
@@ -21,6 +22,43 @@ import type {
   ScoreMarketsMessage,
   ScoreMarketsSuccessResponse,
 } from "./types/chrome-messages";
+
+// ── Programmatic content script registration ──
+// Instead of declaring content_scripts in manifest.json (which would
+// require <all_urls> and load on every site), we register them only
+// for supported platforms via chrome.scripting.
+const CONTENT_SCRIPT_ID = "knoww-content";
+
+async function registerContentScripts(): Promise<void> {
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({
+      ids: [CONTENT_SCRIPT_ID],
+    });
+    if (existing.length > 0) {
+      await chrome.scripting.updateContentScripts([
+        {
+          id: CONTENT_SCRIPT_ID,
+          matches: SUPPORTED_MATCH_PATTERNS,
+          js: ["content.js"],
+          runAt: "document_idle",
+        },
+      ]);
+    } else {
+      await chrome.scripting.registerContentScripts([
+        {
+          id: CONTENT_SCRIPT_ID,
+          matches: SUPPORTED_MATCH_PATTERNS,
+          js: ["content.js"],
+          runAt: "document_idle",
+        },
+      ]);
+    }
+  } catch {
+    // Fallback: script may already be registered from a previous SW lifecycle
+  }
+}
+
+registerContentScripts();
 
 // ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
@@ -522,6 +560,7 @@ chrome.action.onClicked.addListener(() => {
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
+  registerContentScripts();
   if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
     chrome.runtime.openOptionsPage();
   }

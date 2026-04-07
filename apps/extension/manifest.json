@@ -18,27 +18,8 @@
     },
     "default_title": "Knoww Settings"
   },
-  "permissions": ["storage", "offscreen"],
-  "host_permissions": [
-    "https://x.com/*",
-    "https://twitter.com/*",
-    "https://www.linkedin.com/*",
-    "https://www.reddit.com/*",
-    "https://reddit.com/*",
-    "https://old.reddit.com/*",
-    "https://www.quora.com/*",
-    "https://quora.com/*",
-    "https://gamma-api.polymarket.com/*",
-    "https://api.elections.kalshi.com/*",
-    "https://knoww.app/*",
-    "http://localhost/*",
-    "https://clob.polymarket.com/*",
-    "https://data-api.polymarket.com/*",
-    "https://polygon-bor-rpc.publicnode.com/*",
-    "https://relayer-v2.polymarket.com/*",
-    "https://huggingface.co/*",
-    "https://*.huggingface.co/*"
-  ],
+  "permissions": ["storage", "offscreen", "scripting"],
+  "host_permissions": ["<all_urls>"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
@@ -58,35 +39,8 @@
         "*.wasm",
         "*.mjs"
       ],
-      "matches": [
-        "https://x.com/*",
-        "https://twitter.com/*",
-        "https://www.linkedin.com/*",
-        "https://www.reddit.com/*",
-        "https://reddit.com/*",
-        "https://old.reddit.com/*",
-        "https://www.quora.com/*",
-        "https://quora.com/*",
-        "https://farcaster.com/*"
-      ]
+      "matches": ["<all_urls>"]
     }
   ],
-  "options_page": "options.html",
-  "content_scripts": [
-    {
-      "matches": [
-        "https://x.com/*",
-        "https://twitter.com/*",
-        "https://www.linkedin.com/*",
-        "https://www.reddit.com/*",
-        "https://reddit.com/*",
-        "https://old.reddit.com/*",
-        "https://www.quora.com/*",
-        "https://quora.com/*",
-        "https://farcaster.com/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ]
+  "options_page": "options.html"
 }

@@ -3629,7 +3629,7 @@ function render(
     addEnableTrading(panel);
     return;
   } else if (state === "deriving-credentials") {
-    addLoading(panel, "Confirm signature in MetaMask...");
+    addLoading(panel, "Confirm signature in your wallet...");
     return;
   } else if (
     state === "ready" ||

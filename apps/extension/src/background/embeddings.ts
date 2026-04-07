@@ -88,9 +88,10 @@ function buildPipelineOptions(): {
 async function createPipelineInstance(): Promise<FeatureExtractionPipeline> {
   await preloadOnnxWasm();
   const baseOptions = buildPipelineOptions();
-  const webgpuAvailable = Boolean(
-    (env as { IS_WEBGPU_AVAILABLE?: boolean }).IS_WEBGPU_AVAILABLE
-  );
+  const webgpuAvailable =
+    Boolean((env as { IS_WEBGPU_AVAILABLE?: boolean }).IS_WEBGPU_AVAILABLE) ||
+    (typeof navigator !== "undefined" && "gpu" in navigator);
+  logDebug("embeddings.webgpu-check", { available: webgpuAvailable });
   if (webgpuAvailable) {
     try {
       return await pipeline<"feature-extraction">(

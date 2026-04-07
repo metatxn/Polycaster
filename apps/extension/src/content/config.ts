@@ -76,12 +76,6 @@ const CONFIG: Config = {
       DEFAULT_USER_SETTINGS.relevanceThreshold
     );
   },
-  get MIN_AI_CONFIDENCE() {
-    return (
-      USER_SETTINGS.aiConfidenceThreshold ??
-      DEFAULT_USER_SETTINGS.aiConfidenceThreshold
-    );
-  },
   get COOLDOWN_POSTS() {
     return USER_SETTINGS.cooldownPosts ?? DEFAULT_USER_SETTINGS.cooldownPosts;
   },
@@ -155,12 +149,17 @@ function getUserSettings(): UserSettings {
  * Check if a platform is enabled
  */
 function isPlatformEnabled(platformName: string): boolean {
-  const platforms = USER_SETTINGS.platforms as Record<string, boolean>;
-  const defaultPlatforms = DEFAULT_USER_SETTINGS.platforms as Record<
-    string,
-    boolean
-  >;
-  return platforms?.[platformName] ?? defaultPlatforms[platformName] ?? true;
+  const platforms = USER_SETTINGS.platforms;
+  if (platformName in platforms) {
+    return platforms[platformName as keyof typeof platforms];
+  }
+
+  const defaultPlatforms = DEFAULT_USER_SETTINGS.platforms;
+  if (platformName in defaultPlatforms) {
+    return defaultPlatforms[platformName as keyof typeof defaultPlatforms];
+  }
+
+  return true;
 }
 
 /**

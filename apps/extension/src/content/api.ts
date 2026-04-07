@@ -790,82 +790,24 @@ async function extractKeywordsWithAI(
 }
 
 /**
- * Extract keywords using rule-based approach (with optional AI enhancement)
+ * Extract keywords using rule-based approach.
+ * AI is no longer used for direct keyword extraction — it is only used
+ * as a fallback when the context gate blocks high-scoring markets
+ * (handled in injection.ts).
  */
 async function extractSearchKeywords(
   text: string
 ): Promise<KeywordExtractionResult> {
   if (!text) return { keywords: "", matchedTags: [], source: "none" };
 
-  const { CONFIG } = window.KNOWW_CONFIG;
   const { log } = window.KNOWW_UTILS;
   const textPreview = text.slice(0, 160).replace(/\s+/g, " ").trim();
   log("Keyword extraction start:", {
-    aiEnabled: CONFIG.USE_AI_EXTRACTION,
     textLength: text.length,
     textPreview,
   });
   const tagsData = await fetchPolymarketTags();
 
-  // Try AI extraction first if enabled
-  if (CONFIG.USE_AI_EXTRACTION) {
-    log("AI extraction is enabled for this post");
-    const aiResult = await extractKeywordsWithAI(text);
-    if (aiResult) {
-      log("AI extraction raw result:", {
-        keywords: aiResult.keywords,
-        topics: aiResult.topics,
-        entities: aiResult.entities,
-        confidence: aiResult.confidence,
-      });
-
-      // Gate: if AI confidence is below the user-configured threshold, skip
-      if (aiResult.confidence < CONFIG.MIN_AI_CONFIDENCE) {
-        log(
-          "AI confidence too low for market search:",
-          aiResult.confidence,
-          "— skipping"
-        );
-        return {
-          keywords: "",
-          matchedTags: [],
-          confidence: aiResult.confidence,
-          source: "ai",
-        };
-      }
-
-      // Combine AI results with tag matching
-      const matchedTags = tagsData ? extractMatchingTags(text, tagsData) : [];
-      const aiTags = aiResult.topics.map((t) => t.toLowerCase());
-      const combinedTags = [...new Set([...matchedTags, ...aiTags])].slice(
-        0,
-        5
-      );
-      const finalKeywords = aiResult.keywords || extractBasicKeywords(text);
-
-      log("AI+rules merge details:", {
-        ruleMatchedTags: matchedTags,
-        aiTopicTags: aiTags,
-        combinedTags,
-        finalKeywords,
-        confidence: aiResult.confidence,
-        extractionSource: "ai",
-      });
-
-      return {
-        keywords: finalKeywords,
-        matchedTags: combinedTags,
-        entities: aiResult.entities,
-        confidence: aiResult.confidence,
-        source: "ai",
-      };
-    }
-    log("AI extraction unavailable, using rules fallback");
-  } else {
-    log("AI extraction disabled by settings, using rules");
-  }
-
-  // Fallback to rule-based extraction
   const matchedTags = tagsData ? extractMatchingTags(text, tagsData) : [];
   const keywords = extractBasicKeywords(text);
   log("Rules extraction result:", {
@@ -1766,6 +1708,7 @@ const KNOWW_API_BASE = {
   extractMatchingTags,
   extractBasicKeywords,
   extractSearchKeywords,
+  extractKeywordsWithAI,
   // Search functions
   searchPolymarketEvents,
   searchAllMarkets,

@@ -226,6 +226,31 @@ function getSafeRuntimeUrl(path: string): string | null {
   return null;
 }
 
+function applyPlatformStyleVariables(
+  element: HTMLElement,
+  styles: Record<string, unknown> | null | undefined
+): void {
+  if (!styles) return;
+
+  const styleMap: Record<string, string> = {
+    "--knoww-bg": "backgroundColor",
+    "--knoww-border": "borderColor",
+    "--knoww-text": "textColor",
+    "--knoww-text-secondary": "secondaryTextColor",
+    "--knoww-card-bg": "cardBg",
+    "--knoww-accent": "accentColor",
+    "--knoww-font": "fontFamily",
+    "--knoww-radius": "borderRadius",
+  };
+
+  for (const [cssVariable, key] of Object.entries(styleMap)) {
+    const value = styles[key];
+    if (typeof value === "string" && value) {
+      element.style.setProperty(cssVariable, value);
+    }
+  }
+}
+
 /**
  * Parse multi-outcome data from a market's markets array
  */
@@ -1169,6 +1194,7 @@ function createNotificationStack(): HTMLElement {
 
   const themeClass = ` knoww-theme-${theme}`;
   container.className = `knoww-notification-stack knoww-notification-stack-${platformName}${themeClass}`;
+  applyPlatformStyleVariables(container, platform?.getCardStyles?.(theme));
 
   log(
     `Creating notification stack with platform: ${platformName}, theme: ${theme}`
@@ -2272,6 +2298,10 @@ function updateNotificationStackTheme(): void {
 
   // Add the current theme class
   notificationStackContainer.classList.add(`knoww-theme-${theme}`);
+  applyPlatformStyleVariables(
+    notificationStackContainer,
+    platform.getCardStyles?.(theme)
+  );
 
   // Ensure the platform class is set
   if (

@@ -27,6 +27,17 @@ import "./platforms/twitter";
 import "./platforms/linkedin";
 import "./platforms/reddit";
 import "./platforms/quora";
+import "./platforms/hackernews";
+import "./platforms/stackoverflow";
+import "./platforms/stackexchange";
+import "./platforms/producthunt";
+import "./platforms/slashdot";
+import "./platforms/lemmy";
+import "./platforms/threads";
+import "./platforms/bluesky";
+import "./platforms/mastodon";
+import "./platforms/discord";
+import "./platforms/youtube";
 
 // 6. Kalshi adapter (market source)
 import "./kalshi-adapter";

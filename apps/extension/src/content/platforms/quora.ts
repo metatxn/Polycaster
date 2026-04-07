@@ -3,160 +3,148 @@
 // Handles Quora-specific DOM interactions
 // ============================================
 
-import type {
-  CardStyles,
-  InjectionPoint,
-  ThemeStyles,
-} from "../../types/platform";
+import type { CardStyles, InjectionPoint } from "../../types/platform";
+import { registerAdapterWithRetry } from "../platform-registry";
+import { createBasicAdapter } from "./basic-adapter";
+import {
+  buildGenericCardStyles,
+  combineTextParts,
+  detectGenericTheme,
+  normalizeText,
+} from "./helpers";
 
 const ANSWER_CONTENT_SELECTORS = [
   ".puppeteer_test_answer_content",
   "[data-testid='answer_content']",
 ];
 
-function normalizeText(text: string | null | undefined): string {
-  return (text || "").replace(/\s+/g, " ").trim();
+const HOME_FEED_ITEM_SELECTORS = [
+  "[class*='dom_annotate_question_answer_item_']",
+  "[class*='spacing_log_answer_content']",
+  ".puppeteer_test_answer_content",
+  "[data-testid='answer_content']",
+];
+
+const ALL_ITEM_SELECTORS = [
+  ...new Set([...HOME_FEED_ITEM_SELECTORS, ...ANSWER_CONTENT_SELECTORS]),
+];
+
+function detectQuoraTheme(): "dark" | "light" {
+  return detectGenericTheme();
 }
 
-/**
- * Quora Platform Adapter
- */
-const QuoraAdapter = {
-  name: "quora" as const,
+function getQuoraCardStyles(theme?: string): CardStyles {
+  const activeTheme = (theme || detectQuoraTheme()) as "dark" | "light";
 
-  hostPatterns: [/^(www\.)?quora\.com$/],
-
-  selectors: {
-    item: ANSWER_CONTENT_SELECTORS.join(", "),
-    container: 'main[role="main"], main, [role="main"], body',
-    text: ANSWER_CONTENT_SELECTORS.join(", "),
-  },
-
-  extractPostText(postElement: Element): string {
-    try {
-      const answerText = normalizeText(
-        postElement.matches(this.selectors.text || "")
-          ? postElement.textContent
-          : postElement.querySelector(this.selectors.text || "")?.textContent
-      );
-
-      const questionTitle = normalizeText(
-        document.querySelector(".puppeteer_test_question_title")?.textContent
-      );
-
-      const parts = [questionTitle, answerText].filter(
-        (part) => part && part.length > 10
-      );
-      const combined = parts.join(" ").trim();
-
-      return combined.length > 20 ? combined : "";
-    } catch {
-      return "";
-    }
-  },
-
-  findInjectionPoint(postElement: Element): InjectionPoint | null {
-    const answerContent = postElement.matches(this.selectors.item)
-      ? postElement
-      : postElement.querySelector(this.selectors.item);
-
-    if (answerContent?.parentElement) {
-      return {
-        container: answerContent.parentElement,
-        referenceElement: answerContent,
-        insertPosition: "after",
-        postWrapper:
-          answerContent.closest("[data-answer-id], [id^='answer-']") ||
-          answerContent.parentElement,
-      };
-    }
-
-    if (postElement.parentElement) {
-      return {
-        container: postElement.parentElement,
-        referenceElement: postElement,
-        insertPosition: "after",
-        postWrapper: postElement,
-      };
-    }
-
-    return {
-      container: postElement,
-      referenceElement: null,
-      insertPosition: "append",
-      postWrapper: postElement,
-    };
-  },
-
-  detectTheme(): "dark" | "light" {
-    const themeOverride = window.KNOWW_CONFIG?.getThemeOverride?.();
-    if (themeOverride && themeOverride !== "auto") {
-      return themeOverride === "light" ? "light" : "dark";
-    }
-
-    const classHints = [
-      document.documentElement.className,
-      document.body.className,
-      document.documentElement.getAttribute("data-theme"),
-      document.body.getAttribute("data-theme"),
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    if (classHints.includes("dark")) {
-      return "dark";
-    }
-
-    const bodyBg = window.getComputedStyle(document.body).backgroundColor;
-    const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    if (rgbMatch) {
-      const [, r, g, b] = rgbMatch.map(Number);
-      const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
-      return luminance < 140 ? "dark" : "light";
-    }
-
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-  },
-
-  getCardStyles(theme?: string): CardStyles {
-    const activeTheme = (theme || this.detectTheme()) as "dark" | "light";
-
-    const baseStyles = {
+  return buildGenericCardStyles(
+    {
+      accentColor: "#b92b27",
       fontFamily:
         '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-      accentColor: "#b92b27",
-      cardPadding: "12px 16px",
-      cardMargin: "8px 0",
       borderRadius: "12px",
-    };
-
-    const themeStyles: Record<"dark" | "light", ThemeStyles> = {
-      dark: {
-        backgroundColor: "rgb(38, 38, 39)",
-        borderColor: "rgba(255, 255, 255, 0.12)",
-        textColor: "rgb(240, 240, 240)",
-        secondaryTextColor: "rgba(255, 255, 255, 0.7)",
-        cardBg: "rgb(48, 48, 49)",
-      },
-      light: {
+      lightTheme: {
         backgroundColor: "rgb(255, 255, 255)",
         borderColor: "rgba(0, 0, 0, 0.12)",
         textColor: "rgb(40, 40, 41)",
         secondaryTextColor: "rgb(99, 99, 100)",
         cardBg: "rgb(247, 247, 248)",
       },
-    };
+      darkTheme: {
+        backgroundColor: "rgb(38, 38, 39)",
+        borderColor: "rgba(255, 255, 255, 0.12)",
+        textColor: "rgb(240, 240, 240)",
+        secondaryTextColor: "rgba(255, 255, 255, 0.7)",
+        cardBg: "rgb(48, 48, 49)",
+      },
+    },
+    activeTheme
+  );
+}
 
+function findQuoraInjectionPoint(postElement: Element): InjectionPoint | null {
+  const answerContentSelector = ANSWER_CONTENT_SELECTORS.join(", ");
+  const answerContent = postElement.matches(answerContentSelector)
+    ? postElement
+    : postElement.querySelector(answerContentSelector);
+
+  if (answerContent?.parentElement) {
     return {
-      ...baseStyles,
-      ...themeStyles[activeTheme],
-      theme: activeTheme,
+      container: answerContent.parentElement,
+      referenceElement: answerContent,
+      insertPosition: "after",
+      postWrapper:
+        answerContent.closest("[data-answer-id], [id^='answer-']") ||
+        answerContent.parentElement,
     };
-  },
+  }
 
+  const feedItemWrapper =
+    postElement.closest("[class*='dom_annotate_question_answer_item_']") ||
+    postElement;
+
+  if (feedItemWrapper.parentElement) {
+    return {
+      container: feedItemWrapper.parentElement,
+      referenceElement: feedItemWrapper,
+      insertPosition: "after",
+      postWrapper: feedItemWrapper,
+    };
+  }
+
+  if (postElement.parentElement) {
+    return {
+      container: postElement.parentElement,
+      referenceElement: postElement,
+      insertPosition: "after",
+      postWrapper: postElement,
+    };
+  }
+
+  return {
+    container: postElement,
+    referenceElement: null,
+    insertPosition: "append",
+    postWrapper: postElement,
+  };
+}
+
+const QuoraAdapter = createBasicAdapter({
+  name: "quora",
+  hostPatterns: [/^(www\.)?quora\.com$/],
+  itemSelectors: ALL_ITEM_SELECTORS,
+  containerSelectors: ['main[role="main"]', "main", '[role="main"]', "body"],
+  textSelectors: ALL_ITEM_SELECTORS,
+  accentColor: "#b92b27",
+  fontFamily:
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+  borderRadius: "12px",
+  extractPostText(postElement: Element): string {
+    try {
+      const answerContentSelector = ANSWER_CONTENT_SELECTORS.join(", ");
+      const answerText = normalizeText(
+        postElement.matches(answerContentSelector)
+          ? postElement.textContent
+          : (postElement.querySelector(answerContentSelector) || postElement)
+              ?.textContent
+      );
+
+      const questionTitle = normalizeText(
+        postElement
+          .closest("[class*='dom_annotate_question_answer_item_']")
+          ?.querySelector(
+            ".puppeteer_test_question_title, [class*='puppeteer_test_question_title']"
+          )?.textContent ||
+          document.querySelector(".puppeteer_test_question_title")?.textContent
+      );
+
+      return combineTextParts([questionTitle, answerText]);
+    } catch {
+      return "";
+    }
+  },
+  findInjectionPoint: findQuoraInjectionPoint,
+  detectTheme: detectQuoraTheme,
+  getCardStyles: getQuoraCardStyles,
   getWrapperStyles(): string {
     return `
       padding: 12px 0 0 0;
@@ -166,37 +154,30 @@ const QuoraAdapter = {
       gap: 8px;
     `;
   },
-
   hasInjectedCard(postElement: Element): boolean {
     const wrapper =
-      postElement.closest("[data-answer-id], [id^='answer-']") ||
+      postElement.closest(
+        "[data-answer-id], [id^='answer-'], [class*='dom_annotate_question_answer_item_']"
+      ) ||
       postElement.parentElement ||
       postElement;
 
     return !!wrapper.querySelector(".knoww-market-card");
   },
-
-  getDynamicSelectors(): { itemSelector: string; containerSelector: string } {
-    const itemSelector = this.selectors.item;
-
-    const containerCandidates = [
-      'main[role="main"]',
-      "main",
-      '[role="main"]',
-      "body",
-    ];
-
-    const containerSelector =
-      containerCandidates.find((sel) => document.querySelector(sel)) || "body";
-
-    return { itemSelector, containerSelector };
-  },
-
   getCssClassPrefix(): string {
     return "knoww-quora";
   },
-
   getPostId(postElement: Element): string | null {
+    const feedItem = postElement.closest(
+      "[class*='dom_annotate_question_answer_item_']"
+    );
+    if (feedItem) {
+      const itemClass = Array.from(feedItem.classList).find((c) =>
+        c.startsWith("dom_annotate_question_answer_item_")
+      );
+      if (itemClass) return itemClass;
+    }
+
     const wrapper =
       postElement.closest("[data-answer-id], [id^='answer-']") || postElement;
 
@@ -207,11 +188,9 @@ const QuoraAdapter = {
       null
     );
   },
-};
+});
 
 window.KNOWW_QUORA = QuoraAdapter;
-
-import { registerAdapterWithRetry } from "../platform-registry";
 
 registerAdapterWithRetry(QuoraAdapter, 100, 50);
 

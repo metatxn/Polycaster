@@ -92,6 +92,10 @@ function discoverLegacyWallets(): void {
   if (providers.length === 0) return;
   const primaryProvider = getLegacyProvider();
 
+  const existingNames = new Set(
+    [...discoveredWallets.values()].map((w) => w.info.name.toLowerCase())
+  );
+
   providers.forEach((provider, index) => {
     if (discoveredWalletProviderMap.has(provider)) return;
 
@@ -106,11 +110,17 @@ function discoverLegacyWallets(): void {
     const icon = info.icon || provider.icon || "";
     const rdns = info.rdns || provider.rdns || "";
     const name = deriveLegacyWalletName(provider, index);
+    const displayName = info.name || name;
+
+    if (existingNames.has(displayName.toLowerCase())) {
+      discoveredWalletProviderMap.set(provider, providerUuid);
+      return;
+    }
 
     const detail: EIP6963Detail = {
       info: {
         uuid: providerUuid,
-        name: info.name || name,
+        name: displayName,
         icon,
         rdns,
       },
@@ -119,6 +129,7 @@ function discoverLegacyWallets(): void {
 
     discoveredWallets.set(providerUuid, detail);
     discoveredWalletProviderMap.set(provider, providerUuid);
+    existingNames.add(displayName.toLowerCase());
   });
 }
 
@@ -230,7 +241,7 @@ function isLegacyWalletProvider(value: unknown): value is LegacyWalletProvider {
 }
 
 function broadcastWallets(): void {
-  const wallets = [...discoveredWallets.values()].map((w) => ({
+  const allWallets = [...discoveredWallets.values()].map((w) => ({
     uuid: w.info.uuid,
     name: w.info.name,
     icon: w.info.icon,
@@ -242,12 +253,28 @@ function broadcastWallets(): void {
     ? [...discoveredWallets.values()].some((w) => w.provider === eth)
     : true;
   if (eth && !alreadyDiscovered) {
-    wallets.push({
+    allWallets.push({
       uuid: LEGACY_INJECTED_UUID,
       name: "Injected Provider",
       icon: "",
       rdns: "",
     });
+  }
+
+  const seenNames = new Map<string, number>();
+  const wallets: typeof allWallets = [];
+  for (const w of allWallets) {
+    const key = w.name.toLowerCase();
+    const existingIdx = seenNames.get(key);
+    if (existingIdx !== undefined) {
+      const existing = wallets[existingIdx];
+      if (!existing.rdns && w.rdns) {
+        wallets[existingIdx] = w;
+      }
+      continue;
+    }
+    seenNames.set(key, wallets.length);
+    wallets.push(w);
   }
 
   window.postMessage(

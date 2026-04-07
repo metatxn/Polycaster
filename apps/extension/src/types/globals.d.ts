@@ -73,7 +73,6 @@ declare global {
       CONFIG: {
         POSTS_TO_ANALYZE: number;
         MIN_RELEVANCE_SCORE: number;
-        MIN_AI_CONFIDENCE: number;
         COOLDOWN_POSTS: number;
         USE_AI_EXTRACTION: boolean;
       };
@@ -116,6 +115,12 @@ declare global {
       ) => string[];
       extractBasicKeywords: (text: string) => string;
       extractSearchKeywords: (text: string) => Promise<KeywordExtractionResult>;
+      extractKeywordsWithAI: (text: string) => Promise<{
+        keywords: string;
+        topics: string[];
+        entities: string[];
+        confidence: number;
+      } | null>;
       searchPolymarketEvents: (
         query: string,
         matchedTags?: string[]

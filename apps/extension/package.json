@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.19",
+  "version": "2.5.20",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",

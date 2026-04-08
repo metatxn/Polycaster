@@ -220,6 +220,46 @@ function injectInlineStyles(): void {
         padding: 8px 12px !important;
       }
 
+      /* Crypto editorial platforms — dark theme */
+      .knoww-platform-decrypt,
+      .knoww-platform-coindesk,
+      .knoww-platform-cointelegraph,
+      .knoww-platform-theblock,
+      .knoww-platform-blockworks,
+      .knoww-platform-bankless,
+      .knoww-platform-bitcoinmagazine,
+      .knoww-platform-beincrypto,
+      .knoww-platform-unchained,
+      .knoww-platform-cryptopanic {
+        --knoww-bg: rgb(22, 22, 24);
+        --knoww-border: rgba(255, 255, 255, 0.12);
+        --knoww-text: rgb(240, 240, 240);
+        --knoww-text-secondary: rgba(255, 255, 255, 0.6);
+        --knoww-accent: rgb(168, 132, 255);
+        --knoww-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --knoww-radius: 12px;
+        --knoww-card-bg: rgb(32, 32, 36);
+      }
+
+      /* Crypto editorial platforms — light theme */
+      .knoww-platform-decrypt.knoww-theme-light,
+      .knoww-platform-coindesk.knoww-theme-light,
+      .knoww-platform-cointelegraph.knoww-theme-light,
+      .knoww-platform-theblock.knoww-theme-light,
+      .knoww-platform-blockworks.knoww-theme-light,
+      .knoww-platform-bankless.knoww-theme-light,
+      .knoww-platform-bitcoinmagazine.knoww-theme-light,
+      .knoww-platform-beincrypto.knoww-theme-light,
+      .knoww-platform-unchained.knoww-theme-light,
+      .knoww-platform-cryptopanic.knoww-theme-light {
+        --knoww-bg: rgb(255, 255, 255);
+        --knoww-border: rgba(0, 0, 0, 0.1);
+        --knoww-text: rgb(20, 20, 20);
+        --knoww-text-secondary: rgba(0, 0, 0, 0.55);
+        --knoww-accent: rgb(124, 58, 237);
+        --knoww-card-bg: rgb(247, 247, 250);
+      }
+
       /* Stacked cards container - for multi-source display */
       .knoww-stacked-cards {
         display: flex !important;

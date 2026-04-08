@@ -225,6 +225,92 @@
   --knoww-option-5: rgb(205, 55, 80);
 }
 
+/* Crypto editorial platforms — dark theme (default for most crypto sites) */
+.knoww-platform-decrypt,
+.knoww-platform-coindesk,
+.knoww-platform-cointelegraph,
+.knoww-platform-theblock,
+.knoww-platform-blockworks,
+.knoww-platform-bankless,
+.knoww-platform-bitcoinmagazine,
+.knoww-platform-beincrypto,
+.knoww-platform-unchained,
+.knoww-platform-cryptopanic {
+  --knoww-bg: rgb(22, 22, 24);
+  --knoww-border: rgba(255, 255, 255, 0.12);
+  --knoww-text: rgb(240, 240, 240);
+  --knoww-text-secondary: rgba(255, 255, 255, 0.6);
+  --knoww-accent: rgb(168, 132, 255);
+  --knoww-font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --knoww-radius: 12px;
+  --knoww-card-bg: rgb(32, 32, 36);
+  --knoww-header-chip-bg: rgba(255, 255, 255, 0.06);
+}
+
+/* Crypto editorial platforms — light theme */
+.knoww-platform-decrypt.knoww-theme-light,
+.knoww-platform-coindesk.knoww-theme-light,
+.knoww-platform-cointelegraph.knoww-theme-light,
+.knoww-platform-theblock.knoww-theme-light,
+.knoww-platform-blockworks.knoww-theme-light,
+.knoww-platform-bankless.knoww-theme-light,
+.knoww-platform-bitcoinmagazine.knoww-theme-light,
+.knoww-platform-beincrypto.knoww-theme-light,
+.knoww-platform-unchained.knoww-theme-light,
+.knoww-platform-cryptopanic.knoww-theme-light {
+  --knoww-bg: rgb(255, 255, 255);
+  --knoww-border: rgba(0, 0, 0, 0.1);
+  --knoww-text: rgb(20, 20, 20);
+  --knoww-text-secondary: rgba(0, 0, 0, 0.55);
+  --knoww-accent: rgb(124, 58, 237);
+  --knoww-card-bg: rgb(247, 247, 250);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+}
+
+/* Crypto editorial — View Market link visibility on dark theme */
+.knoww-platform-decrypt .knoww-view-market,
+.knoww-platform-coindesk .knoww-view-market,
+.knoww-platform-cointelegraph .knoww-view-market,
+.knoww-platform-theblock .knoww-view-market,
+.knoww-platform-blockworks .knoww-view-market,
+.knoww-platform-bankless .knoww-view-market,
+.knoww-platform-bitcoinmagazine .knoww-view-market,
+.knoww-platform-beincrypto .knoww-view-market,
+.knoww-platform-unchained .knoww-view-market,
+.knoww-platform-cryptopanic .knoww-view-market {
+  color: var(--knoww-accent, rgb(168, 132, 255)) !important;
+}
+
+/* Crypto editorial — Enable Trading button visibility on dark theme */
+.knoww-platform-decrypt .knoww-tp-btn-enable,
+.knoww-platform-coindesk .knoww-tp-btn-enable,
+.knoww-platform-cointelegraph .knoww-tp-btn-enable,
+.knoww-platform-theblock .knoww-tp-btn-enable,
+.knoww-platform-blockworks .knoww-tp-btn-enable,
+.knoww-platform-bankless .knoww-tp-btn-enable,
+.knoww-platform-bitcoinmagazine .knoww-tp-btn-enable,
+.knoww-platform-beincrypto .knoww-tp-btn-enable,
+.knoww-platform-unchained .knoww-tp-btn-enable,
+.knoww-platform-cryptopanic .knoww-tp-btn-enable {
+  border-color: var(--knoww-accent, rgb(168, 132, 255)) !important;
+  color: var(--knoww-accent, rgb(168, 132, 255)) !important;
+}
+
+.knoww-platform-decrypt .knoww-tp-btn-enable:hover,
+.knoww-platform-coindesk .knoww-tp-btn-enable:hover,
+.knoww-platform-cointelegraph .knoww-tp-btn-enable:hover,
+.knoww-platform-theblock .knoww-tp-btn-enable:hover,
+.knoww-platform-blockworks .knoww-tp-btn-enable:hover,
+.knoww-platform-bankless .knoww-tp-btn-enable:hover,
+.knoww-platform-bitcoinmagazine .knoww-tp-btn-enable:hover,
+.knoww-platform-beincrypto .knoww-tp-btn-enable:hover,
+.knoww-platform-unchained .knoww-tp-btn-enable:hover,
+.knoww-platform-cryptopanic .knoww-tp-btn-enable:hover {
+  background: rgba(168, 132, 255, 0.1) !important;
+}
+
 /* Market card - Base styles with CSS variables */
 .knoww-market-card {
   background: var(--knoww-bg, rgb(0, 0, 0)) !important;

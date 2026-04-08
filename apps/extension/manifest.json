@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Knoww - Prediction Markets for Social Media",
-  "version": "2.5.19",
+  "version": "2.5.20",
   "description": "Discover and navigate prediction markets",
   "icons": {
     "16": "icons/icon-16.png",
@@ -87,7 +87,33 @@
         "https://discord.com/*",
         "https://*.discord.com/*",
         "https://youtube.com/*",
-        "https://*.youtube.com/*"
+        "https://*.youtube.com/*",
+        "https://farcaster.xyz/*",
+        "https://*.farcaster.xyz/*",
+        "https://coinmarketcap.com/*",
+        "https://*.coinmarketcap.com/*",
+        "https://paragraph.com/*",
+        "https://*.paragraph.com/*",
+        "https://coindesk.com/*",
+        "https://*.coindesk.com/*",
+        "https://cointelegraph.com/*",
+        "https://*.cointelegraph.com/*",
+        "https://decrypt.co/*",
+        "https://*.decrypt.co/*",
+        "https://theblock.co/*",
+        "https://*.theblock.co/*",
+        "https://blockworks.com/*",
+        "https://*.blockworks.com/*",
+        "https://bankless.com/*",
+        "https://*.bankless.com/*",
+        "https://bitcoinmagazine.com/*",
+        "https://*.bitcoinmagazine.com/*",
+        "https://beincrypto.com/*",
+        "https://*.beincrypto.com/*",
+        "https://unchainedcrypto.com/*",
+        "https://*.unchainedcrypto.com/*",
+        "https://cryptopanic.com/*",
+        "https://*.cryptopanic.com/*"
       ]
     }
   ],

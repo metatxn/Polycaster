@@ -38,6 +38,19 @@ import "./platforms/bluesky";
 import "./platforms/mastodon";
 import "./platforms/discord";
 import "./platforms/youtube";
+import "./platforms/farcaster";
+import "./platforms/coinmarketcap";
+import "./platforms/paragraph";
+import "./platforms/coindesk";
+import "./platforms/cointelegraph";
+import "./platforms/decrypt";
+import "./platforms/theblock";
+import "./platforms/blockworks";
+import "./platforms/bankless";
+import "./platforms/bitcoinmagazine";
+import "./platforms/beincrypto";
+import "./platforms/unchained";
+import "./platforms/cryptopanic";
 
 // 6. Kalshi adapter (market source)
 import "./kalshi-adapter";

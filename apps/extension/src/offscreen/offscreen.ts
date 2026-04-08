@@ -9,6 +9,7 @@
  * (which has chrome.tabs access) to the content script tab.
  */
 
+import { warmUp } from "../background/embeddings";
 import { logWarn } from "../background/logger";
 import { scoreMarkets } from "../background/scoring";
 import { initBridgeSigner } from "../background/signing-state";
@@ -16,6 +17,14 @@ import { handleTradingMessage } from "../background/trading-handler";
 import type { ScoreMarketsMessage } from "../types/chrome-messages";
 
 initBridgeSigner();
+
+let scoringWarmedUp = false;
+
+function ensureScoringWarm(): void {
+  if (scoringWarmedUp) return;
+  scoringWarmedUp = true;
+  warmUp();
+}
 
 function isScoreMarketsMessage(
   payload: unknown
@@ -77,6 +86,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg.type === "offscreen:scoring") {
+      ensureScoringWarm();
       if (!isScoreMarketsMessage(payload)) {
         sendResponse({ ok: false, error: "Invalid scoring payload type" });
         return false;

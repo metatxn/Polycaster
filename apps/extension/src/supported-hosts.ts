@@ -87,4 +87,38 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://youtube.com/*",
   "https://www.youtube.com/*",
   "https://m.youtube.com/*",
+
+  // Farcaster
+  "https://farcaster.xyz/*",
+  "https://www.farcaster.xyz/*",
+
+  // CoinMarketCap Community
+  "https://coinmarketcap.com/*",
+  "https://www.coinmarketcap.com/*",
+
+  // Paragraph
+  "https://paragraph.com/*",
+  "https://*.paragraph.com/*",
+
+  // Crypto media
+  "https://coindesk.com/*",
+  "https://www.coindesk.com/*",
+  "https://cointelegraph.com/*",
+  "https://www.cointelegraph.com/*",
+  "https://decrypt.co/*",
+  "https://www.decrypt.co/*",
+  "https://theblock.co/*",
+  "https://www.theblock.co/*",
+  "https://blockworks.com/*",
+  "https://www.blockworks.com/*",
+  "https://bankless.com/*",
+  "https://www.bankless.com/*",
+  "https://bitcoinmagazine.com/*",
+  "https://www.bitcoinmagazine.com/*",
+  "https://beincrypto.com/*",
+  "https://www.beincrypto.com/*",
+  "https://unchainedcrypto.com/*",
+  "https://www.unchainedcrypto.com/*",
+  "https://cryptopanic.com/*",
+  "https://www.cryptopanic.com/*",
 ];

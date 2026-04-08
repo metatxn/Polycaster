@@ -31,6 +31,10 @@ async function preloadOnnxWasm(): Promise<void> {
   const mjsUrl = getRuntimeUrl("ort/ort-wasm-simd-threaded.asyncify.mjs");
 
   onnxEnv.wasm.proxy = false;
+  onnxEnv.wasm.numThreads =
+    typeof navigator !== "undefined" && navigator.hardwareConcurrency
+      ? Math.min(Math.floor(navigator.hardwareConcurrency / 2), 4)
+      : 2;
 
   try {
     const res = await fetch(wasmUrl);
@@ -138,7 +142,7 @@ const IDB_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 interface IDBEntry {
   text: string;
-  vector: number[];
+  vector: Float32Array | number[];
   ts: number;
 }
 
@@ -172,8 +176,12 @@ function openDB(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-async function idbGetMany(texts: string[]): Promise<Map<string, number[]>> {
-  const result = new Map<string, number[]>();
+function toFloat32(v: Float32Array | number[]): Float32Array {
+  return v instanceof Float32Array ? v : new Float32Array(v);
+}
+
+async function idbGetMany(texts: string[]): Promise<Map<string, Float32Array>> {
+  const result = new Map<string, Float32Array>();
   if (texts.length === 0) return result;
   try {
     const db = await openDB();
@@ -187,7 +195,7 @@ async function idbGetMany(texts: string[]): Promise<Map<string, number[]>> {
         req.onsuccess = () => {
           const entry = req.result as IDBEntry | undefined;
           if (entry && now - entry.ts < IDB_TTL_MS) {
-            result.set(text, entry.vector);
+            result.set(text, toFloat32(entry.vector));
           }
           if (--pending === 0) resolve(result);
         };
@@ -202,7 +210,7 @@ async function idbGetMany(texts: string[]): Promise<Map<string, number[]>> {
 }
 
 async function idbPutMany(
-  entries: Array<{ text: string; vector: number[] }>
+  entries: Array<{ text: string; vector: Float32Array }>
 ): Promise<void> {
   if (entries.length === 0) return;
   try {
@@ -320,24 +328,38 @@ class LRUCache<K, V> {
   }
 }
 
-const l1Cache = new LRUCache<string, number[]>(500);
+const l1Cache = new LRUCache<string, Float32Array>(500);
 
 // ── Embedding computation ────────────────────────────────────────────
 
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  let dotProduct = 0;
-  const maxLength = Math.min(vecA.length, vecB.length);
-  for (let i = 0; i < maxLength; i++) {
-    dotProduct += vecA[i] * vecB[i];
+function cosineSimilarity(vecA: Float32Array, vecB: Float32Array): number {
+  let dot = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dot += vecA[i] * vecB[i];
   }
-  if (!Number.isFinite(dotProduct)) return 0;
-  return dotProduct;
+  return Number.isFinite(dot) ? dot : 0;
 }
 
-async function getEmbeddings(texts: string[]): Promise<number[][]> {
+const EMBEDDING_BATCH_SIZE = 8;
+
+async function getEmbeddings(texts: string[]): Promise<Float32Array[]> {
   const extractor = await getInstance();
-  const output = await extractor(texts, { pooling: "mean", normalize: true });
-  return output.tolist() as number[][];
+  const results: Float32Array[] = [];
+
+  for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
+    const batch = texts.slice(i, i + EMBEDDING_BATCH_SIZE);
+    const output = await extractor(batch, {
+      pooling: "mean",
+      normalize: true,
+    });
+    const data = output.data as Float32Array;
+    const dim = output.dims[1];
+    for (let j = 0; j < batch.length; j++) {
+      results.push(data.slice(j * dim, (j + 1) * dim));
+    }
+  }
+
+  return results;
 }
 
 export async function computeSimilarities(
@@ -346,14 +368,12 @@ export async function computeSimilarities(
 ): Promise<number[]> {
   const start = Date.now();
 
-  // BGE models perform best when the query is prefixed with an instruction.
   const queryText = `Represent this sentence for searching relevant prediction markets: ${postText}`;
 
   const allTexts = [queryText, ...marketTexts];
   const uniqueTexts = Array.from(new Set(allTexts));
 
-  // Local map immune to LRU eviction — used for the final similarity lookup
-  const local = new Map<string, number[]>();
+  const local = new Map<string, Float32Array>();
 
   // L1: check in-memory cache
   const textsNotInL1: string[] = [];
@@ -387,7 +407,7 @@ export async function computeSimilarities(
 
   if (textsToEmbed.length > 0) {
     const newEmbeddings = await getEmbeddings(textsToEmbed);
-    const idbEntries: Array<{ text: string; vector: number[] }> = [];
+    const idbEntries: Array<{ text: string; vector: Float32Array }> = [];
     for (let i = 0; i < textsToEmbed.length; i++) {
       l1Cache.set(textsToEmbed[i], newEmbeddings[i]);
       local.set(textsToEmbed[i], newEmbeddings[i]);
@@ -395,7 +415,8 @@ export async function computeSimilarities(
         idbEntries.push({ text: textsToEmbed[i], vector: newEmbeddings[i] });
       }
     }
-    await idbPutMany(idbEntries);
+    // Fire-and-forget: IDB persistence is not on the critical path
+    idbPutMany(idbEntries).catch(() => {});
     idbPruneIfNeeded();
   }
 
@@ -418,4 +439,12 @@ export async function computeSimilarities(
     computed: textsToEmbed.length,
   });
   return similarities;
+}
+
+/**
+ * Eagerly load the ONNX model so the first real inference is fast.
+ * Call once from the offscreen document during idle time.
+ */
+export function warmUp(): void {
+  getInstance().catch(() => {});
 }

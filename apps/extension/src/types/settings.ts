@@ -14,6 +14,19 @@ export interface PlatformSettings {
   mastodon: boolean;
   discord: boolean;
   youtube: boolean;
+  farcaster: boolean;
+  coinmarketcap: boolean;
+  paragraph: boolean;
+  coindesk: boolean;
+  cointelegraph: boolean;
+  decrypt: boolean;
+  theblock: boolean;
+  blockworks: boolean;
+  bankless: boolean;
+  bitcoinmagazine: boolean;
+  beincrypto: boolean;
+  unchained: boolean;
+  cryptopanic: boolean;
 }
 
 /**
@@ -50,6 +63,19 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   mastodon: true,
   discord: true,
   youtube: true,
+  farcaster: true,
+  coinmarketcap: true,
+  paragraph: true,
+  coindesk: true,
+  cointelegraph: true,
+  decrypt: true,
+  theblock: true,
+  blockworks: true,
+  bankless: true,
+  bitcoinmagazine: true,
+  beincrypto: true,
+  unchained: true,
+  cryptopanic: true,
 };
 
 /**

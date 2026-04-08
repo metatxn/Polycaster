@@ -86,8 +86,6 @@
         "https://infosec.exchange/*",
         "https://discord.com/*",
         "https://*.discord.com/*",
-        "https://youtube.com/*",
-        "https://*.youtube.com/*",
         "https://farcaster.xyz/*",
         "https://*.farcaster.xyz/*",
         "https://coinmarketcap.com/*",

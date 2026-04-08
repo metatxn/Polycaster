@@ -37,7 +37,6 @@ import "./platforms/threads";
 import "./platforms/bluesky";
 import "./platforms/mastodon";
 import "./platforms/discord";
-import "./platforms/youtube";
 import "./platforms/farcaster";
 import "./platforms/coinmarketcap";
 import "./platforms/paragraph";

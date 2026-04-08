@@ -38,7 +38,6 @@ const SUPPORTED_HOST_PATTERNS = [
   /(^|\.)mas\.to$/i,
   /(^|\.)infosec\.exchange$/i,
   /(^|\.)discord\.com$/i,
-  /(^|\.)youtube\.com$/i,
   /(^|\.)farcaster\.xyz$/i,
   /(^|\.)coinmarketcap\.com$/i,
   /(^|\.)paragraph\.com$/i,
@@ -144,12 +143,6 @@ const PLATFORM_OPTIONS: Array<{
     label: "Discord",
     description: "Show prediction markets on Discord messages",
     icon: "C",
-  },
-  {
-    key: "youtube",
-    label: "YouTube Comments",
-    description: "Show prediction markets in YouTube comments",
-    icon: "▶",
   },
   {
     key: "farcaster",

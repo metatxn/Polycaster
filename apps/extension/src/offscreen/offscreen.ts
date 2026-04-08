@@ -19,11 +19,26 @@ import type { ScoreMarketsMessage } from "../types/chrome-messages";
 initBridgeSigner();
 
 let scoringWarmedUp = false;
+let warmUpPromise: Promise<void> | null = null;
 
-function ensureScoringWarm(): void {
-  if (scoringWarmedUp) return;
-  scoringWarmedUp = true;
-  warmUp();
+function ensureScoringWarm(): Promise<void> {
+  if (scoringWarmedUp) return Promise.resolve();
+  if (warmUpPromise) return warmUpPromise;
+
+  warmUpPromise = warmUp()
+    .then(() => {
+      scoringWarmedUp = true;
+    })
+    .catch((err) => {
+      warmUpPromise = null;
+      scoringWarmedUp = false;
+      logWarn("offscreen.warmup-failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    });
+
+  return warmUpPromise;
 }
 
 function isScoreMarketsMessage(
@@ -86,14 +101,14 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg.type === "offscreen:scoring") {
-      ensureScoringWarm();
       if (!isScoreMarketsMessage(payload)) {
         sendResponse({ ok: false, error: "Invalid scoring payload type" });
         return false;
       }
       const request = payload;
 
-      scoreMarkets(request)
+      ensureScoringWarm()
+        .then(() => scoreMarkets(request))
         .then((result) => {
           sendResponse({
             ok: true,

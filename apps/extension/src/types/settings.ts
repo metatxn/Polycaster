@@ -13,7 +13,6 @@ export interface PlatformSettings {
   bluesky: boolean;
   mastodon: boolean;
   discord: boolean;
-  youtube: boolean;
   farcaster: boolean;
   coinmarketcap: boolean;
   paragraph: boolean;
@@ -62,7 +61,6 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   bluesky: true,
   mastodon: true,
   discord: true,
-  youtube: true,
   farcaster: true,
   coinmarketcap: true,
   paragraph: true,

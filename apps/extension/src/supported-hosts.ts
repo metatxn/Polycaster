@@ -83,11 +83,6 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://ptb.discord.com/*",
   "https://canary.discord.com/*",
 
-  // YouTube
-  "https://youtube.com/*",
-  "https://www.youtube.com/*",
-  "https://m.youtube.com/*",
-
   // Farcaster
   "https://farcaster.xyz/*",
   "https://www.farcaster.xyz/*",

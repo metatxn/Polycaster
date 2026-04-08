@@ -33,7 +33,7 @@ async function preloadOnnxWasm(): Promise<void> {
   onnxEnv.wasm.proxy = false;
   onnxEnv.wasm.numThreads =
     typeof navigator !== "undefined" && navigator.hardwareConcurrency
-      ? Math.min(Math.floor(navigator.hardwareConcurrency / 2), 4)
+      ? Math.max(Math.min(Math.floor(navigator.hardwareConcurrency / 2), 4), 1)
       : 2;
 
   try {
@@ -445,6 +445,6 @@ export async function computeSimilarities(
  * Eagerly load the ONNX model so the first real inference is fast.
  * Call once from the offscreen document during idle time.
  */
-export function warmUp(): void {
-  getInstance().catch(() => {});
+export function warmUp(): Promise<void> {
+  return getInstance().then(() => undefined);
 }

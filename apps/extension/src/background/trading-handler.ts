@@ -156,6 +156,7 @@ async function handleDeriveCredentials(
   // Uses the signature already obtained from MetaMask by the content script,
   // avoiding extra signing prompts that ClobClient would trigger.
   let raw: { apiKey: string; secret: string; passphrase: string };
+  let method: "create" | "derive";
 
   const deriveRes = await fetch(`${CLOB_HOST}/auth/derive-api-key`, {
     method: "GET",
@@ -163,6 +164,7 @@ async function handleDeriveCredentials(
   });
   if (deriveRes.ok) {
     raw = await deriveRes.json();
+    method = "derive";
   } else {
     const createRes = await fetch(`${CLOB_HOST}/auth/api-key`, {
       method: "POST",
@@ -170,12 +172,14 @@ async function handleDeriveCredentials(
     });
     if (!createRes.ok) return fail("Failed to derive CLOB API credentials");
     raw = await createRes.json();
+    method = "create";
   }
 
   return ok({
     apiKey: raw.apiKey,
     apiSecret: raw.secret,
     apiPassphrase: raw.passphrase,
+    method,
   });
 }
 

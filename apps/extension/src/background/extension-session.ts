@@ -1,5 +1,5 @@
 const KNOWW_APP_URL = __DEV_MODE__
-  ? "http://localhost:8787"
+  ? "http://localhost:8000"
   : "https://knoww.app";
 const ACCESS_TOKEN_KEY = "knoww_extension_access_token";
 

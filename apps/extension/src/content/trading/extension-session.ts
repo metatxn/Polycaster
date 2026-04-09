@@ -5,7 +5,7 @@ import type {
 import { WalletBridge } from "./bridge";
 
 const KNOWW_APP_URL = __DEV_MODE__
-  ? "http://localhost:8787"
+  ? "http://localhost:8000"
   : "https://knoww.app";
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
@@ -151,59 +151,83 @@ export const ExtensionSession = {
       return cachedToken;
     }
 
-    const chainId = normalizeChainId(await WalletBridge.getChainId());
-    const nonceResult = await fetchJson<NonceResponse>(
-      "/api/extension/session/challenge",
-      {
-        walletAddress: address,
-        chainId,
-      }
-    );
+    void window.KNOWW_ANALYTICS?.track("extension_session_started");
 
-    if (
-      nonceResult.status < 200 ||
-      nonceResult.status >= 300 ||
-      !nonceResult.data.message ||
-      !nonceResult.data.challengeToken
-    ) {
-      throw new Error(
-        getApiErrorMessage(nonceResult.data) || "Failed to start Knoww sign-in"
+    try {
+      const chainId = normalizeChainId(await WalletBridge.getChainId());
+      const nonceResult = await fetchJson<NonceResponse>(
+        "/api/extension/session/challenge",
+        {
+          walletAddress: address,
+          chainId,
+        }
       );
-    }
 
-    const signature = await WalletBridge.signMessage(
-      address,
-      nonceResult.data.message
-    );
-    const verifyResult = await fetchJson<VerifyResponse>(
-      "/api/extension/session/verify",
-      {
-        message: nonceResult.data.message,
-        signature,
-        challengeToken: nonceResult.data.challengeToken,
-        walletAddress: address,
-        chainId,
+      if (
+        nonceResult.status < 200 ||
+        nonceResult.status >= 300 ||
+        !nonceResult.data.message ||
+        !nonceResult.data.challengeToken
+      ) {
+        const reason =
+          getApiErrorMessage(nonceResult.data) ||
+          "Failed to start Knoww sign-in";
+        void window.KNOWW_ANALYTICS?.track("extension_session_failed", {
+          reason,
+        });
+        throw new Error(reason);
       }
-    );
 
-    const token = verifyResult.data.token;
-
-    if (
-      verifyResult.status < 200 ||
-      verifyResult.status >= 300 ||
-      !verifyResult.data.success ||
-      !token
-    ) {
-      throw new Error(
-        getApiErrorMessage(verifyResult.data) || "Knoww sign-in failed"
+      const signature = await WalletBridge.signMessage(
+        address,
+        nonceResult.data.message
       );
+      const verifyResult = await fetchJson<VerifyResponse>(
+        "/api/extension/session/verify",
+        {
+          message: nonceResult.data.message,
+          signature,
+          challengeToken: nonceResult.data.challengeToken,
+          walletAddress: address,
+          chainId,
+        }
+      );
+
+      const token = verifyResult.data.token;
+
+      if (
+        verifyResult.status < 200 ||
+        verifyResult.status >= 300 ||
+        !verifyResult.data.success ||
+        !token
+      ) {
+        const reason =
+          getApiErrorMessage(verifyResult.data) || "Knoww sign-in failed";
+        void window.KNOWW_ANALYTICS?.track("extension_session_failed", {
+          reason,
+        });
+        throw new Error(reason);
+      }
+
+      await sendAuthMessage<null>(
+        { type: "auth:set-token", token },
+        "Failed to store auth token"
+      );
+
+      void window.KNOWW_ANALYTICS?.track("extension_session_succeeded");
+
+      return token;
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        !err.message.includes("Failed to start") &&
+        !err.message.includes("sign-in failed")
+      ) {
+        void window.KNOWW_ANALYTICS?.track("extension_session_failed", {
+          reason: err.message,
+        });
+      }
+      throw err;
     }
-
-    await sendAuthMessage<null>(
-      { type: "auth:set-token", token },
-      "Failed to store auth token"
-    );
-
-    return token;
   },
 };

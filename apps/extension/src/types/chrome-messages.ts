@@ -147,6 +147,12 @@ export interface SigningResponseMessage {
   error?: string;
 }
 
+export interface AnalyticsTrackMessage {
+  type: "analytics:track";
+  event: string;
+  properties?: Record<string, string | number | boolean | null | undefined>;
+}
+
 // ── Union types ──
 
 export type TradingMessage =
@@ -167,7 +173,8 @@ export type BackgroundMessage =
   | FetchJsonMessage
   | ScoreMarketsMessage
   | TradingMessage
-  | SigningResponseMessage;
+  | SigningResponseMessage
+  | AnalyticsTrackMessage;
 
 // ── Responses ──
 

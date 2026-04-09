@@ -37,6 +37,7 @@ export interface UserSettings {
     polymarket: boolean;
     kalshi: boolean;
   };
+  usageAnalyticsEnabled: boolean;
   relevanceThreshold: number;
   cooldownPosts: number;
   showNotificationStack: boolean;
@@ -85,6 +86,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     polymarket: true,
     kalshi: false, // Disabled for now — re-enable when Kalshi integration is ready
   },
+  usageAnalyticsEnabled: true,
   relevanceThreshold: 0.3,
   cooldownPosts: 4,
   showNotificationStack: true,

@@ -371,6 +371,19 @@ function OptionsApp() {
     chrome.storage.sync.set({ knowwSettings: settings }, () => {
       showStatus("Settings saved!");
 
+      if (settings.usageAnalyticsEnabled) {
+        chrome.runtime.sendMessage({
+          type: "analytics:track",
+          event: "settings_updated",
+          properties: {
+            analyticsEnabled: settings.usageAnalyticsEnabled,
+            notificationStackEnabled: settings.showNotificationStack,
+            aiExtractionEnabled: settings.aiExtractionEnabled,
+            personalizationEnabled: settings.personalizationEnabled,
+          },
+        });
+      }
+
       // Notify content scripts
       chrome.tabs.query({}, (tabs) => {
         for (const tab of tabs) {
@@ -441,6 +454,11 @@ function OptionsApp() {
           return;
         }
         if (response?.ok) {
+          chrome.runtime.sendMessage({
+            type: "analytics:track",
+            event: "options_wallet_disconnected",
+            properties: {},
+          });
           setHasToken(false);
           showStatus("Wallet disconnected");
         } else {
@@ -665,6 +683,21 @@ function OptionsApp() {
             <option value="light">Light</option>
             <option value="dim">Dim (Twitter)</option>
           </select>
+        </SettingRow>
+
+        <Divider />
+
+        <SettingRow
+          label="Usage Analytics"
+          description="Help us measure extension usage with anonymous product events. Raw page text is not sent."
+        >
+          <Toggle
+            id="usage-analytics-enabled"
+            checked={settings.usageAnalyticsEnabled}
+            onChange={(v) =>
+              setSettings((prev) => ({ ...prev, usageAnalyticsEnabled: v }))
+            }
+          />
         </SettingRow>
 
         <Divider />

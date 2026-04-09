@@ -374,6 +374,11 @@ function ensureCardVisibilityObserver(): void {
             !clickedMarketIds.has(marketId)
           ) {
             window.KNOWW_PREFERENCES?.recordIgnore(tracked.market);
+            void window.KNOWW_ANALYTICS.track("market_card_ignored", {
+              marketId,
+              source: tracked.market.source || "polymarket",
+              visibleDurationMs: Date.now() - firstSeen,
+            });
           }
           cardFirstVisibleAt.delete(marketId);
         }
@@ -1084,6 +1089,10 @@ function injectMarketCards(
       cardVisibilityObserver?.observe(card);
 
       const source = market.source || "polymarket";
+      void window.KNOWW_ANALYTICS.track("market_card_impression", {
+        marketId: market.id,
+        source,
+      });
       log(
         `✅ Injected ${source} market card on ${platformName}:`,
         market.title
@@ -1108,6 +1117,10 @@ function injectMarketCards(
     return true;
   } catch (e) {
     cleanup?.();
+    void window.KNOWW_ANALYTICS.track("market_card_injection_failed", {
+      cardsAttempted: injectedCards.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
     log("Failed to inject cards:", e);
     return false;
   }

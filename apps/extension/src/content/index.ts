@@ -19,10 +19,13 @@ import "./preferences";
 // 3. Utilities (logging, text extraction, etc.)
 import "./utils";
 
-// 4. Platform registry (must be before platform adapters)
+// 4. Analytics helpers
+import "./analytics";
+
+// 5. Platform registry (must be before platform adapters)
 import "./platform-registry";
 
-// 5. Platform adapters (register themselves with the registry)
+// 6. Platform adapters (register themselves with the registry)
 import "./platforms/twitter";
 import "./platforms/linkedin";
 import "./platforms/reddit";
@@ -51,20 +54,20 @@ import "./platforms/beincrypto";
 import "./platforms/unchained";
 import "./platforms/cryptopanic";
 
-// 6. Kalshi adapter (market source)
+// 7. Kalshi adapter (market source)
 import "./kalshi-adapter";
 
-// 7. API functions (search, fetch, scoring)
+// 8. API functions (search, fetch, scoring)
 import "./api";
 
-// 8. Styles injection
+// 9. Styles injection
 import "./styles";
 
-// 9. UI components (card creation, notification stack)
+// 10. UI components (card creation, notification stack)
 import "./ui";
 
-// 10. Injection logic (feed watching, card injection)
+// 11. Injection logic (feed watching, card injection)
 import "./injection";
 
-// 11. Main entry point (starts the extension)
+// 12. Main entry point (starts the extension)
 import "./main";

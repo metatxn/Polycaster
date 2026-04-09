@@ -71,6 +71,13 @@ let ctx: TradingContext = {
   usdcAllowanceNegRisk: 0,
 };
 
+function trackTradingAnalytics(
+  event: string,
+  properties: Record<string, string | number | boolean | null | undefined> = {}
+): void {
+  void window.KNOWW_ANALYTICS.track(event, properties);
+}
+
 function notify(): void {
   for (const fn of listeners) {
     try {
@@ -200,6 +207,9 @@ export const TradingService = {
 
       const address = accounts[0];
       update({ address });
+      trackTradingAnalytics("wallet_connected", {
+        hasMultipleWallets: walletUuid !== undefined,
+      });
 
       update({ state: "switching-chain" });
       try {
@@ -208,6 +218,10 @@ export const TradingService = {
           await WalletBridge.switchChain(POLYGON_CHAIN_ID_HEX);
         }
       } catch (err) {
+        trackTradingAnalytics("wallet_chain_switch_failed", {
+          chainId: POLYGON_CHAIN_ID_HEX,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
         console.warn("[TradingService] Chain switch failed:", err);
       }
 
@@ -243,6 +257,9 @@ export const TradingService = {
         update({ state: "connected" });
       }
     } catch (err) {
+      trackTradingAnalytics("wallet_connect_failed", {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       update({
         state: "error",
         error: err instanceof Error ? err.message : String(err),
@@ -257,11 +274,27 @@ export const TradingService = {
     }
 
     update({ state: "deriving-credentials", error: null });
+    trackTradingAnalytics("trading_api_key_requested");
 
     try {
-      const creds = await CredentialManager.derive(ctx.address);
-      update({ credentials: creds, state: "ready" });
+      const result = await CredentialManager.derive(ctx.address);
+      trackTradingAnalytics(
+        result.method === "create"
+          ? "trading_api_key_created"
+          : "trading_api_key_derived"
+      );
+      update({
+        credentials: {
+          apiKey: result.apiKey,
+          apiSecret: result.apiSecret,
+          apiPassphrase: result.apiPassphrase,
+        },
+        state: "ready",
+      });
     } catch (err) {
+      trackTradingAnalytics("trading_api_key_failed", {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       update({
         state: "error",
         error: err instanceof Error ? err.message : String(err),

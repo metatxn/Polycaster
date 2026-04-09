@@ -58,6 +58,13 @@ function sendTradingMsg<T>(
 
 const CREDS_STORAGE_KEY = "knoww_clob_creds";
 
+export interface DerivedApiKeyResult {
+  apiKey: string;
+  apiSecret: string;
+  apiPassphrase: string;
+  method: "create" | "derive";
+}
+
 function storageKey(address: string): string {
   return `${CREDS_STORAGE_KEY}_${address.toLowerCase()}`;
 }
@@ -107,9 +114,11 @@ export const CredentialManager = {
    * 2. Sends the signature to the background which calls the CLOB API
    * 3. Caches the resulting credentials
    */
-  async derive(address: string): Promise<ApiKeyCreds> {
+  async derive(address: string): Promise<DerivedApiKeyResult> {
     const cached = await this.getStored(address);
-    if (cached) return cached;
+    if (cached) {
+      return { ...cached, method: "derive" };
+    }
 
     await ExtensionSession.ensureAuthorized(address);
 
@@ -139,7 +148,7 @@ export const CredentialManager = {
     const signature = await WalletBridge.signTypedData(address, typedData);
 
     // Send to background for credential derivation via CLOB API
-    const creds = await sendTradingMsg<ApiKeyCreds>(
+    const result = await sendTradingMsg<DerivedApiKeyResult>(
       {
         type: "trading:derive-credentials",
         address,
@@ -150,7 +159,11 @@ export const CredentialManager = {
       "Failed to derive credentials"
     );
 
-    await this.store(address, creds);
-    return creds;
+    await this.store(address, {
+      apiKey: result.apiKey,
+      apiSecret: result.apiSecret,
+      apiPassphrase: result.apiPassphrase,
+    });
+    return result;
   },
 };

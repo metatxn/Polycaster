@@ -146,8 +146,19 @@ async function resolveTokenAndShowPanel(
       yesTokenId,
       noTokenId,
     });
+    void window.KNOWW_ANALYTICS.track("trading_panel_opened", {
+      marketId: market.id,
+      source: market.source || "polymarket",
+      outcomeName,
+      isMultiOutcome,
+    });
     log(`Trading panel opened for ${outcomeName}`);
   } else {
+    void window.KNOWW_ANALYTICS.track("trading_panel_open_failed", {
+      reason: "token_unresolved",
+      marketId: market.id,
+      outcomeName,
+    });
     log(
       "Could not resolve tokenId for",
       outcomeName,
@@ -709,6 +720,10 @@ function createInlineMarketCard(
   dismissBtn.onclick = (e) => {
     e.stopPropagation();
     e.preventDefault();
+    void window.KNOWW_ANALYTICS.track("market_card_dismissed", {
+      marketId: market.id,
+      source: marketSource,
+    });
 
     TradingPanel.hide();
 
@@ -791,6 +806,12 @@ function createInlineMarketCard(
       const capturedIdx = idx;
       btn.onclick = (e) => {
         e.stopPropagation();
+        void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+          marketId: market.id,
+          source: marketSource,
+          action: "outcome_selected",
+          outcomeName: outcomes[capturedIdx],
+        });
 
         if (marketSource === "kalshi") {
           const url = buildKalshiUrl(market);
@@ -857,6 +878,12 @@ function createInlineMarketCard(
 
       optionRow.onclick = (e) => {
         e.stopPropagation();
+        void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+          marketId: market.id,
+          source: marketSource,
+          action: "outcome_selected",
+          outcomeName: option.name,
+        });
         if (marketSource === "polymarket") {
           resolveTokenAndShowPanel(
             market,
@@ -886,6 +913,12 @@ function createInlineMarketCard(
     toggleBtn.onclick = (e) => {
       e.stopPropagation();
       const isExpanded = currentOptionsList.classList.contains("visible");
+      void window.KNOWW_ANALYTICS.track("market_card_options_toggled", {
+        marketId: market.id,
+        source: marketSource,
+        expanded: !isExpanded,
+        optionCount: multiOutcomeData.length,
+      });
       if (isExpanded) {
         currentOptionsList.classList.remove("visible");
         currentToggleBtn.classList.remove("expanded");
@@ -950,6 +983,12 @@ function createInlineMarketCard(
 
       optionRow.onclick = (e) => {
         e.stopPropagation();
+        void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+          marketId: market.id,
+          source: marketSource,
+          action: "outcome_selected",
+          outcomeName: option.name,
+        });
         if (marketSource === "polymarket") {
           resolveTokenAndShowPanel(
             market,
@@ -978,6 +1017,12 @@ function createInlineMarketCard(
     toggleBtn.onclick = (e) => {
       e.stopPropagation();
       const isExpanded = currentOptionsList.classList.contains("visible");
+      void window.KNOWW_ANALYTICS.track("market_card_options_toggled", {
+        marketId: market.id,
+        source: marketSource,
+        expanded: !isExpanded,
+        optionCount: outcomes.length,
+      });
       if (isExpanded) {
         currentOptionsList.classList.remove("visible");
         currentToggleBtn.classList.remove("expanded");
@@ -1031,6 +1076,11 @@ function createInlineMarketCard(
       log("Opening Knoww:", marketUrl);
     }
 
+    void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+      marketId: market.id,
+      source: marketSource,
+      action: "view_market",
+    });
     window.open(marketUrl, "_blank", "noopener,noreferrer");
     window.KNOWW_PREFERENCES?.recordClick(market);
   };
@@ -1338,6 +1388,7 @@ function setupSearchFunctionality(
     toggleBtn.classList.toggle("knoww-search-active", isSearchOpen);
 
     if (isSearchOpen) {
+      void window.KNOWW_ANALYTICS.track("extension_search_opened");
       input.focus();
       clearBtn.style.display = "flex";
     } else {
@@ -1349,6 +1400,7 @@ function setupSearchFunctionality(
   };
 
   clearBtn.onclick = () => {
+    void window.KNOWW_ANALYTICS.track("extension_search_cleared");
     if (input.value.trim() === "") {
       isSearchOpen = false;
       container.classList.remove("knoww-search-open");
@@ -1384,6 +1436,10 @@ function setupSearchFunctionality(
       try {
         const { searchPolymarketEvents } = window.KNOWW_API;
         const events = await searchPolymarketEvents(searchQuery, []);
+        void window.KNOWW_ANALYTICS.track("extension_search_query_submitted", {
+          queryLength: searchQuery.length,
+          resultCount: events.length,
+        });
 
         // Ignore stale results if query has changed
         if (currentSearchQuery !== searchQuery) {
@@ -1403,10 +1459,12 @@ function setupSearchFunctionality(
           resultsContainer.appendChild(resultItem);
         });
       } catch (e) {
-        // Ignore errors for stale queries
         if (currentSearchQuery !== searchQuery) {
           return;
         }
+        void window.KNOWW_ANALYTICS.track("extension_search_failed", {
+          query: searchQuery,
+        });
         log("Search error:", e);
         resultsContainer.innerHTML =
           '<div class="knoww-search-empty">Search failed</div>';
@@ -1421,6 +1479,7 @@ function setupSearchFunctionality(
       !container.contains(target) &&
       !toggleBtn.contains(target)
     ) {
+      void window.KNOWW_ANALYTICS.track("extension_search_dismissed");
       isSearchOpen = false;
       container.classList.remove("knoww-search-open");
       toggleBtn.classList.remove("knoww-search-active");
@@ -1558,6 +1617,10 @@ function createSearchResultItem(market: Market): HTMLElement {
         : KNOWW_APP_URL;
     }
 
+    void window.KNOWW_ANALYTICS.track("extension_search_result_clicked", {
+      marketId: market.id,
+      source: marketSource,
+    });
     window.open(marketUrl, "_blank", "noopener,noreferrer");
   };
 
@@ -1706,6 +1769,11 @@ function createNotificationItem(
 
   // Click handler to scroll to the market card, or open URL if card is gone
   item.onclick = () => {
+    void window.KNOWW_ANALYTICS.track("notification_stack_item_clicked", {
+      marketId: market.id,
+      source: marketSource,
+      itemStatus: isActive ? "active" : "scrolled_out",
+    });
     if (!isActive) {
       const marketUrl = buildMarketUrl(market);
       log("Opening scrolled-out market directly:", marketUrl);
@@ -1983,6 +2051,9 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
   item.appendChild(arrow);
 
   item.onclick = () => {
+    void window.KNOWW_ANALYTICS.track("notification_trending_clicked", {
+      marketSlug: market.slug || market.id,
+    });
     const marketUrl = buildMarketUrl(market);
     window.open(marketUrl, "_blank", "noopener,noreferrer");
     window.KNOWW_PREFERENCES?.recordClick(market);
@@ -2323,6 +2394,7 @@ function initNotificationStack(): void {
 
   if (!notificationStackContainer) {
     createNotificationStack();
+    void window.KNOWW_ANALYTICS.track("notification_stack_opened");
     log("Notification stack initialized");
   }
 

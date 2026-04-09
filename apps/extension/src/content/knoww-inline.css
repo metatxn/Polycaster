@@ -716,6 +716,7 @@
   object-fit: cover !important;
 }
 
+/* biome-ignore lint: unrelated selector, not an override */
 .knoww-view-market {
   display: flex !important;
   align-items: center !important;
@@ -2945,6 +2946,7 @@
   text-align: left !important;
 }
 
+/* biome-ignore lint: unrelated selector, not an override */
 .knoww-tp-btn-enable {
   display: block !important;
   width: auto !important;
@@ -2966,6 +2968,7 @@
   align-self: center !important;
   margin: 0 auto !important;
 }
+/* biome-ignore lint: pseudo-class variant of same selector */
 .knoww-tp-btn-enable:hover {
   background: rgba(29, 155, 240, 0.1) !important;
 }
@@ -3236,6 +3239,7 @@
   border-radius: 12px !important;
   outline: none !important;
   transition: border-color 0.15s !important;
+  appearance: textfield !important;
   -moz-appearance: textfield !important;
 }
 .knoww-tp-price-field:focus {
@@ -3458,6 +3462,7 @@
   font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
   text-align: center !important;
   outline: none !important;
+  appearance: textfield !important;
   -moz-appearance: textfield !important;
 }
 .knoww-tp-shares-input:focus {
@@ -3812,6 +3817,7 @@
   font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
   outline: none !important;
   transition: border-color 0.15s !important;
+  appearance: textfield !important;
   -moz-appearance: textfield !important;
 }
 .knoww-tp-input-field:focus {

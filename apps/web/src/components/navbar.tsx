@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import posthog from "posthog-js";
 import { useState } from "react";
 import { useBalance, useConnection, useDisconnect } from "wagmi";
 import { DepositModal } from "@/components/deposit-modal";
@@ -95,7 +96,12 @@ export function Navbar() {
               {/* Setup Trading Account Button - Show when user hasn't completed setup */}
               {needsTradingSetup && (
                 <Button
-                  onClick={() => setShowOnboarding(true)}
+                  onClick={() => {
+                    posthog.capture("trading_account_setup_clicked", {
+                      wallet_address: address,
+                    });
+                    setShowOnboarding(true);
+                  }}
                   size="sm"
                   className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
                 >
@@ -174,7 +180,14 @@ export function Navbar() {
                   </DropdownMenuItem>
 
                   <DropdownMenuItem
-                    onClick={() => disconnect.mutate({})}
+                    onClick={() => {
+                      posthog.capture("wallet_disconnected", {
+                        wallet_address: address,
+                        chain_name: chain?.name,
+                      });
+                      posthog.reset();
+                      disconnect.mutate({});
+                    }}
                     className="text-destructive focus:text-destructive"
                   >
                     <LogOut className="mr-2 h-4 w-4" />
@@ -184,7 +197,13 @@ export function Navbar() {
               </DropdownMenu>
             </>
           ) : (
-            <Button onClick={() => open()} size="sm">
+            <Button
+              onClick={() => {
+                posthog.capture("wallet_connect_clicked");
+                open();
+              }}
+              size="sm"
+            >
               <Wallet className="mr-2 h-4 w-4" />
               Connect Wallet
             </Button>

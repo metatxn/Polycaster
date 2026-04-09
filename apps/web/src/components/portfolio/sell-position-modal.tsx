@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import posthog from "posthog-js";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +54,16 @@ export function SellPositionModal({
   } = useSellPosition({
     position,
     onSellSuccess: () => {
+      if (position) {
+        posthog.capture("sell_position_submitted", {
+          market_title: position.market.title,
+          outcome: position.outcome,
+          shares_sold: shares,
+          estimated_proceeds: sellEstimate.estimatedProceeds,
+          estimated_price: sellEstimate.estimatedPrice,
+          unrealized_pnl: position.unrealizedPnl,
+        });
+      }
       onSellSuccess?.();
       onOpenChange(false);
     },

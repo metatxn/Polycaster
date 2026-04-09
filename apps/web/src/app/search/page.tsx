@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import posthog from "posthog-js";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Navbar } from "@/components/navbar";
 import { PageBackground } from "@/components/page-background";
@@ -174,6 +175,13 @@ function SearchContent() {
         volume24hr: event.volume24hr,
         liquidity: event.liquidity,
         live: event.live,
+      });
+      posthog.capture("market_search_result_clicked", {
+        search_query: query.trim(),
+        event_id: event.id,
+        event_slug: event.slug || event.id,
+        event_title: event.title,
+        result_type: "market",
       });
       router.push(`/events/detail/${event.slug || event.id}`);
     },

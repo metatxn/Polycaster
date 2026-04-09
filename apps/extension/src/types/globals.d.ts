@@ -83,9 +83,20 @@ declare global {
       isPlatformEnabled: (platformName: string) => boolean;
       isSourceEnabled: (sourceName: string) => boolean;
       isNotificationStackEnabled: () => boolean;
+      isUsageAnalyticsEnabled: () => boolean;
       getThemeOverride: () => string;
       isDebugMode: () => boolean;
       onSettingsChange: (callback: (settings: UserSettings) => void) => void;
+    };
+
+    KNOWW_ANALYTICS: {
+      track: (
+        event: string,
+        properties?: Record<
+          string,
+          string | number | boolean | null | undefined
+        >
+      ) => Promise<void>;
     };
 
     KNOWW_UTILS: {

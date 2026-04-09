@@ -6,6 +6,10 @@
 
 import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
 import {
+  flushAnalyticsQueue,
+  queueAnalyticsEvent,
+} from "./background/analytics";
+import {
   clearExtensionAccessToken,
   getExtensionAccessToken,
   getExtensionAuthorizationHeader,
@@ -59,6 +63,7 @@ async function registerContentScripts(): Promise<void> {
 }
 
 registerContentScripts();
+void flushAnalyticsQueue();
 
 // ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
@@ -253,9 +258,11 @@ chrome.runtime.onMessage.addListener(
       type?: string;
       tabId?: number;
       id?: string;
+      event?: string;
       url?: string;
       method?: string;
       params?: unknown[];
+      properties?: Record<string, string | number | boolean | null | undefined>;
       result?: unknown;
       error?: string;
       key?: string;
@@ -358,6 +365,30 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ ok: true, data: null } as BackgroundResponse);
         }
       })();
+      return true;
+    }
+
+    if (msg?.type === "analytics:track" && typeof msg.event === "string") {
+      queueAnalyticsEvent({
+        event: msg.event,
+        properties:
+          typeof msg.properties === "object" && msg.properties !== null
+            ? (msg.properties as Record<
+                string,
+                string | number | boolean | null | undefined
+              >)
+            : undefined,
+      })
+        .then(() => {
+          sendResponse({ ok: true, data: null } as BackgroundResponse);
+        })
+        .catch((error) => {
+          logWarn("analytics.queue_failed", error);
+          sendResponse({
+            ok: false,
+            error: "Failed to queue analytics event",
+          } as BackgroundResponse);
+        });
       return true;
     }
 
@@ -562,6 +593,21 @@ chrome.action.onClicked.addListener(() => {
 chrome.runtime.onInstalled.addListener((details) => {
   registerContentScripts();
   if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
+    void queueAnalyticsEvent({
+      event: "extension_installed",
+      properties: {
+        reason: details.reason,
+      },
+    });
     chrome.runtime.openOptionsPage();
+    return;
   }
+
+  void queueAnalyticsEvent({
+    event: "extension_updated",
+    properties: {
+      reason: details.reason,
+      previousVersion: details.previousVersion || null,
+    },
+  });
 });

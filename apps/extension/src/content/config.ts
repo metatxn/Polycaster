@@ -46,7 +46,7 @@ const KALSHI_WEB_URL = "https://kalshi.com";
 // ============================================
 // APP URLs
 // ============================================
-const KNOWW_APP_URL = DEV_MODE ? "http://localhost:8787" : "https://knoww.app";
+const KNOWW_APP_URL = DEV_MODE ? "http://localhost:8000" : "https://knoww.app";
 
 // ============================================
 // ENABLED MARKET SOURCES (dynamic based on user settings)
@@ -185,6 +185,16 @@ function isNotificationStackEnabled(): boolean {
 }
 
 /**
+ * Check if usage analytics should be sent
+ */
+function isUsageAnalyticsEnabled(): boolean {
+  return (
+    USER_SETTINGS.usageAnalyticsEnabled ??
+    DEFAULT_USER_SETTINGS.usageAnalyticsEnabled
+  );
+}
+
+/**
  * Get theme override setting
  */
 function getThemeOverride(): string {
@@ -286,6 +296,7 @@ export const KNOWW_CONFIG = {
   isPlatformEnabled,
   isSourceEnabled,
   isNotificationStackEnabled,
+  isUsageAnalyticsEnabled,
   getThemeOverride,
   isDebugMode,
   onSettingsChange,

@@ -2,6 +2,7 @@
 
 import { AnimatePresence } from "framer-motion";
 import { ArrowLeft, X } from "lucide-react";
+import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { erc20Abi, parseUnits } from "viem";
 import { polygon } from "viem/chains";
@@ -362,6 +363,12 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       if (receipt.status === "success") {
         setIsOnChainConfirmed(true);
         waitingForBridge = true;
+        posthog.capture("deposit_initiated", {
+          token_symbol: selectedToken.symbol,
+          amount,
+          wallet_address: address,
+          deposit_method: selectedMethod,
+        });
       } else throw new Error("Transaction failed on-chain");
     } catch (err) {
       setTxError(err instanceof Error ? err : new Error("Transaction failed"));
@@ -372,7 +379,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
         setIsConfirming(false);
       }
     }
-  }, [selectedToken, amount, bridgeAddress]);
+  }, [selectedToken, amount, bridgeAddress, selectedMethod, address]);
 
   const handleBack = useCallback(() => {
     if (step === "token" || step === "bridge-select") {
@@ -522,6 +529,9 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
             setIsConfirming(false);
             setIsConfirmed(true);
             setIsProcessing(false);
+            posthog.capture("deposit_completed", {
+              wallet_address: bridgeAddress,
+            });
           }
         })
         .catch(() => {})

@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   description: "Privacy Policy for Knoww (knoww.app) and the Knoww Extension.",
 };
 
-const LAST_UPDATED = "January 26, 2026";
+const LAST_UPDATED = "April 8, 2026";
 
 const sections = [
   { id: "overview", title: "Overview" },
@@ -205,6 +205,15 @@ export default function PrivacyPage() {
                         platforms and sources) are stored using Chrome’s
                         extension storage.
                       </li>
+                      <li>
+                        <strong>Extension usage analytics</strong>: if enabled
+                        in the Extension settings, we may collect pseudonymous
+                        product analytics such as extension startup, supported
+                        site detection, market card impressions and clicks,
+                        trading panel opens, and settings changes. We do not
+                        send raw page text or full page content as part of these
+                        analytics events.
+                      </li>
                     </ul>
                   </div>
                 </Section>
@@ -219,6 +228,11 @@ export default function PrivacyPage() {
                       <strong>Improve and debug</strong>: diagnose issues,
                       protect against abuse, and improve reliability and
                       performance.
+                    </li>
+                    <li>
+                      <strong>Measure product adoption</strong>: if analytics
+                      are enabled, understand which supported sites and flows
+                      are used so we can prioritize improvements.
                     </li>
                     <li>
                       <strong>Communicate</strong>: respond to support requests
@@ -252,6 +266,11 @@ export default function PrivacyPage() {
                       <strong>Infrastructure providers</strong>: hosting and
                       networking providers may process standard logs to deliver
                       the service.
+                    </li>
+                    <li>
+                      <strong>Analytics providers</strong>: if Extension usage
+                      analytics are enabled, pseudonymous analytics events may
+                      be processed by analytics providers acting on our behalf.
                     </li>
                     <li>
                       <strong>Legal and safety</strong>: if required by law or
@@ -290,6 +309,11 @@ export default function PrivacyPage() {
                       The Extension stores user settings using Chrome’s{" "}
                       <code className="font-mono text-xs">storage</code>{" "}
                       permission.
+                    </li>
+                    <li>
+                      If you enable usage analytics, the Extension sends only
+                      pseudonymous product events needed to measure product
+                      adoption and feature usage.
                     </li>
                   </ul>
 
@@ -371,6 +395,10 @@ export default function PrivacyPage() {
                     <li>
                       <strong>Disable the Extension</strong>: you can disable or
                       uninstall the Extension at any time in Chrome.
+                    </li>
+                    <li>
+                      <strong>Disable usage analytics</strong>: you can turn off
+                      usage analytics in the Extension settings at any time.
                     </li>
                     <li>
                       <strong>Control local storage</strong>: you can clear site

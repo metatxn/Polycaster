@@ -160,6 +160,39 @@ let sessionRestoreAttempted = false;
 
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 
+function trackPanelAnalytics(
+  event: string,
+  properties: Record<string, string | number | boolean | null | undefined> = {}
+): void {
+  void window.KNOWW_ANALYTICS.track(event, {
+    feature: "trading_panel",
+    ...properties,
+  });
+}
+
+function getTrackedOutcomeName(opts: PanelOptions): string {
+  if (opts.yesTokenId && opts.noTokenId) {
+    return selectedOutcome === "yes" ? "Yes" : "No";
+  }
+  return opts.outcomeName;
+}
+
+function getDepositEventProperties(): Record<
+  string,
+  string | number | boolean | null | undefined
+> {
+  return {
+    depositMethod,
+    tokenSymbol:
+      depositSelected?.symbol ?? depositSelectedBridgeAsset?.token.symbol,
+    amount:
+      depositAmount && !Number.isNaN(Number.parseFloat(depositAmount))
+        ? Number.parseFloat(depositAmount)
+        : undefined,
+    chainName: depositSelectedBridgeAsset?.chainName,
+  };
+}
+
 function getTickSize(): number {
   return TradingService.getContext().tickSize || 0.01;
 }
@@ -548,6 +581,9 @@ function addHeader(
     const depositBtn = el("button", "knoww-tp-header-deposit", "Deposit");
     depositBtn.onclick = (e) => {
       e.stopPropagation();
+      trackPanelAnalytics("trading_panel_deposit_clicked", {
+        marketId: panelOpts?.market.id,
+      });
       activeView = "deposit";
       startDepositFlow(address);
     };
@@ -557,6 +593,9 @@ function addHeader(
     refreshBtn.title = "Refresh balance";
     refreshBtn.onclick = (e) => {
       e.stopPropagation();
+      trackPanelAnalytics("trading_panel_balance_refreshed", {
+        marketId: panelOpts?.market.id,
+      });
       refreshBtn.classList.add("spinning");
       TradingService.refreshBalance()
         .then(() => {
@@ -582,6 +621,7 @@ function addHeader(
     dcBtn.title = "Disconnect wallet";
     dcBtn.onclick = (e) => {
       e.stopPropagation();
+      trackPanelAnalytics("wallet_disconnected");
       TradingService.reset();
       CredentialManager.clear(address).catch(() => {});
     };
@@ -591,6 +631,9 @@ function addHeader(
   const closeBtn = elHtml("button", "knoww-tp-close", I.close);
   closeBtn.onclick = (e) => {
     e.stopPropagation();
+    trackPanelAnalytics("trading_panel_closed", {
+      marketId: panelOpts?.market.id,
+    });
     TradingPanel.hide();
   };
   right.appendChild(closeBtn);
@@ -637,6 +680,10 @@ function addOutcomeToggle(p: HTMLElement, opts: PanelOptions): void {
   yesBtn.innerHTML = `<span class="knoww-tp-outcome-label">Yes</span><span class="knoww-tp-outcome-price">${yesCtx}¢</span>`;
   yesBtn.onclick = (e) => {
     e.stopPropagation();
+    trackPanelAnalytics("trading_panel_outcome_toggled", {
+      outcome: "yes",
+      marketId: opts.market.id,
+    });
     switchOutcome("yes");
   };
 
@@ -647,6 +694,10 @@ function addOutcomeToggle(p: HTMLElement, opts: PanelOptions): void {
   noBtn.innerHTML = `<span class="knoww-tp-outcome-label">No</span><span class="knoww-tp-outcome-price">${noCtx}¢</span>`;
   noBtn.onclick = (e) => {
     e.stopPropagation();
+    trackPanelAnalytics("trading_panel_outcome_toggled", {
+      outcome: "no",
+      marketId: opts.market.id,
+    });
     switchOutcome("no");
   };
 
@@ -743,6 +794,9 @@ function addDisconnected(p: HTMLElement): void {
         e.stopPropagation();
         item.style.opacity = "0.6";
         item.style.pointerEvents = "none";
+        trackPanelAnalytics("wallet_connect_clicked", {
+          walletProvider: w.rdns || w.name,
+        });
         TradingService.connectWallet(w.uuid);
       };
       list.appendChild(item);
@@ -757,6 +811,9 @@ function addDisconnected(p: HTMLElement): void {
     btn.onclick = (e) => {
       e.stopPropagation();
       setButtonLoading(btn, "Connecting…");
+      trackPanelAnalytics("wallet_connect_clicked", {
+        walletProvider: "auto_select",
+      });
 
       window.postMessage(
         { type: "KNOWW_LIST_WALLETS", _n: getNonce() },
@@ -836,6 +893,10 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
   );
   mBtn.onclick = (e) => {
     e.stopPropagation();
+    trackPanelAnalytics("trading_panel_order_mode_selected", {
+      mode: "market",
+      marketId: opts.market.id,
+    });
     orderMode = "market";
     moreMenuOpen = false;
     rerender();
@@ -847,6 +908,10 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
   );
   lBtn.onclick = (e) => {
     e.stopPropagation();
+    trackPanelAnalytics("trading_panel_order_mode_selected", {
+      mode: "limit",
+      marketId: opts.market.id,
+    });
     orderMode = "limit";
     moreMenuOpen = false;
     rerender();
@@ -884,6 +949,9 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
       );
       splitBtn.onclick = (e) => {
         e.stopPropagation();
+        trackPanelAnalytics("trading_panel_split_opened", {
+          marketId: opts.market.id,
+        });
         moreMenuOpen = false;
         activeView = "split";
         splitMergeAmount = 0;
@@ -899,6 +967,9 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
       );
       mergeBtn.onclick = (e) => {
         e.stopPropagation();
+        trackPanelAnalytics("trading_panel_merge_opened", {
+          marketId: opts.market.id,
+        });
         moreMenuOpen = false;
         activeView = "merge";
         splitMergeAmount = 0;
@@ -929,6 +1000,10 @@ function addBuySellToggle(form: HTMLElement): void {
   );
   buyBtn.onclick = (e) => {
     e.stopPropagation();
+    trackPanelAnalytics("trading_panel_side_selected", {
+      side: "buy",
+      marketId: panelOpts?.market.id,
+    });
     activeSide = "buy";
     rerender();
   };
@@ -939,6 +1014,10 @@ function addBuySellToggle(form: HTMLElement): void {
   );
   sellBtn.onclick = (e) => {
     e.stopPropagation();
+    trackPanelAnalytics("trading_panel_side_selected", {
+      side: "sell",
+      marketId: panelOpts?.market.id,
+    });
     activeSide = "sell";
     if (panelOpts) {
       const pos = getPositionSize(panelOpts);
@@ -1037,6 +1116,11 @@ function addLimitPrice(
     bidBtn.onclick = (e) => {
       e.stopPropagation();
       limitPrice = normalizePrice(bestBid, tickSize);
+      trackPanelAnalytics("trading_form_limit_price_set", {
+        marketId: opts.market.id,
+        method: "bid",
+        price: limitPrice,
+      });
       rerender();
     };
     bidAskWrap.appendChild(bidBtn);
@@ -1050,6 +1134,11 @@ function addLimitPrice(
     askBtn.onclick = (e) => {
       e.stopPropagation();
       limitPrice = normalizePrice(bestAsk, tickSize);
+      trackPanelAnalytics("trading_form_limit_price_set", {
+        marketId: opts.market.id,
+        method: "ask",
+        price: limitPrice,
+      });
       rerender();
     };
     bidAskWrap.appendChild(askBtn);
@@ -1065,6 +1154,11 @@ function addLimitPrice(
       (limitPrice || opts.price) - tickSize,
       tickSize
     );
+    trackPanelAnalytics("trading_form_limit_price_set", {
+      marketId: opts.market.id,
+      method: "stepper_down",
+      price: limitPrice,
+    });
     rerender();
   };
 
@@ -1095,6 +1189,11 @@ function addLimitPrice(
         ? (limitPrice * 100).toFixed(2)
         : (limitPrice * 100).toFixed(1);
     input.value = centsDisplay;
+    trackPanelAnalytics("trading_form_limit_price_set", {
+      marketId: opts.market.id,
+      method: "manual",
+      price: limitPrice,
+    });
     refreshDynamicUI();
   };
   wrap.appendChild(input);
@@ -1107,6 +1206,11 @@ function addLimitPrice(
       (limitPrice || opts.price) + tickSize,
       tickSize
     );
+    trackPanelAnalytics("trading_form_limit_price_set", {
+      marketId: opts.market.id,
+      method: "stepper_up",
+      price: limitPrice,
+    });
     rerender();
   };
 
@@ -1154,6 +1258,10 @@ function addLimitPrice(
     btn.onclick = (e) => {
       e.stopPropagation();
       expirationPreset = p;
+      trackPanelAnalytics("trading_form_expiration_changed", {
+        marketId: opts.market.id,
+        expiration: p,
+      });
       rerender();
     };
     expRow.appendChild(btn);
@@ -1264,6 +1372,12 @@ function addAmountSection(
       let capped = Math.max(isSell ? 0.01 : minShares, v);
       if (isSell && positionSize > 0) capped = Math.min(capped, positionSize);
       selectedShares = capped;
+      trackPanelAnalytics("trading_form_shares_input", {
+        marketId: opts.market.id,
+        shares: capped,
+        method: "manual",
+        side: activeSide,
+      });
       refreshDynamicUI();
     }
   };
@@ -1294,6 +1408,11 @@ function addAmountSection(
         Math.floor(ctx.balance / effectivePrice)
       );
     }
+    trackPanelAnalytics("trading_form_max_clicked", {
+      marketId: opts.market.id,
+      shares: selectedShares,
+      side: activeSide,
+    });
     rerender();
   };
   if ((isSell && positionSize <= 0) || (!isSell && ctx.balance <= 0)) {
@@ -1319,6 +1438,13 @@ function adjustShares(delta: number, minShares: number): void {
     if (pos > 0) next = Math.min(next, pos);
   }
   selectedShares = next;
+  trackPanelAnalytics("trading_form_shares_adjusted", {
+    marketId: panelOpts?.market.id || "",
+    shares: next,
+    delta,
+    method: "button",
+    side: activeSide,
+  });
   rerender();
 }
 
@@ -1590,15 +1716,44 @@ function addSubmitButton(
 
   btn.onclick = async (e) => {
     e.stopPropagation();
-    if (btn.disabled || !activePanel) return;
+    if (btn.disabled) {
+      let reason = "unknown";
+      if (orderSettling) reason = "settling";
+      else if (isSubmitting) reason = "submitting";
+      else if (sellBalancesLoading) reason = "loading_position";
+      else if (noShares) reason = "no_shares";
+      else if (noPosition) reason = "no_position";
+      else if (overPosition) reason = "over_position";
+      else if (belowMinNotional) reason = "below_min_notional";
+      else if (belowMinShares) reason = "below_min_shares";
+      else if (noFunds) reason = "insufficient_balance";
+      trackPanelAnalytics("trading_form_submit_blocked", {
+        marketId: opts.market.id,
+        reason,
+        side: activeSide,
+        shares: selectedShares,
+      });
+      return;
+    }
+    if (!activePanel) return;
     const panel = activePanel;
 
     if (needsApproval) {
+      trackPanelAnalytics("trading_usdc_approve_started", {
+        marketId: opts.market.id,
+      });
       try {
         await TradingService.approveUsdc(!!opts.negRisk);
+        trackPanelAnalytics("trading_usdc_approve_succeeded", {
+          marketId: opts.market.id,
+        });
         showToast(panel, "USDC approved!", "success");
         TradingService.refreshBalance().catch(() => {});
       } catch (err) {
+        trackPanelAnalytics("trading_usdc_approve_failed", {
+          marketId: opts.market.id,
+          error: err instanceof Error ? err.message : "Approval failed",
+        });
         showToast(
           panel,
           err instanceof Error ? err.message : "Approval failed",
@@ -1639,6 +1794,15 @@ function addSubmitButton(
           effectiveSize = positionSize;
         }
       }
+      trackPanelAnalytics("market_order_submitted", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        outcomeName: getTrackedOutcomeName(opts),
+        side,
+        orderType: clobOrderType,
+        shares: effectiveSize,
+        totalCost: cost,
+      });
       await TradingService.placeOrder({
         tokenId: opts.tokenId,
         outcomeIndex: opts.outcomeIndex,
@@ -1654,6 +1818,15 @@ function addSubmitButton(
       const isLimitOrder = clobOrderType === "GTC" || clobOrderType === "GTD";
 
       if (isLimitOrder) {
+        trackPanelAnalytics("market_order_succeeded", {
+          marketId: opts.market.id,
+          marketTitle: opts.market.title || "Untitled Market",
+          outcomeName: getTrackedOutcomeName(opts),
+          side,
+          orderType: clobOrderType,
+          shares: effectiveSize,
+          totalCost: cost,
+        });
         showToast(panel, "Limit order placed!", "success");
         TradingService.refreshBalance().catch(() => {});
         if (opts.yesTokenId && opts.noTokenId) {
@@ -1682,6 +1855,17 @@ function addSubmitButton(
           if (settleTimer) {
             clearTimeout(settleTimer);
             settleTimer = null;
+          }
+          if (type === "success") {
+            trackPanelAnalytics("market_order_succeeded", {
+              marketId: opts.market.id,
+              marketTitle: opts.market.title || "Untitled Market",
+              outcomeName: getTrackedOutcomeName(opts),
+              side,
+              orderType: clobOrderType,
+              shares: effectiveSize,
+              totalCost: cost,
+            });
           }
           showToast(panel, message, type);
           rerender();
@@ -1759,6 +1943,16 @@ function addSubmitButton(
         clearTimeout(settleTimer);
         settleTimer = null;
       }
+      trackPanelAnalytics("market_order_failed", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        outcomeName: getTrackedOutcomeName(opts),
+        side,
+        orderType: clobOrderType,
+        shares,
+        totalCost: cost,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       showToast(
         panel,
         err instanceof Error ? err.message : "Order failed",
@@ -1922,18 +2116,34 @@ function renderSplitForm(
     if (btn.disabled || !opts.conditionId || !activePanel) return;
     const panel = activePanel;
     try {
+      trackPanelAnalytics("position_split_submitted", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        amount: splitMergeAmount,
+      });
       await TradingService.splitPosition(
         opts.conditionId,
         splitMergeAmount,
         opts.yesTokenId,
         opts.noTokenId
       );
+      trackPanelAnalytics("position_split_succeeded", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        amount: splitMergeAmount,
+      });
       showToast(panel, "Split completed!", "success");
       refreshSplitMergeState(opts, {
         refreshWallet: true,
         refreshOutcomeBalances: true,
       });
     } catch (err) {
+      trackPanelAnalytics("position_split_failed", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        amount: splitMergeAmount,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       showToast(
         panel,
         err instanceof Error ? err.message : "Split failed",
@@ -2099,18 +2309,34 @@ function renderMergeForm(
     if (btn.disabled || !opts.conditionId || !activePanel) return;
     const panel = activePanel;
     try {
+      trackPanelAnalytics("position_merge_submitted", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        amount: splitMergeAmount,
+      });
       await TradingService.mergePositions(
         opts.conditionId,
         splitMergeAmount,
         opts.yesTokenId,
         opts.noTokenId
       );
+      trackPanelAnalytics("position_merge_succeeded", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        amount: splitMergeAmount,
+      });
       showToast(panel, "Merge completed!", "success");
       refreshSplitMergeState(opts, {
         refreshWallet: true,
         refreshOutcomeBalances: true,
       });
     } catch (err) {
+      trackPanelAnalytics("position_merge_failed", {
+        marketId: opts.market.id,
+        marketTitle: opts.market.title || "Untitled Market",
+        amount: splitMergeAmount,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       showToast(
         panel,
         err instanceof Error ? err.message : "Merge failed",
@@ -2314,6 +2540,7 @@ function startDepositFlow(eoaAddress: string): void {
   resetDepositState();
   depositState = "loading-balances";
   depositStep = "method";
+  trackPanelAnalytics("deposit_opened");
   rerender();
 
   const loadBalances = fetchEoaBalancesViaWallet(eoaAddress)
@@ -2384,6 +2611,9 @@ function depositHandleBack(): void {
 
 async function depositSelectMethod(method: DepositMethod): Promise<void> {
   depositMethod = method;
+  trackPanelAnalytics("deposit_method_selected", {
+    depositMethod: method,
+  });
   if (method === "wallet") {
     depositStep = "token";
   } else if (method === "bridge") {
@@ -2406,6 +2636,10 @@ async function depositSelectToken(
   token: DepositToken,
   proxyAddress: string
 ): Promise<void> {
+  trackPanelAnalytics("deposit_asset_selected", {
+    depositMethod: "wallet",
+    tokenSymbol: token.symbol,
+  });
   depositSelected = token;
   depositError = null;
   depositBridgeAddress = "";
@@ -2447,6 +2681,11 @@ async function depositSelectBridgeAsset(
   asset: SupportedAsset,
   proxyAddress: string
 ): Promise<void> {
+  trackPanelAnalytics("deposit_asset_selected", {
+    depositMethod: "bridge",
+    tokenSymbol: asset.token.symbol,
+    chainName: asset.chainName,
+  });
   depositSelectedBridgeAsset = asset;
   depositState = "loading-bridge";
   rerender();
@@ -2465,7 +2704,8 @@ async function depositSelectBridgeAsset(
       if (matching) depositBridgeAddress = matching.depositAddress;
     }
   } catch (err) {
-    console.error("Failed to get bridge address:", err);
+    depositError =
+      err instanceof Error ? err.message : "Failed to get bridge address.";
   }
 
   depositState = "ready";
@@ -2551,12 +2791,21 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
     if (receipt.status === "reverted") {
       depositIsConfirming = false;
       depositError = "Transaction reverted on-chain";
+      trackPanelAnalytics("deposit_failed", {
+        ...getDepositEventProperties(),
+        stage: "on_chain",
+        errorMessage: depositError,
+      });
       rerender();
       return;
     }
 
     // Phase 2: On-chain confirmed — now poll for bridge credit
     depositTxConfirmed = true;
+    trackPanelAnalytics("deposit_initiated", {
+      ...getDepositEventProperties(),
+      txHash,
+    });
     rerender();
 
     const prevBalance = ctx.balance;
@@ -2600,6 +2849,11 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         depositIsConfirming = false;
         depositError =
           "Transaction confirmed on-chain, but bridge processing failed.";
+        trackPanelAnalytics("deposit_failed", {
+          ...getDepositEventProperties(),
+          stage: "bridge",
+          errorMessage: depositError,
+        });
         rerender();
         return;
       }
@@ -2611,6 +2865,10 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         }
         depositIsConfirming = false;
         depositIsConfirmed = true;
+        trackPanelAnalytics("deposit_completed", {
+          ...getDepositEventProperties(),
+          statusSource: bridgeCompleted ? "bridge_status" : "balance_change",
+        });
         rerender();
         setTimeout(() => {
           activeView = "order";
@@ -2628,6 +2886,11 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         depositIsConfirming = false;
         depositError =
           "Transaction confirmed on-chain, but bridge credit is taking longer than expected. Please check again shortly.";
+        trackPanelAnalytics("deposit_failed", {
+          ...getDepositEventProperties(),
+          stage: "bridge_timeout",
+          errorMessage: depositError,
+        });
         rerender();
         return;
       }
@@ -2646,6 +2909,11 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
     } else {
       depositError = msg;
     }
+    trackPanelAnalytics("deposit_failed", {
+      ...getDepositEventProperties(),
+      stage: "submission",
+      errorMessage: depositError,
+    });
     rerender();
   }
 }
@@ -3181,6 +3449,7 @@ function renderDepositConfirmStep(
       copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
       copyBtn.onclick = (e) => {
         e.stopPropagation();
+        trackPanelAnalytics("deposit_address_copied", { method: "icon" });
         navigator.clipboard.writeText(depositBridgeAddress);
         copyBtn.innerHTML = I.check;
         setTimeout(() => {
@@ -3196,6 +3465,7 @@ function renderDepositConfirmStep(
       copyFullBtn.textContent = "Copy Deposit Address";
       copyFullBtn.onclick = (e) => {
         e.stopPropagation();
+        trackPanelAnalytics("deposit_address_copied", { method: "button" });
         navigator.clipboard.writeText(depositBridgeAddress);
         copyFullBtn.textContent = "Address Copied!";
         setTimeout(() => {
@@ -3491,6 +3761,11 @@ function renderDepositConfirmStep(
   btn.onclick = (e) => {
     e.stopPropagation();
     if (isDisabled) return;
+    trackPanelAnalytics("deposit_confirm_clicked", {
+      asset:
+        depositSelected?.symbol ?? depositSelectedBridgeAsset?.token.symbol,
+      amount: depositAmount || null,
+    });
     executeDeposit(ctx);
   };
   form.appendChild(btn);

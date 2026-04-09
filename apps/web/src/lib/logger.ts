@@ -6,10 +6,10 @@ interface LogPayload {
 
 function write(level: LogLevel, event: string, payload?: LogPayload): void {
   const entry = {
+    ...(payload ?? {}),
     level,
     event,
     timestamp: new Date().toISOString(),
-    ...(payload ?? {}),
   };
 
   const serialized = JSON.stringify(entry);

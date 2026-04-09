@@ -53,14 +53,14 @@ export function SellPositionModal({
     resetShares,
   } = useSellPosition({
     position,
-    onSellSuccess: () => {
+    onSellSuccess: (result) => {
       if (position) {
         posthog.capture("sell_position_submitted", {
           market_title: position.market.title,
           outcome: position.outcome,
-          shares_sold: shares,
-          estimated_proceeds: sellEstimate.estimatedProceeds,
-          estimated_price: sellEstimate.estimatedPrice,
+          shares_sold: result.shares,
+          estimated_proceeds: result.estimatedProceeds,
+          estimated_price: result.estimatedPrice,
           unrealized_pnl: position.unrealizedPnl,
         });
       }

@@ -75,7 +75,9 @@ function trackTradingAnalytics(
   event: string,
   properties: Record<string, string | number | boolean | null | undefined> = {}
 ): void {
-  void window.KNOWW_ANALYTICS.track(event, properties);
+  if (typeof window.KNOWW_ANALYTICS?.track === "function") {
+    void window.KNOWW_ANALYTICS.track(event, properties);
+  }
 }
 
 function notify(): void {

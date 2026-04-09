@@ -454,11 +454,13 @@ function OptionsApp() {
           return;
         }
         if (response?.ok) {
-          chrome.runtime.sendMessage({
-            type: "analytics:track",
-            event: "options_wallet_disconnected",
-            properties: {},
-          });
+          if (settings.usageAnalyticsEnabled) {
+            chrome.runtime.sendMessage({
+              type: "analytics:track",
+              event: "options_wallet_disconnected",
+              properties: {},
+            });
+          }
           setHasToken(false);
           showStatus("Wallet disconnected");
         } else {
@@ -467,7 +469,7 @@ function OptionsApp() {
         }
       });
     }
-  }, [showStatus]);
+  }, [settings.usageAnalyticsEnabled, showStatus]);
 
   return (
     <div className="container">

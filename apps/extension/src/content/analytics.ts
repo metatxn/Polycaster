@@ -14,24 +14,28 @@ function getPageContext(): AnalyticsProperties {
 }
 
 function isAnalyticsEnabled(): boolean {
-  const settings = window.KNOWW_CONFIG.getUserSettings();
-  return settings.usageAnalyticsEnabled;
+  const settings = window.KNOWW_CONFIG?.getUserSettings?.();
+  return settings?.usageAnalyticsEnabled ?? false;
 }
 
 async function track(
   event: string,
   properties: AnalyticsProperties = {}
 ): Promise<void> {
-  if (!isAnalyticsEnabled()) return;
+  try {
+    if (!isAnalyticsEnabled()) return;
 
-  await window.KNOWW_UTILS.safeSendMessage({
-    type: "analytics:track",
-    event,
-    properties: {
-      ...getPageContext(),
-      ...properties,
-    },
-  });
+    await window.KNOWW_UTILS?.safeSendMessage?.({
+      type: "analytics:track",
+      event,
+      properties: {
+        ...getPageContext(),
+        ...properties,
+      },
+    });
+  } catch {
+    // Swallow analytics errors so they never disrupt runtime
+  }
 }
 
 const KNOWW_ANALYTICS = {

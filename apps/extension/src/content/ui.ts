@@ -146,7 +146,7 @@ async function resolveTokenAndShowPanel(
       yesTokenId,
       noTokenId,
     });
-    void window.KNOWW_ANALYTICS.track("trading_panel_opened", {
+    void window.KNOWW_ANALYTICS?.track("trading_panel_opened", {
       marketId: market.id,
       source: market.source || "polymarket",
       outcomeName,
@@ -154,7 +154,7 @@ async function resolveTokenAndShowPanel(
     });
     log(`Trading panel opened for ${outcomeName}`);
   } else {
-    void window.KNOWW_ANALYTICS.track("trading_panel_open_failed", {
+    void window.KNOWW_ANALYTICS?.track("trading_panel_open_failed", {
       reason: "token_unresolved",
       marketId: market.id,
       outcomeName,
@@ -720,7 +720,7 @@ function createInlineMarketCard(
   dismissBtn.onclick = (e) => {
     e.stopPropagation();
     e.preventDefault();
-    void window.KNOWW_ANALYTICS.track("market_card_dismissed", {
+    void window.KNOWW_ANALYTICS?.track("market_card_dismissed", {
       marketId: market.id,
       source: marketSource,
     });
@@ -806,7 +806,7 @@ function createInlineMarketCard(
       const capturedIdx = idx;
       btn.onclick = (e) => {
         e.stopPropagation();
-        void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+        void window.KNOWW_ANALYTICS?.track("market_card_clicked", {
           marketId: market.id,
           source: marketSource,
           action: "outcome_selected",
@@ -878,7 +878,7 @@ function createInlineMarketCard(
 
       optionRow.onclick = (e) => {
         e.stopPropagation();
-        void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+        void window.KNOWW_ANALYTICS?.track("market_card_clicked", {
           marketId: market.id,
           source: marketSource,
           action: "outcome_selected",
@@ -913,7 +913,7 @@ function createInlineMarketCard(
     toggleBtn.onclick = (e) => {
       e.stopPropagation();
       const isExpanded = currentOptionsList.classList.contains("visible");
-      void window.KNOWW_ANALYTICS.track("market_card_options_toggled", {
+      void window.KNOWW_ANALYTICS?.track("market_card_options_toggled", {
         marketId: market.id,
         source: marketSource,
         expanded: !isExpanded,
@@ -983,7 +983,7 @@ function createInlineMarketCard(
 
       optionRow.onclick = (e) => {
         e.stopPropagation();
-        void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+        void window.KNOWW_ANALYTICS?.track("market_card_clicked", {
           marketId: market.id,
           source: marketSource,
           action: "outcome_selected",
@@ -1017,7 +1017,7 @@ function createInlineMarketCard(
     toggleBtn.onclick = (e) => {
       e.stopPropagation();
       const isExpanded = currentOptionsList.classList.contains("visible");
-      void window.KNOWW_ANALYTICS.track("market_card_options_toggled", {
+      void window.KNOWW_ANALYTICS?.track("market_card_options_toggled", {
         marketId: market.id,
         source: marketSource,
         expanded: !isExpanded,
@@ -1076,7 +1076,7 @@ function createInlineMarketCard(
       log("Opening Knoww:", marketUrl);
     }
 
-    void window.KNOWW_ANALYTICS.track("market_card_clicked", {
+    void window.KNOWW_ANALYTICS?.track("market_card_clicked", {
       marketId: market.id,
       source: marketSource,
       action: "view_market",
@@ -1388,7 +1388,7 @@ function setupSearchFunctionality(
     toggleBtn.classList.toggle("knoww-search-active", isSearchOpen);
 
     if (isSearchOpen) {
-      void window.KNOWW_ANALYTICS.track("extension_search_opened");
+      void window.KNOWW_ANALYTICS?.track("extension_search_opened");
       input.focus();
       clearBtn.style.display = "flex";
     } else {
@@ -1400,7 +1400,7 @@ function setupSearchFunctionality(
   };
 
   clearBtn.onclick = () => {
-    void window.KNOWW_ANALYTICS.track("extension_search_cleared");
+    void window.KNOWW_ANALYTICS?.track("extension_search_cleared");
     if (input.value.trim() === "") {
       isSearchOpen = false;
       container.classList.remove("knoww-search-open");
@@ -1436,7 +1436,7 @@ function setupSearchFunctionality(
       try {
         const { searchPolymarketEvents } = window.KNOWW_API;
         const events = await searchPolymarketEvents(searchQuery, []);
-        void window.KNOWW_ANALYTICS.track("extension_search_query_submitted", {
+        void window.KNOWW_ANALYTICS?.track("extension_search_query_submitted", {
           queryLength: searchQuery.length,
           resultCount: events.length,
         });
@@ -1462,7 +1462,7 @@ function setupSearchFunctionality(
         if (currentSearchQuery !== searchQuery) {
           return;
         }
-        void window.KNOWW_ANALYTICS.track("extension_search_failed", {
+        void window.KNOWW_ANALYTICS?.track("extension_search_failed", {
           query: searchQuery,
         });
         log("Search error:", e);
@@ -1479,7 +1479,7 @@ function setupSearchFunctionality(
       !container.contains(target) &&
       !toggleBtn.contains(target)
     ) {
-      void window.KNOWW_ANALYTICS.track("extension_search_dismissed");
+      void window.KNOWW_ANALYTICS?.track("extension_search_dismissed");
       isSearchOpen = false;
       container.classList.remove("knoww-search-open");
       toggleBtn.classList.remove("knoww-search-active");
@@ -1617,7 +1617,7 @@ function createSearchResultItem(market: Market): HTMLElement {
         : KNOWW_APP_URL;
     }
 
-    void window.KNOWW_ANALYTICS.track("extension_search_result_clicked", {
+    void window.KNOWW_ANALYTICS?.track("extension_search_result_clicked", {
       marketId: market.id,
       source: marketSource,
     });
@@ -1769,7 +1769,7 @@ function createNotificationItem(
 
   // Click handler to scroll to the market card, or open URL if card is gone
   item.onclick = () => {
-    void window.KNOWW_ANALYTICS.track("notification_stack_item_clicked", {
+    void window.KNOWW_ANALYTICS?.track("notification_stack_item_clicked", {
       marketId: market.id,
       source: marketSource,
       itemStatus: isActive ? "active" : "scrolled_out",
@@ -2051,7 +2051,7 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
   item.appendChild(arrow);
 
   item.onclick = () => {
-    void window.KNOWW_ANALYTICS.track("notification_trending_clicked", {
+    void window.KNOWW_ANALYTICS?.track("notification_trending_clicked", {
       marketSlug: market.slug || market.id,
     });
     const marketUrl = buildMarketUrl(market);
@@ -2394,7 +2394,7 @@ function initNotificationStack(): void {
 
   if (!notificationStackContainer) {
     createNotificationStack();
-    void window.KNOWW_ANALYTICS.track("notification_stack_opened");
+    void window.KNOWW_ANALYTICS?.track("notification_stack_opened");
     log("Notification stack initialized");
   }
 

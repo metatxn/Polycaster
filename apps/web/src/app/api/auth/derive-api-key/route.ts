@@ -96,6 +96,24 @@ async function deriveApiKey(
   }
 }
 
+function trackApiKeyEvent(
+  address: string,
+  event: string,
+  method: string
+): void {
+  try {
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: address,
+      event,
+      properties: { wallet_address: address, method },
+    });
+    posthog.flush().catch(() => {});
+  } catch {
+    // Analytics must never affect the API response
+  }
+}
+
 /**
  * POST /api/auth/derive-api-key
  *
@@ -156,13 +174,7 @@ export async function POST(request: NextRequest) {
     const createResult = await createApiKey(clobHost, l1Headers);
 
     if (createResult.success && createResult.data) {
-      const posthog = getPostHogClient();
-      posthog.capture({
-        distinctId: address,
-        event: "trading_api_key_created",
-        properties: { wallet_address: address, method: "create" },
-      });
-      await posthog.flush();
+      trackApiKeyEvent(address, "trading_api_key_created", "create");
       return NextResponse.json({
         success: true,
         credentials: createResult.data,
@@ -174,13 +186,7 @@ export async function POST(request: NextRequest) {
     const deriveResult = await deriveApiKey(clobHost, l1Headers);
 
     if (deriveResult.success && deriveResult.data) {
-      const posthog = getPostHogClient();
-      posthog.capture({
-        distinctId: address,
-        event: "trading_api_key_derived",
-        properties: { wallet_address: address, method: "derive" },
-      });
-      await posthog.flush();
+      trackApiKeyEvent(address, "trading_api_key_derived", "derive");
       return NextResponse.json({
         success: true,
         credentials: deriveResult.data,

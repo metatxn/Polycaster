@@ -44,10 +44,10 @@ declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
     return; // Exit early - user has disabled this platform
   }
 
-  void window.KNOWW_ANALYTICS.track("extension_started", {
+  void window.KNOWW_ANALYTICS?.track("extension_started", {
     notificationStackEnabled: isNotificationStackEnabled(),
   });
-  void window.KNOWW_ANALYTICS.track("supported_page_detected", {
+  void window.KNOWW_ANALYTICS?.track("supported_page_detected", {
     platform: platformName,
   });
 

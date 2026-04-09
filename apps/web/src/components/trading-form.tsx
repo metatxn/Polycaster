@@ -436,17 +436,19 @@ export function TradingForm(props: TradingFormProps) {
                       ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20"
                       : "bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20"
                 }`}
-                onClick={() => {
-                  posthog.capture("market_order_submitted", {
-                    market_title: marketTitle,
-                    side,
-                    order_type: orderType,
-                    shares,
-                    outcome_name: selectedOutcome?.name,
-                    total_cost: calculations.total,
-                    potential_win: calculations.potentialWin,
-                  });
-                  handleSubmit();
+                onClick={async () => {
+                  const success = await handleSubmit();
+                  if (success) {
+                    posthog.capture("order_submitted", {
+                      market_title: marketTitle,
+                      side,
+                      order_type: orderType,
+                      shares,
+                      outcome_name: selectedOutcome?.name,
+                      total_cost: calculations.total,
+                      potential_win: calculations.potentialWin,
+                    });
+                  }
                 }}
                 disabled={
                   isLoading ||

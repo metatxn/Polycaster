@@ -89,6 +89,19 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   const quoteFetchedRef = useRef<string | null>(null);
   const [isLoadingQuoteLocal, setIsLoadingQuoteLocal] = useState(false);
 
+  const depositContextRef = useRef({
+    address,
+    selectedToken,
+    amount,
+    selectedMethod,
+  });
+  depositContextRef.current = {
+    address,
+    selectedToken,
+    amount,
+    selectedMethod,
+  };
+
   useEffect(() => {
     if (!open) {
       setStep("method");
@@ -529,8 +542,12 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
             setIsConfirming(false);
             setIsConfirmed(true);
             setIsProcessing(false);
+            const ctx = depositContextRef.current;
             posthog.capture("deposit_completed", {
-              wallet_address: bridgeAddress,
+              wallet_address: ctx.address,
+              token_symbol: ctx.selectedToken?.symbol,
+              amount: ctx.amount,
+              deposit_method: ctx.selectedMethod,
             });
           }
         })

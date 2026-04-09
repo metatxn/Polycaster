@@ -374,7 +374,7 @@ function ensureCardVisibilityObserver(): void {
             !clickedMarketIds.has(marketId)
           ) {
             window.KNOWW_PREFERENCES?.recordIgnore(tracked.market);
-            void window.KNOWW_ANALYTICS.track("market_card_ignored", {
+            void window.KNOWW_ANALYTICS?.track("market_card_ignored", {
               marketId,
               source: tracked.market.source || "polymarket",
               visibleDurationMs: Date.now() - firstSeen,
@@ -1089,7 +1089,7 @@ function injectMarketCards(
       cardVisibilityObserver?.observe(card);
 
       const source = market.source || "polymarket";
-      void window.KNOWW_ANALYTICS.track("market_card_impression", {
+      void window.KNOWW_ANALYTICS?.track("market_card_impression", {
         marketId: market.id,
         source,
       });
@@ -1117,7 +1117,7 @@ function injectMarketCards(
     return true;
   } catch (e) {
     cleanup?.();
-    void window.KNOWW_ANALYTICS.track("market_card_injection_failed", {
+    void window.KNOWW_ANALYTICS?.track("market_card_injection_failed", {
       cardsAttempted: injectedCards.length,
       error: e instanceof Error ? e.message : String(e),
     });

@@ -114,21 +114,30 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let json: unknown;
   try {
-    const json = await request.json();
-    const parsed = requestSchema.safeParse(json);
+    json = await request.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Invalid JSON payload" },
+      { status: 400 }
+    );
+  }
 
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Invalid analytics payload",
-          details: parsed.error.flatten().fieldErrors,
-        },
-        { status: 400 }
-      );
-    }
+  const parsed = requestSchema.safeParse(json);
 
+  if (!parsed.success) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Invalid analytics payload",
+        details: parsed.error.flatten().fieldErrors,
+      },
+      { status: 400 }
+    );
+  }
+
+  try {
     const events = parsed.data.events.map(sanitizeAnalyticsEvent);
 
     await captureServerEvents(events);
@@ -158,7 +167,7 @@ function sanitizeAnalyticsEvent(
 ): ServerPostHogEvent {
   const properties = Object.fromEntries(
     Object.entries(event.properties).filter(
-      ([key]) => !SENSITIVE_PROPERTY_KEYS.has(key)
+      ([key]) => !SENSITIVE_PROPERTY_KEYS.has(key.toLowerCase())
     )
   );
 

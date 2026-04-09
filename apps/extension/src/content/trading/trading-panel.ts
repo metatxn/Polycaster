@@ -164,7 +164,7 @@ function trackPanelAnalytics(
   event: string,
   properties: Record<string, string | number | boolean | null | undefined> = {}
 ): void {
-  void window.KNOWW_ANALYTICS.track(event, {
+  void window.KNOWW_ANALYTICS?.track(event, {
     feature: "trading_panel",
     ...properties,
   });

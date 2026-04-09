@@ -19,7 +19,15 @@
     "default_title": "Knoww Settings"
   },
   "permissions": ["storage", "offscreen", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "https://knoww.app/*",
+    "https://gamma-api.polymarket.com/*",
+    "https://clob.polymarket.com/*",
+    "https://bridge.polymarket.com/*",
+    "https://relayer-v2.polymarket.com/*",
+    "https://polygon-bor-rpc.publicnode.com/*",
+    "https://api.elections.kalshi.com/*"
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },

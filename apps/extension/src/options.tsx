@@ -29,7 +29,7 @@ const SUPPORTED_HOST_PATTERNS = [
   /(^|\.)beehaw\.org$/i,
   /(^|\.)feddit\.org$/i,
   /(^|\.)lemm\.ee$/i,
-  /(^|\.)threads\.net$/i,
+  /(^|\.)threads\.com$/i,
   /^bsky\.app$/i,
   /(^|\.)mastodon\.social$/i,
   /(^|\.)mstdn\.social$/i,

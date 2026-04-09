@@ -248,19 +248,6 @@ function broadcastWallets(): void {
     rdns: w.info.rdns,
   }));
 
-  const eth = getLegacyProvider();
-  const alreadyDiscovered = eth
-    ? [...discoveredWallets.values()].some((w) => w.provider === eth)
-    : true;
-  if (eth && !alreadyDiscovered) {
-    allWallets.push({
-      uuid: LEGACY_INJECTED_UUID,
-      name: "Injected Provider",
-      icon: "",
-      rdns: "",
-    });
-  }
-
   const seenNames = new Map<string, number>();
   const wallets: typeof allWallets = [];
   for (const w of allWallets) {

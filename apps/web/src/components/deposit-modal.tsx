@@ -2,6 +2,7 @@
 
 import { AnimatePresence } from "framer-motion";
 import { ArrowLeft, X } from "lucide-react";
+import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { erc20Abi, parseUnits } from "viem";
 import { polygon } from "viem/chains";
@@ -46,7 +47,8 @@ const CHAIN_CONFIG: Record<string, { icon: string; gradient: string }> = {
 
 export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   const { address, isConnected } = useConnection();
-  const { usdcBalance: polymarketBalance } = useProxyWallet();
+  const { usdcBalance: polymarketBalance, refresh: refreshProxyWallet } =
+    useProxyWallet();
   const {
     tokens: walletTokens,
     isLoading: loadingTokens,
@@ -63,6 +65,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isOnChainConfirmed, setIsOnChainConfirmed] = useState(false);
   const [isConfirmed, setIsConfirmed] = useState(false);
   const [txError, setTxError] = useState<Error | null>(null);
 
@@ -86,6 +89,19 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   const quoteFetchedRef = useRef<string | null>(null);
   const [isLoadingQuoteLocal, setIsLoadingQuoteLocal] = useState(false);
 
+  const depositContextRef = useRef({
+    address,
+    selectedToken,
+    amount,
+    selectedMethod,
+  });
+  depositContextRef.current = {
+    address,
+    selectedToken,
+    amount,
+    selectedMethod,
+  };
+
   useEffect(() => {
     if (!open) {
       setStep("method");
@@ -100,6 +116,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       setDepositError(null);
       setIsPending(false);
       setIsConfirming(false);
+      setIsOnChainConfirmed(false);
       setIsConfirmed(false);
       setTxError(null);
       setQuote(null);
@@ -113,9 +130,10 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     if (isConfirmed) {
       setIsProcessing(false);
       refreshTokens();
+      void refreshProxyWallet();
       setTimeout(() => onOpenChange(false), 1500);
     }
-  }, [isConfirmed, refreshTokens, onOpenChange]);
+  }, [isConfirmed, refreshTokens, refreshProxyWallet, onOpenChange]);
 
   useEffect(() => {
     if (txError) {
@@ -291,11 +309,15 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     if (!selectedToken || !amount || !bridgeAddress) return;
     if (typeof window === "undefined" || !window.ethereum) return;
 
+    let waitingForBridge = false;
+
     setDepositError(null);
     setIsProcessing(true);
     setIsPending(true);
     setTxError(null);
+    setIsOnChainConfirmed(false);
     setIsConfirmed(false);
+    setDepositTransactions([]);
 
     try {
       const { createWalletClient, createPublicClient, custom, http } =
@@ -351,16 +373,26 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
         timeout: 180_000, // 3 minute timeout
         confirmations: 1, // Wait for 1 confirmation
       });
-      if (receipt.status === "success") setIsConfirmed(true);
-      else throw new Error("Transaction failed on-chain");
+      if (receipt.status === "success") {
+        setIsOnChainConfirmed(true);
+        waitingForBridge = true;
+        posthog.capture("deposit_initiated", {
+          token_symbol: selectedToken.symbol,
+          amount,
+          wallet_address: address,
+          deposit_method: selectedMethod,
+        });
+      } else throw new Error("Transaction failed on-chain");
     } catch (err) {
       setTxError(err instanceof Error ? err : new Error("Transaction failed"));
       setIsProcessing(false);
     } finally {
       setIsPending(false);
-      setIsConfirming(false);
+      if (!waitingForBridge) {
+        setIsConfirming(false);
+      }
     }
-  }, [selectedToken, amount, bridgeAddress]);
+  }, [selectedToken, amount, bridgeAddress, selectedMethod, address]);
 
   const handleBack = useCallback(() => {
     if (step === "token" || step === "bridge-select") {
@@ -464,21 +496,63 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   }, [step]);
 
   // Poll deposit status after transaction is confirmed
-  const shouldPollStatus = isConfirmed && !!bridgeAddress;
+  const shouldPollStatus =
+    isOnChainConfirmed && isConfirming && !isConfirmed && !!bridgeAddress;
 
   useEffect(() => {
     if (!shouldPollStatus) return;
 
     let cancelled = false;
+    const startedAt = Date.now();
+    const BRIDGE_TIMEOUT_MS = 3 * 60 * 1000;
+
+    const checkTimeout = () => {
+      if (cancelled) return;
+      if (Date.now() - startedAt >= BRIDGE_TIMEOUT_MS) {
+        cancelled = true;
+        setDepositError(
+          "Transaction confirmed on-chain, but bridge credit is taking longer than expected. Please check again shortly."
+        );
+        setIsConfirming(false);
+        setIsProcessing(false);
+      }
+    };
 
     const fetchStatus = () => {
       getDepositStatus(bridgeAddress)
         .then((data) => {
-          if (!cancelled) setDepositTransactions(data);
+          if (cancelled) return;
+
+          setDepositTransactions(data);
+
+          const hasFailed = data.some((tx) => tx.status === "FAILED");
+          if (hasFailed) {
+            cancelled = true;
+            setDepositError(
+              "Transaction confirmed on-chain, but bridge processing failed. Contact support if funds do not arrive."
+            );
+            setIsConfirming(false);
+            setIsProcessing(false);
+            return;
+          }
+
+          const hasCompleted = data.some((tx) => tx.status === "COMPLETED");
+          if (hasCompleted) {
+            cancelled = true;
+            setIsConfirming(false);
+            setIsConfirmed(true);
+            setIsProcessing(false);
+            const ctx = depositContextRef.current;
+            posthog.capture("deposit_completed", {
+              wallet_address: ctx.address,
+              token_symbol: ctx.selectedToken?.symbol,
+              amount: ctx.amount,
+              deposit_method: ctx.selectedMethod,
+            });
+          }
         })
-        .catch((err) => {
-          if (!cancelled) console.warn("Failed to fetch deposit status:", err);
-        });
+        .catch(() => {})
+        .finally(checkTimeout);
     };
 
     fetchStatus();
@@ -633,6 +707,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
                 depositError={depositError}
                 isPending={isPending}
                 isConfirming={isConfirming}
+                isOnChainConfirmed={isOnChainConfirmed}
                 isConfirmed={isConfirmed}
                 copied={copied}
                 onCopy={handleCopy}

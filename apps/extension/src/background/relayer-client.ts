@@ -22,6 +22,7 @@ import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
 import { ethers } from "ethers";
 import type { BridgeSigner } from "./bridge-signer";
 import { createExtensionBuilderConfig } from "./builder-config";
+import { logInfo } from "./logger";
 
 const RELAYER_URL = POLYMARKET_API.RELAYER.BASE.replace(/\/$/, "");
 const CHAIN_ID = 137;
@@ -236,7 +237,7 @@ export async function executeViaRelayer(
   const eoaAddress = await signer.getAddress();
   const safeAddress = deriveSafeAddress(eoaAddress);
 
-  console.log("[Relayer] Executing via Safe:", safeAddress);
+  logInfo("relayer.execute-safe", { safeAddress });
 
   const deployed = await sendAuthedRequest<{ deployed: boolean }>(
     "GET",
@@ -250,13 +251,6 @@ export async function executeViaRelayer(
     );
   }
 
-  const noncePayload = await sendAuthedRequest<{ nonce: string }>(
-    "GET",
-    "/nonce",
-    undefined,
-    { address: eoaAddress, type: "SAFE" }
-  );
-
   const safeTxns: SafeTransaction[] = transactions.map((t) => ({
     to: t.to,
     operation: 0, // Call
@@ -265,45 +259,90 @@ export async function executeViaRelayer(
   }));
   const aggregated = aggregateSafeTransactions(safeTxns);
 
-  const structHash = createSafeTxStructHash(
-    CHAIN_ID,
-    safeAddress,
-    aggregated,
-    noncePayload.nonce
-  );
+  const maxRetries = 2;
+  let lastError: Error | null = null;
 
-  const signature = await signer.signMessage(ethers.utils.arrayify(structHash));
-  const packedSig = splitAndPackSignature(signature);
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      logInfo("relayer.retry", { attempt, reason: lastError?.message });
+      await new Promise((r) => setTimeout(r, 1500));
+    }
 
-  const requestPayload = JSON.stringify({
-    from: eoaAddress,
-    to: aggregated.to,
-    proxyWallet: safeAddress,
-    data: aggregated.data,
-    nonce: noncePayload.nonce,
-    signature: packedSig,
-    signatureParams: {
-      gasPrice: "0",
-      operation: String(aggregated.operation),
-      safeTxnGas: "0",
-      baseGas: "0",
-      gasToken: ethers.constants.AddressZero,
-      refundReceiver: ethers.constants.AddressZero,
-    },
-    type: "SAFE",
-    metadata: "",
-  });
+    const noncePayload = await sendAuthedRequest<{ nonce: string }>(
+      "GET",
+      "/nonce",
+      undefined,
+      { address: eoaAddress, type: "SAFE" }
+    );
 
-  const submitResponse = await sendAuthedRequest<{
-    transactionID: string;
-    state: string;
-    transactionHash: string;
-  }>("POST", "/submit", requestPayload);
+    const structHash = createSafeTxStructHash(
+      CHAIN_ID,
+      safeAddress,
+      aggregated,
+      noncePayload.nonce
+    );
 
-  console.log("[Relayer] Submitted:", submitResponse);
+    const signature = await signer.signMessage(
+      ethers.utils.arrayify(structHash)
+    );
+    const packedSig = splitAndPackSignature(signature);
 
-  const txHash = await pollTransaction(submitResponse.transactionID);
-  return { transactionID: submitResponse.transactionID, txHash };
+    const requestPayload = JSON.stringify({
+      from: eoaAddress,
+      to: aggregated.to,
+      proxyWallet: safeAddress,
+      data: aggregated.data,
+      nonce: noncePayload.nonce,
+      signature: packedSig,
+      signatureParams: {
+        gasPrice: "0",
+        operation: String(aggregated.operation),
+        safeTxnGas: "0",
+        baseGas: "0",
+        gasToken: ethers.constants.AddressZero,
+        refundReceiver: ethers.constants.AddressZero,
+      },
+      type: "SAFE",
+      metadata: "",
+    });
+
+    const submitResponse = await sendAuthedRequest<{
+      transactionID: string;
+      state: string;
+      transactionHash: string;
+    }>("POST", "/submit", requestPayload);
+
+    logInfo("relayer.submitted", {
+      transactionID: submitResponse.transactionID,
+      state: submitResponse.state,
+      attempt,
+    });
+
+    try {
+      const txHash = await pollTransaction(submitResponse.transactionID);
+      return { transactionID: submitResponse.transactionID, txHash };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const isNonceRace =
+        lastError.message.includes("STATE_FAILED") ||
+        lastError.message.includes("GS026") ||
+        lastError.message.includes("reverted");
+
+      if (!isNonceRace || attempt >= maxRetries - 1) {
+        throw lastError;
+      }
+      logInfo("relayer.nonce-race-detected", {
+        transactionID: submitResponse.transactionID,
+        error: lastError.message,
+      });
+    }
+  }
+
+  throw lastError ?? new Error("Relayer execution failed");
+}
+
+interface RelayerTxDetail extends RelayerTxStatus {
+  errorMsg?: string;
 }
 
 async function pollTransaction(transactionID: string): Promise<string> {
@@ -311,19 +350,20 @@ async function pollTransaction(transactionID: string): Promise<string> {
   const intervalMs = 2000;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const txns = await relayerGet<RelayerTxStatus[]>("/transaction", {
+    const txns = await relayerGet<RelayerTxDetail[]>("/transaction", {
       id: transactionID,
     });
 
     if (txns?.length > 0) {
       const tx = txns[0];
       if (FAILURE_STATES.includes(tx.state)) {
+        const detail = tx.errorMsg ? `: ${tx.errorMsg}` : "";
         throw new Error(
-          `Transaction failed with state: ${tx.state} (hash: ${tx.transactionHash || "none"})`
+          `Transaction failed with state: ${tx.state}${detail} (hash: ${tx.transactionHash || "none"})`
         );
       }
       if (SUCCESS_STATES.includes(tx.state)) {
-        console.log("[Relayer] Confirmed:", tx.transactionHash);
+        logInfo("relayer.confirmed", { transactionHash: tx.transactionHash });
         return tx.transactionHash;
       }
     }

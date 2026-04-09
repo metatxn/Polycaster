@@ -2,6 +2,10 @@
  * Message types for communication with background script
  */
 
+// ── Sentinel error used by builder-config (background) and trading-service (content)
+// to signal that re-authentication is needed. ──
+export const EXTENSION_AUTH_REQUIRED_ERROR = "Extension auth required";
+
 // ── Existing fetch messages ──
 
 export interface FetchTextMessage {
@@ -15,6 +19,24 @@ export interface FetchJsonMessage {
   method?: string;
   headers?: Record<string, string>;
   body?: unknown;
+}
+
+export interface ScoreMarketsMessage {
+  type: "score-markets";
+  postText: string;
+  marketTexts: string[];
+  gateTexts?: string[];
+  includeEmbeddings?: boolean;
+  includeBm25?: boolean;
+  includeContextGate?: boolean;
+}
+
+export interface ContextGateResult {
+  pass: boolean;
+  sharedNouns: number;
+  meaningfulNouns: number;
+  sharedEntities: number;
+  details: string;
 }
 
 // ── Order types (from shared package) ──
@@ -125,6 +147,12 @@ export interface SigningResponseMessage {
   error?: string;
 }
 
+export interface AnalyticsTrackMessage {
+  type: "analytics:track";
+  event: string;
+  properties?: Record<string, string | number | boolean | null | undefined>;
+}
+
 // ── Union types ──
 
 export type TradingMessage =
@@ -143,8 +171,10 @@ export type TradingMessage =
 export type BackgroundMessage =
   | FetchTextMessage
   | FetchJsonMessage
+  | ScoreMarketsMessage
   | TradingMessage
-  | SigningResponseMessage;
+  | SigningResponseMessage
+  | AnalyticsTrackMessage;
 
 // ── Responses ──
 
@@ -176,25 +206,12 @@ export interface TradingErrorResponse {
   error: string;
 }
 
-export interface EmbeddingsSuccessResponse {
+export interface ScoreMarketsSuccessResponse {
   ok: true;
   similarities: number[];
-}
-
-export interface NlpContextGateSuccessResponse {
-  ok: true;
-  results: Array<{
-    pass: boolean;
-    sharedNouns: number;
-    meaningfulNouns: number;
-    sharedEntities: number;
-    details: string;
-  }>;
-}
-
-export interface Bm25SuccessResponse {
-  ok: true;
-  scores: number[];
+  bm25Scores: number[];
+  contextGateResults: ContextGateResult[];
+  usedEmbeddings: boolean;
 }
 
 export type BackgroundResponse =
@@ -203,9 +220,7 @@ export type BackgroundResponse =
   | FetchErrorResponse
   | TradingSuccessResponse
   | TradingErrorResponse
-  | EmbeddingsSuccessResponse
-  | NlpContextGateSuccessResponse
-  | Bm25SuccessResponse;
+  | ScoreMarketsSuccessResponse;
 
 export interface SettingsUpdateMessage {
   type: "KNOWW_SETTINGS_UPDATED";

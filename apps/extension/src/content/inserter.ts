@@ -3,13 +3,81 @@
 // DOM manipulation utilities for content injection
 // ============================================
 
+const DANGEROUS_CSS_PATTERN =
+  /expression\s*\(|url\s*\(\s*(["']?)\s*javascript:|(-moz-binding|-webkit-binding)\s*:|behavior\s*:/i;
+
+function sanitizeStyleValue(value: string): string {
+  return DANGEROUS_CSS_PATTERN.test(value) ? "" : value;
+}
+
 /**
  * Create a DOM node from HTML string safely (no <script>).
  */
 function htmlToElement(html: string): Element | null {
-  const tpl = document.createElement("template");
-  tpl.innerHTML = String(html).trim();
-  return tpl.content.firstElementChild;
+  const text = String(html).trim();
+  if (!text) {
+    return null;
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/html");
+  const root = doc.body.firstElementChild;
+  const element = root || document.createElement("span");
+  if (!root) {
+    element.textContent = text;
+    return element;
+  }
+
+  const nodes = [element, ...Array.from(element.querySelectorAll("*"))];
+  const forbiddenTags = new Set([
+    "script",
+    "iframe",
+    "object",
+    "embed",
+    "link",
+    "meta",
+    "base",
+  ]);
+
+  for (const node of nodes) {
+    if (forbiddenTags.has(node.tagName.toLowerCase())) {
+      node.remove();
+      continue;
+    }
+
+    for (const attr of Array.from(node.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (
+        /^on/i.test(name) ||
+        ((name === "src" ||
+          name === "href" ||
+          name === "action" ||
+          name === "formaction" ||
+          name === "xlink:href" ||
+          name === "srcdoc") &&
+          typeof attr.value === "string" &&
+          /^\s*(javascript|data):/i.test(attr.value))
+      ) {
+        node.removeAttribute(attr.name);
+      } else if (name === "style") {
+        const sanitized = sanitizeStyleValue(attr.value);
+        if (sanitized) {
+          node.setAttribute("style", sanitized);
+        } else {
+          node.removeAttribute("style");
+        }
+      }
+    }
+  }
+
+  if (
+    forbiddenTags.has(element.tagName.toLowerCase()) ||
+    !doc.body.contains(element)
+  ) {
+    return null;
+  }
+
+  return element;
 }
 
 /**
@@ -27,7 +95,7 @@ function isOurCard(el: Element | null): boolean {
  * Insert `nodeToInsert` after `target`.
  */
 function insertAfter(target: Element | null, nodeToInsert: Element): void {
-  if (!target || !target.parentNode) return;
+  if (!target?.parentNode) return;
   target.parentNode.insertBefore(nodeToInsert, target.nextSibling);
 }
 
@@ -82,6 +150,33 @@ function getLinkedInSelectors(): {
 }
 
 /**
+ * Returns a selector set for Quora answers.
+ * - itemSelector: answer content blocks
+ * - containerSelector: main content area
+ */
+function getQuoraSelectors(): {
+  itemSelector: string;
+  containerSelector: string;
+} {
+  const itemSelector = [
+    ".puppeteer_test_answer_content",
+    "[data-testid='answer_content']",
+  ].join(", ");
+
+  const containerSelectorCandidates = [
+    'main[role="main"]',
+    "main",
+    '[role="main"]',
+    "body",
+  ];
+
+  const containerSelector =
+    containerSelectorCandidates.find((sel) => document.querySelector(sel)) ||
+    "body";
+  return { itemSelector, containerSelector };
+}
+
+/**
  * Get selectors for the current platform (auto-detect)
  * Uses platform registry if available, otherwise falls back to manual detection
  */
@@ -100,9 +195,13 @@ function getPlatformSelectors(): {
   // Fallback to manual detection
   const host = (typeof location !== "undefined" && location.hostname) || "";
   const isLinkedIn = /(^|\.)linkedin\.com$/.test(host);
+  const isQuora = /(^|\.)quora\.com$/.test(host);
 
   if (isLinkedIn) {
     return getLinkedInSelectors();
+  }
+  if (isQuora) {
+    return getQuoraSelectors();
   }
   return getXSelectors();
 }
@@ -114,6 +213,7 @@ interface NthInserterApi {
   insertAfter: typeof insertAfter;
   getXSelectors: typeof getXSelectors;
   getLinkedInSelectors: typeof getLinkedInSelectors;
+  getQuoraSelectors: typeof getQuoraSelectors;
   getPlatformSelectors: typeof getPlatformSelectors;
 }
 
@@ -124,6 +224,7 @@ const api: NthInserterApi = {
   insertAfter,
   getXSelectors,
   getLinkedInSelectors,
+  getQuoraSelectors,
   getPlatformSelectors,
 };
 
@@ -136,6 +237,7 @@ if (typeof window !== "undefined") {
 export {
   getLinkedInSelectors,
   getPlatformSelectors,
+  getQuoraSelectors,
   getXSelectors,
   htmlToElement,
   insertAfter,

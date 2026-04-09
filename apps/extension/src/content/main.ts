@@ -44,6 +44,13 @@ declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
     return; // Exit early - user has disabled this platform
   }
 
+  void window.KNOWW_ANALYTICS?.track("extension_started", {
+    notificationStackEnabled: isNotificationStackEnabled(),
+  });
+  void window.KNOWW_ANALYTICS?.track("supported_page_detected", {
+    platform: platformName,
+  });
+
   // Inject required scripts and styles
   injectMetamaskBridge();
   injectInlineStyles();
@@ -127,16 +134,21 @@ declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
     const host = location.hostname || "";
     const isLinkedIn = /(^|\.)linkedin\.com$/.test(host);
     const isReddit = /(^|\.)reddit\.com$/.test(host);
+    const isQuora = /(^|\.)quora\.com$/.test(host);
 
     if (
       typeof NTH_INSERTER !== "undefined" &&
       NTH_INSERTER &&
       typeof NTH_INSERTER.getLinkedInSelectors === "function" &&
-      typeof NTH_INSERTER.getXSelectors === "function"
+      typeof NTH_INSERTER.getXSelectors === "function" &&
+      typeof NTH_INSERTER.getQuoraSelectors === "function"
     ) {
       if (isLinkedIn) {
         ({ itemSelector, containerSelector } =
           NTH_INSERTER.getLinkedInSelectors());
+      } else if (isQuora) {
+        ({ itemSelector, containerSelector } =
+          NTH_INSERTER.getQuoraSelectors());
       } else {
         ({ itemSelector, containerSelector } = NTH_INSERTER.getXSelectors());
       }
@@ -149,6 +161,10 @@ declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
         containerSelector = ".scaffold-finite-scroll__content";
       } else if (isReddit) {
         itemSelector = "shreddit-post";
+        containerSelector = "main";
+      } else if (isQuora) {
+        itemSelector =
+          ".puppeteer_test_answer_content, [data-testid='answer_content']";
         containerSelector = "main";
       } else {
         itemSelector = 'article[data-testid="tweet"]';

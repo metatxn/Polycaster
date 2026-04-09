@@ -27,6 +27,8 @@ pnpm install
 # Configure environment
 cp .env.example .env.local
 # Add your NEXT_PUBLIC_REOWN_PROJECT_ID
+# Add POSTHOG_PROJECT_API_KEY to enable extension analytics ingestion
+# Optional: set POSTHOG_HOST for EU Cloud or self-hosted PostHog
 
 # Start development server
 pnpm dev

@@ -129,11 +129,6 @@
         z-index: 1;
       }
 
-      .toggle input:focus-visible + .toggle-slider {
-        outline: 2px solid #00ba7c;
-        outline-offset: 2px;
-      }
-
       .toggle-slider {
         position: absolute;
         cursor: pointer;
@@ -156,6 +151,11 @@
         background: white;
         transition: 0.2s;
         border-radius: 50%;
+      }
+
+      .toggle input:focus-visible + .toggle-slider {
+        outline: 2px solid #00ba7c;
+        outline-offset: 2px;
       }
 
       .toggle input:checked + .toggle-slider {

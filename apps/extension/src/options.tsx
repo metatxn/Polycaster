@@ -2,29 +2,233 @@
 // KNOWW SETTINGS - Options Page
 // ============================================
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
-const ALLOWED_HOSTS = new Set([
-  "twitter.com",
-  "www.twitter.com",
-  "mobile.twitter.com",
-  "x.com",
-  "www.x.com",
-  "linkedin.com",
-  "www.linkedin.com",
-  "reddit.com",
-  "www.reddit.com",
-  "new.reddit.com",
-  "old.reddit.com",
-]);
+const SUPPORTED_HOST_PATTERNS = [
+  /(^|\.)twitter\.com$/i,
+  /(^|\.)x\.com$/i,
+  /(^|\.)linkedin\.com$/i,
+  /(^|\.)reddit\.com$/i,
+  /(^|\.)quora\.com$/i,
+  /^news\.ycombinator\.com$/i,
+  /(^|\.)stackoverflow\.com$/i,
+  /(^|\.)stackexchange\.com$/i,
+  /(^|\.)superuser\.com$/i,
+  /(^|\.)serverfault\.com$/i,
+  /(^|\.)askubuntu\.com$/i,
+  /(^|\.)mathoverflow\.net$/i,
+  /(^|\.)stackapps\.com$/i,
+  /(^|\.)producthunt\.com$/i,
+  /(^|\.)slashdot\.org$/i,
+  /(^|\.)lemmy\.world$/i,
+  /(^|\.)lemmy\.ml$/i,
+  /(^|\.)sh\.itjust\.works$/i,
+  /(^|\.)programming\.dev$/i,
+  /(^|\.)beehaw\.org$/i,
+  /(^|\.)feddit\.org$/i,
+  /(^|\.)lemm\.ee$/i,
+  /(^|\.)threads\.com$/i,
+  /^bsky\.app$/i,
+  /(^|\.)mastodon\.social$/i,
+  /(^|\.)mstdn\.social$/i,
+  /(^|\.)fosstodon\.org$/i,
+  /(^|\.)hachyderm\.io$/i,
+  /(^|\.)mas\.to$/i,
+  /(^|\.)infosec\.exchange$/i,
+  /(^|\.)discord\.com$/i,
+  /(^|\.)farcaster\.xyz$/i,
+  /(^|\.)coinmarketcap\.com$/i,
+  /(^|\.)paragraph\.com$/i,
+  /(^|\.)coindesk\.com$/i,
+  /(^|\.)cointelegraph\.com$/i,
+  /(^|\.)decrypt\.co$/i,
+  /(^|\.)theblock\.co$/i,
+  /(^|\.)blockworks\.com$/i,
+  /(^|\.)bankless\.com$/i,
+  /(^|\.)bitcoinmagazine\.com$/i,
+  /(^|\.)beincrypto\.com$/i,
+  /(^|\.)unchainedcrypto\.com$/i,
+  /(^|\.)cryptopanic\.com$/i,
+];
+
+const PLATFORM_OPTIONS: Array<{
+  key: keyof UserSettings["platforms"];
+  label: string;
+  description: string;
+  icon: string;
+}> = [
+  {
+    key: "twitter",
+    label: "Twitter / X",
+    description: "Show prediction markets on Twitter/X posts",
+    icon: "𝕏",
+  },
+  {
+    key: "linkedin",
+    label: "LinkedIn",
+    description: "Show prediction markets on LinkedIn posts",
+    icon: "in",
+  },
+  {
+    key: "reddit",
+    label: "Reddit",
+    description: "Show prediction markets on Reddit posts",
+    icon: "📱",
+  },
+  {
+    key: "quora",
+    label: "Quora",
+    description: "Show prediction markets on Quora answers",
+    icon: "Q",
+  },
+  {
+    key: "hackernews",
+    label: "Hacker News",
+    description: "Show prediction markets on Hacker News stories and comments",
+    icon: "Y",
+  },
+  {
+    key: "stackoverflow",
+    label: "Stack Overflow",
+    description:
+      "Show prediction markets on Stack Overflow questions and answers",
+    icon: "SO",
+  },
+  {
+    key: "stackexchange",
+    label: "Stack Exchange",
+    description: "Show prediction markets on Stack Exchange network posts",
+    icon: "SE",
+  },
+  {
+    key: "producthunt",
+    label: "Product Hunt",
+    description: "Show prediction markets on Product Hunt posts and comments",
+    icon: "PH",
+  },
+  {
+    key: "slashdot",
+    label: "Slashdot",
+    description: "Show prediction markets on Slashdot stories and comments",
+    icon: "SD",
+  },
+  {
+    key: "lemmy",
+    label: "Lemmy",
+    description: "Show prediction markets on supported Lemmy instances",
+    icon: "L",
+  },
+  {
+    key: "threads",
+    label: "Threads",
+    description: "Show prediction markets on Threads posts",
+    icon: "@",
+  },
+  {
+    key: "bluesky",
+    label: "Bluesky",
+    description: "Show prediction markets on Bluesky posts",
+    icon: "B",
+  },
+  {
+    key: "mastodon",
+    label: "Mastodon",
+    description: "Show prediction markets on supported Mastodon instances",
+    icon: "M",
+  },
+  {
+    key: "discord",
+    label: "Discord",
+    description: "Show prediction markets on Discord messages",
+    icon: "C",
+  },
+  {
+    key: "farcaster",
+    label: "Farcaster",
+    description: "Show prediction markets on Farcaster casts and replies",
+    icon: "FC",
+  },
+  {
+    key: "coinmarketcap",
+    label: "CoinMarketCap",
+    description: "Show prediction markets on CoinMarketCap community posts",
+    icon: "CMC",
+  },
+  {
+    key: "paragraph",
+    label: "Paragraph",
+    description: "Show prediction markets on Paragraph posts and newsletters",
+    icon: "P",
+  },
+  {
+    key: "coindesk",
+    label: "CoinDesk",
+    description: "Show prediction markets on CoinDesk articles",
+    icon: "CD",
+  },
+  {
+    key: "cointelegraph",
+    label: "Cointelegraph",
+    description: "Show prediction markets on Cointelegraph articles",
+    icon: "CT",
+  },
+  {
+    key: "decrypt",
+    label: "Decrypt",
+    description: "Show prediction markets on Decrypt articles",
+    icon: "D",
+  },
+  {
+    key: "theblock",
+    label: "The Block",
+    description: "Show prediction markets on The Block stories",
+    icon: "TB",
+  },
+  {
+    key: "blockworks",
+    label: "Blockworks",
+    description: "Show prediction markets on Blockworks stories",
+    icon: "BW",
+  },
+  {
+    key: "bankless",
+    label: "Bankless",
+    description: "Show prediction markets on Bankless articles",
+    icon: "BL",
+  },
+  {
+    key: "bitcoinmagazine",
+    label: "Bitcoin Magazine",
+    description: "Show prediction markets on Bitcoin Magazine articles",
+    icon: "BM",
+  },
+  {
+    key: "beincrypto",
+    label: "BeInCrypto",
+    description: "Show prediction markets on BeInCrypto articles",
+    icon: "BC",
+  },
+  {
+    key: "unchained",
+    label: "Unchained",
+    description: "Show prediction markets on Unchained articles",
+    icon: "UC",
+  },
+  {
+    key: "cryptopanic",
+    label: "CryptoPanic",
+    description: "Show prediction markets on CryptoPanic news items",
+    icon: "CP",
+  },
+];
 
 function isSupportedSocialHost(url: string | undefined): boolean {
   if (!url) return false;
   try {
     const { hostname } = new URL(url);
-    return ALLOWED_HOSTS.has(hostname);
+    return SUPPORTED_HOST_PATTERNS.some((pattern) => pattern.test(hostname));
   } catch {
     return false;
   }
@@ -167,6 +371,19 @@ function OptionsApp() {
     chrome.storage.sync.set({ knowwSettings: settings }, () => {
       showStatus("Settings saved!");
 
+      if (settings.usageAnalyticsEnabled) {
+        chrome.runtime.sendMessage({
+          type: "analytics:track",
+          event: "settings_updated",
+          properties: {
+            analyticsEnabled: settings.usageAnalyticsEnabled,
+            notificationStackEnabled: settings.showNotificationStack,
+            aiExtractionEnabled: settings.aiExtractionEnabled,
+            personalizationEnabled: settings.personalizationEnabled,
+          },
+        });
+      }
+
       // Notify content scripts
       chrome.tabs.query({}, (tabs) => {
         for (const tab of tabs) {
@@ -227,25 +444,32 @@ function OptionsApp() {
         "Are you sure you want to disconnect your wallet? You will need to sign in again to trade."
       )
     ) {
-      chrome.runtime.sendMessage({ type: "auth:clear-token" }, (response) => {
+      chrome.runtime.sendMessage({ type: "auth:logout" }, (response) => {
         if (chrome.runtime.lastError) {
           console.error(
-            "auth:clear-token failed:",
+            "auth:logout failed:",
             chrome.runtime.lastError.message
           );
           setHasToken(false);
           return;
         }
         if (response?.ok) {
+          if (settings.usageAnalyticsEnabled) {
+            chrome.runtime.sendMessage({
+              type: "analytics:track",
+              event: "options_wallet_disconnected",
+              properties: {},
+            });
+          }
           setHasToken(false);
           showStatus("Wallet disconnected");
         } else {
-          console.error("auth:clear-token returned non-ok response:", response);
+          console.error("auth:logout returned non-ok response:", response);
           setHasToken(false);
         }
       });
     }
-  }, [showStatus]);
+  }, [settings.usageAnalyticsEnabled, showStatus]);
 
   return (
     <div className="container">
@@ -261,45 +485,22 @@ function OptionsApp() {
 
       {/* Platforms Section */}
       <Section title="Platforms">
-        <SettingRow
-          label="Twitter / X"
-          description="Show prediction markets on Twitter/X posts"
-          icon="𝕏"
-        >
-          <Toggle
-            id="platform-twitter"
-            checked={settings.platforms.twitter}
-            onChange={(v) => updatePlatform("twitter", v)}
-          />
-        </SettingRow>
-
-        <Divider />
-
-        <SettingRow
-          label="LinkedIn"
-          description="Show prediction markets on LinkedIn posts"
-          icon="in"
-        >
-          <Toggle
-            id="platform-linkedin"
-            checked={settings.platforms.linkedin}
-            onChange={(v) => updatePlatform("linkedin", v)}
-          />
-        </SettingRow>
-
-        <Divider />
-
-        <SettingRow
-          label="Reddit"
-          description="Show prediction markets on Reddit posts"
-          icon="📱"
-        >
-          <Toggle
-            id="platform-reddit"
-            checked={settings.platforms.reddit}
-            onChange={(v) => updatePlatform("reddit", v)}
-          />
-        </SettingRow>
+        {PLATFORM_OPTIONS.map((platform, index) => (
+          <Fragment key={platform.key}>
+            <SettingRow
+              label={platform.label}
+              description={platform.description}
+              icon={platform.icon}
+            >
+              <Toggle
+                id={`platform-${platform.key}`}
+                checked={settings.platforms[platform.key]}
+                onChange={(v) => updatePlatform(platform.key, v)}
+              />
+            </SettingRow>
+            {index < PLATFORM_OPTIONS.length - 1 && <Divider />}
+          </Fragment>
+        ))}
       </Section>
 
       {/* Market Sources Section */}
@@ -371,41 +572,6 @@ function OptionsApp() {
         <Divider />
 
         <SettingRow
-          label="AI Confidence Threshold"
-          description={
-            settings.aiConfidenceThreshold <= 0.15
-              ? "Analyzes almost all posts, even if they don't seem like news."
-              : settings.aiConfidenceThreshold >= 0.35
-                ? "Only analyzes posts that clearly sound like news or predictions."
-                : "Balanced: Analyzes posts that are likely to have relevant markets."
-          }
-        >
-          <div className="range-container">
-            <input
-              type="range"
-              id="ai-confidence-threshold"
-              min="0.05"
-              max="0.5"
-              step="0.05"
-              value={settings.aiConfidenceThreshold}
-              onInput={(e) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  aiConfidenceThreshold: parseFloat(
-                    (e.target as HTMLInputElement).value
-                  ),
-                }))
-              }
-            />
-            <span className="range-value" id="ai-confidence-value">
-              {settings.aiConfidenceThreshold.toFixed(2)}
-            </span>
-          </div>
-        </SettingRow>
-
-        <Divider />
-
-        <SettingRow
           label="Injection Frequency"
           description="Check for markets every N posts (lower = more frequent)"
         >
@@ -442,8 +608,8 @@ function OptionsApp() {
         <Divider />
 
         <SettingRow
-          label="AI Keyword Extraction"
-          description="Use AI to improve keyword/topic detection before fallback rules"
+          label="AI-Assisted Matching"
+          description="When a market scores high but lacks keyword overlap, use AI to verify relevance"
         >
           <Toggle
             id="ai-extraction-enabled"
@@ -519,6 +685,21 @@ function OptionsApp() {
             <option value="light">Light</option>
             <option value="dim">Dim (Twitter)</option>
           </select>
+        </SettingRow>
+
+        <Divider />
+
+        <SettingRow
+          label="Usage Analytics"
+          description="Help us measure extension usage with anonymous product events. Raw page text is not sent."
+        >
+          <Toggle
+            id="usage-analytics-enabled"
+            checked={settings.usageAnalyticsEnabled}
+            onChange={(v) =>
+              setSettings((prev) => ({ ...prev, usageAnalyticsEnabled: v }))
+            }
+          />
         </SettingRow>
 
         <Divider />

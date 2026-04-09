@@ -17,6 +17,7 @@
     "typecheck": "pnpm -r run typecheck",
     "typecheck:ext": "pnpm --filter @knoww/extension typecheck",
     "typecheck:web": "pnpm --filter @knoww/web typecheck",
+    "audit:security": "pnpm audit --audit-level=high",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -32,10 +33,10 @@
     },
     "overrides": {
       "typescript": "6.0.2",
-      "axios": "1.13.6",
+      "axios": "1.14.0",
       "@isaacs/brace-expansion": "5.0.1",
       "fast-xml-parser": "5.5.7",
-      "qs": "6.14.1",
+      "qs": "6.15.0",
       "body-parser": "2.2.1",
       "h3": "1.15.10",
       "hono": "4.12.7",
@@ -44,7 +45,9 @@
       "bn.js": "4.12.3",
       "@polymarket/builder-signing-sdk": "1.0.0",
       "undici": "7.24.0",
-      "socket.io-parser": "4.2.6"
+      "socket.io-parser": "4.2.6",
+      "path-to-regexp": "8.4.0",
+      "defu": "6.1.5"
     }
   }
 }

@@ -61,7 +61,7 @@ export async function GET(
 
     const data = (await response.json()) as Record<string, unknown>;
 
-    if (!data || !data.id) {
+    if (!data?.id) {
       return NextResponse.json(
         {
           success: false,

@@ -9,6 +9,7 @@
 import type { ClobOrderType } from "@knoww/shared-types/polymarket";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import type { OrderBook } from "@knoww/shared-types/slippage";
+import { EXTENSION_AUTH_REQUIRED_ERROR } from "../../types/chrome-messages";
 import { WalletBridge } from "./bridge";
 import { type ApiKeyCreds, CredentialManager } from "./credentials";
 import { ExtensionSession } from "./extension-session";
@@ -70,6 +71,15 @@ let ctx: TradingContext = {
   usdcAllowanceNegRisk: 0,
 };
 
+function trackTradingAnalytics(
+  event: string,
+  properties: Record<string, string | number | boolean | null | undefined> = {}
+): void {
+  if (typeof window.KNOWW_ANALYTICS?.track === "function") {
+    void window.KNOWW_ANALYTICS.track(event, properties);
+  }
+}
+
 function notify(): void {
   for (const fn of listeners) {
     try {
@@ -119,6 +129,60 @@ function sendMsg<T>(
   });
 }
 
+function isExtensionAuthError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message
+      .toLowerCase()
+      .includes(EXTENSION_AUTH_REQUIRED_ERROR.toLowerCase())
+  );
+}
+
+let reAuthPromise: Promise<void> | null = null;
+
+async function reauthenticate(address: string): Promise<void> {
+  if (reAuthPromise) return reAuthPromise;
+
+  reAuthPromise = (async () => {
+    try {
+      await ExtensionSession.clear();
+      await ExtensionSession.ensureAuthorized(address);
+    } finally {
+      reAuthPromise = null;
+    }
+  })();
+
+  return reAuthPromise;
+}
+
+async function runWithAuthRetry<T>(
+  address: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  await ExtensionSession.ensureAuthorized(address);
+
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isExtensionAuthError(error)) {
+      throw error;
+    }
+
+    await reauthenticate(address);
+
+    try {
+      return await operation();
+    } catch (retryError) {
+      if (isExtensionAuthError(retryError)) {
+        throw new Error(
+          "Session expired. Please reconnect your wallet and try again."
+        );
+      }
+      throw retryError;
+    }
+  }
+}
+
 export const TradingService = {
   getContext(): TradingContext {
     return ctx;
@@ -145,6 +209,9 @@ export const TradingService = {
 
       const address = accounts[0];
       update({ address });
+      trackTradingAnalytics("wallet_connected", {
+        hasMultipleWallets: walletUuid !== undefined,
+      });
 
       update({ state: "switching-chain" });
       try {
@@ -153,6 +220,10 @@ export const TradingService = {
           await WalletBridge.switchChain(POLYGON_CHAIN_ID_HEX);
         }
       } catch (err) {
+        trackTradingAnalytics("wallet_chain_switch_failed", {
+          chainId: POLYGON_CHAIN_ID_HEX,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
         console.warn("[TradingService] Chain switch failed:", err);
       }
 
@@ -188,6 +259,9 @@ export const TradingService = {
         update({ state: "connected" });
       }
     } catch (err) {
+      trackTradingAnalytics("wallet_connect_failed", {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       update({
         state: "error",
         error: err instanceof Error ? err.message : String(err),
@@ -202,11 +276,27 @@ export const TradingService = {
     }
 
     update({ state: "deriving-credentials", error: null });
+    trackTradingAnalytics("trading_api_key_requested");
 
     try {
-      const creds = await CredentialManager.derive(ctx.address);
-      update({ credentials: creds, state: "ready" });
+      const result = await CredentialManager.derive(ctx.address);
+      trackTradingAnalytics(
+        result.method === "create"
+          ? "trading_api_key_created"
+          : "trading_api_key_derived"
+      );
+      update({
+        credentials: {
+          apiKey: result.apiKey,
+          apiSecret: result.apiSecret,
+          apiPassphrase: result.apiPassphrase,
+        },
+        state: "ready",
+      });
     } catch (err) {
+      trackTradingAnalytics("trading_api_key_failed", {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       update({
         state: "error",
         error: err instanceof Error ? err.message : String(err),
@@ -319,17 +409,17 @@ export const TradingService = {
     update({ state: "placing-order", error: null });
 
     try {
-      await ExtensionSession.ensureAuthorized(ctx.address);
-
-      const result = await sendMsg(
-        {
-          type: "trading:place-order",
-          ...params,
-          address: ctx.address,
-          proxyAddress: ctx.proxyAddress,
-          credentials: ctx.credentials,
-        },
-        "Order failed"
+      const result = await runWithAuthRetry(ctx.address, () =>
+        sendMsg(
+          {
+            type: "trading:place-order",
+            ...params,
+            address: ctx.address,
+            proxyAddress: ctx.proxyAddress,
+            credentials: ctx.credentials,
+          },
+          "Order failed"
+        )
       );
 
       update({ state: "ready" });
@@ -352,12 +442,14 @@ export const TradingService = {
     update({ state: "approving", error: null });
 
     try {
-      const result = await sendMsg<{
-        txHash: string;
-        alreadyApproved?: boolean;
-      }>(
-        { type: "trading:relayer-approve", address: ctx.address },
-        "Approval failed"
+      const result = await runWithAuthRetry(ctx.address, () =>
+        sendMsg<{
+          txHash: string;
+          alreadyApproved?: boolean;
+        }>(
+          { type: "trading:relayer-approve", address: ctx.address },
+          "Approval failed"
+        )
       );
 
       update({ state: "ready" });
@@ -384,18 +476,20 @@ export const TradingService = {
     update({ state: "splitting", error: null });
 
     try {
-      const result = await sendMsg(
-        {
-          type: "trading:split-position",
-          conditionId,
-          amount,
-          address: ctx.address,
-          proxyAddress: ctx.proxyAddress ?? undefined,
-          credentials: ctx.credentials ?? undefined,
-          yesTokenId,
-          noTokenId,
-        },
-        "Split failed"
+      const result = await runWithAuthRetry(ctx.address, () =>
+        sendMsg(
+          {
+            type: "trading:split-position",
+            conditionId,
+            amount,
+            address: ctx.address,
+            proxyAddress: ctx.proxyAddress ?? undefined,
+            credentials: ctx.credentials ?? undefined,
+            yesTokenId,
+            noTokenId,
+          },
+          "Split failed"
+        )
       );
       update({ state: "ready" });
       await this.refreshBalance();
@@ -422,18 +516,20 @@ export const TradingService = {
     update({ state: "merging", error: null });
 
     try {
-      const result = await sendMsg(
-        {
-          type: "trading:merge-positions",
-          conditionId,
-          amount,
-          address: ctx.address,
-          proxyAddress: ctx.proxyAddress ?? undefined,
-          credentials: ctx.credentials ?? undefined,
-          yesTokenId,
-          noTokenId,
-        },
-        "Merge failed"
+      const result = await runWithAuthRetry(ctx.address, () =>
+        sendMsg(
+          {
+            type: "trading:merge-positions",
+            conditionId,
+            amount,
+            address: ctx.address,
+            proxyAddress: ctx.proxyAddress ?? undefined,
+            credentials: ctx.credentials ?? undefined,
+            yesTokenId,
+            noTokenId,
+          },
+          "Merge failed"
+        )
       );
       update({ state: "ready" });
       await this.refreshBalance();

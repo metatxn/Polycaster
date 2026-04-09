@@ -23,7 +23,7 @@ let currentPlatformAdapter: PlatformAdapter | null = null;
  * Register a platform adapter
  */
 function registerPlatform(adapter: PlatformAdapter): void {
-  if (!adapter || !adapter.name) {
+  if (!adapter?.name) {
     console.error("[KnowwPlatform] Cannot register adapter without name");
     return;
   }

@@ -33,6 +33,8 @@ export interface DepositAddress {
 
 interface CreateDepositResponse {
   address: { evm: string; svm: string; btc: string };
+  supportedChains?: string[];
+  supported_chain_ids?: string[];
   note?: string;
 }
 
@@ -98,9 +100,30 @@ interface SupportedAssetsResponse {
 
 // ── Chain metadata (same as web) ──
 
+const SOLANA_CHAIN_ID = "1151111081099710";
+
+const SUPPORTED_BRIDGE_CHAIN_IDS = [
+  "1",
+  "137",
+  "42161",
+  "10",
+  "8453",
+  "43114",
+  "56",
+  "324",
+];
+
 export const CHAIN_METADATA: Record<
   string,
-  { name: string; icon: string; color: string; gradient: string }
+  {
+    name: string;
+    icon: string;
+    color: string;
+    gradient: string;
+    rpc?: string;
+    url?: string;
+    tokenSymbol?: string;
+  }
 > = {
   "1": {
     name: "Ethereum",
@@ -144,6 +167,21 @@ export const CHAIN_METADATA: Record<
     color: "#F0B90B",
     gradient: "from-yellow-400 to-amber-600",
   },
+  "324": {
+    name: "zkSync",
+    icon: "⚡",
+    color: "#8C8DFC",
+    gradient: "from-sky-400 to-indigo-500",
+  },
+  [SOLANA_CHAIN_ID]: {
+    name: "Solana",
+    icon: "◎",
+    color: "#9945FF",
+    gradient: "from-purple-500 to-violet-600",
+    rpc: "https://api.mainnet-beta.solana.com",
+    url: "https://solana.com",
+    tokenSymbol: "USDC",
+  },
 };
 
 // ── API helpers ──
@@ -159,44 +197,42 @@ export async function fetchSupportedAssets(): Promise<SupportedAsset[]> {
 function convertToDepositAddresses(
   data: CreateDepositResponse
 ): DepositAddress[] {
-  const evm = data.address.evm;
-  return [
-    {
-      chainId: "137",
-      chainName: "Polygon",
+  const addresses: DepositAddress[] = [];
+  const supportedChainIds = new Set<string>(
+    data.supportedChains ??
+      data.supported_chain_ids ??
+      SUPPORTED_BRIDGE_CHAIN_IDS
+  );
+
+  // Map supported EVM chains in CHAIN_METADATA to the bridge's EVM deposit address
+  if (data.address.evm) {
+    for (const [chainId, meta] of Object.entries(CHAIN_METADATA)) {
+      if (chainId === SOLANA_CHAIN_ID || !supportedChainIds.has(chainId)) {
+        continue;
+      }
+      addresses.push({
+        chainId,
+        chainName: meta.name,
+        tokenAddress: "",
+        tokenSymbol: "USDC",
+        depositAddress: data.address.evm,
+      });
+    }
+  }
+
+  // Solana uses the SVM deposit address
+  if (data.address.svm) {
+    const solanaMeta = CHAIN_METADATA[SOLANA_CHAIN_ID];
+    addresses.push({
+      chainId: SOLANA_CHAIN_ID,
+      chainName: solanaMeta?.name || "Solana",
       tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: evm,
-    },
-    {
-      chainId: "1",
-      chainName: "Ethereum",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: evm,
-    },
-    {
-      chainId: "42161",
-      chainName: "Arbitrum",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: evm,
-    },
-    {
-      chainId: "8453",
-      chainName: "Base",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: evm,
-    },
-    {
-      chainId: "10",
-      chainName: "Optimism",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: evm,
-    },
-  ];
+      tokenSymbol: solanaMeta?.tokenSymbol || "USDC",
+      depositAddress: data.address.svm,
+    });
+  }
+
+  return addresses;
 }
 
 export async function createDepositAddresses(

@@ -46,7 +46,7 @@ const KALSHI_WEB_URL = "https://kalshi.com";
 // ============================================
 // APP URLs
 // ============================================
-const KNOWW_APP_URL = DEV_MODE ? "http://localhost:8787" : "https://knoww.app";
+const KNOWW_APP_URL = DEV_MODE ? "http://localhost:8000" : "https://knoww.app";
 
 // ============================================
 // ENABLED MARKET SOURCES (dynamic based on user settings)
@@ -74,12 +74,6 @@ const CONFIG: Config = {
     return (
       USER_SETTINGS.relevanceThreshold ??
       DEFAULT_USER_SETTINGS.relevanceThreshold
-    );
-  },
-  get MIN_AI_CONFIDENCE() {
-    return (
-      USER_SETTINGS.aiConfidenceThreshold ??
-      DEFAULT_USER_SETTINGS.aiConfidenceThreshold
     );
   },
   get COOLDOWN_POSTS() {
@@ -155,12 +149,17 @@ function getUserSettings(): UserSettings {
  * Check if a platform is enabled
  */
 function isPlatformEnabled(platformName: string): boolean {
-  const platforms = USER_SETTINGS.platforms as Record<string, boolean>;
-  const defaultPlatforms = DEFAULT_USER_SETTINGS.platforms as Record<
-    string,
-    boolean
-  >;
-  return platforms?.[platformName] ?? defaultPlatforms[platformName] ?? true;
+  const platforms = USER_SETTINGS.platforms;
+  if (platformName in platforms) {
+    return platforms[platformName as keyof typeof platforms];
+  }
+
+  const defaultPlatforms = DEFAULT_USER_SETTINGS.platforms;
+  if (platformName in defaultPlatforms) {
+    return defaultPlatforms[platformName as keyof typeof defaultPlatforms];
+  }
+
+  return true;
 }
 
 /**
@@ -183,6 +182,13 @@ function isNotificationStackEnabled(): boolean {
     USER_SETTINGS.showNotificationStack ??
     DEFAULT_USER_SETTINGS.showNotificationStack
   );
+}
+
+/**
+ * Check if usage analytics should be sent
+ */
+function isUsageAnalyticsEnabled(): boolean {
+  return USER_SETTINGS.usageAnalyticsEnabled === true;
 }
 
 /**
@@ -287,6 +293,7 @@ export const KNOWW_CONFIG = {
   isPlatformEnabled,
   isSourceEnabled,
   isNotificationStackEnabled,
+  isUsageAnalyticsEnabled,
   getThemeOverride,
   isDebugMode,
   onSettingsChange,

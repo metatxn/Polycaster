@@ -10,7 +10,9 @@
  * worker which owns session storage.
  */
 
+import { EXTENSION_AUTH_REQUIRED_ERROR } from "../types/chrome-messages";
 import { getKnowwAppUrl } from "./extension-session";
+import { logWarn } from "./logger";
 
 const SIGN_PROXY_URL = `${getKnowwAppUrl()}/api/sign`;
 
@@ -72,8 +74,8 @@ export function createExtensionBuilderConfig() {
         const bodyStr = JSON.stringify({ method, path, body, timestamp });
         const token = await getAccessTokenViaMessage();
         if (!token) {
-          console.error("[ExtBuilderConfig] Missing extension session token");
-          return undefined;
+          logWarn("builder-config.missing-token");
+          throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
         }
 
         const headers: Record<string, string> = {
@@ -89,19 +91,30 @@ export function createExtensionBuilderConfig() {
 
         if (response.status === 401) {
           await clearAccessTokenViaMessage();
+          throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
         }
 
         if (!response.ok) {
-          console.error(
-            "[ExtBuilderConfig] sign proxy returned",
-            response.status
-          );
+          logWarn("builder-config.sign-failed", {
+            status: response.status,
+            statusText: response.statusText,
+            path,
+          });
           return undefined;
         }
 
         return await response.json();
       } catch (err) {
-        console.error("[ExtBuilderConfig] Failed:", err);
+        if (
+          err instanceof Error &&
+          err.message === EXTENSION_AUTH_REQUIRED_ERROR
+        ) {
+          logWarn("builder-config.auth-required", { path });
+          throw err;
+        }
+        logWarn("builder-config.failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
         return undefined;
       }
     },

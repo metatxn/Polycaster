@@ -37,6 +37,10 @@ interface NthInserterApi {
     itemSelector: string;
     containerSelector: string;
   };
+  getQuoraSelectors: () => {
+    itemSelector: string;
+    containerSelector: string;
+  };
   getPlatformSelectors: () => {
     itemSelector: string;
     containerSelector: string;
@@ -69,7 +73,6 @@ declare global {
       CONFIG: {
         POSTS_TO_ANALYZE: number;
         MIN_RELEVANCE_SCORE: number;
-        MIN_AI_CONFIDENCE: number;
         COOLDOWN_POSTS: number;
         USE_AI_EXTRACTION: boolean;
       };
@@ -80,9 +83,20 @@ declare global {
       isPlatformEnabled: (platformName: string) => boolean;
       isSourceEnabled: (sourceName: string) => boolean;
       isNotificationStackEnabled: () => boolean;
+      isUsageAnalyticsEnabled: () => boolean;
       getThemeOverride: () => string;
       isDebugMode: () => boolean;
       onSettingsChange: (callback: (settings: UserSettings) => void) => void;
+    };
+
+    KNOWW_ANALYTICS: {
+      track: (
+        event: string,
+        properties?: Record<
+          string,
+          string | number | boolean | null | undefined
+        >
+      ) => Promise<void>;
     };
 
     KNOWW_UTILS: {
@@ -112,6 +126,12 @@ declare global {
       ) => string[];
       extractBasicKeywords: (text: string) => string;
       extractSearchKeywords: (text: string) => Promise<KeywordExtractionResult>;
+      extractKeywordsWithAI: (text: string) => Promise<{
+        keywords: string;
+        topics: string[];
+        entities: string[];
+        confidence: number;
+      } | null>;
       searchPolymarketEvents: (
         query: string,
         matchedTags?: string[]
@@ -292,6 +312,7 @@ declare global {
     KNOWW_TWITTER: PlatformAdapter;
     KNOWW_LINKEDIN: PlatformAdapter;
     KNOWW_REDDIT: PlatformAdapter;
+    KNOWW_QUORA: PlatformAdapter;
 
     // Settings listeners
     KNOWW_SETTINGS_LISTENERS: Array<(settings: UserSettings) => void>;

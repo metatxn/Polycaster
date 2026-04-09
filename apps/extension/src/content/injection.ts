@@ -2,6 +2,7 @@
 // TIMELINE INJECTION LOGIC
 // ============================================
 
+import type { ContextGateResult } from "../types/chrome-messages";
 import type {
   InjectedMarketEntry,
   Market,
@@ -16,6 +17,7 @@ interface InjectionPoint {
   container: Element;
   cellInnerDiv?: Element;
   postWrapper?: Element;
+  cleanup?: () => void;
   referenceElement?: Element | null | undefined;
   insertPosition: "append" | "before" | "after";
 }
@@ -58,78 +60,89 @@ interface AnalysisResult {
   postText: string;
 }
 
-interface ContextGateResult {
-  pass: boolean;
-  sharedNouns: number;
-  meaningfulNouns: number;
-  sharedEntities: number;
-  details: string;
+function applyPlatformStyleVariables(
+  element: HTMLElement,
+  styles: Record<string, unknown> | null | undefined
+): void {
+  if (!styles) return;
+
+  const styleMap: Record<string, string> = {
+    "--knoww-bg": "backgroundColor",
+    "--knoww-border": "borderColor",
+    "--knoww-text": "textColor",
+    "--knoww-text-secondary": "secondaryTextColor",
+    "--knoww-card-bg": "cardBg",
+    "--knoww-accent": "accentColor",
+    "--knoww-font": "fontFamily",
+    "--knoww-radius": "borderRadius",
+  };
+
+  for (const [cssVariable, key] of Object.entries(styleMap)) {
+    const value = styles[key];
+    if (typeof value === "string" && value) {
+      element.style.setProperty(cssVariable, value);
+    }
+  }
 }
 
-interface Bm25BatchResult {
-  scores: number[];
-  available: boolean;
-}
-
-/**
- * Call the NLP context gate running in the background (wink-nlp powered).
- * Returns per-market gate results.
- * Falls back to a lightweight naive check if the background call fails.
- */
-async function nlpContextGateBatch(
+async function scoreMarketsBatch(
   postText: string,
-  marketTexts: string[]
-): Promise<ContextGateResult[]> {
+  marketTexts: string[],
+  gateTexts: string[]
+): Promise<{
+  similarities: number[];
+  bm25Scores: number[];
+  contextGateResults: ContextGateResult[];
+  usedEmbeddings: boolean;
+  source: "offscreen" | "fallback";
+}> {
   try {
     const response = await chrome.runtime.sendMessage({
-      type: "nlp-context-gate",
+      type: "score-markets",
       postText,
       marketTexts,
+      gateTexts,
+      includeEmbeddings: true,
+      includeBm25: true,
+      includeContextGate: true,
     });
-    if (response?.ok && Array.isArray(response.results)) {
-      return response.results;
-    }
-    console.warn("[Knoww NLP] Context gate call failed, using naive fallback");
-  } catch {
-    console.warn(
-      "[Knoww NLP] Context gate message error, using naive fallback"
-    );
-  }
-  return marketTexts.map((mt) => {
-    const naive = naiveContextGate(postText, mt);
-    return {
-      ...naive,
-      sharedNouns: naive.sharedLemmas,
-      meaningfulNouns: naive.sharedLemmas,
-      details: "naive-fallback",
-    };
-  });
-}
 
-/**
- * Call BM25 scoring running in the background (minisearch powered).
- * Returns normalized scores [0..1] aligned with marketTexts.
- */
-async function bm25ScoreBatch(
-  postText: string,
-  marketTexts: string[]
-): Promise<Bm25BatchResult> {
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: "bm25-score",
-      postText,
-      marketTexts,
-    });
-    if (response?.ok && Array.isArray(response.scores)) {
-      return { scores: response.scores, available: true };
+    if (
+      response?.ok &&
+      Array.isArray(response.similarities) &&
+      Array.isArray(response.bm25Scores)
+    ) {
+      const contextGateResults = Array.isArray(response.contextGateResults)
+        ? response.contextGateResults
+        : [];
+      return {
+        similarities: response.similarities,
+        bm25Scores: response.bm25Scores,
+        contextGateResults,
+        usedEmbeddings: response.usedEmbeddings ?? true,
+        source: "offscreen",
+      };
     }
-    console.warn("[Knoww BM25] Scoring call failed, returning zeros");
   } catch {
-    console.warn("[Knoww BM25] Scoring message error, returning zeros");
+    // fall through to fallback path
   }
+
+  const fallbackScores = new Array<number>(marketTexts.length).fill(0);
   return {
-    scores: new Array(marketTexts.length).fill(0),
-    available: false,
+    similarities: fallbackScores,
+    bm25Scores: fallbackScores,
+    contextGateResults: marketTexts.map((mt) => {
+      const naive = naiveContextGate(postText, mt);
+      return {
+        pass: naive.pass,
+        sharedNouns: naive.sharedLemmas,
+        meaningfulNouns: naive.sharedLemmas,
+        sharedEntities: naive.sharedEntities,
+        details: "fallback-failed",
+      };
+    }),
+    usedEmbeddings: false,
+    source: "fallback",
   };
 }
 
@@ -226,6 +239,14 @@ function naiveContextGate(
  * triggering expensive layout/style computations.
  */
 function getPostIdentityKey(post: Element): string | null {
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  if (platform && typeof platform.getPostId === "function") {
+    const platformPostId = platform.getPostId(post);
+    if (platformPostId) {
+      return `${platform.name}:${platformPostId}`;
+    }
+  }
+
   // Reddit: shreddit-post has id="t3_xxxxx" directly on the element
   if (post.tagName?.toLowerCase() === "shreddit-post") {
     const redditId = post.getAttribute("id") || post.getAttribute("post-id");
@@ -353,6 +374,11 @@ function ensureCardVisibilityObserver(): void {
             !clickedMarketIds.has(marketId)
           ) {
             window.KNOWW_PREFERENCES?.recordIgnore(tracked.market);
+            void window.KNOWW_ANALYTICS?.track("market_card_ignored", {
+              marketId,
+              source: tracked.market.source || "polymarket",
+              visibleDurationMs: Date.now() - firstSeen,
+            });
           }
           cardFirstVisibleAt.delete(marketId);
         }
@@ -427,6 +453,7 @@ async function analyzePostAndFindMarket(
   // --- BATCH SCORING WITH EMBEDDINGS + BM25 ---
   let marketScores: number[] = [];
   let usedEmbeddings = false;
+  let contextGateResults: ContextGateResult[] = [];
   let marketTexts: string[] = [];
   try {
     marketTexts = markets.map((m) => {
@@ -441,41 +468,36 @@ async function analyzePostAndFindMarket(
       return rich;
     });
 
-    const [embeddingResponse, bm25Result] = await Promise.all([
-      chrome.runtime.sendMessage({
-        type: "compute-similarities",
-        postText: text,
-        marketTexts,
-      }),
-      bm25ScoreBatch(text, marketTexts),
-    ]);
+    const gateTexts = markets.map((m) => {
+      let gateText = m.title || "";
+      if (m.description) gateText += ` ${m.description.slice(0, 120)}`;
+      return gateText;
+    });
 
-    if (embeddingResponse?.ok) {
-      const embeddingScores: number[] = embeddingResponse.similarities;
-      usedEmbeddings = true;
+    const scoring = await scoreMarketsBatch(text, marketTexts, gateTexts);
+    usedEmbeddings = scoring.usedEmbeddings;
+    contextGateResults = scoring.contextGateResults;
 
-      // Only blend lexical scores when BM25 actually succeeded.
-      const SEMANTIC_WEIGHT = bm25Result.available ? 0.7 : 1;
-      const BM25_WEIGHT = bm25Result.available ? 0.3 : 0;
-      marketScores = embeddingScores.map((emb, i) => {
-        const bm = bm25Result.scores[i] ?? 0;
+    if (usedEmbeddings) {
+      const hasBm25Signal = scoring.bm25Scores.some((score) => score > 0);
+      const SEMANTIC_WEIGHT = hasBm25Signal ? 0.7 : 1;
+      const BM25_WEIGHT = hasBm25Signal ? 0.3 : 0;
+      marketScores = scoring.similarities.map((emb, i) => {
+        const bm = scoring.bm25Scores[i] ?? 0;
         return emb * SEMANTIC_WEIGHT + bm * BM25_WEIGHT;
       });
-
       log(
-        bm25Result.available
+        hasBm25Signal
           ? "🧠 Hybrid scoring succeeded —"
           : "🧠 Embedding scoring succeeded (BM25 unavailable) —",
         marketTexts.length,
-        bm25Result.available
-          ? "markets scored (embedding + BM25)"
-          : "markets scored"
+        hasBm25Signal ? "markets scored (embedding + BM25)" : "markets scored"
       );
       if (isDebug) {
         const scored = marketTexts.map((title, i) => ({
           title: title.slice(0, 50),
-          embedding: embeddingScores[i].toFixed(4),
-          bm25: (bm25Result.scores[i] ?? 0).toFixed(4),
+          embedding: scoring.similarities[i].toFixed(4),
+          bm25: (scoring.bm25Scores[i] ?? 0).toFixed(4),
           combined: marketScores[i].toFixed(4),
         }));
         scored.sort((a, b) => parseFloat(b.combined) - parseFloat(a.combined));
@@ -483,8 +505,8 @@ async function analyzePostAndFindMarket(
       }
     } else {
       log(
-        "⚠️ Embeddings scoring failed, falling back to keyword scoring:",
-        embeddingResponse?.error
+        "⚠️ Scoring unavailable, falling back to keyword scoring:",
+        scoring.source
       );
       marketScores = markets.map((m) => calculateRelevanceScore([text], m));
     }
@@ -543,19 +565,16 @@ async function analyzePostAndFindMarket(
     bestBySource.kalshi = { market: null, score: 0, allScores: [] };
   }
 
-  // Context gate uses title + description ONLY (no tags).
-  // Tags help search recall and embedding scoring, but they often contain
-  // noisy keywords that create false overlap (e.g. tag "Who Russian Ambani"
-  // on a US politics market).
-  const gateTexts = markets.map((m) => {
-    let gt = m.title || "";
-    if (m.description) gt += ` ${m.description.slice(0, 120)}`;
-    return gt;
-  });
+  if (!usedEmbeddings) {
+    contextGateResults = [];
+  }
 
-  const contextGateResults = usedEmbeddings
-    ? await nlpContextGateBatch(text, gateTexts)
-    : [];
+  const AI_GATE_RETRY_FLOOR = 0.6;
+  const gateBlockedHighScorers: Array<{
+    index: number;
+    score: number;
+    gateText: string;
+  }> = [];
 
   for (let i = 0; i < markets.length; i++) {
     const market = markets[i];
@@ -580,6 +599,12 @@ async function analyzePostAndFindMarket(
         log(
           `🛑 Context gate dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
         );
+        if (score >= AI_GATE_RETRY_FLOOR) {
+          let gateText = market.title || "";
+          if (market.description)
+            gateText += ` ${market.description.slice(0, 120)}`;
+          gateBlockedHighScorers.push({ index: i, score, gateText });
+        }
         continue;
       }
       if (isDebug) {
@@ -612,6 +637,88 @@ async function analyzePostAndFindMarket(
         score,
       };
     }
+  }
+
+  // AI-assisted retry: if no market passed the gate but high-scoring markets
+  // were blocked, use AI extraction to enrich the post text with better
+  // entities/keywords and re-evaluate the gate for those candidates.
+  const hasPassedMarket = Object.values(bestBySource).some(
+    (data) => data.market && data.score >= effectiveThreshold
+  );
+
+  if (
+    !hasPassedMarket &&
+    gateBlockedHighScorers.length > 0 &&
+    usedEmbeddings &&
+    CONFIG.USE_AI_EXTRACTION &&
+    window.KNOWW_API?.extractKeywordsWithAI
+  ) {
+    log(
+      `🤖 [AI Retry] ${gateBlockedHighScorers.length} high-scoring market(s) blocked by gate, attempting AI extraction...`
+    );
+
+    try {
+      const aiResult = await window.KNOWW_API.extractKeywordsWithAI(text);
+
+      if (aiResult?.keywords) {
+        const enrichedText = [
+          text,
+          aiResult.keywords,
+          ...aiResult.entities,
+          ...aiResult.topics,
+        ].join(" ");
+
+        log(
+          `🤖 [AI Retry] Enriched text with AI: +${aiResult.entities.length} entities, +${aiResult.topics.length} topics`
+        );
+
+        const blockedGateTexts = gateBlockedHighScorers.map((b) => b.gateText);
+        const retryScoring = await scoreMarketsBatch(
+          enrichedText,
+          blockedGateTexts,
+          blockedGateTexts
+        );
+
+        for (let j = 0; j < gateBlockedHighScorers.length; j++) {
+          const { index, score } = gateBlockedHighScorers[j];
+          const gate = retryScoring.contextGateResults[j];
+          const market = markets[index];
+          const source = market.source || "polymarket";
+
+          if (!gate?.pass) {
+            log(
+              `🤖 [AI Retry] Still blocked: "${market.title?.slice(0, 50)}..." (${gate?.details || "no gate result"})`
+            );
+            continue;
+          }
+
+          log(
+            `🤖 [AI Retry] ✅ Gate passed with AI: "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
+          );
+
+          if (bestBySource[source] && score > bestBySource[source].score) {
+            bestBySource[source] = {
+              ...bestBySource[source],
+              market,
+              score,
+            };
+          }
+        }
+      } else {
+        log("🤖 [AI Retry] AI extraction returned no usable result");
+      }
+    } catch (e) {
+      log("🤖 [AI Retry] Failed:", e);
+    }
+  } else if (
+    !hasPassedMarket &&
+    gateBlockedHighScorers.length > 0 &&
+    usedEmbeddings &&
+    !CONFIG.USE_AI_EXTRACTION
+  ) {
+    log(
+      `🤖 [AI Retry] Skipped — AI-assisted matching is disabled in settings (${gateBlockedHighScorers.length} high-scoring market(s) blocked by gate)`
+    );
   }
 
   if (isDebug) {
@@ -881,6 +988,7 @@ function injectMarketCards(
     container,
     cellInnerDiv,
     postWrapper,
+    cleanup,
     referenceElement,
     insertPosition,
   } = injectionPoint;
@@ -889,6 +997,7 @@ function injectMarketCards(
   const wrapperToCheck = cellInnerDiv || postWrapper || container;
   if (wrapperToCheck?.querySelector(".knoww-market-card")) {
     log("Post already has a Knoww card");
+    cleanup?.();
     return false;
   }
 
@@ -899,6 +1008,7 @@ function injectMarketCards(
 
   if (newMarkets.length === 0) {
     log("All markets already injected");
+    cleanup?.();
     return false;
   }
 
@@ -934,6 +1044,7 @@ function injectMarketCards(
   wrapper.setAttribute("data-knoww-platform", platformName);
   wrapper.className = `knoww-stacked-cards knoww-platform-${platformName}${themeClass}`;
   wrapper.style.cssText = wrapperStyles;
+  applyPlatformStyleVariables(wrapper, platform?.getCardStyles?.());
 
   const injectedCards: Array<{ market: Market; card: HTMLElement }> = [];
 
@@ -978,6 +1089,10 @@ function injectMarketCards(
       cardVisibilityObserver?.observe(card);
 
       const source = market.source || "polymarket";
+      void window.KNOWW_ANALYTICS?.track("market_card_impression", {
+        marketId: market.id,
+        source,
+      });
       log(
         `✅ Injected ${source} market card on ${platformName}:`,
         market.title
@@ -1001,6 +1116,11 @@ function injectMarketCards(
     );
     return true;
   } catch (e) {
+    cleanup?.();
+    void window.KNOWW_ANALYTICS?.track("market_card_injection_failed", {
+      cardsAttempted: injectedCards.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
     log("Failed to inject cards:", e);
     return false;
   }

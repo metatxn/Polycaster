@@ -14,6 +14,28 @@ type EIP1193Provider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 };
 
+type LegacyWalletProvider = EIP1193Provider & {
+  providers?: unknown[];
+  info?: {
+    uuid?: string;
+    name?: string;
+    icon?: string;
+    rdns?: string;
+  };
+  name?: string;
+  icon?: string;
+  rdns?: string;
+  isMetaMask?: boolean;
+  isCoinbaseWallet?: boolean;
+  isCoinbase?: boolean;
+  isPhantom?: boolean;
+  isRabby?: boolean;
+  isRabbyWallet?: boolean;
+  isSafe?: boolean;
+  isSafeWallet?: boolean;
+  source?: string;
+};
+
 interface EIP6963Detail {
   info: { uuid: string; name: string; icon: string; rdns: string };
   provider: EIP1193Provider;
@@ -33,6 +55,7 @@ const ALLOWED_METHODS = new Set([
 ]);
 
 const discoveredWallets = new Map<string, EIP6963Detail>();
+const discoveredWalletProviderMap = new Map<LegacyWalletProvider, string>();
 const LEGACY_INJECTED_UUID = "__injected__";
 
 /** The provider the user chose (or the only one available). */
@@ -53,30 +76,192 @@ function discoverWallets(): void {
     const detail = (event as CustomEvent<EIP6963Detail>).detail;
     if (!detail?.info?.uuid || !detail?.provider) return;
     discoveredWallets.set(detail.info.uuid, detail);
+    discoveredWalletProviderMap.set(
+      detail.provider as LegacyWalletProvider,
+      detail.info.uuid
+    );
     broadcastWallets();
   });
   window.dispatchEvent(new Event("eip6963:requestProvider"));
+  discoverLegacyWallets();
+  broadcastWallets();
+}
+
+function discoverLegacyWallets(): void {
+  const providers = getLegacyWalletProviders();
+  if (providers.length === 0) return;
+  const primaryProvider = getLegacyProvider();
+
+  const existingNames = new Set(
+    [...discoveredWallets.values()].map((w) => w.info.name.toLowerCase())
+  );
+
+  providers.forEach((provider, index) => {
+    if (discoveredWalletProviderMap.has(provider)) return;
+
+    const providerUuid =
+      provider === primaryProvider &&
+      providers.length === 1 &&
+      !deriveLegacyIdentityHint(provider)
+        ? LEGACY_INJECTED_UUID
+        : deriveLegacyIdentityUuid(provider, index);
+
+    const info = provider.info ?? {};
+    const icon = info.icon || provider.icon || "";
+    const rdns = info.rdns || provider.rdns || "";
+    const name = deriveLegacyWalletName(provider, index);
+    const displayName = info.name || name;
+
+    if (existingNames.has(displayName.toLowerCase())) {
+      discoveredWalletProviderMap.set(provider, providerUuid);
+      return;
+    }
+
+    const detail: EIP6963Detail = {
+      info: {
+        uuid: providerUuid,
+        name: displayName,
+        icon,
+        rdns,
+      },
+      provider,
+    };
+
+    discoveredWallets.set(providerUuid, detail);
+    discoveredWalletProviderMap.set(provider, providerUuid);
+    existingNames.add(displayName.toLowerCase());
+  });
+}
+
+function deriveLegacyWalletName(
+  provider: LegacyWalletProvider,
+  index: number
+): string {
+  if (provider.info?.name) return provider.info.name;
+  if (provider.name) return provider.name;
+  if (provider.isMetaMask) return "MetaMask";
+  if (provider.isPhantom) return "Phantom";
+  if (provider.isRabby || provider.isRabbyWallet) return "Rabby";
+  if (provider.isSafe || provider.isSafeWallet) return "Safe Wallet";
+  if (provider.isCoinbase || provider.isCoinbaseWallet)
+    return "Coinbase Wallet";
+  const source = provider.source || "";
+  const rdnsHint = provider.info?.rdns || provider.rdns || "";
+  const iconHint = provider.info?.icon || provider.icon || "";
+  const brandHint = detectWalletBrandHint(
+    provider.info?.name || "",
+    provider.name || "",
+    source,
+    rdnsHint,
+    iconHint
+  );
+  if (brandHint) return brandHint;
+  return `Wallet ${index + 1}`;
+}
+
+function deriveLegacyIdentityHint(
+  provider: LegacyWalletProvider
+): string | undefined {
+  return (
+    provider.info?.uuid ||
+    provider.info?.rdns ||
+    provider.rdns ||
+    provider.info?.name ||
+    provider.name ||
+    provider.source ||
+    provider.info?.icon ||
+    provider.icon
+  );
+}
+
+function deriveLegacyIdentityUuid(
+  provider: LegacyWalletProvider,
+  index: number
+): string {
+  const hint = deriveLegacyIdentityHint(provider) || "";
+  const slug = sanitizeWalletSlug(hint);
+  const base = slug || `provider-${index}`;
+  return ensureWalletUuidUnique(base);
+}
+
+function ensureWalletUuidUnique(base: string): string {
+  const MAX_ATTEMPTS = 100;
+  for (let attempt = 0; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const candidate = `${LEGACY_INJECTED_UUID}-${base}${attempt > 0 ? `-${attempt}` : ""}`;
+    if (!discoveredWallets.has(candidate)) return candidate;
+  }
+  // Extremely defensive fallback; practically unreachable.
+  return `${LEGACY_INJECTED_UUID}-${base}-${Date.now().toString(36)}`;
+}
+
+function sanitizeWalletSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function detectWalletBrandHint(...values: string[]): string | undefined {
+  const joined = values.join(" ").toLowerCase();
+  if (joined.includes("metamask")) return "MetaMask";
+  if (joined.includes("phantom")) return "Phantom";
+  if (joined.includes("rabby")) return "Rabby";
+  if (/\bsafe\b/.test(joined)) return "Safe Wallet";
+  if (joined.includes("coinbase")) return "Coinbase Wallet";
+  if (/\bbase\b/.test(joined) || joined.includes("basewallet")) return "Base";
+  return undefined;
+}
+
+function getLegacyWalletProviders(): LegacyWalletProvider[] {
+  const providers = new Set<LegacyWalletProvider>();
+  const primary = getLegacyProvider();
+  if (!primary) return [];
+
+  providers.add(primary);
+
+  const embedded = (primary as { providers?: unknown[] }).providers;
+  if (Array.isArray(embedded)) {
+    for (const candidate of embedded) {
+      if (isLegacyWalletProvider(candidate)) {
+        providers.add(candidate);
+      }
+    }
+  }
+
+  return Array.from(providers);
+}
+
+function isLegacyWalletProvider(value: unknown): value is LegacyWalletProvider {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { request?: unknown }).request === "function"
+  );
 }
 
 function broadcastWallets(): void {
-  const wallets = [...discoveredWallets.values()].map((w) => ({
+  const allWallets = [...discoveredWallets.values()].map((w) => ({
     uuid: w.info.uuid,
     name: w.info.name,
     icon: w.info.icon,
     rdns: w.info.rdns,
   }));
 
-  const eth = getLegacyProvider();
-  const alreadyDiscovered = eth
-    ? [...discoveredWallets.values()].some((w) => w.provider === eth)
-    : true;
-  if (eth && !alreadyDiscovered) {
-    wallets.push({
-      uuid: LEGACY_INJECTED_UUID,
-      name: "Injected Provider",
-      icon: "",
-      rdns: "",
-    });
+  const seenNames = new Map<string, number>();
+  const wallets: typeof allWallets = [];
+  for (const w of allWallets) {
+    const key = w.name.toLowerCase();
+    const existingIdx = seenNames.get(key);
+    if (existingIdx !== undefined) {
+      const existing = wallets[existingIdx];
+      if (!existing.rdns && w.rdns) {
+        wallets[existingIdx] = w;
+      }
+      continue;
+    }
+    seenNames.set(key, wallets.length);
+    wallets.push(w);
   }
 
   window.postMessage(
@@ -86,7 +271,11 @@ function broadcastWallets(): void {
 }
 
 function getLegacyProvider(): EIP1193Provider | null {
-  const eth = (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
+  const eth = (
+    window as unknown as {
+      ethereum?: EIP1193Provider;
+    }
+  ).ethereum;
   return eth && typeof eth.request === "function" ? eth : null;
 }
 
@@ -147,6 +336,7 @@ function postResult(id: string, result: unknown): void {
       if (BRIDGE_NONCE && data._n !== BRIDGE_NONCE) return;
 
       if (data.type === "KNOWW_LIST_WALLETS") {
+        discoverLegacyWallets();
         broadcastWallets();
         return;
       }

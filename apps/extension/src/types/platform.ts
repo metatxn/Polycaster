@@ -10,6 +10,7 @@ export interface InjectionPoint {
   container: Element;
   cellInnerDiv?: Element;
   postWrapper?: Element;
+  cleanup?: () => void;
   referenceElement?: Element | null | undefined;
   insertPosition: "append" | "before" | "after";
 }

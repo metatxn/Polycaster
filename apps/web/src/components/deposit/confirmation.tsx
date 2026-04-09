@@ -30,6 +30,7 @@ interface ConfirmationProps {
   depositError: string | null;
   isPending: boolean;
   isConfirming: boolean;
+  isOnChainConfirmed: boolean;
   isConfirmed: boolean;
   copied: boolean;
   onCopy: () => void;
@@ -88,6 +89,7 @@ export function Confirmation({
   depositError,
   isPending,
   isConfirming,
+  isOnChainConfirmed,
   isConfirmed,
   copied,
   onCopy,
@@ -354,14 +356,29 @@ export function Confirmation({
           )}
 
           {/* Success Message */}
+          {isOnChainConfirmed && isConfirming && !isConfirmed && (
+            <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                <div className="text-sm text-blue-500">
+                  <p className="font-medium">Transaction confirmed on-chain</p>
+                  <p className="text-xs text-blue-400">
+                    Waiting for the bridge to credit USDC.e to your Polymarket
+                    wallet.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {isConfirmed && (
             <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
               <div className="flex items-center gap-2">
                 <Check className="h-4 w-4 text-green-500" />
                 <div className="text-sm text-green-500">
-                  <p className="font-medium">Transaction confirmed!</p>
+                  <p className="font-medium">Deposit complete!</p>
                   <p className="text-xs text-green-400">
-                    USDC.e will be credited to your Polymarket wallet shortly.
+                    USDC.e has been credited to your Polymarket wallet.
                   </p>
                 </div>
               </div>
@@ -369,7 +386,7 @@ export function Confirmation({
           )}
 
           {/* Deposit Status Tracking - using ternary for conditional render (rendering-conditional-render) */}
-          {isConfirmed &&
+          {(isOnChainConfirmed || isConfirmed) &&
           depositTransactions &&
           depositTransactions.length > 0 ? (
             <div className="p-4 rounded-xl bg-gray-100 dark:bg-card border border-gray-200 dark:border-border">
@@ -430,6 +447,7 @@ export function Confirmation({
               isProcessing ||
               isPending ||
               isConfirming ||
+              isOnChainConfirmed ||
               isConfirmed
             }
             className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-xl disabled:opacity-50"
@@ -439,11 +457,18 @@ export function Confirmation({
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Confirm in Wallet...
               </span>
+            ) : isOnChainConfirmed && isConfirming ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Waiting for bridge...
+              </span>
             ) : isConfirming ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Confirming...
+                Confirming on-chain...
               </span>
+            ) : isOnChainConfirmed ? (
+              "Bridge update pending"
             ) : isConfirmed ? (
               <span className="flex items-center gap-2">
                 <Check className="h-4 w-4" />

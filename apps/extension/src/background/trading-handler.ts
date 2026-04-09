@@ -45,6 +45,7 @@ import type {
 } from "../types/chrome-messages";
 import { BridgeSigner } from "./bridge-signer";
 import { createExtensionBuilderConfig } from "./builder-config";
+import { logInfo, logWarn } from "./logger";
 import { executeViaRelayer } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 
@@ -155,6 +156,7 @@ async function handleDeriveCredentials(
   // Uses the signature already obtained from MetaMask by the content script,
   // avoiding extra signing prompts that ClobClient would trigger.
   let raw: { apiKey: string; secret: string; passphrase: string };
+  let method: "create" | "derive";
 
   const deriveRes = await fetch(`${CLOB_HOST}/auth/derive-api-key`, {
     method: "GET",
@@ -162,6 +164,7 @@ async function handleDeriveCredentials(
   });
   if (deriveRes.ok) {
     raw = await deriveRes.json();
+    method = "derive";
   } else {
     const createRes = await fetch(`${CLOB_HOST}/auth/api-key`, {
       method: "POST",
@@ -169,12 +172,14 @@ async function handleDeriveCredentials(
     });
     if (!createRes.ok) return fail("Failed to derive CLOB API credentials");
     raw = await createRes.json();
+    method = "create";
   }
 
   return ok({
     apiKey: raw.apiKey,
     apiSecret: raw.secret,
     apiPassphrase: raw.passphrase,
+    method,
   });
 }
 
@@ -339,12 +344,16 @@ async function handlePlaceOrder(
       asset_type: "CONDITIONAL" as any,
       token_id: msg.tokenId,
     });
-    console.log("[PlaceOrder] Balance/allowance synced with CLOB");
+    logInfo("trading.balance-updated", {
+      tokenId: msg.tokenId,
+      side: msg.side,
+    });
   } catch (syncErr) {
-    console.warn(
-      "[PlaceOrder] updateBalanceAllowance failed (non-fatal):",
-      syncErr
-    );
+    logWarn("trading.balance-update-failed", {
+      tokenId: msg.tokenId,
+      side: msg.side,
+      error: syncErr instanceof Error ? syncErr.message : String(syncErr),
+    });
   }
 
   if (orderType === "FAK" || orderType === "FOK") {
@@ -361,7 +370,7 @@ async function handlePlaceOrder(
       marketOrder.price = msg.price;
     }
 
-    console.log("[PlaceOrder] Market order params:", {
+    logInfo("trading.place-order.market-params", {
       side: msg.side,
       amount: marketAmount,
       price: marketOrder.price,
@@ -377,7 +386,7 @@ async function handlePlaceOrder(
     return ok(response);
   }
 
-  console.log("[PlaceOrder] Limit order params:", {
+  logInfo("trading.place-order.limit-params", {
     tokenID: msg.tokenId,
     price: msg.price,
     size: msg.size,
@@ -400,11 +409,19 @@ async function handlePlaceOrder(
     orderOptions
   );
 
-  console.log("[PlaceOrder] Signed order:", JSON.stringify(order));
+  logInfo("trading.place-order.signed", {
+    tokenID: order.tokenId,
+    side: order.side,
+    size: order.size,
+    price: order.price,
+  });
 
   const response = await client.postOrder(order, orderType as any);
 
-  console.log("[PlaceOrder] CLOB response:", JSON.stringify(response));
+  logInfo("trading.place-order.clob-response", {
+    txHash: (response as Record<string, unknown>)?.transactionHash,
+    status: (response as Record<string, unknown>)?.status,
+  });
 
   if (
     response &&
@@ -625,6 +642,7 @@ async function clobUpdateBalanceAllowance(
 
 async function syncBalancesAfterCTF(msg: {
   address: string;
+  conditionId: string;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   proxyAddress?: string;
   yesTokenId?: string;
@@ -653,7 +671,10 @@ async function syncBalancesAfterCTF(msg: {
       msg.noTokenId
     );
   }
-  console.log("[CTF] Balance/allowance synced with CLOB after split/merge");
+  logInfo("trading.ctf-balance-synced", {
+    conditionId: msg.conditionId,
+    address: msg.address,
+  });
 }
 
 // ── Split Position (USDC → YES + NO) via Relayer (gasless) ──
@@ -686,7 +707,10 @@ async function handleSplitPosition(
   ]);
 
   syncBalancesAfterCTF(msg).catch((e) =>
-    console.warn("[Split] post-sync failed (non-fatal):", e)
+    logWarn("trading.ctf-post-sync-failed", {
+      kind: "split",
+      error: e instanceof Error ? e.message : String(e),
+    })
   );
 
   return ok({ txHash: result.txHash, success: true });
@@ -722,7 +746,10 @@ async function handleMergePositions(
   ]);
 
   syncBalancesAfterCTF(msg).catch((e) =>
-    console.warn("[Merge] post-sync failed (non-fatal):", e)
+    logWarn("trading.ctf-post-sync-failed", {
+      kind: "merge",
+      error: e instanceof Error ? e.message : String(e),
+    })
   );
 
   return ok({ txHash: result.txHash, success: true });
@@ -833,9 +860,9 @@ async function handleRelayerApprove(
     });
   }
 
-  console.log(
-    `[RelayerApprove] Submitting ${txns.length} approval txns via relayer`
-  );
+  logInfo("trading.relayer-approve.submit", {
+    txnCount: txns.length,
+  });
   const result = await executeViaRelayer(signer, txns);
   return ok({ txHash: result.txHash, success: true });
 }

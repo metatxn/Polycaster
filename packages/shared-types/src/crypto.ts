@@ -29,7 +29,7 @@ declare class TextEncoder {
   encode(input: string): Uint8Array;
 }
 
-type CryptoKey = {};
+type CryptoKey = Record<string, unknown>;
 
 /**
  * Compute an HMAC-SHA256 hex digest.

@@ -719,10 +719,10 @@ export function useWithdraw() {
           recipientAddr: destinationAddress,
         });
 
-        const bridgeDepositAddress =
-          toChainId === "1151111081099710"
-            ? bridgeResponse.address.svm
-            : bridgeResponse.address.evm;
+        // Always use the EVM deposit address for the on-chain ERC20 transfer
+        // on Polygon. For Solana withdrawals, the bridge's EVM address receives
+        // the funds and routes them to the recipient's SVM address.
+        const bridgeDepositAddress = bridgeResponse.address.evm;
 
         if (!bridgeDepositAddress) {
           throw new Error(
@@ -759,7 +759,10 @@ export function useWithdraw() {
 
         const relayerResult = await submitAndPollRelayer(transactions);
 
-        if (relayerResult.success) {
+        // Start bridge tracking whether the relayer confirmed or timed out
+        // (pending). The on-chain transfer may still land and the bridge
+        // will eventually report completion or failure.
+        if (relayerResult.success || relayerResult.pending) {
           startBridgeStatusPolling(bridgeDepositAddress);
         }
 

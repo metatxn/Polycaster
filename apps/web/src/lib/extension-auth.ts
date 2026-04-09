@@ -53,8 +53,15 @@ export async function verifyExtensionRequest(
 
 export async function verifyExtensionAccess(
   request: NextRequest,
-  requiredScope: ExtensionScope
+  requiredScope: ExtensionScope,
+  options?: {
+    allowLowTrustFallback?: boolean;
+  }
 ): Promise<NextResponse | null> {
+  if (process.env.NODE_ENV === "development") {
+    return null;
+  }
+
   const authHeader = request.headers.get("authorization");
 
   if (authHeader?.startsWith("Bearer ")) {
@@ -62,5 +69,25 @@ export async function verifyExtensionAccess(
     return response;
   }
 
-  return verifyExtensionRequest(request);
+  if (options?.allowLowTrustFallback) {
+    return verifyExtensionRequest(request);
+  }
+
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+}
+
+/**
+ * Verify extension access for pre-auth endpoints (AI discovery).
+ *
+ * These endpoints are called during the post-scanning phase before
+ * the user has connected a wallet, so a session token may not exist.
+ * Falls back to origin-based verification when no Bearer token is present.
+ */
+export async function verifyExtensionAccessPreAuth(
+  request: NextRequest,
+  requiredScope: ExtensionScope
+): Promise<NextResponse | null> {
+  return verifyExtensionAccess(request, requiredScope, {
+    allowLowTrustFallback: true,
+  });
 }

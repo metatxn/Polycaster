@@ -144,6 +144,122 @@ function injectInlineStyles(): void {
         --knoww-card-bg: rgb(39, 39, 41);
       }
 
+      /* Quora Light Mode (default) */
+      .knoww-platform-quora {
+        --knoww-bg: rgb(255, 255, 255);
+        --knoww-border: rgba(0, 0, 0, 0.12);
+        --knoww-text: rgb(40, 40, 41);
+        --knoww-text-secondary: rgb(99, 99, 100);
+        --knoww-accent: #b92b27;
+        --knoww-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --knoww-radius: 12px;
+        --knoww-card-bg: rgb(247, 247, 248);
+      }
+
+      /* Quora Dark Mode */
+      .dark .knoww-platform-quora,
+      [data-theme="dark"] .knoww-platform-quora,
+      .knoww-platform-quora.knoww-theme-dark {
+        --knoww-bg: rgb(38, 38, 39);
+        --knoww-border: rgba(255, 255, 255, 0.12);
+        --knoww-text: rgb(240, 240, 240);
+        --knoww-text-secondary: rgba(255, 255, 255, 0.7);
+        --knoww-card-bg: rgb(48, 48, 49);
+      }
+
+      /* Slashdot Light Mode (default) */
+      .knoww-platform-slashdot {
+        --knoww-bg: rgb(255, 255, 255);
+        --knoww-border: rgba(0, 0, 0, 0.15);
+        --knoww-text: rgb(34, 34, 34);
+        --knoww-text-secondary: rgb(102, 102, 102);
+        --knoww-accent: #026664;
+        --knoww-font: Arial, Helvetica, sans-serif;
+        --knoww-radius: 4px;
+        --knoww-card-bg: rgb(246, 246, 246);
+      }
+
+      .knoww-platform-slashdot .knoww-market-card {
+        max-width: 600px !important;
+        font-size: 13px !important;
+        border-radius: 4px !important;
+        margin: 4px 0 0 0 !important;
+      }
+
+      .knoww-platform-slashdot .knoww-card-header {
+        padding: 12px !important;
+        gap: 10px !important;
+      }
+
+      .knoww-platform-slashdot .knoww-card-icon {
+        width: 36px !important;
+        height: 36px !important;
+        border-radius: 4px !important;
+      }
+
+      .knoww-platform-slashdot .knoww-card-title {
+        font-size: 13px !important;
+        line-height: 1.3 !important;
+      }
+
+      .knoww-platform-slashdot .knoww-card-volume {
+        font-size: 11px !important;
+      }
+
+      .knoww-platform-slashdot .knoww-card-outcomes {
+        padding: 0 12px 10px 12px !important;
+        gap: 6px !important;
+      }
+
+      .knoww-platform-slashdot .knoww-outcome-btn {
+        padding: 6px 10px !important;
+        font-size: 12px !important;
+      }
+
+      .knoww-platform-slashdot .knoww-card-footer {
+        padding: 8px 12px !important;
+      }
+
+      /* Crypto editorial platforms — dark theme */
+      .knoww-platform-decrypt,
+      .knoww-platform-coindesk,
+      .knoww-platform-cointelegraph,
+      .knoww-platform-theblock,
+      .knoww-platform-blockworks,
+      .knoww-platform-bankless,
+      .knoww-platform-bitcoinmagazine,
+      .knoww-platform-beincrypto,
+      .knoww-platform-unchained,
+      .knoww-platform-cryptopanic {
+        --knoww-bg: rgb(22, 22, 24);
+        --knoww-border: rgba(255, 255, 255, 0.12);
+        --knoww-text: rgb(240, 240, 240);
+        --knoww-text-secondary: rgba(255, 255, 255, 0.6);
+        --knoww-accent: rgb(168, 132, 255);
+        --knoww-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --knoww-radius: 12px;
+        --knoww-card-bg: rgb(32, 32, 36);
+      }
+
+      /* Crypto editorial platforms — light theme */
+      .knoww-platform-decrypt.knoww-theme-light,
+      .knoww-platform-coindesk.knoww-theme-light,
+      .knoww-platform-cointelegraph.knoww-theme-light,
+      .knoww-platform-theblock.knoww-theme-light,
+      .knoww-platform-blockworks.knoww-theme-light,
+      .knoww-platform-bankless.knoww-theme-light,
+      .knoww-platform-bitcoinmagazine.knoww-theme-light,
+      .knoww-platform-beincrypto.knoww-theme-light,
+      .knoww-platform-unchained.knoww-theme-light,
+      .knoww-platform-cryptopanic.knoww-theme-light {
+        --knoww-bg: rgb(255, 255, 255);
+        --knoww-border: rgba(0, 0, 0, 0.1);
+        --knoww-text: rgb(20, 20, 20);
+        --knoww-text-secondary: rgba(0, 0, 0, 0.55);
+        --knoww-accent: rgb(124, 58, 237);
+        --knoww-card-bg: rgb(247, 247, 250);
+      }
+
       /* Stacked cards container - for multi-source display */
       .knoww-stacked-cards {
         display: flex !important;
@@ -633,6 +749,161 @@ function injectInlineStyles(): void {
         font-size: 11px !important;
       }
 
+      /* Quora-specific notification stack styling */
+      .knoww-notification-stack-quora {
+        top: 60px !important;
+        width: 280px !important;
+        --knoww-bg: rgb(255, 255, 255) !important;
+        --knoww-border: rgba(0, 0, 0, 0.12) !important;
+        --knoww-text: rgb(40, 40, 41) !important;
+        --knoww-text-secondary: rgb(99, 99, 100) !important;
+        --knoww-accent: #b92b27 !important;
+        --knoww-radius: 12px !important;
+        --knoww-card-bg: rgb(247, 247, 248) !important;
+        border-radius: 12px !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+      }
+
+      .dark .knoww-notification-stack-quora,
+      [data-theme="dark"] .knoww-notification-stack-quora,
+      .knoww-notification-stack-quora.knoww-theme-dark {
+        --knoww-bg: rgb(38, 38, 39) !important;
+        --knoww-border: rgba(255, 255, 255, 0.12) !important;
+        --knoww-text: rgb(240, 240, 240) !important;
+        --knoww-text-secondary: rgba(255, 255, 255, 0.7) !important;
+        --knoww-card-bg: rgb(48, 48, 49) !important;
+      }
+
+      .knoww-notification-stack-quora .knoww-stack-badge {
+        background: #b92b27 !important;
+      }
+
+      /* Slashdot-specific notification stack styling */
+      .knoww-notification-stack-slashdot {
+        top: 12px !important;
+        width: 260px !important;
+        --knoww-bg: rgb(255, 255, 255) !important;
+        --knoww-border: rgba(0, 0, 0, 0.15) !important;
+        --knoww-text: rgb(34, 34, 34) !important;
+        --knoww-text-secondary: rgb(102, 102, 102) !important;
+        --knoww-accent: #026664 !important;
+        --knoww-radius: 4px !important;
+        --knoww-card-bg: rgb(246, 246, 246) !important;
+        border-radius: 4px !important;
+        font-family: Arial, Helvetica, sans-serif !important;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15) !important;
+      }
+
+      .knoww-notification-stack-slashdot .knoww-stack-badge {
+        background: #026664 !important;
+      }
+
+      /* Slashdot trading panel light-theme overrides */
+      .knoww-platform-slashdot .knoww-trading-panel {
+        background: var(--knoww-bg, #fff) !important;
+        border: 1px solid var(--knoww-border, rgba(0, 0, 0, 0.15)) !important;
+        border-top: none !important;
+        border-radius: 0 0 var(--knoww-radius, 4px) var(--knoww-radius, 4px) !important;
+        margin: -1px 0 4px 0 !important;
+        max-width: 600px !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-form {
+        padding: 10px 14px 14px !important;
+        gap: 10px !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-ordertype-toggle {
+        background: rgba(0, 0, 0, 0.04) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-ordertype-btn.active {
+        background: var(--knoww-bg, #fff) !important;
+        color: var(--knoww-text, #222) !important;
+        border-color: rgba(0, 0, 0, 0.1) !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-more-btn {
+        background: rgba(0, 0, 0, 0.04) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-more-btn:hover,
+      .knoww-platform-slashdot .knoww-tp-more-btn.active {
+        background: var(--knoww-bg, #fff) !important;
+        border-color: rgba(0, 0, 0, 0.1) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-buysell-toggle {
+        border-color: rgba(0, 0, 0, 0.12) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-buysell-btn.buy.active {
+        background: rgba(0, 186, 124, 0.08) !important;
+        color: rgb(0, 160, 107) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-buysell-btn.sell.active {
+        background: rgba(249, 24, 128, 0.08) !important;
+        color: rgb(220, 20, 110) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-outcome-btn {
+        border-color: rgba(0, 0, 0, 0.1) !important;
+        background: rgba(0, 0, 0, 0.02) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-outcome-btn.yes.active {
+        background: rgba(0, 200, 83, 0.08) !important;
+        border-color: rgb(0, 160, 67) !important;
+        color: rgb(0, 140, 58) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-outcome-btn.no.active {
+        background: rgba(255, 23, 68, 0.08) !important;
+        border-color: rgb(220, 20, 60) !important;
+        color: rgb(200, 18, 55) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-shares-btn {
+        border-color: rgba(0, 0, 0, 0.12) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-shares-btn:hover:not(:disabled) {
+        border-color: rgba(0, 0, 0, 0.25) !important;
+        background: rgba(0, 0, 0, 0.03) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-shares-input {
+        background: rgba(0, 0, 0, 0.02) !important;
+        border-color: rgba(0, 0, 0, 0.12) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-shares-input:focus {
+        border-color: var(--knoww-accent, #026664) !important;
+        background: rgba(2, 102, 100, 0.03) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-submit:disabled {
+        background: rgba(0, 0, 0, 0.06) !important;
+        color: var(--knoww-text-secondary, #666) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-submit.loading {
+        background: rgba(0, 0, 0, 0.06) !important;
+        color: var(--knoww-text-secondary, #666) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-spinner {
+        border-color: rgba(0, 0, 0, 0.1) !important;
+        border-top-color: var(--knoww-accent, #026664) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-header-wallet {
+        background: rgba(0, 0, 0, 0.04) !important;
+        border-color: rgba(0, 0, 0, 0.1) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-close:hover {
+        background: rgba(0, 0, 0, 0.06) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-portfolio-bar {
+        background: rgba(0, 0, 0, 0.02) !important;
+        border-bottom-color: rgba(0, 0, 0, 0.06) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-deposit-method-btn {
+        border-color: rgba(0, 0, 0, 0.1) !important;
+        background: rgba(0, 0, 0, 0.02) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-deposit-token-row {
+        border-color: rgba(0, 0, 0, 0.08) !important;
+        background: rgba(0, 0, 0, 0.02) !important;
+      }
+      .knoww-platform-slashdot .knoww-tp-deposit-search {
+        border-color: rgba(0, 0, 0, 0.1) !important;
+        background: rgba(0, 0, 0, 0.02) !important;
+      }
+
       /* Header */
       .knoww-stack-header {
         display: flex !important;
@@ -675,7 +946,7 @@ function injectInlineStyles(): void {
         min-width: 20px !important;
         height: 20px !important;
         padding: 0 6px !important;
-        background: rgb(29, 155, 240) !important;
+        background: var(--knoww-accent, rgb(29, 155, 240)) !important;
         border-radius: 10px !important;
         font-size: 12px !important;
         font-weight: 700 !important;

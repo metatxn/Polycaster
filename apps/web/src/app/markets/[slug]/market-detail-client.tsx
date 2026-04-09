@@ -13,6 +13,7 @@ import {
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import posthog from "posthog-js";
 import React, { useCallback, useState } from "react";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Navbar } from "@/components/navbar";
@@ -470,6 +471,11 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                     await navigator.share({
                       title: market.question,
                       url: window.location.href,
+                    });
+                    posthog.capture("market_shared", {
+                      market_slug: slug,
+                      market_question: market.question,
+                      share_method: "native_share",
                     });
                   } catch (err) {
                     // User cancelled or share failed - ignore

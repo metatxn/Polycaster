@@ -730,6 +730,14 @@ async function extractKeywordsWithAI(
 
     if (resp?.ok && "data" in resp && resp.data) {
       const data = resp.data as AITopicExtractionEndpointResponse;
+      const status = "status" in resp ? resp.status : undefined;
+
+      if (typeof status === "number" && (status < 200 || status >= 300)) {
+        log("AI extraction returned non-2xx status:", status, data);
+        setCachedAIExtraction(normalizedText, null);
+        return null;
+      }
+
       log("AI endpoint response meta:", {
         success: data.success,
         cached: data.cached,
@@ -744,6 +752,17 @@ async function extractKeywordsWithAI(
           "AI endpoint returned success=false:",
           data.error || "unknown error"
         );
+        setCachedAIExtraction(normalizedText, null);
+        return null;
+      }
+
+      if (
+        typeof data.searchQuery !== "string" ||
+        !Array.isArray(data.tags) ||
+        !Array.isArray(data.entities) ||
+        typeof data.confidence !== "number"
+      ) {
+        log("AI endpoint returned unexpected payload shape:", data);
         setCachedAIExtraction(normalizedText, null);
         return null;
       }
@@ -771,82 +790,24 @@ async function extractKeywordsWithAI(
 }
 
 /**
- * Extract keywords using rule-based approach (with optional AI enhancement)
+ * Extract keywords using rule-based approach.
+ * AI is no longer used for direct keyword extraction — it is only used
+ * as a fallback when the context gate blocks high-scoring markets
+ * (handled in injection.ts).
  */
 async function extractSearchKeywords(
   text: string
 ): Promise<KeywordExtractionResult> {
   if (!text) return { keywords: "", matchedTags: [], source: "none" };
 
-  const { CONFIG } = window.KNOWW_CONFIG;
   const { log } = window.KNOWW_UTILS;
   const textPreview = text.slice(0, 160).replace(/\s+/g, " ").trim();
   log("Keyword extraction start:", {
-    aiEnabled: CONFIG.USE_AI_EXTRACTION,
     textLength: text.length,
     textPreview,
   });
   const tagsData = await fetchPolymarketTags();
 
-  // Try AI extraction first if enabled
-  if (CONFIG.USE_AI_EXTRACTION) {
-    log("AI extraction is enabled for this post");
-    const aiResult = await extractKeywordsWithAI(text);
-    if (aiResult) {
-      log("AI extraction raw result:", {
-        keywords: aiResult.keywords,
-        topics: aiResult.topics,
-        entities: aiResult.entities,
-        confidence: aiResult.confidence,
-      });
-
-      // Gate: if AI confidence is below the user-configured threshold, skip
-      if (aiResult.confidence < CONFIG.MIN_AI_CONFIDENCE) {
-        log(
-          "AI confidence too low for market search:",
-          aiResult.confidence,
-          "— skipping"
-        );
-        return {
-          keywords: "",
-          matchedTags: [],
-          confidence: aiResult.confidence,
-          source: "ai",
-        };
-      }
-
-      // Combine AI results with tag matching
-      const matchedTags = tagsData ? extractMatchingTags(text, tagsData) : [];
-      const aiTags = aiResult.topics.map((t) => t.toLowerCase());
-      const combinedTags = [...new Set([...matchedTags, ...aiTags])].slice(
-        0,
-        5
-      );
-      const finalKeywords = aiResult.keywords || extractBasicKeywords(text);
-
-      log("AI+rules merge details:", {
-        ruleMatchedTags: matchedTags,
-        aiTopicTags: aiTags,
-        combinedTags,
-        finalKeywords,
-        confidence: aiResult.confidence,
-        extractionSource: "ai",
-      });
-
-      return {
-        keywords: finalKeywords,
-        matchedTags: combinedTags,
-        entities: aiResult.entities,
-        confidence: aiResult.confidence,
-        source: "ai",
-      };
-    }
-    log("AI extraction unavailable, using rules fallback");
-  } else {
-    log("AI extraction disabled by settings, using rules");
-  }
-
-  // Fallback to rule-based extraction
   const matchedTags = tagsData ? extractMatchingTags(text, tagsData) : [];
   const keywords = extractBasicKeywords(text);
   log("Rules extraction result:", {
@@ -932,8 +893,9 @@ async function searchPolymarketEvents(
         const json = JSON.parse(searchResp.text) as {
           events?: RawPolymarketEvent[];
         };
+        const rawCount = json.events?.length || 0;
+        let added = 0;
         for (const event of json.events || []) {
-          // Skip closed or inactive events
           if (event.closed === true || event.active === false) continue;
           if (!seenIds.has(event.id)) {
             seenIds.add(event.id);
@@ -944,13 +906,19 @@ async function searchPolymarketEvents(
               _source: "search",
             };
             allEvents.push(market);
+            added++;
           }
         }
         log(
-          "Polymarket Search API returned",
-          json.events?.length || 0,
-          "events for:",
-          query
+          `Polymarket Search API: ${rawCount} raw events, ${added} active for: ${query}`
+        );
+      } else {
+        log(
+          "Polymarket Search API: no valid response",
+          searchResp?.ok,
+          "error" in (searchResp || {})
+            ? (searchResp as { error?: string }).error
+            : ""
         );
       }
     } catch (e) {
@@ -974,8 +942,17 @@ async function searchPolymarketEvents(
         });
         if (tagResp?.ok && "text" in tagResp && tagResp.text) {
           const events = JSON.parse(tagResp.text) as RawPolymarketEvent[];
-          return Array.isArray(events) ? events : [];
+          const list = Array.isArray(events) ? events : [];
+          log(`Tag "${tagSlug}": ${list.length} events returned`);
+          return list;
         }
+        log(
+          `Tag "${tagSlug}": no valid response`,
+          tagResp?.ok,
+          "error" in (tagResp || {})
+            ? (tagResp as { error?: string }).error
+            : ""
+        );
       } catch (e) {
         log("Tag fetch failed for slug:", tagSlug, e);
       }
@@ -983,9 +960,9 @@ async function searchPolymarketEvents(
     });
 
     const tagResults = await Promise.all(tagPromises);
+    let tagAdded = 0;
     for (const events of tagResults) {
       for (const event of events) {
-        // Skip closed or inactive events
         if (event.closed === true || event.active === false) continue;
         if (!seenIds.has(event.id)) {
           seenIds.add(event.id);
@@ -996,9 +973,13 @@ async function searchPolymarketEvents(
             _source: "tag",
           };
           allEvents.push(market);
+          tagAdded++;
         }
       }
     }
+    log(
+      `Polymarket tag search: ${tagAdded} active events from ${matchedTags.length} tags`
+    );
   }
 
   // Final filter: ensure no closed or inactive events and sort by volume
@@ -1025,16 +1006,20 @@ async function searchAllMarkets(
 
   log("Searching all markets for:", query, "tags:", matchedTags);
 
-  const searchPromises: Promise<Market[]>[] = [];
+  const searchEntries: Array<{
+    source: string;
+    promise: Promise<Market[]>;
+  }> = [];
 
   // Search Polymarket if enabled
   if (ENABLED_SOURCES?.polymarket) {
-    searchPromises.push(
-      searchPolymarketEvents(query, matchedTags).catch((e) => {
+    searchEntries.push({
+      source: "Polymarket",
+      promise: searchPolymarketEvents(query, matchedTags).catch((e) => {
         log("Polymarket search failed:", e);
         return [];
-      })
-    );
+      }),
+    });
   }
 
   // Search Kalshi if enabled and adapter is available
@@ -1048,42 +1033,27 @@ async function searchAllMarkets(
         )
       : [];
 
-    searchPromises.push(
-      window.KNOWW_KALSHI.searchKalshiEvents(
+    searchEntries.push({
+      source: "Kalshi",
+      promise: window.KNOWW_KALSHI.searchKalshiEvents(
         query,
         kalshiMatchedCategories
       ).catch((e) => {
         log("Kalshi search failed:", e);
         return [];
-      })
-    );
+      }),
+    });
   }
 
   // Wait for all searches to complete
-  const results = await Promise.all(searchPromises);
+  const results = await Promise.all(
+    searchEntries.map((entry) => entry.promise)
+  );
 
   if (isDebug) {
-    // Debug: Log results from each source
     log("📥 Search results by source:");
-    results.forEach((sourceResults) => {
-      const sources = sourceResults.map((m) => m.source || "polymarket");
-      const uniqueSources = [...new Set(sources)];
-      // Derive friendly source name from actual data
-      let sourceName = "Unknown";
-      if (uniqueSources.includes("polymarket")) {
-        sourceName = "Polymarket";
-      } else if (uniqueSources.includes("kalshi")) {
-        sourceName = "Kalshi";
-      } else if (uniqueSources.length > 0) {
-        // Capitalize first letter of the first unique source
-        sourceName =
-          uniqueSources[0].charAt(0).toUpperCase() + uniqueSources[0].slice(1);
-      }
-      log(
-        `  ${sourceName}: ${sourceResults.length} results (sources: ${
-          uniqueSources.join(", ") || "none"
-        })`
-      );
+    results.forEach((sourceResults, i) => {
+      log(`  ${searchEntries[i].source}: ${sourceResults.length} results`);
     });
   }
 
@@ -1530,6 +1500,22 @@ async function validateMarketRelevance(
         reason?: string;
         confidence?: number;
       };
+      const status = "status" in resp ? resp.status : undefined;
+
+      if (typeof status === "number" && (status < 200 || status >= 300)) {
+        log("AI relevance validation returned non-2xx status:", status, data);
+        return null;
+      }
+
+      if (
+        typeof data.relevant !== "boolean" ||
+        typeof data.reason !== "string" ||
+        typeof data.confidence !== "number"
+      ) {
+        log("AI relevance validation returned unexpected payload shape:", data);
+        return null;
+      }
+
       log("AI relevance validation:", {
         market: market.title?.slice(0, 40),
         relevant: data.relevant,
@@ -1537,9 +1523,9 @@ async function validateMarketRelevance(
         confidence: data.confidence,
       });
       return {
-        relevant: data.relevant ?? true,
-        reason: data.reason || "",
-        confidence: data.confidence ?? 0,
+        relevant: data.relevant,
+        reason: data.reason,
+        confidence: data.confidence,
       };
     }
   } catch (e) {
@@ -1722,6 +1708,7 @@ const KNOWW_API_BASE = {
   extractMatchingTags,
   extractBasicKeywords,
   extractSearchKeywords,
+  extractKeywordsWithAI,
   // Search functions
   searchPolymarketEvents,
   searchAllMarkets,

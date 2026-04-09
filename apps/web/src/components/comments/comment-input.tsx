@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Loader2, Send, X } from "lucide-react";
+import posthog from "posthog-js";
 import { useCallback, useRef, useState } from "react";
 import { useSignTypedData } from "wagmi";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -147,6 +148,13 @@ export function CommentInput({
       }
 
       await postComment(payload);
+
+      posthog.capture("comment_submitted", {
+        event_id: eventId,
+        is_reply: isReply,
+        character_count: content.trim().length,
+        wallet_address: userAddress,
+      });
 
       // Clear the input
       setContent("");

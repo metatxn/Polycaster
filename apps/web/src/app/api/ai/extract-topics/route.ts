@@ -3,7 +3,7 @@ import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
-import { verifyExtensionAccess } from "@/lib/extension-auth";
+import { verifyExtensionAccessPreAuth } from "@/lib/extension-auth";
 
 const MAX_INPUT_CHARS = 500;
 const MIN_MEANINGFUL_CHARS = 20;
@@ -373,7 +373,7 @@ async function extractTopicsFromText(
     const openrouter = createOpenRouter({ apiKey });
     const aiResult = await withTimeout(
       generateText({
-        model: openrouter.chat("google/gemini-3-flash-preview"),
+        model: openrouter.chat("openai/gpt-5.4-nano"),
         output: Output.object({ schema: TopicExtractionSchema }),
         system: SYSTEM_PROMPT,
         prompt: `Analyze this social media post and extract prediction market topics.
@@ -446,7 +446,10 @@ ${truncatedText}
 }
 
 export async function POST(request: NextRequest) {
-  const authResponse = await verifyExtensionAccess(request, "ai:extract");
+  const authResponse = await verifyExtensionAccessPreAuth(
+    request,
+    "ai:extract"
+  );
   if (authResponse) return authResponse;
 
   // Rate limit: 20 requests per minute (AI is expensive)
@@ -492,7 +495,10 @@ export async function POST(request: NextRequest) {
 
 // Also support GET for simple testing (rate limited same as POST)
 export async function GET(request: NextRequest) {
-  const authResponse = await verifyExtensionAccess(request, "ai:extract");
+  const authResponse = await verifyExtensionAccessPreAuth(
+    request,
+    "ai:extract"
+  );
   if (authResponse) return authResponse;
 
   const rateLimitResponse = checkRateLimit(request, {

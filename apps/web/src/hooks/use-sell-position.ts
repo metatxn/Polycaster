@@ -23,9 +23,15 @@ interface OrderBookData {
   asks: Array<{ price: string; size: string }>;
 }
 
+interface SellResult {
+  shares: number;
+  estimatedProceeds: number;
+  estimatedPrice: number;
+}
+
 interface UseSellPositionOptions {
   position: Position | null;
-  onSellSuccess?: () => void;
+  onSellSuccess?: (result: SellResult) => void;
   onSellError?: (error: Error) => void;
 }
 
@@ -257,7 +263,11 @@ export function useSellPosition({
           setTimeout(refetchAll, 20000);
           setTimeout(refetchAll, 30000);
         }
-        onSellSuccess?.();
+        onSellSuccess?.({
+          shares,
+          estimatedProceeds: sellEstimate.estimatedProceeds,
+          estimatedPrice: sellEstimate.estimatedPrice,
+        });
         return { success: true, order: result.order };
       }
 

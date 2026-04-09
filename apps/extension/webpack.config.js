@@ -1,8 +1,43 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const webpack = require("webpack");
 const CopyPlugin = require("copy-webpack-plugin");
 
 require("dotenv").config();
+
+const transformersEntry = require.resolve("@huggingface/transformers");
+
+function findTransformersPackageRoot(startPath) {
+  let current = path.dirname(startPath);
+  while (current !== path.dirname(current)) {
+    const packageJsonPath = path.join(current, "package.json");
+    if (fs.existsSync(packageJsonPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+        if (pkg.name === "@huggingface/transformers") {
+          return current;
+        }
+      } catch {
+        // Keep searching upward.
+      }
+    }
+    current = path.dirname(current);
+  }
+  throw new Error(
+    `Unable to locate @huggingface/transformers package root from ${startPath}`
+  );
+}
+
+const transformersPackageRoot = findTransformersPackageRoot(transformersEntry);
+const onnxRuntimeDistPath = path.resolve(
+  transformersPackageRoot,
+  "../../onnxruntime-web/dist"
+);
+if (!fs.existsSync(onnxRuntimeDistPath)) {
+  throw new Error(
+    `Unable to locate onnxruntime-web dist folder at ${onnxRuntimeDistPath}`
+  );
+}
 
 module.exports = (_env, argv) => {
   const isProduction = argv.mode === "production";
@@ -19,11 +54,22 @@ module.exports = (_env, argv) => {
     output: {
       path: path.resolve(__dirname, "dist"),
       filename: "[name].js",
+      chunkFilename: "chunks/[name].[contenthash:8].js",
+      // Keep webpack's runtime URL detection explicit; this works for
+      // extension pages, offscreen docs, and service workers.
+      publicPath: "auto",
       clean: true,
     },
     devtool: isProduction ? false : "cheap-module-source-map",
     module: {
       rules: [
+        {
+          test: /ort-wasm-simd-threaded\.asyncify\.wasm$/i,
+          type: "asset/resource",
+          generator: {
+            filename: "ort/[name][ext]",
+          },
+        },
         {
           test: /\.tsx?$/,
           use: {
@@ -72,7 +118,6 @@ module.exports = (_env, argv) => {
         Buffer: ["buffer", "Buffer"],
         process: "process/browser",
       }),
-      new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
       new CopyPlugin({
         patterns: [
           { from: "manifest.json", to: "manifest.json" },
@@ -81,13 +126,45 @@ module.exports = (_env, argv) => {
           { from: "icons", to: "icons" },
           { from: "src/content/knoww-inline.css", to: "knoww-inline.css" },
           { from: "src/offscreen/offscreen.html", to: "offscreen.html" },
+          {
+            from: path.join(
+              onnxRuntimeDistPath,
+              "ort-wasm-simd-threaded.asyncify.mjs"
+            ),
+            to: "ort/ort-wasm-simd-threaded.asyncify.mjs",
+          },
         ],
       }),
+    ],
+    ignoreWarnings: [
+      {
+        module:
+          /@huggingface[\\/]transformers[\\/]dist[\\/]transformers\.web\.js/i,
+        message:
+          /Critical dependency: the request of a dependency is an expression/i,
+      },
+      {
+        module:
+          /@huggingface[\\/]transformers[\\/]dist[\\/]transformers\.web\.js/i,
+        message: /import\.meta/i,
+      },
     ],
     optimization: {
       minimize: true,
       usedExports: true,
-      splitChunks: false,
+      splitChunks: {
+        chunks: "async",
+        minSize: 40 * 1024,
+        minChunks: 1,
+        maxAsyncRequests: 30,
+        maxInitialRequests: 10,
+      },
+    },
+    performance: {
+      hints: "warning",
+      maxAssetSize: 2 * 1024 * 1024,
+      maxEntrypointSize: 2 * 1024 * 1024,
+      assetFilter: (assetFilename) => /\.(css|js|mjs)$/.test(assetFilename),
     },
   };
 };

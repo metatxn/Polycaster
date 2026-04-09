@@ -313,8 +313,8 @@ export function useTradingFormState({
     [minShares, side]
   );
 
-  const handleSubmit = useCallback(async () => {
-    if (!canTrade || !selectedOutcome || !hasValidTokenId) return;
+  const handleSubmit = useCallback(async (): Promise<boolean> => {
+    if (!canTrade || !selectedOutcome || !hasValidTokenId) return false;
 
     try {
       let clobOrderType: ClobOrderType;
@@ -419,12 +419,14 @@ export function useTradingFormState({
           scheduleRefetch(3000);
           scheduleRefetch(5000);
         }
+        return true;
       } else {
         throw new Error("Order failed");
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Order failed");
       onOrderError?.(error);
+      return false;
     }
   }, [
     canTrade,

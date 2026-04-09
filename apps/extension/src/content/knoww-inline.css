@@ -158,6 +158,159 @@
   --knoww-card-bg: rgb(39, 39, 41);
 }
 
+/* Quora Light Mode (default) */
+.knoww-platform-quora {
+  --knoww-bg: rgb(255, 255, 255);
+  --knoww-border: rgba(0, 0, 0, 0.12);
+  --knoww-text: rgb(40, 40, 41);
+  --knoww-text-secondary: rgb(99, 99, 100);
+  --knoww-accent: #b92b27;
+  --knoww-font:
+    -apple-system, "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica",
+    "Arial", sans-serif;
+  --knoww-radius: 12px;
+  --knoww-card-bg: rgb(247, 247, 248);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(230, 126, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(5, 150, 105),
+    rgb(13, 148, 136)
+  );
+  --knoww-deposit-text: #fff;
+  --knoww-option-1: rgb(37, 99, 195);
+  --knoww-option-2: rgb(126, 58, 205);
+  --knoww-option-3: rgb(180, 130, 0);
+  --knoww-option-4: rgb(8, 145, 170);
+  --knoww-option-5: rgb(205, 55, 80);
+}
+
+/* Quora Dark Mode */
+.dark .knoww-platform-quora,
+[data-theme="dark"] .knoww-platform-quora,
+.knoww-platform-quora.knoww-theme-dark {
+  --knoww-bg: rgb(38, 38, 39);
+  --knoww-border: rgba(255, 255, 255, 0.12);
+  --knoww-text: rgb(240, 240, 240);
+  --knoww-text-secondary: rgba(255, 255, 255, 0.7);
+  --knoww-card-bg: rgb(48, 48, 49);
+}
+
+/* Slashdot Light Mode (default — Slashdot has a light gray background) */
+.knoww-platform-slashdot {
+  --knoww-bg: rgb(255, 255, 255);
+  --knoww-border: rgba(0, 0, 0, 0.15);
+  --knoww-text: rgb(34, 34, 34);
+  --knoww-text-secondary: rgb(102, 102, 102);
+  --knoww-accent: #026664;
+  --knoww-font: "Arial", "Helvetica", sans-serif;
+  --knoww-radius: 4px;
+  --knoww-card-bg: rgb(246, 246, 246);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+  --knoww-accent-green: rgb(0, 150, 100);
+  --knoww-accent-green-glow: rgba(0, 150, 100, 0.3);
+  --knoww-accent-warn: rgb(200, 120, 0);
+  --knoww-deposit-bg: linear-gradient(
+    135deg,
+    rgb(2, 102, 100),
+    rgb(3, 130, 128)
+  );
+  --knoww-deposit-text: #fff;
+  --knoww-option-1: rgb(37, 99, 195);
+  --knoww-option-2: rgb(126, 58, 205);
+  --knoww-option-3: rgb(180, 130, 0);
+  --knoww-option-4: rgb(8, 145, 170);
+  --knoww-option-5: rgb(205, 55, 80);
+}
+
+/* Crypto editorial platforms — dark theme (default for most crypto sites) */
+.knoww-platform-decrypt,
+.knoww-platform-coindesk,
+.knoww-platform-cointelegraph,
+.knoww-platform-theblock,
+.knoww-platform-blockworks,
+.knoww-platform-bankless,
+.knoww-platform-bitcoinmagazine,
+.knoww-platform-beincrypto,
+.knoww-platform-unchained,
+.knoww-platform-cryptopanic {
+  --knoww-bg: rgb(22, 22, 24);
+  --knoww-border: rgba(255, 255, 255, 0.12);
+  --knoww-text: rgb(240, 240, 240);
+  --knoww-text-secondary: rgba(255, 255, 255, 0.6);
+  --knoww-accent: rgb(168, 132, 255);
+  --knoww-font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --knoww-radius: 12px;
+  --knoww-card-bg: rgb(32, 32, 36);
+  --knoww-header-chip-bg: rgba(255, 255, 255, 0.06);
+}
+
+/* Crypto editorial platforms — light theme */
+.knoww-platform-decrypt.knoww-theme-light,
+.knoww-platform-coindesk.knoww-theme-light,
+.knoww-platform-cointelegraph.knoww-theme-light,
+.knoww-platform-theblock.knoww-theme-light,
+.knoww-platform-blockworks.knoww-theme-light,
+.knoww-platform-bankless.knoww-theme-light,
+.knoww-platform-bitcoinmagazine.knoww-theme-light,
+.knoww-platform-beincrypto.knoww-theme-light,
+.knoww-platform-unchained.knoww-theme-light,
+.knoww-platform-cryptopanic.knoww-theme-light {
+  --knoww-bg: rgb(255, 255, 255);
+  --knoww-border: rgba(0, 0, 0, 0.1);
+  --knoww-text: rgb(20, 20, 20);
+  --knoww-text-secondary: rgba(0, 0, 0, 0.55);
+  --knoww-accent: rgb(124, 58, 237);
+  --knoww-card-bg: rgb(247, 247, 250);
+  --knoww-header-chip-bg: rgba(0, 0, 0, 0.04);
+}
+
+/* Crypto editorial — View Market link visibility on dark theme */
+.knoww-platform-decrypt .knoww-view-market,
+.knoww-platform-coindesk .knoww-view-market,
+.knoww-platform-cointelegraph .knoww-view-market,
+.knoww-platform-theblock .knoww-view-market,
+.knoww-platform-blockworks .knoww-view-market,
+.knoww-platform-bankless .knoww-view-market,
+.knoww-platform-bitcoinmagazine .knoww-view-market,
+.knoww-platform-beincrypto .knoww-view-market,
+.knoww-platform-unchained .knoww-view-market,
+.knoww-platform-cryptopanic .knoww-view-market {
+  color: var(--knoww-accent, rgb(168, 132, 255)) !important;
+}
+
+/* Crypto editorial — Enable Trading button visibility on dark theme */
+.knoww-platform-decrypt .knoww-tp-btn-enable,
+.knoww-platform-coindesk .knoww-tp-btn-enable,
+.knoww-platform-cointelegraph .knoww-tp-btn-enable,
+.knoww-platform-theblock .knoww-tp-btn-enable,
+.knoww-platform-blockworks .knoww-tp-btn-enable,
+.knoww-platform-bankless .knoww-tp-btn-enable,
+.knoww-platform-bitcoinmagazine .knoww-tp-btn-enable,
+.knoww-platform-beincrypto .knoww-tp-btn-enable,
+.knoww-platform-unchained .knoww-tp-btn-enable,
+.knoww-platform-cryptopanic .knoww-tp-btn-enable {
+  border-color: var(--knoww-accent, rgb(168, 132, 255)) !important;
+  color: var(--knoww-accent, rgb(168, 132, 255)) !important;
+}
+
+.knoww-platform-decrypt .knoww-tp-btn-enable:hover,
+.knoww-platform-coindesk .knoww-tp-btn-enable:hover,
+.knoww-platform-cointelegraph .knoww-tp-btn-enable:hover,
+.knoww-platform-theblock .knoww-tp-btn-enable:hover,
+.knoww-platform-blockworks .knoww-tp-btn-enable:hover,
+.knoww-platform-bankless .knoww-tp-btn-enable:hover,
+.knoww-platform-bitcoinmagazine .knoww-tp-btn-enable:hover,
+.knoww-platform-beincrypto .knoww-tp-btn-enable:hover,
+.knoww-platform-unchained .knoww-tp-btn-enable:hover,
+.knoww-platform-cryptopanic .knoww-tp-btn-enable:hover {
+  background: rgba(168, 132, 255, 0.1) !important;
+}
+
 /* Market card - Base styles with CSS variables */
 .knoww-market-card {
   background: var(--knoww-bg, rgb(0, 0, 0)) !important;
@@ -563,6 +716,7 @@
   object-fit: cover !important;
 }
 
+/* biome-ignore lint: unrelated selector, not an override */
 .knoww-view-market {
   display: flex !important;
   align-items: center !important;
@@ -584,6 +738,137 @@
 .knoww-view-market svg {
   width: 16px !important;
   height: 16px !important;
+}
+
+/* Slashdot-specific card sizing — narrower to match content area */
+.knoww-platform-slashdot .knoww-market-card {
+  max-width: 600px !important;
+  font-size: 13px !important;
+  border-radius: 4px !important;
+  margin: 2px 0 0 0 !important;
+}
+
+.knoww-platform-slashdot .knoww-card-header {
+  padding: 10px 12px 8px !important;
+  gap: 10px !important;
+}
+
+.knoww-platform-slashdot .knoww-card-icon {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 4px !important;
+}
+
+.knoww-platform-slashdot .knoww-card-title {
+  font-size: 13px !important;
+  line-height: 1.3 !important;
+}
+
+.knoww-platform-slashdot .knoww-card-volume {
+  font-size: 11px !important;
+}
+
+.knoww-platform-slashdot .knoww-card-outcomes {
+  padding: 0 12px 8px 12px !important;
+  gap: 6px !important;
+}
+
+.knoww-platform-slashdot .knoww-outcome-btn {
+  padding: 7px 10px !important;
+  font-size: 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-card-footer {
+  padding: 10px 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-source-badge {
+  font-size: 11px !important;
+}
+
+.knoww-platform-slashdot .knoww-view-market {
+  font-size: 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-card-context {
+  font-size: 10px !important;
+  margin-top: 1px !important;
+}
+
+.knoww-platform-slashdot .knoww-stacked-cards {
+  gap: 4px !important;
+}
+
+.knoww-platform-slashdot .knoww-options-list {
+  padding: 4px 0 !important;
+}
+
+.knoww-platform-slashdot .knoww-toggle-options {
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-option-row {
+  padding: 6px 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-option-name {
+  font-size: 13px !important;
+}
+
+.knoww-platform-slashdot .knoww-option-percent {
+  font-size: 13px !important;
+}
+
+/* ============================================ */
+/* Stack Overflow / Stack Exchange Platform     */
+/* ============================================ */
+
+.knoww-platform-stackoverflow,
+.knoww-platform-stackexchange {
+  --knoww-font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Adjusted", "Segoe UI",
+    "Liberation Sans", sans-serif !important;
+  --knoww-radius: 10px !important;
+}
+
+.knoww-platform-stackoverflow.knoww-theme-light,
+.knoww-platform-stackexchange.knoww-theme-light {
+  --knoww-bg: rgb(255, 255, 255) !important;
+  --knoww-border: rgb(214, 217, 220) !important;
+  --knoww-text: rgb(35, 38, 41) !important;
+  --knoww-text-secondary: rgb(106, 115, 124) !important;
+  --knoww-card-bg: rgb(248, 249, 249) !important;
+  --knoww-accent: rgb(244, 128, 36) !important;
+}
+
+.knoww-platform-stackoverflow.knoww-theme-dark,
+.knoww-platform-stackexchange.knoww-theme-dark {
+  --knoww-bg: rgb(45, 45, 48) !important;
+  --knoww-border: rgb(68, 68, 72) !important;
+  --knoww-text: rgb(227, 230, 232) !important;
+  --knoww-text-secondary: rgb(155, 160, 165) !important;
+  --knoww-card-bg: rgb(56, 56, 60) !important;
+  --knoww-accent: rgb(244, 128, 36) !important;
+}
+
+.knoww-platform-stackoverflow .knoww-stacked-cards,
+.knoww-platform-stackexchange .knoww-stacked-cards {
+  margin: 12px 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.knoww-platform-stackoverflow .knoww-market-card,
+.knoww-platform-stackexchange .knoww-market-card {
+  border-radius: 6px !important;
+}
+
+/* Notification stack positioning for SO/SE (account for top bar) */
+.knoww-notification-stack-stackoverflow,
+.knoww-notification-stack-stackexchange {
+  top: 60px !important;
 }
 
 /* ============================================ */
@@ -646,6 +931,58 @@
   --knoww-text: rgb(247, 249, 249) !important;
   --knoww-text-secondary: rgb(139, 152, 165) !important;
   --knoww-card-bg: rgb(30, 42, 56) !important;
+}
+
+/* Header */
+.knoww-stack-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 12px 16px !important;
+  border-bottom: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+}
+
+.knoww-stack-title {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+
+.knoww-stack-icon {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 4px !important;
+  overflow: hidden !important;
+  flex-shrink: 0 !important;
+}
+
+.knoww-stack-icon img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+.knoww-stack-header-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.knoww-stack-badge {
+  min-width: 20px !important;
+  height: 20px !important;
+  padding: 0 6px !important;
+  background: var(--knoww-accent, rgb(29, 155, 240)) !important;
+  border-radius: 10px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: white !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 /* Drag cursor on the notification stack header */
@@ -722,56 +1059,59 @@
   font-size: 11px !important;
 }
 
-/* Header */
-.knoww-stack-header {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  padding: 12px 16px !important;
-  border-bottom: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+/* Quora-specific notification stack styling */
+.knoww-notification-stack-quora {
+  top: 60px !important;
+  width: 280px !important;
+  --knoww-bg: rgb(255, 255, 255) !important;
+  --knoww-border: rgba(0, 0, 0, 0.12) !important;
+  --knoww-text: rgb(40, 40, 41) !important;
+  --knoww-text-secondary: rgb(99, 99, 100) !important;
+  --knoww-accent: #b92b27 !important;
+  --knoww-radius: 12px !important;
+  --knoww-card-bg: rgb(247, 247, 248) !important;
+  border-radius: 12px !important;
+  font-family:
+    -apple-system, "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica",
+    "Arial", sans-serif !important;
 }
 
-.knoww-stack-title {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+.dark .knoww-notification-stack-quora,
+[data-theme="dark"] .knoww-notification-stack-quora,
+.knoww-notification-stack-quora.knoww-theme-dark {
+  --knoww-bg: rgb(38, 38, 39) !important;
+  --knoww-border: rgba(255, 255, 255, 0.12) !important;
+  --knoww-text: rgb(240, 240, 240) !important;
+  --knoww-text-secondary: rgba(255, 255, 255, 0.7) !important;
+  --knoww-card-bg: rgb(48, 48, 49) !important;
 }
 
-.knoww-stack-icon {
-  width: 20px !important;
-  height: 20px !important;
+.knoww-notification-stack-quora .knoww-stack-badge {
+  background: #b92b27 !important;
+}
+
+/* Slashdot-specific notification stack styling */
+.knoww-notification-stack-slashdot {
+  top: 12px !important;
+  width: 260px !important;
+  --knoww-bg: rgb(255, 255, 255) !important;
+  --knoww-border: rgba(0, 0, 0, 0.15) !important;
+  --knoww-text: rgb(34, 34, 34) !important;
+  --knoww-text-secondary: rgb(102, 102, 102) !important;
+  --knoww-accent: #026664 !important;
+  --knoww-radius: 4px !important;
+  --knoww-card-bg: rgb(246, 246, 246) !important;
   border-radius: 4px !important;
-  overflow: hidden !important;
-  flex-shrink: 0 !important;
+  font-family: "Arial", "Helvetica", sans-serif !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15) !important;
 }
 
-.knoww-stack-icon img {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover !important;
+.knoww-notification-stack-slashdot .knoww-stack-badge {
+  background: #026664 !important;
 }
 
-.knoww-stack-header-right {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-}
-
-.knoww-stack-badge {
-  min-width: 20px !important;
-  height: 20px !important;
-  padding: 0 6px !important;
-  background: rgb(29, 155, 240) !important;
-  border-radius: 10px !important;
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  color: white !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+.knoww-notification-stack-slashdot .knoww-stack-header {
+  padding: 10px 12px !important;
 }
 
 /* Search toggle button */
@@ -1301,6 +1641,14 @@
   gap: 8px !important;
   font-size: 12px !important;
   font-weight: 600 !important;
+}
+
+.knoww-notification-stack-slashdot .knoww-notification-title {
+  font-size: 12px !important;
+}
+
+.knoww-notification-stack-slashdot .knoww-notification-prices {
+  font-size: 11px !important;
 }
 
 /* Multi-outcome prices - stacked layout */
@@ -2558,7 +2906,7 @@
 .knoww-tp-wallet-item {
   display: flex !important;
   align-items: center !important;
-  justify-content: center !important;
+  justify-content: flex-start !important;
   gap: 10px !important;
   width: 100% !important;
   padding: 10px 14px !important;
@@ -2572,7 +2920,7 @@
   transition:
     background 0.15s,
     border-color 0.15s !important;
-  text-align: center !important;
+  text-align: left !important;
   line-height: 1.3 !important;
 }
 .knoww-tp-wallet-item:hover {
@@ -2590,13 +2938,15 @@
   object-fit: contain !important;
 }
 .knoww-tp-wallet-item span {
-  flex: 0 1 auto !important;
+  flex: 1 1 auto !important;
   min-width: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
+  text-align: left !important;
 }
 
+/* biome-ignore lint: unrelated selector, not an override */
 .knoww-tp-btn-enable {
   display: block !important;
   width: auto !important;
@@ -2618,6 +2968,7 @@
   align-self: center !important;
   margin: 0 auto !important;
 }
+/* biome-ignore lint: pseudo-class variant of same selector */
 .knoww-tp-btn-enable:hover {
   background: rgba(29, 155, 240, 0.1) !important;
 }
@@ -2888,6 +3239,7 @@
   border-radius: 12px !important;
   outline: none !important;
   transition: border-color 0.15s !important;
+  appearance: textfield !important;
   -moz-appearance: textfield !important;
 }
 .knoww-tp-price-field:focus {
@@ -3110,6 +3462,7 @@
   font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
   text-align: center !important;
   outline: none !important;
+  appearance: textfield !important;
   -moz-appearance: textfield !important;
 }
 .knoww-tp-shares-input:focus {
@@ -3464,6 +3817,7 @@
   font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
   outline: none !important;
   transition: border-color 0.15s !important;
+  appearance: textfield !important;
   -moz-appearance: textfield !important;
 }
 .knoww-tp-input-field:focus {
@@ -3662,4 +4016,481 @@
 .knoww-platform-reddit .knoww-tp-expiration-btn {
   padding: 4px 8px !important;
   font-size: 11px !important;
+}
+
+/* ============================================ */
+/* SLASHDOT — Trading Panel Light-Theme         */
+/* ============================================ */
+
+.knoww-platform-slashdot .knoww-trading-panel {
+  background: var(--knoww-bg, #fff) !important;
+  border: 1px solid var(--knoww-border, rgba(0, 0, 0, 0.15)) !important;
+  border-top: none !important;
+  border-radius: 0 0 var(--knoww-radius, 4px) var(--knoww-radius, 4px) !important;
+  margin: -1px 0 2px 0 !important;
+  max-width: 600px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-form {
+  padding: 8px 12px 12px !important;
+  gap: 8px !important;
+}
+
+.knoww-platform-slashdot .knoww-trading-panel,
+.knoww-platform-slashdot .knoww-trading-panel * {
+  box-sizing: border-box !important;
+}
+
+.knoww-platform-slashdot .knoww-trading-panel button,
+.knoww-platform-slashdot .knoww-trading-panel input,
+.knoww-platform-slashdot .knoww-trading-panel select {
+  margin: 0 !important;
+  font-family: inherit !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-connect-section,
+.knoww-platform-slashdot .knoww-tp-enable-section,
+.knoww-platform-slashdot .knoww-tp-loading-section {
+  padding: 22px 16px !important;
+  gap: 10px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-header {
+  padding: 10px 12px !important;
+  gap: 8px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-title {
+  font-size: 13px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-header-right {
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-header-deposit {
+  padding: 5px 10px !important;
+  font-size: 11px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-header-action,
+.knoww-platform-slashdot .knoww-tp-close {
+  width: 28px !important;
+  height: 28px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-ordertype-row {
+  align-items: stretch !important;
+  gap: 8px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-ordertype-toggle {
+  padding: 3px !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-ordertype-btn {
+  min-height: 38px !important;
+  font-size: 12px !important;
+  padding: 8px 10px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-more-wrap {
+  display: flex !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-more-btn {
+  width: 38px !important;
+  min-height: 38px !important;
+  height: auto !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-more-btn svg {
+  width: 16px !important;
+  height: 16px !important;
+  color: inherit !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-buysell-toggle {
+  padding: 3px !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  border-radius: 10px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-buysell-btn {
+  min-height: 38px !important;
+  font-size: 12px !important;
+  padding: 8px 10px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-outcome-btn {
+  min-height: 40px !important;
+  padding: 8px 12px !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: var(--knoww-text-secondary, #666) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-outcome-btn.yes.active {
+  background: rgba(0, 200, 83, 0.08) !important;
+  border-color: rgb(0, 160, 67) !important;
+  color: rgb(0, 140, 58) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-outcome-btn.no.active {
+  background: rgba(255, 23, 68, 0.08) !important;
+  border-color: rgb(220, 20, 60) !important;
+  color: rgb(200, 18, 55) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-section-header {
+  margin-bottom: 6px !important;
+  gap: 6px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-section-label,
+.knoww-platform-slashdot .knoww-tp-cost-display {
+  font-size: 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-price-controls {
+  gap: 8px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-price-field {
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: var(--knoww-text, #222) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-price-field:focus {
+  border-color: var(--knoww-accent, #026664) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-bidask-wrap {
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-bidask-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  padding: 4px 8px !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  border-radius: 999px !important;
+  background: rgba(0, 0, 0, 0.04) !important;
+  font-size: 10px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-bidask-btn.bid {
+  color: rgb(0, 160, 107) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-bidask-btn.ask {
+  color: rgb(220, 20, 110) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-shares-row {
+  display: grid !important;
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1fr) minmax(88px, 1.35fr) minmax(0, 1fr)
+    minmax(0, 1fr) minmax(54px, 0.95fr) !important;
+  gap: 8px !important;
+  margin-top: 2px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-shares-btn {
+  min-height: 34px !important;
+  padding: 6px 8px !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: var(--knoww-text-secondary, #666) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-shares-input {
+  min-width: 0 !important;
+  padding: 6px 8px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-max-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 34px !important;
+  padding: 0 10px !important;
+  background: rgba(2, 102, 100, 0.06) !important;
+  border: 1px solid rgba(2, 102, 100, 0.22) !important;
+  border-radius: 8px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-execution-info {
+  padding: 2px 0 0 !important;
+  font-size: 11px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-exec-group {
+  gap: 6px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-order-position {
+  margin-top: 4px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-exp-row {
+  gap: 6px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-exp-btn {
+  padding: 5px 10px !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  border-radius: 8px !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: var(--knoww-text-secondary, #666) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-exp-btn:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-exp-btn.active {
+  background: rgba(2, 102, 100, 0.08) !important;
+  border-color: rgba(2, 102, 100, 0.3) !important;
+  color: var(--knoww-accent, #026664) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-summary {
+  gap: 4px !important;
+  padding-top: 10px !important;
+  border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-summary-row {
+  align-items: flex-start !important;
+  gap: 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-summary-label {
+  font-size: 12px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-summary-value {
+  font-size: 12px !important;
+  text-align: right !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-summary-value.lg {
+  font-size: 16px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-submit {
+  min-height: 42px !important;
+  padding: 10px 14px !important;
+  font-size: 14px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-submit:disabled,
+.knoww-platform-slashdot .knoww-tp-submit.loading {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: var(--knoww-text-secondary, #666) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-spinner {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  border-top-color: var(--knoww-accent, #026664) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-submit-spinner {
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  border-top-color: currentColor !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-portfolio-bar {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-terms {
+  font-size: 9px !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-close:hover,
+.knoww-platform-slashdot .knoww-tp-header-action:hover {
+  color: var(--knoww-text, #222) !important;
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-header-wallet {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-method-btn {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-method-btn:hover:not(.disabled) {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-token-row {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-token-row:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-token-row.selected {
+  background: rgba(2, 102, 100, 0.06) !important;
+  border-color: rgba(2, 102, 100, 0.35) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-search {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: var(--knoww-text, #222) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-search:focus {
+  border-color: var(--knoww-accent, #026664) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-chain-dot {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-divider-line {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-method-icon.card,
+.knoww-platform-slashdot .knoww-tp-deposit-method-icon.exchange {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-deposit-coming-soon {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-input-field {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  color: var(--knoww-text, #222) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-input-field:focus {
+  border-color: var(--knoww-accent, #026664) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-info-box {
+  background: rgba(2, 102, 100, 0.04) !important;
+  border-color: rgba(2, 102, 100, 0.15) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-back-btn {
+  color: var(--knoww-accent, #026664) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-back-btn:hover {
+  background: rgba(2, 102, 100, 0.05) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-wallet-item {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.knoww-platform-slashdot .knoww-tp-wallet-item:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+/* ============================================ */
+/* Threads Platform                             */
+/* ============================================ */
+
+.knoww-platform-threads {
+  --knoww-font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif !important;
+  --knoww-radius: 12px !important;
+}
+
+.knoww-platform-threads.knoww-theme-dark {
+  --knoww-bg: rgb(16, 16, 16) !important;
+  --knoww-border: rgb(54, 54, 54) !important;
+  --knoww-text: rgb(243, 245, 247) !important;
+  --knoww-text-secondary: rgb(119, 119, 119) !important;
+  --knoww-card-bg: rgb(30, 30, 30) !important;
+  --knoww-accent: rgb(225, 225, 225) !important;
+}
+
+.knoww-platform-threads.knoww-theme-light {
+  --knoww-bg: rgb(255, 255, 255) !important;
+  --knoww-border: rgb(219, 219, 219) !important;
+  --knoww-text: rgb(0, 0, 0) !important;
+  --knoww-text-secondary: rgb(115, 115, 115) !important;
+  --knoww-card-bg: rgb(250, 250, 250) !important;
+  --knoww-accent: rgb(0, 0, 0) !important;
+}
+
+/* View market link — needs visible color on dark background */
+.knoww-platform-threads.knoww-theme-dark .knoww-view-market {
+  color: rgb(225, 225, 225) !important;
+}
+
+/* Enable Trading button — visible border and text on dark background */
+.knoww-platform-threads.knoww-theme-dark .knoww-tp-btn-enable {
+  border-color: rgb(225, 225, 225) !important;
+  color: rgb(225, 225, 225) !important;
+}
+
+.knoww-platform-threads.knoww-theme-dark .knoww-tp-btn-enable:hover {
+  background: rgba(225, 225, 225, 0.1) !important;
+}
+
+/* Trading panel spinner on dark theme */
+.knoww-platform-threads.knoww-theme-dark .knoww-tp-spinner {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  border-top-color: rgb(225, 225, 225) !important;
+}
+
+/* Loading text visibility */
+.knoww-platform-threads.knoww-theme-dark .knoww-tp-loading-text {
+  color: rgb(180, 180, 180) !important;
+}
+
+/* Notification stack positioning */
+.knoww-notification-stack-threads {
+  top: 12px !important;
+}
+
+.knoww-notification-stack-threads.knoww-theme-dark {
+  --knoww-bg: rgb(16, 16, 16) !important;
+  --knoww-border: rgb(54, 54, 54) !important;
+  --knoww-text: rgb(243, 245, 247) !important;
+  --knoww-text-secondary: rgb(119, 119, 119) !important;
+  --knoww-accent: rgb(225, 225, 225) !important;
+  --knoww-card-bg: rgb(30, 30, 30) !important;
+}
+
+.knoww-notification-stack-threads.knoww-theme-light {
+  --knoww-bg: rgb(255, 255, 255) !important;
+  --knoww-border: rgb(219, 219, 219) !important;
+  --knoww-text: rgb(0, 0, 0) !important;
+  --knoww-text-secondary: rgb(115, 115, 115) !important;
+  --knoww-accent: rgb(0, 0, 0) !important;
+  --knoww-card-bg: rgb(250, 250, 250) !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15) !important;
 }

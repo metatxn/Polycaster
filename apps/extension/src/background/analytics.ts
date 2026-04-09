@@ -38,20 +38,17 @@ async function isAnalyticsEnabled(): Promise<boolean> {
         { [SETTINGS_STORAGE_KEY]: DEFAULT_USER_SETTINGS },
         (result) => {
           if (chrome.runtime.lastError) {
-            resolve(DEFAULT_USER_SETTINGS.usageAnalyticsEnabled);
+            resolve(false);
             return;
           }
           const settings = result[SETTINGS_STORAGE_KEY] as
             | Partial<UserSettings>
             | undefined;
-          resolve(
-            settings?.usageAnalyticsEnabled ??
-              DEFAULT_USER_SETTINGS.usageAnalyticsEnabled
-          );
+          resolve(settings?.usageAnalyticsEnabled === true);
         }
       );
     } catch {
-      resolve(DEFAULT_USER_SETTINGS.usageAnalyticsEnabled);
+      resolve(false);
     }
   });
 }

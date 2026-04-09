@@ -46,7 +46,3 @@ export function logInfo(event: string, payload?: LogPayload): void {
 export function logWarn(event: string, payload?: LogPayload): void {
   emit("warn", event, payload);
 }
-
-export function logError(event: string, payload?: LogPayload): void {
-  emit("error", event, payload);
-}

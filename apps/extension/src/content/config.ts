@@ -188,10 +188,7 @@ function isNotificationStackEnabled(): boolean {
  * Check if usage analytics should be sent
  */
 function isUsageAnalyticsEnabled(): boolean {
-  return (
-    USER_SETTINGS.usageAnalyticsEnabled ??
-    DEFAULT_USER_SETTINGS.usageAnalyticsEnabled
-  );
+  return USER_SETTINGS.usageAnalyticsEnabled === true;
 }
 
 /**

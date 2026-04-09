@@ -153,16 +153,16 @@ function hashText(value: string): number {
 }
 
 function makeBm25Key(marketTexts: string[]): string {
-  let hash = 0x811c9dc5 >>> 0;
-  hash = Math.imul((hash ^ marketTexts.length) >>> 0, 0x01000193) >>> 0;
-  for (const text of marketTexts) {
-    hash = Math.imul((hash ^ hashText(text)) >>> 0, 0x01000193) >>> 0;
+  const parts = new Array<string>(marketTexts.length + 1);
+  parts[0] = String(marketTexts.length);
+  for (let i = 0; i < marketTexts.length; i++) {
+    parts[i + 1] = hashText(marketTexts[i]).toString(36);
   }
-  return hash.toString(16);
+  return parts.join("|");
 }
 
 function makeBm25ScoreKey(postText: string, marketTexts: string[]): string {
-  return `${makeBm25Key(marketTexts)}|${hashText(postText)}`;
+  return `${hashText(postText).toString(36)}:${makeBm25Key(marketTexts)}`;
 }
 
 function createBm25Index(marketTexts: string[]): MiniSearch<MarketDoc> {

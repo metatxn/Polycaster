@@ -86,7 +86,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     polymarket: true,
     kalshi: false, // Disabled for now — re-enable when Kalshi integration is ready
   },
-  usageAnalyticsEnabled: true,
+  usageAnalyticsEnabled: false,
   relevanceThreshold: 0.3,
   cooldownPosts: 4,
   showNotificationStack: true,

@@ -6,6 +6,7 @@ import {
   pipeline,
 } from "@huggingface/transformers";
 import { logDebug, logInfo, logWarn } from "./logger";
+import { LRUCache } from "./lru-cache";
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -295,49 +296,23 @@ async function idbPruneIfNeeded(): Promise<void> {
 
 // ── In-memory L1 cache ───────────────────────────────────────────────
 
-class LRUCache<K, V> {
-  private max: number;
-  private cache: Map<K, V>;
-
-  constructor(max = 1000) {
-    this.max = max;
-    this.cache = new Map();
-  }
-
-  has(key: K): boolean {
-    return this.cache.has(key);
-  }
-
-  get(key: K): V | undefined {
-    const item = this.cache.get(key);
-    if (item !== undefined) {
-      this.cache.delete(key);
-      this.cache.set(key, item);
-    }
-    return item;
-  }
-
-  set(key: K, val: V): void {
-    if (this.cache.has(key)) {
-      this.cache.delete(key);
-    } else if (this.cache.size >= this.max) {
-      const oldest = this.cache.keys().next();
-      if (!oldest.done) this.cache.delete(oldest.value);
-    }
-    this.cache.set(key, val);
-  }
-}
-
 const l1Cache = new LRUCache<string, Float32Array>(500);
 
 // ── Embedding computation ────────────────────────────────────────────
 
 function cosineSimilarity(vecA: Float32Array, vecB: Float32Array): number {
   let dot = 0;
+  let normA = 0;
+  let normB = 0;
   for (let i = 0; i < vecA.length; i++) {
     dot += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
   }
-  return Number.isFinite(dot) ? dot : 0;
+  if (normA === 0 || normB === 0) return 0;
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  const sim = dot / denom;
+  return Number.isFinite(sim) ? sim : 0;
 }
 
 const EMBEDDING_BATCH_SIZE = 8;

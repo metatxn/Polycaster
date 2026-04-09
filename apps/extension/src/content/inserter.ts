@@ -3,6 +3,13 @@
 // DOM manipulation utilities for content injection
 // ============================================
 
+const DANGEROUS_CSS_PATTERN =
+  /expression\s*\(|url\s*\(\s*(["']?)\s*javascript:|(-moz-binding|-webkit-binding)\s*:|behavior\s*:/i;
+
+function sanitizeStyleValue(value: string): string {
+  return DANGEROUS_CSS_PATTERN.test(value) ? "" : value;
+}
+
 /**
  * Create a DOM node from HTML string safely (no <script>).
  */
@@ -42,7 +49,6 @@ function htmlToElement(html: string): Element | null {
       const name = attr.name.toLowerCase();
       if (
         /^on/i.test(name) ||
-        name === "style" ||
         ((name === "src" ||
           name === "href" ||
           name === "action" ||
@@ -53,6 +59,13 @@ function htmlToElement(html: string): Element | null {
           /^\s*(javascript|data):/i.test(attr.value))
       ) {
         node.removeAttribute(attr.name);
+      } else if (name === "style") {
+        const sanitized = sanitizeStyleValue(attr.value);
+        if (sanitized) {
+          node.setAttribute("style", sanitized);
+        } else {
+          node.removeAttribute("style");
+        }
       }
     }
   }

@@ -1,8 +1,10 @@
+import { DEFAULT_USER_SETTINGS, type UserSettings } from "../types/settings";
 import { getKnowwAppUrl } from "./extension-session";
-import { logWarn } from "./logger";
+import { logDebug, logWarn } from "./logger";
 
 const ANALYTICS_QUEUE_KEY = "knoww_analytics_queue_v1";
 const ANALYTICS_INSTALL_ID_KEY = "knoww_analytics_install_id_v1";
+const SETTINGS_STORAGE_KEY = "knowwSettings";
 const MAX_BATCH_SIZE = 20;
 const FLUSH_DELAY_MS = 1500;
 const MAX_PROPERTY_VALUE_LENGTH = 200;
@@ -27,6 +29,31 @@ let queueTask: Promise<unknown> = Promise.resolve();
 
 function getStorageArea(): typeof chrome.storage.local {
   return chrome.storage.local;
+}
+
+async function isAnalyticsEnabled(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.sync.get(
+        { [SETTINGS_STORAGE_KEY]: DEFAULT_USER_SETTINGS },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            resolve(DEFAULT_USER_SETTINGS.usageAnalyticsEnabled);
+            return;
+          }
+          const settings = result[SETTINGS_STORAGE_KEY] as
+            | Partial<UserSettings>
+            | undefined;
+          resolve(
+            settings?.usageAnalyticsEnabled ??
+              DEFAULT_USER_SETTINGS.usageAnalyticsEnabled
+          );
+        }
+      );
+    } catch {
+      resolve(DEFAULT_USER_SETTINGS.usageAnalyticsEnabled);
+    }
+  });
 }
 
 function sanitizePrimitive(value: Primitive | undefined): Primitive {
@@ -143,6 +170,12 @@ async function flushAnalyticsQueueUnlocked(): Promise<void> {
 export async function queueAnalyticsEvent(
   input: AnalyticsTrackInput
 ): Promise<void> {
+  const enabled = await isAnalyticsEnabled();
+  if (!enabled) {
+    logDebug("analytics.skipped_disabled", { event: input.event });
+    return;
+  }
+
   await runQueueTask(async () => {
     const distinctId = await getOrCreateInstallId();
     const queue = await getQueue();
@@ -166,5 +199,17 @@ export async function queueAnalyticsEvent(
 }
 
 export async function flushAnalyticsQueue(): Promise<void> {
+  const enabled = await isAnalyticsEnabled();
+  if (!enabled) {
+    await runQueueTask(async () => {
+      const queue = await getQueue();
+      if (queue.length > 0) {
+        logDebug("analytics.flush_cleared_disabled", { count: queue.length });
+        await setQueue([]);
+      }
+    });
+    return;
+  }
+
   await runQueueTask(flushAnalyticsQueueUnlocked);
 }

@@ -249,6 +249,13 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return n;
 }
 
+const DANGEROUS_CSS_PATTERN =
+  /expression\s*\(|url\s*\(\s*(["']?)\s*javascript:|(-moz-binding|-webkit-binding)\s*:|behavior\s*:/i;
+
+function sanitizeCssValue(value: string): string {
+  return DANGEROUS_CSS_PATTERN.test(value) ? "" : value;
+}
+
 function sanitizeHtml(html: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
@@ -283,12 +290,18 @@ function sanitizeHtml(html: string): string {
       const value = attr.value ?? "";
       if (
         /^on/i.test(name) ||
-        name === "style" ||
         name === "srcdoc" ||
         ((name === "src" || name === "href" || name === "xlink:href") &&
           /^\s*(javascript|data):/i.test(value))
       ) {
         node.removeAttribute(attr.name);
+      } else if (name === "style") {
+        const sanitized = sanitizeCssValue(value);
+        if (sanitized) {
+          node.setAttribute("style", sanitized);
+        } else {
+          node.removeAttribute("style");
+        }
       }
     }
   }

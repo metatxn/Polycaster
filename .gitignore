@@ -63,3 +63,4 @@ polymarket-us-support-report.md
 .cache/
 .claude/
 .env.local
+.test-dist/

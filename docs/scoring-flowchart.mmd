@@ -1,0 +1,92 @@
+flowchart TD
+    A["Feed Ready"] --> B["Discover Posts
+    MutationObserver + Scroll + Periodic Scan"]
+    B --> C["Deduplicate Post
+    identity key + cooldown"]
+    C --> D["Extract Post Text"]
+    D --> E{"Valid post?"}
+    E -- "No: too short / non-English / empty" --> Z1["Skip Post"]
+    E -- "Yes" --> F["Extract Search Inputs
+    rules-only keyword extraction + matched tags"]
+    F --> G["Search All Markets
+    Polymarket + Kalshi"]
+    G --> H{"Markets found?"}
+    H -- "No" --> Z2["Stop"]
+    H -- "Yes" --> I["Prepare Market Texts
+    richText for ranking
+    gateText for context gate"]
+
+    I --> J["Background Scoring Request"]
+    J --> J1["Embeddings signal"]
+    J --> J2["BM25 signal"]
+    J --> J3["NLP context gate"]
+
+    J1 --> K{"Embeddings status"}
+    J2 --> L{"BM25 status"}
+    J3 -->     M{"Gate status"}
+
+    K -- "ok" --> N["Ranking Mode = Hybrid"]
+    K -- "failed/disabled" --> O{"BM25 or local lexical evidence available?"}
+    O -- "Yes" --> P["Ranking Mode = Lexical"]
+    O -- "No" --> Q["Ranking Mode = Heuristic"]
+
+    N --> R["Compute score
+    embedding * 0.7 + bm25 * 0.3
+    if BM25 missing: embeddings only"]
+    P --> S["Compute score
+    BM25 + heuristic lexical evidence"]
+    Q --> T["Compute score
+    strict heuristic only"]
+
+    R --> U["Apply NLP context gate
+    if gate missing: fall back to naiveContextGate"]
+    S --> V["Apply NLP context gate
+    if gate missing: fall back to naiveContextGate"]
+    T --> W["Apply strict local gate
+    per-market tag intersection + entity evidence"]
+
+    U --> X{"Gate passed?
+    distinct topical signals >= 2"}
+    X -- "Yes" --> AA["Candidate survives"]
+    X -- "No" --> Y{"No source passed yet
+    and blocked score >= 0.6
+    and embeddings active
+    and AI retry enabled?"}
+    Y -- "Yes" --> AB["AI Retry
+    use AI to enrich post text for blocked candidate
+    rerun gate only
+    keep original score"]
+    Y -- "No" --> Z3["Reject candidate"]
+    AB --> AC{"Retry gate passed?"}
+    AC -- "Yes" --> AA
+    AC -- "No" --> Z3
+
+    V --> AD{"Gate passed?"}
+    AD -- "Yes" --> AA
+    AD -- "No" --> Z3
+
+    W --> AE{"Gate passed?"}
+    AE -- "Yes" --> AA
+    AE -- "No" --> Z3
+
+    AA --> AF{"Meets mode threshold?"}
+    AF -- "No" --> Z4["Reject candidate"]
+    AF -- "Yes" --> AG["Keep best candidate per source"]
+
+    AG --> AH{"Any source has a surviving candidate?"}
+    AH -- "No" --> Z5["Stop"]
+    AH -- "Yes" --> AI["AI relevance validation
+    final rerank / reject stage"]
+
+    AI --> AJ{"Validator result"}
+    AJ -- "Relevant" --> AK["Keep market"]
+    AJ -- "Irrelevant" --> Z6["Reject market"]
+    AJ -- "Unavailable" --> AL{"Fail-open allowed?"}
+
+    AL -- "Yes: score >= floor (any mode)" --> AK
+    AL -- "No" --> Z6
+
+    AK --> AM["Sort surviving markets by score"]
+    AM --> AN["Inject cards into post
+    one best market per source"]
+    AN --> AO["Track visibility, clicks, ignores, analytics"]

@@ -8,6 +8,16 @@ import type {
   Market,
   MarketSearchResult,
 } from "../types/market";
+import {
+  buildMarketGateText,
+  determineScoringMode,
+  evaluateCandidateGate,
+  FAIL_OPEN_FLOOR,
+  getEffectiveThreshold,
+  naiveContextGate,
+  type ScoringMode,
+  shouldFailOpen,
+} from "./scoring-policy";
 import { LRUSet, scheduleIdle } from "./utils";
 
 /**
@@ -88,7 +98,12 @@ function applyPlatformStyleVariables(
 async function scoreMarketsBatch(
   postText: string,
   marketTexts: string[],
-  gateTexts: string[]
+  gateTexts: string[],
+  features: {
+    includeEmbeddings?: boolean;
+    includeBm25?: boolean;
+    includeContextGate?: boolean;
+  } = {}
 ): Promise<{
   similarities: number[];
   bm25Scores: number[];
@@ -96,15 +111,21 @@ async function scoreMarketsBatch(
   usedEmbeddings: boolean;
   source: "offscreen" | "fallback";
 }> {
+  const {
+    includeEmbeddings = true,
+    includeBm25 = true,
+    includeContextGate = true,
+  } = features;
+
   try {
     const response = await chrome.runtime.sendMessage({
       type: "score-markets",
       postText,
       marketTexts,
       gateTexts,
-      includeEmbeddings: true,
-      includeBm25: true,
-      includeContextGate: true,
+      includeEmbeddings,
+      includeBm25,
+      includeContextGate,
     });
 
     if (
@@ -128,104 +149,15 @@ async function scoreMarketsBatch(
   }
 
   const fallbackScores = new Array<number>(marketTexts.length).fill(0);
+  const fallbackGateResults: ContextGateResult[] = includeContextGate
+    ? gateTexts.map((gateText) => naiveContextGate(postText, gateText))
+    : [];
   return {
     similarities: fallbackScores,
     bm25Scores: fallbackScores,
-    contextGateResults: marketTexts.map((mt) => {
-      const naive = naiveContextGate(postText, mt);
-      return {
-        pass: naive.pass,
-        sharedNouns: naive.sharedLemmas,
-        meaningfulNouns: naive.sharedLemmas,
-        sharedEntities: naive.sharedEntities,
-        details: "fallback-failed",
-      };
-    }),
+    contextGateResults: fallbackGateResults,
     usedEmbeddings: false,
     source: "fallback",
-  };
-}
-
-const CONTEXT_STOP_WORDS = new Set([
-  "will",
-  "what",
-  "when",
-  "where",
-  "which",
-  "who",
-  "why",
-  "how",
-  "this",
-  "that",
-  "with",
-  "from",
-  "have",
-  "has",
-  "about",
-  "into",
-  "your",
-  "their",
-  "there",
-  "would",
-  "could",
-  "should",
-  "after",
-  "before",
-  "under",
-  "over",
-  "than",
-  "then",
-  "them",
-  "they",
-  "just",
-  "very",
-  "more",
-  "most",
-  "also",
-  "news",
-  "post",
-  "thread",
-]);
-
-function naiveContextGate(
-  postText: string,
-  marketText: string
-): { pass: boolean; sharedLemmas: number; sharedEntities: number } {
-  const toTokens = (text: string): Set<string> =>
-    new Set(
-      text
-        .toLowerCase()
-        .replace(/https?:\/\/\S+/g, " ")
-        .replace(/[^\p{L}\p{N}\s]/gu, " ")
-        .split(/\s+/)
-        .filter((t) => t.length >= 3 && !CONTEXT_STOP_WORDS.has(t))
-    );
-
-  const postTokens = toTokens(postText);
-  const marketTokens = toTokens(marketText);
-  let sharedLemmas = 0;
-  for (const t of postTokens) {
-    if (marketTokens.has(t)) sharedLemmas++;
-  }
-
-  const extractEntities = (text: string): Set<string> =>
-    new Set(
-      (text.match(/\b[A-Z][a-zA-Z]{2,}\b/g) || [])
-        .map((w) => w.toLowerCase())
-        .filter((w) => !CONTEXT_STOP_WORDS.has(w))
-    );
-
-  const postEntities = extractEntities(postText);
-  const marketEntities = extractEntities(marketText);
-  let sharedEntities = 0;
-  for (const e of postEntities) {
-    if (marketEntities.has(e)) sharedEntities++;
-  }
-
-  return {
-    pass: sharedLemmas >= 2 || sharedEntities >= 1,
-    sharedLemmas,
-    sharedEntities,
   };
 }
 
@@ -452,9 +384,9 @@ async function analyzePostAndFindMarket(
 
   // --- BATCH SCORING WITH EMBEDDINGS + BM25 ---
   let marketScores: number[] = [];
-  let usedEmbeddings = false;
   let contextGateResults: ContextGateResult[] = [];
   let marketTexts: string[] = [];
+  let scoringMode: ScoringMode = "heuristic";
   try {
     marketTexts = markets.map((m) => {
       let rich = m.title || "";
@@ -468,18 +400,19 @@ async function analyzePostAndFindMarket(
       return rich;
     });
 
-    const gateTexts = markets.map((m) => {
-      let gateText = m.title || "";
-      if (m.description) gateText += ` ${m.description.slice(0, 120)}`;
-      return gateText;
-    });
+    const gateTexts = markets.map((market) => buildMarketGateText(market));
 
     const scoring = await scoreMarketsBatch(text, marketTexts, gateTexts);
-    usedEmbeddings = scoring.usedEmbeddings;
     contextGateResults = scoring.contextGateResults;
 
-    if (usedEmbeddings) {
-      const hasBm25Signal = scoring.bm25Scores.some((score) => score > 0);
+    const hasBm25Signal = scoring.bm25Scores.some((s) => s > 0);
+    scoringMode = determineScoringMode({
+      usedEmbeddings: scoring.usedEmbeddings,
+      bm25Scores: scoring.bm25Scores,
+      source: scoring.source,
+    });
+
+    if (scoringMode === "hybrid") {
       const SEMANTIC_WEIGHT = hasBm25Signal ? 0.7 : 1;
       const BM25_WEIGHT = hasBm25Signal ? 0.3 : 0;
       marketScores = scoring.similarities.map((emb, i) => {
@@ -488,10 +421,10 @@ async function analyzePostAndFindMarket(
       });
       log(
         hasBm25Signal
-          ? "🧠 Hybrid scoring succeeded —"
-          : "🧠 Embedding scoring succeeded (BM25 unavailable) —",
+          ? "🧠 Hybrid scoring —"
+          : "🧠 Embedding scoring (BM25 unavailable) —",
         marketTexts.length,
-        hasBm25Signal ? "markets scored (embedding + BM25)" : "markets scored"
+        "markets scored"
       );
       if (isDebug) {
         const scored = marketTexts.map((title, i) => ({
@@ -503,15 +436,33 @@ async function analyzePostAndFindMarket(
         scored.sort((a, b) => parseFloat(b.combined) - parseFloat(a.combined));
         log("🧠 Hybrid scores (sorted):", scored);
       }
-    } else {
+    } else if (scoringMode === "lexical") {
+      const heuristicScores = markets.map((m) =>
+        calculateRelevanceScore([text], m)
+      );
+      const BM25_WEIGHT = 0.8;
+      const HEURISTIC_WEIGHT = 0.2;
+      marketScores = scoring.bm25Scores.map((bm25, i) => {
+        return (
+          bm25 * BM25_WEIGHT + (heuristicScores[i] ?? 0) * HEURISTIC_WEIGHT
+        );
+      });
       log(
-        "⚠️ Scoring unavailable, falling back to keyword scoring:",
+        "📖 Lexical scoring — embeddings unavailable, using BM25 + heuristic:",
+        marketTexts.length,
+        "markets scored"
+      );
+    } else {
+      scoringMode = "heuristic";
+      log(
+        "⚠️ Heuristic scoring — offscreen scoring unavailable:",
         scoring.source
       );
       marketScores = markets.map((m) => calculateRelevanceScore([text], m));
     }
   } catch (e) {
-    log("⚠️ Embeddings error, falling back to keyword scoring:", e);
+    scoringMode = "heuristic";
+    log("⚠️ Heuristic scoring — scoring error:", e);
     marketScores = markets.map((m) => calculateRelevanceScore([text], m));
   }
   // -----------------------------------------
@@ -546,13 +497,12 @@ async function analyzePostAndFindMarket(
     }
   }
 
-  // When embeddings are active, cosine similarity needs a higher bar than keyword overlap.
-  // Respect the user's relevanceThreshold setting but floor at 0.5 — below that, cosine
-  // similarity between unrelated topics produces false positives from shared vocabulary.
-  const EMBEDDING_FLOOR = 0.5;
-  const effectiveThreshold = usedEmbeddings
-    ? Math.max(EMBEDDING_FLOOR, CONFIG.MIN_RELEVANCE_SCORE)
-    : CONFIG.MIN_RELEVANCE_SCORE;
+  // Cosine similarity needs a higher bar than keyword/BM25 overlap to avoid
+  // false positives from shared vocabulary. Only apply the floor in hybrid mode.
+  const effectiveThreshold = getEffectiveThreshold(
+    CONFIG.MIN_RELEVANCE_SCORE,
+    scoringMode
+  );
 
   // Track best market PER SOURCE (regardless of score - we'll filter later)
   const bestBySource: Record<string, BestBySourceEntry> = {};
@@ -565,16 +515,18 @@ async function analyzePostAndFindMarket(
     bestBySource.kalshi = { market: null, score: 0, allScores: [] };
   }
 
-  if (!usedEmbeddings) {
-    contextGateResults = [];
-  }
-
-  const AI_GATE_RETRY_FLOOR = 0.6;
   const gateBlockedHighScorers: Array<{
     index: number;
     score: number;
     gateText: string;
   }> = [];
+
+  let metricsGateBlocked = 0;
+  let metricsGateZeroSignal = 0;
+  let metricsGateSingleSignal = 0;
+  let metricsGateRecovered = 0;
+  let metricsRetryEligible = 0;
+  let metricsBelowThreshold = 0;
 
   for (let i = 0; i < markets.length; i++) {
     const market = markets[i];
@@ -592,26 +544,46 @@ async function analyzePostAndFindMarket(
 
     const score = marketScores[i];
 
-    // NLP Context Gate: require meaningful lemma or specific entity overlap
-    if (usedEmbeddings && contextGateResults[i]) {
-      const gate = contextGateResults[i];
-      if (!gate.pass) {
-        log(
-          `🛑 Context gate dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
-        );
-        if (score >= AI_GATE_RETRY_FLOOR) {
-          let gateText = market.title || "";
-          if (market.description)
-            gateText += ` ${market.description.slice(0, 120)}`;
-          gateBlockedHighScorers.push({ index: i, score, gateText });
-        }
-        continue;
+    const gateDecision = evaluateCandidateGate({
+      postText: text,
+      market,
+      matchedTags: result.matchedTags,
+      scoringMode,
+      score,
+      gate: contextGateResults[i],
+    });
+    const gate = gateDecision.gate;
+
+    if (gateDecision.usedRecoveryGate && gateDecision.recoveryGate) {
+      metricsGateRecovered++;
+      log(
+        `🔄 Single-signal recovery [${scoringMode}]: "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gateDecision.recoveryGate.details})`
+      );
+    }
+
+    if (!gateDecision.pass) {
+      metricsGateBlocked++;
+      const signals = (gate.meaningfulNouns || 0) + (gate.sharedEntities || 0);
+      if (signals === 0) metricsGateZeroSignal++;
+      else if (signals === 1) metricsGateSingleSignal++;
+
+      log(
+        `🛑 Context gate [${scoringMode}] dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, reason=${signals === 0 ? "gate-zero-signal" : signals === 1 ? "gate-single-signal" : "gate-low-overlap"}, ${gate.details})`
+      );
+      if (gateDecision.retryEligible) {
+        gateBlockedHighScorers.push({
+          index: i,
+          score,
+          gateText: buildMarketGateText(market),
+        });
+        metricsRetryEligible++;
       }
-      if (isDebug) {
-        log(
-          `✅ Context gate passed "${market.title?.slice(0, 50)}..." (${gate.details})`
-        );
-      }
+      continue;
+    }
+    if (isDebug) {
+      log(
+        `✅ Context gate [${scoringMode}] passed "${market.title?.slice(0, 50)}..." (${gate.details})`
+      );
     }
 
     if (isDebug) {
@@ -649,7 +621,7 @@ async function analyzePostAndFindMarket(
   if (
     !hasPassedMarket &&
     gateBlockedHighScorers.length > 0 &&
-    usedEmbeddings &&
+    scoringMode === "hybrid" &&
     CONFIG.USE_AI_EXTRACTION &&
     window.KNOWW_API?.extractKeywordsWithAI
   ) {
@@ -676,31 +648,41 @@ async function analyzePostAndFindMarket(
         const retryScoring = await scoreMarketsBatch(
           enrichedText,
           blockedGateTexts,
-          blockedGateTexts
+          blockedGateTexts,
+          {
+            includeEmbeddings: false,
+            includeBm25: false,
+            includeContextGate: true,
+          }
         );
 
         for (let j = 0; j < gateBlockedHighScorers.length; j++) {
-          const { index, score } = gateBlockedHighScorers[j];
-          const gate = retryScoring.contextGateResults[j];
+          const { index, score: originalScore } = gateBlockedHighScorers[j];
+          const gate =
+            retryScoring.contextGateResults[j] ??
+            naiveContextGate(enrichedText, blockedGateTexts[j]);
           const market = markets[index];
           const source = market.source || "polymarket";
 
-          if (!gate?.pass) {
+          if (!gate.pass) {
             log(
-              `🤖 [AI Retry] Still blocked: "${market.title?.slice(0, 50)}..." (${gate?.details || "no gate result"})`
+              `🤖 [AI Retry] Still blocked: "${market.title?.slice(0, 50)}..." (${gate.details})`
             );
             continue;
           }
 
           log(
-            `🤖 [AI Retry] ✅ Gate passed with AI: "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
+            `🤖 [AI Retry] ✅ Gate passed with AI: "${market.title?.slice(0, 50)}..." (originalScore=${originalScore.toFixed(3)}, ${gate.details})`
           );
 
-          if (bestBySource[source] && score > bestBySource[source].score) {
+          if (
+            bestBySource[source] &&
+            originalScore > bestBySource[source].score
+          ) {
             bestBySource[source] = {
               ...bestBySource[source],
               market,
-              score,
+              score: originalScore,
             };
           }
         }
@@ -713,7 +695,7 @@ async function analyzePostAndFindMarket(
   } else if (
     !hasPassedMarket &&
     gateBlockedHighScorers.length > 0 &&
-    usedEmbeddings &&
+    scoringMode === "hybrid" &&
     !CONFIG.USE_AI_EXTRACTION
   ) {
     log(
@@ -729,7 +711,7 @@ async function analyzePostAndFindMarket(
         (s) => s.meetsThreshold
       ).length;
       log(
-        `  ${source}: ${data.allScores.length} scored, ${aboveThreshold} above threshold (${effectiveThreshold}${usedEmbeddings ? " [embeddings]" : ""})`
+        `  ${source}: ${data.allScores.length} scored, ${aboveThreshold} above threshold (${effectiveThreshold} [${scoringMode}])`
       );
       if (data.market) {
         log(
@@ -744,54 +726,58 @@ async function analyzePostAndFindMarket(
     }
   }
 
-  // Check if AT LEAST ONE source has a market that meets the threshold
-  const hasAnyRelevantMarket = Object.values(bestBySource).some(
-    (data) => data.market && data.score >= effectiveThreshold
+  log(
+    `📊 Post metrics: mode=${scoringMode} searched=${markets.length} gate-blocked=${metricsGateBlocked} (zero-signal=${metricsGateZeroSignal} single-signal=${metricsGateSingleSignal}) recovered=${metricsGateRecovered} retry-eligible=${metricsRetryEligible}`
   );
 
-  if (!hasAnyRelevantMarket) {
-    log(
-      `❌ No market from any source met relevance threshold (${effectiveThreshold}${
-        usedEmbeddings ? " [embeddings]" : ""
-      }) for this post`
-    );
-    return null;
-  }
-
-  // Collect best market from EACH source (regardless of individual score)
-  // Since at least one source is relevant, we show all sources
   const candidateMarkets: MarketSearchResult[] = [];
 
   for (const [source, data] of Object.entries(bestBySource)) {
-    if (data.market) {
-      const meetsThreshold = data.score >= effectiveThreshold;
+    if (!data.market) continue;
 
-      if (usedEmbeddings && meetsThreshold && !data.market._contextReason) {
-        const pct = Math.round(data.score * 100);
-        const topicHint =
-          result.matchedTags.length > 0
-            ? result.matchedTags.slice(0, 2).join(", ")
-            : result.keywords.split(" ").slice(0, 3).join(" ").trim();
-        data.market._contextReason = topicHint
-          ? `${pct}% match · ${topicHint}`
-          : `${pct}% match`;
-      }
-
-      candidateMarkets.push({
-        market: data.market,
-        score: data.score,
-        source: source as "polymarket" | "kalshi",
-      });
-      if (isDebug) {
-        log(
-          `✓ Best ${source} market:`,
-          data.market.title,
-          `Score: ${data.score.toFixed(2)}${
-            meetsThreshold ? "" : " (below threshold, but including anyway)"
-          }`
-        );
-      }
+    const meetsThreshold = data.score >= effectiveThreshold;
+    if (!meetsThreshold) {
+      metricsBelowThreshold++;
+      log(
+        `⏭️ ${source} best market below threshold (${data.score.toFixed(2)} < ${effectiveThreshold} [${scoringMode}]): "${data.market.title?.slice(0, 50)}"`
+      );
+      continue;
     }
+
+    if (scoringMode !== "heuristic" && !data.market._contextReason) {
+      const pct = Math.round(data.score * 100);
+      const topicHint =
+        result.matchedTags.length > 0
+          ? result.matchedTags.slice(0, 2).join(", ")
+          : result.keywords.split(" ").slice(0, 3).join(" ").trim();
+      data.market._contextReason = topicHint
+        ? `${pct}% match · ${topicHint}`
+        : `${pct}% match`;
+    }
+
+    candidateMarkets.push({
+      market: data.market,
+      score: data.score,
+      source: source as "polymarket" | "kalshi",
+    });
+    if (isDebug) {
+      log(
+        `✓ Best ${source} market:`,
+        data.market.title,
+        `Score: ${data.score.toFixed(2)}`
+      );
+    }
+  }
+
+  log(
+    `📊 Post result: below-threshold=${metricsBelowThreshold} final-candidates=${candidateMarkets.length}`
+  );
+
+  if (candidateMarkets.length === 0) {
+    log(
+      `❌ No market from any source met relevance threshold (${effectiveThreshold} [${scoringMode}]) for this post`
+    );
+    return null;
   }
 
   // AI relevance validation — validate all candidates in parallel to avoid
@@ -805,23 +791,20 @@ async function analyzePostAndFindMarket(
     })
   );
 
-  // When AI validation is unavailable (timeout/error/disabled), only allow
-  // markets through if their embedding score is high enough to be confident
-  // on its own. Since we now have a strict lexical Context Gate, we can safely
-  // lower this floor to match the standard embedding floor.
-  const FAIL_OPEN_FLOOR = 0.5;
-
   const relevantMarkets: MarketSearchResult[] = [];
   for (let i = 0; i < validationResults.length; i++) {
     const candidate = candidateMarkets[i];
     const result = validationResults[i];
     if (result.status === "rejected") {
-      if (usedEmbeddings && candidate.score < FAIL_OPEN_FLOOR) {
+      if (!shouldFailOpen(candidate.score, FAIL_OPEN_FLOOR)) {
         log(
-          `✗ Validation errored & score too low (${candidate.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${candidate.market.title?.slice(0, 50)}"`
+          `✗ reason=validator-error-low-score [${scoringMode}] (${candidate.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${candidate.market.title?.slice(0, 50)}"`
         );
         continue;
       }
+      log(
+        `⚠️ reason=validator-error-fail-open [${scoringMode}] (${candidate.score.toFixed(2)}): "${candidate.market.title?.slice(0, 50)}"`
+      );
       relevantMarkets.push(candidate);
       continue;
     }
@@ -829,16 +812,16 @@ async function analyzePostAndFindMarket(
     if (validation) {
       if (!validation.relevant) {
         log(
-          `✗ AI rejected market as irrelevant: "${entry.market.title?.slice(0, 50)}"`
+          `✗ reason=validator-rejected: "${entry.market.title?.slice(0, 50)}"`
         );
         continue;
       }
       if (validation.reason) {
         entry.market._contextReason = validation.reason;
       }
-    } else if (usedEmbeddings && entry.score < FAIL_OPEN_FLOOR) {
+    } else if (!shouldFailOpen(entry.score, FAIL_OPEN_FLOOR)) {
       log(
-        `✗ AI unavailable & score too low (${entry.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${entry.market.title?.slice(0, 50)}"`
+        `✗ reason=validator-unavailable-low-score [${scoringMode}] (${entry.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${entry.market.title?.slice(0, 50)}"`
       );
       continue;
     }

@@ -16,7 +16,46 @@ const ALLOWED_ORIGINS_SET = new Set(ALLOWED_EXTENSION_ORIGINS);
 
 export function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return false;
-  return ALLOWED_ORIGINS_SET.has(origin);
+  if (ALLOWED_ORIGINS_SET.has(origin)) return true;
+  if (
+    process.env.NODE_ENV === "development" &&
+    origin.startsWith("chrome-extension://")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Build CORS headers for a validated chrome-extension origin.
+ * Returns an empty object when the origin is not allowed.
+ */
+export function extensionCorsHeaders(
+  request: NextRequest
+): Record<string, string> {
+  const origin = request.headers.get("origin");
+  if (!origin || !isOriginAllowed(origin)) return {};
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+}
+
+/**
+ * Standard OPTIONS handler for routes called by the extension.
+ */
+export function handleExtensionPreflight(request: NextRequest): NextResponse {
+  const origin = request.headers.get("origin");
+  if (!origin || !isOriginAllowed(origin)) {
+    return new NextResponse(null, { status: 403 });
+  }
+  return new NextResponse(null, {
+    status: 204,
+    headers: extensionCorsHeaders(request),
+  });
 }
 
 export function isRefererAllowed(referer: string | null): boolean {

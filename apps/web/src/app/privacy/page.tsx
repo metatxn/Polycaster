@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   description: "Privacy Policy for Knoww (knoww.app) and the Knoww Extension.",
 };
 
-const LAST_UPDATED = "April 8, 2026";
+const LAST_UPDATED = "April 10, 2026";
 
 const sections = [
   { id: "overview", title: "Overview" },
@@ -138,15 +138,19 @@ export default function PrivacyPage() {
                     Knoww is a product that helps you discover and interact with
                     prediction markets (including markets provided by third
                     parties) and related information. The Web App may connect to
-                    blockchain wallets and display data associated with public
-                    blockchain addresses.
+                    blockchain wallets, display data associated with public
+                    blockchain addresses, and provide trading- and comment-
+                    related features that rely on third-party market providers.
                   </p>
                   <p>
                     The Extension enhances supported social websites by
                     detecting topics in on-screen content and surfacing
-                    potentially relevant markets. The Extension processes page
-                    content to power these features and makes network requests
-                    to market data providers to retrieve results.
+                    potentially relevant markets. Depending on your settings and
+                    the feature being used, the Extension may process page
+                    content locally, store local relevance/personalization data,
+                    send excerpts of content to Knoww for AI-assisted matching,
+                    and make network requests to market data providers to
+                    retrieve results.
                   </p>
                 </Section>
 
@@ -161,6 +165,13 @@ export default function PrivacyPage() {
                         wallet in the Web App, we and our wallet connectivity
                         providers may receive your public wallet address and
                         related connection metadata.
+                      </li>
+                      <li>
+                        <strong>Comments and other submitted content</strong>:
+                        if you post a comment or otherwise submit content
+                        through Knoww, we process the content you submit and the
+                        wallet-authentication data needed to send it to the
+                        relevant provider.
                       </li>
                       <li>
                         <strong>Support communications</strong>: if you contact
@@ -178,13 +189,24 @@ export default function PrivacyPage() {
                       <li>
                         <strong>Usage and device data</strong>: standard log
                         data such as IP address, browser type, pages viewed, and
-                        timestamps may be processed by our hosting and
-                        infrastructure providers.
+                        timestamps may be processed by our hosting,
+                        infrastructure, analytics, and wallet connectivity
+                        providers.
                       </li>
                       <li>
-                        <strong>Local app state</strong>: the Web App stores
-                        certain preferences and session state in your browser
-                        (see “Storage, Cookies & Similar Technologies”).
+                        <strong>Product analytics and diagnostics</strong>: the
+                        Web App may capture feature-usage events, wallet-related
+                        action metadata, market identifiers/titles, and client
+                        error or exception diagnostics through analytics tooling
+                        when enabled in our deployment configuration.
+                      </li>
+                      <li>
+                        <strong>
+                          Local app state, cookies, and similar technologies
+                        </strong>
+                        : the Web App stores certain preferences, wallet
+                        connection state, and session state in your browser (see
+                        “Storage, Cookies & Similar Technologies”).
                       </li>
                     </ul>
                   </div>
@@ -201,18 +223,36 @@ export default function PrivacyPage() {
                         what market data queries to run.
                       </li>
                       <li>
-                        <strong>Extension settings</strong> (e.g., enabled
-                        platforms and sources) are stored using Chrome’s
-                        extension storage.
+                        <strong>
+                          Extension settings and local preference data
+                        </strong>{" "}
+                        (for example enabled platforms/sources, learned
+                        click/ignore preferences, local caches, and similar
+                        state) are stored using Chrome extension storage and
+                        related browser storage.
+                      </li>
+                      <li>
+                        <strong>Extension session and trading state</strong>: if
+                        you use wallet-connected extension features, the
+                        Extension may store short-lived extension session tokens
+                        and trading-related credentials/state in extension
+                        storage for the current browser session.
                       </li>
                       <li>
                         <strong>Extension usage analytics</strong>: if enabled
-                        in the Extension settings, we may collect pseudonymous
-                        product analytics such as extension startup, supported
-                        site detection, market card impressions and clicks,
-                        trading panel opens, and settings changes. We do not
-                        send raw page text or full page content as part of these
-                        analytics events.
+                        in the Extension settings, we may collect product
+                        analytics such as extension startup, supported-site
+                        detection, market card impressions and clicks, trading
+                        panel opens, settings changes, platform name, host, and
+                        page URL/path. We do not design these analytics events
+                        to include raw page text or full page content.
+                      </li>
+                      <li>
+                        <strong>AI-assisted matching inputs</strong>: if
+                        AI-assisted matching is enabled in the Extension,
+                        normalized or truncated excerpts of page text and market
+                        titles/tags may be sent to Knoww APIs so we can extract
+                        topics or validate market relevance.
                       </li>
                     </ul>
                   </div>
@@ -222,17 +262,28 @@ export default function PrivacyPage() {
                   <ul className="list-disc pl-5 space-y-1">
                     <li>
                       <strong>Provide the product</strong>: operate the Web App,
-                      show markets, and enable wallet-based features.
+                      show markets, support comments, and enable wallet-based
+                      features.
                     </li>
                     <li>
                       <strong>Improve and debug</strong>: diagnose issues,
-                      protect against abuse, and improve reliability and
-                      performance.
+                      monitor errors, protect against abuse, and improve
+                      reliability and performance.
                     </li>
                     <li>
-                      <strong>Measure product adoption</strong>: if analytics
-                      are enabled, understand which supported sites and flows
-                      are used so we can prioritize improvements.
+                      <strong>Measure product usage</strong>: understand which
+                      features, supported sites, and flows are used so we can
+                      prioritize improvements.
+                    </li>
+                    <li>
+                      <strong>Match markets to content</strong>: analyze text,
+                      extract topics, rank candidates, and validate relevance so
+                      the Extension can show more useful market suggestions.
+                    </li>
+                    <li>
+                      <strong>Personalize results</strong>: if personalization
+                      is enabled in the Extension, learn from your clicks and
+                      ignores to adjust future ranking locally on your device.
                     </li>
                     <li>
                       <strong>Communicate</strong>: respond to support requests
@@ -248,12 +299,15 @@ export default function PrivacyPage() {
                   </p>
                   <ul className="list-disc pl-5 space-y-1">
                     <li>
-                      <strong>Market data providers</strong>: Knoww queries
-                      third party services (for example, Polymarket and Kalshi
-                      APIs) to fetch market information. Requests may include
-                      search terms derived from your activity (e.g., keywords or
-                      tags) and standard network metadata (like IP address)
-                      handled by those providers.
+                      <strong>Market, trading, and blockchain providers</strong>
+                      : Knoww queries third-party services (for example,
+                      Polymarket, Kalshi, bridge providers, RPC providers, and
+                      related infrastructure) to fetch market information,
+                      support trading, route deposits, fetch comments, and read
+                      public blockchain data. Requests may include search terms,
+                      wallet addresses, signatures, transaction details, or
+                      standard network metadata as needed for the feature you
+                      use.
                     </li>
                     <li>
                       <strong>Wallet connectivity providers</strong>: the Web
@@ -263,14 +317,22 @@ export default function PrivacyPage() {
                       to their own policies.
                     </li>
                     <li>
-                      <strong>Infrastructure providers</strong>: hosting and
-                      networking providers may process standard logs to deliver
-                      the service.
+                      <strong>Analytics providers</strong>: Knoww uses analytics
+                      tooling (currently including PostHog) for Web App product
+                      analytics, client diagnostics, and Extension analytics if
+                      enabled.
                     </li>
                     <li>
-                      <strong>Analytics providers</strong>: if Extension usage
-                      analytics are enabled, pseudonymous analytics events may
-                      be processed by analytics providers acting on our behalf.
+                      <strong>AI providers</strong>: if AI-assisted matching is
+                      enabled in the Extension, excerpts of page text and market
+                      metadata may be processed by Knoww and AI providers acting
+                      on our behalf (currently via OpenRouter and underlying
+                      model providers) to extract topics or validate relevance.
+                    </li>
+                    <li>
+                      <strong>Infrastructure providers</strong>: hosting,
+                      caching, networking, and security providers may process
+                      standard logs and request metadata to deliver the service.
                     </li>
                     <li>
                       <strong>Legal and safety</strong>: if required by law or
@@ -287,9 +349,18 @@ export default function PrivacyPage() {
                     Supported sites
                   </p>
                   <p>
-                    The Extension runs on: <strong>x.com</strong>,{" "}
-                    <strong>twitter.com</strong>, <strong>linkedin.com</strong>,{" "}
-                    <strong>reddit.com</strong> (including old Reddit).
+                    The Extension supports a broader set of sites than only X,
+                    LinkedIn, and Reddit. Current supported platforms include
+                    major social sites, forums, developer communities, and
+                    crypto/news properties such as X/Twitter, LinkedIn, Reddit,
+                    Quora, Hacker News, Stack Overflow / Stack Exchange, Product
+                    Hunt, Slashdot, supported Lemmy and Mastodon instances,
+                    Threads, Bluesky, Discord, Farcaster, CoinMarketCap,
+                    Paragraph, CoinDesk, Cointelegraph, Decrypt, The Block,
+                    Blockworks, Bankless, Bitcoin Magazine, BeInCrypto,
+                    Unchained, and CryptoPanic. The list may change over time,
+                    and the Extension settings are the best source for the
+                    latest supported platforms.
                   </p>
 
                   <p className="font-semibold text-foreground mt-3">
@@ -301,6 +372,12 @@ export default function PrivacyPage() {
                       extract keywords/topics and match relevant markets.
                     </li>
                     <li>
+                      If AI-assisted matching is enabled, the Extension may send
+                      normalized or truncated text excerpts and market metadata
+                      to Knoww APIs for topic extraction and relevance
+                      validation.
+                    </li>
+                    <li>
                       The Extension uses those extracted keywords/tags to query
                       market data APIs (e.g., Polymarket and Kalshi) and display
                       results on the page.
@@ -308,12 +385,15 @@ export default function PrivacyPage() {
                     <li>
                       The Extension stores user settings using Chrome’s{" "}
                       <code className="font-mono text-xs">storage</code>{" "}
-                      permission.
+                      permission, and may keep local preference data and local
+                      embeddings on-device to improve relevance ranking.
                     </li>
                     <li>
                       If you enable usage analytics, the Extension sends only
-                      pseudonymous product events needed to measure product
-                      adoption and feature usage.
+                      product events needed to measure product adoption and
+                      feature usage. These events may include host, page URL or
+                      path, platform, and feature interaction metadata, but are
+                      not designed to include raw page text.
                     </li>
                   </ul>
 
@@ -325,10 +405,12 @@ export default function PrivacyPage() {
                     <ExternalLink href="https://knoww.app">
                       knoww.app
                     </ExternalLink>{" "}
-                    to support certain features. If we add features that send
-                    more information (for example, sending full page text for AI
-                    processing), we will update this policy and/or provide
-                    in-product notice where appropriate.
+                    to support AI-assisted matching, extension authentication,
+                    analytics ingestion (if enabled), trading-related features,
+                    and other Extension-backed functionality. Depending on the
+                    feature, this may include wallet address, signed
+                    authentication messages, short-lived session tokens, content
+                    excerpts, market metadata, and product interaction metadata.
                   </p>
                 </Section>
 
@@ -337,8 +419,8 @@ export default function PrivacyPage() {
                   title="Storage, Cookies & Similar Technologies"
                 >
                   <p>
-                    The Web App uses browser storage to keep the app usable and
-                    remember your preferences. Examples include:
+                    The Web App uses browser storage and cookies to keep the app
+                    usable and remember your preferences. Examples include:
                   </p>
                   <ul className="list-disc pl-5 space-y-1">
                     <li>
@@ -356,13 +438,42 @@ export default function PrivacyPage() {
                       (with expiration).
                     </li>
                     <li>
-                      <strong>API credentials/session secrets</strong> stored in{" "}
+                      <strong>API credentials and read-only API keys</strong>{" "}
+                      stored in{" "}
                       <code className="font-mono text-xs">sessionStorage</code>{" "}
                       and cleared when you close your browser.
                     </li>
+                    <li>
+                      <strong>
+                        Recent searches, last-viewed markets, alert preferences,
+                        and UI state
+                      </strong>{" "}
+                      stored in browser storage to support search,
+                      notifications, and interface preferences.
+                    </li>
+                    <li>
+                      <strong>Wallet connection state</strong> stored in cookies
+                      and related storage used by the wallet connection stack.
+                    </li>
                   </ul>
                   <p>
-                    Third parties (such as wallet connectivity providers and
+                    The Extension also stores settings in{" "}
+                    <code className="font-mono text-xs">
+                      chrome.storage.sync
+                    </code>
+                    , local preferences and some analytics queue/state in{" "}
+                    <code className="font-mono text-xs">
+                      chrome.storage.local
+                    </code>
+                    , short-lived auth/trading state in{" "}
+                    <code className="font-mono text-xs">
+                      chrome.storage.session
+                    </code>
+                    , and local embeddings/caches in browser storage such as{" "}
+                    <code className="font-mono text-xs">IndexedDB</code>.
+                  </p>
+                  <p>
+                    Third parties (such as wallet connectivity, analytics, and
                     hosting providers) may use their own cookies or similar
                     technologies as part of providing their services.
                   </p>
@@ -380,9 +491,12 @@ export default function PrivacyPage() {
                   <p>
                     We retain information only for as long as needed for the
                     purposes described in this policy, unless a longer retention
-                    period is required or permitted by law. Much of Knoww’s
-                    state is stored locally in your browser and can be cleared
-                    by clearing site data.
+                    period is required or permitted by law. Some data is stored
+                    locally in your browser or extension and remains until it is
+                    cleared or expires; some session data is cleared when the
+                    browser session ends; and some server-side logs, caches, and
+                    analytics records may be retained for a limited period as
+                    needed to operate, secure, and improve the service.
                   </p>
                 </Section>
 
@@ -401,8 +515,14 @@ export default function PrivacyPage() {
                       usage analytics in the Extension settings at any time.
                     </li>
                     <li>
+                      <strong>Disable AI-assisted matching</strong>: you can
+                      turn off AI-assisted matching in the Extension settings,
+                      which stops those AI requests from the Extension.
+                    </li>
+                    <li>
                       <strong>Control local storage</strong>: you can clear site
-                      data (local/session storage) in your browser settings.
+                      data (local/session storage/cookies) in your browser
+                      settings and clear Extension data in Chrome.
                     </li>
                     <li>
                       <strong>Request help</strong>: contact us to ask questions
@@ -413,8 +533,9 @@ export default function PrivacyPage() {
 
                 <Section id="children" title="Children’s Privacy">
                   <p>
-                    Knoww is not intended for children under 13 (or the minimum
-                    age required in your jurisdiction). We do not knowingly
+                    Knoww is not intended for children or for people who are not
+                    legally permitted to use prediction market or trading-
+                    related products in their jurisdiction. We do not knowingly
                     collect personal information from children.
                   </p>
                 </Section>

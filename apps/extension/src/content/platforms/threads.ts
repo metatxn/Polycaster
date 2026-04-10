@@ -12,7 +12,7 @@ const THREADS_FONT =
 
 const ThreadsAdapter = createBasicAdapter({
   name: "threads",
-  hostPatterns: [/^(?:www\.)?threads\.com$/],
+  hostPatterns: [/^(?:www\.)?threads\.(?:com|net)$/],
   itemSelectors: ["div[data-pressable-container]", "article"],
   containerSelectors: ["main", '[role="main"]', "body"],
   textSelectors: ["span[dir='auto']"],

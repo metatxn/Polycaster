@@ -743,7 +743,9 @@ function extractBasicKeywords(text: string): string {
 
   const titleCaseWords = cleanText.match(/\b[A-Z][a-z]{2,}\b/g) || [];
   for (const word of titleCaseWords) {
-    addCandidate(word, CANDIDATE_SCORE.titleCaseWord);
+    if (!ENTITY_EXCLUDE_WORDS.has(word)) {
+      addCandidate(word, CANDIDATE_SCORE.titleCaseWord);
+    }
   }
 
   const allWords = cleanText.replace(/[^\w\s]/g, " ").split(/\s+/);

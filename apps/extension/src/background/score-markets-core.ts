@@ -99,8 +99,8 @@ export function createScoreMarkets({
     const count = marketTexts.length;
     const zero = new Array<number>(count).fill(0);
     let usedEmbeddings = false;
-    let similarities = zero;
-    let bm25Scores = zero;
+    let similarities = includeEmbeddings ? zero : [];
+    let bm25Scores = includeBm25 ? zero : [];
 
     if (includeEmbeddings) {
       try {

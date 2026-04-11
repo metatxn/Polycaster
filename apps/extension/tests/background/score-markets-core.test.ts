@@ -166,8 +166,8 @@ test("score-markets core respects disabled feature flags", async () => {
     includeContextGate: true,
   });
 
-  assert.deepEqual(result.similarities, [0]);
-  assert.deepEqual(result.bm25Scores, [0]);
+  assert.deepEqual(result.similarities, []);
+  assert.deepEqual(result.bm25Scores, []);
   assert.equal(result.contextGateResults.length, 1);
   assert.equal(result.usedEmbeddings, false);
   assert.equal(embeddingsCalled, 0);

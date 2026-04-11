@@ -8,7 +8,8 @@ flowchart TD
     D --> E{"Valid post?"}
     E -- "No: too short / non-English / empty" --> Z1["Skip Post"]
     E -- "Yes" --> F["Extract Search Inputs
-    rules-only keyword extraction + matched tags"]
+    rules-only keyword extraction + matched tags
+    title-case words filtered by ENTITY_EXCLUDE_WORDS"]
     F --> G["Search All Markets
     Polymarket + Kalshi"]
     G --> H{"Markets found?"}
@@ -18,8 +19,12 @@ flowchart TD
     gateText for context gate"]
 
     I --> J["Background Scoring Request"]
-    J --> J1["Embeddings signal"]
-    J --> J2["BM25 signal"]
+    J --> J1["Embeddings signal
+    disabled → empty array
+    failed → zero-filled array"]
+    J --> J2["BM25 signal
+    disabled → empty array
+    failed → zero-filled array"]
     J --> J3["NLP context gate"]
 
     J1 --> K{"Embeddings status"}

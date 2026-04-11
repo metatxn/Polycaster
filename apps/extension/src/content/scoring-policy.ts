@@ -240,6 +240,16 @@ const NAIVE_STOP_WORDS = new Set([
   "bet",
   "betting",
   "question",
+  "former",
+  "house",
+  "speaker",
+  "campaign",
+  "currently",
+  "reportedly",
+  "celebration",
+  "anniversary",
+  "launch",
+  "launching",
 ]);
 
 const CONTRACTION_SUFFIX_RE = /n't$|'[a-z]{1,2}$/i;

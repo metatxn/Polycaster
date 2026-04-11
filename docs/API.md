@@ -206,6 +206,79 @@ Authorization: Bearer eyJ...
 }
 ```
 
+## Analytics
+
+### POST `/api/analytics/batch`
+
+Description: Accepts a batch of sanitized extension analytics events and forwards them to the server-side PostHog client.
+
+Headers
+
+- `Content-Type: application/json`
+- Auth: extension `Origin` / `Referer` is required for CORS; no bearer token is required
+
+Request body
+
+| Field | Type | Required | Validation |
+| ----- | ---- | -------- | ---------- |
+| `events` | `AnalyticsEvent[]` | Yes | Array length `1..20`. |
+
+`AnalyticsEvent`
+
+| Field | Type | Required | Validation |
+| ----- | ---- | -------- | ---------- |
+| `event` | `string` | Yes | Min length `1`, max length `64`. |
+| `distinctId` | `string` | Yes | Must be a UUID. |
+| `timestamp` | `string` | Yes | Must be an ISO datetime. |
+| `properties` | `Record<string, string \| number \| boolean \| null>` | No | Keys must be non-empty and max length `64`. String values are capped at `200` chars. |
+
+Success `202`
+
+- Schema:
+  - `success: true`
+  - `accepted: number`
+
+Errors
+
+- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid analytics payload", details: fieldErrors }`
+- `401`: Not used by this handler.
+- `404`: Not used.
+- `429`: Shared rate-limit body.
+- `503`: `{ success: false, error: "Analytics backend is not configured" }` or `{ success: false, error: "Failed to capture analytics events" }`
+
+Rate limiting
+
+- `30` requests/minute/IP
+
+Example
+
+```http
+POST /api/analytics/batch HTTP/1.1
+Content-Type: application/json
+Origin: chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc
+
+{
+  "events": [
+    {
+      "event": "extension_opened",
+      "distinctId": "11111111-1111-4111-8111-111111111111",
+      "timestamp": "2026-04-02T10:00:00.000Z",
+      "properties": {
+        "platform": "twitter",
+        "usageAnalyticsEnabled": true
+      }
+    }
+  ]
+}
+```
+
+```json
+{
+  "success": true,
+  "accepted": 1
+}
+```
+
 ## Auth And Extension Sessions
 
 ### POST `/api/auth/derive-api-key`
@@ -384,6 +457,49 @@ Content-Type: application/json
   "success": true,
   "token": "eyJhbGciOiJIUzI1NiJ9...",
   "expiresAt": "2026-04-02T10:15:00.000Z"
+}
+```
+
+### POST `/api/extension/session/logout`
+
+Description: Revokes the current extension bearer token.
+
+Headers
+
+- Auth: `Authorization: Bearer <extension-session-token>` with a valid extension session
+
+Request body
+
+- None
+
+Success `200`
+
+- Schema:
+  - `success: true`
+
+Errors
+
+- `400`: Not used.
+- `401`: `{ error: "Unauthorized" }` or the structured error returned by `requireExtensionSession()`
+- `404`: Not used.
+- `429`: Shared rate-limit body.
+- `503`: `{ error: "Failed to revoke extension session" }`
+
+Rate limiting
+
+- `20` requests/minute/IP
+
+Example
+
+```http
+POST /api/extension/session/logout HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+Origin: chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc
+```
+
+```json
+{
+  "success": true
 }
 ```
 

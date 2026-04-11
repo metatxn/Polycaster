@@ -69,10 +69,11 @@ flowchart LR
 | Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, preconnects to upstream APIs, and serves the main pages | Hooks, contexts, server-cache, API routes |
 | Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
+| Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/notifications/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*` | Powers live sports markets, CLOB notifications, and browser-side price alerting around trading activity | Web data hooks, websocket managers, Polymarket CLOB |
 | API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI | Polymarket APIs, OpenRouter, builder signing service, Polygon RPC |
-| Web infra helpers | `apps/web/src/lib/*` | Caching, origin checks, auth helpers, websocket managers, server-side fetch memoization, RPC utilities | Cloudflare Worker runtime, browser, upstream APIs |
+| Web infra helpers | `apps/web/src/lib/*` | Caching, origin checks, auth helpers, websocket managers, server-side fetch memoization, RPC utilities, PostHog server capture | Cloudflare Worker runtime, browser, upstream APIs, PostHog |
 | Extension content runtime | `apps/extension/src/content/*` | Detects supported social platforms, extracts post text, ranks relevant markets, injects inline UI and trading panel | Background service worker, Knoww APIs, Polymarket APIs |
-| Extension background worker | `apps/extension/src/background.ts`, `apps/extension/src/background/*` | Central message router, auth token storage, CORS-safe fetch proxy, local NLP/embedding services | Content scripts, offscreen document, Knoww API, Polymarket APIs |
+| Extension background worker | `apps/extension/src/background.ts`, `apps/extension/src/background/*` | Central message router, auth token storage, batched analytics queue, CORS-safe fetch proxy, local NLP/embedding services | Content scripts, offscreen document, Knoww API, PostHog ingest route, Polymarket APIs |
 | Extension offscreen trading runtime | `apps/extension/src/offscreen/offscreen.ts`, `apps/extension/src/background/trading-handler.ts` | Hosts heavy trading dependencies (`ethers`, `ClobClient`) outside the MV3 service worker | Background worker, relayer, CLOB, Polygon RPC |
 | Shared market/contracts package | `packages/shared-types/src/*` | Single source of truth for Polymarket endpoints, contract addresses, auth constants, ABIs, and shared types | Web app and extension |
 | Deployment config | `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts`, `apps/web/next.config.ts` | Packages the Next.js app for Cloudflare Workers and R2-backed incremental cache | Cloudflare Workers, R2 |
@@ -86,9 +87,12 @@ flowchart LR
 | Sports | `apps/web/src/app/events/sports/page.tsx` | Sports-specific event/market views |
 | Market detail | `apps/web/src/app/markets/[slug]/page.tsx` | Detailed market trading and order book UI |
 | Portfolio | `apps/web/src/app/portfolio/page.tsx` | Positions, orders, trades, P&L, deposit/withdraw |
+| Live | `apps/web/src/app/live/page.tsx` | Live and scheduled sports markets with websocket-backed game state |
+| Notifications | `apps/web/src/app/notifications/page.tsx` | CLOB account notifications and dismissal UX |
 | Whales | `apps/web/src/app/whales/page.tsx` | Whale activity and suspicious/insider activity analysis |
 | Leaderboard | `apps/web/src/app/leaderboard/page.tsx` | Trader leaderboard |
 | Profile | `apps/web/src/app/profile/[address]/page.tsx` | Public trader profile views |
+| Privacy | `apps/web/src/app/privacy/page.tsx` | User-facing privacy and data-retention disclosures |
 
 ## 3. Data Flow
 
@@ -265,7 +269,12 @@ Notes:
 | --- | --- | --- | --- |
 | `sessionStorage` | `polymarket_api_creds_<address>` | `apps/web/src/hooks/use-clob-credentials.ts` | Stores derived CLOB API credentials for the current browser session |
 | `sessionStorage` | `polymarket_readonly_keys_<address>` | `apps/web/src/hooks/use-clob-credentials.ts` | Stores read-only CLOB API keys |
-| `localStorage` | search-related keys | `apps/web/src/app/search/page.tsx` | Stores recent searches / last-viewed search results |
+| `sessionStorage` | `homeViewMode` | `apps/web/src/app/home-content.tsx` | Remembers the home-page view mode for the active tab |
+| `localStorage` | search-related keys | `apps/web/src/app/search/page.tsx`, `apps/web/src/components/market-search.tsx` | Stores recent searches / last-viewed search results |
+| `localStorage` | `knoww_onboarding_complete_<address>` | `apps/web/src/context/onboarding-context.tsx` | Remembers that a wallet completed trading onboarding |
+| `localStorage` | `knoww-accent-color` | `apps/web/src/context/color-theme-context.tsx` | Persists the selected accent color |
+| `localStorage` | `price-alerts-storage` | `apps/web/src/hooks/use-price-alerts.ts` | Persists browser-side price alert configuration |
+| `localStorage` | `trading_session_*` envelope keys | `apps/web/src/lib/session.ts` | Persists signed trading-session metadata with integrity checks |
 
 ### 4.3 Extension browser storage
 
@@ -275,6 +284,7 @@ Notes:
 | `chrome.storage.session` | arbitrary credential keys | `apps/extension/src/background.ts` | Keeps trading credentials behind the service-worker boundary |
 | `chrome.storage.sync` | `knowwSettings` | `apps/extension/src/options.tsx` | Syncs user settings across browsers/profiles |
 | `chrome.storage.local` | `knowwPreferences` and related UI prefs | `apps/extension/src/content/preferences.ts` | Keeps local-only extension preferences |
+| `chrome.storage.local` | `knoww_analytics_queue_v1`, `knoww_analytics_install_id_v1` | `apps/extension/src/background/analytics.ts` | Buffers optional extension analytics before batch upload |
 | IndexedDB | DB `knoww-embeddings`, store `vectors` | `apps/extension/src/background/embeddings.ts` | Persists local text embeddings for relevance ranking |
 
 ### 4.4 IndexedDB structure used by the extension
@@ -320,6 +330,7 @@ Behavior:
 | Polymarket WebSockets | `apps/web/src/lib/websocket-manager.ts`, `apps/web/src/lib/sports-websocket-manager.ts` | Live market and sports updates |
 | Polygon RPC / Alchemy | `apps/web/src/app/api/rpc/polygon/route.ts`, `apps/web/src/lib/rpc.ts`, `apps/web/src/config/index.tsx`, `apps/extension/src/background/trading-handler.ts` | On-chain reads and trading wallet checks |
 | OpenRouter | `apps/web/src/app/api/ai/extract-topics/route.ts`, `apps/web/src/app/api/ai/validate-relevance/route.ts` | LLM-powered topic extraction and relevance filtering |
+| PostHog | `apps/web/src/lib/posthog-server.ts`, `apps/web/src/app/api/analytics/batch/route.ts`, `apps/extension/src/background/analytics.ts` | Optional web/server and extension analytics capture |
 | Hugging Face transformers.js | `apps/extension/src/background/embeddings.ts` | Local embedding model for extension relevance ranking |
 | Reown / WalletConnect | `apps/web/src/config/index.tsx`, `apps/web/src/context/index.tsx` | Wallet connection and session management |
 | Cloudflare Workers + OpenNext | `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts` | Edge runtime for the web app |

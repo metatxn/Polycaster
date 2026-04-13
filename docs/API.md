@@ -29,6 +29,35 @@ This document is generated from the route handlers under `apps/web/src/app/api`.
 
 ## AI
 
+### OPTIONS `/api/ai/extract-topics`
+
+Description: CORS preflight handler for the extension-facing topic extraction route.
+
+Headers
+
+- `Origin: <allowed extension origin>` or an allowed app `Referer`
+
+Request body
+
+- None
+
+Success `200`
+
+- Empty body
+- Returns extension CORS headers from `handleExtensionPreflight()`
+
+Errors
+
+- `400`: Not used.
+- `401`: Not used.
+- `403`: Returned when the request origin/referer is not allowed by the extension auth helpers.
+- `404`: Not used.
+- `500`: Not used.
+
+Rate limiting
+
+- No explicit rate limiter
+
 ### POST `/api/ai/extract-topics`
 
 Description: Extracts topic/category metadata from extension text using OpenRouter. Requires extension access.
@@ -146,6 +175,35 @@ Origin: chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc
 }
 ```
 
+### OPTIONS `/api/ai/validate-relevance`
+
+Description: CORS preflight handler for the extension-facing relevance validation route.
+
+Headers
+
+- `Origin: <allowed extension origin>` or an allowed app `Referer`
+
+Request body
+
+- None
+
+Success `200`
+
+- Empty body
+- Returns extension CORS headers from `handleExtensionPreflight()`
+
+Errors
+
+- `400`: Not used.
+- `401`: Not used.
+- `403`: Returned when the request origin/referer is not allowed by the extension auth helpers.
+- `404`: Not used.
+- `500`: Not used.
+
+Rate limiting
+
+- No explicit rate limiter
+
 ### POST `/api/ai/validate-relevance`
 
 Description: Uses OpenRouter to decide whether a market title is genuinely relevant to a piece of post text. Requires extension access.
@@ -207,6 +265,35 @@ Authorization: Bearer eyJ...
 ```
 
 ## Analytics
+
+### OPTIONS `/api/analytics/batch`
+
+Description: CORS preflight handler for the extension analytics ingest route.
+
+Headers
+
+- `Origin: <allowed extension origin>`
+
+Request body
+
+- None
+
+Success `200`
+
+- Empty body
+- Returns extension CORS headers from `handleExtensionPreflight()`
+
+Errors
+
+- `400`: Not used.
+- `401`: Not used.
+- `403`: Returned when the request origin is not allowed by the extension auth helpers.
+- `404`: Not used.
+- `500`: Not used.
+
+Rate limiting
+
+- No explicit rate limiter
 
 ### POST `/api/analytics/batch`
 
@@ -502,6 +589,35 @@ Origin: chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc
   "success": true
 }
 ```
+
+### OPTIONS `/api/extension/session/logout`
+
+Description: CORS preflight handler for extension session logout.
+
+Headers
+
+- `Origin: <allowed extension origin>`
+
+Request body
+
+- None
+
+Success `200`
+
+- Empty body
+- Returns extension CORS headers from `handleExtensionPreflight()`
+
+Errors
+
+- `400`: Not used.
+- `401`: Not used.
+- `403`: Returned when the request origin is not allowed by the extension auth helpers.
+- `404`: Not used.
+- `500`: Not used.
+
+Rate limiting
+
+- No explicit rate limiter
 
 ## Comments
 
@@ -1170,7 +1286,7 @@ GET /api/profile/0x1111111111111111111111111111111111111111 HTTP/1.1
 
 ### GET `/api/markets/by-tag`
 
-Description: Fetches markets for a tag ID and sorts the resulting array by `created_at` descending.
+Description: Fetches markets for a tag ID from Gamma's keyset endpoint and returns cursor-based pagination metadata.
 
 Headers
 
@@ -1182,17 +1298,21 @@ Query parameters
 | ---------- | -------- | -------- | ----------------------------------- |
 | `tag_id`   | `string` | Yes      | Required string.                    |
 | `closed`   | `string` | No       | Optional string. Default `"false"`. |
-| `archived` | `string` | No       | Optional string. Default `"false"`. |
 | `limit`    | `string` | No       | Optional string. Default `"50"`.    |
-| `offset`   | `string` | No       | Optional string. Default `"0"`.     |
+| `after_cursor` | `string` | No    | Optional keyset cursor for the next page. |
 
 Success `200`
 
-- Schema: `{ success: true, count: number, markets: object[], tag_id: string }`
+- Schema:
+  - `success: true`
+  - `count: number`
+  - `markets: object[]`
+  - `tag_id: string`
+  - `pagination: { hasMore: boolean, nextCursor: string | null }`
 
 Errors
 
-- `400`: `{ success: false, error: "tag_id is required" }` or `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "tag_id is required" }`, `{ success: false, error: "offset is no longer supported; use after_cursor" }`, or `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -1217,7 +1337,11 @@ GET /api/markets/by-tag?tag_id=342&limit=2 HTTP/1.1
       "question": "Will California legalize X this year?"
     }
   ],
-  "tag_id": "342"
+  "tag_id": "342",
+  "pagination": {
+    "hasMore": false,
+    "nextCursor": null
+  }
 }
 ```
 

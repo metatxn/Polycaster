@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
+import { logger } from "@/lib/logger";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = "https://knoww.app";
@@ -15,49 +17,59 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Fetch active markets for dynamic routes
   let marketRoutes: MetadataRoute.Sitemap = [];
   try {
-    const res = await fetch(
-      `${POLYMARKET_API.GAMMA.MARKETS}?closed=false&limit=100`,
+    const page = await fetchGammaKeysetPage<{ slug?: string }>(
       {
-        next: { revalidate: 3600 }, // Cache for 1 hour
-      }
+        endpoint: POLYMARKET_API.GAMMA.MARKETS_KEYSET,
+        params: new URLSearchParams({
+          closed: "false",
+          limit: "100",
+        }),
+        revalidate: 3600,
+      },
+      ["markets", "data"]
     );
-    if (res.ok) {
-      const markets = (await res.json()) as { slug?: string }[];
-      marketRoutes = markets
-        .filter((m) => m.slug)
-        .map((m) => ({
-          url: `${baseUrl}/markets/${m.slug}`,
-          lastModified: new Date(),
-          changeFrequency: "hourly" as const,
-          priority: 0.7,
-        }));
-    }
+
+    marketRoutes = page.items
+      .filter((m) => m.slug)
+      .map((m) => ({
+        url: `${baseUrl}/markets/${m.slug}`,
+        lastModified: new Date(),
+        changeFrequency: "hourly" as const,
+        priority: 0.7,
+      }));
   } catch (e) {
-    console.error("Failed to fetch markets for sitemap:", e);
+    logger.error("sitemap.markets.fetch_failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
 
   // Fetch active events for dynamic routes
   let eventRoutes: MetadataRoute.Sitemap = [];
   try {
-    const res = await fetch(
-      `${POLYMARKET_API.GAMMA.EVENTS}?closed=false&limit=100`,
+    const page = await fetchGammaKeysetPage<{ slug?: string }>(
       {
-        next: { revalidate: 3600 },
-      }
+        endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
+        params: new URLSearchParams({
+          closed: "false",
+          limit: "100",
+        }),
+        revalidate: 3600,
+      },
+      ["events", "data"]
     );
-    if (res.ok) {
-      const events = (await res.json()) as { slug?: string }[];
-      eventRoutes = events
-        .filter((e) => e.slug)
-        .map((e) => ({
-          url: `${baseUrl}/events/detail/${e.slug}`,
-          lastModified: new Date(),
-          changeFrequency: "hourly" as const,
-          priority: 0.6,
-        }));
-    }
+
+    eventRoutes = page.items
+      .filter((e) => e.slug)
+      .map((e) => ({
+        url: `${baseUrl}/events/detail/${e.slug}`,
+        lastModified: new Date(),
+        changeFrequency: "hourly" as const,
+        priority: 0.6,
+      }));
   } catch (e) {
-    console.error("Failed to fetch events for sitemap:", e);
+    logger.error("sitemap.events.fetch_failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
 
   return [...staticRoutes, ...marketRoutes, ...eventRoutes];

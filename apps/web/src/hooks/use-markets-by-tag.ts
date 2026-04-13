@@ -37,9 +37,8 @@ interface MarketsByTagResponse {
 interface UseMarketsByTagParams {
   tag_id?: string;
   closed?: boolean;
-  archived?: boolean;
   limit?: number;
-  offset?: number;
+  afterCursor?: string;
 }
 
 /**
@@ -56,14 +55,11 @@ async function fetchMarketsByTag(
   if (params.closed !== undefined) {
     queryParams.set("closed", params.closed.toString());
   }
-  if (params.archived !== undefined) {
-    queryParams.set("archived", params.archived.toString());
-  }
   if (params.limit) {
     queryParams.set("limit", params.limit.toString());
   }
-  if (params.offset) {
-    queryParams.set("offset", params.offset.toString());
+  if (params.afterCursor) {
+    queryParams.set("after_cursor", params.afterCursor);
   }
 
   const response = await fetch(`/api/markets/by-tag?${queryParams.toString()}`);

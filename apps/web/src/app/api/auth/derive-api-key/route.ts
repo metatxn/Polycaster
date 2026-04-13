@@ -1,7 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
-import { getPostHogClient } from "@/lib/posthog-server";
+import {
+  getPostHogClient,
+  isPostHogServerConfigured,
+} from "@/lib/posthog-server";
 import { isValidAddress } from "@/lib/validation";
 
 /**
@@ -101,6 +104,7 @@ function trackApiKeyEvent(
   event: string,
   method: string
 ): void {
+  if (!isPostHogServerConfigured()) return;
   try {
     const posthog = getPostHogClient();
     posthog.capture({

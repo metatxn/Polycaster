@@ -37,7 +37,8 @@ interface TrendingEventsResponse {
   data?: TrendingEvent[];
   pagination?: {
     hasMore: boolean;
-    totalResults: number;
+    nextCursor?: string;
+    totalResults?: number;
   };
   error?: string;
 }
@@ -49,11 +50,14 @@ export function useTrendingEvents(
 ) {
   return useInfiniteQuery({
     queryKey: ["trending-events", limit, filters],
-    queryFn: async ({ pageParam = 0 }) => {
+    queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: limit.toString(),
-        offset: pageParam.toString(),
       });
+
+      if (pageParam) {
+        params.set("after_cursor", pageParam);
+      }
 
       if (filters) {
         if (filters.volume24hrMin)
@@ -62,18 +66,7 @@ export function useTrendingEvents(
           params.set("volume1wk_min", filters.volumeWeeklyMin.toString());
         if (filters.liquidityMin)
           params.set("liquidity_min", filters.liquidityMin.toString());
-        if (
-          filters.competitiveMin !== undefined &&
-          filters.competitiveMin !== null
-        )
-          params.set("competitive_min", filters.competitiveMin.toString());
-        if (
-          filters.competitiveMax !== undefined &&
-          filters.competitiveMax !== null
-        )
-          params.set("competitive_max", filters.competitiveMax.toString());
         if (filters.live) params.set("live", "true");
-        if (filters.ended) params.set("ended", "true");
         if (filters.startDateFrom)
           params.set("start_date_min", filters.startDateFrom);
         if (filters.startDateTo)
@@ -95,18 +88,14 @@ export function useTrendingEvents(
         throw new Error(result.error || "Failed to fetch trending events");
       }
 
-      const hasMore =
-        result.pagination?.hasMore ??
-        (result.data ? result.data.length === limit : false);
-
       return {
         events: result.data || [],
-        nextOffset: hasMore ? pageParam + limit : undefined,
-        totalResults: result.pagination?.totalResults || 0,
+        nextCursor: result.pagination?.nextCursor,
+        totalResults: result.pagination?.totalResults,
       };
     },
-    getNextPageParam: (lastPage) => lastPage.nextOffset,
-    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    initialPageParam: "",
     staleTime: 60 * 1000, // 1 minute
     refetchOnWindowFocus: false,
     enabled,

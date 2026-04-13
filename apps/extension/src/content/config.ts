@@ -26,6 +26,8 @@ const POLYMARKET_SEARCH_API_URL =
   "https://gamma-api.polymarket.com/public-search";
 const POLYMARKET_TAGS_API_URL = "https://gamma-api.polymarket.com/tags";
 const POLYMARKET_EVENTS_API_URL = "https://gamma-api.polymarket.com/events";
+const POLYMARKET_EVENTS_KEYSET_API_URL =
+  "https://gamma-api.polymarket.com/events/keyset";
 
 // ============================================
 // KALSHI API URLs (HTTPS only)
@@ -272,6 +274,7 @@ export const KNOWW_CONFIG = {
   POLYMARKET_SEARCH_API_URL,
   POLYMARKET_TAGS_API_URL,
   POLYMARKET_EVENTS_API_URL,
+  POLYMARKET_EVENTS_KEYSET_API_URL,
   // Kalshi
   KALSHI_BASE_URL,
   KALSHI_EVENTS_API_URL,

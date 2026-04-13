@@ -143,7 +143,7 @@ export function useNotifications() {
       const rawData = await client.getNotifications();
 
       // Transform raw data to our typed notifications
-      const transformed = rawData.map((raw, index) =>
+      const transformed = rawData?.map((raw, index) =>
         transformNotification(raw, index)
       );
 

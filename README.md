@@ -26,7 +26,7 @@ pnpm install
 
 # Configure the web app environment
 $EDITOR apps/web/.env.local
-# Required: NEXT_PUBLIC_REOWN_PROJECT_ID
+# Required: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
 # Optional: POSTHOG_PROJECT_API_KEY and POSTHOG_HOST for analytics ingestion
 
 # Run the web app
@@ -41,9 +41,14 @@ Open [http://localhost:8000](http://localhost:8000)
 # Configure the extension environment if needed
 cp apps/extension/.env.example apps/extension/.env
 
-# Run the extension build in watch mode
+# Run the web app locally for extension API calls
+pnpm dev:web
+
+# In a second terminal, run the extension build in watch mode
 pnpm dev:ext
 ```
+
+In development, the extension targets `http://localhost:8000` by default. Use `DEV_MODE=false` in `apps/extension/.env` if you want the built extension to talk to production instead.
 
 ## Tech Stack
 
@@ -66,8 +71,13 @@ pnpm build:web      # Build the web app only
 pnpm build:ext      # Build the extension only
 pnpm preview        # Preview the Cloudflare web deployment locally
 pnpm lint           # Lint the monorepo
+pnpm lint:web       # Lint the web app only
+pnpm lint:ext       # Lint the extension only
 pnpm format         # Format the monorepo
 pnpm typecheck      # Type-check all workspace packages
+pnpm typecheck:web  # Type-check the web app only
+pnpm typecheck:ext  # Type-check the extension only
+pnpm audit:security # Run a high-severity dependency audit
 pnpm deploy         # Deploy the web app to Cloudflare
 pnpm release:ext    # Bump, build, and zip the extension release
 ```

@@ -3,7 +3,13 @@
  *
  * Pure utility — no framework or runtime dependencies.
  * Used by both the web app and the Chrome extension.
+ *
+ * All internal arithmetic uses Decimal.js to avoid IEEE 754 rounding errors
+ * on monetary values. Public interfaces return plain `number` so callers
+ * don't need to depend on Decimal directly.
  */
+
+import Decimal from "decimal.js";
 
 export interface OrderBookLevel {
   price: string;
@@ -34,29 +40,44 @@ export interface MarketOrderPriceResult {
   priceExceedsMaxSlippage: boolean;
 }
 
-const MARKET_BUFFER = 0.005;
+const MARKET_BUFFER = new Decimal("0.005");
+const HUNDRED = new Decimal(100);
+const ONE = new Decimal(1);
+const PRICE_CEIL = new Decimal("0.99");
+const PRICE_FLOOR = new Decimal("0.01");
 
-function parseLevel(
-  level: OrderBookLevel
-): { price: number; size: number } | null {
-  const price = parseFloat(level.price);
-  const size = parseFloat(level.size);
-  if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) {
+interface ParsedLevel {
+  price: Decimal;
+  size: Decimal;
+}
+
+function parseLevel(level: OrderBookLevel): ParsedLevel | null {
+  try {
+    const price = new Decimal(level.price);
+    const size = new Decimal(level.size);
+    if (!price.isFinite() || !size.isFinite() || size.lte(0)) return null;
+    return { price, size };
+  } catch {
     return null;
   }
-  return { price, size };
 }
 
 export function roundUpToTick(price: number, tickSize: number): number {
-  return Math.ceil(price / tickSize) * tickSize;
+  const p = new Decimal(price);
+  const t = new Decimal(tickSize);
+  return p.div(t).ceil().mul(t).toNumber();
 }
 
 export function roundDownToTick(price: number, tickSize: number): number {
-  return Math.floor(price / tickSize) * tickSize;
+  const p = new Decimal(price);
+  const t = new Decimal(tickSize);
+  return p.div(t).floor().mul(t).toNumber();
 }
 
 export function roundToTick(price: number, tickSize: number): number {
-  return Math.round(price / tickSize) * tickSize;
+  const p = new Decimal(price);
+  const t = new Decimal(tickSize);
+  return p.div(t).round().mul(t).toNumber();
 }
 
 function createEmptyResult(size: number): SlippageResult {
@@ -82,43 +103,51 @@ export function calculateBuySlippage(
 
   const sortedAsks = (orderBook.asks || [])
     .map(parseLevel)
-    .filter((l): l is { price: number; size: number } => l !== null)
-    .sort((a, b) => a.price - b.price);
+    .filter((l): l is ParsedLevel => l !== null)
+    .sort((a, b) => a.price.cmp(b.price));
 
   if (sortedAsks.length === 0) return createEmptyResult(size);
 
   const bestPrice = sortedAsks[0].price;
-  let remaining = size;
-  let totalCost = 0;
+  let remaining = new Decimal(size);
+  let totalCost = new Decimal(0);
   let worstPrice = bestPrice;
   const fills: SlippageResult["fills"] = [];
 
   for (const level of sortedAsks) {
-    if (remaining <= 0) break;
-    const fillSize = Math.min(remaining, level.size);
-    const fillCost = fillSize * level.price;
-    fills.push({ price: level.price, size: fillSize, notional: fillCost });
-    totalCost += fillCost;
-    remaining -= fillSize;
+    if (remaining.lte(0)) break;
+    const fillSize = Decimal.min(remaining, level.size);
+    const fillCost = fillSize.mul(level.price);
+    fills.push({
+      price: level.price.toNumber(),
+      size: fillSize.toNumber(),
+      notional: fillCost.toNumber(),
+    });
+    totalCost = totalCost.add(fillCost);
+    remaining = remaining.sub(fillSize);
     worstPrice = level.price;
   }
 
-  const filledSize = size - remaining;
-  const avgFillPrice = filledSize > 0 ? totalCost / filledSize : 0;
-  const slippage = avgFillPrice - bestPrice;
-  const slippagePercent = bestPrice > 0 ? (slippage / bestPrice) * 100 : 0;
+  const filledSize = new Decimal(size).sub(remaining);
+  const avgFillPrice = filledSize.gt(0)
+    ? totalCost.div(filledSize)
+    : new Decimal(0);
+  const slippage = avgFillPrice.sub(bestPrice);
+  const slippagePercent = bestPrice.gt(0)
+    ? slippage.div(bestPrice).mul(HUNDRED)
+    : new Decimal(0);
 
   return {
-    canFill: remaining === 0,
-    avgFillPrice,
-    bestPrice,
-    worstPrice,
-    slippage,
-    slippagePercent,
-    totalNotional: totalCost,
+    canFill: remaining.isZero(),
+    avgFillPrice: avgFillPrice.toNumber(),
+    bestPrice: bestPrice.toNumber(),
+    worstPrice: worstPrice.toNumber(),
+    slippage: slippage.toNumber(),
+    slippagePercent: slippagePercent.toNumber(),
+    totalNotional: totalCost.toNumber(),
     fills,
-    unfilledSize: remaining,
-    filledSize,
+    unfilledSize: remaining.toNumber(),
+    filledSize: filledSize.toNumber(),
   };
 }
 
@@ -130,43 +159,51 @@ export function calculateSellSlippage(
 
   const sortedBids = (orderBook.bids || [])
     .map(parseLevel)
-    .filter((l): l is { price: number; size: number } => l !== null)
-    .sort((a, b) => b.price - a.price);
+    .filter((l): l is ParsedLevel => l !== null)
+    .sort((a, b) => b.price.cmp(a.price));
 
   if (sortedBids.length === 0) return createEmptyResult(size);
 
   const bestPrice = sortedBids[0].price;
-  let remaining = size;
-  let totalProceeds = 0;
+  let remaining = new Decimal(size);
+  let totalProceeds = new Decimal(0);
   let worstPrice = bestPrice;
   const fills: SlippageResult["fills"] = [];
 
   for (const level of sortedBids) {
-    if (remaining <= 0) break;
-    const fillSize = Math.min(remaining, level.size);
-    const fillProceeds = fillSize * level.price;
-    fills.push({ price: level.price, size: fillSize, notional: fillProceeds });
-    totalProceeds += fillProceeds;
-    remaining -= fillSize;
+    if (remaining.lte(0)) break;
+    const fillSize = Decimal.min(remaining, level.size);
+    const fillProceeds = fillSize.mul(level.price);
+    fills.push({
+      price: level.price.toNumber(),
+      size: fillSize.toNumber(),
+      notional: fillProceeds.toNumber(),
+    });
+    totalProceeds = totalProceeds.add(fillProceeds);
+    remaining = remaining.sub(fillSize);
     worstPrice = level.price;
   }
 
-  const filledSize = size - remaining;
-  const avgFillPrice = filledSize > 0 ? totalProceeds / filledSize : 0;
-  const slippage = bestPrice - avgFillPrice;
-  const slippagePercent = bestPrice > 0 ? (slippage / bestPrice) * 100 : 0;
+  const filledSize = new Decimal(size).sub(remaining);
+  const avgFillPrice = filledSize.gt(0)
+    ? totalProceeds.div(filledSize)
+    : new Decimal(0);
+  const slippage = bestPrice.sub(avgFillPrice);
+  const slippagePercent = bestPrice.gt(0)
+    ? slippage.div(bestPrice).mul(HUNDRED)
+    : new Decimal(0);
 
   return {
-    canFill: remaining === 0,
-    avgFillPrice,
-    bestPrice,
-    worstPrice,
-    slippage,
-    slippagePercent,
-    totalNotional: totalProceeds,
+    canFill: remaining.isZero(),
+    avgFillPrice: avgFillPrice.toNumber(),
+    bestPrice: bestPrice.toNumber(),
+    worstPrice: worstPrice.toNumber(),
+    slippage: slippage.toNumber(),
+    slippagePercent: slippagePercent.toNumber(),
+    totalNotional: totalProceeds.toNumber(),
     fills,
-    unfilledSize: remaining,
-    filledSize,
+    unfilledSize: remaining.toNumber(),
+    filledSize: filledSize.toNumber(),
   };
 }
 
@@ -196,40 +233,40 @@ export function calculateMarketOrderPrice(
 
   if (requireFullFill && !slippageResult.canFill) return null;
 
-  const maxFrac = maxSlippagePercent / 100;
-  let limitPrice: number;
+  const maxFrac = new Decimal(maxSlippagePercent).div(HUNDRED);
+  const best = new Decimal(slippageResult.bestPrice);
+  const worst = new Decimal(slippageResult.worstPrice);
+  let limitPrice: Decimal;
   let priceExceedsMaxSlippage = false;
 
   if (side === "BUY") {
-    const maxPrice = slippageResult.bestPrice * (1 + maxFrac);
-    if (slippageResult.worstPrice > maxPrice) {
-      limitPrice = roundUpToTick(maxPrice, tickSize);
+    const maxPrice = best.mul(ONE.add(maxFrac));
+    if (worst.gt(maxPrice)) {
+      limitPrice = new Decimal(roundUpToTick(maxPrice.toNumber(), tickSize));
       priceExceedsMaxSlippage = true;
     } else {
-      limitPrice = roundUpToTick(
-        slippageResult.worstPrice * (1 + MARKET_BUFFER),
-        tickSize
+      limitPrice = new Decimal(
+        roundUpToTick(worst.mul(ONE.add(MARKET_BUFFER)).toNumber(), tickSize)
       );
     }
-    limitPrice = Math.min(maxPrice, limitPrice);
-    limitPrice = Math.min(0.99, limitPrice);
+    limitPrice = Decimal.min(maxPrice, limitPrice);
+    limitPrice = Decimal.min(PRICE_CEIL, limitPrice);
   } else {
-    const minPrice = slippageResult.bestPrice * (1 - maxFrac);
-    if (slippageResult.worstPrice < minPrice) {
-      limitPrice = roundDownToTick(minPrice, tickSize);
+    const minPrice = best.mul(ONE.sub(maxFrac));
+    if (worst.lt(minPrice)) {
+      limitPrice = new Decimal(roundDownToTick(minPrice.toNumber(), tickSize));
       priceExceedsMaxSlippage = true;
     } else {
-      limitPrice = roundDownToTick(
-        slippageResult.worstPrice * (1 - MARKET_BUFFER),
-        tickSize
+      limitPrice = new Decimal(
+        roundDownToTick(worst.mul(ONE.sub(MARKET_BUFFER)).toNumber(), tickSize)
       );
     }
-    limitPrice = Math.max(minPrice, limitPrice);
-    limitPrice = Math.max(0.01, limitPrice);
+    limitPrice = Decimal.max(minPrice, limitPrice);
+    limitPrice = Decimal.max(PRICE_FLOOR, limitPrice);
   }
 
   return {
-    limitPrice,
+    limitPrice: limitPrice.toNumber(),
     expectedSlippage: slippageResult,
     priceExceedsMaxSlippage,
   };
@@ -250,21 +287,22 @@ export function formatSlippageDisplay(
   filledSize: string;
   unfilledSize: string;
 } {
-  const formatPrice = (p: number) => `${(p * 100).toFixed(1)}¢`;
-  const formatNotional = (n: number) => `$${n.toFixed(2)}`;
+  const formatPrice = (p: number) =>
+    `${new Decimal(p).mul(HUNDRED).toFixed(1)}¢`;
+  const formatNotional = (n: number) => `$${new Decimal(n).toFixed(2)}`;
 
   return {
     avgPrice: formatPrice(slippage.avgFillPrice),
     bestPrice: formatPrice(slippage.bestPrice),
     worstPrice: formatPrice(slippage.worstPrice),
     slippageAmount: formatPrice(slippage.slippage),
-    slippagePercent: `${slippage.slippagePercent.toFixed(2)}%`,
+    slippagePercent: `${new Decimal(slippage.slippagePercent).toFixed(2)}%`,
     totalLabel: side === "SELL" ? "Total Proceeds" : "Total Cost",
     totalNotional: formatNotional(slippage.totalNotional),
     fillsDescription: slippage.fills
-      .map((f) => `${f.size.toFixed(0)} @ ${formatPrice(f.price)}`)
+      .map((f) => `${new Decimal(f.size).toFixed(0)} @ ${formatPrice(f.price)}`)
       .join(", "),
-    filledSize: slippage.filledSize.toFixed(0),
-    unfilledSize: slippage.unfilledSize.toFixed(0),
+    filledSize: new Decimal(slippage.filledSize).toFixed(0),
+    unfilledSize: new Decimal(slippage.unfilledSize).toFixed(0),
   };
 }

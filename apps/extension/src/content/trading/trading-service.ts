@@ -367,7 +367,10 @@ export const TradingService = {
 
   // ── Order Book ──
 
-  async fetchOrderBook(tokenId: string): Promise<OrderBook | null> {
+  async fetchOrderBook(
+    tokenId: string,
+    options?: { syncContext?: boolean }
+  ): Promise<OrderBook | null> {
     try {
       const data = await sendMsg<
         OrderBook & { min_order_size?: string; tick_size?: string }
@@ -375,14 +378,17 @@ export const TradingService = {
         { type: "trading:get-orderbook", tokenId },
         "Failed to fetch order book"
       );
-      const rawMin = parseFloat(data.min_order_size ?? "1");
-      const minOrderSize = Math.max(
-        1,
-        Math.ceil(Number.isFinite(rawMin) ? rawMin : 1)
-      );
-      const rawTick = parseFloat(data.tick_size ?? "0.01");
-      const tickSize = Number.isFinite(rawTick) && rawTick > 0 ? rawTick : 0.01;
-      update({ orderBook: data, minOrderSize, tickSize });
+      if (options?.syncContext !== false) {
+        const rawMin = parseFloat(data.min_order_size ?? "1");
+        const minOrderSize = Math.max(
+          1,
+          Math.ceil(Number.isFinite(rawMin) ? rawMin : 1)
+        );
+        const rawTick = parseFloat(data.tick_size ?? "0.01");
+        const tickSize =
+          Number.isFinite(rawTick) && rawTick > 0 ? rawTick : 0.01;
+        update({ orderBook: data, minOrderSize, tickSize });
+      }
       return data;
     } catch {
       return null;

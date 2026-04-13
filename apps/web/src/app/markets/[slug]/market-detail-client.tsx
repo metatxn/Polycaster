@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   Bookmark,
@@ -14,7 +15,7 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import posthog from "posthog-js";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Navbar } from "@/components/navbar";
 import { PageBackground } from "@/components/page-background";
@@ -30,7 +31,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMarketDetail } from "@/hooks/use-market-detail";
+import {
+  useOrderBook as useOrderBookFromStore,
+  useOrderBookStore,
+} from "@/hooks/use-orderbook-store";
 import { usePriceAlertDetection } from "@/hooks/use-price-alerts";
+import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import { formatPrice, formatVolume } from "@/lib/formatters";
 import type { OutcomeData } from "@/types/market";
 
@@ -76,6 +82,13 @@ const TradingForm = dynamic(
   }
 );
 
+interface MarketDetailTradingOrderBookSnapshot {
+  bids: Array<{ price: string; size: string }>;
+  asks: Array<{ price: string; size: string }>;
+  min_order_size: string;
+  tick_size: string;
+}
+
 export default function MarketDetailClient({ slug }: { slug: string }) {
   const router = useRouter();
   const [selectedOutcome, setSelectedOutcome] = useState(0);
@@ -115,6 +128,8 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
   // Enable price alert detection for this market's assets
   usePriceAlertDetection(assetIds);
 
+  const setOrderBookFromRest = useOrderBookStore((s) => s.setOrderBookFromRest);
+
   // Handle order success - must be at top level before any early returns
   const handleOrderSuccess = useCallback((_order: unknown) => {
     // console.log("Order placed successfully:", order);
@@ -133,13 +148,213 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
     // console.log("Price clicked:", price);
   }, []);
 
+  const outcomes = useMemo<string[]>(() => {
+    if (!market?.outcomes) return [];
+    return JSON.parse(market.outcomes) as string[];
+  }, [market?.outcomes]);
+
+  const prices = useMemo<string[]>(() => {
+    if (!market?.outcomePrices) return [];
+    return JSON.parse(market.outcomePrices) as string[];
+  }, [market?.outcomePrices]);
+
+  const outcomeData = useMemo(() => {
+    const volume = market?.volumeNum || market?.volume || 0;
+    return outcomes.map((outcome: string, idx: number) => {
+      const price = prices[idx] ? Number.parseFloat(prices[idx]) : 0;
+      const probability = (price * 100).toFixed(0);
+      const change = ((Math.random() - 0.5) * 10).toFixed(1);
+      return {
+        name: outcome,
+        probability: Number.parseInt(probability, 10),
+        change: Number.parseFloat(change),
+        volume,
+        color:
+          idx === 0
+            ? "orange"
+            : idx === 1
+              ? "blue"
+              : idx === 2
+                ? "purple"
+                : "green",
+      };
+    });
+  }, [market?.volume, market?.volumeNum, outcomes, prices]);
+
+  const tradingOutcomes = useMemo<OutcomeData[]>(() => {
+    const tokens = market?.tokens || [];
+    const clobTokenIds = market?.clobTokenIds
+      ? (JSON.parse(market.clobTokenIds) as string[])
+      : [];
+
+    return outcomes.map((outcome: string, idx: number) => {
+      const price = prices[idx] ? Number.parseFloat(prices[idx]) : 0.5;
+
+      let tokenId = "";
+      if (tokens.length > 0) {
+        const token = tokens.find(
+          (t) => t.outcome?.toLowerCase() === outcome.toLowerCase()
+        );
+        tokenId = token?.token_id || "";
+      }
+      if (!tokenId && clobTokenIds.length > 0) {
+        tokenId = clobTokenIds[idx] || "";
+      }
+
+      return {
+        name: outcome,
+        tokenId,
+        price,
+        probability: price * 100,
+      };
+    });
+  }, [market?.clobTokenIds, market?.tokens, outcomes, prices]);
+
+  // Prepare token info for the chart
+  const chartColors = [
+    "hsl(25, 95%, 53%)", // Orange
+    "hsl(221, 83%, 53%)", // Blue
+    "hsl(280, 100%, 70%)", // Purple/Pink
+    "hsl(142, 76%, 36%)", // Green
+  ];
+  const chartTokens = tradingOutcomes.map((outcome, idx) => ({
+    tokenId: outcome.tokenId,
+    name: outcome.name,
+    color: chartColors[idx % chartColors.length],
+  }));
+
+  const currentTokenId = tradingOutcomes[selectedOutcome]?.tokenId || "";
+
+  const { data: orderBookData } =
+    useQuery<MarketDetailTradingOrderBookSnapshot | null>({
+      queryKey: ["marketDetailTradingOrderBook", currentTokenId],
+      queryFn:
+        async (): Promise<MarketDetailTradingOrderBookSnapshot | null> => {
+          if (!currentTokenId) return null;
+
+          const response = await fetch(
+            `https://clob.polymarket.com/book?token_id=${currentTokenId}`,
+            { headers: { Accept: "application/json" } }
+          );
+          if (!response.ok) return null;
+
+          const data = (await response.json()) as {
+            bids?: Array<{ price: string; size: string }>;
+            asks?: Array<{ price: string; size: string }>;
+            min_order_size?: string;
+            tick_size?: string;
+          };
+
+          return {
+            bids: data.bids || [],
+            asks: data.asks || [],
+            min_order_size: data.min_order_size || "1",
+            tick_size: data.tick_size || "0.01",
+          };
+        },
+      enabled: !!currentTokenId,
+      staleTime: 30000,
+    });
+
+  useEffect(() => {
+    if (orderBookData && currentTokenId) {
+      setOrderBookFromRest(
+        currentTokenId,
+        orderBookData.bids || [],
+        orderBookData.asks || []
+      );
+    }
+  }, [currentTokenId, orderBookData, setOrderBookFromRest]);
+
+  const websocketAssetIds = useMemo(
+    () => (currentTokenId ? [currentTokenId] : []),
+    [currentTokenId]
+  );
+  const { isConnected } = useOrderBookWebSocket(websocketAssetIds);
+
+  const storeOrderBook = useOrderBookFromStore(currentTokenId);
+
+  const { bestBid, bestAsk, tickSize, minOrderSize, orderBook } =
+    useMemo(() => {
+      const marketMinOrderSize =
+        Number.parseFloat(
+          String(market?.orderMinSize ?? market?.order_min_size ?? "1")
+        ) || 1;
+
+      if (storeOrderBook) {
+        return {
+          bestBid: storeOrderBook.bestBid ?? undefined,
+          bestAsk: storeOrderBook.bestAsk ?? undefined,
+          tickSize: orderBookData?.tick_size
+            ? Number.parseFloat(orderBookData.tick_size)
+            : 0.01,
+          minOrderSize: orderBookData?.min_order_size
+            ? Math.max(
+                marketMinOrderSize,
+                Number.parseFloat(orderBookData.min_order_size) || 1
+              )
+            : marketMinOrderSize,
+          orderBook: {
+            bids: storeOrderBook.bids,
+            asks: storeOrderBook.asks,
+          },
+        };
+      }
+
+      if (!orderBookData) {
+        return {
+          bestBid: undefined,
+          bestAsk: undefined,
+          tickSize: 0.01,
+          minOrderSize: marketMinOrderSize,
+          orderBook: undefined,
+        };
+      }
+
+      const bids = orderBookData.bids || [];
+      const asks = orderBookData.asks || [];
+      const sortedBids = [...bids].sort(
+        (a, b) => Number.parseFloat(b.price) - Number.parseFloat(a.price)
+      );
+      const sortedAsks = [...asks].sort(
+        (a, b) => Number.parseFloat(a.price) - Number.parseFloat(b.price)
+      );
+
+      return {
+        bestBid: sortedBids[0]
+          ? Number.parseFloat(sortedBids[0].price)
+          : undefined,
+        bestAsk: sortedAsks[0]
+          ? Number.parseFloat(sortedAsks[0].price)
+          : undefined,
+        tickSize: orderBookData.tick_size
+          ? Number.parseFloat(orderBookData.tick_size)
+          : 0.01,
+        minOrderSize: Math.max(
+          marketMinOrderSize,
+          orderBookData.min_order_size
+            ? Number.parseFloat(orderBookData.min_order_size) || 1
+            : 1
+        ),
+        orderBook: { bids, asks },
+      };
+    }, [
+      market?.orderMinSize,
+      market?.order_min_size,
+      orderBookData,
+      storeOrderBook,
+    ]);
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
         <PageBackground />
         <Navbar />
         <main className="px-4 md:px-6 lg:px-8 py-8 space-y-8">
-          {/* Back Button Skeleton */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -148,8 +363,6 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
           >
             <Skeleton className="h-10 w-32" />
           </motion.div>
-
-          {/* Market Header Skeleton */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -170,13 +383,8 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
               </div>
             </div>
           </motion.div>
-
-          {/* Separator */}
           <Skeleton className="h-px w-full" />
-
-          {/* Main Content Grid Skeleton */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Chart Skeleton */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -193,8 +401,6 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                 </CardContent>
               </Card>
             </motion.div>
-
-            {/* Trading Panel Skeleton */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -206,22 +412,16 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                   <Skeleton className="h-4 w-40" />
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Tabs Skeleton */}
                   <div className="flex gap-2">
                     <Skeleton className="h-10 flex-1" />
                     <Skeleton className="h-10 flex-1" />
                   </div>
-
-                  {/* Outcome Buttons Skeleton */}
                   <div className="space-y-2">
                     <Skeleton className="h-4 w-32" />
                     <Skeleton className="h-20 w-full" />
                     <Skeleton className="h-20 w-full" />
                   </div>
-
                   <Skeleton className="h-px w-full" />
-
-                  {/* Form Skeleton */}
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <Skeleton className="h-4 w-24" />
@@ -248,8 +448,6 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
               </Card>
             </motion.div>
           </div>
-
-          {/* Order Book Skeleton */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -304,80 +502,6 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
       </div>
     );
   }
-
-  const outcomes = market.outcomes ? JSON.parse(market.outcomes) : [];
-  const prices = market.outcomePrices ? JSON.parse(market.outcomePrices) : [];
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
-
-  // Calculate outcome-specific data
-  const outcomeData = outcomes.map((outcome: string, idx: number) => {
-    const price = prices[idx] ? Number.parseFloat(prices[idx]) : 0;
-    const probability = (price * 100).toFixed(0);
-    const change = ((Math.random() - 0.5) * 10).toFixed(1); // Mock change data
-    return {
-      name: outcome,
-      probability: Number.parseInt(probability, 10),
-      change: Number.parseFloat(change),
-      volume: market.volumeNum || market.volume || 0,
-      color:
-        idx === 0
-          ? "orange"
-          : idx === 1
-            ? "blue"
-            : idx === 2
-              ? "purple"
-              : "green",
-    };
-  });
-
-  // Prepare outcome data for trading form
-  const tradingOutcomes: OutcomeData[] = (() => {
-    // Get token IDs from tokens array (preferred) or clobTokenIds (fallback)
-    // The tokens array contains { token_id, outcome } for each outcome
-    const tokens = market.tokens || [];
-    const clobTokenIds = market.clobTokenIds
-      ? JSON.parse(market.clobTokenIds)
-      : [];
-
-    return outcomes.map((outcome: string, idx: number) => {
-      const price = prices[idx] ? Number.parseFloat(prices[idx]) : 0.5;
-
-      // Find token ID - priority: tokens array > clobTokenIds array
-      let tokenId = "";
-      if (tokens.length > 0) {
-        const token = tokens.find(
-          (t) => t.outcome?.toLowerCase() === outcome.toLowerCase()
-        );
-        tokenId = token?.token_id || "";
-      }
-      if (!tokenId && clobTokenIds.length > 0) {
-        tokenId = clobTokenIds[idx] || "";
-      }
-
-      return {
-        name: outcome,
-        tokenId,
-        price,
-        probability: price * 100,
-      };
-    });
-  })();
-
-  // Prepare token info for the chart
-  const chartColors = [
-    "hsl(25, 95%, 53%)", // Orange
-    "hsl(221, 83%, 53%)", // Blue
-    "hsl(280, 100%, 70%)", // Purple/Pink
-    "hsl(142, 76%, 36%)", // Green
-  ];
-  const chartTokens = tradingOutcomes.map((outcome, idx) => ({
-    tokenId: outcome.tokenId,
-    name: outcome.name,
-    color: chartColors[idx % chartColors.length],
-  }));
 
   return (
     <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
@@ -580,22 +704,23 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
             <ErrorBoundary name="Trading Form">
               <TradingForm
                 marketTitle={market.question}
-                tokenId={tradingOutcomes[selectedOutcome]?.tokenId || ""}
+                tokenId={currentTokenId}
                 outcomes={tradingOutcomes}
                 selectedOutcomeIndex={selectedOutcome}
                 onOutcomeChange={setSelectedOutcome}
                 negRisk={market.negRisk}
-                minOrderSize={
-                  Number.parseFloat(
-                    String(market.orderMinSize ?? market.order_min_size ?? "1")
-                  ) || 1
-                }
+                tickSize={tickSize}
+                minOrderSize={minOrderSize}
+                bestBid={bestBid}
+                bestAsk={bestAsk}
+                orderBook={orderBook}
                 onOrderSuccess={handleOrderSuccess}
                 onOrderError={handleOrderError}
                 marketImage={market.image}
                 yesProbability={
                   market.bestAsk ? Math.round(market.bestAsk * 100) : undefined
                 }
+                isLiveData={isConnected}
                 conditionId={market.conditionId}
               />
             </ErrorBoundary>
@@ -606,148 +731,133 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
         <div className="space-y-4">
           <h2 className="text-lg font-semibold">OUTCOME</h2>
           <div className="space-y-3">
-            {outcomeData.map(
-              (
-                outcome: {
-                  name: string;
-                  probability: number;
-                  volume: number;
-                  change: number;
-                  color: string;
-                },
-                idx: number
-              ) => (
-                <Card key={idx}>
-                  <CardContent className="p-4">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      {/* Left: Outcome info */}
-                      <div className="flex-1 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold">{outcome.name}</h3>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl font-bold">
-                              {outcome.probability}%
-                            </span>
-                            <div
-                              className={`flex items-center gap-1 text-sm ${
-                                outcome.change >= 0
-                                  ? "text-green-500"
-                                  : "text-red-500"
-                              }`}
-                            >
-                              <TrendingUp
-                                className={`h-4 w-4 ${
-                                  outcome.change < 0 ? "rotate-180" : ""
-                                }`}
-                              />
-                              <span>
-                                {outcome.change >= 0 ? "+" : ""}
-                                {outcome.change}%
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <span>{formatVolume(outcome.volume)} Vol.</span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() =>
-                                copyToClipboard(formatVolume(outcome.volume))
-                              }
-                              aria-label="Copy volume"
-                            >
-                              <Copy className="h-3 w-3" aria-hidden="true" />
-                            </Button>
-                          </div>
-                        </div>
+            {outcomeData.map((outcome, idx: number) => (
+              <Card key={idx}>
+                <CardContent className="p-4">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    {/* Left: Outcome info */}
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold">{outcome.name}</h3>
                       </div>
-
-                      {/* Right: Action buttons */}
-                      <div className="flex items-center gap-3">
-                        <Button
-                          type="button"
-                          size="lg"
-                          className={`bg-green-600 hover:bg-green-700 text-white min-w-[120px] transition-[background-color,box-shadow] duration-150 ${
-                            showOrderBook && selectedOutcome === idx
-                              ? "ring-2 ring-green-400 ring-offset-2 ring-offset-background"
-                              : ""
-                          }`}
-                          onClick={() => {
-                            if (showOrderBook && selectedOutcome === idx) {
-                              setShowOrderBook(false);
-                            } else {
-                              setSelectedOutcome(idx);
-                              setShowOrderBook(true);
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl font-bold">
+                            {outcome.probability}%
+                          </span>
+                          <div
+                            className={`flex items-center gap-1 text-sm ${
+                              outcome.change >= 0
+                                ? "text-green-500"
+                                : "text-red-500"
+                            }`}
+                          >
+                            <TrendingUp
+                              className={`h-4 w-4 ${
+                                outcome.change < 0 ? "rotate-180" : ""
+                              }`}
+                            />
+                            <span>
+                              {outcome.change >= 0 ? "+" : ""}
+                              {outcome.change}%
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span>{formatVolume(outcome.volume)} Vol.</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() =>
+                              copyToClipboard(formatVolume(outcome.volume))
                             }
-                          }}
-                        >
-                          Yes {formatPrice(prices[idx] || "0")}¢
-                        </Button>
-                        <Button
-                          type="button"
-                          size="lg"
-                          variant="destructive"
-                          className={`min-w-[120px] transition-[background-color,box-shadow] duration-150 ${
-                            showOrderBook && selectedOutcome === idx
-                              ? "ring-2 ring-red-400 ring-offset-2 ring-offset-background"
-                              : ""
-                          }`}
-                          onClick={() => {
-                            if (showOrderBook && selectedOutcome === idx) {
-                              setShowOrderBook(false);
-                            } else {
-                              setSelectedOutcome(idx);
-                              setShowOrderBook(true);
-                            }
-                          }}
-                        >
-                          No{" "}
-                          {formatPrice(
-                            (
-                              1 - Number.parseFloat(prices[idx] || "0")
-                            ).toString()
-                          )}
-                          ¢
-                        </Button>
+                            aria-label="Copy volume"
+                          >
+                            <Copy className="h-3 w-3" aria-hidden="true" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Order Book - Shown below this outcome when clicked (only for > 1 outcomes) */}
-                    {showOrderBook &&
-                      selectedOutcome === idx &&
-                      tradingOutcomes.length > 1 && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="mt-4 pt-4 border-t border-border"
-                        >
-                          <OrderBook
-                            outcomes={tradingOutcomes.map((o) => ({
-                              name: o.name,
-                              tokenId: o.tokenId,
-                              price: o.price,
-                            }))}
-                            defaultOutcomeIndex={selectedOutcome}
-                            maxLevels={4}
-                            onPriceClick={handlePriceClick}
-                            onOutcomeChange={(index) =>
-                              setSelectedOutcome(index)
-                            }
-                            defaultCollapsed={false}
-                            embedded
-                          />
-                        </motion.div>
-                      )}
-                  </CardContent>
-                </Card>
-              )
-            )}
+                    {/* Right: Action buttons */}
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        size="lg"
+                        className={`bg-green-600 hover:bg-green-700 text-white min-w-[120px] transition-[background-color,box-shadow] duration-150 ${
+                          showOrderBook && selectedOutcome === idx
+                            ? "ring-2 ring-green-400 ring-offset-2 ring-offset-background"
+                            : ""
+                        }`}
+                        onClick={() => {
+                          if (showOrderBook && selectedOutcome === idx) {
+                            setShowOrderBook(false);
+                          } else {
+                            setSelectedOutcome(idx);
+                            setShowOrderBook(true);
+                          }
+                        }}
+                      >
+                        Yes {formatPrice(prices[idx] || "0")}¢
+                      </Button>
+                      <Button
+                        type="button"
+                        size="lg"
+                        variant="destructive"
+                        className={`min-w-[120px] transition-[background-color,box-shadow] duration-150 ${
+                          showOrderBook && selectedOutcome === idx
+                            ? "ring-2 ring-red-400 ring-offset-2 ring-offset-background"
+                            : ""
+                        }`}
+                        onClick={() => {
+                          if (showOrderBook && selectedOutcome === idx) {
+                            setShowOrderBook(false);
+                          } else {
+                            setSelectedOutcome(idx);
+                            setShowOrderBook(true);
+                          }
+                        }}
+                      >
+                        No{" "}
+                        {formatPrice(
+                          (1 - Number.parseFloat(prices[idx] || "0")).toString()
+                        )}
+                        ¢
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Order Book - Shown below this outcome when clicked (only for > 1 outcomes) */}
+                  {showOrderBook &&
+                    selectedOutcome === idx &&
+                    tradingOutcomes.length > 1 && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="mt-4 pt-4 border-t border-border"
+                      >
+                        <OrderBook
+                          outcomes={tradingOutcomes.map((o) => ({
+                            name: o.name,
+                            tokenId: o.tokenId,
+                            price: o.price,
+                          }))}
+                          defaultOutcomeIndex={selectedOutcome}
+                          maxLevels={4}
+                          onPriceClick={handlePriceClick}
+                          onOutcomeChange={(index) => setSelectedOutcome(index)}
+                          defaultCollapsed={false}
+                          embedded
+                        />
+                      </motion.div>
+                    )}
+                </CardContent>
+              </Card>
+            ))}
           </div>
 
           {/* Trading Notice */}

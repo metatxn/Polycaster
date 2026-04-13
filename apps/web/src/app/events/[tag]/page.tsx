@@ -87,7 +87,6 @@ export default function TagEventsPage() {
     limit: 20,
     order: "volume24hr",
     ascending: false,
-    active: apiQueryParams.active,
     closed: apiQueryParams.closed,
     filters: serverFilterParams,
   });

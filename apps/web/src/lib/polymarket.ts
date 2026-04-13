@@ -8,6 +8,8 @@
  * that need to make direct HTTP calls to the CLOB API.
  */
 
+import Decimal from "decimal.js";
+
 export enum Side {
   BUY = "BUY",
   SELL = "SELL",
@@ -28,30 +30,35 @@ export enum SignatureType {
 }
 
 /**
- * Calculate potential profit/loss for an order
+ * Calculate potential profit/loss for an order.
+ * Uses Decimal.js internally to avoid floating-point rounding errors.
+ *
+ * BUY:  pay price×size USDC → receive `size` shares → if outcome wins, payout = size ($1/share)
+ * SELL: sell `size` shares at `price` → receive price×size USDC (gross, pre-fee)
  */
 export function calculatePotentialPnL(
   price: number,
   size: number,
   side: OrderSide
 ): { cost: number; potentialWin: number; potentialLoss: number } {
-  const cost = price * size;
+  const p = new Decimal(price);
+  const s = new Decimal(size);
 
   if (side === OrderSide.BUY) {
-    // Buying YES: pay price * size, win size if YES, lose cost if NO
+    const cost = p.mul(s);
     return {
-      cost,
-      potentialWin: size - cost, // Profit = payout - cost
-      potentialLoss: cost,
+      cost: cost.toNumber(),
+      potentialWin: s.sub(cost).toNumber(),
+      potentialLoss: cost.toNumber(),
     };
   }
-  // Selling YES (buying NO): pay (1-price) * size, win size if NO
-  const noPrice = 1 - price;
-  const noCost = noPrice * size;
+
+  // SELL: proceeds = price × size (selling tokens you own at current price)
+  const proceeds = p.mul(s);
   return {
-    cost: noCost,
-    potentialWin: size - noCost,
-    potentialLoss: noCost,
+    cost: proceeds.toNumber(),
+    potentialWin: proceeds.toNumber(),
+    potentialLoss: s.sub(proceeds).toNumber(),
   };
 }
 

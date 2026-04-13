@@ -1,8 +1,9 @@
-import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import { cache } from "react";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import type { Event } from "@/hooks/use-event-detail";
 import type { LeaderboardTrader } from "@/hooks/use-leaderboard";
+import { fetchGammaKeysetPage, toSlimGammaEvent } from "@/lib/gamma-keyset";
+import type { GammaEvent } from "@/types/gamma-api";
 
 /**
  * Server-side Cache Utilities using React.cache()
@@ -46,6 +47,7 @@ export interface InitialEvent {
 export interface InitialHomeData {
   events: InitialEvent[];
   totalResults: number;
+  hasMore: boolean;
 }
 
 export interface InitialLeaderboardData {
@@ -72,96 +74,26 @@ export const getInitialEvents = cache(
     try {
       const params = new URLSearchParams({
         limit: "20",
-        offset: "0",
-        active: "true",
-        archived: "false",
         closed: "false",
         order: "volume24hr",
         ascending: "false",
       });
 
-      const response = await fetch(
-        `${POLYMARKET_API.GAMMA.EVENTS_PAGINATION}?${params.toString()}`,
+      const page = await fetchGammaKeysetPage<GammaEvent>(
         {
-          headers: {
-            Accept: "application/json",
-          },
-          next: {
-            revalidate: CACHE_DURATION.EVENTS,
-          },
-        }
+          endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
+          params,
+          revalidate: CACHE_DURATION.EVENTS,
+        },
+        ["events", "data"]
       );
 
-      if (!response.ok) {
-        console.error("Failed to fetch initial events:", response.statusText);
-        return null;
-      }
-
-      const rawData = (await response.json()) as {
-        data?: Array<{
-          id: string;
-          slug: string;
-          title: string;
-          description?: string;
-          image?: string;
-          volume?: string;
-          volume24hr?: number | string;
-          volume1wk?: number | string;
-          volume1mo?: number | string;
-          volume1yr?: number | string;
-          liquidity?: number | string;
-          liquidityClob?: number | string;
-          active?: boolean;
-          closed?: boolean;
-          live?: boolean;
-          ended?: boolean;
-          competitive?: number;
-          enableNegRisk?: boolean;
-          negRiskAugmented?: boolean;
-          startDate?: string;
-          endDate?: string;
-          markets?: Array<{ id: string }>;
-          tags?: Array<string | { id?: string; slug?: string; label?: string }>;
-        }>;
-        pagination?: {
-          totalResults?: number;
-        };
-      };
-
-      // Performance: Strip down to only needed fields
-      const slimEvents =
-        rawData.data?.map((event) => ({
-          id: event.id,
-          slug: event.slug,
-          title: event.title,
-          description: event.description,
-          image: event.image,
-          volume: event.volume,
-          volume24hr: event.volume24hr,
-          volume1wk: event.volume1wk,
-          volume1mo: event.volume1mo,
-          volume1yr: event.volume1yr,
-          liquidity: event.liquidity,
-          liquidityClob: event.liquidityClob,
-          active: event.active,
-          closed: event.closed,
-          live: event.live,
-          ended: event.ended,
-          competitive: event.competitive,
-          negRisk: resolveNegRisk(event),
-          startDate: event.startDate,
-          endDate: event.endDate,
-          markets: event.markets?.map((m) => ({ id: m.id })),
-          tags: event.tags?.map((t) =>
-            typeof t === "string"
-              ? t
-              : { id: t.id, slug: t.slug, label: t.label }
-          ),
-        })) || [];
+      const slimEvents = page.items.map((event) => toSlimGammaEvent(event));
 
       return {
         events: slimEvents,
-        totalResults: rawData.pagination?.totalResults ?? slimEvents.length,
+        totalResults: slimEvents.length,
+        hasMore: Boolean(page.nextCursor),
       };
     } catch (error) {
       console.error("Error fetching initial events:", error);

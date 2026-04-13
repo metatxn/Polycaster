@@ -58,6 +58,7 @@ declare global {
       POLYMARKET_SEARCH_API_URL: string;
       POLYMARKET_TAGS_API_URL: string;
       POLYMARKET_EVENTS_API_URL: string;
+      POLYMARKET_EVENTS_KEYSET_API_URL: string;
       KALSHI_BASE_URL: string;
       KALSHI_EVENTS_API_URL: string;
       KALSHI_MARKETS_API_URL: string;

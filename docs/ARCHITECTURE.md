@@ -11,20 +11,20 @@ Knoww is a prediction-markets product built on top of Polymarket.
 It has two user-facing surfaces:
 
 - `apps/web`: the public web app at `knoww.app`, where users browse markets, view portfolios, inspect whale activity, and place trades.
-- `apps/extension`: a Chrome extension that injects relevant prediction-market cards into social feeds and can initiate trading flows from those pages.
+- `apps/extension`: a Chrome extension that injects relevant prediction-market cards into supported social, community, and editorial sites and can initiate trading flows from those pages.
 
 ### Who uses it
 
 - End users browsing prediction markets on the web app
 - Traders connecting Polygon wallets and placing Polymarket orders
-- Extension users reading X/Twitter, LinkedIn, Reddit, and Farcaster feeds and discovering related markets inline
+- Extension users reading X/Twitter, LinkedIn, Reddit, Farcaster, Bluesky, Discord, Hacker News, Stack Overflow, and crypto/news sites and discovering related markets inline
 
 ### Problems it solves
 
 - Makes Polymarket data easier to browse than Polymarket’s raw APIs
 - Adds web-app views that combine multiple upstream Polymarket APIs into a single UI
 - Hides sensitive builder-signing credentials behind first-party proxy routes
-- Lets users discover markets in-context on social platforms instead of manually searching
+- Lets users discover markets in-context on social, community, and editorial sites instead of manually searching
 
 ### Repository shape
 
@@ -72,9 +72,11 @@ flowchart LR
 | Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/notifications/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*` | Powers live sports markets, CLOB notifications, and browser-side price alerting around trading activity | Web data hooks, websocket managers, Polymarket CLOB |
 | API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI | Polymarket APIs, OpenRouter, builder signing service, Polygon RPC |
 | Web infra helpers | `apps/web/src/lib/*` | Caching, origin checks, auth helpers, websocket managers, server-side fetch memoization, RPC utilities, PostHog server capture | Cloudflare Worker runtime, browser, upstream APIs, PostHog |
-| Extension content runtime | `apps/extension/src/content/*` | Detects supported social platforms, extracts post text, ranks relevant markets, injects inline UI and trading panel | Background service worker, Knoww APIs, Polymarket APIs |
+| Web platform guards | `apps/web/src/middleware.ts`, `apps/web/instrumentation-client.ts` | Applies security headers/CSP and bootstraps browser-side telemetry | Browser, Next.js runtime, PostHog |
+| Extension content runtime | `apps/extension/src/content/*` | Detects supported sites, extracts post/article text, ranks relevant markets, and injects inline UI and trading panels | Background service worker, Knoww APIs, Polymarket APIs |
 | Extension background worker | `apps/extension/src/background.ts`, `apps/extension/src/background/*` | Central message router, auth token storage, batched analytics queue, CORS-safe fetch proxy, local NLP/embedding services | Content scripts, offscreen document, Knoww API, PostHog ingest route, Polymarket APIs |
 | Extension offscreen trading runtime | `apps/extension/src/offscreen/offscreen.ts`, `apps/extension/src/background/trading-handler.ts` | Hosts heavy trading dependencies (`ethers`, `ClobClient`) outside the MV3 service worker | Background worker, relayer, CLOB, Polygon RPC |
+| Extension options and preferences | `apps/extension/src/options.tsx`, `apps/extension/src/content/preferences.ts`, `apps/extension/src/types/settings.ts` | Manages per-user platform/source toggles, analytics preferences, theme overrides, and debug settings | Chrome storage, content runtime, background worker |
 | Shared market/contracts package | `packages/shared-types/src/*` | Single source of truth for Polymarket endpoints, contract addresses, auth constants, ABIs, and shared types | Web app and extension |
 | Deployment config | `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts`, `apps/web/next.config.ts` | Packages the Next.js app for Cloudflare Workers and R2-backed incremental cache | Cloudflare Workers, R2 |
 
@@ -84,11 +86,13 @@ flowchart LR
 | --- | --- | --- |
 | Home | `apps/web/src/app/page.tsx` | SSR first page of events using edge fetches from Polymarket |
 | Event listing by tag | `apps/web/src/app/events/[tag]/page.tsx` | Category/tag-driven event browsing |
+| Event detail | `apps/web/src/app/events/detail/[slug]/page.tsx` | Event-level market list and event metadata view |
 | Sports | `apps/web/src/app/events/sports/page.tsx` | Sports-specific event/market views |
 | Market detail | `apps/web/src/app/markets/[slug]/page.tsx` | Detailed market trading and order book UI |
 | Portfolio | `apps/web/src/app/portfolio/page.tsx` | Positions, orders, trades, P&L, deposit/withdraw |
 | Live | `apps/web/src/app/live/page.tsx` | Live and scheduled sports markets with websocket-backed game state |
 | Notifications | `apps/web/src/app/notifications/page.tsx` | CLOB account notifications and dismissal UX |
+| Search | `apps/web/src/app/search/page.tsx` | Client-side market discovery with recent-search persistence |
 | Whales | `apps/web/src/app/whales/page.tsx` | Whale activity and suspicious/insider activity analysis |
 | Leaderboard | `apps/web/src/app/leaderboard/page.tsx` | Trader leaderboard |
 | Profile | `apps/web/src/app/profile/[address]/page.tsx` | Public trader profile views |

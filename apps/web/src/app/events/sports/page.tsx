@@ -105,7 +105,6 @@ export default function SportsPage() {
     limit: 20,
     order: volumeOrderField,
     ascending: false,
-    active: apiQueryParams.active ?? true,
     closed: apiQueryParams.closed,
     tagSlug: effectiveTagSlug,
     filters: serverFilterParams,

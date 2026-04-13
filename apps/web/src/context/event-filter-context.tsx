@@ -122,9 +122,7 @@ interface EventFilterContextType {
   hasActiveFilters: boolean;
   // Server-side filter params for API
   serverFilterParams: EventFilterParams;
-  // API query params derived from filters
   apiQueryParams: {
-    active: boolean;
     closed: boolean;
     tagSlug?: string;
   };
@@ -232,23 +230,8 @@ export function EventFilterProvider({ children }: { children: ReactNode }) {
       params.liquidityMin = filters.liquidity;
     }
 
-    // Competitiveness (convert from 0-100 to 0-1)
-    if (filters.competitiveness.min > 0) {
-      params.competitiveMin = filters.competitiveness.min / 100;
-    }
-    if (filters.competitiveness.max < 100) {
-      params.competitiveMax = filters.competitiveness.max / 100;
-    }
-
-    // Live/Ended status
     if (filters.status.includes("live") && !filters.status.includes("active")) {
       params.live = true;
-    }
-    if (
-      filters.status.includes("ended") &&
-      !filters.status.includes("active")
-    ) {
-      params.ended = true;
     }
 
     // Date range filters
@@ -266,19 +249,15 @@ export function EventFilterProvider({ children }: { children: ReactNode }) {
     filters.volume24hr,
     filters.volumeWeekly,
     filters.liquidity,
-    filters.competitiveness,
     filters.status,
     filters.dateRange,
   ]);
 
-  // Compute API query params (active, closed, tagSlug)
   const apiQueryParams = useMemo(() => {
-    const params: { active: boolean; closed: boolean; tagSlug?: string } = {
-      active: filters.status.includes("active"),
+    const params: { closed: boolean; tagSlug?: string } = {
       closed: filters.status.includes("closed"),
     };
 
-    // If only one tag is selected, use it for server-side filtering
     if (filters.tagSlugs.length === 1) {
       params.tagSlug = filters.tagSlugs[0];
     }

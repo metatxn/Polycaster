@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Decimal from "decimal.js";
 import { useCallback, useMemo, useState } from "react";
 import type { Position } from "@/components/portfolio/types";
 import {
@@ -52,15 +53,11 @@ export function useSellPosition({
   const [shares, setShares] = useState<number>(position?.size ?? 0);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Get token ID for the position (we need to sell the token we own)
   const tokenId = useMemo(() => {
     if (!position) return "";
-    // The position should have the asset/tokenId from the market
-    // For Yes positions, we sell Yes tokens; for No positions, we sell No tokens
     return position.asset || "";
   }, [position]);
 
-  // Fetch order book for the position's token
   const { data: orderBookData, isLoading: isLoadingOrderBook } =
     useQuery<OrderBookData | null>({
       queryKey: ["orderBook", tokenId],
@@ -75,16 +72,15 @@ export function useSellPosition({
           asks?: Array<{ price: string; size: string }>;
         };
         return {
-          bids: data.bids || [],
-          asks: data.asks || [],
+          bids: Array.isArray(data?.bids) ? data?.bids : [],
+          asks: Array.isArray(data?.asks) ? data?.asks : [],
         };
       },
       enabled: !!tokenId,
-      staleTime: 5000, // Refresh every 5 seconds for fresh pricing
+      staleTime: 5000,
       refetchInterval: 5000,
     });
 
-  // Calculate estimated proceeds based on order book depth
   const sellEstimate = useMemo(() => {
     if (!orderBookData || shares <= 0) {
       return {
@@ -108,37 +104,41 @@ export function useSellPosition({
         };
       }
 
-      // Can't fully fill - use best bid as estimate
-      const bestBid = orderBookData.bids[0];
-      const bestBidPrice = bestBid ? Number.parseFloat(bestBid.price) : 0;
+      const bestBid = orderBookData.bids?.[0];
+      const bestBidPrice = bestBid
+        ? new Decimal(bestBid.price)
+        : new Decimal(0);
+      const estimatedProceeds = bestBidPrice.mul(shares);
       return {
         canFill: false,
-        estimatedPrice: bestBidPrice,
-        estimatedProceeds: shares * bestBidPrice,
+        estimatedPrice: bestBidPrice.toNumber(),
+        estimatedProceeds: estimatedProceeds.toNumber(),
         slippagePercent: 0,
       };
     } catch {
-      const bestBid = orderBookData.bids[0];
-      const bestBidPrice = bestBid ? Number.parseFloat(bestBid.price) : 0;
+      const bestBid = orderBookData.bids?.[0];
+      const bestBidPrice = bestBid
+        ? new Decimal(bestBid.price)
+        : new Decimal(0);
+      const estimatedProceeds = bestBidPrice.mul(shares);
       return {
         canFill: false,
-        estimatedPrice: bestBidPrice,
-        estimatedProceeds: shares * bestBidPrice,
+        estimatedPrice: bestBidPrice.toNumber(),
+        estimatedProceeds: estimatedProceeds.toNumber(),
         slippagePercent: 0,
       };
     }
   }, [orderBookData, shares, position?.currentPrice]);
 
-  // Best bid from order book
   const bestBid = useMemo(() => {
-    if (!orderBookData?.bids?.length) return undefined;
-    const sortedBids = [...orderBookData.bids].sort(
+    const bids = orderBookData?.bids ?? [];
+    if (!bids.length) return undefined;
+    const sortedBids = [...bids].sort(
       (a, b) => Number.parseFloat(b.price) - Number.parseFloat(a.price)
     );
     return Number.parseFloat(sortedBids[0].price);
   }, [orderBookData]);
 
-  // Handle shares change with bounds
   const handleSharesChange = useCallback(
     (delta: number) => {
       const maxShares = position?.size ?? 0;
@@ -147,14 +147,12 @@ export function useSellPosition({
     [position?.size]
   );
 
-  // Set shares to max (full position)
   const setMaxShares = useCallback(() => {
     if (position?.size) {
       setShares(position.size);
     }
   }, [position?.size]);
 
-  // Execute market sell order
   const executeSell = useCallback(async () => {
     if (!canTrade || !tokenId || shares <= 0) {
       const error = new Error("Cannot execute sell: missing requirements");
@@ -165,43 +163,45 @@ export function useSellPosition({
     setIsSubmitting(true);
 
     try {
-      // Calculate sell price with buffer (slightly below best bid for guaranteed fill)
       const tickSize = 0.01;
+      const buffer = new Decimal("0.995");
       let sellPrice: number;
 
       if (sellEstimate.canFill && sellEstimate.worstPrice) {
-        // Use worst price from slippage calculation with a small buffer
-        const priceWithBuffer = sellEstimate.worstPrice * 0.995;
-        sellPrice = Math.max(0.01, roundDownToTick(priceWithBuffer, tickSize));
+        const buffered = new Decimal(sellEstimate.worstPrice).mul(buffer);
+        sellPrice = Math.max(
+          0.01,
+          roundDownToTick(buffered.toNumber(), tickSize)
+        );
       } else if (bestBid) {
-        // Fallback to best bid with buffer
-        const priceWithBuffer = bestBid * 0.995;
-        sellPrice = Math.max(0.01, roundDownToTick(priceWithBuffer, tickSize));
+        const buffered = new Decimal(bestBid).mul(buffer);
+        sellPrice = Math.max(
+          0.01,
+          roundDownToTick(buffered.toNumber(), tickSize)
+        );
       } else {
-        // Last resort: use current price with buffer
-        const priceWithBuffer = (position?.currentPrice ?? 0.5) * 0.995;
-        sellPrice = Math.max(0.01, roundDownToTick(priceWithBuffer, tickSize));
+        const buffered = new Decimal(position?.currentPrice ?? 0.5).mul(buffer);
+        sellPrice = Math.max(
+          0.01,
+          roundDownToTick(buffered.toNumber(), tickSize)
+        );
       }
 
-      // Determine if this is a neg risk market
-      // We can check from the position's market data if available
-      const negRisk = false; // Default to false, can be enhanced if position has this info
+      const negRisk = false;
 
       const result = await createOrder({
         tokenId,
         price: sellPrice,
         size: shares,
         side: Side.SELL,
-        orderType: ClobOrderType.FAK, // Fill And Kill for market sell
+        orderType: ClobOrderType.FAK,
         negRisk,
       });
 
       if (result.success) {
-        // Invalidate and refetch queries aggressively
         if (proxyAddress) {
           clearBalanceCache(proxyAddress);
 
-          // Immediate invalidation - use exact: false to match all queries with this prefix
           await Promise.all([
             queryClient.invalidateQueries({
               queryKey: [PROXY_WALLET_QUERY_KEY],
@@ -221,7 +221,6 @@ export function useSellPosition({
             }),
           ]);
 
-          // Immediate refetch - force fresh data
           await Promise.all([
             queryClient.refetchQueries({
               queryKey: [PROXY_WALLET_QUERY_KEY],
@@ -233,8 +232,6 @@ export function useSellPosition({
             }),
           ]);
 
-          // Multiple delayed refetches to catch backend updates
-          // Polymarket's Data API can take 10-30 seconds to update positions
           const refetchAll = async () => {
             clearBalanceCache(proxyAddress);
             await Promise.all([
@@ -253,8 +250,6 @@ export function useSellPosition({
             ]);
           };
 
-          // More aggressive refetch schedule: 1s, 3s, 5s, 10s, 15s, 20s, 30s
-          // Polymarket's backend can be slow to update
           setTimeout(refetchAll, 1000);
           setTimeout(refetchAll, 3000);
           setTimeout(refetchAll, 5000);
@@ -293,13 +288,11 @@ export function useSellPosition({
     onSellError,
   ]);
 
-  // Reset shares when position changes
   const resetShares = useCallback(() => {
     setShares(position?.size ?? 0);
   }, [position?.size]);
 
   return {
-    // State
     shares,
     setShares,
     isLoading: isClobLoading || isLoadingOrderBook,
@@ -307,11 +300,9 @@ export function useSellPosition({
     error: clobError,
     canTrade,
 
-    // Estimates
     sellEstimate,
     bestBid,
 
-    // Actions
     handleSharesChange,
     setMaxShares,
     executeSell,

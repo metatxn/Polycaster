@@ -17,7 +17,6 @@ export interface FilterableEvent {
   endDate?: string;
   active?: boolean;
   closed?: boolean;
-  archived?: boolean;
   volume?: string;
   volume24hr?: number | string;
   volume1wk?: number | string;
@@ -44,7 +43,8 @@ interface FilteredEventsResponse {
   data?: FilterableEvent[];
   pagination?: {
     hasMore: boolean;
-    totalResults: number;
+    nextCursor?: string;
+    totalResults?: number;
   };
   error?: string;
 }
@@ -189,34 +189,18 @@ export function useFilteredEvents({
     }
   }, [filters.volumeWindow]);
 
-  // Build server-side filter params
   const serverParams = useMemo(() => {
     const params: Record<string, string> = {
       limit: limit.toString(),
       order: volumeOrderField,
-      ascending: "false", // Always sort by volume descending (highest first)
+      ascending: "false",
     };
 
-    // Server supports active/closed filtering
-    // We'll fetch a broader set and filter client-side for more complex status logic
-    const hasActiveOnly =
-      filters.status.length === 1 && filters.status.includes("active");
     const hasClosedOnly =
       filters.status.length === 1 && filters.status.includes("closed");
 
-    if (hasActiveOnly) {
-      params.active = "true";
-      params.closed = "false";
-    } else if (hasClosedOnly) {
-      params.active = "false";
-      params.closed = "true";
-    } else {
-      // Fetch all and filter client-side
-      params.active = "true";
-      params.closed = "false";
-    }
+    params.closed = hasClosedOnly ? "true" : "false";
 
-    // Tag filter - server supports single tag
     if (filters.tagSlugs.length === 1) {
       params.tag_slug = filters.tagSlugs[0];
     }
@@ -227,11 +211,14 @@ export function useFilteredEvents({
   // Fetch events from API
   const query = useInfiniteQuery({
     queryKey: ["filtered-events", serverParams, filters.volumeWindow],
-    queryFn: async ({ pageParam = 0 }) => {
+    queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         ...serverParams,
-        offset: pageParam.toString(),
       });
+
+      if (pageParam) {
+        params.set("after_cursor", pageParam);
+      }
 
       const response = await fetch(
         `/api/events/paginated?${params.toString()}`
@@ -249,14 +236,12 @@ export function useFilteredEvents({
 
       return {
         events: result.data || [],
-        nextOffset: result.pagination?.hasMore
-          ? pageParam + Number.parseInt(serverParams.limit, 10)
-          : undefined,
-        totalResults: result.pagination?.totalResults || 0,
+        nextCursor: result.pagination?.nextCursor,
+        totalResults: result.pagination?.totalResults,
       };
     },
-    getNextPageParam: (lastPage) => lastPage.nextOffset,
-    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    initialPageParam: "",
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
   });
@@ -318,11 +303,14 @@ export function useFilteredEventsWithViewMode(
   // Fetch events from the appropriate endpoint
   const query = useInfiniteQuery({
     queryKey: ["filtered-events", viewMode, baseLimit, filters.volumeWindow],
-    queryFn: async ({ pageParam = 0 }) => {
+    queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: baseLimit.toString(),
-        offset: pageParam.toString(),
       });
+
+      if (pageParam) {
+        params.set("after_cursor", pageParam);
+      }
 
       const response = await fetch(`${endpoint}?${params.toString()}`);
 
@@ -338,14 +326,12 @@ export function useFilteredEventsWithViewMode(
 
       return {
         events: result.data || [],
-        nextOffset: result.pagination?.hasMore
-          ? pageParam + baseLimit
-          : undefined,
-        totalResults: result.pagination?.totalResults || 0,
+        nextCursor: result.pagination?.nextCursor,
+        totalResults: result.pagination?.totalResults,
       };
     },
-    getNextPageParam: (lastPage) => lastPage.nextOffset,
-    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    initialPageParam: "",
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
   });

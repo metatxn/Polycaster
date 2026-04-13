@@ -163,6 +163,7 @@ let sessionRestoreAttempted = false;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const LIVE_PANEL_REFRESH_INTERVAL = 10000;
 let livePanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let livePanelRefreshEnabled = false;
 
 function trackPanelAnalytics(
   event: string,
@@ -206,6 +207,12 @@ function clearLivePanelRefreshTimer(): void {
     clearTimeout(livePanelRefreshTimer);
     livePanelRefreshTimer = null;
   }
+}
+
+function canRefreshLivePanel(): boolean {
+  return Boolean(
+    livePanelRefreshEnabled && activePanel?.isConnected && panelOpts
+  );
 }
 
 function normalizePrice(price: number, tick?: number): number {
@@ -399,7 +406,7 @@ function syncSelectedOutcomePrice(): void {
 }
 
 async function refreshLivePanelData(): Promise<void> {
-  if (!panelOpts || !activePanel) return;
+  if (!canRefreshLivePanel() || !panelOpts) return;
 
   const currentTokenId = panelOpts.tokenId;
   if (!currentTokenId) return;
@@ -448,15 +455,19 @@ async function refreshLivePanelData(): Promise<void> {
 
 function scheduleLivePanelRefresh(): void {
   clearLivePanelRefreshTimer();
-  if (!activePanel || !panelOpts) return;
+  if (!canRefreshLivePanel()) return;
 
   const run = async () => {
+    if (!canRefreshLivePanel()) {
+      clearLivePanelRefreshTimer();
+      return;
+    }
     try {
       await refreshLivePanelData();
     } catch {
       /* ignore live refresh errors */
     } finally {
-      if (activePanel && panelOpts) {
+      if (canRefreshLivePanel()) {
         livePanelRefreshTimer = setTimeout(run, LIVE_PANEL_REFRESH_INTERVAL);
       }
     }
@@ -4127,11 +4138,13 @@ export const TradingPanel = {
       anchor.parentNode?.insertBefore(panel, anchor.nextSibling);
     }
     activePanel = panel;
+    livePanelRefreshEnabled = true;
     applyOverflowOverrides(panel);
     scheduleLivePanelRefresh();
   },
 
   hide(): void {
+    livePanelRefreshEnabled = false;
     clearLivePanelRefreshTimer();
     if (settleTimer) {
       clearTimeout(settleTimer);

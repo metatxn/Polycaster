@@ -240,7 +240,9 @@ export function useTradingFormState({
     const total =
       orderType === "MARKET" && slippageResult
         ? slippageResult.totalNotional
-        : pnl.cost;
+        : orderSide === OrderSide.SELL
+          ? pnl.proceeds
+          : pnl.cost;
 
     return {
       price,

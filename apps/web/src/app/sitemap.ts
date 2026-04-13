@@ -3,6 +3,50 @@ import { POLYMARKET_API } from "@/constants/polymarket";
 import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
 
+const SITEMAP_REVALIDATE_SECONDS = 3600;
+const SITEMAP_PAGE_LIMIT = "100";
+
+async function fetchAllKeysetItems<T>(
+  endpoint: string,
+  params: URLSearchParams,
+  preferredKeys: Array<"data" | "events" | "markets">
+): Promise<T[]> {
+  const items: T[] = [];
+  let nextCursor: string | undefined;
+  const seenCursors = new Set<string>();
+
+  while (true) {
+    const pageParams = new URLSearchParams(params);
+    if (nextCursor) {
+      pageParams.set("after_cursor", nextCursor);
+    }
+
+    const page = await fetchGammaKeysetPage<T>(
+      {
+        endpoint,
+        params: pageParams,
+        revalidate: SITEMAP_REVALIDATE_SECONDS,
+      },
+      preferredKeys
+    );
+
+    if (page.items.length === 0) {
+      break;
+    }
+
+    items.push(...page.items);
+
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
+      break;
+    }
+
+    seenCursors.add(page.nextCursor);
+    nextCursor = page.nextCursor;
+  }
+
+  return items;
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = "https://knoww.app";
 
@@ -17,19 +61,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Fetch active markets for dynamic routes
   let marketRoutes: MetadataRoute.Sitemap = [];
   try {
-    const page = await fetchGammaKeysetPage<{ slug?: string }>(
-      {
-        endpoint: POLYMARKET_API.GAMMA.MARKETS_KEYSET,
-        params: new URLSearchParams({
-          closed: "false",
-          limit: "100",
-        }),
-        revalidate: 3600,
-      },
+    const markets = await fetchAllKeysetItems<{ slug?: string }>(
+      POLYMARKET_API.GAMMA.MARKETS_KEYSET,
+      new URLSearchParams({
+        closed: "false",
+        limit: SITEMAP_PAGE_LIMIT,
+      }),
       ["markets", "data"]
     );
 
-    marketRoutes = page.items
+    marketRoutes = markets
       .filter((m) => m.slug)
       .map((m) => ({
         url: `${baseUrl}/markets/${m.slug}`,
@@ -46,19 +87,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Fetch active events for dynamic routes
   let eventRoutes: MetadataRoute.Sitemap = [];
   try {
-    const page = await fetchGammaKeysetPage<{ slug?: string }>(
-      {
-        endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
-        params: new URLSearchParams({
-          closed: "false",
-          limit: "100",
-        }),
-        revalidate: 3600,
-      },
+    const events = await fetchAllKeysetItems<{ slug?: string }>(
+      POLYMARKET_API.GAMMA.EVENTS_KEYSET,
+      new URLSearchParams({
+        closed: "false",
+        limit: SITEMAP_PAGE_LIMIT,
+      }),
       ["events", "data"]
     );
 
-    eventRoutes = page.items
+    eventRoutes = events
       .filter((e) => e.slug)
       .map((e) => ({
         url: `${baseUrl}/events/detail/${e.slug}`,

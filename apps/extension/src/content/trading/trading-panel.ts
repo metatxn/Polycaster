@@ -418,6 +418,9 @@ async function refreshLivePanelData(): Promise<void> {
       : Promise.resolve(null),
   ]);
 
+  // Re-check after async operation - panel may have been hidden
+  if (!panelOpts || !activePanel) return;
+
   if (isBinary) {
     if (selectedOutcome === "yes") {
       yesPrice = getDisplayPriceFromOrderBook(currentBook, yesPrice);

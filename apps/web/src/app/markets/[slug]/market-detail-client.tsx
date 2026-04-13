@@ -89,9 +89,31 @@ interface MarketDetailTradingOrderBookSnapshot {
   tick_size: string;
 }
 
+/** Gamma API stores some fields as JSON strings; malformed data must not crash the page. */
+function safeParseStringArray(
+  raw: string | undefined,
+  field: string,
+  marketLabel: string
+): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((x) => String(x)) : [];
+  } catch {
+    console.warn(`Failed to parse ${field} for market ${marketLabel}:`, raw);
+    return [];
+  }
+}
+
+function numberArraysEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((value, idx) => value === b[idx]);
+}
+
 export default function MarketDetailClient({ slug }: { slug: string }) {
   const router = useRouter();
   const [selectedOutcome, setSelectedOutcome] = useState(0);
+  const [outcomeRangeChanges, setOutcomeRangeChanges] = useState<number[]>([]);
   // Track if order book is shown (only used when > 1 outcome)
   const [showOrderBook, setShowOrderBook] = useState(false);
 
@@ -103,20 +125,11 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
     if (!market) return [];
     const tokens = market.tokens || [];
 
-    // Safely parse clobTokenIds with try-catch to handle malformed JSON
-    let clobTokenIds: string[] = [];
-    if (market.clobTokenIds) {
-      try {
-        const parsed = JSON.parse(market.clobTokenIds);
-        clobTokenIds = Array.isArray(parsed) ? parsed : [];
-      } catch {
-        // Malformed JSON - fall back to empty array
-        console.warn(
-          `Failed to parse clobTokenIds for market ${market.slug || market.id}:`,
-          market.clobTokenIds
-        );
-      }
-    }
+    const clobTokenIds = safeParseStringArray(
+      market.clobTokenIds,
+      "clobTokenIds",
+      market.slug || market.id || "?"
+    );
 
     // Prefer token IDs from tokens array, fallback to clobTokenIds
     if (tokens.length > 0) {
@@ -150,24 +163,38 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   const outcomes = useMemo<string[]>(() => {
     if (!market?.outcomes) return [];
-    return JSON.parse(market.outcomes) as string[];
-  }, [market?.outcomes]);
+    return safeParseStringArray(
+      market.outcomes,
+      "outcomes",
+      market.slug || market.id || "?"
+    );
+  }, [market?.outcomes, market?.slug, market?.id]);
 
   const prices = useMemo<string[]>(() => {
     if (!market?.outcomePrices) return [];
-    return JSON.parse(market.outcomePrices) as string[];
-  }, [market?.outcomePrices]);
+    return safeParseStringArray(
+      market.outcomePrices,
+      "outcomePrices",
+      market.slug || market.id || "?"
+    );
+  }, [market?.outcomePrices, market?.slug, market?.id]);
+
+  const handleOutcomeRangeChanges = useCallback((changes: number[]) => {
+    setOutcomeRangeChanges((prev) =>
+      numberArraysEqual(prev, changes) ? prev : changes
+    );
+  }, []);
 
   const outcomeData = useMemo(() => {
     const volume = market?.volumeNum || market?.volume || 0;
     return outcomes.map((outcome: string, idx: number) => {
       const price = prices[idx] ? Number.parseFloat(prices[idx]) : 0;
       const probability = (price * 100).toFixed(0);
-      const change = ((Math.random() - 0.5) * 10).toFixed(1);
+      const change = outcomeRangeChanges[idx] ?? 0;
       return {
         name: outcome,
         probability: Number.parseInt(probability, 10),
-        change: Number.parseFloat(change),
+        change,
         volume,
         color:
           idx === 0
@@ -179,13 +206,21 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                 : "green",
       };
     });
-  }, [market?.volume, market?.volumeNum, outcomes, prices]);
+  }, [
+    market?.volume,
+    market?.volumeNum,
+    outcomeRangeChanges,
+    outcomes,
+    prices,
+  ]);
 
   const tradingOutcomes = useMemo<OutcomeData[]>(() => {
     const tokens = market?.tokens || [];
-    const clobTokenIds = market?.clobTokenIds
-      ? (JSON.parse(market.clobTokenIds) as string[])
-      : [];
+    const clobTokenIds = safeParseStringArray(
+      market?.clobTokenIds,
+      "clobTokenIds",
+      market?.slug || market?.id || "?"
+    );
 
     return outcomes.map((outcome: string, idx: number) => {
       const price = prices[idx] ? Number.parseFloat(prices[idx]) : 0.5;
@@ -208,7 +243,14 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
         probability: price * 100,
       };
     });
-  }, [market?.clobTokenIds, market?.tokens, outcomes, prices]);
+  }, [
+    market?.clobTokenIds,
+    market?.id,
+    market?.slug,
+    market?.tokens,
+    outcomes,
+    prices,
+  ]);
 
   // Prepare token info for the chart
   const chartColors = [
@@ -674,6 +716,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                     tokens={chartTokens}
                     outcomes={outcomes}
                     outcomePrices={prices.map((p: string) => p.toString())}
+                    onOutcomeRangeChanges={handleOutcomeRangeChanges}
                   />
                 </ErrorBoundary>
               </CardContent>

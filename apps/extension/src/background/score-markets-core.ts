@@ -97,10 +97,10 @@ export function createScoreMarkets({
     }
 
     const count = marketTexts.length;
-    const zero = new Array<number>(count).fill(0);
+    const createZeroScores = () => new Array<number>(count).fill(0);
     let usedEmbeddings = false;
-    let similarities = includeEmbeddings ? zero : [];
-    let bm25Scores = includeBm25 ? zero : [];
+    let similarities = includeEmbeddings ? createZeroScores() : [];
+    let bm25Scores = includeBm25 ? createZeroScores() : [];
 
     if (includeEmbeddings) {
       try {
@@ -114,7 +114,7 @@ export function createScoreMarkets({
         logWarn("scoring.embeddings-failed", {
           message: error instanceof Error ? error.message : String(error),
         });
-        similarities = zero;
+        similarities = createZeroScores();
       }
     }
 
@@ -125,7 +125,7 @@ export function createScoreMarkets({
         logWarn("scoring.bm25-failed", {
           message: error instanceof Error ? error.message : String(error),
         });
-        bm25Scores = zero;
+        bm25Scores = createZeroScores();
       }
     }
 

@@ -9,6 +9,10 @@ interface GammaKeysetPayload<T> {
   events?: T[];
   markets?: T[];
   next_cursor?: string;
+  count?: number | string;
+  total_count?: number | string;
+  total_results?: number | string;
+  totalResults?: number | string;
 }
 
 interface FetchGammaKeysetPageParams {
@@ -20,6 +24,7 @@ interface FetchGammaKeysetPageParams {
 export interface GammaKeysetPage<T> {
   items: T[];
   nextCursor?: string;
+  totalResults?: number;
 }
 
 export function toSlimGammaEvent(event: GammaEvent, fullMarkets = false) {
@@ -89,13 +94,41 @@ function extractItems<T>(
   return [];
 }
 
+function normalizeCount(
+  value: number | string | undefined
+): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function extractTotalResults<T>(
+  payload: GammaKeysetPayload<T>
+): number | undefined {
+  return (
+    normalizeCount(payload.total_results) ??
+    normalizeCount(payload.totalResults) ??
+    normalizeCount(payload.total_count) ??
+    normalizeCount(payload.count)
+  );
+}
+
 export async function fetchGammaKeysetPage<T>(
   { endpoint, params, revalidate }: FetchGammaKeysetPageParams,
   preferredKeys: KeysetItemKey[]
 ): Promise<GammaKeysetPage<T>> {
   const response = await fetch(`${endpoint}?${params.toString()}`, {
     headers: {
-      "Content-Type": "application/json",
+      Accept: "application/json",
     },
     next: { revalidate },
   });
@@ -109,6 +142,7 @@ export async function fetchGammaKeysetPage<T>(
   return {
     items: extractItems(payload, preferredKeys),
     nextCursor: payload.next_cursor,
+    totalResults: extractTotalResults(payload),
   };
 }
 
@@ -124,7 +158,7 @@ export async function resolveGammaTagId(
     `${POLYMARKET_API.GAMMA.BASE}/tags/slug/${encodeURIComponent(slug)}`,
     {
       headers: {
-        "Content-Type": "application/json",
+        Accept: "application/json",
       },
       next: { revalidate },
     }

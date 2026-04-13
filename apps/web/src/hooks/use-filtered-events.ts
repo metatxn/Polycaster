@@ -42,7 +42,6 @@ interface FilteredEventsResponse {
   success: boolean;
   data?: FilterableEvent[];
   pagination?: {
-    hasMore: boolean;
     nextCursor?: string;
     totalResults?: number;
   };

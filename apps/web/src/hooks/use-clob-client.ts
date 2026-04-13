@@ -156,11 +156,21 @@ export function useClobClient() {
           params.orderType === OrderType.FAK ||
           params.orderType === OrderType.FOK
         ) {
+          const buyAmount = params.amount;
+
+          if (params.side !== Side.SELL && buyAmount == null) {
+            throw new Error(
+              "BUY market orders require a notional amount (params.amount)"
+            );
+          }
+
           // BUY market orders use notional USDC amount; SELL market orders use shares.
           const marketAmount =
-            params.side === Side.SELL
-              ? params.size
-              : (params.amount ?? params.size);
+            params.side === Side.SELL ? params.size : buyAmount;
+
+          if (marketAmount == null) {
+            throw new Error("Failed to determine market order amount");
+          }
 
           const order = await client.createMarketOrder(
             {

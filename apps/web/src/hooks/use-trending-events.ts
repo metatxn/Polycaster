@@ -38,7 +38,7 @@ interface TrendingEventsResponse {
   pagination?: {
     hasMore: boolean;
     nextCursor?: string;
-    totalResults?: number;
+    totalResults: number;
   };
   error?: string;
 }
@@ -88,10 +88,15 @@ export function useTrendingEvents(
         throw new Error(result.error || "Failed to fetch trending events");
       }
 
+      const pagination = result.pagination ?? {
+        hasMore: false,
+        totalResults: 0,
+      };
+
       return {
         events: result.data || [],
-        nextCursor: result.pagination?.nextCursor,
-        totalResults: result.pagination?.totalResults,
+        nextCursor: pagination.nextCursor,
+        totalResults: pagination.totalResults ?? 0,
       };
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor,

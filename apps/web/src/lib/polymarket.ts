@@ -40,7 +40,12 @@ export function calculatePotentialPnL(
   price: number,
   size: number,
   side: OrderSide
-): { cost: number; potentialWin: number; potentialLoss: number } {
+): {
+  cost: number;
+  proceeds: number;
+  potentialWin: number;
+  potentialLoss: number;
+} {
   const p = new Decimal(price);
   const s = new Decimal(size);
 
@@ -48,16 +53,18 @@ export function calculatePotentialPnL(
     const cost = p.mul(s);
     return {
       cost: cost.toNumber(),
+      proceeds: 0,
       potentialWin: s.sub(cost).toNumber(),
       potentialLoss: cost.toNumber(),
     };
   }
 
-  // SELL: proceeds = price × size (selling tokens you own at current price)
+  // SELL orders do not spend capital; they realize immediate proceeds.
   const proceeds = p.mul(s);
   return {
-    cost: proceeds.toNumber(),
-    potentialWin: proceeds.toNumber(),
+    cost: 0,
+    proceeds: proceeds.toNumber(),
+    potentialWin: 0,
     potentialLoss: s.sub(proceeds).toNumber(),
   };
 }

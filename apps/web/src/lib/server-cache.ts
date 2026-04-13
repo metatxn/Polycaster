@@ -92,7 +92,7 @@ export const getInitialEvents = cache(
 
       return {
         events: slimEvents,
-        totalResults: slimEvents.length,
+        totalResults: page.totalResults ?? slimEvents.length,
         hasMore: Boolean(page.nextCursor),
       };
     } catch (error) {

@@ -76,7 +76,7 @@ exports.POLYMARKET_API = {
     BASE: "https://user-pnl-api.polymarket.com",
   },
   RELAYER: {
-    BASE: "https://relayer-v2.polymarket.com/",
+    BASE: "https://relayer-v2.polymarket.com",
   },
   STRAPI: {
     BASE: "https://strapi-matic.poly.market",

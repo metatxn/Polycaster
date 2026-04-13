@@ -63,18 +63,21 @@ function parseLevel(level: OrderBookLevel): ParsedLevel | null {
 }
 
 export function roundUpToTick(price: number, tickSize: number): number {
+  if (tickSize <= 0) throw new Error("tickSize must be positive");
   const p = new Decimal(price);
   const t = new Decimal(tickSize);
   return p.div(t).ceil().mul(t).toNumber();
 }
 
 export function roundDownToTick(price: number, tickSize: number): number {
+  if (tickSize <= 0) throw new Error("tickSize must be positive");
   const p = new Decimal(price);
   const t = new Decimal(tickSize);
   return p.div(t).floor().mul(t).toNumber();
 }
 
 export function roundToTick(price: number, tickSize: number): number {
+  if (tickSize <= 0) throw new Error("tickSize must be positive");
   const p = new Decimal(price);
   const t = new Decimal(tickSize);
   return p.div(t).round().mul(t).toNumber();

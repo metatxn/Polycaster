@@ -14,7 +14,7 @@ const marketsByTagSchema = z.object({
 
 /**
  * GET /api/markets/by-tag
- * Get markets filtered by tag_id (closed=false enforced).
+ * Get markets filtered by tag_id (closed defaults to false).
  */
 export async function GET(request: NextRequest) {
   const rateLimitResponse = checkRateLimit(request, {

@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
         pagination: {
           hasMore: Boolean(page.nextCursor),
           nextCursor: page.nextCursor,
+          totalResults: page.totalResults ?? 0,
         },
       },
       {

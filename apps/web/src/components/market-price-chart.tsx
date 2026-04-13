@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -46,9 +46,11 @@ interface MarketPriceChartProps {
   startDate?: string;
   /** Default time range selection (defaults to "ALL") */
   defaultTimeRange?: TimeRange;
+  /** Called when per-outcome price changes for the active time range are available */
+  onOutcomeRangeChanges?: (changes: number[]) => void;
 }
 
-type TimeRange = "1H" | "6H" | "1D" | "1W" | "1M" | "ALL";
+export type TimeRange = "1H" | "6H" | "1D" | "1W" | "1M" | "ALL";
 
 // Map time range to startTs offset (seconds ago from now)
 const timeRangeToStartTsOffset: Record<TimeRange, number> = {
@@ -116,6 +118,7 @@ export function MarketPriceChart({
   outcomes = [],
   outcomePrices = [],
   defaultTimeRange = "ALL",
+  onOutcomeRangeChanges,
 }: MarketPriceChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>(defaultTimeRange);
 
@@ -396,6 +399,41 @@ export function MarketPriceChart({
   }, [chartData]);
 
   const timeRanges: TimeRange[] = ["1H", "6H", "1D", "1W", "1M", "ALL"];
+
+  const outcomeRangeChanges = useMemo(() => {
+    if (!priceHistories || priceHistories.length === 0) {
+      return [];
+    }
+
+    const hasAnyData = priceHistories.some((ph) => ph.history.length > 0);
+    if (!hasAnyData) {
+      return [];
+    }
+
+    return priceHistories.map((ph, idx) => {
+      if (ph.history.length === 0) {
+        return 0;
+      }
+
+      const sortedHistory = [...ph.history].sort((a, b) => a.t - b.t);
+      const startPrice = sortedHistory[0]?.p;
+      const currentPrice = Number.parseFloat(outcomePrices[idx] ?? "");
+      const endPrice = Number.isFinite(currentPrice)
+        ? currentPrice
+        : sortedHistory[sortedHistory.length - 1]?.p;
+
+      if (!Number.isFinite(startPrice) || !Number.isFinite(endPrice)) {
+        return 0;
+      }
+
+      // Match Polymarket's whole-number badge behavior by truncating percentage points.
+      return Math.trunc((endPrice - startPrice) * 100);
+    });
+  }, [outcomePrices, priceHistories]);
+
+  useEffect(() => {
+    onOutcomeRangeChanges?.(outcomeRangeChanges);
+  }, [onOutcomeRangeChanges, outcomeRangeChanges]);
 
   return (
     <div className="space-y-4">

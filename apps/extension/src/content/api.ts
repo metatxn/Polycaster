@@ -15,6 +15,7 @@ import { HIGH_SIGNAL_TOKENS } from "./scoring-policy";
 // Cache for Polymarket tags
 let polymarketTagsCache: PolymarketTagsCache | null = null;
 let tagsLastFetched = 0;
+let polymarketTagsInFlight: Promise<PolymarketTagsCache | null> | null = null;
 
 // Cache for AI extraction results (both success and short-lived failures)
 interface AIExtractionCacheEntry {
@@ -585,40 +586,50 @@ async function fetchPolymarketTags(): Promise<PolymarketTagsCache | null> {
     return polymarketTagsCache;
   }
 
+  if (polymarketTagsInFlight) {
+    return polymarketTagsInFlight;
+  }
+
   if (!isExtensionContextValid()) {
     log("Extension context invalidated, cannot fetch tags");
     return polymarketTagsCache;
   }
 
-  try {
-    const url = `${POLYMARKET_TAGS_API_URL}?limit=500`;
-    const resp = await safeSendMessage({ type: "fetch-text", url });
+  polymarketTagsInFlight = (async () => {
+    try {
+      const url = `${POLYMARKET_TAGS_API_URL}?limit=500`;
+      const resp = await safeSendMessage({ type: "fetch-text", url });
 
-    if (resp?.ok && "text" in resp && resp.text) {
-      const tags = JSON.parse(resp.text) as PolymarketTag[];
-      const { keywordMap, keywordRegexMap } = buildTagKeywordMap(tags);
-      // MEMORY: Only store the derived maps needed for matching.
-      // The raw list, slugs Set, and labels Set are not used after building maps.
-      polymarketTagsCache = {
-        list: tags,
-        keywordMap,
-        keywordRegexMap,
-      };
-      tagsLastFetched = now;
-      log(
-        "Cached",
-        tags.length,
-        "Polymarket tags with",
-        keywordRegexMap.size,
-        "precompiled regexes"
-      );
-      return polymarketTagsCache;
+      if (resp?.ok && "text" in resp && resp.text) {
+        const tags = JSON.parse(resp.text) as PolymarketTag[];
+        const { keywordMap, keywordRegexMap } = buildTagKeywordMap(tags);
+        // MEMORY: Only store the derived maps needed for matching.
+        // The raw list, slugs Set, and labels Set are not used after building maps.
+        polymarketTagsCache = {
+          list: tags,
+          keywordMap,
+          keywordRegexMap,
+        };
+        tagsLastFetched = now;
+        log(
+          "Cached",
+          tags.length,
+          "Polymarket tags with",
+          keywordRegexMap.size,
+          "precompiled regexes"
+        );
+        return polymarketTagsCache;
+      }
+    } catch (e) {
+      log("Failed to fetch tags:", e);
+    } finally {
+      polymarketTagsInFlight = null;
     }
-  } catch (e) {
-    log("Failed to fetch tags:", e);
-  }
 
-  return polymarketTagsCache;
+    return polymarketTagsCache;
+  })();
+
+  return polymarketTagsInFlight;
 }
 
 /**

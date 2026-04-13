@@ -40,6 +40,7 @@ const activePostKeysByMarket = new Map<string, Set<string>>();
 const MAX_ACTIVE_POSTS_PER_MARKET = 3; // Allow same market on up to 3 active posts at once
 const MAX_CANDIDATES_PER_POST = 2; // Keep a small fallback pool per post without increasing render density
 const MAX_INJECTIONS_PER_BATCH = 3; // Keep feed-level UI density bounded
+const ANALYZE_BATCH_CONCURRENCY = 3;
 const POST_CANDIDATE_SCORE_GAP = 0.08; // Don't keep weak fallback candidates for a post
 const injectedIntoPosts = new WeakSet<Element>(); // Track which posts have cards
 const injectedMarkets: InjectedMarketEntry[] = []; // Track injected markets with WeakRef to DOM elements for notification stack
@@ -56,6 +57,15 @@ let cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
 let cardVisibilityObserver: IntersectionObserver | null = null;
 let notificationStackUpdateDebounce: ReturnType<typeof setTimeout> | null =
   null;
+const FEED_READY_MIN_POSTS = 1;
+const FEED_READY_CHECK_INTERVAL_MS = 250;
+const INITIAL_SCAN_IDLE_TIMEOUT_MS = 500;
+const QUEUED_POST_PROCESS_IDLE_TIMEOUT_MS = 250;
+const PERIODIC_QUEUE_DRAIN_IDLE_TIMEOUT_MS = 500;
+const PERIODIC_SCAN_IDLE_TIMEOUT_MS = 1000;
+const SCROLL_SCAN_IDLE_TIMEOUT_MS = 500;
+const RESUME_QUEUE_DRAIN_IDLE_TIMEOUT_MS = 250;
+const RESUME_INITIAL_SCAN_IDLE_TIMEOUT_MS = 500;
 
 const IGNORE_VISIBILITY_THRESHOLD_MS = 5000;
 const clickedMarketIds = new Set<string>();
@@ -1381,26 +1391,49 @@ function injectMarketCard(
 async function analyzeBatchSelections(
   posts: Array<{ post: Element; key: string | null }>
 ): Promise<BatchCandidateSelection[]> {
-  const selections: BatchCandidateSelection[] = [];
+  const { log } = window.KNOWW_UTILS;
+  const selections = new Array<BatchCandidateSelection | null>(
+    posts.length
+  ).fill(null);
+  let nextIndex = 0;
 
-  for (const { post, key } of posts) {
-    if (injectedIntoPosts.has(post)) continue;
+  const workerCount = Math.min(ANALYZE_BATCH_CONCURRENCY, posts.length);
+  if (workerCount === 0) return [];
 
-    const postKey = key ?? getPostIdentityKey(post);
-    if (!postKey) continue;
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
 
-    const result = await analyzePostAndFindMarket(post);
-    if (!result?.markets || result.markets.length === 0) continue;
+      if (currentIndex >= posts.length) return;
 
-    selections.push({
-      post,
-      postKey,
-      topics: result.topics,
-      markets: result.markets,
-    });
-  }
+      const { post, key } = posts[currentIndex];
+      if (injectedIntoPosts.has(post)) continue;
 
-  return selections;
+      const postKey = key ?? getPostIdentityKey(post);
+      if (!postKey) continue;
+
+      try {
+        const result = await analyzePostAndFindMarket(post);
+        if (!result?.markets || result.markets.length === 0) continue;
+
+        selections[currentIndex] = {
+          post,
+          postKey,
+          topics: result.topics,
+          markets: result.markets,
+        };
+      } catch (error) {
+        log("⚠️ [PostAnalyzer] analyzePostAndFindMarket failed:", error);
+      }
+    }
+  });
+
+  await Promise.all(workers);
+
+  return selections.filter(
+    (selection): selection is BatchCandidateSelection => selection !== null
+  );
 }
 
 /**
@@ -1926,7 +1959,10 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
       // Debounce processing
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        scheduleIdle(() => processQueuedPosts({ itemSelector }), 2000);
+        scheduleIdle(
+          () => processQueuedPosts({ itemSelector }),
+          QUEUED_POST_PROCESS_IDLE_TIMEOUT_MS
+        );
       }, 300);
     });
 
@@ -1943,7 +1979,10 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
     if (!feedReady) return;
     // Drain pending queue first to avoid starvation after tab hide/show.
     if (pendingPostsQueue.length > 0) {
-      scheduleIdle(() => processQueuedPosts({ itemSelector }), 1500);
+      scheduleIdle(
+        () => processQueuedPosts({ itemSelector }),
+        PERIODIC_QUEUE_DRAIN_IDLE_TIMEOUT_MS
+      );
       return;
     }
     // Skip if we recently saw mutations
@@ -1976,7 +2015,7 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
         log(`⏸️ [FeedWatcher] Tab hidden, skipping periodic scan`);
         return;
       }
-      scheduleIdle(runPeriodicScan, 3000);
+      scheduleIdle(runPeriodicScan, PERIODIC_SCAN_IDLE_TIMEOUT_MS);
     }, 20000); // Increased from 15s to 20s for better performance
   };
 
@@ -2021,7 +2060,10 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
       // Skip full scan if we already have queued posts to process
       if (pendingPostsQueue.length > 0 || isAnalyzing) return;
 
-      scheduleIdle(() => processVisiblePosts({ itemSelector }), 2000);
+      scheduleIdle(
+        () => processVisiblePosts({ itemSelector }),
+        SCROLL_SCAN_IDLE_TIMEOUT_MS
+      );
     }, 1000); // Increased from 750ms to 1000ms
   };
 
@@ -2066,12 +2108,18 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
 
     // Always attempt to drain queued posts on resume.
     if (pendingPostsQueue.length > 0) {
-      scheduleIdle(() => processQueuedPosts({ itemSelector }), 1000);
+      scheduleIdle(
+        () => processQueuedPosts({ itemSelector }),
+        RESUME_QUEUE_DRAIN_IDLE_TIMEOUT_MS
+      );
     }
 
     if (!initialScanDone) {
       // Run initial scan when we resume from a hidden state
-      scheduleIdle(() => processVisiblePosts({ itemSelector }), 3000);
+      scheduleIdle(
+        () => processVisiblePosts({ itemSelector }),
+        RESUME_INITIAL_SCAN_IDLE_TIMEOUT_MS
+      );
       initialScanDone = true;
     }
     log(`▶️ [FeedWatcher] Resumed watchers (tab visible)`);
@@ -2088,35 +2136,42 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
 
   // PERFORMANCE: Wait for feed to be ready before starting scans
   log(`👁️ [FeedWatcher] Waiting for feed to be ready...`);
-  waitForFeedReady(containerSelector, itemSelector, 10000, 500, 3).then(
-    (ready) => {
-      feedReady = true;
+  waitForFeedReady(
+    containerSelector,
+    itemSelector,
+    10000,
+    FEED_READY_CHECK_INTERVAL_MS,
+    FEED_READY_MIN_POSTS
+  ).then((ready) => {
+    feedReady = true;
 
-      if (ready) {
-        log(`✅ [FeedWatcher] Feed is ready! Starting scans...`);
-      } else {
-        log(`⚠️ [FeedWatcher] Feed ready timeout, starting scans anyway...`);
-      }
-
-      if (document.hidden) {
-        pauseWatchers();
-        return;
-      }
-
-      // Start the observer now that feed is ready
-      startObserver();
-
-      // Start periodic cleanup and scans
-      startCleanupInterval();
-      startPeriodicScan();
-      startScrollListener();
-
-      // Run initial scan
-      log(`🚀 [FeedWatcher] Running initial post scan`);
-      scheduleIdle(() => processVisiblePosts({ itemSelector }), 3000);
-      initialScanDone = true;
+    if (ready) {
+      log(`✅ [FeedWatcher] Feed is ready! Starting scans...`);
+    } else {
+      log(`⚠️ [FeedWatcher] Feed ready timeout, starting scans anyway...`);
     }
-  );
+
+    if (document.hidden) {
+      pauseWatchers();
+      return;
+    }
+
+    // Start the observer now that feed is ready
+    startObserver();
+
+    // Start periodic cleanup and scans
+    startCleanupInterval();
+    startPeriodicScan();
+    startScrollListener();
+
+    // Run initial scan
+    log(`🚀 [FeedWatcher] Running initial post scan`);
+    scheduleIdle(
+      () => processVisiblePosts({ itemSelector }),
+      INITIAL_SCAN_IDLE_TIMEOUT_MS
+    );
+    initialScanDone = true;
+  });
 
   log(`👁️ [FeedWatcher] ========== INITIALIZATION COMPLETE ==========\n`);
 

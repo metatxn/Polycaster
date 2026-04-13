@@ -100,6 +100,23 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (msg.type === "offscreen:scoring-prewarm") {
+      ensureScoringWarm()
+        .then(() => {
+          sendResponse({ ok: true, data: null });
+        })
+        .catch((err) => {
+          logWarn("offscreen.scoring-prewarm-failed", {
+            message: err instanceof Error ? err.message : String(err),
+          });
+          sendResponse({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      return true;
+    }
+
     if (msg.type === "offscreen:scoring") {
       if (!isScoreMarketsMessage(payload)) {
         sendResponse({ ok: false, error: "Invalid scoring payload type" });

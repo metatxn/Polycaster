@@ -25,6 +25,7 @@ import type {
   FetchTextMessage,
   ScoreMarketsMessage,
   ScoreMarketsSuccessResponse,
+  ScoringPrewarmMessage,
 } from "./types/chrome-messages";
 
 // ── Programmatic content script registration ──
@@ -44,7 +45,7 @@ async function registerContentScripts(): Promise<void> {
           id: CONTENT_SCRIPT_ID,
           matches: SUPPORTED_MATCH_PATTERNS,
           js: ["content.js"],
-          runAt: "document_idle",
+          runAt: "document_end",
         },
       ]);
     } else {
@@ -53,7 +54,7 @@ async function registerContentScripts(): Promise<void> {
           id: CONTENT_SCRIPT_ID,
           matches: SUPPORTED_MATCH_PATTERNS,
           js: ["content.js"],
-          runAt: "document_idle",
+          runAt: "document_end",
         },
       ]);
     }
@@ -139,6 +140,16 @@ function isScoreMarketsMessage(
   );
 }
 
+function isScoringPrewarmMessage(
+  message: unknown
+): message is ScoringPrewarmMessage {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as ScoringPrewarmMessage).type === "scoring:prewarm-offscreen"
+  );
+}
+
 function isScoreMarketsSuccessResponse(
   response: BackgroundResponse | { ok: false; error?: string }
 ): response is ScoreMarketsSuccessResponse {
@@ -218,7 +229,10 @@ function forwardToOffscreen(
 }
 
 async function sendOffscreenMessage(
-  offscreenType: "offscreen:trading" | "offscreen:scoring",
+  offscreenType:
+    | "offscreen:trading"
+    | "offscreen:scoring"
+    | "offscreen:scoring-prewarm",
   payload: unknown,
   tabId: number | undefined,
   attempt = 1
@@ -425,6 +439,24 @@ chrome.runtime.onMessage.addListener(
     // Pre-warm offscreen document so it's ready when the user places a trade
     if (msg?.type === "trading:prewarm-offscreen") {
       ensureOffscreen()
+        .then(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        )
+        .catch(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        );
+      return true;
+    }
+
+    if (isScoringPrewarmMessage(message)) {
+      void ensureOffscreen()
+        .then(() =>
+          sendOffscreenMessage(
+            "offscreen:scoring-prewarm",
+            message,
+            sender.tab?.id
+          )
+        )
         .then(() =>
           sendResponse({ ok: true, data: null } as BackgroundResponse)
         )

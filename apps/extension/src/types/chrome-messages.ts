@@ -31,6 +31,10 @@ export interface ScoreMarketsMessage {
   includeContextGate?: boolean;
 }
 
+export interface ScoringPrewarmMessage {
+  type: "scoring:prewarm-offscreen";
+}
+
 export interface ContextGateResult {
   pass: boolean;
   sharedNouns: number;
@@ -172,6 +176,7 @@ export type BackgroundMessage =
   | FetchTextMessage
   | FetchJsonMessage
   | ScoreMarketsMessage
+  | ScoringPrewarmMessage
   | TradingMessage
   | SigningResponseMessage
   | AnalyticsTrackMessage;

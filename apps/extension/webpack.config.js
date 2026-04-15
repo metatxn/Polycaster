@@ -5,6 +5,58 @@ const CopyPlugin = require("copy-webpack-plugin");
 
 require("dotenv").config();
 
+/**
+ * Extract a named `export const NAME: string[] = [...]` array from the
+ * supported-hosts.ts source without requiring a full TS compiler.
+ * Skips lines that are commented out (// prefix).
+ */
+function extractStringArray(tsSource, exportName) {
+  const pattern = new RegExp(
+    `export\\s+const\\s+${exportName}\\s*(?::\\s*string\\[\\])?\\s*=\\s*\\[([\\s\\S]*?)\\];`
+  );
+  const match = tsSource.match(pattern);
+  if (!match) {
+    throw new Error(`Could not extract ${exportName} from supported-hosts.ts`);
+  }
+  const items = [];
+  for (const line of match[1].split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("//")) continue;
+    const strMatch = trimmed.match(/"([^"]+)"/);
+    if (strMatch) items.push(strMatch[1]);
+  }
+  return items;
+}
+
+function readHostsFile() {
+  return fs.readFileSync(
+    path.resolve(__dirname, "src/supported-hosts.ts"),
+    "utf-8"
+  );
+}
+
+function buildHostPermissions(hostsSource, devMode) {
+  const sitePatterns = extractStringArray(
+    hostsSource,
+    "SUPPORTED_MATCH_PATTERNS"
+  );
+  const apiPatterns = extractStringArray(hostsSource, "API_HOST_PERMISSIONS");
+  const extra = devMode ? ["http://localhost/*"] : [];
+  const unique = [...new Set([...sitePatterns, ...apiPatterns, ...extra])];
+  unique.sort();
+  return unique;
+}
+
+function buildWarMatches(hostsSource) {
+  const sitePatterns = extractStringArray(
+    hostsSource,
+    "SUPPORTED_MATCH_PATTERNS"
+  );
+  const unique = [...new Set(sitePatterns)];
+  unique.sort();
+  return unique;
+}
+
 const transformersEntry = require.resolve("@huggingface/transformers");
 
 function findTransformersPackageRoot(startPath) {
@@ -62,6 +114,11 @@ module.exports = (_env, argv) => {
     },
     devtool: isProduction ? false : "cheap-module-source-map",
     module: {
+      parser: {
+        javascript: {
+          importMeta: false,
+        },
+      },
       rules: [
         {
           test: /ort-wasm-simd-threaded\.asyncify\.wasm$/i,
@@ -107,6 +164,36 @@ module.exports = (_env, argv) => {
       },
     },
     plugins: [
+      {
+        apply(compiler) {
+          const pluginName = "ReplaceImportMetaPlugin";
+          compiler.hooks.compilation.tap(pluginName, (compilation) => {
+            compilation.hooks.processAssets.tap(
+              {
+                name: pluginName,
+                stage:
+                  compiler.webpack.Compilation
+                    .PROCESS_ASSETS_STAGE_OPTIMIZE_SIZE,
+              },
+              (assets) => {
+                for (const [name, asset] of Object.entries(assets)) {
+                  if (!name.endsWith(".js")) continue;
+                  const source = asset.source().toString();
+                  if (!source.includes("import.meta")) continue;
+                  const replaced = source.replace(
+                    /\bimport\.meta/g,
+                    '({url:self.location?.href||""})'
+                  );
+                  compilation.updateAsset(
+                    name,
+                    new compiler.webpack.sources.RawSource(replaced)
+                  );
+                }
+              }
+            );
+          });
+        },
+      },
       new webpack.DefinePlugin({
         __DEV_MODE__: JSON.stringify(devMode),
         "process.env.NODE_DEBUG": JSON.stringify(""),
@@ -120,7 +207,23 @@ module.exports = (_env, argv) => {
       }),
       new CopyPlugin({
         patterns: [
-          { from: "manifest.json", to: "manifest.json" },
+          {
+            from: "manifest.json",
+            to: "manifest.json",
+            transform(content) {
+              const manifest = JSON.parse(content.toString());
+              const hostsSource = readHostsFile();
+              manifest.host_permissions = buildHostPermissions(
+                hostsSource,
+                devMode
+              );
+              if (manifest.web_accessible_resources?.[0]?.matches) {
+                manifest.web_accessible_resources[0].matches =
+                  buildWarMatches(hostsSource);
+              }
+              return JSON.stringify(manifest, null, 2) + "\n";
+            },
+          },
           { from: "options.html", to: "options.html" },
           { from: "styles.css", to: "styles.css" },
           { from: "icons", to: "icons" },

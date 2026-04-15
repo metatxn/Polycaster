@@ -7,6 +7,11 @@
  * When adding a new platform adapter, add its URL patterns here.
  * The content script itself still uses hostPatterns regexes for
  * fine-grained adapter detection at runtime.
+ *
+ * NOTE: These patterns are also consumed by webpack.config.js at build
+ * time to generate the manifest's `host_permissions` array (union of
+ * content-script sites + API domains). Keep this file importable by
+ * both TypeScript (background SW) and plain Node (webpack).
  */
 export const SUPPORTED_MATCH_PATTERNS: string[] = [
   // Twitter / X
@@ -63,9 +68,11 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://feddit.org/*",
   "https://lemm.ee/*",
 
-  // Threads
+  // Threads (.net redirects to .com but cover both for cached/slow redirects)
   "https://threads.com/*",
   "https://www.threads.com/*",
+  "https://threads.net/*",
+  "https://www.threads.net/*",
 
   // Bluesky
   "https://bsky.app/*",
@@ -116,4 +123,32 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://www.unchainedcrypto.com/*",
   "https://cryptopanic.com/*",
   "https://www.cryptopanic.com/*",
+];
+
+/**
+ * API domains the background service worker needs to reach directly.
+ * These are added to `host_permissions` in addition to the content-script
+ * site patterns so the browser enforces a scoped allowlist instead of
+ * the overly broad `<all_urls>`.
+ */
+export const API_HOST_PERMISSIONS: string[] = [
+  // Polymarket APIs
+  "https://gamma-api.polymarket.com/*",
+  "https://clob.polymarket.com/*",
+  "https://data-api.polymarket.com/*",
+  "https://relayer-v2.polymarket.com/*",
+  "https://user-pnl-api.polymarket.com/*",
+
+  // Polygon RPC
+  "https://polygon-bor-rpc.publicnode.com/*",
+
+  // Kalshi API
+  "https://api.elections.kalshi.com/*",
+
+  // Knoww backend
+  "https://knoww.app/*",
+
+  // HuggingFace model downloads (embedding model ONNX weights)
+  "https://huggingface.co/*",
+  "https://*.huggingface.co/*",
 ];

@@ -3,7 +3,11 @@ import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
-import { verifyExtensionAccessPreAuth } from "@/lib/extension-auth";
+import {
+  extensionCorsHeaders,
+  handleExtensionPreflight,
+  verifyExtensionAccessPreAuth,
+} from "@/lib/extension-auth";
 
 const AI_TIMEOUT_MS = 5000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -214,17 +218,30 @@ Is this market relevant to what the post is discussing?`,
   }
 }
 
+export async function OPTIONS(request: NextRequest) {
+  return handleExtensionPreflight(request);
+}
+
 export async function POST(request: NextRequest) {
+  const cors = extensionCorsHeaders(request);
+
   const authResponse = await verifyExtensionAccessPreAuth(
     request,
     "ai:validate"
   );
-  if (authResponse) return authResponse;
+  if (authResponse) {
+    for (const [k, v] of Object.entries(cors)) authResponse.headers.set(k, v);
+    return authResponse;
+  }
 
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 30,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) {
+    for (const [k, v] of Object.entries(cors))
+      rateLimitResponse.headers.set(k, v);
+    return rateLimitResponse;
+  }
 
   try {
     const body = (await request.json()) as {
@@ -241,7 +258,7 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json(
         { error: "Missing 'postText' or 'marketTitle'" },
-        { status: 400 }
+        { status: 400, headers: cors }
       );
     }
 
@@ -259,7 +276,7 @@ export async function POST(request: NextRequest) {
       body.marketTitle,
       tags
     );
-    return NextResponse.json(result, { status: 200 });
+    return NextResponse.json(result, { status: 200, headers: cors });
   } catch (error) {
     console.error("Validate relevance request error:", error);
     const isClientError =
@@ -272,7 +289,7 @@ export async function POST(request: NextRequest) {
         confidence: 0,
         error: isClientError ? "Invalid request body" : "Internal server error",
       },
-      { status: isClientError ? 400 : 500 }
+      { status: isClientError ? 400 : 500, headers: cors }
     );
   }
 }

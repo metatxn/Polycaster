@@ -3,7 +3,11 @@ import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
-import { verifyExtensionAccessPreAuth } from "@/lib/extension-auth";
+import {
+  extensionCorsHeaders,
+  handleExtensionPreflight,
+  verifyExtensionAccessPreAuth,
+} from "@/lib/extension-auth";
 
 const MAX_INPUT_CHARS = 500;
 const MIN_MEANINGFUL_CHARS = 20;
@@ -445,18 +449,30 @@ ${truncatedText}
   }
 }
 
+export async function OPTIONS(request: NextRequest) {
+  return handleExtensionPreflight(request);
+}
+
 export async function POST(request: NextRequest) {
+  const cors = extensionCorsHeaders(request);
+
   const authResponse = await verifyExtensionAccessPreAuth(
     request,
     "ai:extract"
   );
-  if (authResponse) return authResponse;
+  if (authResponse) {
+    for (const [k, v] of Object.entries(cors)) authResponse.headers.set(k, v);
+    return authResponse;
+  }
 
-  // Rate limit: 20 requests per minute (AI is expensive)
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 20,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) {
+    for (const [k, v] of Object.entries(cors))
+      rateLimitResponse.headers.set(k, v);
+    return rateLimitResponse;
+  }
 
   try {
     const body = (await request.json()) as { text?: string };
@@ -465,13 +481,14 @@ export async function POST(request: NextRequest) {
     if (!text || typeof text !== "string") {
       return NextResponse.json(
         { error: "Missing or invalid 'text' field" },
-        { status: 400 }
+        { status: 400, headers: cors }
       );
     }
 
     const extraction = await extractTopicsFromText(text);
     return NextResponse.json(extraction, {
       status: 200,
+      headers: cors,
     });
   } catch (error) {
     console.error("AI extraction request parse error:", error);
@@ -488,23 +505,31 @@ export async function POST(request: NextRequest) {
         fallbackReason: "provider-error",
         error: "Invalid request payload",
       }),
-      { status: 400 }
+      { status: 400, headers: cors }
     );
   }
 }
 
-// Also support GET for simple testing (rate limited same as POST)
 export async function GET(request: NextRequest) {
+  const cors = extensionCorsHeaders(request);
+
   const authResponse = await verifyExtensionAccessPreAuth(
     request,
     "ai:extract"
   );
-  if (authResponse) return authResponse;
+  if (authResponse) {
+    for (const [k, v] of Object.entries(cors)) authResponse.headers.set(k, v);
+    return authResponse;
+  }
 
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 20,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) {
+    for (const [k, v] of Object.entries(cors))
+      rateLimitResponse.headers.set(k, v);
+    return rateLimitResponse;
+  }
 
   const { searchParams } = new URL(request.url);
   const text = searchParams.get("text");
@@ -515,12 +540,13 @@ export async function GET(request: NextRequest) {
         error: "Missing 'text' query parameter",
         usage: "GET /api/ai/extract-topics?text=your+text+here",
       },
-      { status: 400 }
+      { status: 400, headers: cors }
     );
   }
 
   const extraction = await extractTopicsFromText(text);
   return NextResponse.json(extraction, {
     status: 200,
+    headers: cors,
   });
 }

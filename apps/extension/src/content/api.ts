@@ -10,6 +10,7 @@ import type {
   PolymarketTagsCache,
 } from "../types/market";
 import { KNOWW_CONFIG } from "./config";
+import { HIGH_SIGNAL_TOKENS } from "./scoring-policy";
 
 // Cache for Polymarket tags
 let polymarketTagsCache: PolymarketTagsCache | null = null;
@@ -159,6 +160,10 @@ const COMMON_WORDS = new Set([
   "would",
   "could",
   "should",
+  "can",
+  "may",
+  "might",
+  "must",
   "i",
   "me",
   "my",
@@ -194,7 +199,6 @@ const COMMON_WORDS = new Set([
   "when",
   "then",
   "than",
-  "just",
   "about",
   "over",
   "some",
@@ -208,6 +212,7 @@ const COMMON_WORDS = new Set([
   "last",
   "breaking",
   "update",
+  "updates",
   "thread",
   "viral",
   "trending",
@@ -224,13 +229,109 @@ const COMMON_WORDS = new Set([
   "world",
   "today",
   "major",
-  "every",
   "going",
   "think",
   "using",
   "weeks",
   "months",
   "years",
+  "global",
+  "track",
+  "prompt",
+  "announce",
+  "announced",
+  "announces",
+  "report",
+  "reports",
+  "reported",
+  "says",
+  "said",
+  "sources",
+  "according",
+  "official",
+  "new",
+  "now",
+  "because",
+  "poor",
+  "two",
+  "three",
+  "four",
+  "five",
+  "point",
+  "points",
+  "look",
+  "looks",
+  "great",
+  "good",
+  "bad",
+  "best",
+  "worst",
+  "need",
+  "needs",
+  "want",
+  "wants",
+  "get",
+  "got",
+  "getting",
+  "take",
+  "took",
+  "make",
+  "made",
+  "long",
+  "come",
+  "came",
+  "back",
+  "keep",
+  "same",
+  "way",
+  "well",
+  "real",
+  "big",
+  "many",
+  "part",
+  "whole",
+  "actually",
+  "opinion",
+  "prediction",
+  "odds",
+  "chance",
+  "likely",
+  "bet",
+  "betting",
+  "question",
+  "post",
+  "live",
+  "court",
+  "former",
+  "house",
+  "speaker",
+  "calls",
+  "calling",
+  "campaign",
+  "currently",
+  "accepting",
+  "donations",
+  "donation",
+  "fundraiser",
+  "page",
+  "reportedly",
+  "received",
+  "pledged",
+  "fraction",
+  "tiny",
+  "billion",
+  "million",
+  "launch",
+  "launching",
+  "celebration",
+  "anniversary",
+  "entered",
+  "travels",
+  "through",
+  "atmosphere",
+  "journey",
+  "ending",
+  "perfect",
 ]);
 
 /** Entity name pattern (capitalized multi-word names) */
@@ -563,45 +664,138 @@ function extractMatchingTags(
   return Array.from(merged).slice(0, 5);
 }
 
-/**
- * Basic keyword extraction
- * Uses module-scope COMMON_WORDS Set to avoid re-creation on each call.
- */
+// Scored keyword extraction: candidates are ranked by quality, not position.
+
+const MULTI_WORD_ENTITY_RE =
+  /\b([A-Z][a-z]+(?:\s+(?:of|the|and|for|in)\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g;
+const SHORT_CAPS_TOKEN_RE = /\b[A-Z][A-Z0-9]{1,5}\b/g;
+const CAMEL_HASHTAG_RE = /#([A-Z][a-z]+(?:[A-Z][a-z]+)+)/g;
+const DIGIT_HASHTAG_RE = /#([A-Za-z]+)(\d+)/g;
+
+const CANDIDATE_SCORE = {
+  multiWordEntity: 10,
+  highSignalToken: 9,
+  hashtag: 7,
+  titleCaseWord: 5,
+  longNoun: 3,
+} as const;
+
+interface KeywordCandidate {
+  term: string;
+  score: number;
+}
+
+function normalizeHashtag(raw: string): string {
+  const withoutHash = raw.startsWith("#") ? raw.slice(1) : raw;
+
+  const camelSplit = withoutHash.replace(/([a-z])([A-Z])/g, "$1 $2");
+  const digitSplit = camelSplit.replace(/([A-Za-z])(\d)/g, "$1 $2");
+  return digitSplit.toLowerCase();
+}
+
 function extractBasicKeywords(text: string): string {
   if (!text) return "";
 
-  const hashtags = (text.match(/#\w+/g) || [])
-    .map((tag) => tag.slice(1))
-    .filter((tag) => tag.length > 2)
-    .slice(0, 3);
-
-  const capitalizedWords = (text.match(/\b[A-Z][a-zA-Z]{2,}\b/g) || [])
-    .filter((word) => !COMMON_WORDS.has(word.toLowerCase()) && word.length > 2)
-    .slice(0, 4);
-
-  const cleanedText = text
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/[^\w\s]/g, " ");
-  const significantWords = cleanedText
-    .split(/\s+/)
-    .filter((word) => {
-      const lower = word.toLowerCase();
-      return (
-        word.length > 4 && !COMMON_WORDS.has(lower) && !word.match(/^\d+$/)
-      );
-    })
-    .slice(0, 4);
-
-  const allTerms = [...hashtags, ...capitalizedWords, ...significantWords];
+  const candidates: KeywordCandidate[] = [];
   const seen = new Set<string>();
-  const uniqueTerms = allTerms.filter((term) => {
-    const lower = term.toLowerCase();
-    if (seen.has(lower)) return false;
-    seen.add(lower);
-    return true;
-  });
 
-  return uniqueTerms.slice(0, 6).join(" ");
+  const addCandidate = (term: string, score: number): void => {
+    const key = term.toLowerCase().trim();
+    if (!key || key.length < 2 || seen.has(key)) return;
+    if (COMMON_WORDS.has(key)) return;
+    seen.add(key);
+    candidates.push({ term: key, score });
+  };
+
+  const cleanText = text
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u0060\u02BC]/g, "'")
+    .replace(/'s\b/gi, "")
+    .replace(/n't\b/gi, "")
+    .replace(/'[a-z]{1,2}\b/gi, "");
+
+  MULTI_WORD_ENTITY_RE.lastIndex = 0;
+  for (
+    let match = MULTI_WORD_ENTITY_RE.exec(cleanText);
+    match !== null;
+    match = MULTI_WORD_ENTITY_RE.exec(cleanText)
+  ) {
+    const phrase = match[1].trim();
+    const words = phrase.split(/\s+/);
+    const contentWords = words.filter(
+      (w) => !COMMON_WORDS.has(w.toLowerCase())
+    );
+    if (contentWords.length >= 2) {
+      addCandidate(phrase, CANDIDATE_SCORE.multiWordEntity);
+    }
+  }
+
+  SHORT_CAPS_TOKEN_RE.lastIndex = 0;
+  for (
+    let match = SHORT_CAPS_TOKEN_RE.exec(cleanText);
+    match !== null;
+    match = SHORT_CAPS_TOKEN_RE.exec(cleanText)
+  ) {
+    const token = match[0].toLowerCase();
+    if (HIGH_SIGNAL_TOKENS.has(token)) {
+      addCandidate(match[0], CANDIDATE_SCORE.highSignalToken);
+    }
+  }
+
+  const hashtags = cleanText.match(/#\w+/g) || [];
+  for (const tag of hashtags) {
+    const normalized = normalizeHashtag(tag);
+    if (normalized.length >= 2 && !COMMON_WORDS.has(normalized)) {
+      addCandidate(normalized, CANDIDATE_SCORE.hashtag);
+    }
+  }
+
+  CAMEL_HASHTAG_RE.lastIndex = 0;
+  for (
+    let match = CAMEL_HASHTAG_RE.exec(cleanText);
+    match !== null;
+    match = CAMEL_HASHTAG_RE.exec(cleanText)
+  ) {
+    addCandidate(normalizeHashtag(match[0]), CANDIDATE_SCORE.hashtag);
+  }
+
+  DIGIT_HASHTAG_RE.lastIndex = 0;
+  for (
+    let match = DIGIT_HASHTAG_RE.exec(cleanText);
+    match !== null;
+    match = DIGIT_HASHTAG_RE.exec(cleanText)
+  ) {
+    addCandidate(
+      `${match[1].toLowerCase()} ${match[2]}`,
+      CANDIDATE_SCORE.hashtag
+    );
+  }
+
+  const titleCaseWords = cleanText.match(/\b[A-Z][a-z]{2,}\b/g) || [];
+  for (const word of titleCaseWords) {
+    if (!ENTITY_EXCLUDE_WORDS.has(word)) {
+      addCandidate(word, CANDIDATE_SCORE.titleCaseWord);
+    }
+  }
+
+  const allWords = cleanText.replace(/[^\w\s]/g, " ").split(/\s+/);
+  for (const word of allWords) {
+    const lower = word.toLowerCase();
+    if (
+      word.length > 4 &&
+      !COMMON_WORDS.has(lower) &&
+      !/^\d+$/.test(word) &&
+      !HIGH_SIGNAL_TOKENS.has(lower)
+    ) {
+      addCandidate(word, CANDIDATE_SCORE.longNoun);
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates
+    .slice(0, 6)
+    .map((c) => c.term)
+    .join(" ");
 }
 
 interface AIExtractionResult {

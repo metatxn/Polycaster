@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "Node16",
+    "moduleResolution": "node16",
+    "outDir": "./.test-dist",
+    "rootDir": "../..",
+    "types": ["chrome"],
+    "sourceMap": false
+  },
+  "include": [
+    "src/content/scoring-policy.ts",
+    "src/background/score-markets-core.ts",
+    "src/types/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}

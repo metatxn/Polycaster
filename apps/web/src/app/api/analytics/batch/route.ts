@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import {
+  extensionCorsHeaders,
+  handleExtensionPreflight,
+} from "@/lib/extension-auth";
 import { logger } from "@/lib/logger";
 import {
   captureServerEvents,
@@ -97,12 +101,20 @@ const SENSITIVE_PROPERTY_KEYS = new Set([
  *       503:
  *         description: Analytics backend unavailable
  */
+export async function OPTIONS(request: NextRequest) {
+  return handleExtensionPreflight(request);
+}
+
 export async function POST(request: NextRequest) {
+  const cors = extensionCorsHeaders(request);
+
   const rateLimitResponse = checkRateLimit(request, {
     interval: 60 * 1000,
     uniqueTokenPerInterval: 30,
   });
   if (rateLimitResponse) {
+    for (const [k, v] of Object.entries(cors))
+      rateLimitResponse.headers.set(k, v);
     return rateLimitResponse;
   }
 
@@ -110,7 +122,7 @@ export async function POST(request: NextRequest) {
     logger.warn("analytics.batch.misconfigured");
     return NextResponse.json(
       { success: false, error: "Analytics backend is not configured" },
-      { status: 503 }
+      { status: 503, headers: cors }
     );
   }
 
@@ -120,7 +132,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json(
       { success: false, error: "Invalid JSON payload" },
-      { status: 400 }
+      { status: 400, headers: cors }
     );
   }
 
@@ -133,7 +145,7 @@ export async function POST(request: NextRequest) {
         error: "Invalid analytics payload",
         details: parsed.error.flatten().fieldErrors,
       },
-      { status: 400 }
+      { status: 400, headers: cors }
     );
   }
 
@@ -149,7 +161,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       { success: true, accepted: events.length },
-      { status: 202 }
+      { status: 202, headers: cors }
     );
   } catch (error) {
     logger.error("analytics.batch.failed", {
@@ -157,7 +169,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(
       { success: false, error: "Failed to capture analytics events" },
-      { status: 503 }
+      { status: 503, headers: cors }
     );
   }
 }

@@ -8,6 +8,16 @@ import type {
   Market,
   MarketSearchResult,
 } from "../types/market";
+import {
+  buildMarketGateText,
+  determineScoringMode,
+  evaluateCandidateGate,
+  FAIL_OPEN_FLOOR,
+  getEffectiveThreshold,
+  naiveContextGate,
+  type ScoringMode,
+  shouldFailOpen,
+} from "./scoring-policy";
 import { LRUSet, scheduleIdle } from "./utils";
 
 /**
@@ -25,8 +35,15 @@ interface InjectionPoint {
 // State management
 const analyzedPosts = new WeakSet<Element>();
 const injectedMarketIds = new Set<string>();
+const injectedPostMarketPairs = new Set<string>();
+const activePostKeysByMarket = new Map<string, Set<string>>();
+const MAX_ACTIVE_POSTS_PER_MARKET = 3; // Allow same market on up to 3 active posts at once
+const MAX_CANDIDATES_PER_POST = 2; // Keep a small fallback pool per post without increasing render density
+const MAX_INJECTIONS_PER_BATCH = 3; // Keep feed-level UI density bounded
+const POST_CANDIDATE_SCORE_GAP = 0.08; // Don't keep weak fallback candidates for a post
 const injectedIntoPosts = new WeakSet<Element>(); // Track which posts have cards
 const injectedMarkets: InjectedMarketEntry[] = []; // Track injected markets with WeakRef to DOM elements for notification stack
+const liveInjectedCardRefs = new Map<string, LiveInjectedCardRef>();
 let postsSinceLastInjection = 0;
 let totalPostsProcessed = 0;
 let isAnalyzing = false;
@@ -60,6 +77,30 @@ interface AnalysisResult {
   postText: string;
 }
 
+interface BatchCandidateSelection {
+  post: Element;
+  postKey: string;
+  topics: string[];
+  markets: MarketSearchResult[];
+}
+
+interface AllocatedInjection {
+  post: Element;
+  postKey: string;
+  topics: string[];
+  market: MarketSearchResult;
+}
+
+interface PendingPostEntry {
+  post: Element;
+  key: string | null;
+}
+
+interface LiveInjectedCardRef {
+  marketId: string;
+  cardRef: WeakRef<HTMLElement>;
+}
+
 function applyPlatformStyleVariables(
   element: HTMLElement,
   styles: Record<string, unknown> | null | undefined
@@ -85,10 +126,202 @@ function applyPlatformStyleVariables(
   }
 }
 
+function getCardTrackingKey(
+  card: HTMLElement | null,
+  marketId: string
+): string {
+  const postKey = card?.getAttribute("data-knoww-post-key");
+  return postKey ? getPostMarketPairKey(postKey, marketId) : marketId;
+}
+
+function getPostMarketPairKey(postKey: string, marketId: string): string {
+  return JSON.stringify([postKey, marketId]);
+}
+
+function getActivePostCountForMarket(marketId: string): number {
+  return activePostKeysByMarket.get(marketId)?.size ?? 0;
+}
+
+function isMarketInjectableForPost(postKey: string, marketId: string): boolean {
+  return (
+    !injectedPostMarketPairs.has(getPostMarketPairKey(postKey, marketId)) &&
+    getActivePostCountForMarket(marketId) < MAX_ACTIVE_POSTS_PER_MARKET
+  );
+}
+
+function selectTopCandidatesForPost(
+  candidates: MarketSearchResult[]
+): MarketSearchResult[] {
+  if (candidates.length === 0) return [];
+
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  const topScore = sorted[0].score;
+  const minimumScore = Math.max(0, topScore - POST_CANDIDATE_SCORE_GAP);
+
+  return sorted
+    .filter((entry) => entry.score >= minimumScore)
+    .slice(0, MAX_CANDIDATES_PER_POST);
+}
+
+function syncInjectedCardTrackingFromDom(): void {
+  injectedMarketIds.clear();
+  injectedPostMarketPairs.clear();
+  activePostKeysByMarket.clear();
+  const liveTrackingKeys = new Set<string>();
+
+  for (const [trackingKey, entry] of Array.from(
+    liveInjectedCardRefs.entries()
+  )) {
+    const card = entry.cardRef.deref();
+    if (!card?.isConnected) {
+      liveInjectedCardRefs.delete(trackingKey);
+      continue;
+    }
+
+    const marketId =
+      card.getAttribute("data-knoww-market-id") || entry.marketId;
+    if (!marketId) continue;
+
+    injectedMarketIds.add(marketId);
+    liveTrackingKeys.add(trackingKey);
+
+    const postKey = card.getAttribute("data-knoww-post-key");
+    if (!postKey) continue;
+
+    injectedPostMarketPairs.add(trackingKey);
+
+    let activePosts = activePostKeysByMarket.get(marketId);
+    if (!activePosts) {
+      activePosts = new Set<string>();
+      activePostKeysByMarket.set(marketId, activePosts);
+    }
+    activePosts.add(postKey);
+  }
+
+  for (const marketId of Array.from(clickedMarketIds)) {
+    if (!injectedMarketIds.has(marketId)) {
+      clickedMarketIds.delete(marketId);
+    }
+  }
+
+  for (const trackingKey of Array.from(cardFirstVisibleAt.keys())) {
+    if (
+      !liveTrackingKeys.has(trackingKey) &&
+      !injectedMarketIds.has(trackingKey)
+    ) {
+      cardFirstVisibleAt.delete(trackingKey);
+    }
+  }
+}
+
+function allocateBatchInjections(
+  selections: BatchCandidateSelection[]
+): AllocatedInjection[] {
+  if (selections.length === 0) return [];
+
+  syncInjectedCardTrackingFromDom();
+
+  const orderedSelections = [...selections].sort(
+    (a, b) => (b.markets[0]?.score ?? 0) - (a.markets[0]?.score ?? 0)
+  );
+
+  const planned: AllocatedInjection[] = [];
+  const plannedPostMarketPairs = new Set<string>();
+  const plannedActiveCounts = new Map<string, number>();
+
+  for (const [marketId, activePosts] of activePostKeysByMarket.entries()) {
+    plannedActiveCounts.set(marketId, activePosts.size);
+  }
+
+  for (const selection of orderedSelections) {
+    if (planned.length >= MAX_INJECTIONS_PER_BATCH) break;
+
+    const chosenMarket = selection.markets.find(({ market }) => {
+      const pairKey = getPostMarketPairKey(selection.postKey, market.id);
+      if (plannedPostMarketPairs.has(pairKey)) return false;
+      if (!isMarketInjectableForPost(selection.postKey, market.id))
+        return false;
+
+      return (
+        (plannedActiveCounts.get(market.id) ??
+          getActivePostCountForMarket(market.id)) < MAX_ACTIVE_POSTS_PER_MARKET
+      );
+    });
+
+    if (!chosenMarket) continue;
+
+    const chosenPairKey = getPostMarketPairKey(
+      selection.postKey,
+      chosenMarket.market.id
+    );
+    plannedPostMarketPairs.add(chosenPairKey);
+    plannedActiveCounts.set(
+      chosenMarket.market.id,
+      (plannedActiveCounts.get(chosenMarket.market.id) ??
+        getActivePostCountForMarket(chosenMarket.market.id)) + 1
+    );
+
+    planned.push({
+      post: selection.post,
+      postKey: selection.postKey,
+      topics: selection.topics,
+      market: chosenMarket,
+    });
+  }
+
+  return planned;
+}
+
+const cooldownPendingPosts: PendingPostEntry[] = [];
+
+function enqueueCooldownPendingPosts(posts: PendingPostEntry[]): number {
+  let added = 0;
+
+  for (const entry of posts) {
+    if (!entry.post.isConnected) continue;
+
+    const exists = entry.key
+      ? cooldownPendingPosts.some((pending) => pending.key === entry.key)
+      : cooldownPendingPosts.some((pending) => pending.post === entry.post);
+
+    if (exists) continue;
+
+    cooldownPendingPosts.push(entry);
+    added++;
+  }
+
+  return added;
+}
+
+function dequeueCooldownPendingPosts(itemSelector: string): PendingPostEntry[] {
+  const drained = cooldownPendingPosts.splice(0, cooldownPendingPosts.length);
+  const ready: PendingPostEntry[] = [];
+
+  for (const entry of drained) {
+    const { post, key } = entry;
+    if (!post.isConnected) continue;
+
+    const parentPost = post.parentElement?.closest(itemSelector);
+    if (parentPost && parentPost !== post) continue;
+
+    if (key && processedPostKeys.has(key)) continue;
+    if (analyzedPosts.has(post)) continue;
+
+    ready.push(entry);
+  }
+
+  return ready;
+}
+
 async function scoreMarketsBatch(
   postText: string,
   marketTexts: string[],
-  gateTexts: string[]
+  gateTexts: string[],
+  features: {
+    includeEmbeddings?: boolean;
+    includeBm25?: boolean;
+    includeContextGate?: boolean;
+  } = {}
 ): Promise<{
   similarities: number[];
   bm25Scores: number[];
@@ -96,15 +329,21 @@ async function scoreMarketsBatch(
   usedEmbeddings: boolean;
   source: "offscreen" | "fallback";
 }> {
+  const {
+    includeEmbeddings = true,
+    includeBm25 = true,
+    includeContextGate = true,
+  } = features;
+
   try {
     const response = await chrome.runtime.sendMessage({
       type: "score-markets",
       postText,
       marketTexts,
       gateTexts,
-      includeEmbeddings: true,
-      includeBm25: true,
-      includeContextGate: true,
+      includeEmbeddings,
+      includeBm25,
+      includeContextGate,
     });
 
     if (
@@ -128,104 +367,15 @@ async function scoreMarketsBatch(
   }
 
   const fallbackScores = new Array<number>(marketTexts.length).fill(0);
+  const fallbackGateResults: ContextGateResult[] = includeContextGate
+    ? gateTexts.map((gateText) => naiveContextGate(postText, gateText))
+    : [];
   return {
     similarities: fallbackScores,
     bm25Scores: fallbackScores,
-    contextGateResults: marketTexts.map((mt) => {
-      const naive = naiveContextGate(postText, mt);
-      return {
-        pass: naive.pass,
-        sharedNouns: naive.sharedLemmas,
-        meaningfulNouns: naive.sharedLemmas,
-        sharedEntities: naive.sharedEntities,
-        details: "fallback-failed",
-      };
-    }),
+    contextGateResults: fallbackGateResults,
     usedEmbeddings: false,
     source: "fallback",
-  };
-}
-
-const CONTEXT_STOP_WORDS = new Set([
-  "will",
-  "what",
-  "when",
-  "where",
-  "which",
-  "who",
-  "why",
-  "how",
-  "this",
-  "that",
-  "with",
-  "from",
-  "have",
-  "has",
-  "about",
-  "into",
-  "your",
-  "their",
-  "there",
-  "would",
-  "could",
-  "should",
-  "after",
-  "before",
-  "under",
-  "over",
-  "than",
-  "then",
-  "them",
-  "they",
-  "just",
-  "very",
-  "more",
-  "most",
-  "also",
-  "news",
-  "post",
-  "thread",
-]);
-
-function naiveContextGate(
-  postText: string,
-  marketText: string
-): { pass: boolean; sharedLemmas: number; sharedEntities: number } {
-  const toTokens = (text: string): Set<string> =>
-    new Set(
-      text
-        .toLowerCase()
-        .replace(/https?:\/\/\S+/g, " ")
-        .replace(/[^\p{L}\p{N}\s]/gu, " ")
-        .split(/\s+/)
-        .filter((t) => t.length >= 3 && !CONTEXT_STOP_WORDS.has(t))
-    );
-
-  const postTokens = toTokens(postText);
-  const marketTokens = toTokens(marketText);
-  let sharedLemmas = 0;
-  for (const t of postTokens) {
-    if (marketTokens.has(t)) sharedLemmas++;
-  }
-
-  const extractEntities = (text: string): Set<string> =>
-    new Set(
-      (text.match(/\b[A-Z][a-zA-Z]{2,}\b/g) || [])
-        .map((w) => w.toLowerCase())
-        .filter((w) => !CONTEXT_STOP_WORDS.has(w))
-    );
-
-  const postEntities = extractEntities(postText);
-  const marketEntities = extractEntities(marketText);
-  let sharedEntities = 0;
-  for (const e of postEntities) {
-    if (marketEntities.has(e)) sharedEntities++;
-  }
-
-  return {
-    pass: sharedLemmas >= 2 || sharedEntities >= 1,
-    sharedLemmas,
-    sharedEntities,
   };
 }
 
@@ -336,7 +486,13 @@ function ensureCardVisibilityObserver(): void {
 
       const marketIndex = new Map<string, number>();
       for (let i = 0; i < injectedMarkets.length; i++) {
-        marketIndex.set(injectedMarkets[i].market.id, i);
+        const trackedCard = injectedMarkets[i].cardRef?.deref?.();
+        if (!trackedCard?.isConnected) continue;
+
+        const trackedMarketId =
+          trackedCard.getAttribute("data-knoww-market-id") ||
+          injectedMarkets[i].market.id;
+        marketIndex.set(getCardTrackingKey(trackedCard, trackedMarketId), i);
       }
 
       for (const observerEntry of entries) {
@@ -344,7 +500,8 @@ function ensureCardVisibilityObserver(): void {
         const marketId = card?.getAttribute?.("data-knoww-market-id");
         if (!marketId) continue;
 
-        const idx = marketIndex.get(marketId);
+        const trackingKey = getCardTrackingKey(card, marketId);
+        const idx = marketIndex.get(trackingKey);
         if (idx === undefined) continue;
 
         const tracked = injectedMarkets[idx];
@@ -361,13 +518,13 @@ function ensureCardVisibilityObserver(): void {
 
         if (isInViewport) {
           tracked.lastVisibleAt = Date.now();
-          if (!cardFirstVisibleAt.has(marketId)) {
-            cardFirstVisibleAt.set(marketId, Date.now());
+          if (!cardFirstVisibleAt.has(trackingKey)) {
+            cardFirstVisibleAt.set(trackingKey, Date.now());
           }
         }
 
         if (wasInViewport && !isInViewport) {
-          const firstSeen = cardFirstVisibleAt.get(marketId);
+          const firstSeen = cardFirstVisibleAt.get(trackingKey);
           if (
             firstSeen &&
             Date.now() - firstSeen >= IGNORE_VISIBILITY_THRESHOLD_MS &&
@@ -380,7 +537,7 @@ function ensureCardVisibilityObserver(): void {
               visibleDurationMs: Date.now() - firstSeen,
             });
           }
-          cardFirstVisibleAt.delete(marketId);
+          cardFirstVisibleAt.delete(trackingKey);
         }
       }
 
@@ -452,9 +609,9 @@ async function analyzePostAndFindMarket(
 
   // --- BATCH SCORING WITH EMBEDDINGS + BM25 ---
   let marketScores: number[] = [];
-  let usedEmbeddings = false;
   let contextGateResults: ContextGateResult[] = [];
   let marketTexts: string[] = [];
+  let scoringMode: ScoringMode = "heuristic";
   try {
     marketTexts = markets.map((m) => {
       let rich = m.title || "";
@@ -468,18 +625,19 @@ async function analyzePostAndFindMarket(
       return rich;
     });
 
-    const gateTexts = markets.map((m) => {
-      let gateText = m.title || "";
-      if (m.description) gateText += ` ${m.description.slice(0, 120)}`;
-      return gateText;
-    });
+    const gateTexts = markets.map((market) => buildMarketGateText(market));
 
     const scoring = await scoreMarketsBatch(text, marketTexts, gateTexts);
-    usedEmbeddings = scoring.usedEmbeddings;
     contextGateResults = scoring.contextGateResults;
 
-    if (usedEmbeddings) {
-      const hasBm25Signal = scoring.bm25Scores.some((score) => score > 0);
+    const hasBm25Signal = scoring.bm25Scores.some((s) => s > 0);
+    scoringMode = determineScoringMode({
+      usedEmbeddings: scoring.usedEmbeddings,
+      bm25Scores: scoring.bm25Scores,
+      source: scoring.source,
+    });
+
+    if (scoringMode === "hybrid") {
       const SEMANTIC_WEIGHT = hasBm25Signal ? 0.7 : 1;
       const BM25_WEIGHT = hasBm25Signal ? 0.3 : 0;
       marketScores = scoring.similarities.map((emb, i) => {
@@ -488,10 +646,10 @@ async function analyzePostAndFindMarket(
       });
       log(
         hasBm25Signal
-          ? "🧠 Hybrid scoring succeeded —"
-          : "🧠 Embedding scoring succeeded (BM25 unavailable) —",
+          ? "🧠 Hybrid scoring —"
+          : "🧠 Embedding scoring (BM25 unavailable) —",
         marketTexts.length,
-        hasBm25Signal ? "markets scored (embedding + BM25)" : "markets scored"
+        "markets scored"
       );
       if (isDebug) {
         const scored = marketTexts.map((title, i) => ({
@@ -503,15 +661,33 @@ async function analyzePostAndFindMarket(
         scored.sort((a, b) => parseFloat(b.combined) - parseFloat(a.combined));
         log("🧠 Hybrid scores (sorted):", scored);
       }
-    } else {
+    } else if (scoringMode === "lexical") {
+      const heuristicScores = markets.map((m) =>
+        calculateRelevanceScore([text], m)
+      );
+      const BM25_WEIGHT = 0.8;
+      const HEURISTIC_WEIGHT = 0.2;
+      marketScores = scoring.bm25Scores.map((bm25, i) => {
+        return (
+          bm25 * BM25_WEIGHT + (heuristicScores[i] ?? 0) * HEURISTIC_WEIGHT
+        );
+      });
       log(
-        "⚠️ Scoring unavailable, falling back to keyword scoring:",
+        "📖 Lexical scoring — embeddings unavailable, using BM25 + heuristic:",
+        marketTexts.length,
+        "markets scored"
+      );
+    } else {
+      scoringMode = "heuristic";
+      log(
+        "⚠️ Heuristic scoring — offscreen scoring unavailable:",
         scoring.source
       );
       marketScores = markets.map((m) => calculateRelevanceScore([text], m));
     }
   } catch (e) {
-    log("⚠️ Embeddings error, falling back to keyword scoring:", e);
+    scoringMode = "heuristic";
+    log("⚠️ Heuristic scoring — scoring error:", e);
     marketScores = markets.map((m) => calculateRelevanceScore([text], m));
   }
   // -----------------------------------------
@@ -546,16 +722,18 @@ async function analyzePostAndFindMarket(
     }
   }
 
-  // When embeddings are active, cosine similarity needs a higher bar than keyword overlap.
-  // Respect the user's relevanceThreshold setting but floor at 0.5 — below that, cosine
-  // similarity between unrelated topics produces false positives from shared vocabulary.
-  const EMBEDDING_FLOOR = 0.5;
-  const effectiveThreshold = usedEmbeddings
-    ? Math.max(EMBEDDING_FLOOR, CONFIG.MIN_RELEVANCE_SCORE)
-    : CONFIG.MIN_RELEVANCE_SCORE;
+  // Cosine similarity needs a higher bar than keyword/BM25 overlap to avoid
+  // false positives from shared vocabulary. Only apply the floor in hybrid mode.
+  const effectiveThreshold = getEffectiveThreshold(
+    CONFIG.MIN_RELEVANCE_SCORE,
+    scoringMode
+  );
 
-  // Track best market PER SOURCE (regardless of score - we'll filter later)
+  // Track best market PER SOURCE for debug visibility, but retain multiple
+  // post-level candidates so allocation can fall back if the top candidate
+  // for this post is blocked elsewhere in the feed.
   const bestBySource: Record<string, BestBySourceEntry> = {};
+  const candidateMarketsById = new Map<string, MarketSearchResult>();
 
   // Initialize tracking for each enabled source
   if (ENABLED_SOURCES?.polymarket) {
@@ -565,24 +743,21 @@ async function analyzePostAndFindMarket(
     bestBySource.kalshi = { market: null, score: 0, allScores: [] };
   }
 
-  if (!usedEmbeddings) {
-    contextGateResults = [];
-  }
-
-  const AI_GATE_RETRY_FLOOR = 0.6;
   const gateBlockedHighScorers: Array<{
     index: number;
     score: number;
     gateText: string;
   }> = [];
 
+  let metricsGateBlocked = 0;
+  let metricsGateZeroSignal = 0;
+  let metricsGateSingleSignal = 0;
+  let metricsGateRecovered = 0;
+  let metricsRetryEligible = 0;
+  let metricsBelowThreshold = 0;
+
   for (let i = 0; i < markets.length; i++) {
     const market = markets[i];
-    if (injectedMarketIds.has(market.id)) {
-      log(`⏭️ Skipping already injected market: ${market.id}`);
-      continue;
-    }
-
     const source = market.source || "polymarket";
 
     if (!bestBySource[source]) {
@@ -592,33 +767,63 @@ async function analyzePostAndFindMarket(
 
     const score = marketScores[i];
 
-    // NLP Context Gate: require meaningful lemma or specific entity overlap
-    if (usedEmbeddings && contextGateResults[i]) {
-      const gate = contextGateResults[i];
-      if (!gate.pass) {
-        log(
-          `🛑 Context gate dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
-        );
-        if (score >= AI_GATE_RETRY_FLOOR) {
-          let gateText = market.title || "";
-          if (market.description)
-            gateText += ` ${market.description.slice(0, 120)}`;
-          gateBlockedHighScorers.push({ index: i, score, gateText });
-        }
-        continue;
-      }
-      if (isDebug) {
-        log(
-          `✅ Context gate passed "${market.title?.slice(0, 50)}..." (${gate.details})`
-        );
-      }
+    const gateDecision = evaluateCandidateGate({
+      postText: text,
+      market,
+      matchedTags: result.matchedTags,
+      scoringMode,
+      score,
+      gate: contextGateResults[i],
+    });
+    const gate = gateDecision.gate;
+
+    if (gateDecision.usedRecoveryGate && gateDecision.recoveryGate) {
+      metricsGateRecovered++;
+      log(
+        `🔄 Single-signal recovery [${scoringMode}]: "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gateDecision.recoveryGate.details})`
+      );
     }
+
+    if (!gateDecision.pass) {
+      metricsGateBlocked++;
+      const signals = (gate.meaningfulNouns || 0) + (gate.sharedEntities || 0);
+      if (signals === 0) metricsGateZeroSignal++;
+      else if (signals === 1) metricsGateSingleSignal++;
+
+      log(
+        `🛑 Context gate [${scoringMode}] dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, reason=${signals === 0 ? "gate-zero-signal" : signals === 1 ? "gate-single-signal" : "gate-low-overlap"}, ${gate.details})`
+      );
+      if (gateDecision.retryEligible) {
+        gateBlockedHighScorers.push({
+          index: i,
+          score,
+          gateText: buildMarketGateText(market),
+        });
+        metricsRetryEligible++;
+      }
+      continue;
+    }
+    if (isDebug) {
+      log(
+        `✅ Context gate [${scoringMode}] passed "${market.title?.slice(0, 50)}..." (${gate.details})`
+      );
+    }
+
+    if (score > bestBySource[source].score) {
+      bestBySource[source] = {
+        ...bestBySource[source],
+        market,
+        score,
+      };
+    }
+
+    const meetsThreshold = score >= effectiveThreshold;
 
     if (isDebug) {
       bestBySource[source].allScores.push({
         title: market.title?.slice(0, 40),
         score: score.toFixed(2),
-        meetsThreshold: score >= effectiveThreshold,
+        meetsThreshold,
       });
 
       if (score >= 0.1) {
@@ -630,26 +835,47 @@ async function analyzePostAndFindMarket(
       }
     }
 
-    if (score > bestBySource[source].score) {
-      bestBySource[source] = {
-        ...bestBySource[source],
+    if (!meetsThreshold) {
+      metricsBelowThreshold++;
+      log(
+        `⏭️ ${source} market below threshold (${score.toFixed(2)} < ${effectiveThreshold} [${scoringMode}]): "${market.title?.slice(0, 50)}"`
+      );
+      continue;
+    }
+
+    if (scoringMode !== "heuristic" && !market._contextReason) {
+      const pct = Math.round(score * 100);
+      const topicHint =
+        result.matchedTags.length > 0
+          ? result.matchedTags.slice(0, 2).join(", ")
+          : result.keywords.split(" ").slice(0, 3).join(" ").trim();
+      market._contextReason = topicHint
+        ? `${pct}% match · ${topicHint}`
+        : `${pct}% match`;
+    }
+
+    const existingCandidate = candidateMarketsById.get(market.id);
+    if (!existingCandidate || score > existingCandidate.score) {
+      candidateMarketsById.set(market.id, {
         market,
         score,
-      };
+        source: source as "polymarket" | "kalshi",
+      });
     }
   }
 
   // AI-assisted retry: if no market passed the gate but high-scoring markets
   // were blocked, use AI extraction to enrich the post text with better
   // entities/keywords and re-evaluate the gate for those candidates.
-  const hasPassedMarket = Object.values(bestBySource).some(
-    (data) => data.market && data.score >= effectiveThreshold
+  let candidateMarkets = selectTopCandidatesForPost(
+    Array.from(candidateMarketsById.values())
   );
+  const hasPassedMarket = candidateMarkets.length > 0;
 
   if (
     !hasPassedMarket &&
     gateBlockedHighScorers.length > 0 &&
-    usedEmbeddings &&
+    scoringMode === "hybrid" &&
     CONFIG.USE_AI_EXTRACTION &&
     window.KNOWW_API?.extractKeywordsWithAI
   ) {
@@ -676,34 +902,57 @@ async function analyzePostAndFindMarket(
         const retryScoring = await scoreMarketsBatch(
           enrichedText,
           blockedGateTexts,
-          blockedGateTexts
+          blockedGateTexts,
+          {
+            includeEmbeddings: false,
+            includeBm25: false,
+            includeContextGate: true,
+          }
         );
 
         for (let j = 0; j < gateBlockedHighScorers.length; j++) {
-          const { index, score } = gateBlockedHighScorers[j];
-          const gate = retryScoring.contextGateResults[j];
+          const { index, score: originalScore } = gateBlockedHighScorers[j];
+          const gate =
+            retryScoring.contextGateResults[j] ??
+            naiveContextGate(enrichedText, blockedGateTexts[j]);
           const market = markets[index];
           const source = market.source || "polymarket";
 
-          if (!gate?.pass) {
+          if (!gate.pass) {
             log(
-              `🤖 [AI Retry] Still blocked: "${market.title?.slice(0, 50)}..." (${gate?.details || "no gate result"})`
+              `🤖 [AI Retry] Still blocked: "${market.title?.slice(0, 50)}..." (${gate.details})`
             );
             continue;
           }
 
           log(
-            `🤖 [AI Retry] ✅ Gate passed with AI: "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, ${gate.details})`
+            `🤖 [AI Retry] ✅ Gate passed with AI: "${market.title?.slice(0, 50)}..." (originalScore=${originalScore.toFixed(3)}, ${gate.details})`
           );
 
-          if (bestBySource[source] && score > bestBySource[source].score) {
+          if (
+            bestBySource[source] &&
+            originalScore > bestBySource[source].score
+          ) {
             bestBySource[source] = {
               ...bestBySource[source],
               market,
-              score,
+              score: originalScore,
             };
           }
+
+          const existingCandidate = candidateMarketsById.get(market.id);
+          if (!existingCandidate || originalScore > existingCandidate.score) {
+            candidateMarketsById.set(market.id, {
+              market,
+              score: originalScore,
+              source,
+            });
+          }
         }
+
+        candidateMarkets = selectTopCandidatesForPost(
+          Array.from(candidateMarketsById.values())
+        );
       } else {
         log("🤖 [AI Retry] AI extraction returned no usable result");
       }
@@ -713,7 +962,7 @@ async function analyzePostAndFindMarket(
   } else if (
     !hasPassedMarket &&
     gateBlockedHighScorers.length > 0 &&
-    usedEmbeddings &&
+    scoringMode === "hybrid" &&
     !CONFIG.USE_AI_EXTRACTION
   ) {
     log(
@@ -729,7 +978,7 @@ async function analyzePostAndFindMarket(
         (s) => s.meetsThreshold
       ).length;
       log(
-        `  ${source}: ${data.allScores.length} scored, ${aboveThreshold} above threshold (${effectiveThreshold}${usedEmbeddings ? " [embeddings]" : ""})`
+        `  ${source}: ${data.allScores.length} scored, ${aboveThreshold} above threshold (${effectiveThreshold} [${scoringMode}])`
       );
       if (data.market) {
         log(
@@ -744,54 +993,19 @@ async function analyzePostAndFindMarket(
     }
   }
 
-  // Check if AT LEAST ONE source has a market that meets the threshold
-  const hasAnyRelevantMarket = Object.values(bestBySource).some(
-    (data) => data.market && data.score >= effectiveThreshold
+  log(
+    `📊 Post metrics: mode=${scoringMode} searched=${markets.length} gate-blocked=${metricsGateBlocked} (zero-signal=${metricsGateZeroSignal} single-signal=${metricsGateSingleSignal}) recovered=${metricsGateRecovered} retry-eligible=${metricsRetryEligible}`
   );
 
-  if (!hasAnyRelevantMarket) {
+  log(
+    `📊 Post result: below-threshold=${metricsBelowThreshold} final-candidates=${candidateMarkets.length}`
+  );
+
+  if (candidateMarkets.length === 0) {
     log(
-      `❌ No market from any source met relevance threshold (${effectiveThreshold}${
-        usedEmbeddings ? " [embeddings]" : ""
-      }) for this post`
+      `❌ No market from any source met relevance threshold (${effectiveThreshold} [${scoringMode}]) for this post`
     );
     return null;
-  }
-
-  // Collect best market from EACH source (regardless of individual score)
-  // Since at least one source is relevant, we show all sources
-  const candidateMarkets: MarketSearchResult[] = [];
-
-  for (const [source, data] of Object.entries(bestBySource)) {
-    if (data.market) {
-      const meetsThreshold = data.score >= effectiveThreshold;
-
-      if (usedEmbeddings && meetsThreshold && !data.market._contextReason) {
-        const pct = Math.round(data.score * 100);
-        const topicHint =
-          result.matchedTags.length > 0
-            ? result.matchedTags.slice(0, 2).join(", ")
-            : result.keywords.split(" ").slice(0, 3).join(" ").trim();
-        data.market._contextReason = topicHint
-          ? `${pct}% match · ${topicHint}`
-          : `${pct}% match`;
-      }
-
-      candidateMarkets.push({
-        market: data.market,
-        score: data.score,
-        source: source as "polymarket" | "kalshi",
-      });
-      if (isDebug) {
-        log(
-          `✓ Best ${source} market:`,
-          data.market.title,
-          `Score: ${data.score.toFixed(2)}${
-            meetsThreshold ? "" : " (below threshold, but including anyway)"
-          }`
-        );
-      }
-    }
   }
 
   // AI relevance validation — validate all candidates in parallel to avoid
@@ -805,23 +1019,20 @@ async function analyzePostAndFindMarket(
     })
   );
 
-  // When AI validation is unavailable (timeout/error/disabled), only allow
-  // markets through if their embedding score is high enough to be confident
-  // on its own. Since we now have a strict lexical Context Gate, we can safely
-  // lower this floor to match the standard embedding floor.
-  const FAIL_OPEN_FLOOR = 0.5;
-
   const relevantMarkets: MarketSearchResult[] = [];
   for (let i = 0; i < validationResults.length; i++) {
     const candidate = candidateMarkets[i];
     const result = validationResults[i];
     if (result.status === "rejected") {
-      if (usedEmbeddings && candidate.score < FAIL_OPEN_FLOOR) {
+      if (!shouldFailOpen(candidate.score, FAIL_OPEN_FLOOR)) {
         log(
-          `✗ Validation errored & score too low (${candidate.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${candidate.market.title?.slice(0, 50)}"`
+          `✗ reason=validator-error-low-score [${scoringMode}] (${candidate.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${candidate.market.title?.slice(0, 50)}"`
         );
         continue;
       }
+      log(
+        `⚠️ reason=validator-error-fail-open [${scoringMode}] (${candidate.score.toFixed(2)}): "${candidate.market.title?.slice(0, 50)}"`
+      );
       relevantMarkets.push(candidate);
       continue;
     }
@@ -829,16 +1040,16 @@ async function analyzePostAndFindMarket(
     if (validation) {
       if (!validation.relevant) {
         log(
-          `✗ AI rejected market as irrelevant: "${entry.market.title?.slice(0, 50)}"`
+          `✗ reason=validator-rejected: "${entry.market.title?.slice(0, 50)}"`
         );
         continue;
       }
       if (validation.reason) {
         entry.market._contextReason = validation.reason;
       }
-    } else if (usedEmbeddings && entry.score < FAIL_OPEN_FLOOR) {
+    } else if (!shouldFailOpen(entry.score, FAIL_OPEN_FLOOR)) {
       log(
-        `✗ AI unavailable & score too low (${entry.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${entry.market.title?.slice(0, 50)}"`
+        `✗ reason=validator-unavailable-low-score [${scoringMode}] (${entry.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${entry.market.title?.slice(0, 50)}"`
       );
       continue;
     }
@@ -852,15 +1063,14 @@ async function analyzePostAndFindMarket(
 
   // Sort by score (highest first) for display order
   relevantMarkets.sort((a, b) => b.score - a.score);
+  const topRelevantMarkets = selectTopCandidatesForPost(relevantMarkets);
 
   if (isDebug) {
-    log(
-      `✓ Found ${relevantMarkets.length} markets from different sources to inject`
-    );
+    log(`✓ Found ${topRelevantMarkets.length} candidate markets for this post`);
   }
 
   return {
-    markets: relevantMarkets,
+    markets: topRelevantMarkets,
     topics:
       result.matchedTags.length > 0
         ? result.matchedTags
@@ -967,13 +1177,20 @@ function findInjectionPoint(article: Element): InjectionPoint | null {
 function injectMarketCards(
   targetPost: Element,
   marketsData: MarketSearchResult[],
-  topics: string[]
+  topics: string[],
+  options: { postKey?: string } = {}
 ): boolean {
   const { log } = window.KNOWW_UTILS;
   const { createInlineMarketCard } = window.KNOWW_UI;
+  const postKey = options.postKey ?? getPostIdentityKey(targetPost);
 
   if (injectedIntoPosts.has(targetPost)) {
     log("Post already has cards");
+    return false;
+  }
+
+  if (!postKey) {
+    log("Could not resolve post identity for injection");
     return false;
   }
 
@@ -1001,10 +1218,11 @@ function injectMarketCards(
     return false;
   }
 
-  // Filter out already injected markets
-  const newMarkets = marketsData.filter(
-    ({ market }) => !injectedMarketIds.has(market.id)
-  );
+  // Policy A: inject at most one card per post, but keep a fallback candidate
+  // available if the top candidate for this post is blocked elsewhere.
+  const newMarkets = marketsData
+    .filter(({ market }) => isMarketInjectableForPost(postKey, market.id))
+    .slice(0, 1);
 
   if (newMarkets.length === 0) {
     log("All markets already injected");
@@ -1042,6 +1260,7 @@ function injectMarketCards(
   const wrapper = document.createElement("div");
   wrapper.setAttribute("data-knoww-injected", "true");
   wrapper.setAttribute("data-knoww-platform", platformName);
+  wrapper.setAttribute("data-knoww-post-key", postKey);
   wrapper.className = `knoww-stacked-cards knoww-platform-${platformName}${themeClass}`;
   wrapper.style.cssText = wrapperStyles;
   applyPlatformStyleVariables(wrapper, platform?.getCardStyles?.());
@@ -1051,6 +1270,8 @@ function injectMarketCards(
   // Create and append cards for each source
   for (const { market, score } of newMarkets) {
     const card = createInlineMarketCard(market, score, topics);
+    card.setAttribute("data-knoww-market-id", market.id);
+    card.setAttribute("data-knoww-post-key", postKey);
     wrapper.appendChild(card);
     injectedCards.push({ market, card });
   }
@@ -1072,9 +1293,22 @@ function injectMarketCards(
     // PERFORMANCE: Removed forced reflow (wrapper.offsetHeight)
     // CSS animations/transitions will trigger reflow naturally when needed
 
-    // Mark all markets as injected
+    // Mark all post/market pairs as injected and update active market coverage
     for (const { market, card } of injectedCards) {
       injectedMarketIds.add(market.id);
+      const trackingKey = getPostMarketPairKey(postKey, market.id);
+      injectedPostMarketPairs.add(trackingKey);
+      liveInjectedCardRefs.set(trackingKey, {
+        marketId: market.id,
+        cardRef: new WeakRef(card),
+      });
+
+      let activePosts = activePostKeysByMarket.get(market.id);
+      if (!activePosts) {
+        activePosts = new Set<string>();
+        activePostKeysByMarket.set(market.id, activePosts);
+      }
+      activePosts.add(postKey);
 
       // Track for notification stack using WeakRef to allow GC when DOM elements are removed
       injectedMarkets.push({
@@ -1139,8 +1373,34 @@ function injectMarketCard(
   return injectMarketCards(
     targetPost,
     [{ market, score, source: market.source || "polymarket" }],
-    topics
+    topics,
+    { postKey: getPostIdentityKey(targetPost) ?? undefined }
   );
+}
+
+async function analyzeBatchSelections(
+  posts: Array<{ post: Element; key: string | null }>
+): Promise<BatchCandidateSelection[]> {
+  const selections: BatchCandidateSelection[] = [];
+
+  for (const { post, key } of posts) {
+    if (injectedIntoPosts.has(post)) continue;
+
+    const postKey = key ?? getPostIdentityKey(post);
+    if (!postKey) continue;
+
+    const result = await analyzePostAndFindMarket(post);
+    if (!result?.markets || result.markets.length === 0) continue;
+
+    selections.push({
+      post,
+      postKey,
+      topics: result.topics,
+      markets: result.markets,
+    });
+  }
+
+  return selections;
 }
 
 /**
@@ -1208,7 +1468,7 @@ async function processVisiblePosts(options: {
     log(`   • New posts to process: ${newPosts.length}`);
   }
 
-  if (newPosts.length === 0) {
+  if (newPosts.length === 0 && cooldownPendingPosts.length === 0) {
     if (isDebug) {
       log(`🔄 [PostScanner] No new posts to process`);
       log(`🔄 [PostScanner] ========== SCAN END ==========\n`);
@@ -1216,21 +1476,15 @@ async function processVisiblePosts(options: {
     return;
   }
 
-  // Mark posts as analyzed (LRU Set auto-evicts oldest entries)
-  for (const { post, key } of newPosts) {
-    if (key) {
-      processedPostKeys.add(key);
-    }
-    analyzedPosts.add(post);
-  }
-  totalPostsProcessed += newPosts.length;
-  postsSinceLastInjection += newPosts.length;
+  const newlyDeferredPosts = enqueueCooldownPendingPosts(newPosts);
+  postsSinceLastInjection += newlyDeferredPosts;
 
   if (isDebug) {
     log(`📊 [PostScanner] Stats update:`);
     log(`   • Total posts processed (all time): ${totalPostsProcessed}`);
     log(`   • Posts since last injection: ${postsSinceLastInjection}`);
     log(`   • Cooldown threshold: ${CONFIG.COOLDOWN_POSTS}`);
+    log(`   • Cooldown pending posts: ${cooldownPendingPosts.length}`);
     log(
       `   • Will analyze for markets: ${
         postsSinceLastInjection >= CONFIG.COOLDOWN_POSTS
@@ -1240,98 +1494,89 @@ async function processVisiblePosts(options: {
     );
   }
 
-  // Check if we should try to inject a market
-  if (postsSinceLastInjection >= CONFIG.COOLDOWN_POSTS) {
-    isAnalyzing = true;
+  // Respect user's Injection Frequency setting (COOLDOWN_POSTS)
+  if (postsSinceLastInjection < CONFIG.COOLDOWN_POSTS) {
     if (isDebug) {
-      log(`\n🔍 [PostAnalyzer] ========== ANALYSIS START ==========`);
+      log(`🔄 [PostScanner] ========== SCAN END ==========\n`);
+    }
+    return;
+  }
+
+  const postsReadyForAnalysis = dequeueCooldownPendingPosts(itemSelector);
+  if (postsReadyForAnalysis.length === 0) {
+    if (isDebug) {
+      log(`🔄 [PostScanner] No pending posts remained eligible for analysis`);
+      log(`🔄 [PostScanner] ========== SCAN END ==========\n`);
+    }
+    return;
+  }
+
+  // Mark posts as analyzed only once they are actually entering analysis.
+  for (const { post, key } of postsReadyForAnalysis) {
+    if (key) {
+      processedPostKeys.add(key);
+    }
+    analyzedPosts.add(post);
+  }
+  totalPostsProcessed += postsReadyForAnalysis.length;
+
+  isAnalyzing = true;
+  if (isDebug) {
+    log(`\n🔍 [PostAnalyzer] ========== ANALYSIS START ==========`);
+    log(
+      `🔍 [PostAnalyzer] Analyzing ${postsReadyForAnalysis.length} posts for market relevance...`
+    );
+  }
+
+  try {
+    const batchSelections = await analyzeBatchSelections(postsReadyForAnalysis);
+    const plannedInjections = allocateBatchInjections(batchSelections);
+
+    if (isDebug) {
       log(
-        `🔍 [PostAnalyzer] Analyzing ${newPosts.length} posts for market relevance...`
+        `🧭 [PostAnalyzer] Planned ${plannedInjections.length} injection(s) from ${batchSelections.length} post candidate set(s)`
       );
     }
 
-    try {
-      // Analyze each new post INDIVIDUALLY to find one with relevant markets
-      let postIndex = 0;
-      for (const { post } of newPosts) {
-        postIndex++;
+    let injectionsThisBatch = 0;
+    for (const plan of plannedInjections) {
+      const injected = injectMarketCards(
+        plan.post,
+        [plan.market],
+        plan.topics,
+        { postKey: plan.postKey }
+      );
 
-        // Skip if already has a card
-        if (injectedIntoPosts.has(post)) {
-          if (isDebug) {
-            log(
-              `⏭️ [PostAnalyzer] Post ${postIndex}/${newPosts.length}: Already has card, skipping`
-            );
-          }
-          continue;
-        }
-
+      if (!injected) {
         if (isDebug) {
-          // Extract post text preview for debugging (avoid innerText in prod)
-          const postText =
-            window.KNOWW_UTILS?.extractPostText?.(post) ||
-            (post as HTMLElement).textContent?.slice(0, 100) ||
-            "Unable to extract text";
-          log(`\n📝 [PostAnalyzer] Post ${postIndex}/${newPosts.length}:`);
-          log(`   Preview: "${postText.slice(0, 80)}..."`);
-          log(`   Searching for relevant markets...`);
+          log(`⚠️ [PostAnalyzer] Injection failed, trying next planned post...`);
         }
-
-        const result = await analyzePostAndFindMarket(post);
-
-        if (result?.markets && result.markets.length > 0) {
-          if (isDebug) {
-            log(
-              `✅ [PostAnalyzer] Found ${result.markets.length} relevant market(s)!`
-            );
-            result.markets.forEach((m, i) => {
-              log(
-                `   ${i + 1}. "${m.market.title?.slice(0, 50)}..." (${
-                  m.source
-                }, score: ${m.score.toFixed(2)})`
-              );
-            });
-            log(`   Topics: ${result.topics.join(", ")}`);
-          }
-
-          // Found relevant markets for THIS specific post (could be from multiple sources)
-          const injected = injectMarketCards(
-            post,
-            result.markets,
-            result.topics
-          );
-
-          if (injected) {
-            postsSinceLastInjection = 0;
-            if (isDebug) {
-              log(
-                `🎉 [PostAnalyzer] Successfully injected ${result.markets.length} market card(s)!`
-              );
-              log(`🔍 [PostAnalyzer] ========== ANALYSIS END ==========\n`);
-            }
-            break; // Only inject into one post per batch
-          } else {
-            if (isDebug) {
-              log(`⚠️ [PostAnalyzer] Injection failed, trying next post...`);
-            }
-          }
-        } else {
-          if (isDebug) {
-            log(`❌ [PostAnalyzer] No relevant markets found for this post`);
-          }
-        }
+        continue;
       }
+
+      injectionsThisBatch++;
+      postsSinceLastInjection = 0;
+
       if (isDebug) {
-        log(`🔍 [PostAnalyzer] ========== ANALYSIS END ==========\n`);
+        log(
+          `🎉 [PostAnalyzer] Injected "${plan.market.market.title?.slice(
+            0,
+            50
+          )}..." (${injectionsThisBatch}/${MAX_INJECTIONS_PER_BATCH} this batch)`
+        );
       }
-    } catch (e) {
-      if (isDebug) {
-        log(`💥 [PostAnalyzer] Error during analysis:`, e);
-        log(`🔍 [PostAnalyzer] ========== ANALYSIS END (ERROR) ==========\n`);
-      }
-    } finally {
-      isAnalyzing = false;
     }
+
+    if (isDebug) {
+      log(`🔍 [PostAnalyzer] ========== ANALYSIS END ==========\n`);
+    }
+  } catch (e) {
+    if (isDebug) {
+      log(`💥 [PostAnalyzer] Error during analysis:`, e);
+      log(`🔍 [PostAnalyzer] ========== ANALYSIS END (ERROR) ==========\n`);
+    }
+  } finally {
+    isAnalyzing = false;
   }
 
   if (isDebug) {
@@ -1348,7 +1593,8 @@ const MAX_PENDING_QUEUE_SIZE = 30; // Reduced from 50 for better memory
 
 /**
  * Unified memory cleanup — single entry point for all cache maintenance.
- * PERFORMANCE: No document.querySelector calls; relies on WeakRef for market ID cleanup.
+ * Rebuilds live injection tracking from DOM so per-market active-post limits
+ * stay accurate as cards mount and unmount.
  * LRU Set handles processedPostKeys eviction automatically.
  * @param force - bypass the time-based throttle
  */
@@ -1363,6 +1609,8 @@ function runMemoryCleanup(force = false): void {
 
   lastMemoryCleanup = now;
   log(`🧹 [MemoryCleanup] Running cleanup...`);
+
+  syncInjectedCardTrackingFromDom();
 
   // 1. processedPostKeys: LRU Set self-manages, no pruning needed
 
@@ -1388,33 +1636,18 @@ function runMemoryCleanup(force = false): void {
     );
   }
 
-  // 3. Safety cap: prevent unbounded injectedMarketIds growth over very long sessions
-  //    Only prune IDs whose cards are confirmed gone from the DOM
-  const ID_SAFETY_CAP = 200;
-  if (injectedMarketIds.size > ID_SAFETY_CAP) {
-    // Single DOM query to find all live market card IDs
-    const liveCardIds = new Set<string>();
-    const liveCards = document.querySelectorAll("[data-knoww-market-id]");
-    for (const card of Array.from(liveCards)) {
-      const id = card.getAttribute("data-knoww-market-id");
-      if (id) liveCardIds.add(id);
+  // 3. Clear cooldown-deferred posts if they have disconnected elements
+  let deferredCleaned = 0;
+  for (let i = cooldownPendingPosts.length - 1; i >= 0; i--) {
+    if (!cooldownPendingPosts[i].post.isConnected) {
+      cooldownPendingPosts.splice(i, 1);
+      deferredCleaned++;
     }
-
-    // Only prune IDs whose cards are no longer in the DOM
-    let prunedIds = 0;
-    for (const id of injectedMarketIds) {
-      if (!liveCardIds.has(id)) {
-        injectedMarketIds.delete(id);
-        prunedIds++;
-      }
-      // Stop once we're back under the cap
-      if (injectedMarketIds.size <= ID_SAFETY_CAP) break;
-    }
-    if (prunedIds > 0) {
-      log(
-        `🧹 [MemoryCleanup] Pruned ${prunedIds} IDs for removed cards (${injectedMarketIds.size} remaining)`
-      );
-    }
+  }
+  if (deferredCleaned > 0) {
+    log(
+      `🧹 [MemoryCleanup] Removed ${deferredCleaned} disconnected deferred posts`
+    );
   }
 
   // 4. Clear pending queue if it has disconnected elements
@@ -1532,48 +1765,59 @@ async function processQueuedPosts(options: {
     newPosts.push({ post, key });
   }
 
-  if (newPosts.length === 0) {
+  if (newPosts.length === 0 && cooldownPendingPosts.length === 0) {
     log(`🔄 [QueueProcessor] No new posts after filtering`);
     return;
   }
 
   log(`🔄 [QueueProcessor] ${newPosts.length} new posts to process`);
 
-  // Mark posts as analyzed (LRU Set auto-evicts oldest entries)
-  for (const { post, key } of newPosts) {
+  const newlyDeferredPosts = enqueueCooldownPendingPosts(newPosts);
+  postsSinceLastInjection += newlyDeferredPosts;
+
+  // Respect user's Injection Frequency setting (COOLDOWN_POSTS)
+  if (postsSinceLastInjection < CONFIG.COOLDOWN_POSTS) {
+    return;
+  }
+
+  const postsReadyForAnalysis = dequeueCooldownPendingPosts(itemSelector);
+  if (postsReadyForAnalysis.length === 0) {
+    return;
+  }
+
+  // Mark posts as analyzed only once they are actually entering analysis.
+  for (const { post, key } of postsReadyForAnalysis) {
     if (key) {
       processedPostKeys.add(key);
     }
     analyzedPosts.add(post);
   }
 
-  totalPostsProcessed += newPosts.length;
-  postsSinceLastInjection += newPosts.length;
+  totalPostsProcessed += postsReadyForAnalysis.length;
 
-  // Check cooldown and analyze
-  if (postsSinceLastInjection >= CONFIG.COOLDOWN_POSTS) {
-    isAnalyzing = true;
-    try {
-      for (const { post } of newPosts) {
-        if (injectedIntoPosts.has(post)) continue;
+  isAnalyzing = true;
+  try {
+    const batchSelections = await analyzeBatchSelections(postsReadyForAnalysis);
+    const plannedInjections = allocateBatchInjections(batchSelections);
 
-        const result = await analyzePostAndFindMarket(post);
-        if (result?.markets && result.markets.length > 0) {
-          const injected = injectMarketCards(
-            post,
-            result.markets,
-            result.topics
-          );
-          if (injected) {
-            postsSinceLastInjection = 0;
-            log(`🎉 [QueueProcessor] Successfully injected card!`);
-            break;
-          }
-        }
-      }
-    } finally {
-      isAnalyzing = false;
+    let injectionsThisBatch = 0;
+    for (const plan of plannedInjections) {
+      const injected = injectMarketCards(
+        plan.post,
+        [plan.market],
+        plan.topics,
+        { postKey: plan.postKey }
+      );
+      if (!injected) continue;
+
+      injectionsThisBatch++;
+      postsSinceLastInjection = 0;
+      log(
+        `🎉 [QueueProcessor] Successfully injected card! (${injectionsThisBatch}/${MAX_INJECTIONS_PER_BATCH} this batch)`
+      );
     }
+  } finally {
+    isAnalyzing = false;
   }
 }
 

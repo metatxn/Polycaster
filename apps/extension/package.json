@@ -1,11 +1,13 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.21",
+  "version": "2.5.22",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
     "dev": "webpack --mode development --watch",
     "clean": "rm -rf dist",
+    "test": "pnpm run test:scoring",
+    "test:scoring": "rm -rf .test-dist && tsc -p tsconfig.tests.json && node --test .test-dist/apps/extension/tests/**/*.test.js",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "format": "biome format --write",
@@ -26,7 +28,7 @@
     "wink-nlp": "2.4.0"
   },
   "devDependencies": {
-    "@types/chrome": "0.1.39",
+    "@types/chrome": "0.1.40",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "buffer": "6.0.3",
@@ -35,7 +37,7 @@
     "process": "0.11.10",
     "ts-loader": "9.5.7",
     "typescript": "6.0.2",
-    "webpack": "5.105.4",
+    "webpack": "5.106.0",
     "webpack-cli": "7.0.2"
   }
 }

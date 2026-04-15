@@ -79,14 +79,13 @@ test("naiveContextGate handles left curly apostrophe in contractions", () => {
   );
 });
 
-test("naiveContextGate allows a single high-signal token match", () => {
+test("naiveContextGate requires at least two distinct signals", () => {
   const gate = naiveContextGate(
     "GTA trailer rumor tonight",
     "GTA VI released before June 2026?"
   );
 
-  assert.equal(gate.pass, true);
-  assert.ok(gate.details.includes("high-signal"));
+  assert.equal(gate.pass, false);
 });
 
 test("determineScoringMode distinguishes hybrid lexical and heuristic", () => {
@@ -174,7 +173,7 @@ test("evaluateCandidateGate marks hybrid near-misses as AI-retry eligible", () =
   assert.equal(decision.retryEligible, true);
 });
 
-test("evaluateCandidateGate applies single-signal recovery for high-score entity matches", () => {
+test("evaluateCandidateGate does not recover a single high-score entity match", () => {
   const decision = evaluateCandidateGate({
     postText: "GTA trailer rumor tonight",
     market: createMarket({
@@ -190,9 +189,50 @@ test("evaluateCandidateGate applies single-signal recovery for high-score entity
     }),
   });
 
-  assert.equal(decision.pass, true);
-  assert.equal(decision.usedRecoveryGate, true);
-  assert.ok(decision.recoveryGate);
+  assert.equal(decision.pass, false);
+  assert.equal(decision.usedRecoveryGate, false);
+});
+
+test("evaluateCandidateGate does not recover a single weak noun overlap", () => {
+  const decision = evaluateCandidateGate({
+    postText: "How do I get my hands on one of these bad boys?",
+    market: createMarket({
+      title: "How long will Trump and Xi shake hands when they meet?",
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.67,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details: "nouns=[hand] meaningful=[hand] entities=[] distinct=1",
+    }),
+  });
+
+  assert.equal(decision.pass, false);
+  assert.equal(decision.usedRecoveryGate, false);
+});
+
+test("evaluateCandidateGate rejects location-only overlap across unrelated topics", () => {
+  const decision = evaluateCandidateGate({
+    postText:
+      "Delhi-based dpropulse is building India's first rotating detonation engine",
+    market: createMarket({
+      title: "Legends Cricket League: Daredevils Delhi vs India Tigers",
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.86,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 1,
+      details:
+        "nouns=[delhi,india] meaningful=[delhi] entities=[delhi] distinct=1",
+    }),
+  });
+
+  assert.equal(decision.pass, false);
+  assert.equal(decision.usedRecoveryGate, false);
 });
 
 test("shouldFailOpen keeps the shared score floor behavior", () => {

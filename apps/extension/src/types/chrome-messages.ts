@@ -5,6 +5,8 @@
 // ── Sentinel error used by builder-config (background) and trading-service (content)
 // to signal that re-authentication is needed. ──
 export const EXTENSION_AUTH_REQUIRED_ERROR = "Extension auth required";
+export const TRADING_SESSION_DISCONNECTED_MESSAGE =
+  "trading:session-disconnected";
 
 // ── Existing fetch messages ──
 
@@ -135,6 +137,10 @@ export interface TradingRelayerApproveMessage {
   address: string;
 }
 
+export interface TradingPrewarmOffscreenMessage {
+  type: "trading:prewarm-offscreen";
+}
+
 // ── Signing delegation (background ↔ content) ──
 
 export interface SigningRequestMessage {
@@ -170,7 +176,8 @@ export type TradingMessage =
   | TradingSplitPositionMessage
   | TradingMergePositionsMessage
   | TradingGetOutcomeBalancesMessage
-  | TradingRelayerApproveMessage;
+  | TradingRelayerApproveMessage
+  | TradingPrewarmOffscreenMessage;
 
 export type BackgroundMessage =
   | FetchTextMessage

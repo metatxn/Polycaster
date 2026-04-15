@@ -111,6 +111,20 @@ interface LiveInjectedCardRef {
   cardRef: WeakRef<HTMLElement>;
 }
 
+interface ReinjectionCandidate {
+  postKey: string;
+  market: Market;
+  score: number;
+  topics: string[];
+  timestamp: number;
+}
+
+const reinjectionCandidatesByTrackingKey = new Map<
+  string,
+  ReinjectionCandidate
+>();
+const reinjectionTrackingKeysByPostKey = new Map<string, Set<string>>();
+
 function applyPlatformStyleVariables(
   element: HTMLElement,
   styles: Record<string, unknown> | null | undefined
@@ -146,6 +160,61 @@ function getCardTrackingKey(
 
 function getPostMarketPairKey(postKey: string, marketId: string): string {
   return JSON.stringify([postKey, marketId]);
+}
+
+function rememberReinjectionCandidate(
+  postKey: string,
+  market: Market,
+  score: number,
+  topics: string[]
+): void {
+  const trackingKey = getPostMarketPairKey(postKey, market.id);
+  reinjectionCandidatesByTrackingKey.set(trackingKey, {
+    postKey,
+    market,
+    score,
+    topics: [...topics],
+    timestamp: Date.now(),
+  });
+
+  let trackingKeys = reinjectionTrackingKeysByPostKey.get(postKey);
+  if (!trackingKeys) {
+    trackingKeys = new Set<string>();
+    reinjectionTrackingKeysByPostKey.set(postKey, trackingKeys);
+  }
+  trackingKeys.add(trackingKey);
+}
+
+function forgetReinjectionCandidate(
+  postKey: string | undefined,
+  marketId: string
+): void {
+  if (!postKey) return;
+
+  const trackingKey = getPostMarketPairKey(postKey, marketId);
+  reinjectionCandidatesByTrackingKey.delete(trackingKey);
+
+  const trackingKeys = reinjectionTrackingKeysByPostKey.get(postKey);
+  if (!trackingKeys) return;
+
+  trackingKeys.delete(trackingKey);
+  if (trackingKeys.size === 0) {
+    reinjectionTrackingKeysByPostKey.delete(postKey);
+  }
+}
+
+function getReinjectionCandidatesForPost(
+  postKey: string
+): ReinjectionCandidate[] {
+  const trackingKeys = reinjectionTrackingKeysByPostKey.get(postKey);
+  if (!trackingKeys || trackingKeys.size === 0) {
+    return [];
+  }
+
+  return Array.from(trackingKeys)
+    .map((trackingKey) => reinjectionCandidatesByTrackingKey.get(trackingKey))
+    .filter((candidate): candidate is ReinjectionCandidate => !!candidate)
+    .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function getActivePostCountForMarket(marketId: string): number {
@@ -438,6 +507,173 @@ function getPostIdentityKey(post: Element): string | null {
     .slice(0, 160)
     .trim();
   return snippet ? `txt:${snippet}` : null;
+}
+
+function getCurrentItemSelector(): string | null {
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  if (platform?.getDynamicSelectors) {
+    return platform.getDynamicSelectors().itemSelector;
+  }
+
+  return window.KNOWW_PLATFORM?.getSelectors?.().item || null;
+}
+
+function findPostByKey(
+  postKey: string,
+  posts?: Array<{ post: Element; key: string | null }>
+): Element | null {
+  const itemSelector = getCurrentItemSelector();
+  const candidates = posts
+    ? posts.map(({ post, key }) => ({
+        post,
+        key: key ?? getPostIdentityKey(post),
+      }))
+    : itemSelector
+      ? Array.from(document.querySelectorAll(itemSelector)).map((post) => ({
+          post,
+          key: getPostIdentityKey(post),
+        }))
+      : [];
+
+  for (const candidate of candidates) {
+    if (candidate.key === postKey) {
+      return candidate.post;
+    }
+  }
+
+  return null;
+}
+
+function upsertInjectedMarketEntry(
+  postKey: string,
+  market: Market,
+  card: HTMLElement
+): void {
+  const now = Date.now();
+  const existingEntry = injectedMarkets.find(
+    (entry) => entry.postKey === postKey && entry.market.id === market.id
+  );
+
+  if (existingEntry) {
+    existingEntry.market = market;
+    existingEntry.cardRef = new WeakRef(card);
+    existingEntry.postKey = postKey;
+    existingEntry.timestamp = now;
+    existingEntry.isInViewport = true;
+    existingEntry.lastVisibleAt = now;
+    return;
+  }
+
+  injectedMarkets.push({
+    market,
+    cardRef: new WeakRef(card),
+    postKey,
+    timestamp: now,
+    isInViewport: true,
+    lastVisibleAt: now,
+  });
+}
+
+function refreshLiveTrackingForPost(post: Element, postKey: string): void {
+  const cards = post.querySelectorAll<HTMLElement>(".knoww-market-card");
+  if (cards.length === 0) return;
+
+  for (const card of Array.from(cards)) {
+    const marketId = card.getAttribute("data-knoww-market-id");
+    if (!marketId) continue;
+
+    const trackingKey = getPostMarketPairKey(postKey, marketId);
+    liveInjectedCardRefs.set(trackingKey, {
+      marketId,
+      cardRef: new WeakRef(card),
+    });
+    injectedMarketIds.add(marketId);
+    injectedPostMarketPairs.add(trackingKey);
+
+    let activePosts = activePostKeysByMarket.get(marketId);
+    if (!activePosts) {
+      activePosts = new Set<string>();
+      activePostKeysByMarket.set(marketId, activePosts);
+    }
+    activePosts.add(postKey);
+
+    const trackedMarket =
+      reinjectionCandidatesByTrackingKey.get(trackingKey)?.market ||
+      injectedMarkets.find(
+        (entry) => entry.postKey === postKey && entry.market.id === marketId
+      )?.market;
+
+    if (trackedMarket) {
+      upsertInjectedMarketEntry(postKey, trackedMarket, card);
+    }
+
+    ensureCardVisibilityObserver();
+    cardVisibilityObserver?.observe(card);
+  }
+}
+
+function restoreTrackedMarketsOnPost(post: Element, postKey: string): boolean {
+  const trackedMarkets = getReinjectionCandidatesForPost(postKey);
+  if (trackedMarkets.length === 0) return false;
+
+  refreshLiveTrackingForPost(post, postKey);
+
+  const alreadyInjected = post.querySelector(
+    ".knoww-market-card[data-knoww-market-id]"
+  );
+  if (alreadyInjected) {
+    return true;
+  }
+
+  const [latestMarket] = trackedMarkets;
+  return injectMarketCards(
+    post,
+    [
+      {
+        market: latestMarket.market,
+        score: latestMarket.score,
+        source: latestMarket.market.source || "polymarket",
+      },
+    ],
+    latestMarket.topics,
+    { postKey }
+  );
+}
+
+function restoreTrackedMarket(postKey: string, marketId: string): boolean {
+  syncInjectedCardTrackingFromDom();
+
+  const targetPost = findPostByKey(postKey);
+  if (!targetPost) return false;
+
+  refreshLiveTrackingForPost(targetPost, postKey);
+
+  const existingCard = targetPost.querySelector<HTMLElement>(
+    `.knoww-market-card[data-knoww-market-id="${marketId}"]`
+  );
+  if (existingCard) {
+    return true;
+  }
+
+  const candidate = reinjectionCandidatesByTrackingKey.get(
+    getPostMarketPairKey(postKey, marketId)
+  );
+  if (!candidate) {
+    return false;
+  }
+
+  return injectMarketCards(
+    targetPost,
+    [
+      {
+        market: candidate.market,
+        score: candidate.score,
+        source: candidate.market.source || "polymarket",
+      },
+    ],
+    candidate.topics,
+    { postKey }
+  );
 }
 
 /**
@@ -1194,11 +1430,6 @@ function injectMarketCards(
   const { createInlineMarketCard } = window.KNOWW_UI;
   const postKey = options.postKey ?? getPostIdentityKey(targetPost);
 
-  if (injectedIntoPosts.has(targetPost)) {
-    log("Post already has cards");
-    return false;
-  }
-
   if (!postKey) {
     log("Could not resolve post identity for injection");
     return false;
@@ -1226,6 +1457,10 @@ function injectMarketCards(
     log("Post already has a Knoww card");
     cleanup?.();
     return false;
+  }
+
+  if (injectedIntoPosts.has(targetPost)) {
+    log("Post was previously injected; card missing, attempting reinjection");
   }
 
   // Policy A: inject at most one card per post, but keep a fallback candidate
@@ -1308,6 +1543,9 @@ function injectMarketCards(
       injectedMarketIds.add(market.id);
       const trackingKey = getPostMarketPairKey(postKey, market.id);
       injectedPostMarketPairs.add(trackingKey);
+      const injectedMarketData = newMarkets.find(
+        (entry) => entry.market.id === market.id
+      );
       liveInjectedCardRefs.set(trackingKey, {
         marketId: market.id,
         cardRef: new WeakRef(card),
@@ -1320,14 +1558,17 @@ function injectMarketCards(
       }
       activePosts.add(postKey);
 
+      if (injectedMarketData) {
+        rememberReinjectionCandidate(
+          postKey,
+          market,
+          injectedMarketData.score,
+          topics
+        );
+      }
+
       // Track for notification stack using WeakRef to allow GC when DOM elements are removed
-      injectedMarkets.push({
-        market,
-        cardRef: new WeakRef(card), // WeakRef allows GC when card is removed from DOM
-        timestamp: Date.now(),
-        isInViewport: true,
-        lastVisibleAt: Date.now(),
-      });
+      upsertInjectedMarketEntry(postKey, market, card);
 
       ensureCardVisibilityObserver();
       cardVisibilityObserver?.observe(card);
@@ -1474,6 +1715,12 @@ async function processVisiblePosts(options: {
   const newPosts: Array<{ post: Element; key: string | null }> = [];
   let nestedCount = 0;
   let alreadyProcessedCount = 0;
+  let restoredTrackedCards = 0;
+  const shouldAttemptRestore = reinjectionTrackingKeysByPostKey.size > 0;
+
+  if (shouldAttemptRestore) {
+    syncInjectedCardTrackingFromDom();
+  }
 
   for (const post of posts) {
     // Skip nested posts using closest() - O(n) total instead of O(n²)
@@ -1485,6 +1732,11 @@ async function processVisiblePosts(options: {
     }
 
     const key = getPostIdentityKey(post);
+    if (shouldAttemptRestore && key && restoreTrackedMarketsOnPost(post, key)) {
+      restoredTrackedCards++;
+      continue;
+    }
+
     if (key && processedPostKeys.has(key)) {
       alreadyProcessedCount++;
       continue;
@@ -1498,6 +1750,7 @@ async function processVisiblePosts(options: {
     log(`   • Total posts found: ${posts.length}`);
     log(`   • Nested (skipped): ${nestedCount}`);
     log(`   • Already processed: ${alreadyProcessedCount}`);
+    log(`   • Restored tracked cards: ${restoredTrackedCards}`);
     log(`   • New posts to process: ${newPosts.length}`);
   }
 
@@ -1663,6 +1916,7 @@ function runMemoryCleanup(force = false): void {
       if (removedCard) {
         cardVisibilityObserver?.unobserve(removedCard);
       }
+      forgetReinjectionCandidate(removedEntry.postKey, removedEntry.market.id);
     }
     log(
       `🧹 [MemoryCleanup] Trimmed injectedMarkets to ${injectedMarkets.length} (removed ${removed.length})`
@@ -1780,6 +2034,11 @@ async function processQueuedPosts(options: {
 
   // Filter and deduplicate
   const newPosts: Array<{ post: Element; key: string | null }> = [];
+  const shouldAttemptRestore = reinjectionTrackingKeysByPostKey.size > 0;
+
+  if (shouldAttemptRestore) {
+    syncInjectedCardTrackingFromDom();
+  }
 
   for (const post of postsToProcess) {
     // Skip if not connected to DOM anymore (virtualized away)
@@ -1790,6 +2049,10 @@ async function processQueuedPosts(options: {
     if (parentPost && parentPost !== post) continue;
 
     const key = getPostIdentityKey(post);
+    if (shouldAttemptRestore && key && restoreTrackedMarketsOnPost(post, key)) {
+      continue;
+    }
+
     if (key && processedPostKeys.has(key)) continue;
 
     // Skip if already in analyzedPosts WeakSet
@@ -2230,6 +2493,7 @@ window.KNOWW_INJECTION = {
   markClicked: (marketId: string) => {
     clickedMarketIds.add(marketId);
   },
+  restoreTrackedMarket,
   // Stats for debugging
   getMemoryStats: () => ({
     processedPostKeys: processedPostKeys.size,

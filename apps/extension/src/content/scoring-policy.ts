@@ -7,7 +7,6 @@ export const EMBEDDING_FLOOR = 0.5;
 export const FAIL_OPEN_FLOOR = 0.5;
 export const AI_GATE_RETRY_FLOOR = 0.6;
 export const HEURISTIC_STRICT_SHARED_NOUNS = 3;
-export const SINGLE_SIGNAL_RECOVERY_FLOOR = 0.65;
 
 const SMART_QUOTE_RE = /[\u2018\u2019\u201A\u201B\u2032\u0060\u02BC]/g;
 const NAIVE_GATE_TOKEN_RE = /[\s,.!?;:()[\]{}"'/\-@#\u2018\u2019\u201C\u201D]+/;
@@ -380,18 +379,13 @@ export function naiveContextGate(
 
   const allSignals = new Set([...sharedNounList, ...sharedEntityList]);
   const distinctSignals = allSignals.size;
-  const hasHighSignalMatch = [...allSignals].some((signal) =>
-    HIGH_SIGNAL_TOKENS.has(signal)
-  );
 
   return {
-    pass:
-      distinctSignals >= NAIVE_GATE_MIN_DISTINCT ||
-      (distinctSignals === 1 && hasHighSignalMatch),
+    pass: distinctSignals >= NAIVE_GATE_MIN_DISTINCT,
     sharedNouns,
     meaningfulNouns: sharedNouns,
     sharedEntities,
-    details: `fallback-local-gate: words=[${sharedNounList.join(",")}] entities=[${sharedEntityList.join(",")}] distinct=${distinctSignals}${hasHighSignalMatch ? " high-signal" : ""}`,
+    details: `fallback-local-gate: words=[${sharedNounList.join(",")}] entities=[${sharedEntityList.join(",")}] distinct=${distinctSignals}`,
   };
 }
 
@@ -457,7 +451,7 @@ export function evaluateCandidateGate({
   const fallbackGate = naiveContextGate(postText, buildMarketGateText(market));
   const resolvedGate = gate ?? fallbackGate;
   let gatePass = resolvedGate.pass;
-  let usedRecoveryGate = false;
+  const usedRecoveryGate = false;
   let recoveryGate: ContextGateResult | undefined;
 
   if (scoringMode === "heuristic") {
@@ -465,12 +459,6 @@ export function evaluateCandidateGate({
       hasPerMarketTagMatch(matchedTags, market) ||
       (resolvedGate.pass &&
         resolvedGate.sharedNouns >= HEURISTIC_STRICT_SHARED_NOUNS);
-  }
-
-  if (!gatePass && score >= SINGLE_SIGNAL_RECOVERY_FLOOR && fallbackGate.pass) {
-    gatePass = true;
-    usedRecoveryGate = true;
-    recoveryGate = fallbackGate;
   }
 
   return {

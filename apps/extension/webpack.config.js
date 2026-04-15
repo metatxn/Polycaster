@@ -221,7 +221,7 @@ module.exports = (_env, argv) => {
                 manifest.web_accessible_resources[0].matches =
                   buildWarMatches(hostsSource);
               }
-              return JSON.stringify(manifest, null, 2) + "\n";
+              return `${JSON.stringify(manifest, null, 2)}\n`;
             },
           },
           { from: "options.html", to: "options.html" },

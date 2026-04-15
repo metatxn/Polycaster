@@ -250,6 +250,7 @@ declare global {
       startCleanupInterval: () => void;
       stopCleanupInterval: () => void;
       markClicked: (marketId: string) => void;
+      restoreTrackedMarket: (postKey: string, marketId: string) => boolean;
       // Stats for debugging
       getMemoryStats: () => {
         processedPostKeys: number;

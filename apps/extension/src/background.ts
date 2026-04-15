@@ -27,12 +27,14 @@ import type {
   ScoreMarketsSuccessResponse,
   ScoringPrewarmMessage,
 } from "./types/chrome-messages";
+import { TRADING_SESSION_DISCONNECTED_MESSAGE } from "./types/chrome-messages";
 
 // ── Programmatic content script registration ──
 // Instead of declaring content_scripts in manifest.json (which would
 // require <all_urls> and load on every site), we register them only
 // for supported platforms via chrome.scripting.
 const CONTENT_SCRIPT_ID = "knoww-content";
+const TRADING_CREDS_STORAGE_PREFIX = "knoww_clob_creds_";
 
 async function registerContentScripts(): Promise<void> {
   try {
@@ -115,6 +117,53 @@ function isFetchTextMessage(message: unknown): message is FetchTextMessage {
     message !== null &&
     (message as FetchTextMessage).type === "fetch-text" &&
     typeof (message as FetchTextMessage).url === "string"
+  );
+}
+
+async function clearCachedTradingCredentials(): Promise<void> {
+  const sessionEntries = await new Promise<Record<string, unknown>>(
+    (resolve) => {
+      chrome.storage.session.get(null, (items) => {
+        resolve(items as Record<string, unknown>);
+      });
+    }
+  );
+
+  const credentialKeys = Object.keys(sessionEntries).filter((key) =>
+    key.startsWith(TRADING_CREDS_STORAGE_PREFIX)
+  );
+
+  if (credentialKeys.length === 0) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    chrome.storage.session.remove(credentialKeys, () => resolve());
+  });
+}
+
+async function broadcastTradingSessionDisconnected(): Promise<void> {
+  const tabs = await chrome.tabs.query({});
+
+  await Promise.all(
+    tabs.map(
+      (tab) =>
+        new Promise<void>((resolve) => {
+          if (typeof tab.id !== "number") {
+            resolve();
+            return;
+          }
+
+          chrome.tabs.sendMessage(
+            tab.id,
+            { type: TRADING_SESSION_DISCONNECTED_MESSAGE },
+            () => {
+              void chrome.runtime.lastError;
+              resolve();
+            }
+          );
+        })
+    )
   );
 }
 
@@ -231,6 +280,7 @@ function forwardToOffscreen(
 async function sendOffscreenMessage(
   offscreenType:
     | "offscreen:trading"
+    | "offscreen:trading-prewarm"
     | "offscreen:scoring"
     | "offscreen:scoring-prewarm",
   payload: unknown,
@@ -375,7 +425,9 @@ chrome.runtime.onMessage.addListener(
             });
           }
         } finally {
+          await clearCachedTradingCredentials();
           await clearExtensionAccessToken();
+          await broadcastTradingSessionDisconnected();
           sendResponse({ ok: true, data: null } as BackgroundResponse);
         }
       })();
@@ -438,7 +490,14 @@ chrome.runtime.onMessage.addListener(
 
     // Pre-warm offscreen document so it's ready when the user places a trade
     if (msg?.type === "trading:prewarm-offscreen") {
-      ensureOffscreen()
+      void ensureOffscreen()
+        .then(() =>
+          sendOffscreenMessage(
+            "offscreen:trading-prewarm",
+            message,
+            sender.tab?.id
+          )
+        )
         .then(() =>
           sendResponse({ ok: true, data: null } as BackgroundResponse)
         )

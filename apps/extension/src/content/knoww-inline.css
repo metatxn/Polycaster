@@ -2863,6 +2863,18 @@
   line-height: 1.4 !important;
 }
 
+.knoww-tp-enable-error {
+  width: 100% !important;
+  max-width: 280px !important;
+  padding: 10px 12px !important;
+  border-radius: 10px !important;
+  background: rgba(239, 68, 68, 0.1) !important;
+  border: 1px solid rgba(239, 68, 68, 0.22) !important;
+  color: rgb(239, 68, 68) !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+
 .knoww-tp-btn-connect {
   display: flex !important;
   align-items: center !important;

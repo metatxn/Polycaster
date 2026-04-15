@@ -1,44 +1,39 @@
 /**
- * Offscreen Document — hosts the heavy trading bundle (ethers + ClobClient)
- * so the service worker stays lightweight.
- *
- * Receives "offscreen:trading" messages from the service worker, processes
- * them via handleTradingMessage, and sends the result back via sendResponse.
- *
- * Signing requests from BridgeSigner are relayed through the service worker
- * (which has chrome.tabs access) to the content script tab.
+ * Offscreen Document — lightweight dispatcher that lazy-loads either the
+ * scoring runtime or the trading runtime on first use.
  */
 
-import { warmUp } from "../background/embeddings";
 import { logWarn } from "../background/logger";
-import { scoreMarkets } from "../background/scoring";
-import { initBridgeSigner } from "../background/signing-state";
-import { handleTradingMessage } from "../background/trading-handler";
 import type { ScoreMarketsMessage } from "../types/chrome-messages";
 
-initBridgeSigner();
+type ScoringRuntimeModule = typeof import("./scoring-runtime");
+type TradingRuntimeModule = typeof import("./trading-runtime");
 
-let scoringWarmedUp = false;
-let warmUpPromise: Promise<void> | null = null;
+let scoringRuntimePromise: Promise<ScoringRuntimeModule> | null = null;
+let tradingRuntimePromise: Promise<TradingRuntimeModule> | null = null;
 
-function ensureScoringWarm(): Promise<void> {
-  if (scoringWarmedUp) return Promise.resolve();
-  if (warmUpPromise) return warmUpPromise;
-
-  warmUpPromise = warmUp()
-    .then(() => {
-      scoringWarmedUp = true;
-    })
-    .catch((err) => {
-      warmUpPromise = null;
-      scoringWarmedUp = false;
-      logWarn("offscreen.warmup-failed", {
-        message: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
+function loadScoringRuntime(): Promise<ScoringRuntimeModule> {
+  if (!scoringRuntimePromise) {
+    scoringRuntimePromise = import(
+      /* webpackChunkName: "offscreen-scoring-runtime" */ "./scoring-runtime"
+    ).catch((error) => {
+      scoringRuntimePromise = null;
+      throw error;
     });
+  }
+  return scoringRuntimePromise;
+}
 
-  return warmUpPromise;
+function loadTradingRuntime(): Promise<TradingRuntimeModule> {
+  if (!tradingRuntimePromise) {
+    tradingRuntimePromise = import(
+      /* webpackChunkName: "offscreen-trading-runtime" */ "./trading-runtime"
+    ).catch((error) => {
+      tradingRuntimePromise = null;
+      throw error;
+    });
+  }
+  return tradingRuntimePromise;
 }
 
 function isScoreMarketsMessage(
@@ -79,14 +74,15 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg.type === "offscreen:trading") {
-      const fakeSender: chrome.runtime.MessageSender = {
-        tab: tabId != null ? ({ id: tabId } as chrome.tabs.Tab) : undefined,
-      };
-      handleTradingMessage(payload, fakeSender)
+      loadTradingRuntime()
+        .then((runtime) =>
+          runtime.handleTradingOffscreenMessage(
+            payload as { type: string; [key: string]: unknown },
+            tabId
+          )
+        )
         .then((result) => {
-          sendResponse(
-            result ?? { ok: false, error: "Unhandled trading message" }
-          );
+          sendResponse(result);
         })
         .catch((err) => {
           logWarn("offscreen.trading-failed", {
@@ -100,8 +96,27 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (msg.type === "offscreen:trading-prewarm") {
+      loadTradingRuntime()
+        .then((runtime) => runtime.prewarmTrading())
+        .then(() => {
+          sendResponse({ ok: true, data: null });
+        })
+        .catch((err) => {
+          logWarn("offscreen.trading-prewarm-failed", {
+            message: err instanceof Error ? err.message : String(err),
+          });
+          sendResponse({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      return true;
+    }
+
     if (msg.type === "offscreen:scoring-prewarm") {
-      ensureScoringWarm()
+      loadScoringRuntime()
+        .then((runtime) => runtime.prewarmScoring())
         .then(() => {
           sendResponse({ ok: true, data: null });
         })
@@ -124,16 +139,10 @@ chrome.runtime.onMessage.addListener(
       }
       const request = payload;
 
-      ensureScoringWarm()
-        .then(() => scoreMarkets(request))
+      loadScoringRuntime()
+        .then((runtime) => runtime.handleScoringMessage(request))
         .then((result) => {
-          sendResponse({
-            ok: true,
-            similarities: result.similarities,
-            bm25Scores: result.bm25Scores,
-            contextGateResults: result.contextGateResults,
-            usedEmbeddings: result.usedEmbeddings,
-          });
+          sendResponse(result);
         })
         .catch((err) => {
           logWarn("offscreen.scoring-failed", {

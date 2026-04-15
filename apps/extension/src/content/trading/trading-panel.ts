@@ -159,6 +159,7 @@ let yesPrice = 0;
 let noPriceValue = 0;
 
 let sessionRestoreAttempted = false;
+let lastRenderedErrorToast: string | null = null;
 
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const LIVE_PANEL_REFRESH_INTERVAL = 10000;
@@ -640,6 +641,8 @@ function createPanel(opts: PanelOptions): HTMLElement {
     noPriceValue = opts.outcomeIndex === 1 ? opts.price : 1 - opts.price;
   }
 
+  lastRenderedErrorToast = null;
+
   const currentCtx = TradingService.getContext();
   if (
     currentCtx.address &&
@@ -678,7 +681,13 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
   if (!TradingService.getContext().address && !sessionRestoreAttempted) {
     sessionRestoreAttempted = true;
-    WalletBridge.getAccounts()
+    TradingService.hasActiveSession()
+      .then((hasSession) => {
+        if (!hasSession) {
+          return [];
+        }
+        return WalletBridge.getAccounts();
+      })
       .then((accounts) => {
         if (accounts.length > 0) TradingService.connectWallet();
       })
@@ -796,8 +805,11 @@ function addHeader(
     dcBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("wallet_disconnected");
-      TradingService.reset();
-      CredentialManager.clear(address).catch(() => {});
+      setButtonLoading(dcBtn, "Disconnecting…");
+      void TradingService.disconnect().catch(() => {
+        TradingService.reset();
+        CredentialManager.clear(address).catch(() => {});
+      });
     };
     right.appendChild(dcBtn);
   }
@@ -1034,17 +1046,53 @@ function addLoading(p: HTMLElement, text: string): void {
   p.appendChild(s);
 }
 
-function addEnableTrading(p: HTMLElement): void {
+function formatTradingPanelErrorMessage(
+  message: string | null | undefined
+): string {
+  const trimmed = message?.trim() ?? "";
+  const normalized = trimmed.toLowerCase();
+
+  if (
+    normalized === "failed to fetch" ||
+    normalized.includes("networkerror") ||
+    normalized.includes("load failed")
+  ) {
+    return "Could not connect to Knoww. Retry to start a new signing request.";
+  }
+
+  if (normalized.includes("timed out")) {
+    return "Knoww took too long to respond. Retry to start a new signing request.";
+  }
+
+  return trimmed || "Something went wrong. Retry the request.";
+}
+
+function addEnableTrading(
+  p: HTMLElement,
+  options?: { errorMessage?: string | null }
+): void {
+  const errorMessage = options?.errorMessage
+    ? formatTradingPanelErrorMessage(options.errorMessage)
+    : null;
   const s = el("div", "knoww-tp-enable-section");
   s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
   s.appendChild(
     el(
       "div",
       "knoww-tp-enable-msg",
-      "Sign a message to enable trading on Polymarket"
+      errorMessage
+        ? "Trading could not be enabled. Retry to start a new signing request."
+        : "Sign a message to enable trading on Polymarket"
     )
   );
-  const btn = el("button", "knoww-tp-btn-enable", "Enable Trading");
+  if (errorMessage) {
+    s.appendChild(el("div", "knoww-tp-enable-error", errorMessage));
+  }
+  const btn = el(
+    "button",
+    "knoww-tp-btn-enable",
+    errorMessage ? "Retry" : "Enable Trading"
+  );
   btn.onclick = (e) => {
     e.stopPropagation();
     setButtonLoading(btn, "Waiting for signature…");
@@ -3977,6 +4025,10 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
   // Enable trading notice (blocks all steps)
   const needsTrading = !ctx.credentials;
   if (needsTrading) {
+    const enableTradingError =
+      ctx.state === "error" && ctx.error
+        ? formatTradingPanelErrorMessage(ctx.error)
+        : null;
     const notice = el("div", "knoww-tp-deposit-notice");
     notice.appendChild(
       elHtml("span", "knoww-tp-deposit-notice-icon", I.shield)
@@ -3989,14 +4041,21 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
       el(
         "div",
         "knoww-tp-deposit-notice-desc",
-        "You need to sign a message to enable trading before you can deposit funds."
+        enableTradingError
+          ? "Trading could not be enabled. Retry to start a new signing request before depositing funds."
+          : "You need to sign a message to enable trading before you can deposit funds."
       )
     );
+    if (enableTradingError) {
+      noticeText.appendChild(
+        el("div", "knoww-tp-enable-error", enableTradingError)
+      );
+    }
     notice.appendChild(noticeText);
     form.appendChild(notice);
 
     const enableBtn = el("button", "knoww-tp-submit deposit");
-    enableBtn.textContent = "Enable Trading";
+    enableBtn.textContent = enableTradingError ? "Retry" : "Enable Trading";
     enableBtn.onclick = (e) => {
       e.stopPropagation();
       setButtonLoading(enableBtn, "Waiting for signature…");
@@ -4059,12 +4118,14 @@ function render(
 
   if (activeView === "deposit") {
     renderDepositForm(panel, ctx);
-  } else if (state === "connected" && !ctx.credentials) {
-    addEnableTrading(panel);
-    return;
   } else if (state === "deriving-credentials") {
     addLoading(panel, "Confirm signature in your wallet...");
     return;
+  } else if (!ctx.credentials && (state === "connected" || state === "error")) {
+    addEnableTrading(panel, { errorMessage: state === "error" ? error : null });
+    if (state !== "error") {
+      return;
+    }
   } else if (
     state === "ready" ||
     state === "placing-order" ||
@@ -4081,7 +4142,15 @@ function render(
     }
   }
 
-  if (error) showToast(panel, error, "error");
+  if (error) {
+    const displayError = formatTradingPanelErrorMessage(error);
+    if (lastRenderedErrorToast !== displayError) {
+      showToast(panel, displayError, "error");
+      lastRenderedErrorToast = displayError;
+    }
+  } else {
+    lastRenderedErrorToast = null;
+  }
 }
 
 function showToast(
@@ -4146,6 +4215,7 @@ export const TradingPanel = {
   hide(): void {
     livePanelRefreshEnabled = false;
     clearLivePanelRefreshTimer();
+    lastRenderedErrorToast = null;
     if (settleTimer) {
       clearTimeout(settleTimer);
       settleTimer = null;

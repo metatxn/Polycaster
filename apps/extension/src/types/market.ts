@@ -356,6 +356,7 @@ export interface KeywordExtractionResult {
 export interface InjectedMarketEntry {
   market: Market;
   cardRef: WeakRef<HTMLElement> | { deref: () => HTMLElement | undefined };
+  postKey?: string;
   timestamp: number;
   isInViewport?: boolean;
   lastVisibleAt?: number;

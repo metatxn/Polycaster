@@ -9,7 +9,10 @@
 import type { ClobOrderType } from "@knoww/shared-types/polymarket";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import type { OrderBook } from "@knoww/shared-types/slippage";
-import { EXTENSION_AUTH_REQUIRED_ERROR } from "../../types/chrome-messages";
+import {
+  EXTENSION_AUTH_REQUIRED_ERROR,
+  TRADING_SESSION_DISCONNECTED_MESSAGE,
+} from "../../types/chrome-messages";
 import { WalletBridge } from "./bridge";
 import { type ApiKeyCreds, CredentialManager } from "./credentials";
 import { ExtensionSession } from "./extension-session";
@@ -54,22 +57,26 @@ type StateListener = (ctx: TradingContext) => void;
 
 const listeners: StateListener[] = [];
 
-let ctx: TradingContext = {
-  state: "disconnected",
-  address: null,
-  proxyAddress: null,
-  isDeployed: false,
-  balance: 0,
-  polBalance: 0,
-  tokenBalances: [],
-  credentials: null,
-  error: null,
-  orderBook: null,
-  minOrderSize: 1,
-  tickSize: 0.01,
-  usdcAllowance: 0,
-  usdcAllowanceNegRisk: 0,
-};
+function createDisconnectedContext(): TradingContext {
+  return {
+    state: "disconnected",
+    address: null,
+    proxyAddress: null,
+    isDeployed: false,
+    balance: 0,
+    polBalance: 0,
+    tokenBalances: [],
+    credentials: null,
+    error: null,
+    orderBook: null,
+    minOrderSize: 1,
+    tickSize: 0.01,
+    usdcAllowance: 0,
+    usdcAllowanceNegRisk: 0,
+  };
+}
+
+let ctx: TradingContext = createDisconnectedContext();
 
 function trackTradingAnalytics(
   event: string,
@@ -194,6 +201,10 @@ export const TradingService = {
       const idx = listeners.indexOf(listener);
       if (idx >= 0) listeners.splice(idx, 1);
     };
+  },
+
+  async hasActiveSession(): Promise<boolean> {
+    return (await ExtensionSession.getToken()) !== null;
   },
 
   async connectWallet(walletUuid?: string): Promise<void> {
@@ -576,22 +587,23 @@ export const TradingService = {
   },
 
   reset(): void {
-    ctx = {
-      state: "disconnected",
-      address: null,
-      proxyAddress: null,
-      isDeployed: false,
-      balance: 0,
-      polBalance: 0,
-      tokenBalances: [],
-      credentials: null,
-      error: null,
-      orderBook: null,
-      minOrderSize: 1,
-      tickSize: 0.01,
-      usdcAllowance: 0,
-      usdcAllowanceNegRisk: 0,
-    };
+    ctx = createDisconnectedContext();
     notify();
   },
+
+  async disconnect(): Promise<void> {
+    await sendMsg<null>({ type: "auth:logout" }, "Failed to disconnect wallet");
+    this.reset();
+  },
 };
+
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type !== TRADING_SESSION_DISCONNECTED_MESSAGE) {
+      return false;
+    }
+
+    TradingService.reset();
+    return false;
+  });
+}

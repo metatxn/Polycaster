@@ -1636,7 +1636,7 @@ function createNotificationItem(
   isActive = true
 ): HTMLElement {
   const { log } = window.KNOWW_UTILS;
-  const { market, cardRef } = marketData;
+  const { market, cardRef, postKey } = marketData;
 
   const marketSource = market.source || "polymarket";
 
@@ -1775,13 +1775,25 @@ function createNotificationItem(
       itemStatus: isActive ? "active" : "scrolled_out",
     });
     if (!isActive) {
-      const marketUrl = buildMarketUrl(market);
-      log("Opening scrolled-out market directly:", marketUrl);
-      window.open(marketUrl, "_blank", "noopener,noreferrer");
+      const restored =
+        postKey &&
+        window.KNOWW_INJECTION?.restoreTrackedMarket?.(postKey, market.id);
+      if (restored) {
+        scrollToMarket(null, market.id, market, postKey);
+      } else {
+        const marketUrl = buildMarketUrl(market);
+        log("Opening scrolled-out market directly:", marketUrl);
+        window.open(marketUrl, "_blank", "noopener,noreferrer");
+      }
       window.KNOWW_PREFERENCES?.recordClick(market);
       return;
     }
-    scrollToMarket(cardRef as WeakRef<HTMLElement> | null, market.id, market);
+    scrollToMarket(
+      cardRef as WeakRef<HTMLElement> | null,
+      market.id,
+      market,
+      postKey
+    );
     window.KNOWW_PREFERENCES?.recordClick(market);
   };
 
@@ -1820,7 +1832,8 @@ function truncateText(text: string, maxLength: number): string {
 function scrollToMarket(
   cardRefOrElement: WeakRef<HTMLElement> | HTMLElement | null | undefined,
   marketId: string,
-  market?: Market
+  market?: Market,
+  postKey?: string
 ): void {
   const { log } = window.KNOWW_UTILS;
 
@@ -1834,9 +1847,28 @@ function scrollToMarket(
     !(targetCard instanceof Node) ||
     !document.body.contains(targetCard)
   ) {
-    targetCard = document.querySelector(
-      `[data-knoww-market-id="${marketId}"]`
-    ) as HTMLElement | null;
+    const scopedSelector = postKey
+      ? `.knoww-market-card[data-knoww-market-id="${marketId}"][data-knoww-post-key="${postKey}"]`
+      : `[data-knoww-market-id="${marketId}"]`;
+    targetCard = document.querySelector(scopedSelector) as HTMLElement | null;
+  }
+
+  if (
+    !targetCard ||
+    !(targetCard instanceof Node) ||
+    !document.body.contains(targetCard)
+  ) {
+    const restored =
+      postKey &&
+      window.KNOWW_INJECTION?.restoreTrackedMarket?.(postKey, marketId);
+    if (restored) {
+      const restoredSelector = postKey
+        ? `.knoww-market-card[data-knoww-market-id="${marketId}"][data-knoww-post-key="${postKey}"]`
+        : `[data-knoww-market-id="${marketId}"]`;
+      targetCard = document.querySelector(
+        restoredSelector
+      ) as HTMLElement | null;
+    }
   }
 
   if (

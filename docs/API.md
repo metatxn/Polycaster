@@ -514,11 +514,11 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Missing message, signature, challengeToken, walletAddress, or chainId" }` or `{ error: "Invalid request payload" }`
+- `400`: `{ error: "Missing message, signature, challengeToken, walletAddress, or chainId" }`, `{ error: "Malformed signature" }`, or `{ error: "Invalid request payload" }`
 - `401`: `{ error: "Invalid or expired challenge" }` or `{ error: "Invalid signature" }`
 - `404`: Not used.
 - `500`: Not used.
-- `503`: `{ error: "Extension session secret is not configured" }`
+- `503`: `{ error: "Extension session secret is not configured" }` or `{ error: "Failed to establish extension session" }`
 
 Rate limiting
 
@@ -787,21 +787,24 @@ Headers
 
 Query parameters
 
-| Name       | Type             | Required | Validation                                                  |
-| ---------- | ---------------- | -------- | ----------------------------------------------------------- |
-| `tag`      | `string \| null` | No       | Optional nullable string.                                   |
-| `limit`    | `string`         | No       | Optional string; no numeric validation. Default `"50"`.     |
-| `offset`   | `string`         | No       | Optional string; no numeric validation. Default `"0"`.      |
-| `closed`   | `string`         | No       | Optional string passed through upstream. Default `"false"`. |
-| `archived` | `string`         | No       | Optional string passed through upstream. Default `"false"`. |
+| Name           | Type             | Required | Validation                                                  |
+| -------------- | ---------------- | -------- | ----------------------------------------------------------- |
+| `tag`          | `string \| null` | No       | Optional nullable string.                                   |
+| `limit`        | `string`         | No       | Optional string; no numeric validation. Default `"50"`.     |
+| `after_cursor` | `string`         | No       | Optional keyset cursor for the next page.                   |
+| `closed`       | `string`         | No       | Optional string passed through upstream. Default `"false"`. |
 
 Success `200`
 
-- Schema: `{ success: true, count: number, events: unknown[] }`
+- Schema:
+  - `success: true`
+  - `count: number`
+  - `events: unknown[]`
+  - `pagination: { hasMore: boolean, nextCursor: string | null }`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -813,20 +816,24 @@ Rate limiting
 Example
 
 ```http
-GET /api/events/list?tag=nfl&limit=2&offset=0 HTTP/1.1
+GET /api/events/list?tag=nfl&limit=2&after_cursor=abc123 HTTP/1.1
 ```
 
 ```json
 {
   "success": true,
-  "count": 2,
+  "count": 1,
   "events": [
     {
       "id": "35908",
       "slug": "chiefs-vs-bills",
       "title": "Chiefs vs. Bills"
     }
-  ]
+  ],
+  "pagination": {
+    "hasMore": true,
+    "nextCursor": "def456"
+  }
 }
 ```
 
@@ -840,35 +847,30 @@ Headers
 
 Query parameters
 
-| Name              | Type     | Required | Validation                                                                                         |
-| ----------------- | -------- | -------- | -------------------------------------------------------------------------------------------------- |
-| `tag_slug`        | `string` | No       | Passed through upstream.                                                                           |
-| `limit`           | `string` | No       | Default `"20"`. No numeric validation.                                                             |
-| `offset`          | `string` | No       | Default `"0"`. No numeric validation.                                                              |
-| `active`          | `string` | No       | Default `"true"`.                                                                                  |
-| `archived`        | `string` | No       | Default `"false"`.                                                                                 |
-| `closed`          | `string` | No       | Default `"false"`.                                                                                 |
-| `order`           | `string` | No       | Default `"volume24hr"`.                                                                            |
-| `ascending`       | `string` | No       | Default `"false"`.                                                                                 |
-| `markets`         | `"full"` | No       | When set to `"full"`, expanded market fields are returned. Otherwise only market IDs are returned. |
-| `volume24hr_min`  | `string` | No       | Mapped to upstream `volume_min`.                                                                   |
-| `volume1wk_min`   | `string` | No       | Also mapped to upstream `volume_min`.                                                              |
-| `liquidity_min`   | `string` | No       | Passed to upstream `liquidity_min`.                                                                |
-| `competitive_min` | `string` | No       | Passed to upstream `competitive_min`.                                                              |
-| `competitive_max` | `string` | No       | Parsed but not used.                                                                               |
-| `live`            | `string` | No       | Only `"true"` adds the upstream filter.                                                            |
-| `ended`           | `string` | No       | Only `"true"` adds the upstream filter.                                                            |
-| `start_date_min`  | `string` | No       | Sent as `startDate_gte`.                                                                           |
-| `start_date_max`  | `string` | No       | Sent as `startDate_lte`.                                                                           |
-| `end_date_min`    | `string` | No       | Sent as `endDate_gte`.                                                                             |
-| `end_date_max`    | `string` | No       | Sent as `endDate_lte`.                                                                             |
+| Name             | Type     | Required | Validation                                                                                         |
+| ---------------- | -------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `tag_slug`       | `string` | No       | Passed through upstream.                                                                           |
+| `limit`          | `string` | No       | Default `"20"`. No numeric validation.                                                             |
+| `after_cursor`   | `string` | No       | Optional keyset cursor for the next page.                                                          |
+| `closed`         | `string` | No       | Default `"false"`.                                                                                 |
+| `order`          | `string` | No       | Default `"volume24hr"`.                                                                            |
+| `ascending`      | `string` | No       | Default `"false"`.                                                                                 |
+| `markets`        | `"full"` | No       | When set to `"full"`, expanded market fields are returned. Otherwise only market IDs are returned. |
+| `volume24hr_min` | `string` | No       | Mapped to upstream `volume_min`.                                                                   |
+| `volume1wk_min`  | `string` | No       | Also mapped to upstream `volume_min`.                                                              |
+| `liquidity_min`  | `string` | No       | Passed to upstream `liquidity_min`.                                                                |
+| `live`           | `string` | No       | Only `"true"` adds the upstream filter.                                                            |
+| `start_date_min` | `string` | No       | Passed through upstream as `start_date_min`.                                                       |
+| `start_date_max` | `string` | No       | Passed through upstream as `start_date_max`.                                                       |
+| `end_date_min`   | `string` | No       | Passed through upstream as `end_date_min`.                                                         |
+| `end_date_max`   | `string` | No       | Passed through upstream as `end_date_max`.                                                         |
 
 Success `200`
 
 - Schema:
   - `success: true`
   - `data: SlimEvent[]`
-  - `pagination: { hasMore: boolean, totalResults: number }`
+  - `pagination: { hasMore: boolean, nextCursor: string | null }`
 - `SlimEvent` contains:
   - event fields: `id`, `slug`, `title`, `description`, `image`, volume/liquidity fields, `active`, `closed`, `live`, `ended`, `competitive`, `negRisk`, `score`, `startDate`, `endDate`
   - `markets`: either `{ id }[]` or expanded market objects with `question`, `outcomes`, `outcomePrices`, `groupItemTitle`, `image`, `icon`, parsed `clobTokenIds: string[]`, `conditionId`, `gameStartTime`
@@ -876,7 +878,7 @@ Success `200`
 
 Errors
 
-- `400`: Not used by this handler.
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -920,7 +922,7 @@ GET /api/events/paginated?tag_slug=crypto&limit=2&markets=full HTTP/1.1
   ],
   "pagination": {
     "hasMore": true,
-    "totalResults": 250
+    "nextCursor": "def456"
   }
 }
 ```
@@ -993,11 +995,11 @@ Query parameters
 - Same filter set as `GET /api/events/paginated`, except this route always forces:
   - `order=volume`
   - `ascending=false`
-  - defaults `limit=15`, `offset=0`, `active=true`, `archived=false`, `closed=false`
+  - defaults `limit=15`, `closed=false`
 
 Success `200`
 
-- Same slim event response schema as `GET /api/events/paginated`.
+- Same slim event response schema as `GET /api/events/paginated`, plus `pagination.totalResults`.
 
 Errors
 
@@ -1048,7 +1050,7 @@ Query parameters
 - Same filter set as `GET /api/events/paginated`, except this route always forces:
   - `order=volume24hr`
   - `ascending=false`
-  - defaults `limit=15`, `offset=0`, `active=true`, `archived=false`, `closed=false`
+  - defaults `limit=15`, `closed=false`
 
 Success `200`
 
@@ -1085,7 +1087,7 @@ GET /api/events/breaking?limit=2 HTTP/1.1
   ],
   "pagination": {
     "hasMore": true,
-    "totalResults": 48
+    "nextCursor": "def456"
   }
 }
 ```
@@ -1103,7 +1105,7 @@ Query parameters
 - Same filter set as `GET /api/events/paginated`, except this route always forces:
   - `order=startDate`
   - `ascending=false`
-  - defaults `limit=15`, `offset=0`, `active=true`, `archived=false`, `closed=false`
+  - defaults `limit=15`, `closed=false`
 
 Success `200`
 
@@ -1140,7 +1142,7 @@ GET /api/events/new?limit=2 HTTP/1.1
   ],
   "pagination": {
     "hasMore": true,
-    "totalResults": 64
+    "nextCursor": "def456"
   }
 }
 ```
@@ -2160,12 +2162,12 @@ Headers
 
 Query parameters
 
-| Name     | Type             | Required | Validation                       |
-| -------- | ---------------- | -------- | -------------------------------- |
-| `sport`  | `string \| null` | No       | Optional nullable string.        |
-| `league` | `string \| null` | No       | Optional nullable string.        |
-| `limit`  | `string`         | No       | Optional string. Default `"20"`. |
-| `offset` | `string`         | No       | Optional string. Default `"0"`.  |
+| Name           | Type             | Required | Validation                             |
+| -------------- | ---------------- | -------- | -------------------------------------- |
+| `sport`        | `string \| null` | No       | Optional nullable string.              |
+| `league`       | `string \| null` | No       | Optional nullable string.              |
+| `limit`        | `string`         | No       | Optional string. Default `"20"`.       |
+| `after_cursor` | `string`         | No       | Optional keyset cursor for the next page. |
 
 Success `200`
 
@@ -2174,10 +2176,11 @@ Success `200`
   - `count: number`
   - `markets: object[]`
   - `filters: { sport: string, league: string, tag: string }`
+  - `pagination: { hasMore: boolean, nextCursor?: string | null }`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -2201,6 +2204,10 @@ GET /api/sports/markets?league=nba&limit=2 HTTP/1.1
     "sport": "all",
     "league": "nba",
     "tag": "nba"
+  },
+  "pagination": {
+    "hasMore": false,
+    "nextCursor": null
   }
 }
 ```

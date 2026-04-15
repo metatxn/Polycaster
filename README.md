@@ -27,13 +27,16 @@ pnpm install
 # Configure the web app environment
 $EDITOR apps/web/.env.local
 # Required: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-# Optional: POSTHOG_PROJECT_API_KEY and POSTHOG_HOST for analytics ingestion
+# Optional client analytics: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN and NEXT_PUBLIC_POSTHOG_HOST
+# Optional server analytics: POSTHOG_PROJECT_API_KEY and POSTHOG_HOST
 
 # Run the web app
 pnpm dev:web
 ```
 
 Open [http://localhost:8000](http://localhost:8000)
+
+For full local parity with production-only features, the web app also reads server-side variables such as `OPENROUTER_API_KEY`, `EXTENSION_SESSION_SECRET`, `BUILDER_SIGNING_SERVER_URL`, `INTERNAL_AUTH_TOKEN`, `ALCHEMY_API_KEY`, and `POLYGON_RPC_URL`.
 
 ### Extension Development
 

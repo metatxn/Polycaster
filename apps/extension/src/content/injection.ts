@@ -18,7 +18,7 @@ import {
   type ScoringMode,
   shouldFailOpen,
 } from "./scoring-policy";
-import { LRUSet, scheduleIdle } from "./utils";
+import { escapeSelectorValue, LRUSet, scheduleIdle } from "./utils";
 
 /**
  * Injection point for market cards (local type to avoid circular import)
@@ -648,8 +648,9 @@ function restoreTrackedMarket(postKey: string, marketId: string): boolean {
 
   refreshLiveTrackingForPost(targetPost, postKey);
 
+  const escapedMarketId = escapeSelectorValue(marketId);
   const existingCard = targetPost.querySelector<HTMLElement>(
-    `.knoww-market-card[data-knoww-market-id="${marketId}"]`
+    `.knoww-market-card[data-knoww-market-id="${escapedMarketId}"]`
   );
   if (existingCard) {
     return true;

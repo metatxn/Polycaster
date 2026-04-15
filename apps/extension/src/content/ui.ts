@@ -9,7 +9,7 @@ import type {
   NestedMarket,
 } from "../types/market";
 import { TradingPanel } from "./trading/trading-panel";
-import { escapeHtml } from "./utils";
+import { escapeHtml, escapeSelectorValue } from "./utils";
 
 /**
  * Extract the CLOB token ID for a given outcome index from a market.
@@ -1847,9 +1847,11 @@ function scrollToMarket(
     !(targetCard instanceof Node) ||
     !document.body.contains(targetCard)
   ) {
+    const escapedMarketId = escapeSelectorValue(marketId);
+    const escapedPostKey = postKey ? escapeSelectorValue(postKey) : undefined;
     const scopedSelector = postKey
-      ? `.knoww-market-card[data-knoww-market-id="${marketId}"][data-knoww-post-key="${postKey}"]`
-      : `[data-knoww-market-id="${marketId}"]`;
+      ? `.knoww-market-card[data-knoww-market-id="${escapedMarketId}"][data-knoww-post-key="${escapedPostKey}"]`
+      : `[data-knoww-market-id="${escapedMarketId}"]`;
     targetCard = document.querySelector(scopedSelector) as HTMLElement | null;
   }
 
@@ -1862,9 +1864,11 @@ function scrollToMarket(
       postKey &&
       window.KNOWW_INJECTION?.restoreTrackedMarket?.(postKey, marketId);
     if (restored) {
+      const escapedMarketId = escapeSelectorValue(marketId);
+      const escapedPostKey = postKey ? escapeSelectorValue(postKey) : undefined;
       const restoredSelector = postKey
-        ? `.knoww-market-card[data-knoww-market-id="${marketId}"][data-knoww-post-key="${postKey}"]`
-        : `[data-knoww-market-id="${marketId}"]`;
+        ? `.knoww-market-card[data-knoww-market-id="${escapedMarketId}"][data-knoww-post-key="${escapedPostKey}"]`
+        : `[data-knoww-market-id="${escapedMarketId}"]`;
       targetCard = document.querySelector(
         restoredSelector
       ) as HTMLElement | null;

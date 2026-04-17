@@ -764,7 +764,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 {/* Loading More */}
                 {currentData.isFetchingMore && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
-                    {[...Array(5)].map((_, i) => (
+                    {[...Array(20)].map((_, i) => (
                       <div
                         key={`loading-${i}`}
                         className="rounded-2xl sm:rounded-3xl bg-card/30 backdrop-blur-sm border border-border/30 overflow-hidden animate-pulse"

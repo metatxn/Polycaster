@@ -23,6 +23,22 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    // OpenNext on Cloudflare Workers does not propagate images.minimumCacheTTL
+    // to the optimized image response, so the browser refetches every visit.
+    // Emitting Cache-Control here makes repeat visits hit the HTTP cache.
+    return [
+      {
+        source: "/_next/image",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+    ];
+  },
   // Required to support PostHog trailing slash API requests
   skipTrailingSlashRedirect: true,
   images: {

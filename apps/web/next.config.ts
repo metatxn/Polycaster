@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   experimental: {
     reactCompiler: true,
   },
+  poweredByHeader: false,
   // Turbopack configuration for development
   turbopack: {
     resolveExtensions: [".mdx", ".tsx", ".ts", ".jsx", ".js", ".mjs", ".json"],
@@ -25,6 +26,8 @@ const nextConfig: NextConfig = {
   // Required to support PostHog trailing slash API requests
   skipTrailingSlashRedirect: true,
   images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 31_536_000,
     remotePatterns: [
       {
         protocol: "https",

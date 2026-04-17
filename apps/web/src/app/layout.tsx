@@ -94,26 +94,28 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Preconnect to external API domains for faster initial requests */}
-        {/* crossOrigin needed for CORS-enabled fetch/XHR requests to reuse the connection */}
-        {/* dns-prefetch fallbacks added for older browsers that don't support preconnect */}
+        {/* Preconnect: limited to origins used before first paint.
+            crossOrigin needed for CORS-enabled fetch/XHR to reuse the connection.
+            gamma-api hydrates client-side pagination/filters; api.web3modal.org is
+            fetched during Reown AppKit init; bridge.polymarket.com is used by the
+            wallet/relayer path. Other origins only used on detail/wallet flows —
+            kept as dns-prefetch to avoid wasting TLS handshakes on the home page. */}
         <link
           rel="preconnect"
           href="https://gamma-api.polymarket.com"
           crossOrigin="anonymous"
         />
-        <link rel="dns-prefetch" href="https://gamma-api.polymarket.com" />
         <link
           rel="preconnect"
-          href="https://clob.polymarket.com"
+          href="https://api.web3modal.org"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preconnect"
+          href="https://bridge.polymarket.com"
           crossOrigin="anonymous"
         />
         <link rel="dns-prefetch" href="https://clob.polymarket.com" />
-        <link
-          rel="preconnect"
-          href="https://data-api.polymarket.com"
-          crossOrigin="anonymous"
-        />
         <link rel="dns-prefetch" href="https://data-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://user-pnl-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://strapi-matic.poly.market" />

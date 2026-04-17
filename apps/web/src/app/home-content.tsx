@@ -756,7 +756,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                       key={`${event.id}-${index}`}
                       event={event}
                       index={index}
-                      priority={index < 4}
+                      priority={index < 6}
                     />
                   ))}
                 </div>

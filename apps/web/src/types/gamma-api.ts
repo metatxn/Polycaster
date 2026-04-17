@@ -58,19 +58,3 @@ export interface GammaTag {
   slug?: string;
   label?: string;
 }
-
-/**
- * Pagination info from Gamma API
- */
-export interface GammaPagination {
-  hasMore: boolean;
-  totalResults: number;
-}
-
-/**
- * Full response from Gamma API events endpoint
- */
-export interface GammaEventsResponse {
-  data: GammaEvent[];
-  pagination: GammaPagination;
-}

@@ -10,7 +10,6 @@ interface PaginatedEvent {
   endDate?: string;
   active?: boolean;
   closed?: boolean;
-  archived?: boolean;
   volume?: string;
   volume24hr?: number | string;
   volume1wk?: number | string;
@@ -45,21 +44,17 @@ interface PaginatedEventsResponse {
   data?: PaginatedEvent[];
   pagination?: {
     hasMore: boolean;
-    totalResults: number;
+    nextCursor?: string;
+    totalResults?: number;
   };
   error?: string;
 }
 
-// Server-side filter parameters
 export interface EventFilterParams {
   volume24hrMin?: number | null;
   volumeWeeklyMin?: number | null;
   liquidityMin?: number | null;
-  competitiveMin?: number | null;
-  competitiveMax?: number | null;
   live?: boolean;
-  ended?: boolean;
-  // Date filters (ISO string format)
   startDateFrom?: string | null;
   startDateTo?: string | null;
   endDateFrom?: string | null;
@@ -69,26 +64,18 @@ export interface EventFilterParams {
 interface UsePaginatedEventsParams {
   tagSlug?: string;
   limit?: number;
-  active?: boolean;
-  archived?: boolean;
   closed?: boolean;
   order?: string;
   ascending?: boolean;
-  // Server-side filters
   filters?: EventFilterParams;
-  // Enable/disable the query
   enabled?: boolean;
-  // Auto-refetch interval in ms (0 = disabled)
   refetchInterval?: number;
-  // Request full market data (outcomes, prices, tokenIds) — only use on pages that need it
   fullMarkets?: boolean;
 }
 
 export function usePaginatedEvents({
   tagSlug,
   limit = 20,
-  active = true,
-  archived = false,
   closed = false,
   order = "volume24hr",
   ascending = false,
@@ -103,37 +90,31 @@ export function usePaginatedEvents({
       "paginated",
       tagSlug || "all",
       limit,
-      active,
-      archived,
       closed,
       order,
       ascending,
       fullMarkets,
-      // Include filters in query key for proper cache invalidation
       filters?.volume24hrMin ?? null,
       filters?.volumeWeeklyMin ?? null,
       filters?.liquidityMin ?? null,
-      filters?.competitiveMin ?? null,
-      filters?.competitiveMax ?? null,
       filters?.live ?? null,
-      filters?.ended ?? null,
       filters?.startDateFrom ?? null,
       filters?.startDateTo ?? null,
       filters?.endDateFrom ?? null,
       filters?.endDateTo ?? null,
     ],
-    queryFn: async ({ pageParam = 0 }) => {
+    queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: limit.toString(),
-        offset: pageParam.toString(),
-        active: active.toString(),
-        archived: archived.toString(),
         closed: closed.toString(),
         order,
         ascending: ascending.toString(),
       });
 
-      // Add tag filter
+      if (pageParam) {
+        params.set("after_cursor", pageParam);
+      }
+
       if (tagSlug) {
         params.set("tag_slug", tagSlug);
       }
@@ -142,7 +123,6 @@ export function usePaginatedEvents({
         params.set("markets", "full");
       }
 
-      // Add server-side filters
       if (filters?.volume24hrMin) {
         params.set("volume24hr_min", filters.volume24hrMin.toString());
       }
@@ -152,26 +132,10 @@ export function usePaginatedEvents({
       if (filters?.liquidityMin) {
         params.set("liquidity_min", filters.liquidityMin.toString());
       }
-      if (
-        filters?.competitiveMin !== undefined &&
-        filters?.competitiveMin !== null
-      ) {
-        params.set("competitive_min", filters.competitiveMin.toString());
-      }
-      if (
-        filters?.competitiveMax !== undefined &&
-        filters?.competitiveMax !== null
-      ) {
-        params.set("competitive_max", filters.competitiveMax.toString());
-      }
       if (filters?.live) {
         params.set("live", "true");
       }
-      if (filters?.ended) {
-        params.set("ended", "true");
-      }
 
-      // Date filters
       if (filters?.startDateFrom) {
         params.set("start_date_min", filters.startDateFrom);
       }
@@ -201,12 +165,12 @@ export function usePaginatedEvents({
 
       return {
         events: result.data || [],
-        nextOffset: result.pagination?.hasMore ? pageParam + limit : undefined,
-        totalResults: result.pagination?.totalResults || 0,
+        nextCursor: result.pagination?.nextCursor,
+        totalResults: result.pagination?.totalResults,
       };
     },
-    getNextPageParam: (lastPage) => lastPage.nextOffset,
-    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    initialPageParam: "",
     staleTime: refetchInterval > 0 ? refetchInterval : undefined,
     refetchInterval: refetchInterval > 0 ? refetchInterval : false,
     refetchOnWindowFocus: false,

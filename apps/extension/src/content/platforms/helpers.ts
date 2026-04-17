@@ -8,6 +8,13 @@ export function normalizeText(text: string | null | undefined): string {
   return (text || "").replace(/\s+/g, " ").trim();
 }
 
+// Capture up to two trailing path segments so that articles sharing a final
+// slug across different sections (e.g. /politics/news vs /sports/news) do not
+// collide on the post-id derived from this match. The optional prefix segment
+// excludes "." so that the host portion of an absolute URL (e.g. "cnbc.com")
+// is never picked up as a section qualifier.
+export const GENERIC_LINK_PATTERN = /\/((?:[^/?#.]+\/)?[^/?#]+)\/?(?:[?#]|$)/i;
+
 export function collectTextParts(
   scope: ParentNode,
   selectors: string[]
@@ -262,7 +269,9 @@ export function extractPostIdFromLink(
   postElement: Element,
   hrefPattern: RegExp
 ): string | null {
-  const link = postElement.querySelector("a[href]");
+  const link = postElement.matches("a[href]")
+    ? postElement
+    : postElement.querySelector("a[href]");
   const href = link?.getAttribute("href");
   const match = href?.match(hrefPattern);
   return match?.[1] || null;

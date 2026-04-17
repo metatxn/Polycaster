@@ -4,54 +4,40 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
-const SUPPORTED_HOST_PATTERNS = [
-  /(^|\.)twitter\.com$/i,
-  /(^|\.)x\.com$/i,
-  /(^|\.)linkedin\.com$/i,
-  /(^|\.)reddit\.com$/i,
-  /(^|\.)quora\.com$/i,
-  /^news\.ycombinator\.com$/i,
-  /(^|\.)stackoverflow\.com$/i,
-  /(^|\.)stackexchange\.com$/i,
-  /(^|\.)superuser\.com$/i,
-  /(^|\.)serverfault\.com$/i,
-  /(^|\.)askubuntu\.com$/i,
-  /(^|\.)mathoverflow\.net$/i,
-  /(^|\.)stackapps\.com$/i,
-  /(^|\.)producthunt\.com$/i,
-  /(^|\.)slashdot\.org$/i,
-  /(^|\.)lemmy\.world$/i,
-  /(^|\.)lemmy\.ml$/i,
-  /(^|\.)sh\.itjust\.works$/i,
-  /(^|\.)programming\.dev$/i,
-  /(^|\.)beehaw\.org$/i,
-  /(^|\.)feddit\.org$/i,
-  /(^|\.)lemm\.ee$/i,
-  /(^|\.)threads\.com$/i,
-  /^bsky\.app$/i,
-  /(^|\.)mastodon\.social$/i,
-  /(^|\.)mstdn\.social$/i,
-  /(^|\.)fosstodon\.org$/i,
-  /(^|\.)hachyderm\.io$/i,
-  /(^|\.)mas\.to$/i,
-  /(^|\.)infosec\.exchange$/i,
-  /(^|\.)discord\.com$/i,
-  /(^|\.)farcaster\.xyz$/i,
-  /(^|\.)coinmarketcap\.com$/i,
-  /(^|\.)paragraph\.com$/i,
-  /(^|\.)coindesk\.com$/i,
-  /(^|\.)cointelegraph\.com$/i,
-  /(^|\.)decrypt\.co$/i,
-  /(^|\.)theblock\.co$/i,
-  /(^|\.)blockworks\.com$/i,
-  /(^|\.)bankless\.com$/i,
-  /(^|\.)bitcoinmagazine\.com$/i,
-  /(^|\.)beincrypto\.com$/i,
-  /(^|\.)unchainedcrypto\.com$/i,
-  /(^|\.)cryptopanic\.com$/i,
-];
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchPatternToHostnameRegex(pattern: string): RegExp | null {
+  // The manifest-derived source list is currently limited to `https?://host/*`
+  // match patterns; anything broader should stay out of the options summary.
+  const match = pattern.match(/^https?:\/\/([^/]+)\/\*$/i);
+  const hostnamePattern = match?.[1]?.toLowerCase();
+  if (!hostnamePattern || hostnamePattern === "*") {
+    return null;
+  }
+
+  if (hostnamePattern.startsWith("*.")) {
+    const baseHostname = escapeRegex(hostnamePattern.slice(2));
+    return new RegExp(`^(?:[^.]+\\.)+${baseHostname}$`, "i");
+  }
+
+  return new RegExp(`^${escapeRegex(hostnamePattern)}$`, "i");
+}
+
+// Keep the options-page "supported site" messaging derived from the same
+// content-script match patterns used by background.ts + manifest generation.
+const SUPPORTED_HOST_PATTERNS = Array.from(
+  new Map(
+    SUPPORTED_MATCH_PATTERNS.map(matchPatternToHostnameRegex)
+      .filter((pattern): pattern is RegExp => pattern !== null)
+      .sort((a, b) => a.source.localeCompare(b.source))
+      .map((pattern) => [`${pattern.source}/${pattern.flags}`, pattern])
+  ).values()
+);
 
 const PLATFORM_OPTIONS: Array<{
   key: keyof UserSettings["platforms"];
@@ -221,6 +207,118 @@ const PLATFORM_OPTIONS: Array<{
     label: "CryptoPanic",
     description: "Show prediction markets on CryptoPanic news items",
     icon: "CP",
+  },
+  // News publishers
+  {
+    key: "cnn",
+    label: "CNN",
+    description: "Show prediction markets on CNN articles and homepage feeds",
+    icon: "CN",
+  },
+  {
+    key: "nytimes",
+    label: "The New York Times",
+    description: "Show prediction markets on NYTimes articles",
+    icon: "NY",
+  },
+  {
+    key: "wsj",
+    label: "The Wall Street Journal",
+    description: "Show prediction markets on WSJ articles",
+    icon: "WS",
+  },
+  {
+    key: "washington-post",
+    label: "The Washington Post",
+    description: "Show prediction markets on Washington Post articles",
+    icon: "WP",
+  },
+  {
+    key: "thehindu",
+    label: "The Hindu",
+    description: "Show prediction markets on The Hindu articles",
+    icon: "TH",
+  },
+  {
+    key: "hindustan-times",
+    label: "Hindustan Times",
+    description: "Show prediction markets on Hindustan Times articles",
+    icon: "HT",
+  },
+  {
+    key: "cnbc",
+    label: "CNBC",
+    description: "Show prediction markets on CNBC articles and feeds",
+    icon: "NB",
+  },
+  {
+    key: "forbes",
+    label: "Forbes",
+    description: "Show prediction markets on Forbes articles",
+    icon: "FB",
+  },
+  {
+    key: "yahoo-finance",
+    label: "Yahoo Finance",
+    description: "Show prediction markets on Yahoo Finance articles",
+    icon: "YF",
+  },
+  {
+    key: "dlnews",
+    label: "DL News",
+    description: "Show prediction markets on DL News articles",
+    icon: "DL",
+  },
+  // Tech publishers
+  {
+    key: "cnet",
+    label: "CNET",
+    description: "Show prediction markets on CNET articles and category pages",
+    icon: "CE",
+  },
+  {
+    key: "zdnet",
+    label: "ZDNET",
+    description: "Show prediction markets on ZDNET articles",
+    icon: "ZD",
+  },
+  {
+    key: "tomshardware",
+    label: "Tom's Hardware",
+    description: "Show prediction markets on Tom's Hardware articles",
+    icon: "TM",
+  },
+  // Sports publishers
+  {
+    key: "skysports",
+    label: "Sky Sports",
+    description: "Show prediction markets on Sky Sports articles and feeds",
+    icon: "SS",
+  },
+  {
+    key: "sporting-news",
+    label: "Sporting News",
+    description: "Show prediction markets on Sporting News articles",
+    icon: "SN",
+  },
+  {
+    key: "fox-sports",
+    label: "FOX Sports",
+    description: "Show prediction markets on FOX Sports articles",
+    icon: "FX",
+  },
+  // Prediction-market websites
+  {
+    key: "kalshi-platform",
+    label: "Kalshi",
+    description: "Show cross-source markets alongside Kalshi event tiles",
+    icon: "KL",
+  },
+  {
+    key: "manifold-markets",
+    label: "Manifold",
+    description: "Show cross-source markets alongside Manifold question cards",
+    icon: "MN",
   },
 ];
 

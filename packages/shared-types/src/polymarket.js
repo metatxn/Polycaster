@@ -59,7 +59,9 @@ exports.POLYMARKET_API = {
     TEAMS: "https://gamma-api.polymarket.com/teams",
     SPORTS: "https://gamma-api.polymarket.com/sports",
     MARKETS: "https://gamma-api.polymarket.com/markets",
+    MARKETS_KEYSET: "https://gamma-api.polymarket.com/markets/keyset",
     EVENTS: "https://gamma-api.polymarket.com/events",
+    EVENTS_KEYSET: "https://gamma-api.polymarket.com/events/keyset",
     EVENTS_PAGINATION: "https://gamma-api.polymarket.com/events/pagination",
     COMMENTS: "https://gamma-api.polymarket.com/comments",
   },
@@ -74,7 +76,7 @@ exports.POLYMARKET_API = {
     BASE: "https://user-pnl-api.polymarket.com",
   },
   RELAYER: {
-    BASE: "https://relayer-v2.polymarket.com/",
+    BASE: "https://relayer-v2.polymarket.com",
   },
   STRAPI: {
     BASE: "https://strapi-matic.poly.market",

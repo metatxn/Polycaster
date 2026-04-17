@@ -52,7 +52,25 @@ function buildWarMatches(hostsSource) {
     hostsSource,
     "SUPPORTED_MATCH_PATTERNS"
   );
-  const unique = [...new Set(sitePatterns)];
+
+  // Chrome is stricter for web_accessible_resources.matches than for
+  // host_permissions/content-script matches: path-scoped patterns like
+  // `https://www.bbc.com/news/*` are rejected there. Normalize every site
+  // pattern to an origin-wide form (`scheme://host/*`) before injecting it
+  // into the manifest.
+  const normalizedPatterns = sitePatterns.map((pattern) => {
+    const match = pattern.match(/^(\*|https?|file|ftp):\/\/([^/]+)(?:\/.*)?$/);
+    if (!match) {
+      throw new Error(
+        `Unsupported web_accessible_resources match pattern: ${pattern}`
+      );
+    }
+
+    const [, scheme, host] = match;
+    return `${scheme}://${host}/*`;
+  });
+
+  const unique = [...new Set(normalizedPatterns)];
   unique.sort();
   return unique;
 }
@@ -210,18 +228,25 @@ module.exports = (_env, argv) => {
           {
             from: "manifest.json",
             to: "manifest.json",
-            transform(content) {
-              const manifest = JSON.parse(content.toString());
-              const hostsSource = readHostsFile();
-              manifest.host_permissions = buildHostPermissions(
-                hostsSource,
-                devMode
-              );
-              if (manifest.web_accessible_resources?.[0]?.matches) {
-                manifest.web_accessible_resources[0].matches =
-                  buildWarMatches(hostsSource);
-              }
-              return JSON.stringify(manifest, null, 2) + "\n";
+            transform: {
+              // This transform depends on supported-hosts.ts in addition to
+              // manifest.json itself, so CopyPlugin's default caching can
+              // otherwise serve stale host_permission/web_accessible_resources
+              // output after hosts change.
+              cache: false,
+              transformer(content) {
+                const manifest = JSON.parse(content.toString());
+                const hostsSource = readHostsFile();
+                manifest.host_permissions = buildHostPermissions(
+                  hostsSource,
+                  devMode
+                );
+                if (manifest.web_accessible_resources?.[0]?.matches) {
+                  manifest.web_accessible_resources[0].matches =
+                    buildWarMatches(hostsSource);
+                }
+                return `${JSON.stringify(manifest, null, 2)}\n`;
+              },
             },
           },
           { from: "options.html", to: "options.html" },

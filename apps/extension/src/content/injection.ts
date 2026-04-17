@@ -2,7 +2,10 @@
 // TIMELINE INJECTION LOGIC
 // ============================================
 
-import type { ContextGateResult } from "../types/chrome-messages";
+import type {
+  ContextGateResult,
+  ScoreMarketsSuccessResponse,
+} from "../types/chrome-messages";
 import type {
   InjectedMarketEntry,
   Market,
@@ -18,7 +21,12 @@ import {
   type ScoringMode,
   shouldFailOpen,
 } from "./scoring-policy";
-import { LRUSet, scheduleIdle } from "./utils";
+import {
+  escapeSelectorValue,
+  LRUSet,
+  safeSendMessage,
+  scheduleIdle,
+} from "./utils";
 
 /**
  * Injection point for market cards (local type to avoid circular import)
@@ -39,7 +47,19 @@ const injectedPostMarketPairs = new Set<string>();
 const activePostKeysByMarket = new Map<string, Set<string>>();
 const MAX_ACTIVE_POSTS_PER_MARKET = 3; // Allow same market on up to 3 active posts at once
 const MAX_CANDIDATES_PER_POST = 2; // Keep a small fallback pool per post without increasing render density
-const MAX_INJECTIONS_PER_BATCH = 3; // Keep feed-level UI density bounded
+// Default per-scan cap. Platforms can raise this by setting
+// `maxInjectionsPerBatch` on their adapter (see `resolveMaxInjectionsPerBatch`).
+const MAX_INJECTIONS_PER_BATCH = 5;
+
+function resolveMaxInjectionsPerBatch(): number {
+  const override =
+    window.KNOWW_PLATFORM?.getCurrentPlatform?.()?.maxInjectionsPerBatch;
+  if (typeof override === "number" && override > 0) {
+    return Math.floor(override);
+  }
+  return MAX_INJECTIONS_PER_BATCH;
+}
+const ANALYZE_BATCH_CONCURRENCY = 3;
 const POST_CANDIDATE_SCORE_GAP = 0.08; // Don't keep weak fallback candidates for a post
 const injectedIntoPosts = new WeakSet<Element>(); // Track which posts have cards
 const injectedMarkets: InjectedMarketEntry[] = []; // Track injected markets with WeakRef to DOM elements for notification stack
@@ -56,6 +76,15 @@ let cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
 let cardVisibilityObserver: IntersectionObserver | null = null;
 let notificationStackUpdateDebounce: ReturnType<typeof setTimeout> | null =
   null;
+const FEED_READY_MIN_POSTS = 1;
+const FEED_READY_CHECK_INTERVAL_MS = 250;
+const INITIAL_SCAN_IDLE_TIMEOUT_MS = 500;
+const QUEUED_POST_PROCESS_IDLE_TIMEOUT_MS = 250;
+const PERIODIC_QUEUE_DRAIN_IDLE_TIMEOUT_MS = 500;
+const PERIODIC_SCAN_IDLE_TIMEOUT_MS = 1000;
+const SCROLL_SCAN_IDLE_TIMEOUT_MS = 500;
+const RESUME_QUEUE_DRAIN_IDLE_TIMEOUT_MS = 250;
+const RESUME_INITIAL_SCAN_IDLE_TIMEOUT_MS = 500;
 
 const IGNORE_VISIBILITY_THRESHOLD_MS = 5000;
 const clickedMarketIds = new Set<string>();
@@ -96,10 +125,39 @@ interface PendingPostEntry {
   key: string | null;
 }
 
+function isScoreMarketsSuccessResponse(
+  response: unknown
+): response is ScoreMarketsSuccessResponse {
+  return (
+    !!response &&
+    typeof response === "object" &&
+    "ok" in response &&
+    response.ok === true &&
+    "similarities" in response &&
+    Array.isArray(response.similarities) &&
+    "bm25Scores" in response &&
+    Array.isArray(response.bm25Scores)
+  );
+}
+
 interface LiveInjectedCardRef {
   marketId: string;
   cardRef: WeakRef<HTMLElement>;
 }
+
+interface ReinjectionCandidate {
+  postKey: string;
+  market: Market;
+  score: number;
+  topics: string[];
+  timestamp: number;
+}
+
+const reinjectionCandidatesByTrackingKey = new Map<
+  string,
+  ReinjectionCandidate
+>();
+const reinjectionTrackingKeysByPostKey = new Map<string, Set<string>>();
 
 function applyPlatformStyleVariables(
   element: HTMLElement,
@@ -136,6 +194,61 @@ function getCardTrackingKey(
 
 function getPostMarketPairKey(postKey: string, marketId: string): string {
   return JSON.stringify([postKey, marketId]);
+}
+
+function rememberReinjectionCandidate(
+  postKey: string,
+  market: Market,
+  score: number,
+  topics: string[]
+): void {
+  const trackingKey = getPostMarketPairKey(postKey, market.id);
+  reinjectionCandidatesByTrackingKey.set(trackingKey, {
+    postKey,
+    market,
+    score,
+    topics: [...topics],
+    timestamp: Date.now(),
+  });
+
+  let trackingKeys = reinjectionTrackingKeysByPostKey.get(postKey);
+  if (!trackingKeys) {
+    trackingKeys = new Set<string>();
+    reinjectionTrackingKeysByPostKey.set(postKey, trackingKeys);
+  }
+  trackingKeys.add(trackingKey);
+}
+
+function forgetReinjectionCandidate(
+  postKey: string | undefined,
+  marketId: string
+): void {
+  if (!postKey) return;
+
+  const trackingKey = getPostMarketPairKey(postKey, marketId);
+  reinjectionCandidatesByTrackingKey.delete(trackingKey);
+
+  const trackingKeys = reinjectionTrackingKeysByPostKey.get(postKey);
+  if (!trackingKeys) return;
+
+  trackingKeys.delete(trackingKey);
+  if (trackingKeys.size === 0) {
+    reinjectionTrackingKeysByPostKey.delete(postKey);
+  }
+}
+
+function getReinjectionCandidatesForPost(
+  postKey: string
+): ReinjectionCandidate[] {
+  const trackingKeys = reinjectionTrackingKeysByPostKey.get(postKey);
+  if (!trackingKeys || trackingKeys.size === 0) {
+    return [];
+  }
+
+  return Array.from(trackingKeys)
+    .map((trackingKey) => reinjectionCandidatesByTrackingKey.get(trackingKey))
+    .filter((candidate): candidate is ReinjectionCandidate => !!candidate)
+    .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function getActivePostCountForMarket(marketId: string): number {
@@ -227,14 +340,17 @@ function allocateBatchInjections(
 
   const planned: AllocatedInjection[] = [];
   const plannedPostMarketPairs = new Set<string>();
+  const plannedPostKeys = new Set<string>();
   const plannedActiveCounts = new Map<string, number>();
+  const maxInjections = resolveMaxInjectionsPerBatch();
 
   for (const [marketId, activePosts] of activePostKeysByMarket.entries()) {
     plannedActiveCounts.set(marketId, activePosts.size);
   }
 
   for (const selection of orderedSelections) {
-    if (planned.length >= MAX_INJECTIONS_PER_BATCH) break;
+    if (planned.length >= maxInjections) break;
+    if (plannedPostKeys.has(selection.postKey)) continue;
 
     const chosenMarket = selection.markets.find(({ market }) => {
       const pairKey = getPostMarketPairKey(selection.postKey, market.id);
@@ -255,6 +371,7 @@ function allocateBatchInjections(
       chosenMarket.market.id
     );
     plannedPostMarketPairs.add(chosenPairKey);
+    plannedPostKeys.add(selection.postKey);
     plannedActiveCounts.set(
       chosenMarket.market.id,
       (plannedActiveCounts.get(chosenMarket.market.id) ??
@@ -336,7 +453,7 @@ async function scoreMarketsBatch(
   } = features;
 
   try {
-    const response = await chrome.runtime.sendMessage({
+    const response = await safeSendMessage({
       type: "score-markets",
       postText,
       marketTexts,
@@ -346,11 +463,7 @@ async function scoreMarketsBatch(
       includeContextGate,
     });
 
-    if (
-      response?.ok &&
-      Array.isArray(response.similarities) &&
-      Array.isArray(response.bm25Scores)
-    ) {
+    if (isScoreMarketsSuccessResponse(response)) {
       const contextGateResults = Array.isArray(response.contextGateResults)
         ? response.contextGateResults
         : [];
@@ -428,6 +541,174 @@ function getPostIdentityKey(post: Element): string | null {
     .slice(0, 160)
     .trim();
   return snippet ? `txt:${snippet}` : null;
+}
+
+function getCurrentItemSelector(): string | null {
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  if (platform?.getDynamicSelectors) {
+    return platform.getDynamicSelectors().itemSelector;
+  }
+
+  return window.KNOWW_PLATFORM?.getSelectors?.().item || null;
+}
+
+function findPostByKey(
+  postKey: string,
+  posts?: Array<{ post: Element; key: string | null }>
+): Element | null {
+  const itemSelector = getCurrentItemSelector();
+  const candidates = posts
+    ? posts.map(({ post, key }) => ({
+        post,
+        key: key ?? getPostIdentityKey(post),
+      }))
+    : itemSelector
+      ? Array.from(document.querySelectorAll(itemSelector)).map((post) => ({
+          post,
+          key: getPostIdentityKey(post),
+        }))
+      : [];
+
+  for (const candidate of candidates) {
+    if (candidate.key === postKey) {
+      return candidate.post;
+    }
+  }
+
+  return null;
+}
+
+function upsertInjectedMarketEntry(
+  postKey: string,
+  market: Market,
+  card: HTMLElement
+): void {
+  const now = Date.now();
+  const existingEntry = injectedMarkets.find(
+    (entry) => entry.postKey === postKey && entry.market.id === market.id
+  );
+
+  if (existingEntry) {
+    existingEntry.market = market;
+    existingEntry.cardRef = new WeakRef(card);
+    existingEntry.postKey = postKey;
+    existingEntry.timestamp = now;
+    existingEntry.isInViewport = true;
+    existingEntry.lastVisibleAt = now;
+    return;
+  }
+
+  injectedMarkets.push({
+    market,
+    cardRef: new WeakRef(card),
+    postKey,
+    timestamp: now,
+    isInViewport: true,
+    lastVisibleAt: now,
+  });
+}
+
+function refreshLiveTrackingForPost(post: Element, postKey: string): void {
+  const cards = post.querySelectorAll<HTMLElement>(".knoww-market-card");
+  if (cards.length === 0) return;
+
+  for (const card of Array.from(cards)) {
+    const marketId = card.getAttribute("data-knoww-market-id");
+    if (!marketId) continue;
+
+    const trackingKey = getPostMarketPairKey(postKey, marketId);
+    liveInjectedCardRefs.set(trackingKey, {
+      marketId,
+      cardRef: new WeakRef(card),
+    });
+    injectedMarketIds.add(marketId);
+    injectedPostMarketPairs.add(trackingKey);
+
+    let activePosts = activePostKeysByMarket.get(marketId);
+    if (!activePosts) {
+      activePosts = new Set<string>();
+      activePostKeysByMarket.set(marketId, activePosts);
+    }
+    activePosts.add(postKey);
+
+    const trackedMarket =
+      reinjectionCandidatesByTrackingKey.get(trackingKey)?.market ||
+      injectedMarkets.find(
+        (entry) => entry.postKey === postKey && entry.market.id === marketId
+      )?.market;
+
+    if (trackedMarket) {
+      upsertInjectedMarketEntry(postKey, trackedMarket, card);
+    }
+
+    ensureCardVisibilityObserver();
+    cardVisibilityObserver?.observe(card);
+  }
+}
+
+function restoreTrackedMarketsOnPost(post: Element, postKey: string): boolean {
+  const trackedMarkets = getReinjectionCandidatesForPost(postKey);
+  if (trackedMarkets.length === 0) return false;
+
+  refreshLiveTrackingForPost(post, postKey);
+
+  const alreadyInjected = post.querySelector(
+    ".knoww-market-card[data-knoww-market-id]"
+  );
+  if (alreadyInjected) {
+    return true;
+  }
+
+  const [latestMarket] = trackedMarkets;
+  return injectMarketCards(
+    post,
+    [
+      {
+        market: latestMarket.market,
+        score: latestMarket.score,
+        source: latestMarket.market.source || "polymarket",
+      },
+    ],
+    latestMarket.topics,
+    { postKey }
+  );
+}
+
+function restoreTrackedMarket(postKey: string, marketId: string): boolean {
+  syncInjectedCardTrackingFromDom();
+
+  const targetPost = findPostByKey(postKey);
+  if (!targetPost) return false;
+
+  refreshLiveTrackingForPost(targetPost, postKey);
+
+  const escapedMarketId = escapeSelectorValue(marketId);
+  const existingCard = targetPost.querySelector<HTMLElement>(
+    `.knoww-market-card[data-knoww-market-id="${escapedMarketId}"]`
+  );
+  if (existingCard) {
+    return true;
+  }
+
+  const candidate = reinjectionCandidatesByTrackingKey.get(
+    getPostMarketPairKey(postKey, marketId)
+  );
+  if (!candidate) {
+    return false;
+  }
+
+  return injectMarketCards(
+    targetPost,
+    [
+      {
+        market: candidate.market,
+        score: candidate.score,
+        source: candidate.market.source || "polymarket",
+      },
+    ],
+    candidate.topics,
+    { postKey }
+  );
 }
 
 /**
@@ -564,6 +845,7 @@ async function analyzePostAndFindMarket(
   const { extractSearchKeywords, searchAllMarkets, calculateRelevanceScore } =
     window.KNOWW_API;
   const { CONFIG, ENABLED_SOURCES } = window.KNOWW_CONFIG;
+  const currentPlatform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
   const isDebug =
     window.KNOWW_CONFIG?.isDebugMode?.() ??
     window.KNOWW_CONFIG?.DEV_MODE ??
@@ -576,7 +858,7 @@ async function analyzePostAndFindMarket(
     return null;
   }
 
-  if (!isEnglishText(text)) {
+  if (!currentPlatform?.bypassEnglishCheck && !isEnglishText(text)) {
     log("Skipping non-English post:", `${text.slice(0, 50)}...`);
     return null;
   }
@@ -774,6 +1056,7 @@ async function analyzePostAndFindMarket(
       scoringMode,
       score,
       gate: contextGateResults[i],
+      relaxed: currentPlatform?.relaxContextGate === true,
     });
     const gate = gateDecision.gate;
 
@@ -1184,11 +1467,6 @@ function injectMarketCards(
   const { createInlineMarketCard } = window.KNOWW_UI;
   const postKey = options.postKey ?? getPostIdentityKey(targetPost);
 
-  if (injectedIntoPosts.has(targetPost)) {
-    log("Post already has cards");
-    return false;
-  }
-
   if (!postKey) {
     log("Could not resolve post identity for injection");
     return false;
@@ -1210,12 +1488,26 @@ function injectMarketCards(
     insertPosition,
   } = injectionPoint;
 
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+
   // Check if card already exists in the post wrapper
   const wrapperToCheck = cellInnerDiv || postWrapper || container;
-  if (wrapperToCheck?.querySelector(".knoww-market-card")) {
+  const platformAlreadyInjected =
+    platform && typeof platform.hasInjectedCard === "function"
+      ? platform.hasInjectedCard(targetPost)
+      : false;
+
+  if (
+    platformAlreadyInjected ||
+    wrapperToCheck?.querySelector(".knoww-market-card")
+  ) {
     log("Post already has a Knoww card");
     cleanup?.();
     return false;
+  }
+
+  if (injectedIntoPosts.has(targetPost)) {
+    log("Post was previously injected; card missing, attempting reinjection");
   }
 
   // Policy A: inject at most one card per post, but keep a fallback candidate
@@ -1240,7 +1532,6 @@ function injectMarketCards(
   `;
 
   // Use platform adapter for wrapper styles if available
-  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
   if (platform && typeof platform.getWrapperStyles === "function") {
     wrapperStyles = platform.getWrapperStyles();
   }
@@ -1298,6 +1589,9 @@ function injectMarketCards(
       injectedMarketIds.add(market.id);
       const trackingKey = getPostMarketPairKey(postKey, market.id);
       injectedPostMarketPairs.add(trackingKey);
+      const injectedMarketData = newMarkets.find(
+        (entry) => entry.market.id === market.id
+      );
       liveInjectedCardRefs.set(trackingKey, {
         marketId: market.id,
         cardRef: new WeakRef(card),
@@ -1310,14 +1604,17 @@ function injectMarketCards(
       }
       activePosts.add(postKey);
 
+      if (injectedMarketData) {
+        rememberReinjectionCandidate(
+          postKey,
+          market,
+          injectedMarketData.score,
+          topics
+        );
+      }
+
       // Track for notification stack using WeakRef to allow GC when DOM elements are removed
-      injectedMarkets.push({
-        market,
-        cardRef: new WeakRef(card), // WeakRef allows GC when card is removed from DOM
-        timestamp: Date.now(),
-        isInViewport: true,
-        lastVisibleAt: Date.now(),
-      });
+      upsertInjectedMarketEntry(postKey, market, card);
 
       ensureCardVisibilityObserver();
       cardVisibilityObserver?.observe(card);
@@ -1381,26 +1678,49 @@ function injectMarketCard(
 async function analyzeBatchSelections(
   posts: Array<{ post: Element; key: string | null }>
 ): Promise<BatchCandidateSelection[]> {
-  const selections: BatchCandidateSelection[] = [];
+  const { log } = window.KNOWW_UTILS;
+  const selections = new Array<BatchCandidateSelection | null>(
+    posts.length
+  ).fill(null);
+  let nextIndex = 0;
 
-  for (const { post, key } of posts) {
-    if (injectedIntoPosts.has(post)) continue;
+  const workerCount = Math.min(ANALYZE_BATCH_CONCURRENCY, posts.length);
+  if (workerCount === 0) return [];
 
-    const postKey = key ?? getPostIdentityKey(post);
-    if (!postKey) continue;
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
 
-    const result = await analyzePostAndFindMarket(post);
-    if (!result?.markets || result.markets.length === 0) continue;
+      if (currentIndex >= posts.length) return;
 
-    selections.push({
-      post,
-      postKey,
-      topics: result.topics,
-      markets: result.markets,
-    });
-  }
+      const { post, key } = posts[currentIndex];
+      if (injectedIntoPosts.has(post)) continue;
 
-  return selections;
+      const postKey = key ?? getPostIdentityKey(post);
+      if (!postKey) continue;
+
+      try {
+        const result = await analyzePostAndFindMarket(post);
+        if (!result?.markets || result.markets.length === 0) continue;
+
+        selections[currentIndex] = {
+          post,
+          postKey,
+          topics: result.topics,
+          markets: result.markets,
+        };
+      } catch (error) {
+        log("⚠️ [PostAnalyzer] analyzePostAndFindMarket failed:", error);
+      }
+    }
+  });
+
+  await Promise.all(workers);
+
+  return selections.filter(
+    (selection): selection is BatchCandidateSelection => selection !== null
+  );
 }
 
 /**
@@ -1441,6 +1761,14 @@ async function processVisiblePosts(options: {
   const newPosts: Array<{ post: Element; key: string | null }> = [];
   let nestedCount = 0;
   let alreadyProcessedCount = 0;
+  let duplicateLogicalPostCount = 0;
+  let restoredTrackedCards = 0;
+  const shouldAttemptRestore = reinjectionTrackingKeysByPostKey.size > 0;
+  const seenPostKeys = new Set<string>();
+
+  if (shouldAttemptRestore) {
+    syncInjectedCardTrackingFromDom();
+  }
 
   for (const post of posts) {
     // Skip nested posts using closest() - O(n) total instead of O(n²)
@@ -1452,9 +1780,25 @@ async function processVisiblePosts(options: {
     }
 
     const key = getPostIdentityKey(post);
+    if (key && seenPostKeys.has(key)) {
+      duplicateLogicalPostCount++;
+      continue;
+    }
+
+    if (shouldAttemptRestore && key && restoreTrackedMarketsOnPost(post, key)) {
+      seenPostKeys.add(key);
+      restoredTrackedCards++;
+      continue;
+    }
+
     if (key && processedPostKeys.has(key)) {
+      seenPostKeys.add(key);
       alreadyProcessedCount++;
       continue;
+    }
+
+    if (key) {
+      seenPostKeys.add(key);
     }
 
     newPosts.push({ post, key });
@@ -1465,6 +1809,8 @@ async function processVisiblePosts(options: {
     log(`   • Total posts found: ${posts.length}`);
     log(`   • Nested (skipped): ${nestedCount}`);
     log(`   • Already processed: ${alreadyProcessedCount}`);
+    log(`   • Duplicate logical posts: ${duplicateLogicalPostCount}`);
+    log(`   • Restored tracked cards: ${restoredTrackedCards}`);
     log(`   • New posts to process: ${newPosts.length}`);
   }
 
@@ -1562,7 +1908,7 @@ async function processVisiblePosts(options: {
           `🎉 [PostAnalyzer] Injected "${plan.market.market.title?.slice(
             0,
             50
-          )}..." (${injectionsThisBatch}/${MAX_INJECTIONS_PER_BATCH} this batch)`
+          )}..." (${injectionsThisBatch}/${resolveMaxInjectionsPerBatch()} this batch)`
         );
       }
     }
@@ -1630,6 +1976,7 @@ function runMemoryCleanup(force = false): void {
       if (removedCard) {
         cardVisibilityObserver?.unobserve(removedCard);
       }
+      forgetReinjectionCandidate(removedEntry.postKey, removedEntry.market.id);
     }
     log(
       `🧹 [MemoryCleanup] Trimmed injectedMarkets to ${injectedMarkets.length} (removed ${removed.length})`
@@ -1747,6 +2094,12 @@ async function processQueuedPosts(options: {
 
   // Filter and deduplicate
   const newPosts: Array<{ post: Element; key: string | null }> = [];
+  const shouldAttemptRestore = reinjectionTrackingKeysByPostKey.size > 0;
+  const seenPostKeys = new Set<string>();
+
+  if (shouldAttemptRestore) {
+    syncInjectedCardTrackingFromDom();
+  }
 
   for (const post of postsToProcess) {
     // Skip if not connected to DOM anymore (virtualized away)
@@ -1757,7 +2110,18 @@ async function processQueuedPosts(options: {
     if (parentPost && parentPost !== post) continue;
 
     const key = getPostIdentityKey(post);
+    if (key && seenPostKeys.has(key)) continue;
+
+    if (shouldAttemptRestore && key && restoreTrackedMarketsOnPost(post, key)) {
+      seenPostKeys.add(key);
+      continue;
+    }
+
     if (key && processedPostKeys.has(key)) continue;
+
+    if (key) {
+      seenPostKeys.add(key);
+    }
 
     // Skip if already in analyzedPosts WeakSet
     if (analyzedPosts.has(post)) continue;
@@ -1813,7 +2177,7 @@ async function processQueuedPosts(options: {
       injectionsThisBatch++;
       postsSinceLastInjection = 0;
       log(
-        `🎉 [QueueProcessor] Successfully injected card! (${injectionsThisBatch}/${MAX_INJECTIONS_PER_BATCH} this batch)`
+        `🎉 [QueueProcessor] Successfully injected card! (${injectionsThisBatch}/${resolveMaxInjectionsPerBatch()} this batch)`
       );
     }
   } finally {
@@ -1926,7 +2290,10 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
       // Debounce processing
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        scheduleIdle(() => processQueuedPosts({ itemSelector }), 2000);
+        scheduleIdle(
+          () => processQueuedPosts({ itemSelector }),
+          QUEUED_POST_PROCESS_IDLE_TIMEOUT_MS
+        );
       }, 300);
     });
 
@@ -1943,7 +2310,10 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
     if (!feedReady) return;
     // Drain pending queue first to avoid starvation after tab hide/show.
     if (pendingPostsQueue.length > 0) {
-      scheduleIdle(() => processQueuedPosts({ itemSelector }), 1500);
+      scheduleIdle(
+        () => processQueuedPosts({ itemSelector }),
+        PERIODIC_QUEUE_DRAIN_IDLE_TIMEOUT_MS
+      );
       return;
     }
     // Skip if we recently saw mutations
@@ -1976,7 +2346,7 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
         log(`⏸️ [FeedWatcher] Tab hidden, skipping periodic scan`);
         return;
       }
-      scheduleIdle(runPeriodicScan, 3000);
+      scheduleIdle(runPeriodicScan, PERIODIC_SCAN_IDLE_TIMEOUT_MS);
     }, 20000); // Increased from 15s to 20s for better performance
   };
 
@@ -2021,7 +2391,10 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
       // Skip full scan if we already have queued posts to process
       if (pendingPostsQueue.length > 0 || isAnalyzing) return;
 
-      scheduleIdle(() => processVisiblePosts({ itemSelector }), 2000);
+      scheduleIdle(
+        () => processVisiblePosts({ itemSelector }),
+        SCROLL_SCAN_IDLE_TIMEOUT_MS
+      );
     }, 1000); // Increased from 750ms to 1000ms
   };
 
@@ -2066,12 +2439,18 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
 
     // Always attempt to drain queued posts on resume.
     if (pendingPostsQueue.length > 0) {
-      scheduleIdle(() => processQueuedPosts({ itemSelector }), 1000);
+      scheduleIdle(
+        () => processQueuedPosts({ itemSelector }),
+        RESUME_QUEUE_DRAIN_IDLE_TIMEOUT_MS
+      );
     }
 
     if (!initialScanDone) {
       // Run initial scan when we resume from a hidden state
-      scheduleIdle(() => processVisiblePosts({ itemSelector }), 3000);
+      scheduleIdle(
+        () => processVisiblePosts({ itemSelector }),
+        RESUME_INITIAL_SCAN_IDLE_TIMEOUT_MS
+      );
       initialScanDone = true;
     }
     log(`▶️ [FeedWatcher] Resumed watchers (tab visible)`);
@@ -2088,35 +2467,42 @@ function watchFeed(containerSelector: string, itemSelector: string): void {
 
   // PERFORMANCE: Wait for feed to be ready before starting scans
   log(`👁️ [FeedWatcher] Waiting for feed to be ready...`);
-  waitForFeedReady(containerSelector, itemSelector, 10000, 500, 3).then(
-    (ready) => {
-      feedReady = true;
+  waitForFeedReady(
+    containerSelector,
+    itemSelector,
+    10000,
+    FEED_READY_CHECK_INTERVAL_MS,
+    FEED_READY_MIN_POSTS
+  ).then((ready) => {
+    feedReady = true;
 
-      if (ready) {
-        log(`✅ [FeedWatcher] Feed is ready! Starting scans...`);
-      } else {
-        log(`⚠️ [FeedWatcher] Feed ready timeout, starting scans anyway...`);
-      }
-
-      if (document.hidden) {
-        pauseWatchers();
-        return;
-      }
-
-      // Start the observer now that feed is ready
-      startObserver();
-
-      // Start periodic cleanup and scans
-      startCleanupInterval();
-      startPeriodicScan();
-      startScrollListener();
-
-      // Run initial scan
-      log(`🚀 [FeedWatcher] Running initial post scan`);
-      scheduleIdle(() => processVisiblePosts({ itemSelector }), 3000);
-      initialScanDone = true;
+    if (ready) {
+      log(`✅ [FeedWatcher] Feed is ready! Starting scans...`);
+    } else {
+      log(`⚠️ [FeedWatcher] Feed ready timeout, starting scans anyway...`);
     }
-  );
+
+    if (document.hidden) {
+      pauseWatchers();
+      return;
+    }
+
+    // Start the observer now that feed is ready
+    startObserver();
+
+    // Start periodic cleanup and scans
+    startCleanupInterval();
+    startPeriodicScan();
+    startScrollListener();
+
+    // Run initial scan
+    log(`🚀 [FeedWatcher] Running initial post scan`);
+    scheduleIdle(
+      () => processVisiblePosts({ itemSelector }),
+      INITIAL_SCAN_IDLE_TIMEOUT_MS
+    );
+    initialScanDone = true;
+  });
 
   log(`👁️ [FeedWatcher] ========== INITIALIZATION COMPLETE ==========\n`);
 
@@ -2175,6 +2561,7 @@ window.KNOWW_INJECTION = {
   markClicked: (marketId: string) => {
     clickedMarketIds.add(marketId);
   },
+  restoreTrackedMarket,
   // Stats for debugging
   getMemoryStats: () => ({
     processedPostKeys: processedPostKeys.size,

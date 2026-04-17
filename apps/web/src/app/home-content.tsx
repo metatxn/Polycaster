@@ -385,7 +385,6 @@ export function HomeContent({ initialData }: HomeContentProps) {
     limit: 20,
     order: volumeOrderField,
     ascending: false,
-    active: apiQueryParams.active,
     closed: apiQueryParams.closed,
     tagSlug: apiQueryParams.tagSlug,
     filters: serverFilterParams,
@@ -443,7 +442,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           events: filteredEvents,
           isLoading,
           error: allPaginatedError,
-          hasMore: hasNextAllPaginated ?? (initialData?.totalResults ?? 0) > 20,
+          hasMore: hasNextAllPaginated ?? initialData?.hasMore ?? false,
           fetchMore: fetchNextAllPaginated,
           isFetchingMore: isFetchingNextAllPaginated,
         };
@@ -757,7 +756,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                       key={`${event.id}-${index}`}
                       event={event}
                       index={index}
-                      priority={index < 4}
+                      priority={index < 6}
                     />
                   ))}
                 </div>

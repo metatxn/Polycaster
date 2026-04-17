@@ -16,13 +16,31 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const SAVE_DEBOUNCE_MS = 2000;
 
+function canUseLocalStorage(): boolean {
+  try {
+    return (
+      typeof chrome !== "undefined" &&
+      !!chrome.runtime?.id &&
+      !!chrome.storage?.local
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ============================================
 // PERSISTENCE
 // ============================================
 
 async function loadPreferences(): Promise<UserPreferences> {
   return new Promise((resolve) => {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    if (!canUseLocalStorage()) {
+      preferences = { ...DEFAULT_USER_PREFERENCES };
+      resolve(preferences);
+      return;
+    }
+
+    try {
       chrome.storage.local.get(
         { [PREFERENCES_STORAGE_KEY]: DEFAULT_USER_PREFERENCES },
         (result) => {
@@ -36,7 +54,7 @@ async function loadPreferences(): Promise<UserPreferences> {
           resolve(preferences);
         }
       );
-    } else {
+    } catch {
       preferences = { ...DEFAULT_USER_PREFERENCES };
       resolve(preferences);
     }
@@ -46,26 +64,34 @@ async function loadPreferences(): Promise<UserPreferences> {
 function scheduleSave(): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      chrome.storage.local.set(
-        { [PREFERENCES_STORAGE_KEY]: preferences },
-        () => {
-          if (chrome.runtime.lastError) {
-            // Save failed silently — nothing actionable for the user
+    if (canUseLocalStorage()) {
+      try {
+        chrome.storage.local.set(
+          { [PREFERENCES_STORAGE_KEY]: preferences },
+          () => {
+            if (chrome.runtime.lastError) {
+              // Save failed silently — nothing actionable for the user
+            }
           }
-        }
-      );
+        );
+      } catch {
+        // Extension context invalidated; ignore deferred saves from stale scripts
+      }
     }
   }, SAVE_DEBOUNCE_MS);
 }
 
 async function resetPreferences(): Promise<void> {
   preferences = { ...DEFAULT_USER_PREFERENCES };
-  if (typeof chrome !== "undefined" && chrome.storage?.local) {
+  if (canUseLocalStorage()) {
     return new Promise((resolve) => {
-      chrome.storage.local.remove(PREFERENCES_STORAGE_KEY, () => {
+      try {
+        chrome.storage.local.remove(PREFERENCES_STORAGE_KEY, () => {
+          resolve();
+        });
+      } catch {
         resolve();
-      });
+      }
     });
   }
 }

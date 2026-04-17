@@ -40,15 +40,19 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'",
     // Scripts: self + inline (Next.js hydration requires inline scripts).
     // unsafe-eval is conditionally added only in dev (see below).
-    `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+    // PostHog assets are served from us-assets.i.posthog.com.
+    // Cloudflare Insights beacon is served from static.cloudflareinsights.com.
+    `script-src 'self' 'unsafe-inline' https://us-assets.i.posthog.com https://static.cloudflareinsights.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
     // Styles: self + inline (required for Tailwind CSS-in-JS and Radix UI)
     "style-src 'self' 'unsafe-inline'",
     // Images: self + Polymarket S3 + data URIs + blob URIs + crypto logos
     "img-src 'self' data: blob: https://polymarket-upload.s3.us-east-2.amazonaws.com https://*.polymarket.com https://cryptologos.cc",
     // Fonts: self + data URIs + Reown-hosted wallet fonts
     "font-src 'self' data: https://fonts.reown.com",
-    // Connect: self + knoww.app subdomains + Polymarket APIs + Alchemy + WalletConnect/Web3Modal + Polygon RPC
-    "connect-src 'self' https://*.knoww.app https://clob.polymarket.com https://gamma-api.polymarket.com https://data-api.polymarket.com https://user-pnl-api.polymarket.com https://bridge.polymarket.com https://relayer-v2.polymarket.com https://*.alchemy.com https://*.walletconnect.com https://*.walletconnect.org wss://*.walletconnect.com wss://*.walletconnect.org https://*.web3modal.org https://*.web3modal.com https://polygon-rpc.com https://polygon-mainnet.g.alchemy.com wss://ws-subscriptions-clob.polymarket.com wss://sports-api.polymarket.com https://openrouter.ai https://*.reown.com wss://*.reown.com",
+    // Connect: self + PostHog + Cloudflare Insights beacon + knoww.app subdomains
+    // + Polymarket APIs + Alchemy + WalletConnect/Web3Modal + Polygon RPC
+    // + Coinbase Wallet SDK analytics (cca-lite.coinbase.com)
+    "connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com https://cloudflareinsights.com https://*.knoww.app https://clob.polymarket.com https://gamma-api.polymarket.com https://data-api.polymarket.com https://user-pnl-api.polymarket.com https://bridge.polymarket.com https://relayer-v2.polymarket.com https://*.alchemy.com https://*.walletconnect.com https://*.walletconnect.org wss://*.walletconnect.com wss://*.walletconnect.org https://*.web3modal.org https://*.web3modal.com https://polygon-rpc.com https://polygon-mainnet.g.alchemy.com wss://ws-subscriptions-clob.polymarket.com wss://sports-api.polymarket.com https://openrouter.ai https://*.reown.com wss://*.reown.com https://cca-lite.coinbase.com",
     // Frames: none (we don't embed iframes)
     "frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://*.reown.com",
     // Object/base/form restrictions

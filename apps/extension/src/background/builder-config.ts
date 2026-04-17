@@ -12,7 +12,7 @@
 
 import { EXTENSION_AUTH_REQUIRED_ERROR } from "../types/chrome-messages";
 import { getKnowwAppUrl } from "./extension-session";
-import { logWarn } from "./logger";
+import { logInfo, logWarn } from "./logger";
 
 const SIGN_PROXY_URL = `${getKnowwAppUrl()}/api/sign`;
 
@@ -74,7 +74,10 @@ export function createExtensionBuilderConfig() {
         const bodyStr = JSON.stringify({ method, path, body, timestamp });
         const token = await getAccessTokenViaMessage();
         if (!token) {
-          logWarn("builder-config.missing-token");
+          logInfo("builder-config.auth-required", {
+            path,
+            reason: "missing-token",
+          });
           throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
         }
 
@@ -109,7 +112,7 @@ export function createExtensionBuilderConfig() {
           err instanceof Error &&
           err.message === EXTENSION_AUTH_REQUIRED_ERROR
         ) {
-          logWarn("builder-config.auth-required", { path });
+          logInfo("builder-config.auth-required", { path });
           throw err;
         }
         logWarn("builder-config.failed", {

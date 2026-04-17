@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.22",
+  "version": "2.5.24",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
@@ -20,10 +20,11 @@
     "@knoww/shared-types": "workspace:*",
     "@polymarket/clob-client": "5.8.1",
     "@polymarket/order-utils": "3.0.1",
+    "decimal.js": "^10.6.0",
     "ethers": "5.8.0",
     "minisearch": "7.2.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
     "wink-eng-lite-web-model": "1.8.1",
     "wink-nlp": "2.4.0"
   },
@@ -37,7 +38,7 @@
     "process": "0.11.10",
     "ts-loader": "9.5.7",
     "typescript": "6.0.2",
-    "webpack": "5.106.0",
+    "webpack": "5.106.1",
     "webpack-cli": "7.0.2"
   }
 }

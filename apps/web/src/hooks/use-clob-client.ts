@@ -41,6 +41,7 @@ export interface CreateOrderParams {
   tokenId: string;
   price: number;
   size: number;
+  amount?: number;
   side: Side;
   orderType?: OrderType;
   expiration?: number; // Unix timestamp for GTD orders
@@ -80,6 +81,7 @@ export function useClobClient() {
       throw new Error("No wallet provider found. Please install MetaMask.");
     }
     const { providers } = await import("ethers");
+    // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
     const provider = new providers.Web3Provider(window.ethereum as any);
     await provider.send("eth_requestAccounts", []);
     return provider.getSigner();
@@ -149,6 +151,41 @@ export function useClobClient() {
         const client = await getClient();
         const feeRateBps = await client.getFeeRateBps(params.tokenId);
         const orderOptions = params.negRisk ? { negRisk: true } : undefined;
+
+        if (
+          params.orderType === OrderType.FAK ||
+          params.orderType === OrderType.FOK
+        ) {
+          const buyAmount = params.amount;
+
+          if (params.side !== Side.SELL && buyAmount == null) {
+            throw new Error(
+              "BUY market orders require a notional amount (params.amount)"
+            );
+          }
+
+          // BUY market orders use notional USDC amount; SELL market orders use shares.
+          const marketAmount =
+            params.side === Side.SELL ? params.size : buyAmount;
+
+          if (marketAmount == null) {
+            throw new Error("Failed to determine market order amount");
+          }
+
+          const order = await client.createMarketOrder(
+            {
+              tokenID: params.tokenId,
+              amount: marketAmount,
+              side: params.side,
+              feeRateBps,
+              ...(params.price > 0 ? { price: params.price } : {}),
+            },
+            orderOptions
+          );
+
+          const response = await client.postOrder(order, params.orderType);
+          return { success: true, order: response };
+        }
 
         const order = await client.createOrder(
           {
@@ -237,6 +274,7 @@ export function useClobClient() {
 
       const walletClient = createWalletClient({
         chain: polygon,
+        // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
         transport: custom(window.ethereum as any),
         account: address,
       });

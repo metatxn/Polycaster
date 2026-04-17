@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { logger } from "@/lib/logger";
 
 // Validation schema
 const teamsSchema = z.object({
@@ -87,7 +88,9 @@ export async function GET(request: NextRequest) {
       teams: Array.isArray(data) ? data : [],
     });
   } catch (error) {
-    console.error("Error fetching teams:", error);
+    logger.error("sports.teams.fetch_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       {
         success: false,

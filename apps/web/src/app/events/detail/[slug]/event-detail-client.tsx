@@ -69,21 +69,14 @@ interface EventDetailClientProps {
 // Cap list-row live quotes to keep WS subscription bounded on large events.
 const MAX_MARKETS_WITH_LIVE_QUOTES = 20;
 
-// Order book response type - defined outside component to avoid hook order issues
-interface OrderBookResponse {
-  success: boolean;
-  tokenID: string;
-  orderBook: {
-    market: string;
-    asset_id: string;
-    timestamp: string;
-    hash: string;
-    bids: Array<{ price: string; size: string }>;
-    asks: Array<{ price: string; size: string }>;
-    min_order_size: string;
-    tick_size: string;
-    neg_risk: boolean;
-  };
+// Dedicated trading-panel order book snapshot shape.
+// Keep this separate from other ["orderBook", tokenId] query consumers so the
+// trading form never reads an incompatible cached payload and waits for staleness.
+interface TradingPanelOrderBookSnapshot {
+  bids: Array<{ price: string; size: string }>;
+  asks: Array<{ price: string; size: string }>;
+  min_order_size: string;
+  tick_size: string;
 }
 
 export default function EventDetailClient({
@@ -583,55 +576,41 @@ export default function EventDetailClient({
 
   // STEP 1: Fetch initial order book snapshot directly from Polymarket CLOB API
   // Direct fetch is faster than going through our Next.js API route
-  const { data: orderBookData } = useQuery<OrderBookResponse | null>({
-    queryKey: ["orderBook", currentTokenId],
-    queryFn: async (): Promise<OrderBookResponse | null> => {
-      if (!currentTokenId) return null;
-      // Direct call to Polymarket CLOB API (public, allows CORS)
-      const response = await fetch(
-        `https://clob.polymarket.com/book?token_id=${currentTokenId}`,
-        { headers: { Accept: "application/json" } }
-      );
-      if (!response.ok) return null;
-      const data = (await response.json()) as {
-        market?: string;
-        asset_id?: string;
-        timestamp?: string;
-        hash?: string;
-        bids?: Array<{ price: string; size: string }>;
-        asks?: Array<{ price: string; size: string }>;
-        min_order_size?: string;
-        tick_size?: string;
-        neg_risk?: boolean;
-      };
-      // Wrap in our expected format
-      return {
-        success: true,
-        tokenID: currentTokenId,
-        orderBook: {
-          market: data.market || "",
-          asset_id: data.asset_id || currentTokenId,
-          timestamp: data.timestamp || "",
-          hash: data.hash || "",
+  const { data: orderBookData } =
+    useQuery<TradingPanelOrderBookSnapshot | null>({
+      queryKey: ["tradingPanelOrderBook", currentTokenId],
+      queryFn: async (): Promise<TradingPanelOrderBookSnapshot | null> => {
+        if (!currentTokenId) return null;
+        // Direct call to Polymarket CLOB API (public, allows CORS)
+        const response = await fetch(
+          `https://clob.polymarket.com/book?token_id=${currentTokenId}`,
+          { headers: { Accept: "application/json" } }
+        );
+        if (!response.ok) return null;
+        const data = (await response.json()) as {
+          bids?: Array<{ price: string; size: string }>;
+          asks?: Array<{ price: string; size: string }>;
+          min_order_size?: string;
+          tick_size?: string;
+        };
+        return {
           bids: data.bids || [],
           asks: data.asks || [],
           min_order_size: data.min_order_size || "1",
           tick_size: data.tick_size || "0.01",
-          neg_risk: data.neg_risk || false,
-        },
-      };
-    },
-    enabled: !!currentTokenId,
-    staleTime: 30000, // Consider fresh for 30s (WebSocket will update)
-  });
+        };
+      },
+      enabled: !!currentTokenId,
+      staleTime: 30000, // Consider fresh for 30s (WebSocket will update)
+    });
 
   // STEP 2: Seed the store with REST data when it arrives
   useEffect(() => {
-    if (orderBookData?.orderBook && currentTokenId) {
+    if (orderBookData && currentTokenId) {
       setOrderBookFromRest(
         currentTokenId,
-        orderBookData.orderBook.bids || [],
-        orderBookData.orderBook.asks || []
+        orderBookData.bids || [],
+        orderBookData.asks || []
       );
     }
   }, [orderBookData, currentTokenId, setOrderBookFromRest]);
@@ -665,7 +644,7 @@ export default function EventDetailClient({
       }
 
       // Fall back to raw REST API data if store is empty
-      if (!orderBookData?.orderBook) {
+      if (!orderBookData) {
         return {
           bestBid: undefined,
           bestAsk: undefined,
@@ -675,9 +654,8 @@ export default function EventDetailClient({
         };
       }
 
-      const ob = orderBookData.orderBook;
-      const bids = ob.bids || [];
-      const asks = ob.asks || [];
+      const bids = orderBookData.bids || [];
+      const asks = orderBookData.asks || [];
 
       const sortedBids = [...bids].sort(
         (a, b) => Number.parseFloat(b.price) - Number.parseFloat(a.price)
@@ -689,11 +667,11 @@ export default function EventDetailClient({
       const bestBidLevel = sortedBids.length > 0 ? sortedBids[0] : null;
       const bestAskLevel = sortedAsks.length > 0 ? sortedAsks[0] : null;
 
-      const tickSizeValue = ob.tick_size
-        ? Number.parseFloat(ob.tick_size)
+      const tickSizeValue = orderBookData.tick_size
+        ? Number.parseFloat(orderBookData.tick_size)
         : 0.01;
-      const bookMinOrderSizeValue = ob.min_order_size
-        ? Number.parseFloat(ob.min_order_size)
+      const bookMinOrderSizeValue = orderBookData.min_order_size
+        ? Number.parseFloat(orderBookData.min_order_size)
         : 1;
 
       const minOrderSizeValue = Math.max(

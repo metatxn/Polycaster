@@ -11,8 +11,10 @@ import type { UserSettings } from "../types/settings";
 // Declare NTH_INSERTER as a global that may or may not exist
 declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
 
+const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
+
 (async function main(): Promise<void> {
-  const { log } = window.KNOWW_UTILS;
+  const { log, safeSendMessage } = window.KNOWW_UTILS;
   const {
     CONFIG,
     ENABLED_SOURCES,
@@ -113,7 +115,12 @@ declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
 
   // Defer prefetch to reduce initial memory spike
   const { scheduleIdle } = window.KNOWW_UTILS;
-  scheduleIdle(deferredPrefetch, 5000);
+  scheduleIdle(deferredPrefetch, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
+
+  scheduleIdle(() => {
+    if (document.hidden) return;
+    void safeSendMessage({ type: "scoring:prewarm-offscreen" });
+  }, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
 
   // Determine site-specific selectors using platform registry
   let itemSelector: string;

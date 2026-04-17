@@ -79,14 +79,13 @@ test("naiveContextGate handles left curly apostrophe in contractions", () => {
   );
 });
 
-test("naiveContextGate allows a single high-signal token match", () => {
+test("naiveContextGate requires at least two distinct signals", () => {
   const gate = naiveContextGate(
     "GTA trailer rumor tonight",
     "GTA VI released before June 2026?"
   );
 
-  assert.equal(gate.pass, true);
-  assert.ok(gate.details.includes("high-signal"));
+  assert.equal(gate.pass, false);
 });
 
 test("determineScoringMode distinguishes hybrid lexical and heuristic", () => {
@@ -174,7 +173,7 @@ test("evaluateCandidateGate marks hybrid near-misses as AI-retry eligible", () =
   assert.equal(decision.retryEligible, true);
 });
 
-test("evaluateCandidateGate applies single-signal recovery for high-score entity matches", () => {
+test("evaluateCandidateGate does not recover a single high-score entity match", () => {
   const decision = evaluateCandidateGate({
     postText: "GTA trailer rumor tonight",
     market: createMarket({
@@ -190,13 +189,115 @@ test("evaluateCandidateGate applies single-signal recovery for high-score entity
     }),
   });
 
-  assert.equal(decision.pass, true);
-  assert.equal(decision.usedRecoveryGate, true);
-  assert.ok(decision.recoveryGate);
+  assert.equal(decision.pass, false);
+  assert.equal(decision.usedRecoveryGate, false);
+});
+
+test("evaluateCandidateGate does not recover a single weak noun overlap", () => {
+  const decision = evaluateCandidateGate({
+    postText: "How do I get my hands on one of these bad boys?",
+    market: createMarket({
+      title: "How long will Trump and Xi shake hands when they meet?",
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.67,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details: "nouns=[hand] meaningful=[hand] entities=[] distinct=1",
+    }),
+  });
+
+  assert.equal(decision.pass, false);
+  assert.equal(decision.usedRecoveryGate, false);
+});
+
+test("evaluateCandidateGate rejects location-only overlap across unrelated topics", () => {
+  const decision = evaluateCandidateGate({
+    postText:
+      "Delhi-based dpropulse is building India's first rotating detonation engine",
+    market: createMarket({
+      title: "Legends Cricket League: Daredevils Delhi vs India Tigers",
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.86,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 1,
+      details:
+        "nouns=[delhi,india] meaningful=[delhi] entities=[delhi] distinct=1",
+    }),
+  });
+
+  assert.equal(decision.pass, false);
+  assert.equal(decision.usedRecoveryGate, false);
 });
 
 test("shouldFailOpen keeps the shared score floor behavior", () => {
   assert.equal(shouldFailOpen(0.49), false);
   assert.equal(shouldFailOpen(0.5), true);
   assert.equal(shouldFailOpen(0.73), true);
+});
+
+test("evaluateCandidateGate relaxed passes a single-signal high-score match (kalshi)", () => {
+  // Mirrors the live Kalshi case "More tech layoffs in 2026..." vs
+  // "Tech Layoffs Up or Down in 2026?" — both sides share only `tech` but the
+  // score is decisively high, so the relaxed gate should accept it.
+  const decision = evaluateCandidateGate({
+    postText: "More tech layoffs in 2026 than in 2025?",
+    market: createMarket({ title: "Tech Layoffs Up or Down in 2026?" }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.926,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details: "nouns=[tech] meaningful=[tech] entities=[] distinct=1",
+    }),
+    relaxed: true,
+  });
+
+  assert.equal(decision.pass, true);
+});
+
+test("evaluateCandidateGate relaxed still rejects single-signal low-score matches", () => {
+  // Score below AI_GATE_RETRY_FLOOR (0.6) — relaxation must not lower the
+  // quality bar for weak matches.
+  const decision = evaluateCandidateGate({
+    postText: "Number of rate cuts in 2026?",
+    market: createMarket({
+      title: "Number of TSA passengers April 13-April 19?",
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.55,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details: "nouns=[number] meaningful=[number] entities=[] distinct=1",
+    }),
+    relaxed: true,
+  });
+
+  assert.equal(decision.pass, false);
+});
+
+test("evaluateCandidateGate relaxed without any signals still fails", () => {
+  const decision = evaluateCandidateGate({
+    postText: "Unrelated topic A",
+    market: createMarket({ title: "Unrelated topic B" }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.9,
+    gate: createGate({
+      meaningfulNouns: 0,
+      sharedEntities: 0,
+      details: "distinct=0",
+    }),
+    relaxed: true,
+  });
+
+  assert.equal(decision.pass, false);
 });

@@ -30,7 +30,7 @@ function getPostHogHost(): string {
 }
 
 export function isPostHogServerConfigured(): boolean {
-  return !!getPostHogProjectKey();
+  return process.env.NODE_ENV === "production" && !!getPostHogProjectKey();
 }
 
 export function getPostHogClient(): PostHog {

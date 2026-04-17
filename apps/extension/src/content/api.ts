@@ -15,6 +15,7 @@ import { HIGH_SIGNAL_TOKENS } from "./scoring-policy";
 // Cache for Polymarket tags
 let polymarketTagsCache: PolymarketTagsCache | null = null;
 let tagsLastFetched = 0;
+let polymarketTagsInFlight: Promise<PolymarketTagsCache | null> | null = null;
 
 // Cache for AI extraction results (both success and short-lived failures)
 interface AIExtractionCacheEntry {
@@ -585,40 +586,50 @@ async function fetchPolymarketTags(): Promise<PolymarketTagsCache | null> {
     return polymarketTagsCache;
   }
 
+  if (polymarketTagsInFlight) {
+    return polymarketTagsInFlight;
+  }
+
   if (!isExtensionContextValid()) {
     log("Extension context invalidated, cannot fetch tags");
     return polymarketTagsCache;
   }
 
-  try {
-    const url = `${POLYMARKET_TAGS_API_URL}?limit=500`;
-    const resp = await safeSendMessage({ type: "fetch-text", url });
+  polymarketTagsInFlight = (async () => {
+    try {
+      const url = `${POLYMARKET_TAGS_API_URL}?limit=500`;
+      const resp = await safeSendMessage({ type: "fetch-text", url });
 
-    if (resp?.ok && "text" in resp && resp.text) {
-      const tags = JSON.parse(resp.text) as PolymarketTag[];
-      const { keywordMap, keywordRegexMap } = buildTagKeywordMap(tags);
-      // MEMORY: Only store the derived maps needed for matching.
-      // The raw list, slugs Set, and labels Set are not used after building maps.
-      polymarketTagsCache = {
-        list: tags,
-        keywordMap,
-        keywordRegexMap,
-      };
-      tagsLastFetched = now;
-      log(
-        "Cached",
-        tags.length,
-        "Polymarket tags with",
-        keywordRegexMap.size,
-        "precompiled regexes"
-      );
-      return polymarketTagsCache;
+      if (resp?.ok && "text" in resp && resp.text) {
+        const tags = JSON.parse(resp.text) as PolymarketTag[];
+        const { keywordMap, keywordRegexMap } = buildTagKeywordMap(tags);
+        // MEMORY: Only store the derived maps needed for matching.
+        // The raw list, slugs Set, and labels Set are not used after building maps.
+        polymarketTagsCache = {
+          list: tags,
+          keywordMap,
+          keywordRegexMap,
+        };
+        tagsLastFetched = now;
+        log(
+          "Cached",
+          tags.length,
+          "Polymarket tags with",
+          keywordRegexMap.size,
+          "precompiled regexes"
+        );
+        return polymarketTagsCache;
+      }
+    } catch (e) {
+      log("Failed to fetch tags:", e);
+    } finally {
+      polymarketTagsInFlight = null;
     }
-  } catch (e) {
-    log("Failed to fetch tags:", e);
-  }
 
-  return polymarketTagsCache;
+    return polymarketTagsCache;
+  })();
+
+  return polymarketTagsInFlight;
 }
 
 /**
@@ -1041,6 +1052,31 @@ interface RawPolymarketEvent {
   source?: "polymarket" | "kalshi";
 }
 
+function parsePolymarketEventsPayload(payload: unknown): RawPolymarketEvent[] {
+  if (Array.isArray(payload)) {
+    return payload as RawPolymarketEvent[];
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const wrapper = payload as {
+    data?: unknown;
+    events?: unknown;
+  };
+
+  if (Array.isArray(wrapper.events)) {
+    return wrapper.events as RawPolymarketEvent[];
+  }
+
+  if (Array.isArray(wrapper.data)) {
+    return wrapper.data as RawPolymarketEvent[];
+  }
+
+  return [];
+}
+
 /**
  * Search Polymarket events
  */
@@ -1051,7 +1087,7 @@ async function searchPolymarketEvents(
   const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;
   const {
     POLYMARKET_SEARCH_API_URL,
-    POLYMARKET_EVENTS_API_URL,
+    POLYMARKET_EVENTS_KEYSET_API_URL,
     ENABLED_SOURCES,
   } = window.KNOWW_CONFIG;
 
@@ -1125,9 +1161,9 @@ async function searchPolymarketEvents(
     log("Fetching Polymarket events for tags:", matchedTags);
 
     const tagPromises = matchedTags.slice(0, 2).map(async (tagSlug) => {
-      const tagUrl = `${POLYMARKET_EVENTS_API_URL}?tag_slug=${encodeURIComponent(
+      const tagUrl = `${POLYMARKET_EVENTS_KEYSET_API_URL}?tag_slug=${encodeURIComponent(
         tagSlug
-      )}&closed=false&archived=false&limit=5&order=volume24hr&ascending=false&optimized=true`;
+      )}&closed=false&limit=5&order=volume24hr&ascending=false`;
 
       try {
         const tagResp = await safeSendMessage({
@@ -1135,8 +1171,7 @@ async function searchPolymarketEvents(
           url: tagUrl,
         });
         if (tagResp?.ok && "text" in tagResp && tagResp.text) {
-          const events = JSON.parse(tagResp.text) as RawPolymarketEvent[];
-          const list = Array.isArray(events) ? events : [];
+          const list = parsePolymarketEventsPayload(JSON.parse(tagResp.text));
           log(`Tag "${tagSlug}": ${list.length} events returned`);
           return list;
         }
@@ -1746,7 +1781,8 @@ const TRENDING_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  */
 async function fetchTrendingMarkets(): Promise<Market[]> {
   const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;
-  const { POLYMARKET_EVENTS_API_URL, ENABLED_SOURCES } = window.KNOWW_CONFIG;
+  const { POLYMARKET_EVENTS_KEYSET_API_URL, ENABLED_SOURCES } =
+    window.KNOWW_CONFIG;
 
   const now = Date.now();
   if (
@@ -1768,12 +1804,11 @@ async function fetchTrendingMarkets(): Promise<Market[]> {
   // Fetch top Polymarket events by volume
   if (ENABLED_SOURCES?.polymarket) {
     try {
-      const url = `${POLYMARKET_EVENTS_API_URL}?closed=false&archived=false&limit=10&order=volume24hr&ascending=false`;
+      const url = `${POLYMARKET_EVENTS_KEYSET_API_URL}?closed=false&limit=10&order=volume24hr&ascending=false`;
       const resp = await safeSendMessage({ type: "fetch-text", url });
 
       if (resp?.ok && "text" in resp && resp.text) {
-        const events = JSON.parse(resp.text) as RawPolymarketEvent[];
-        const eventList = Array.isArray(events) ? events : [];
+        const eventList = parsePolymarketEventsPayload(JSON.parse(resp.text));
         for (const event of eventList) {
           if (event.closed === true || event.active === false) continue;
           if (!seenIds.has(event.id)) {

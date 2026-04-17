@@ -1,5 +1,6 @@
 "use client";
 
+import Decimal from "decimal.js";
 import type { TradingSide } from "@/types/market";
 
 interface OrderSummaryProps {
@@ -9,7 +10,6 @@ interface OrderSummaryProps {
   selectedOutcomeName?: string;
   isBelowMinNotional?: boolean;
   minNotional?: number;
-  /** Trading side - affects display labels */
   side?: TradingSide;
 }
 
@@ -33,7 +33,7 @@ export function OrderSummary({
         <span
           className={`text-lg font-semibold ${isSell ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}
         >
-          ${totalCost.toFixed(2)}
+          ${new Decimal(totalCost).toFixed(2)}
         </span>
       </div>
 
@@ -43,7 +43,7 @@ export function OrderSummary({
             Minimum order value
           </span>
           <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
-            ${minNotional.toFixed(2)} required
+            ${new Decimal(minNotional).toFixed(2)} required
           </span>
         </div>
       )}
@@ -55,7 +55,7 @@ export function OrderSummary({
               Potential Return
             </span>
             <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
-              ${(totalCost + potentialWin).toFixed(2)}
+              ${new Decimal(totalCost).add(potentialWin).toFixed(2)}
             </span>
           </div>
 
@@ -64,7 +64,7 @@ export function OrderSummary({
               Profit if {selectedOutcomeName || "Yes"}
             </span>
             <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
-              +${potentialWin.toFixed(2)} ({profitPercent}%)
+              +${new Decimal(potentialWin).toFixed(2)} ({profitPercent}%)
             </span>
           </div>
         </>

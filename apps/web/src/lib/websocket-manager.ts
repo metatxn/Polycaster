@@ -1,6 +1,7 @@
 "use client";
 
 import { POLYMARKET_API, WEBSOCKET_CONFIG } from "@/constants/polymarket";
+import { logger } from "@/lib/logger";
 import { filterValidTokenIds } from "@/lib/token-validation";
 import type { ConnectionState, WebSocketEvent } from "@/types/websocket";
 
@@ -208,7 +209,7 @@ class WebSocketManager {
       this.ws = new WebSocket(POLYMARKET_API.WSS.MARKET);
 
       this.ws.onopen = () => {
-        console.log("[WSManager] Connected to Polymarket Market Channel");
+        logger.info("websocket.market.connected");
         this.updateConnectionState("connected");
         // Reset reconnection tracking on successful connection
         this.reconnectAttempt = 0;
@@ -221,7 +222,7 @@ class WebSocketManager {
         ];
 
         if (allAssets.length > 0) {
-          this.sendSubscription("subscribe", Array.from(new Set(allAssets)));
+          this.sendInitialSubscription(Array.from(new Set(allAssets)));
         }
         this.pendingSubscriptions.clear();
 
@@ -252,22 +253,34 @@ class WebSocketManager {
         } catch (err) {
           // Only log if it's not a known non-JSON message
           if (typeof event.data === "string" && event.data.length < 100) {
-            console.debug("[WSManager] Non-JSON message:", event.data);
+            logger.info("websocket.market.non_json_message", {
+              payload: event.data,
+            });
           } else {
-            console.error("[WSManager] Failed to parse message:", err);
+            logger.error("websocket.market.parse_failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         }
       };
 
       this.ws.onerror = (event) => {
-        console.error("[WSManager] WebSocket error:", event);
+        logger.error("websocket.market.error", {
+          event:
+            event instanceof Event
+              ? {
+                  type: event.type,
+                }
+              : String(event),
+        });
         this.updateConnectionState("error");
       };
 
       this.ws.onclose = (event) => {
-        console.log(
-          `[WSManager] Closed: code=${event.code}, reason=${event.reason}`
-        );
+        logger.info("websocket.market.closed", {
+          code: event.code,
+          reason: event.reason,
+        });
         this.stopHeartbeat();
 
         // Don't reconnect if closed cleanly or no subscriptions
@@ -280,7 +293,9 @@ class WebSocketManager {
         this.scheduleReconnect();
       };
     } catch (err) {
-      console.error("[WSManager] Failed to connect:", err);
+      logger.error("websocket.market.connect_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       this.updateConnectionState("error");
       this.scheduleReconnect();
     }
@@ -318,8 +333,29 @@ class WebSocketManager {
     }
   }
 
+  private sendInitialSubscription(assetIds: string[]): void {
+    if (
+      !this.ws ||
+      this.ws.readyState !== WebSocket.OPEN ||
+      assetIds.length === 0
+    ) {
+      return;
+    }
+
+    try {
+      this.ws.send(JSON.stringify({ type: "market", assets_ids: assetIds }));
+      logger.info("websocket.market.subscriptions.initialized", {
+        assetCount: assetIds.length,
+      });
+    } catch (err) {
+      logger.error("websocket.market.subscription_init_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   private sendSubscription(
-    type: "subscribe" | "unsubscribe",
+    operation: "subscribe" | "unsubscribe",
     assetIds: string[]
   ): void {
     if (
@@ -331,10 +367,16 @@ class WebSocketManager {
     }
 
     try {
-      this.ws.send(JSON.stringify({ type, assets_ids: assetIds }));
-      console.log(`[WSManager] ${type}d to ${assetIds.length} assets`);
+      this.ws.send(JSON.stringify({ operation, assets_ids: assetIds }));
+      logger.info("websocket.market.subscription.updated", {
+        operation,
+        assetCount: assetIds.length,
+      });
     } catch (err) {
-      console.error(`[WSManager] Failed to ${type}:`, err);
+      logger.error("websocket.market.subscription_update_failed", {
+        operation,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -344,7 +386,9 @@ class WebSocketManager {
       try {
         callback(state);
       } catch (err) {
-        console.error("[WSManager] Connection listener error:", err);
+        logger.error("websocket.market.connection_listener_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
@@ -354,7 +398,9 @@ class WebSocketManager {
       try {
         callback(event);
       } catch (err) {
-        console.error("[WSManager] Event listener error:", err);
+        logger.error("websocket.market.event_listener_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
@@ -381,10 +427,9 @@ class WebSocketManager {
 
     // Check if we've exceeded max attempts
     if (this.reconnectAttempt > RECONNECT_LIMITS.MAX_ATTEMPTS) {
-      console.warn(
-        `[WSManager] Max reconnection attempts (${RECONNECT_LIMITS.MAX_ATTEMPTS}) reached. ` +
-          `Giving up. User can manually refresh to retry.`
-      );
+      logger.warn("websocket.market.reconnect_aborted", {
+        maxAttempts: RECONNECT_LIMITS.MAX_ATTEMPTS,
+      });
       this.updateConnectionState("disconnected");
       return;
     }
@@ -395,9 +440,11 @@ class WebSocketManager {
       WEBSOCKET_CONFIG.MAX_RECONNECT_DELAY_MS
     );
 
-    console.log(
-      `[WSManager] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt}/${RECONNECT_LIMITS.MAX_ATTEMPTS})`
-    );
+    logger.info("websocket.market.reconnecting", {
+      delayMs: delay,
+      attempt: this.reconnectAttempt,
+      maxAttempts: RECONNECT_LIMITS.MAX_ATTEMPTS,
+    });
     this.updateConnectionState("reconnecting");
 
     this.reconnectTimeout = setTimeout(() => {
@@ -426,7 +473,7 @@ class WebSocketManager {
       this.heartbeatTimeout = null;
     }
 
-    console.debug("[WSManager] Heartbeat pong received");
+    logger.info("websocket.market.heartbeat_pong");
   }
 
   /**
@@ -439,9 +486,7 @@ class WebSocketManager {
 
     // If we're still waiting for a pong from the last ping, connection might be dead
     if (this.awaitingPong) {
-      console.warn(
-        "[WSManager] No pong received for previous ping, connection may be stale"
-      );
+      logger.warn("websocket.market.heartbeat_stale");
       // Don't immediately reconnect, let the timeout handle it
     }
 
@@ -454,15 +499,15 @@ class WebSocketManager {
       // Set a timeout - if we don't get pong within timeout, reconnect
       this.heartbeatTimeout = setTimeout(() => {
         if (this.awaitingPong) {
-          console.warn(
-            "[WSManager] Heartbeat timeout - no pong received, reconnecting..."
-          );
+          logger.warn("websocket.market.heartbeat_timeout");
           this.awaitingPong = false;
           this.reconnect();
         }
       }, HEARTBEAT_CONFIG.TIMEOUT_MS);
     } catch (err) {
-      console.error("[WSManager] Failed to send ping:", err);
+      logger.error("websocket.market.heartbeat_ping_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       // Connection is likely broken, trigger reconnect
       this.reconnect();
     }
@@ -482,7 +527,7 @@ class WebSocketManager {
       }
     }, HEARTBEAT_CONFIG.INTERVAL_MS);
 
-    console.debug("[WSManager] Heartbeat monitoring started");
+    logger.info("websocket.market.heartbeat_started");
   }
 
   /**

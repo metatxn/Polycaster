@@ -26,8 +26,9 @@ pnpm install
 
 # Configure the web app environment
 $EDITOR apps/web/.env.local
-# Required: NEXT_PUBLIC_REOWN_PROJECT_ID
-# Optional: POSTHOG_PROJECT_API_KEY and POSTHOG_HOST for analytics ingestion
+# Required: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+# Optional client analytics: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN and NEXT_PUBLIC_POSTHOG_HOST
+# Optional server analytics: POSTHOG_PROJECT_API_KEY and POSTHOG_HOST
 
 # Run the web app
 pnpm dev:web
@@ -35,15 +36,22 @@ pnpm dev:web
 
 Open [http://localhost:8000](http://localhost:8000)
 
+For full local parity with production-only features, the web app also reads server-side variables such as `OPENROUTER_API_KEY`, `EXTENSION_SESSION_SECRET`, `BUILDER_SIGNING_SERVER_URL`, `INTERNAL_AUTH_TOKEN`, `ALCHEMY_API_KEY`, and `POLYGON_RPC_URL`.
+
 ### Extension Development
 
 ```bash
 # Configure the extension environment if needed
 cp apps/extension/.env.example apps/extension/.env
 
-# Run the extension build in watch mode
+# Run the web app locally for extension API calls
+pnpm dev:web
+
+# In a second terminal, run the extension build in watch mode
 pnpm dev:ext
 ```
+
+In development, the extension targets `http://localhost:8000` by default. Use `DEV_MODE=false` in `apps/extension/.env` if you want the built extension to talk to production instead.
 
 ## Tech Stack
 
@@ -66,8 +74,13 @@ pnpm build:web      # Build the web app only
 pnpm build:ext      # Build the extension only
 pnpm preview        # Preview the Cloudflare web deployment locally
 pnpm lint           # Lint the monorepo
+pnpm lint:web       # Lint the web app only
+pnpm lint:ext       # Lint the extension only
 pnpm format         # Format the monorepo
 pnpm typecheck      # Type-check all workspace packages
+pnpm typecheck:web  # Type-check the web app only
+pnpm typecheck:ext  # Type-check the extension only
+pnpm audit:security # Run a high-severity dependency audit
 pnpm deploy         # Deploy the web app to Cloudflare
 pnpm release:ext    # Bump, build, and zip the extension release
 ```

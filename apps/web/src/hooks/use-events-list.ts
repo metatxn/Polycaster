@@ -10,7 +10,6 @@ interface Event {
   endDate?: string;
   active?: boolean;
   closed?: boolean;
-  archived?: boolean;
   tags?: string[];
   marketCount?: number;
   volume?: string;
@@ -30,9 +29,8 @@ interface EventsResponse {
 interface UseEventsListParams {
   tag?: string;
   limit?: number;
-  offset?: number;
+  afterCursor?: string;
   closed?: boolean;
-  archived?: boolean;
 }
 
 /**
@@ -45,11 +43,9 @@ async function fetchEventsList(
 
   if (params.tag) queryParams.set("tag", params.tag);
   if (params.limit) queryParams.set("limit", params.limit.toString());
-  if (params.offset) queryParams.set("offset", params.offset.toString());
+  if (params.afterCursor) queryParams.set("after_cursor", params.afterCursor);
   if (params.closed !== undefined)
     queryParams.set("closed", params.closed.toString());
-  if (params.archived !== undefined)
-    queryParams.set("archived", params.archived.toString());
 
   const response = await fetch(`/api/events/list?${queryParams.toString()}`);
 

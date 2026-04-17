@@ -16,6 +16,11 @@ import {
 export interface BasicAdapterConfig {
   name: string;
   hostPatterns: RegExp[];
+  bypassEnglishCheck?: boolean;
+  relaxContextGate?: boolean;
+  maxInjectionsPerBatch?: number;
+  maxActiveNotificationItems?: number;
+  maxNotificationItems?: number;
   itemSelectors: string[];
   containerSelectors: string[];
   textSelectors: string[];
@@ -82,6 +87,11 @@ export function createBasicAdapter(
   const adapter: PlatformAdapter = {
     name: config.name,
     hostPatterns: config.hostPatterns,
+    bypassEnglishCheck: config.bypassEnglishCheck,
+    relaxContextGate: config.relaxContextGate,
+    maxInjectionsPerBatch: config.maxInjectionsPerBatch,
+    maxActiveNotificationItems: config.maxActiveNotificationItems,
+    maxNotificationItems: config.maxNotificationItems,
     selectors: {
       item: itemSelector,
       container: containerSelector,

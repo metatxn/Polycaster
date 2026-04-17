@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Decimal from "decimal.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "wagmi";
 import {
@@ -204,25 +205,24 @@ export function useTradingFormState({
 
   const marketOrderPrice = useMemo(() => {
     if (slippageResult?.canFill) {
+      const worst = new Decimal(slippageResult.worstPrice);
       if (side === "BUY") {
-        const priceWithBuffer = slippageResult.worstPrice * 1.005;
-        return Math.min(0.99, roundUpToTick(priceWithBuffer, tickSize));
-      } else {
-        const priceWithBuffer = slippageResult.worstPrice * 0.995;
-        return Math.max(0.01, roundDownToTick(priceWithBuffer, tickSize));
+        const buffered = worst.mul("1.005").toNumber();
+        return Math.min(0.99, roundUpToTick(buffered, tickSize));
       }
+      const buffered = worst.mul("0.995").toNumber();
+      return Math.max(0.01, roundDownToTick(buffered, tickSize));
     }
 
-    const maxSlippageFraction = maxSlippagePercent / 100;
+    const maxFrac = new Decimal(maxSlippagePercent).div(100);
     if (side === "BUY") {
-      const basePrice = bestAsk ?? selectedOutcome?.price ?? 0.5;
-      const priceWithSlippage = basePrice * (1 + maxSlippageFraction);
-      return Math.min(0.99, roundUpToTick(priceWithSlippage, tickSize));
-    } else {
-      const basePrice = bestBid ?? selectedOutcome?.price ?? 0.5;
-      const priceWithSlippage = basePrice * (1 - maxSlippageFraction);
-      return Math.max(0.01, roundDownToTick(priceWithSlippage, tickSize));
+      const base = new Decimal(bestAsk ?? selectedOutcome?.price ?? 0.5);
+      const withSlippage = base.mul(new Decimal(1).add(maxFrac)).toNumber();
+      return Math.min(0.99, roundUpToTick(withSlippage, tickSize));
     }
+    const base = new Decimal(bestBid ?? selectedOutcome?.price ?? 0.5);
+    const withSlippage = base.mul(new Decimal(1).sub(maxFrac)).toNumber();
+    return Math.max(0.01, roundDownToTick(withSlippage, tickSize));
   }, [
     slippageResult,
     side,
@@ -240,7 +240,9 @@ export function useTradingFormState({
     const total =
       orderType === "MARKET" && slippageResult
         ? slippageResult.totalNotional
-        : pnl.cost;
+        : orderSide === OrderSide.SELL
+          ? pnl.proceeds
+          : pnl.cost;
 
     return {
       price,
@@ -248,7 +250,9 @@ export function useTradingFormState({
       potentialWin: pnl.potentialWin,
       potentialLoss: pnl.potentialLoss,
       returnPercent:
-        total > 0 ? ((pnl.potentialWin / total) * 100).toFixed(1) : "0",
+        total > 0
+          ? new Decimal(pnl.potentialWin).div(total).mul(100).toFixed(1)
+          : "0",
     };
   }, [side, orderType, limitPrice, marketOrderPrice, shares, slippageResult]);
 
@@ -347,6 +351,10 @@ export function useTradingFormState({
         tokenId: selectedOutcome.tokenId,
         price: orderPrice,
         size: shares,
+        amount:
+          orderType === "MARKET" && side === "BUY"
+            ? calculations.total
+            : undefined,
         side: side === "BUY" ? Side.BUY : Side.SELL,
         orderType: clobOrderType,
         expiration,
@@ -447,6 +455,7 @@ export function useTradingFormState({
     queryClient,
     onOrderError,
     initialShares,
+    calculations.total,
   ]);
 
   return {

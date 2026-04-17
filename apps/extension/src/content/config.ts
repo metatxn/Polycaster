@@ -19,6 +19,18 @@ const DEV_MODE = __DEV_MODE__;
 // Current user settings (will be populated from chrome.storage)
 let USER_SETTINGS: UserSettings = { ...DEFAULT_USER_SETTINGS };
 
+function canUseSyncStorage(): boolean {
+  try {
+    return (
+      typeof chrome !== "undefined" &&
+      !!chrome.runtime?.id &&
+      !!chrome.storage?.sync
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ============================================
 // POLYMARKET API URLs (HTTPS only)
 // ============================================
@@ -26,6 +38,8 @@ const POLYMARKET_SEARCH_API_URL =
   "https://gamma-api.polymarket.com/public-search";
 const POLYMARKET_TAGS_API_URL = "https://gamma-api.polymarket.com/tags";
 const POLYMARKET_EVENTS_API_URL = "https://gamma-api.polymarket.com/events";
+const POLYMARKET_EVENTS_KEYSET_API_URL =
+  "https://gamma-api.polymarket.com/events/keyset";
 
 // ============================================
 // KALSHI API URLs (HTTPS only)
@@ -99,7 +113,13 @@ const TAGS_CACHE_DURATION = 24 * 60 * 60 * 1000;
  */
 async function loadUserSettings(): Promise<UserSettings> {
   return new Promise((resolve) => {
-    if (typeof chrome !== "undefined" && chrome.storage?.sync) {
+    if (!canUseSyncStorage()) {
+      USER_SETTINGS = { ...DEFAULT_USER_SETTINGS };
+      resolve(USER_SETTINGS);
+      return;
+    }
+
+    try {
       chrome.storage.sync.get(
         { knowwSettings: DEFAULT_USER_SETTINGS },
         (result) => {
@@ -131,7 +151,7 @@ async function loadUserSettings(): Promise<UserSettings> {
           resolve(USER_SETTINGS);
         }
       );
-    } else {
+    } catch {
       USER_SETTINGS = { ...DEFAULT_USER_SETTINGS };
       resolve(USER_SETTINGS);
     }
@@ -272,6 +292,7 @@ export const KNOWW_CONFIG = {
   POLYMARKET_SEARCH_API_URL,
   POLYMARKET_TAGS_API_URL,
   POLYMARKET_EVENTS_API_URL,
+  POLYMARKET_EVENTS_KEYSET_API_URL,
   // Kalshi
   KALSHI_BASE_URL,
   KALSHI_EVENTS_API_URL,

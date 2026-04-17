@@ -9,7 +9,7 @@ import type {
   NestedMarket,
 } from "../types/market";
 import { TradingPanel } from "./trading/trading-panel";
-import { escapeHtml } from "./utils";
+import { escapeHtml, escapeSelectorValue } from "./utils";
 
 /**
  * Extract the CLOB token ID for a given outcome index from a market.
@@ -533,6 +533,8 @@ function createInlineMarketCard(
 ): HTMLElement {
   const { log } = window.KNOWW_UTILS;
   const { KNOWW_APP_URL } = window.KNOWW_CONFIG;
+  const currentPlatform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  const isKalshiPage = currentPlatform?.name === "kalshi-platform";
 
   const marketSource = market.source || "polymarket";
   const sourceConfig = SOURCE_CONFIG[marketSource] || SOURCE_CONFIG.polymarket;
@@ -542,6 +544,12 @@ function createInlineMarketCard(
   card.setAttribute("data-knoww-market-id", market.id);
   card.setAttribute("data-knoww-source", marketSource);
   card.setAttribute("data-nth-injector-card", "true");
+
+  if (isKalshiPage) {
+    card.style.position = "relative";
+    card.style.zIndex = "3";
+    card.style.pointerEvents = "auto";
+  }
 
   const parsed = parseMultiOutcomeData(market);
   let outcomes = parsed.outcomes;
@@ -657,6 +665,7 @@ function createInlineMarketCard(
     const img = document.createElement("img");
     img.src = imageUrl;
     img.alt = "";
+    img.decoding = "async";
     img.onerror = () => {
       log("Image failed to load:", imageUrl);
       icon.innerHTML = "";
@@ -664,6 +673,7 @@ function createInlineMarketCard(
         const fallbackImg = document.createElement("img");
         fallbackImg.src = kalshiFallbackIcon;
         fallbackImg.alt = "Kalshi";
+        fallbackImg.decoding = "async";
         icon.appendChild(fallbackImg);
       } else {
         icon.textContent = getMarketEmoji(market);
@@ -682,6 +692,7 @@ function createInlineMarketCard(
       const img = document.createElement("img");
       img.src = kalshiFallbackIcon;
       img.alt = "Kalshi";
+      img.decoding = "async";
       icon.appendChild(img);
     } else {
       icon.textContent = getMarketEmoji(market);
@@ -1095,6 +1106,15 @@ function createInlineMarketCard(
   if (optionsList) card.appendChild(optionsList);
   card.appendChild(footer);
 
+  if (isKalshiPage) {
+    const stopKalshiTilePropagation = (event: MouseEvent): void => {
+      event.stopPropagation();
+    };
+
+    card.addEventListener("click", stopKalshiTilePropagation);
+    card.addEventListener("auxclick", stopKalshiTilePropagation);
+  }
+
   return card;
 }
 
@@ -1174,10 +1194,29 @@ function getMarketEmoji(market: Market): string {
 
 let notificationStackContainer: HTMLElement | null = null;
 let notificationStackListenersAttached = false; // Guard to prevent duplicate listeners on re-init
+// Default caps; platforms can override via `maxActiveNotificationItems` and
+// `maxNotificationItems` on their adapter (see `resolveNotificationCaps`).
 const MAX_NOTIFICATION_ITEMS = 12;
 const MAX_ACTIVE_NOTIFICATION_ITEMS = 4;
-const MAX_SCROLLED_NOTIFICATION_ITEMS =
-  MAX_NOTIFICATION_ITEMS - MAX_ACTIVE_NOTIFICATION_ITEMS;
+
+function resolveNotificationCaps(): { active: number; scrolled: number } {
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  const activeOverride = platform?.maxActiveNotificationItems;
+  const totalOverride = platform?.maxNotificationItems;
+
+  const active =
+    typeof activeOverride === "number" && activeOverride > 0
+      ? Math.floor(activeOverride)
+      : MAX_ACTIVE_NOTIFICATION_ITEMS;
+  const total =
+    typeof totalOverride === "number" && totalOverride > 0
+      ? Math.floor(totalOverride)
+      : MAX_NOTIFICATION_ITEMS;
+  // Guarantee the scrolled-out bucket has at least one slot so the section
+  // doesn't collapse when a platform sets active === total.
+  const scrolled = Math.max(total - active, 0);
+  return { active, scrolled };
+}
 const SCROLLED_OUT_GRACE_MS = 8000;
 
 // Trending markets state
@@ -1636,7 +1675,7 @@ function createNotificationItem(
   isActive = true
 ): HTMLElement {
   const { log } = window.KNOWW_UTILS;
-  const { market, cardRef } = marketData;
+  const { market, cardRef, postKey } = marketData;
 
   const marketSource = market.source || "polymarket";
 
@@ -1775,13 +1814,25 @@ function createNotificationItem(
       itemStatus: isActive ? "active" : "scrolled_out",
     });
     if (!isActive) {
-      const marketUrl = buildMarketUrl(market);
-      log("Opening scrolled-out market directly:", marketUrl);
-      window.open(marketUrl, "_blank", "noopener,noreferrer");
+      const restored =
+        postKey &&
+        window.KNOWW_INJECTION?.restoreTrackedMarket?.(postKey, market.id);
+      if (restored) {
+        scrollToMarket(null, market.id, market, postKey);
+      } else {
+        const marketUrl = buildMarketUrl(market);
+        log("Opening scrolled-out market directly:", marketUrl);
+        window.open(marketUrl, "_blank", "noopener,noreferrer");
+      }
       window.KNOWW_PREFERENCES?.recordClick(market);
       return;
     }
-    scrollToMarket(cardRef as WeakRef<HTMLElement> | null, market.id, market);
+    scrollToMarket(
+      cardRef as WeakRef<HTMLElement> | null,
+      market.id,
+      market,
+      postKey
+    );
     window.KNOWW_PREFERENCES?.recordClick(market);
   };
 
@@ -1820,7 +1871,8 @@ function truncateText(text: string, maxLength: number): string {
 function scrollToMarket(
   cardRefOrElement: WeakRef<HTMLElement> | HTMLElement | null | undefined,
   marketId: string,
-  market?: Market
+  market?: Market,
+  postKey?: string
 ): void {
   const { log } = window.KNOWW_UTILS;
 
@@ -1834,9 +1886,32 @@ function scrollToMarket(
     !(targetCard instanceof Node) ||
     !document.body.contains(targetCard)
   ) {
-    targetCard = document.querySelector(
-      `[data-knoww-market-id="${marketId}"]`
-    ) as HTMLElement | null;
+    const escapedMarketId = escapeSelectorValue(marketId);
+    const escapedPostKey = postKey ? escapeSelectorValue(postKey) : undefined;
+    const scopedSelector = postKey
+      ? `.knoww-market-card[data-knoww-market-id="${escapedMarketId}"][data-knoww-post-key="${escapedPostKey}"]`
+      : `[data-knoww-market-id="${escapedMarketId}"]`;
+    targetCard = document.querySelector(scopedSelector) as HTMLElement | null;
+  }
+
+  if (
+    !targetCard ||
+    !(targetCard instanceof Node) ||
+    !document.body.contains(targetCard)
+  ) {
+    const restored =
+      postKey &&
+      window.KNOWW_INJECTION?.restoreTrackedMarket?.(postKey, marketId);
+    if (restored) {
+      const escapedMarketId = escapeSelectorValue(marketId);
+      const escapedPostKey = postKey ? escapeSelectorValue(postKey) : undefined;
+      const restoredSelector = postKey
+        ? `.knoww-market-card[data-knoww-market-id="${escapedMarketId}"][data-knoww-post-key="${escapedPostKey}"]`
+        : `[data-knoww-market-id="${escapedMarketId}"]`;
+      targetCard = document.querySelector(
+        restoredSelector
+      ) as HTMLElement | null;
+    }
   }
 
   if (
@@ -2272,12 +2347,11 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
     }
   });
 
-  // Keep bounded lists for readability
-  const recentActiveMarkets = activeMarkets
-    .slice(-MAX_ACTIVE_NOTIFICATION_ITEMS)
-    .reverse();
+  // Keep bounded lists for readability (platform-aware caps)
+  const caps = resolveNotificationCaps();
+  const recentActiveMarkets = activeMarkets.slice(-caps.active).reverse();
   const recentScrolledMarkets = scrolledOutMarkets
-    .slice(-MAX_SCROLLED_NOTIFICATION_ITEMS)
+    .slice(-caps.scrolled)
     .reverse();
 
   const totalDisplayed =

@@ -135,14 +135,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform data for frontend
-    const data = rawData.map((point) => ({
+    const data = rawData?.map((point) => ({
       timestamp: new Date(point.t * 1000).toISOString(),
       date: new Date(point.t * 1000).toLocaleDateString(),
       pnl: point.p,
     }));
 
     // Calculate summary statistics
-    const pnlValues = rawData.map((p) => p.p);
+    const pnlValues = rawData?.map((p) => p.p);
     const startPnl = pnlValues[0] || 0;
     const endPnl = pnlValues[pnlValues.length - 1] || 0;
     const change = endPnl - startPnl;

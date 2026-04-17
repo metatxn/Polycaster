@@ -13,6 +13,7 @@
 import { USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
+import Decimal from "decimal.js";
 import type { ClobOrderType } from "../../types/chrome-messages";
 import type { Market } from "../../types/market";
 import { escapeHtml } from "../utils";
@@ -155,10 +156,15 @@ let depositStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 let selectedOutcome: "yes" | "no" = "yes";
 let yesPrice = 0;
+let noPriceValue = 0;
 
 let sessionRestoreAttempted = false;
+let lastRenderedErrorToast: string | null = null;
 
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+const LIVE_PANEL_REFRESH_INTERVAL = 10000;
+let livePanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let livePanelRefreshEnabled = false;
 
 function trackPanelAnalytics(
   event: string,
@@ -195,6 +201,19 @@ function getDepositEventProperties(): Record<
 
 function getTickSize(): number {
   return TradingService.getContext().tickSize || 0.01;
+}
+
+function clearLivePanelRefreshTimer(): void {
+  if (livePanelRefreshTimer) {
+    clearTimeout(livePanelRefreshTimer);
+    livePanelRefreshTimer = null;
+  }
+}
+
+function canRefreshLivePanel(): boolean {
+  return Boolean(
+    livePanelRefreshEnabled && activePanel?.isConnected && panelOpts
+  );
 }
 
 function normalizePrice(price: number, tick?: number): number {
@@ -334,28 +353,169 @@ function rerender(): void {
     render(activePanel, panelOpts, TradingService.getContext());
 }
 
+function getBestBidAskFromOrderBook(
+  orderBook:
+    | { bids?: Array<{ price: string }>; asks?: Array<{ price: string }> }
+    | null
+    | undefined
+): {
+  bestBid: number | undefined;
+  bestAsk: number | undefined;
+} {
+  if (!orderBook) return { bestBid: undefined, bestAsk: undefined };
+
+  let bestBid: number | undefined;
+  if (orderBook.bids?.length) {
+    const parsed = orderBook.bids
+      .map((l) => parseFloat(l.price))
+      .filter((p) => Number.isFinite(p) && p > 0);
+    if (parsed.length > 0) bestBid = Math.max(...parsed);
+  }
+
+  let bestAsk: number | undefined;
+  if (orderBook.asks?.length) {
+    const parsed = orderBook.asks
+      .map((l) => parseFloat(l.price))
+      .filter((p) => Number.isFinite(p) && p > 0);
+    if (parsed.length > 0) bestAsk = Math.min(...parsed);
+  }
+
+  return { bestBid, bestAsk };
+}
+
+function getDisplayPriceFromOrderBook(
+  orderBook:
+    | { bids?: Array<{ price: string }>; asks?: Array<{ price: string }> }
+    | null
+    | undefined,
+  fallback: number
+): number {
+  const { bestBid, bestAsk } = getBestBidAskFromOrderBook(orderBook);
+  if (bestBid !== undefined && bestAsk !== undefined) {
+    return new Decimal(bestBid).add(bestAsk).div(2).toNumber();
+  }
+  return bestAsk ?? bestBid ?? fallback;
+}
+
+function syncSelectedOutcomePrice(): void {
+  if (!panelOpts) return;
+  if (panelOpts.yesTokenId && panelOpts.noTokenId) {
+    panelOpts.price = selectedOutcome === "yes" ? yesPrice : noPriceValue;
+    return;
+  }
+  panelOpts.price = yesPrice;
+}
+
+async function refreshLivePanelData(): Promise<void> {
+  if (!canRefreshLivePanel() || !panelOpts) return;
+
+  const currentTokenId = panelOpts.tokenId;
+  if (!currentTokenId) return;
+
+  const isBinary = Boolean(panelOpts.yesTokenId && panelOpts.noTokenId);
+  const siblingTokenId = isBinary
+    ? selectedOutcome === "yes"
+      ? panelOpts.noTokenId
+      : panelOpts.yesTokenId
+    : undefined;
+
+  const [currentBook, siblingBook] = await Promise.all([
+    TradingService.fetchOrderBook(currentTokenId),
+    siblingTokenId
+      ? TradingService.fetchOrderBook(siblingTokenId, { syncContext: false })
+      : Promise.resolve(null),
+  ]);
+
+  // Re-check after async operation - panel may have been hidden
+  if (!panelOpts || !activePanel) return;
+
+  if (isBinary) {
+    if (selectedOutcome === "yes") {
+      yesPrice = getDisplayPriceFromOrderBook(currentBook, yesPrice);
+      noPriceValue = getDisplayPriceFromOrderBook(
+        siblingBook,
+        noPriceValue || 1 - yesPrice
+      );
+    } else {
+      noPriceValue = getDisplayPriceFromOrderBook(currentBook, noPriceValue);
+      yesPrice = getDisplayPriceFromOrderBook(
+        siblingBook,
+        yesPrice || 1 - noPriceValue
+      );
+    }
+  } else if (currentBook) {
+    yesPrice = getDisplayPriceFromOrderBook(
+      currentBook,
+      yesPrice || panelOpts.price
+    );
+  }
+
+  syncSelectedOutcomePrice();
+  rerender();
+}
+
+function scheduleLivePanelRefresh(): void {
+  clearLivePanelRefreshTimer();
+  if (!canRefreshLivePanel()) return;
+
+  const run = async () => {
+    if (!canRefreshLivePanel()) {
+      clearLivePanelRefreshTimer();
+      return;
+    }
+    try {
+      await refreshLivePanelData();
+    } catch {
+      /* ignore live refresh errors */
+    } finally {
+      if (canRefreshLivePanel()) {
+        livePanelRefreshTimer = setTimeout(run, LIVE_PANEL_REFRESH_INTERVAL);
+      }
+    }
+  };
+
+  livePanelRefreshTimer = setTimeout(run, LIVE_PANEL_REFRESH_INTERVAL);
+}
+
 function getEffectivePrice(opts: PanelOptions): number {
   return orderMode === "limit" ? limitPrice || opts.price : opts.price;
 }
 
-function getCost(opts: PanelOptions): number {
-  const price = getEffectivePrice(opts);
-  if (activeSide === "buy") return price * selectedShares;
-  const sellPrice = 1 - price;
-  return sellPrice * selectedShares;
+function getMarketNotional(ctx: TradingContext): number | null {
+  if (orderMode !== "market" || !ctx.orderBook || selectedShares <= 0) {
+    return null;
+  }
+
+  const side = activeSide === "sell" ? "SELL" : "BUY";
+  const slip = calculateSlippage(ctx.orderBook, side, selectedShares);
+  if (slip.fills.length === 0) {
+    return null;
+  }
+
+  return new Decimal(slip.totalNotional).toNumber();
+}
+
+function getCost(opts: PanelOptions, ctx?: TradingContext): number {
+  const marketNotional = ctx ? getMarketNotional(ctx) : null;
+  if (marketNotional !== null) {
+    return marketNotional;
+  }
+
+  const price = new Decimal(getEffectivePrice(opts));
+  return price.mul(selectedShares).toNumber();
 }
 
 function refreshDynamicUI(): void {
   if (!activePanel || !panelOpts) return;
   const ctx = TradingService.getContext();
   const opts = panelOpts;
-  const cost = getCost(opts);
+  const cost = getCost(opts, ctx);
 
   const form = activePanel.querySelector(".knoww-tp-form");
   if (!form) return;
 
   const costDisp = form.querySelector(".knoww-tp-cost-display");
-  if (costDisp) costDisp.textContent = `$${cost.toFixed(2)}`;
+  if (costDisp) costDisp.textContent = `$${new Decimal(cost).toFixed(2)}`;
 
   const sharesInput = form.querySelector(
     ".knoww-tp-shares-input"
@@ -392,7 +552,7 @@ function refreshDynamicUI(): void {
   const oldDynamic = form.querySelector(".knoww-tp-dynamic");
   const dynamic = el("div", "knoww-tp-dynamic");
   addOrderSummary(dynamic, opts, ctx);
-  addBalanceWarning(dynamic, ctx.balance);
+  addBalanceWarning(dynamic, opts, ctx);
   addSubmitButton(dynamic, opts, ctx);
   if (oldDynamic) {
     oldDynamic.replaceWith(dynamic);
@@ -473,11 +633,15 @@ function createPanel(opts: PanelOptions): HTMLElement {
   if (opts.isMultiOutcome) {
     selectedOutcome = "yes";
     yesPrice = opts.price;
+    noPriceValue = 1 - opts.price;
     opts.outcomeIndex = 0;
   } else {
     selectedOutcome = opts.outcomeIndex === 1 ? "no" : "yes";
     yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
+    noPriceValue = opts.outcomeIndex === 1 ? opts.price : 1 - opts.price;
   }
+
+  lastRenderedErrorToast = null;
 
   const currentCtx = TradingService.getContext();
   if (
@@ -517,7 +681,13 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
   if (!TradingService.getContext().address && !sessionRestoreAttempted) {
     sessionRestoreAttempted = true;
-    WalletBridge.getAccounts()
+    TradingService.hasActiveSession()
+      .then((hasSession) => {
+        if (!hasSession) {
+          return [];
+        }
+        return WalletBridge.getAccounts();
+      })
       .then((accounts) => {
         if (accounts.length > 0) TradingService.connectWallet();
       })
@@ -635,8 +805,11 @@ function addHeader(
     dcBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("wallet_disconnected");
-      TradingService.reset();
-      CredentialManager.clear(address).catch(() => {});
+      setButtonLoading(dcBtn, "Disconnecting…");
+      void TradingService.disconnect().catch(() => {
+        TradingService.reset();
+        CredentialManager.clear(address).catch(() => {});
+      });
     };
     right.appendChild(dcBtn);
   }
@@ -660,29 +833,27 @@ function switchOutcome(side: "yes" | "no"): void {
   if (!panelOpts.yesTokenId || !panelOpts.noTokenId) return;
 
   selectedOutcome = side;
-  const noPrice = 1 - yesPrice;
-
   if (side === "yes") {
     panelOpts.tokenId = panelOpts.yesTokenId;
     panelOpts.price = yesPrice;
     panelOpts.outcomeIndex = 0;
   } else {
     panelOpts.tokenId = panelOpts.noTokenId;
-    panelOpts.price = noPrice;
+    panelOpts.price = noPriceValue;
     panelOpts.outcomeIndex = 1;
   }
 
   limitPrice = normalizePrice(panelOpts.price);
   TradingService.fetchOrderBook(panelOpts.tokenId);
+  scheduleLivePanelRefresh();
   rerender();
 }
 
 function addOutcomeToggle(p: HTMLElement, opts: PanelOptions): void {
   if (!opts.yesTokenId || !opts.noTokenId) return;
 
-  const noPrice = 1 - yesPrice;
   const yesCtx = Math.round(yesPrice * 100);
-  const noCtx = Math.round(noPrice * 100);
+  const noCtx = Math.round(noPriceValue * 100);
 
   const row = el("div", "knoww-tp-outcome-toggle");
 
@@ -740,10 +911,12 @@ function addPortfolioBar(
 
   if (!showYes && !showNo) return;
 
-  const yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
-  const noPrice = 1 - yesPrice;
-  const yesValue = yesPos * yesPrice;
-  const noValue = noPos * noPrice;
+  const currentYesPrice =
+    opts.yesTokenId && opts.noTokenId ? yesPrice : opts.price;
+  const currentNoPrice =
+    opts.yesTokenId && opts.noTokenId ? noPriceValue : 1 - currentYesPrice;
+  const yesValue = yesPos * currentYesPrice;
+  const noValue = noPos * currentNoPrice;
 
   const yesLabel = opts.outcomeIndex === 0 ? opts.outcomeName : "Yes";
   const noLabel = opts.outcomeIndex === 0 ? "No" : opts.outcomeName;
@@ -757,7 +930,7 @@ function addPortfolioBar(
       el(
         "span",
         "knoww-tp-portfolio-value positive",
-        `${yesPos.toFixed(1)} @ $${yesPrice.toFixed(2)} · $${yesValue.toFixed(2)}`
+        `${yesPos.toFixed(1)} @ $${currentYesPrice.toFixed(2)} · $${yesValue.toFixed(2)}`
       )
     );
     portfolio.appendChild(yRow);
@@ -769,7 +942,7 @@ function addPortfolioBar(
       el(
         "span",
         "knoww-tp-portfolio-value positive",
-        `${noPos.toFixed(1)} @ $${noPrice.toFixed(2)} · $${noValue.toFixed(2)}`
+        `${noPos.toFixed(1)} @ $${currentNoPrice.toFixed(2)} · $${noValue.toFixed(2)}`
       )
     );
     portfolio.appendChild(nRow);
@@ -873,17 +1046,53 @@ function addLoading(p: HTMLElement, text: string): void {
   p.appendChild(s);
 }
 
-function addEnableTrading(p: HTMLElement): void {
+function formatTradingPanelErrorMessage(
+  message: string | null | undefined
+): string {
+  const trimmed = message?.trim() ?? "";
+  const normalized = trimmed.toLowerCase();
+
+  if (
+    normalized === "failed to fetch" ||
+    normalized.includes("networkerror") ||
+    normalized.includes("load failed")
+  ) {
+    return "Could not connect to Knoww. Retry to start a new signing request.";
+  }
+
+  if (normalized.includes("timed out")) {
+    return "Knoww took too long to respond. Retry to start a new signing request.";
+  }
+
+  return trimmed || "Something went wrong. Retry the request.";
+}
+
+function addEnableTrading(
+  p: HTMLElement,
+  options?: { errorMessage?: string | null }
+): void {
+  const errorMessage = options?.errorMessage
+    ? formatTradingPanelErrorMessage(options.errorMessage)
+    : null;
   const s = el("div", "knoww-tp-enable-section");
   s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
   s.appendChild(
     el(
       "div",
       "knoww-tp-enable-msg",
-      "Sign a message to enable trading on Polymarket"
+      errorMessage
+        ? "Trading could not be enabled. Retry to start a new signing request."
+        : "Sign a message to enable trading on Polymarket"
     )
   );
-  const btn = el("button", "knoww-tp-btn-enable", "Enable Trading");
+  if (errorMessage) {
+    s.appendChild(el("div", "knoww-tp-enable-error", errorMessage));
+  }
+  const btn = el(
+    "button",
+    "knoww-tp-btn-enable",
+    errorMessage ? "Retry" : "Enable Trading"
+  );
   btn.onclick = (e) => {
     e.stopPropagation();
     setButtonLoading(btn, "Waiting for signature…");
@@ -1049,26 +1258,7 @@ function getBestBidAsk(ctx: TradingContext): {
   bestBid: number | undefined;
   bestAsk: number | undefined;
 } {
-  const ob = ctx.orderBook;
-  if (!ob) return { bestBid: undefined, bestAsk: undefined };
-
-  let bestBid: number | undefined;
-  if (ob.bids?.length) {
-    const parsed = ob.bids
-      .map((l) => parseFloat(l.price))
-      .filter((p) => Number.isFinite(p) && p > 0);
-    if (parsed.length > 0) bestBid = Math.max(...parsed);
-  }
-
-  let bestAsk: number | undefined;
-  if (ob.asks?.length) {
-    const parsed = ob.asks
-      .map((l) => parseFloat(l.price))
-      .filter((p) => Number.isFinite(p) && p > 0);
-    if (parsed.length > 0) bestAsk = Math.min(...parsed);
-  }
-
-  return { bestBid, bestAsk };
+  return getBestBidAskFromOrderBook(ctx.orderBook);
 }
 
 function getOrderPositionInfo(
@@ -1344,7 +1534,7 @@ function addAmountSection(
   const effectivePrice = getEffectivePrice(opts);
   const isSell = activeSide === "sell";
   const positionSize = getPositionSize(opts);
-  const cost = getCost(opts);
+  const cost = getCost(opts, ctx);
   const minShares = isSell ? 1 : Math.max(1, Math.ceil(ctx.minOrderSize));
 
   // Shares header: "Shares" label on left, cost on right
@@ -1471,7 +1661,7 @@ function addOrderSummary(
   const isBuy = activeSide === "buy";
   const effectivePrice = getEffectivePrice(opts);
   const shares = selectedShares;
-  const cost = getCost(opts);
+  const cost = getCost(opts, ctx);
   const minShares = Math.max(1, Math.ceil(ctx.minOrderSize));
   const positionSize = getPositionSize(opts);
 
@@ -1485,7 +1675,7 @@ function addOrderSummary(
     );
     const posVal =
       positionSize > 0
-        ? `${positionSize.toFixed(2)} shares ($${(positionSize * effectivePrice).toFixed(2)})`
+        ? `${new Decimal(positionSize).toFixed(2)} shares ($${new Decimal(positionSize).mul(effectivePrice).toFixed(2)})`
         : "None";
     posRow.appendChild(
       el(
@@ -1502,11 +1692,12 @@ function addOrderSummary(
   r1.appendChild(
     el("span", "knoww-tp-summary-label", isBuy ? "Total Cost" : "You Receive")
   );
+  const costDec = new Decimal(cost);
   r1.appendChild(
     el(
       "span",
       `knoww-tp-summary-value lg${!isBuy ? " positive" : ""}`,
-      `$${cost.toFixed(2)}`
+      `$${costDec.toFixed(2)}`
     )
   );
   summary.appendChild(r1);
@@ -1527,8 +1718,7 @@ function addOrderSummary(
   }
 
   if (isBuy) {
-    // Potential Return = shares (each share pays $1 if outcome wins)
-    const potentialReturn = shares;
+    const potentialReturn = new Decimal(shares);
     const r3 = el("div", "knoww-tp-summary-row");
     r3.appendChild(el("span", "knoww-tp-summary-label", "Potential Return"));
     r3.appendChild(
@@ -1540,9 +1730,8 @@ function addOrderSummary(
     );
     summary.appendChild(r3);
 
-    // Profit = potential return - cost
-    const profit = potentialReturn - cost;
-    const pct = cost > 0 ? (profit / cost) * 100 : 0;
+    const profit = potentialReturn.sub(costDec);
+    const pct = costDec.gt(0) ? profit.div(costDec).mul(100) : new Decimal(0);
     const r4 = el("div", "knoww-tp-summary-row");
     r4.appendChild(
       el("span", "knoww-tp-summary-label", `Profit if ${opts.outcomeName}`)
@@ -1596,10 +1785,17 @@ function addOrderSummary(
 
 // ── Balance Warning ──
 
-function addBalanceWarning(form: HTMLElement, balance: number): void {
-  if (!panelOpts || activeSide === "sell") return;
-  const cost = getCost(panelOpts);
-  if (cost <= balance || balance < 0) return;
+function addBalanceWarning(
+  form: HTMLElement,
+  opts: PanelOptions,
+  ctx: TradingContext
+): void {
+  if (activeSide === "sell") return;
+  const { balance, address } = ctx;
+  const cost = getCost(opts, ctx);
+  const balanceDecimal = new Decimal(balance);
+  const costDecimal = new Decimal(cost);
+  if (costDecimal.lte(balanceDecimal) || balanceDecimal.lt(0)) return;
 
   const w = el("div", "knoww-tp-balance-warn");
 
@@ -1610,27 +1806,25 @@ function addBalanceWarning(form: HTMLElement, balance: number): void {
     el(
       "span",
       "knoww-tp-warn-text",
-      `Need $${(cost - balance).toFixed(2)} more`
+      `Need $${costDecimal.sub(balanceDecimal).toFixed(2)} more`
     )
   );
   top.appendChild(left);
-  const ctx = TradingService.getContext();
-  if (ctx.address) {
-    const addr = ctx.address;
+  if (address) {
     const depBtn = el("button", "knoww-tp-warn-deposit-btn", "Deposit");
     depBtn.onclick = (e) => {
       e.stopPropagation();
       activeView = "deposit";
-      startDepositFlow(addr);
+      startDepositFlow(address);
     };
     top.appendChild(depBtn);
   }
   w.appendChild(top);
 
-  const progress = Math.min(100, (balance / cost) * 100);
+  const progress = Decimal.min(100, balanceDecimal.div(costDecimal).mul(100));
   const barBg = el("div", "knoww-tp-warn-bar-bg");
   const barFill = el("div", "knoww-tp-warn-bar-fill");
-  barFill.style.width = `${progress}%`;
+  barFill.style.width = `${progress.toNumber()}%`;
   barBg.appendChild(barFill);
   w.appendChild(barBg);
 
@@ -1638,7 +1832,7 @@ function addBalanceWarning(form: HTMLElement, balance: number): void {
     el(
       "div",
       "knoww-tp-warn-detail",
-      `$${balance.toFixed(2)} / $${cost.toFixed(2)} USDC.e`
+      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} USDC.e`
     )
   );
   form.appendChild(w);
@@ -1655,7 +1849,7 @@ function addSubmitButton(
   const { balance, state, minOrderSize, usdcAllowance, usdcAllowanceNegRisk } =
     ctx;
   const isSubmitting = state === "placing-order" || state === "approving";
-  const cost = getCost(opts);
+  const cost = getCost(opts, ctx);
   const noFunds = activeSide === "buy" && cost > balance;
   const noShares = selectedShares <= 0;
   const shares = selectedShares;
@@ -1996,7 +2190,7 @@ function renderOrderForm(
 
   const dynamic = el("div", "knoww-tp-dynamic");
   addOrderSummary(dynamic, opts, ctx);
-  addBalanceWarning(dynamic, ctx.balance);
+  addBalanceWarning(dynamic, opts, ctx);
   addSubmitButton(dynamic, opts, ctx);
   form.appendChild(dynamic);
 
@@ -3831,6 +4025,10 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
   // Enable trading notice (blocks all steps)
   const needsTrading = !ctx.credentials;
   if (needsTrading) {
+    const enableTradingError =
+      ctx.state === "error" && ctx.error
+        ? formatTradingPanelErrorMessage(ctx.error)
+        : null;
     const notice = el("div", "knoww-tp-deposit-notice");
     notice.appendChild(
       elHtml("span", "knoww-tp-deposit-notice-icon", I.shield)
@@ -3843,14 +4041,21 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
       el(
         "div",
         "knoww-tp-deposit-notice-desc",
-        "You need to sign a message to enable trading before you can deposit funds."
+        enableTradingError
+          ? "Trading could not be enabled. Retry to start a new signing request before depositing funds."
+          : "You need to sign a message to enable trading before you can deposit funds."
       )
     );
+    if (enableTradingError) {
+      noticeText.appendChild(
+        el("div", "knoww-tp-enable-error", enableTradingError)
+      );
+    }
     notice.appendChild(noticeText);
     form.appendChild(notice);
 
     const enableBtn = el("button", "knoww-tp-submit deposit");
-    enableBtn.textContent = "Enable Trading";
+    enableBtn.textContent = enableTradingError ? "Retry" : "Enable Trading";
     enableBtn.onclick = (e) => {
       e.stopPropagation();
       setButtonLoading(enableBtn, "Waiting for signature…");
@@ -3913,12 +4118,14 @@ function render(
 
   if (activeView === "deposit") {
     renderDepositForm(panel, ctx);
-  } else if (state === "connected" && !ctx.credentials) {
-    addEnableTrading(panel);
-    return;
   } else if (state === "deriving-credentials") {
     addLoading(panel, "Confirm signature in your wallet...");
     return;
+  } else if (!ctx.credentials && (state === "connected" || state === "error")) {
+    addEnableTrading(panel, { errorMessage: state === "error" ? error : null });
+    if (state !== "error") {
+      return;
+    }
   } else if (
     state === "ready" ||
     state === "placing-order" ||
@@ -3935,7 +4142,15 @@ function render(
     }
   }
 
-  if (error) showToast(panel, error, "error");
+  if (error) {
+    const displayError = formatTradingPanelErrorMessage(error);
+    if (lastRenderedErrorToast !== displayError) {
+      showToast(panel, displayError, "error");
+      lastRenderedErrorToast = displayError;
+    }
+  } else {
+    lastRenderedErrorToast = null;
+  }
 }
 
 function showToast(
@@ -3992,10 +4207,15 @@ export const TradingPanel = {
       anchor.parentNode?.insertBefore(panel, anchor.nextSibling);
     }
     activePanel = panel;
+    livePanelRefreshEnabled = true;
     applyOverflowOverrides(panel);
+    scheduleLivePanelRefresh();
   },
 
   hide(): void {
+    livePanelRefreshEnabled = false;
+    clearLivePanelRefreshTimer();
+    lastRenderedErrorToast = null;
     if (settleTimer) {
       clearTimeout(settleTimer);
       settleTimer = null;

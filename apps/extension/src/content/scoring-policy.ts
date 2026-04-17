@@ -268,6 +268,13 @@ export interface GateDecisionInput {
   scoringMode: ScoringMode;
   score: number;
   gate?: ContextGateResult;
+  /**
+   * When true, the gate passes at `distinct >= 1` provided the score clears
+   * `AI_GATE_RETRY_FLOOR`. Set by platforms where both sides are short market
+   * questions (kalshi.com). Default (false) keeps the standard 2+ distinct
+   * signals requirement.
+   */
+  relaxed?: boolean;
 }
 
 export interface GateDecisionResult {
@@ -447,6 +454,7 @@ export function evaluateCandidateGate({
   scoringMode,
   score,
   gate,
+  relaxed,
 }: GateDecisionInput): GateDecisionResult {
   const fallbackGate = naiveContextGate(postText, buildMarketGateText(market));
   const resolvedGate = gate ?? fallbackGate;
@@ -459,6 +467,17 @@ export function evaluateCandidateGate({
       hasPerMarketTagMatch(matchedTags, market) ||
       (resolvedGate.pass &&
         resolvedGate.sharedNouns >= HEURISTIC_STRICT_SHARED_NOUNS);
+  }
+
+  // Platform-specific relaxation: short market questions rarely share the
+  // default two distinct signals. Accept a single signal provided the score
+  // already cleared the AI retry floor (so quality is still gated by score).
+  if (!gatePass && relaxed && score >= AI_GATE_RETRY_FLOOR) {
+    const hasSingleSignal =
+      resolvedGate.meaningfulNouns >= 1 || resolvedGate.sharedEntities >= 1;
+    if (hasSingleSignal) {
+      gatePass = true;
+    }
   }
 
   return {

@@ -53,6 +53,27 @@ import "./platforms/bitcoinmagazine";
 import "./platforms/beincrypto";
 import "./platforms/unchained";
 import "./platforms/cryptopanic";
+import "./platforms/extended-editorial";
+import "./platforms/extended-community";
+import "./platforms/kalshi-website";
+import "./platforms/manifold-markets";
+import "./platforms/extended-markets";
+import "./platforms/cnn";
+import "./platforms/yahoo-finance";
+import "./platforms/dlnews";
+import "./platforms/nytimes";
+import "./platforms/wsj";
+import "./platforms/washington-post";
+import "./platforms/thehindu";
+import "./platforms/hindustan-times";
+import "./platforms/cnbc";
+import "./platforms/forbes";
+import "./platforms/skysports";
+import "./platforms/sporting-news";
+import "./platforms/fox-sports";
+import "./platforms/cnet";
+import "./platforms/zdnet";
+import "./platforms/tomshardware";
 
 // 7. Kalshi adapter (market source)
 import "./kalshi-adapter";

@@ -240,3 +240,64 @@ test("shouldFailOpen keeps the shared score floor behavior", () => {
   assert.equal(shouldFailOpen(0.5), true);
   assert.equal(shouldFailOpen(0.73), true);
 });
+
+test("evaluateCandidateGate relaxed passes a single-signal high-score match (kalshi)", () => {
+  // Mirrors the live Kalshi case "More tech layoffs in 2026..." vs
+  // "Tech Layoffs Up or Down in 2026?" — both sides share only `tech` but the
+  // score is decisively high, so the relaxed gate should accept it.
+  const decision = evaluateCandidateGate({
+    postText: "More tech layoffs in 2026 than in 2025?",
+    market: createMarket({ title: "Tech Layoffs Up or Down in 2026?" }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.926,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details: "nouns=[tech] meaningful=[tech] entities=[] distinct=1",
+    }),
+    relaxed: true,
+  });
+
+  assert.equal(decision.pass, true);
+});
+
+test("evaluateCandidateGate relaxed still rejects single-signal low-score matches", () => {
+  // Score below AI_GATE_RETRY_FLOOR (0.6) — relaxation must not lower the
+  // quality bar for weak matches.
+  const decision = evaluateCandidateGate({
+    postText: "Number of rate cuts in 2026?",
+    market: createMarket({
+      title: "Number of TSA passengers April 13-April 19?",
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.55,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details: "nouns=[number] meaningful=[number] entities=[] distinct=1",
+    }),
+    relaxed: true,
+  });
+
+  assert.equal(decision.pass, false);
+});
+
+test("evaluateCandidateGate relaxed without any signals still fails", () => {
+  const decision = evaluateCandidateGate({
+    postText: "Unrelated topic A",
+    market: createMarket({ title: "Unrelated topic B" }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.9,
+    gate: createGate({
+      meaningfulNouns: 0,
+      sharedEntities: 0,
+      details: "distinct=0",
+    }),
+    relaxed: true,
+  });
+
+  assert.equal(decision.pass, false);
+});

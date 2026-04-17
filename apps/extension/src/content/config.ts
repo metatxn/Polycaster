@@ -19,6 +19,18 @@ const DEV_MODE = __DEV_MODE__;
 // Current user settings (will be populated from chrome.storage)
 let USER_SETTINGS: UserSettings = { ...DEFAULT_USER_SETTINGS };
 
+function canUseSyncStorage(): boolean {
+  try {
+    return (
+      typeof chrome !== "undefined" &&
+      !!chrome.runtime?.id &&
+      !!chrome.storage?.sync
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ============================================
 // POLYMARKET API URLs (HTTPS only)
 // ============================================
@@ -101,7 +113,13 @@ const TAGS_CACHE_DURATION = 24 * 60 * 60 * 1000;
  */
 async function loadUserSettings(): Promise<UserSettings> {
   return new Promise((resolve) => {
-    if (typeof chrome !== "undefined" && chrome.storage?.sync) {
+    if (!canUseSyncStorage()) {
+      USER_SETTINGS = { ...DEFAULT_USER_SETTINGS };
+      resolve(USER_SETTINGS);
+      return;
+    }
+
+    try {
       chrome.storage.sync.get(
         { knowwSettings: DEFAULT_USER_SETTINGS },
         (result) => {
@@ -133,7 +151,7 @@ async function loadUserSettings(): Promise<UserSettings> {
           resolve(USER_SETTINGS);
         }
       );
-    } else {
+    } catch {
       USER_SETTINGS = { ...DEFAULT_USER_SETTINGS };
       resolve(USER_SETTINGS);
     }

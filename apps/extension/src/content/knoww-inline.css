@@ -332,7 +332,21 @@
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
+  position: relative !important;
+  z-index: 1 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
   animation: knoww-card-slide-down 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knoww-market-card {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    max-height: none !important;
+  }
 }
 
 /* Stacked cards container - for multi-source display */
@@ -340,6 +354,12 @@
   display: flex !important;
   flex-direction: column !important;
   gap: 8px !important;
+  position: relative !important;
+  z-index: 10 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  isolation: isolate !important;
 }
 
 .knoww-stacked-cards .knoww-market-card {
@@ -393,11 +413,15 @@
   align-items: flex-start !important;
   padding: 16px !important;
   gap: 12px !important;
+  min-width: 0 !important;
 }
 
 .knoww-card-icon {
   width: 48px !important;
   height: 48px !important;
+  max-width: 48px !important;
+  max-height: 48px !important;
+  flex: 0 0 48px !important;
   border-radius: 8px !important;
   background: var(--knoww-card-bg, rgb(32, 35, 39)) !important;
   display: flex !important;
@@ -406,12 +430,30 @@
   font-size: 24px !important;
   flex-shrink: 0 !important;
   overflow: hidden !important;
+  position: relative !important;
 }
 
 .knoww-card-icon img {
   width: 100% !important;
   height: 100% !important;
+  max-width: 48px !important;
+  max-height: 48px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
   object-fit: cover !important;
+  object-position: center !important;
+  display: block !important;
+  flex: none !important;
+}
+
+.knoww-card-footer svg,
+.knoww-outcome-btn svg,
+.knoww-toggle-options svg,
+.knoww-view-market svg {
+  width: 16px !important;
+  height: 16px !important;
+  max-width: 16px !important;
+  max-height: 16px !important;
 }
 
 .knoww-card-title-section {
@@ -875,12 +917,15 @@
 /* NOTIFICATION STACK STYLES */
 /* ============================================ */
 
-/* Main container - always fixed position on right side */
+/* Main container - always fixed position on right side.
+   z-index is pushed near INT32_MAX because some publishers (ESPN, for example)
+   ship sticky/relative chrome at z-index ≥ 1000000, which would otherwise bury
+   the panel. */
 .knoww-notification-stack {
   position: fixed !important;
   top: 12px !important;
   right: 20px !important;
-  z-index: 9999 !important;
+  z-index: 2147483000 !important;
   background: var(--knoww-bg, rgb(0, 0, 0)) !important;
   border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
   border-radius: var(--knoww-radius, 16px) !important;
@@ -1905,6 +1950,11 @@
   padding: 8px 12px !important;
   border-bottom: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
   gap: 8px !important;
+  /* Wrap the action group to a second row on narrow host columns instead of
+     spilling past the card's right edge (min-width:0 lets the title shrink
+     so the wallet chip / DEPOSIT / actions can fit together). */
+  flex-wrap: wrap !important;
+  min-width: 0 !important;
 }
 
 .knoww-tp-title {

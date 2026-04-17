@@ -1183,8 +1183,9 @@ Errors
 
 - `400`: `{ error: string }` for invalid `category`, `timePeriod`, or `orderBy`
 - `401`: Not used.
-- `404`: Not used.
+- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ error: "Failed to fetch leaderboard data" }`.
 - `500`: `{ error: "Internal server error" }`
+- Other upstream failures: the handler returns the upstream HTTP status with `{ error: "Failed to fetch leaderboard data" }`.
 
 Rate limiting
 
@@ -1572,7 +1573,8 @@ Errors
 - `400`: `{ success: false, error: "Token ID is required" }` or `{ success: false, error: "Invalid token ID format" }`
 - `401`: Not used.
 - `404`: `{ success: false, error: "Token not found", history: [] }`
-- `500`: `{ success: false, error: string, history: [] }`
+- `500`: `{ success: false, error: string, history: [] }` for local exceptions only.
+- Other upstream failures: the handler returns the upstream HTTP status with `{ success: false, error: "Failed to fetch price history", history: [] }`.
 
 Rate limiting
 
@@ -1871,8 +1873,9 @@ Errors
 
 - `400`: Not used.
 - `401`: Not used.
-- `404`: Not used.
+- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ error: "Failed to search" }`.
 - `500`: `{ error: "Internal server error" }`
+- Other upstream failures: the handler returns the upstream HTTP status with `{ error: "Failed to search" }`.
 
 Rate limiting
 
@@ -2345,7 +2348,8 @@ Errors
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used; missing users return `200` with `details: null`.
-- `500`: `{ success: false, error: string }`
+- `500`: `{ success: false, error: string }` for local exceptions only.
+- Other upstream failures: the handler returns the upstream HTTP status with `{ success: false, error: "Failed to fetch user details from Polymarket", details: number }`.
 
 Rate limiting
 
@@ -2402,7 +2406,8 @@ Errors
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used; upstream 404 is normalized to `200` with `profile: null`.
-- `500`: `{ success: false, error: string }`
+- `500`: `{ success: false, error: string }` for local exceptions only.
+- Other upstream failures: the handler returns the upstream HTTP status with `{ success: false, error: "Failed to fetch profile from Polymarket", details: number }`.
 
 Rate limiting
 
@@ -2457,7 +2462,7 @@ Errors
 
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
-- `404`: Not used.
+- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch portfolio value from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
 - `504`: `{ success: false, error: "Request to Polymarket timed out" }`
 
@@ -2519,7 +2524,7 @@ Errors
 
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
-- `404`: Not used.
+- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch positions from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
 
 Rate limiting
@@ -2611,7 +2616,7 @@ Errors
 
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
-- `404`: Not used.
+- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch trades from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
 - `504`: `{ success: false, error: "Request to Polymarket timed out" }`
 
@@ -2708,7 +2713,7 @@ Errors
 
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
-- `404`: Not used.
+- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch P&L history from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
 
 Rate limiting

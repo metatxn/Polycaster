@@ -546,4 +546,4 @@ export const KNOWW_UTILS = {
 window.KNOWW_UTILS = KNOWW_UTILS;
 
 // Re-export for direct ES module imports
-export { LRUSet, scheduleIdle };
+export { isExtensionContextValid, LRUSet, safeSendMessage, scheduleIdle };

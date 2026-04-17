@@ -1,4 +1,5 @@
 export interface PlatformSettings {
+  // Core social / community
   twitter: boolean;
   linkedin: boolean;
   reddit: boolean;
@@ -14,6 +15,7 @@ export interface PlatformSettings {
   mastodon: boolean;
   discord: boolean;
   farcaster: boolean;
+  // Crypto publishers
   coinmarketcap: boolean;
   paragraph: boolean;
   coindesk: boolean;
@@ -26,6 +28,33 @@ export interface PlatformSettings {
   beincrypto: boolean;
   unchained: boolean;
   cryptopanic: boolean;
+  // News publishers
+  cnn: boolean;
+  nytimes: boolean;
+  wsj: boolean;
+  "washington-post": boolean;
+  thehindu: boolean;
+  "hindustan-times": boolean;
+  cnbc: boolean;
+  forbes: boolean;
+  "yahoo-finance": boolean;
+  dlnews: boolean;
+  // Tech publishers
+  cnet: boolean;
+  zdnet: boolean;
+  tomshardware: boolean;
+  // Sports publishers
+  skysports: boolean;
+  "sporting-news": boolean;
+  "fox-sports": boolean;
+  // Prediction-market websites
+  "kalshi-platform": boolean;
+  "manifold-markets": boolean;
+  // Generic fallback adapters (cover groups of publishers that don't have a
+  // dedicated file, e.g. theguardian.com under extended-editorial)
+  "extended-editorial": boolean;
+  "extended-community": boolean;
+  "extended-markets": boolean;
 }
 
 /**
@@ -75,6 +104,27 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   beincrypto: true,
   unchained: true,
   cryptopanic: true,
+  cnn: true,
+  nytimes: true,
+  wsj: true,
+  "washington-post": true,
+  thehindu: true,
+  "hindustan-times": true,
+  cnbc: true,
+  forbes: true,
+  "yahoo-finance": true,
+  dlnews: true,
+  cnet: true,
+  zdnet: true,
+  tomshardware: true,
+  skysports: true,
+  "sporting-news": true,
+  "fox-sports": true,
+  "kalshi-platform": true,
+  "manifold-markets": true,
+  "extended-editorial": true,
+  "extended-community": true,
+  "extended-markets": true,
 };
 
 /**

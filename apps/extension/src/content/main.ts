@@ -14,7 +14,7 @@ declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
 const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
 
 (async function main(): Promise<void> {
-  const { log } = window.KNOWW_UTILS;
+  const { log, safeSendMessage } = window.KNOWW_UTILS;
   const {
     CONFIG,
     ENABLED_SOURCES,
@@ -119,9 +119,7 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
 
   scheduleIdle(() => {
     if (document.hidden) return;
-    chrome.runtime
-      .sendMessage({ type: "scoring:prewarm-offscreen" })
-      .catch(() => {});
+    void safeSendMessage({ type: "scoring:prewarm-offscreen" });
   }, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
 
   // Determine site-specific selectors using platform registry

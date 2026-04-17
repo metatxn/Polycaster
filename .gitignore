@@ -64,3 +64,6 @@ polymarket-us-support-report.md
 .claude/
 .env.local
 .test-dist/
+.playwright/
+.playwright-report/
+.playwright-mcp/

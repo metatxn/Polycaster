@@ -5,17 +5,23 @@ import { logger } from "@/lib/logger";
 
 const SITEMAP_REVALIDATE_SECONDS = 3600;
 const SITEMAP_PAGE_LIMIT = "100";
+// Cap the sitemap to avoid exhausting the build timeout (Polymarket's catalog
+// has grown large enough that paginating it fully exceeds the 60s Next.js
+// export limit). 2000 per type keeps us well under sitemap protocol's 50k cap
+// while bounding build time to ~20 pages of keyset fetches.
+const SITEMAP_MAX_ITEMS_PER_TYPE = 2000;
 
 async function fetchAllKeysetItems<T>(
   endpoint: string,
   params: URLSearchParams,
-  preferredKeys: Array<"data" | "events" | "markets">
+  preferredKeys: Array<"data" | "events" | "markets">,
+  maxItems: number
 ): Promise<T[]> {
   const items: T[] = [];
   let nextCursor: string | undefined;
   const seenCursors = new Set<string>();
 
-  while (true) {
+  while (items.length < maxItems) {
     const pageParams = new URLSearchParams(params);
     if (nextCursor) {
       pageParams.set("after_cursor", nextCursor);
@@ -44,7 +50,7 @@ async function fetchAllKeysetItems<T>(
     nextCursor = page.nextCursor;
   }
 
-  return items;
+  return items.length > maxItems ? items.slice(0, maxItems) : items;
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -67,7 +73,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         closed: "false",
         limit: SITEMAP_PAGE_LIMIT,
       }),
-      ["markets", "data"]
+      ["markets", "data"],
+      SITEMAP_MAX_ITEMS_PER_TYPE
     );
 
     marketRoutes = markets
@@ -93,7 +100,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         closed: "false",
         limit: SITEMAP_PAGE_LIMIT,
       }),
-      ["events", "data"]
+      ["events", "data"],
+      SITEMAP_MAX_ITEMS_PER_TYPE
     );
 
     eventRoutes = events

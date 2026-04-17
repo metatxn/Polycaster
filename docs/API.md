@@ -1183,9 +1183,8 @@ Errors
 
 - `400`: `{ error: string }` for invalid `category`, `timePeriod`, or `orderBy`
 - `401`: Not used.
-- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ error: "Failed to fetch leaderboard data" }`.
 - `500`: `{ error: "Internal server error" }`
-- Other upstream failures: the handler returns the upstream HTTP status with `{ error: "Failed to fetch leaderboard data" }`.
+- Upstream non-OK responses (including 404) are forwarded with the upstream HTTP status and `{ error: "Failed to fetch leaderboard data" }`.
 
 Rate limiting
 

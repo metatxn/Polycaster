@@ -73,8 +73,8 @@ export function findPrimaryLinkFromSelectors(
       return closestLink;
     }
 
-    const nestedLink = scope.querySelector<HTMLAnchorElement>(selector);
-    if (nestedLink) {
+    const nestedLink = scope.querySelector(selector);
+    if (nestedLink instanceof HTMLAnchorElement) {
       return nestedLink;
     }
   }

@@ -69,6 +69,15 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 export function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname === "/_next/image") {
+    const response = NextResponse.next();
+    response.headers.set(
+      "Cache-Control",
+      "public, max-age=31536000, immutable"
+    );
+    return response;
+  }
+
   const response = NextResponse.next();
 
   // Apply security headers to all responses
@@ -88,15 +97,14 @@ export function middleware(request: NextRequest) {
  *
  * Apply middleware to all routes EXCEPT:
  * - Static files (_next/static)
- * - Image optimization (_next/image)
  * - Favicon and other static assets
  */
 export const config = {
   matcher: [
+    "/_next/image",
     /*
      * Match all request paths except:
      * - _next/static (static files)
-     * - _next/image (image optimization files)
      * - favicon.ico, logo-*, manifest.json, robots.txt, sitemap.xml
      * - Public assets (svg, png, jpg, etc.)
      */

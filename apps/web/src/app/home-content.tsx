@@ -58,6 +58,7 @@ import { useBreakingEvents } from "@/hooks/use-breaking-events";
 import { useNewEvents } from "@/hooks/use-new-events";
 import { usePaginatedEvents } from "@/hooks/use-paginated-events";
 import { useTrendingEvents } from "@/hooks/use-trending-events";
+import { PRIORITY_EVENT_CARD_COUNT } from "@/lib/lcp-images";
 
 // Tab categories
 const TAB_CATEGORIES = [
@@ -756,7 +757,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                       key={`${event.id}-${index}`}
                       event={event}
                       index={index}
-                      priority={index < 6}
+                      priority={index < PRIORITY_EVENT_CARD_COUNT}
                     />
                   ))}
                 </div>

@@ -151,6 +151,7 @@ export function EventCard({
                 alt={event.title}
                 fill
                 priority={priority}
+                fetchPriority={priority ? "high" : undefined}
                 sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 20vw"
                 className="object-cover transition-all duration-500 sm:duration-700 ease-out sm:group-hover:scale-110 sm:group-hover:brightness-110"
               />

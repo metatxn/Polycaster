@@ -1,17 +1,11 @@
 import { Suspense } from "react";
 import { preload } from "react-dom";
+import {
+  buildOptimizedImageUrl,
+  PRIORITY_EVENT_CARD_COUNT,
+} from "@/lib/lcp-images";
 import { getInitialEvents } from "@/lib/server-cache";
 import { HomeContent } from "./home-content";
-
-// Matches the sizes attribute on EventCard's <Image> for the first row of the
-// grid. Requesting the same URL the client will use means the preload is
-// deduped with the actual image fetch rather than wasting bandwidth.
-const LCP_CARD_IMAGE_WIDTH = 640;
-const LCP_PRELOAD_COUNT = 4;
-
-function buildOptimizedImageUrl(src: string, width: number, quality = 75) {
-  return `/_next/image?url=${encodeURIComponent(src)}&w=${width}&q=${quality}`;
-}
 
 /**
  * Homepage - Server Component
@@ -35,9 +29,9 @@ export default async function Home() {
   // boundary: the preload tags land in the initial document head and the
   // browser's preload scanner kicks off image fetches immediately, instead of
   // waiting for the streamed HTML chunk to arrive and for hydration to run.
-  initialData?.events?.slice(0, LCP_PRELOAD_COUNT).forEach((event) => {
+  initialData?.events?.slice(0, PRIORITY_EVENT_CARD_COUNT).forEach((event) => {
     if (event.image) {
-      preload(buildOptimizedImageUrl(event.image, LCP_CARD_IMAGE_WIDTH), {
+      preload(buildOptimizedImageUrl(event.image), {
         as: "image",
         fetchPriority: "high",
       });

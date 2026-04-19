@@ -12,11 +12,9 @@ import {
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
-import { POLYGON_CHAIN_ID, RELAYER_API_URL } from "@/constants/polymarket";
 import { SignatureType } from "@/lib/polymarket";
-import { createBuilderConfig } from "@/lib/remote-builder-config";
+import { executeViaRelayer } from "@/lib/relayer-client";
 import { getRpcUrl } from "@/lib/rpc";
-import { getBuilderSignProxyUrl } from "@/lib/sign-proxy-url";
 import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
 
@@ -78,34 +76,6 @@ export function useClobClient() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-
-  /**
-   * Lazily construct a Polymarket RelayClient.
-   *
-   * Mirrors the instantiation pattern in `use-ctf-operations.ts` and
-   * `use-withdraw.ts` so we can dispatch a gasless multiSend on behalf
-   * of the user's Safe (e.g. wrap USDC.e → pUSD before a BUY order).
-   */
-  const getRelayClient = useCallback(async () => {
-    if (!walletClient || !address) {
-      throw new Error("Wallet not connected");
-    }
-
-    const signProxyUrl = getBuilderSignProxyUrl();
-    if (!signProxyUrl) {
-      throw new Error("Builder sign proxy URL not configured");
-    }
-
-    const { RelayClient } = await import("@polymarket/builder-relayer-client");
-    const builderConfig = createBuilderConfig({ url: signProxyUrl });
-
-    return new RelayClient(
-      RELAYER_API_URL,
-      POLYGON_CHAIN_ID,
-      walletClient,
-      builderConfig
-    );
-  }, [walletClient, address]);
 
   /**
    * Internal helper to get ethers signer from window.ethereum
@@ -257,45 +227,23 @@ export function useClobClient() {
         args: [USDC_E_ADDRESS, proxyAddress as `0x${string}`, shortfall],
       });
 
-      const relayClient = await getRelayClient();
-      const response = await relayClient.execute([
-        { to: USDC_E_ADDRESS, data: approveData, value: "0" },
-        { to: COLLATERAL_ONRAMP_ADDRESS, data: wrapData, value: "0" },
+      if (!walletClient) throw new Error("Wallet not connected");
+      if (!address) throw new Error("Wallet not connected");
+
+      await executeViaRelayer(walletClient, address as `0x${string}`, [
+        {
+          to: USDC_E_ADDRESS as `0x${string}`,
+          data: approveData,
+          value: "0",
+        },
+        {
+          to: COLLATERAL_ONRAMP_ADDRESS as `0x${string}`,
+          data: wrapData,
+          value: "0",
+        },
       ]);
-
-      // Poll until the wrap lands — without this, the order post can race
-      // ahead and fail validation because pUSD isn't credited yet.
-      const transactionID = response.transactionID;
-      const successStates = [
-        "STATE_EXECUTED",
-        "STATE_MINED",
-        "STATE_CONFIRMED",
-      ];
-      const failureStates = ["STATE_FAILED", "STATE_INVALID"];
-      const maxAttempts = 15;
-      const pollInterval = 2000;
-
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const txns = await relayClient.getTransaction(transactionID);
-        if (txns && txns.length > 0) {
-          const tx = txns[0];
-          if (failureStates.includes(tx.state)) {
-            throw new Error(
-              `Wrap USDC.e → pUSD failed with state: ${tx.state}`
-            );
-          }
-          if (successStates.includes(tx.state)) return;
-        }
-        if (attempt < maxAttempts - 1) {
-          await new Promise((resolve) => setTimeout(resolve, pollInterval));
-        }
-      }
-
-      throw new Error(
-        "Wrap USDC.e → pUSD did not confirm in time. Please retry."
-      );
     },
-    [proxyAddress, getRelayClient]
+    [proxyAddress, walletClient, address]
   );
 
   /**

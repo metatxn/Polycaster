@@ -116,9 +116,17 @@ function readText(value: unknown): string | undefined {
     : undefined;
 }
 
+function normalizeRawTagSlug(slug: string): string {
+  return slug.trim().toLowerCase();
+}
+
 export function normalizeTagSlug(slug: string): string {
-  const normalized = slug.trim().toLowerCase();
+  const normalized = normalizeRawTagSlug(slug);
   return TAG_ALIAS_MAP[normalized] ?? normalized;
+}
+
+function isLegacyTagAlias(slug: string): boolean {
+  return Object.hasOwn(TAG_ALIAS_MAP, normalizeRawTagSlug(slug));
 }
 
 export function formatTagLabel(slugOrLabel: string): string {
@@ -150,7 +158,7 @@ export function normalizeTagRecord(tag: TagShape): NormalizedTag | null {
 
   const canonicalSlug = normalizeTagSlug(rawSlug);
   const fallback = getKnownTagDefinition(canonicalSlug);
-  const isLegacyAlias = canonicalSlug !== rawSlug;
+  const isLegacyAlias = isLegacyTagAlias(rawSlug);
 
   const label = isLegacyAlias
     ? (fallback?.label ?? readText(tag.label))

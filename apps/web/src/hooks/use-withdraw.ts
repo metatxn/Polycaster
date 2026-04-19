@@ -5,9 +5,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { encodeFunctionData, parseUnits } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
 import { USDC_E_ADDRESS, USDC_E_DECIMALS } from "@/constants/contracts";
-import { POLYGON_CHAIN_ID, RELAYER_API_URL } from "@/constants/polymarket";
-import { createBuilderConfig } from "@/lib/remote-builder-config";
-import { getBuilderSignProxyUrl } from "@/lib/sign-proxy-url";
+import { executeViaRelayer } from "@/lib/relayer-client";
 import type { DepositStatus, QuoteResponse } from "./use-bridge";
 import { useBridge } from "./use-bridge";
 import { PROXY_WALLET_QUERY_KEY, useProxyWallet } from "./use-proxy-wallet";
@@ -464,32 +462,6 @@ export function useWithdraw() {
     }
   }, []);
 
-  /**
-   * Initialize the RelayClient for executing the withdrawal
-   */
-  const getClient = useCallback(async () => {
-    if (!walletClient || !address) {
-      throw new Error("Wallet not connected");
-    }
-
-    const signProxyUrl = getBuilderSignProxyUrl();
-
-    // Dynamic import to avoid SSR issues
-    const { RelayClient } = await import("@polymarket/builder-relayer-client");
-    const builderConfig = createBuilderConfig({
-      url: signProxyUrl,
-    });
-
-    const client = new RelayClient(
-      RELAYER_API_URL,
-      POLYGON_CHAIN_ID,
-      walletClient,
-      builderConfig
-    );
-
-    return client;
-  }, [walletClient, address]);
-
   // ────────────────────────────────────────────────────────────
   // Legacy Polygon-only withdrawal via direct transfer / Uniswap swap
   // Replaced by the Polymarket Bridge API path for all tokens and chains.
@@ -557,75 +529,34 @@ export function useWithdraw() {
 
   /**
    * Submit transactions via relayer and poll for confirmation.
+   *
+   * `executeViaRelayer` submits to /api/relayer and polls /transaction until
+   * the relayer reports a success state (throws on failure/timeout). We surface
+   * the on-chain hash to the caller once the tx lands.
    */
   const submitAndPollRelayer = async (
     transactions: Array<{ to: string; data: string; value: string }>
   ): Promise<WithdrawResult> => {
-    const client = await getClient();
+    if (!walletClient || !address) {
+      throw new Error("Wallet not connected");
+    }
 
     setState("submitting");
-    const response = await client.execute(transactions, "funwithdraw");
 
-    console.log("[Withdraw] Transaction submitted:", {
-      transactionID: response.transactionID,
-      state: response.state,
-    });
-
-    setState("pending");
-
-    const result = await response.wait();
-
-    if (
-      result &&
-      (result.state === "STATE_CONFIRMED" || result.state === "STATE_MINED")
-    ) {
-      console.log("[Withdraw] Transaction confirmed:", result.transactionHash);
-      setState("confirmed");
-      await refreshBalance();
-      return { success: true, transactionHash: result.transactionHash };
-    }
-
-    const maxAttempts = 15;
-    const pollInterval = 2000;
-    const successStates = ["STATE_EXECUTED", "STATE_MINED", "STATE_CONFIRMED"];
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      console.log(
-        `[Withdraw] Polling attempt ${attempt + 1}/${maxAttempts}...`
-      );
-      const txns = await client.getTransaction(response.transactionID);
-
-      if (txns && txns.length > 0) {
-        const tx = txns[0];
-        console.log(`[Withdraw] Transaction state: ${tx.state}`);
-
-        if (tx.state === "STATE_FAILED" || tx.state === "STATE_INVALID") {
-          throw new Error(`Withdrawal failed with state: ${tx.state}`);
-        }
-
-        if (successStates.includes(tx.state)) {
-          console.log("[Withdraw] Withdrawal confirmed:", tx.transactionHash);
-          setState("confirmed");
-          await refreshBalance();
-          return { success: true, transactionHash: tx.transactionHash };
-        }
-      }
-
-      if (attempt < maxAttempts - 1) {
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      }
-    }
-
-    console.log(
-      "[Withdraw] Polling timed out, transaction status unknown - treating as pending"
+    const result = await executeViaRelayer(
+      walletClient,
+      address as `0x${string}`,
+      transactions.map((t) => ({
+        to: t.to as `0x${string}`,
+        data: t.data as `0x${string}`,
+        value: t.value,
+      }))
     );
-    setState("pending");
 
-    return {
-      success: false,
-      pending: true,
-      transactionHash: response.transactionHash || response.transactionID,
-    };
+    console.log("[Withdraw] Transaction confirmed:", result.transactionHash);
+    setState("confirmed");
+    await refreshBalance();
+    return { success: true, transactionHash: result.transactionHash };
   };
 
   /**

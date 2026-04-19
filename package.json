@@ -21,9 +21,9 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.9",
+    "@biomejs/biome": "2.4.12",
     "husky": "9.1.7",
-    "typescript": "6.0.2"
+    "typescript": "6.0.3"
   },
   "pnpm": {
     "peerDependencyRules": {

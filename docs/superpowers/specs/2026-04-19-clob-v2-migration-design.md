@@ -16,8 +16,11 @@
 
 - Renaming `USDC.e` → `pUSD` in user-facing copy across deposit, withdraw, balance, and trading-warning components.
 - Bridge deposit/withdraw flow audit. Bridges remain externally `USDC.e`-oriented; we only touch CLOB collateral.
-- Migrating the relayer flow (`@polymarket/builder-relayer-client`) to anything new. The V2 migration guide is CLOB-only; the relayer SDK has no V2 release. Relayer-side `BuilderConfig` stays.
-- Removing `@polymarket/builder-signing-sdk` from relayer-only call sites (it's still imported by the relayer signing path).
+- Migrating the relayer SDK (`@polymarket/builder-relayer-client@0.0.8`) to a newer version (none exists yet) or rewriting the extension's hand-rolled relayer client (`apps/extension/src/background/relayer-client.ts`).
+- Changing how relayer requests are authenticated. The HMAC `BuilderConfig` flow that goes through `/api/sign` stays intact for relayer use.
+- Removing `@polymarket/builder-signing-sdk` from relayer-only call sites.
+
+**Note:** The relayer's *transport and auth* are unchanged, but Step 6 *uses* the relayer to send new types of transactions (approve USDC.e to Onramp, wrap USDC.e → pUSD). That is a relayer payload change, not a relayer infrastructure change. The risk model for Step 6 is documented in Section 6.
 
 ## 2. Pre-Migration Verified Facts
 
@@ -51,29 +54,25 @@ The relayer flow (`use-relayer-client.ts`, `use-ctf-operations.ts`, `use-withdra
 
 ## 4. Step-by-Step Component Design
 
-Each step is a single commit on the feature branch.
+Each step is a single commit on the feature branch. Every commit must leave `pnpm -r build` and `pnpm -r typecheck` green so we can revert any single step in isolation.
 
-### Step 1 — Dependency surgery
+### Step 1 — Dependency swap + constructor refactor (single commit)
 
-**Files:**
-- `package.json` (root): keep `@polymarket/builder-signing-sdk@1.0.0` override (still used by relayer signing path).
-- `apps/web/package.json`: replace `@polymarket/clob-client@5.8.1` → `@polymarket/clob-client-v2@1.0.0`. Remove `@polymarket/order-utils@3.0.1`. Keep `@polymarket/builder-signing-sdk@1.0.0` and `@polymarket/builder-relayer-client@0.0.8`.
+Bundling these together because changing the import name to `@polymarket/clob-client-v2` will break compilation until the constructor calls are also updated. Splitting them would leave one commit with a broken build.
+
+**Dependency changes:**
+- `apps/web/package.json`: replace `@polymarket/clob-client@5.8.1` → `@polymarket/clob-client-v2@1.0.0`. Remove unused `@polymarket/order-utils@3.0.1`. Keep `@polymarket/builder-signing-sdk@1.0.0` and `@polymarket/builder-relayer-client@0.0.8`.
 - `apps/extension/package.json`: replace `@polymarket/clob-client@5.8.1` → `@polymarket/clob-client-v2@1.0.0`. Remove `@polymarket/order-utils@3.0.1`.
+- `package.json` (root): keep `@polymarket/builder-signing-sdk@1.0.0` override.
 - `pnpm-lock.yaml`: refreshed via `pnpm install`.
 
-**Validation:** `pnpm install` succeeds. `pnpm -r build` may break in this commit because of import-name changes — that's fine, Step 2 fixes it.
+**Web call sites to refactor:**
+- `apps/web/src/hooks/use-clob-client.ts:98, 112, 409` (authenticated + read-only)
+- `apps/web/src/hooks/use-notifications.ts:102, 120`
+- `apps/web/src/hooks/use-clob-credentials.ts:341, 468, 629`
 
-### Step 2 — Constructor refactor
-
-**Web call sites:**
-- `apps/web/src/hooks/use-clob-client.ts:112` (authenticated client)
-- `apps/web/src/hooks/use-clob-client.ts:410` (unauthenticated fee-rate client)
-- `apps/web/src/hooks/use-notifications.ts:120` (notifications client)
-- `apps/web/src/hooks/use-clob-credentials.ts:341, 468, 629` (3 sites for credential derivation)
-
-**Extension call sites:**
-- `apps/extension/src/background/trading-handler.ts:323` (authenticated)
-- `apps/extension/src/background/trading-handler.ts:446` (unauthenticated)
+**Extension call sites to refactor:**
+- `apps/extension/src/background/trading-handler.ts:29, 323, 446`
 
 **Refactor pattern:**
 
@@ -89,15 +88,17 @@ new ClobClient({
   creds,
   signatureType: sigType,
   funderAddress: funder,
-  builderConfig,  // shape changes in Step 4
+  builderConfig,  // SHAPE STILL OLD HERE — Step 4 swaps to { builderCode }
 })
 ```
 
-**Static-import conversion:** `apps/extension/src/background/trading-handler.ts:29` is a static `import { ClobClient } from "@polymarket/clob-client"`. V2 is ESM-only; convert to dynamic `await import("@polymarket/clob-client-v2")` to match the rest of the codebase and avoid bundler issues in the extension service worker.
+**Static-import conversion:** `apps/extension/src/background/trading-handler.ts:29` is a static `import { ClobClient } from "@polymarket/clob-client"`. V2 is ESM-only; convert to dynamic `await import("@polymarket/clob-client-v2")` to match the rest of the codebase.
 
-**Validation:** `pnpm -r typecheck` passes.
+**Builder-config compatibility note:** This commit keeps the existing `BuilderConfig` (from `remote-builder-config.ts` / `createExtensionBuilderConfig`) wired into the V2 ClobClient. The V2 SDK's `BuilderConfig` interface is only `{ builderCode: string }`, so the legacy proxy-signing config will *type-mismatch*. We resolve this by casting through `unknown` at the construction site as a temporary measure. Step 4 properly replaces the value. Without this temporary cast, the build breaks until Step 4 — which is the trade-off here. If the cast is unacceptable, fold Step 4 into this commit too.
 
-### Step 3 — Order creation cleanup
+**Validation:** `pnpm -r typecheck` and `pnpm -r build` both pass.
+
+### Step 2 — Order creation cleanup
 
 **Files:**
 - `apps/web/src/hooks/use-clob-client.ts` — remove `feeRateBps` from `createOrder` and `createMarketOrder` call sites; drop the `getFeeRateBps()` pre-call that fetches and injects it. Add optional `builderCode` and `userUSDCBalance` (market BUY only).
@@ -123,28 +124,38 @@ const marketOrder: UserMarketOrderV2 = {
 
 **Validation:** Type-check passes. SDK accepts the order shapes (they're typed).
 
-### Step 4 — Builder attribution swap
+### Step 3 — Builder attribution swap (CLOB-side only)
+
+**Critical:** The `/api/sign` route and the `RemoteBuilderConfig` / `createExtensionBuilderConfig` helpers are *also* used by the relayer flow for HMAC-signed relayer headers. The relayer's secret cannot live in the browser, so the proxy route must stay alive. **Do not delete those files in this step.** Only swap the value passed into `ClobClient`.
 
 **New environment variable:** `POLY_BUILDER_CODE` (a public bytes32 value from the Builder Profile page; not a secret).
-- Web: add to `apps/web/.env.local.example` and Vercel/hosting envs as `NEXT_PUBLIC_POLY_BUILDER_CODE` (needs to be readable in the browser).
-- Extension: add to `apps/extension/.env.example` as `VITE_POLY_BUILDER_CODE`.
+- Web: add to `apps/web/.env.local.example` and hosting/CI as `NEXT_PUBLIC_POLY_BUILDER_CODE` so it's readable in the browser bundle.
+- Extension: add to `apps/extension/.env.example` as `POLY_BUILDER_CODE`. Inject it via webpack `DefinePlugin` in `apps/extension/webpack.config.js` by adding:
+  ```js
+  "process.env.POLY_BUILDER_CODE": JSON.stringify(process.env.POLY_BUILDER_CODE || ""),
+  ```
+  Then read `process.env.POLY_BUILDER_CODE` in extension code. (Webpack already runs `dotenv.config()` so a local `.env` works in dev.)
 
-**ClobClient construction** (Step 2 sites): pass `builderConfig: { builderCode: process.env.NEXT_PUBLIC_POLY_BUILDER_CODE }` (or extension equivalent) when the env var is set; omit otherwise.
+**ClobClient construction changes** (the 5+2 sites from Step 1):
+- Replace the existing legacy `builderConfig` argument with the V2 shape:
+  ```ts
+  builderConfig: builderCode ? { builderCode } : undefined
+  ```
+  where `builderCode` is read from the env var above.
+- Remove the `unknown`-cast that Step 1 introduced as a temporary measure.
 
-**Files to delete (CLOB-only proxy stack):**
-- `apps/web/src/lib/remote-builder-config.ts`
-- `apps/web/src/lib/sign-proxy-url.ts`
-- `apps/web/src/app/api/sign/route.ts`
-- `apps/extension/src/background/builder-config.ts`
+**Files left alone (still needed for relayer):**
+- `apps/web/src/lib/remote-builder-config.ts` — keep; relayer hooks (`use-relayer-client.ts`, `use-ctf-operations.ts`, `use-withdraw.ts`) still call `createBuilderConfig()` for their HMAC signing.
+- `apps/web/src/lib/sign-proxy-url.ts` — keep; resolves `/api/sign` URL.
+- `apps/web/src/app/api/sign/route.ts` — keep; the relayer's HMAC headers are still signed server-side.
+- `apps/extension/src/background/builder-config.ts` — keep; extension relayer (`relayer-client.ts:24, 212`) imports `createExtensionBuilderConfig` for relayer auth.
+- `@polymarket/builder-signing-sdk@1.0.0` — keep as a dependency.
 
-**Files to update (relayer still uses BuilderConfig):**
-- The 3 relayer-using web hooks (`use-relayer-client.ts`, `use-ctf-operations.ts`, `use-withdraw.ts`) currently import their relayer `BuilderConfig` factory from `apps/web/src/lib/remote-builder-config.ts`. Since that file is being deleted, introduce a new minimal helper at `apps/web/src/lib/relayer-builder-config.ts` containing only what the relayer needs (the HMAC signing path), and switch the 3 hooks to import from it.
-- `apps/extension/src/background/relayer-client.ts` — already self-contained; verify no leftover import of `builder-config.ts`.
-- Keep `@polymarket/builder-signing-sdk@1.0.0` as a dependency. The relayer flow still needs both its types and its signing helpers.
+**Optional cleanup (out of scope for cutover-survival):** Once the relayer SDK gets a V2 release, the entire HMAC proxy stack can be removed. That's a follow-up branch.
 
-**Validation:** Builder attribution shows up at https://builders.polymarket.com after a test order on preprod.
+**Validation:** Builder attribution shows up at https://builders.polymarket.com after a test order on preprod. Relayer-backed flows (CTF split/merge/redeem, withdraw, Safe deploy) still work.
 
-### Step 5 — Contract address update
+### Step 4 — Contract address update
 
 **File:** `packages/shared-types/src/contracts.ts`
 
@@ -163,9 +174,9 @@ export const USDC_E_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 export const USDC_E_DECIMALS = 6;
 ```
 
-**Approval-list update:** Wherever the code today approves USDC.e to the CLOB exchanges, switch to approving **pUSD** to the V2 exchanges. USDC.e approvals to the **CollateralOnramp** are added separately (Step 6).
+**Approval-list update:** Wherever the code today approves USDC.e to the CLOB exchanges, switch to approving **pUSD** to the V2 exchanges. USDC.e approvals to the **CollateralOnramp** are added separately (Step 5).
 
-### Step 6 — pUSD wrap-on-trade
+### Step 5 — pUSD wrap-on-trade
 
 The CLOB V2 exchange settles in pUSD. Today the proxy wallet (Safe) holds USDC.e. We need to convert before trading.
 
@@ -188,7 +199,7 @@ The CLOB V2 exchange settles in pUSD. Today the proxy wallet (Safe) holds USDC.e
 
 **Validation:** First trade by a fresh user goes through approve → wrap → place order in a single user interaction.
 
-### Step 7 — Preprod testing
+### Step 6 — Preprod testing
 
 **Switch hosts:** Set `NEXT_PUBLIC_POLYMARKET_HOST=https://clob-v2.polymarket.com` in web `.env.local` and the extension equivalent.
 
@@ -207,8 +218,10 @@ The CLOB V2 exchange settles in pUSD. Today the proxy wallet (Safe) holds USDC.e
 | First-trade approve+wrap | Single relayer batch covers approval, wrap, and order |
 | Builder attribution | Order appears under our builder code at builders.polymarket.com |
 | API key derivation | New users can derive credentials |
+| Relayer-backed CTF op | Existing CTF split/merge/redeem still works (regression check on Step 3 cleanup) |
+| Relayer-backed withdraw | Existing withdraw flow still works (regression check on Step 3 cleanup) |
 
-### Step 8 — Cutover-day deployment
+### Step 7 — Cutover-day deployment
 
 **Pre-cutover:**
 - Switch hosts back to `https://clob.polymarket.com` in production env vars.
@@ -234,11 +247,14 @@ The CLOB V2 exchange settles in pUSD. Today the proxy wallet (Safe) holds USDC.e
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| ESM-only SDK breaks Next.js bundle | Low | Codebase already uses dynamic `import()` for clob-client; one static import gets converted |
+| ESM-only SDK breaks Next.js bundle | Low | Codebase already uses dynamic `import()` for clob-client in 5/6 sites; one static extension import gets converted in Step 1 |
+| Step 3 deletes a file the relayer needs | Medium | Step 3 explicitly leaves `remote-builder-config.ts`, `sign-proxy-url.ts`, `/api/sign`, and `builder-config.ts` in place; only the *value passed to ClobClient* changes. Step 6 includes regression tests for relayer flows |
 | Relayer SDK breaks because builder-signing-sdk types change | Low | Pin builder-signing-sdk to current `1.0.0`; relayer flow not touched |
-| pUSD wrapping during a trade fails partway | Medium | Use single relayer batch (atomic); on failure, surface error and don't post the order |
-| Existing approvals not migrated; users hit "insufficient allowance" on first post-cutover trade | High | Step 6 adds pUSD-to-V2-exchange approvals to the first-time approval batch; existing users will trigger a one-time re-approval |
-| `NEXT_PUBLIC_POLY_BUILDER_CODE` not set in prod | Low | Code path falls back to no-attribution (orders still post, just unattributed); add a deploy checklist item |
+| Step 5 adds wrap+approve transactions to relayer batches that the relayer/Safe rejects | Medium | The relayer already executes arbitrary calls via Safe `multiSend` (see `relayer-client.ts:66-90`); wrap+approve are vanilla ERC-20/Onramp calls. Smoke-test on preprod before cutover |
+| pUSD wrapping during a trade fails partway | Medium | Use single relayer batch (atomic via `multiSend`); on failure, surface error and don't post the order |
+| Existing approvals not migrated; users hit "insufficient allowance" on first post-cutover trade | High | Step 5 adds pUSD-to-V2-exchange approvals to the first-time approval batch; existing users trigger a one-time re-approval |
+| `POLY_BUILDER_CODE` not set in prod env | Low | Code path falls back to no-attribution (orders still post, just unattributed); add a deploy checklist item |
+| Webpack `DefinePlugin` not updated; extension can't read `POLY_BUILDER_CODE` | Low | Step 3 explicitly updates `apps/extension/webpack.config.js`; smoke-tested by builder leaderboard check on extension trade |
 | Order-book wipe at cutover surprises users | High (UX) | Pre-cutover banner + post-cutover messaging |
 
 ## 7. Open Items After Spec Approval

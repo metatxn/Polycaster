@@ -78,8 +78,8 @@ A dynamic Next.js App Router route that accepts GET and POST for any subpath und
 2. Constructs the upstream URL: `https://relayer-v2.polymarket.com/{path}` (preserving query string).
 3. Forwards the body for POST; forwards query for GET.
 4. Adds two headers to the upstream request:
-   - `RELAYER_API_KEY: ${process.env.POLYMARKET_RELAYER_API_KEY}`
-   - `RELAYER_API_KEY_ADDRESS: ${process.env.POLYMARKET_RELAYER_API_KEY_ADDRESS}`
+   - `RELAYER_API_KEY: ${process.env.POLY_RELAYER_API_KEY}`
+   - `RELAYER_API_KEY_ADDRESS: ${process.env.POLY_RELAYER_API_KEY_ADDRESS}`
 5. Returns the upstream response body and status code.
 
 **Caller authentication:**
@@ -90,8 +90,8 @@ The actual transaction safety comes from the body: every relayer request include
 
 **Env vars needed:**
 ```
-POLYMARKET_RELAYER_API_KEY=<server-side secret>
-POLYMARKET_RELAYER_API_KEY_ADDRESS=<address that owns the key>
+POLY_RELAYER_API_KEY=<server-side secret>
+POLY_RELAYER_API_KEY_ADDRESS=<address that owns the key>
 EXTENSION_AUTH_TOKEN=<the existing token used by /api/sign>  (already present)
 NEXT_PUBLIC_APP_URL=https://knoww.app  (for origin checks)
 ```
@@ -227,8 +227,8 @@ Update `.env` examples and deploy targets:
 
 `apps/web/.env.local.example`:
 ```
-POLYMARKET_RELAYER_API_KEY=
-POLYMARKET_RELAYER_API_KEY_ADDRESS=
+POLY_RELAYER_API_KEY=
+POLY_RELAYER_API_KEY_ADDRESS=
 # (NEXT_PUBLIC_APP_URL and EXTENSION_AUTH_TOKEN already present)
 ```
 

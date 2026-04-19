@@ -108,15 +108,24 @@ export function EventCard({
           ? Number.parseFloat(event.liquidity)
           : event.liquidity || 0;
 
+  // Only run entry animation on the initial page of cards. Cards appended via
+  // infinite-scroll skip the animation to avoid extra main-thread work and to
+  // keep the grid visually stable as the user scrolls.
+  const animateEntry = index < 20;
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{
-        duration: 0.4,
-        delay: Math.min(index * 0.03, 0.3),
-        ease: [0.23, 1, 0.32, 1],
-      }}
+      initial={animateEntry ? { opacity: 0, y: 20 } : false}
+      animate={animateEntry ? { opacity: 1, y: 0 } : undefined}
+      transition={
+        animateEntry
+          ? {
+              duration: 0.4,
+              delay: Math.min(index * 0.03, 0.3),
+              ease: [0.23, 1, 0.32, 1],
+            }
+          : undefined
+      }
       whileTap={{ scale: 0.98 }}
       className="h-full"
     >
@@ -127,8 +136,10 @@ export function EventCard({
         {/* Outer glow on hover - hidden on touch devices */}
         <div className="absolute -inset-px rounded-2xl sm:rounded-[1.75rem] bg-linear-to-br from-purple-500/0 via-blue-500/0 to-emerald-500/0 group-hover:from-purple-500/30 group-hover:via-blue-500/30 group-hover:to-emerald-500/30 dark:group-hover:from-purple-500/50 dark:group-hover:via-blue-500/50 dark:group-hover:to-emerald-500/50 opacity-0 group-hover:opacity-100 transition-all duration-500 blur-xl hidden sm:block" />
 
-        {/* Card Container - Enhanced mobile styling */}
-        <div className="relative h-full rounded-2xl sm:rounded-3xl bg-white dark:bg-card/60 backdrop-blur-xl border border-gray-200 dark:border-white/8 overflow-hidden transition-all duration-300 sm:duration-500 group-hover:border-gray-300 dark:group-hover:border-white/20 group-hover:bg-white dark:group-hover:bg-card/80 shadow-md shadow-gray-200/50 dark:shadow-black/20 group-hover:shadow-lg sm:group-hover:shadow-xl group-hover:shadow-gray-300/50 dark:group-hover:shadow-purple-500/10 group-active:shadow-sm group-active:scale-[0.99] sm:group-active:scale-100">
+        {/* Card Container - Enhanced mobile styling.
+            contain:layout isolates reflows caused by late-arriving image
+            metadata or dynamic text, keeping scroll CLS bounded. */}
+        <div className="relative h-full rounded-2xl sm:rounded-3xl bg-white dark:bg-card/60 backdrop-blur-xl border border-gray-200 dark:border-white/8 overflow-hidden transition-all duration-300 sm:duration-500 group-hover:border-gray-300 dark:group-hover:border-white/20 group-hover:bg-white dark:group-hover:bg-card/80 shadow-md shadow-gray-200/50 dark:shadow-black/20 group-hover:shadow-lg sm:group-hover:shadow-xl group-hover:shadow-gray-300/50 dark:group-hover:shadow-purple-500/10 group-active:shadow-sm group-active:scale-[0.99] sm:group-active:scale-100 contain-[layout]">
           {/* Rainbow border effect on hover - desktop only */}
           <div className="absolute inset-0 rounded-2xl sm:rounded-3xl p-px bg-linear-to-br from-purple-500/0 via-transparent to-blue-500/0 group-hover:from-purple-400/20 group-hover:via-pink-400/15 group-hover:to-blue-400/20 dark:group-hover:from-purple-500/30 dark:group-hover:via-pink-500/20 dark:group-hover:to-blue-500/30 transition-all duration-500 pointer-events-none hidden sm:block" />
 
@@ -140,6 +151,7 @@ export function EventCard({
                 alt={event.title}
                 fill
                 priority={priority}
+                fetchPriority={priority ? "high" : undefined}
                 sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 20vw"
                 className="object-cover transition-all duration-500 sm:duration-700 ease-out sm:group-hover:scale-110 sm:group-hover:brightness-110"
               />

@@ -5,6 +5,7 @@ import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 import { fetchGammaKeysetPage, toSlimGammaEvent } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
+import { normalizeTagSlug } from "@/lib/tag-slugs";
 import type { GammaEvent } from "@/types/gamma-api";
 
 /**
@@ -31,7 +32,8 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
 
-    const tagSlug = searchParams.get("tag_slug");
+    const rawTagSlug = searchParams.get("tag_slug");
+    const tagSlug = rawTagSlug ? normalizeTagSlug(rawTagSlug) : null;
     const limit = searchParams.get("limit") || "20";
     const afterCursor = searchParams.get("after_cursor");
     const closed = searchParams.get("closed") || "false";

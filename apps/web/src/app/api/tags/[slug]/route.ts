@@ -1,6 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
+import { logger } from "@/lib/logger";
+import { normalizeTagRecord, normalizeTagSlug } from "@/lib/tag-slugs";
 
 /**
  * GET /api/tags/:slug
@@ -21,6 +24,7 @@ export async function GET(
   }
   try {
     const { slug } = await params;
+    const canonicalSlug = normalizeTagSlug(slug);
 
     if (!slug) {
       return NextResponse.json(
@@ -32,14 +36,9 @@ export async function GET(
       );
     }
 
-    // console.log(`Fetching tag details for slug: ${slug}`);
-    // console.log(
-    //   `hello api-tags-slug: ${POLYMARKET_API.GAMMA.BASE}/tags/slug/${slug}`,
-    // );
-
     // Fetch tag details from Gamma API
     const response = await fetch(
-      `${POLYMARKET_API.GAMMA.BASE}/tags/slug/${slug}`,
+      `${POLYMARKET_API.GAMMA.BASE}/tags/slug/${encodeURIComponent(canonicalSlug)}`,
       {
         headers: {
           "Content-Type": "application/json",
@@ -49,38 +48,50 @@ export async function GET(
     );
 
     if (!response.ok) {
-      console.error(`Gamma API error for slug ${slug}: ${response.statusText}`);
+      logger.warn("tags.detail.not_found", {
+        requestedSlug: slug,
+        canonicalSlug,
+        status: response.status,
+        statusText: response.statusText,
+      });
       return NextResponse.json(
         {
           success: false,
-          error: `Tag not found: ${slug}`,
+          error: `Tag not found: ${canonicalSlug}`,
         },
         { status: response.status }
       );
     }
 
-    const data = (await response.json()) as Record<string, unknown>;
+    const normalizedTag = normalizeTagRecord(
+      (await response.json()) as Record<string, unknown>
+    );
 
-    if (!data?.id) {
+    if (!normalizedTag?.slug) {
       return NextResponse.json(
         {
           success: false,
-          error: `Tag not found: ${slug}`,
+          error: `Tag not found: ${canonicalSlug}`,
         },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      tag: data,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        tag: normalizedTag,
+      },
+      { headers: getCacheHeaders("static") }
+    );
   } catch (error) {
-    console.error("Error fetching tag details:", error);
+    logger.error("tags.detail.fetch_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Unable to load tag details",
       },
       { status: 500 }
     );

@@ -3,6 +3,13 @@ import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import type { Event } from "@/hooks/use-event-detail";
 import type { LeaderboardTrader } from "@/hooks/use-leaderboard";
 import { fetchGammaKeysetPage, toSlimGammaEvent } from "@/lib/gamma-keyset";
+import { logger } from "@/lib/logger";
+import {
+  formatTagLabel,
+  getKnownTagDefinition,
+  normalizeTagRecord,
+  normalizeTagSlug,
+} from "@/lib/tag-slugs";
 import type { GammaEvent } from "@/types/gamma-api";
 
 /**
@@ -58,11 +65,49 @@ export interface InitialLeaderboardData {
   total: number;
 }
 
+export interface InitialTagData {
+  slug: string;
+  label: string;
+  description?: string;
+}
+
 // Full event type for server-side fetching
 export interface GammaEventFull extends Event {
   title: string;
   description?: string;
   image?: string;
+}
+
+async function fetchInitialEventPage(
+  tagSlug?: string
+): Promise<InitialHomeData | null> {
+  const params = new URLSearchParams({
+    limit: "20",
+    closed: "false",
+    order: "volume24hr",
+    ascending: "false",
+  });
+
+  if (tagSlug) {
+    params.set("tag_slug", normalizeTagSlug(tagSlug));
+  }
+
+  const page = await fetchGammaKeysetPage<GammaEvent>(
+    {
+      endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
+      params,
+      revalidate: CACHE_DURATION.EVENTS,
+    },
+    ["events", "data"]
+  );
+
+  const slimEvents = page.items.map((event) => toSlimGammaEvent(event));
+
+  return {
+    events: slimEvents,
+    totalResults: page.totalResults ?? slimEvents.length,
+    hasMore: Boolean(page.nextCursor),
+  };
 }
 
 /**
@@ -72,33 +117,85 @@ export interface GammaEventFull extends Event {
 export const getInitialEvents = cache(
   async (): Promise<InitialHomeData | null> => {
     try {
-      const params = new URLSearchParams({
-        limit: "20",
-        closed: "false",
-        order: "volume24hr",
-        ascending: "false",
-      });
-
-      const page = await fetchGammaKeysetPage<GammaEvent>(
-        {
-          endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
-          params,
-          revalidate: CACHE_DURATION.EVENTS,
-        },
-        ["events", "data"]
-      );
-
-      const slimEvents = page.items.map((event) => toSlimGammaEvent(event));
-
-      return {
-        events: slimEvents,
-        totalResults: page.totalResults ?? slimEvents.length,
-        hasMore: Boolean(page.nextCursor),
-      };
+      return await fetchInitialEventPage();
     } catch (error) {
-      console.error("Error fetching initial events:", error);
+      logger.error("server_cache.events.fetch_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
+  }
+);
+
+export const getInitialEventsByTag = cache(
+  async (tagSlug: string): Promise<InitialHomeData | null> => {
+    try {
+      return await fetchInitialEventPage(tagSlug);
+    } catch (error) {
+      logger.error("server_cache.events_by_tag.fetch_failed", {
+        tagSlug: normalizeTagSlug(tagSlug),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+);
+
+export const getTagDetails = cache(
+  async (tagSlug: string): Promise<InitialTagData | null> => {
+    const canonicalSlug = normalizeTagSlug(tagSlug);
+    const fallback = getKnownTagDefinition(canonicalSlug);
+
+    try {
+      const response = await fetch(
+        `${POLYMARKET_API.GAMMA.BASE}/tags/slug/${encodeURIComponent(canonicalSlug)}`,
+        {
+          headers: {
+            Accept: "application/json",
+          },
+          next: { revalidate: CACHE_DURATION.SPORTS_LIST },
+        }
+      );
+
+      if (!response.ok) {
+        if (fallback) {
+          return fallback;
+        }
+
+        logger.warn("server_cache.tag.fetch_failed", {
+          tagSlug: canonicalSlug,
+          status: response.status,
+          statusText: response.statusText,
+        });
+        return null;
+      }
+
+      const normalizedTag = normalizeTagRecord(
+        (await response.json()) as Record<string, unknown>
+      );
+
+      if (normalizedTag) {
+        return {
+          slug: normalizedTag.slug,
+          label: normalizedTag.label,
+          description: normalizedTag.description,
+        };
+      }
+    } catch (error) {
+      logger.error("server_cache.tag.fetch_failed", {
+        tagSlug: canonicalSlug,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if (fallback) {
+      return fallback;
+    }
+
+    return {
+      slug: canonicalSlug,
+      label: formatTagLabel(canonicalSlug),
+    };
   }
 );
 
@@ -130,7 +227,10 @@ export const getInitialLeaderboard = cache(
       );
 
       if (!response.ok) {
-        console.error("Failed to fetch leaderboard:", response.statusText);
+        logger.warn("server_cache.leaderboard.fetch_failed", {
+          status: response.status,
+          statusText: response.statusText,
+        });
         return null;
       }
 
@@ -160,7 +260,9 @@ export const getInitialLeaderboard = cache(
         total: traders.length,
       };
     } catch (error) {
-      console.error("Error fetching leaderboard:", error);
+      logger.error("server_cache.leaderboard.fetch_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
@@ -185,12 +287,19 @@ export const getEvent = cache(
         next: { revalidate: CACHE_DURATION.EVENTS },
       });
       if (!res.ok) {
-        console.error("Failed to fetch event:", res.status, res.statusText);
+        logger.warn("server_cache.event.fetch_failed", {
+          slugOrId,
+          status: res.status,
+          statusText: res.statusText,
+        });
         return null;
       }
       return (await res.json()) as GammaEventFull;
     } catch (error) {
-      console.error("Error fetching event:", error);
+      logger.error("server_cache.event.fetch_failed", {
+        slugOrId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

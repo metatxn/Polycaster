@@ -1,4 +1,9 @@
 import { Suspense } from "react";
+import { preload } from "react-dom";
+import {
+  buildOptimizedImageUrl,
+  PRIORITY_EVENT_CARD_COUNT,
+} from "@/lib/lcp-images";
 import { getInitialEvents } from "@/lib/server-cache";
 import { HomeContent } from "./home-content";
 
@@ -18,6 +23,20 @@ import { HomeContent } from "./home-content";
 export default async function Home() {
   // Pre-fetch initial events on the server (runs at the edge)
   const initialData = await getInitialEvents();
+
+  // Emit <link rel="preload" as="image" fetchpriority="high"> for the first
+  // few cards before HomeContent streams in. This bypasses the Suspense
+  // boundary: the preload tags land in the initial document head and the
+  // browser's preload scanner kicks off image fetches immediately, instead of
+  // waiting for the streamed HTML chunk to arrive and for hydration to run.
+  initialData?.events?.slice(0, PRIORITY_EVENT_CARD_COUNT).forEach((event) => {
+    if (event.image) {
+      preload(buildOptimizedImageUrl(event.image), {
+        as: "image",
+        fetchPriority: "high",
+      });
+    }
+  });
 
   return (
     <Suspense

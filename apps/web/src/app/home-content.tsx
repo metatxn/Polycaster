@@ -58,6 +58,7 @@ import { useBreakingEvents } from "@/hooks/use-breaking-events";
 import { useNewEvents } from "@/hooks/use-new-events";
 import { usePaginatedEvents } from "@/hooks/use-paginated-events";
 import { useTrendingEvents } from "@/hooks/use-trending-events";
+import { PRIORITY_EVENT_CARD_COUNT } from "@/lib/lcp-images";
 
 // Tab categories
 const TAB_CATEGORIES = [
@@ -756,7 +757,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                       key={`${event.id}-${index}`}
                       event={event}
                       index={index}
-                      priority={index < 6}
+                      priority={index < PRIORITY_EVENT_CARD_COUNT}
                     />
                   ))}
                 </div>
@@ -764,7 +765,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 {/* Loading More */}
                 {currentData.isFetchingMore && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
-                    {[...Array(5)].map((_, i) => (
+                    {[...Array(20)].map((_, i) => (
                       <div
                         key={`loading-${i}`}
                         className="rounded-2xl sm:rounded-3xl bg-card/30 backdrop-blur-sm border border-border/30 overflow-hidden animate-pulse"

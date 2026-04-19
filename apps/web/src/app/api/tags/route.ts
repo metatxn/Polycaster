@@ -2,50 +2,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+import { logger } from "@/lib/logger";
+import { buildFallbackTags, normalizeTagRecord } from "@/lib/tag-slugs";
 
-// Fallback tags if API doesn't have a tags endpoint
-const FALLBACK_TAGS = [
-  {
-    tag: "sports",
-    label: "Sports",
-    description: "Sports prediction markets including NFL, NBA, MLB, and more",
-  },
-  {
-    tag: "politics",
-    label: "Politics",
-    description: "Political events, elections, and government decisions",
-  },
-  {
-    tag: "crypto",
-    label: "Crypto",
-    description: "Cryptocurrency prices, blockchain events, and DeFi",
-  },
-  {
-    tag: "world",
-    label: "World",
-    description: "Global events, international relations, and world affairs",
-  },
-  {
-    tag: "finance",
-    label: "Finance",
-    description: "Financial markets, economy, and business outcomes",
-  },
-  {
-    tag: "technology",
-    label: "Technology",
-    description: "Tech innovations, product launches, and industry trends",
-  },
-  {
-    tag: "entertainment",
-    label: "Entertainment",
-    description: "Movies, TV shows, awards, and pop culture",
-  },
-  {
-    tag: "trending",
-    label: "Trending",
-    description: "Most popular and trending prediction markets",
-  },
-];
+const FALLBACK_TAGS = buildFallbackTags();
 
 /**
  * GET /api/tags
@@ -74,8 +34,6 @@ export async function GET(request: NextRequest) {
       ? `${POLYMARKET_API.GAMMA.BASE}/tags?${queryParams.toString()}`
       : `${POLYMARKET_API.GAMMA.BASE}/tags?order=updatedAt`;
 
-    // console.log("Fetching tags from:", url);
-
     const response = await fetch(url, {
       headers: {
         "Content-Type": "application/json",
@@ -84,9 +42,10 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      console.warn(
-        `Gamma API /tags endpoint not available (${response.status}), using fallback tags`
-      );
+      logger.warn("tags.list.upstream_unavailable", {
+        status: response.status,
+        statusText: response.statusText,
+      });
       // Use fallback tags if endpoint doesn't exist
       return NextResponse.json(
         {
@@ -100,10 +59,20 @@ export async function GET(request: NextRequest) {
     }
 
     const data = (await response.json()) as unknown[];
+    const normalizedTags = Array.isArray(data)
+      ? Array.from(
+          new Map(
+            data
+              .map((tag) => normalizeTagRecord(tag as Record<string, unknown>))
+              .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
+              .map((tag) => [tag.slug, tag])
+          ).values()
+        )
+      : [];
 
     // If data is empty or invalid, use fallback
-    if (!data || !Array.isArray(data) || data.length === 0) {
-      console.warn("Gamma API /tags returned empty data, using fallback tags");
+    if (normalizedTags.length === 0) {
+      logger.warn("tags.list.empty_payload");
       return NextResponse.json(
         {
           success: true,
@@ -119,14 +88,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        count: data.length,
-        tags: data,
+        count: normalizedTags.length,
+        tags: normalizedTags,
         fallback: false,
       },
       { headers: getCacheHeaders("static") }
     );
   } catch (error) {
-    console.error("Error fetching tags:", error);
+    logger.error("tags.list.fetch_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Return fallback tags instead of error
     return NextResponse.json(
       {
@@ -134,7 +105,6 @@ export async function GET(request: NextRequest) {
         count: FALLBACK_TAGS.length,
         tags: FALLBACK_TAGS,
         fallback: true,
-        error: error instanceof Error ? error.message : "Unknown error",
       },
       { headers: getCacheHeaders("static") }
     );

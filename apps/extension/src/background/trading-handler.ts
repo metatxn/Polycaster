@@ -26,7 +26,6 @@ import {
   POLYMARKET_API,
   SIGNATURE_TYPES,
 } from "@knoww/shared-types/polymarket";
-import { ClobClient } from "@polymarket/clob-client";
 import { ethers } from "ethers";
 import type {
   TradingDeriveCredentialsMessage,
@@ -312,6 +311,7 @@ async function handlePlaceOrder(
     POLYGON_CHAIN_ID
   );
   const signer = new BridgeSigner(msg.address, tabId, provider);
+  const { ClobClient } = await import("@polymarket/clob-client-v2");
   const builderConfig = createExtensionBuilderConfig();
 
   const creds = {
@@ -320,17 +320,16 @@ async function handlePlaceOrder(
     passphrase: msg.credentials.apiPassphrase,
   };
 
-  const client = new ClobClient(
-    CLOB_HOST,
-    POLYGON_CHAIN_ID,
+  const client = new ClobClient({
+    host: CLOB_HOST,
+    chain: POLYGON_CHAIN_ID,
     signer,
     creds,
-    SIGNATURE_TYPES.POLY_GNOSIS_SAFE,
-    msg.proxyAddress,
-    undefined,
-    false,
-    builderConfig as any
-  );
+    signatureType: SIGNATURE_TYPES.POLY_GNOSIS_SAFE,
+    funderAddress: msg.proxyAddress,
+    // TEMP: legacy proxy-signing config; Task 3 swaps this to { builderCode }
+    builderConfig: builderConfig as unknown as { builderCode: string },
+  });
 
   const feeRateBps = await client.getFeeRateBps(msg.tokenId);
   const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
@@ -443,7 +442,8 @@ async function handlePlaceOrder(
 async function handleGetFeeRate(
   msg: TradingGetFeeRateMessage
 ): Promise<TradingResponse> {
-  const client = new ClobClient(CLOB_HOST, POLYGON_CHAIN_ID);
+  const { ClobClient } = await import("@polymarket/clob-client-v2");
+  const client = new ClobClient({ host: CLOB_HOST, chain: POLYGON_CHAIN_ID });
   const feeRate = await client.getFeeRateBps(msg.tokenId);
   return ok({ feeRate });
 }

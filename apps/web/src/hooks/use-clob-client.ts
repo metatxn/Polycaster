@@ -95,7 +95,7 @@ export function useClobClient() {
     if (!proxyAddress) throw new Error("Proxy wallet not found");
 
     const [{ ClobClient }, signer] = await Promise.all([
-      import("@polymarket/clob-client"),
+      import("@polymarket/clob-client-v2"),
       getEthersSigner(),
     ]);
 
@@ -109,17 +109,16 @@ export function useClobClient() {
       passphrase: credentials.apiPassphrase,
     };
 
-    return new ClobClient(
-      CLOB_HOST,
-      CHAIN_ID,
+    return new ClobClient({
+      host: CLOB_HOST,
+      chain: CHAIN_ID,
       signer,
       creds,
-      SignatureType.POLY_GNOSIS_SAFE,
-      proxyAddress,
-      undefined,
-      false,
-      builderConfig
-    );
+      signatureType: SignatureType.POLY_GNOSIS_SAFE as unknown as number,
+      funderAddress: proxyAddress,
+      // TEMP: legacy proxy-signing config; Task 3 swaps this to { builderCode }
+      builderConfig: builderConfig as unknown as { builderCode: string },
+    });
   }, [credentials, proxyAddress, getEthersSigner]);
 
   /**
@@ -406,8 +405,8 @@ export function useClobClient() {
   const getFeeRateBps = useCallback(
     async (tokenId: string): Promise<number> => {
       try {
-        const { ClobClient } = await import("@polymarket/clob-client");
-        const client = new ClobClient(CLOB_HOST, CHAIN_ID);
+        const { ClobClient } = await import("@polymarket/clob-client-v2");
+        const client = new ClobClient({ host: CLOB_HOST, chain: CHAIN_ID });
         return await client.getFeeRateBps(tokenId);
       } catch (err) {
         console.error("Failed to get fee rate:", err);

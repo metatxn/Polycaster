@@ -18,8 +18,7 @@
   "dependencies": {
     "@huggingface/transformers": "4.1.0",
     "@knoww/shared-types": "workspace:*",
-    "@polymarket/clob-client": "5.8.1",
-    "@polymarket/order-utils": "3.0.1",
+    "@polymarket/clob-client-v2": "1.0.0",
     "decimal.js": "^10.6.0",
     "ethers": "5.8.0",
     "minisearch": "7.2.0",

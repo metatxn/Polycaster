@@ -148,7 +148,6 @@ export function useClobClient() {
 
       try {
         const client = await getClient();
-        const feeRateBps = await client.getFeeRateBps(params.tokenId);
         const orderOptions = params.negRisk ? { negRisk: true } : undefined;
 
         if (
@@ -176,7 +175,7 @@ export function useClobClient() {
               tokenID: params.tokenId,
               amount: marketAmount,
               side: params.side,
-              feeRateBps,
+              // feeRateBps removed (V2: protocol-determined at match time)
               ...(params.price > 0 ? { price: params.price } : {}),
             },
             orderOptions
@@ -192,7 +191,7 @@ export function useClobClient() {
             price: params.price,
             size: params.size,
             side: params.side,
-            feeRateBps,
+            // feeRateBps removed (V2: protocol-determined at match time)
             expiration:
               params.orderType === OrderType.GTD ? params.expiration : 0,
           },

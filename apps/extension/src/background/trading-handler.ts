@@ -331,7 +331,6 @@ async function handlePlaceOrder(
     builderConfig: builderConfig as unknown as { builderCode: string },
   });
 
-  const feeRateBps = await client.getFeeRateBps(msg.tokenId);
   const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
   const orderType = msg.orderType || "GTC";
 
@@ -362,7 +361,7 @@ async function handlePlaceOrder(
       tokenID: msg.tokenId,
       amount: marketAmount,
       side: msg.side,
-      feeRateBps,
+      // feeRateBps removed (V2: protocol-determined at match time)
       orderType,
     };
     if (msg.price && msg.price > 0) {
@@ -390,7 +389,6 @@ async function handlePlaceOrder(
     price: msg.price,
     size: msg.size,
     side: msg.side,
-    feeRateBps,
     orderType,
     expiration: orderType === "GTD" ? msg.expiration : 0,
     negRisk: !!msg.negRisk,
@@ -402,7 +400,7 @@ async function handlePlaceOrder(
       price: msg.price,
       size: msg.size,
       side: msg.side as any,
-      feeRateBps,
+      // feeRateBps removed (V2: protocol-determined at match time)
       expiration: orderType === "GTD" ? msg.expiration : 0,
     },
     orderOptions

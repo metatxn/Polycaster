@@ -5,10 +5,12 @@
  */
 
 import {
+  COLLATERAL_ONRAMP_ADDRESS,
   CTF_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
+  PUSD_ADDRESS,
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
   USDC_E_ADDRESS,
@@ -512,14 +514,14 @@ async function handleGetAllAllowances(
     ERC20_ALLOWANCE_ABI,
     provider
   );
+  const pusd = new ethers.Contract(PUSD_ADDRESS, ERC20_ALLOWANCE_ABI, provider);
   const ctf = new ethers.Contract(
     CTF_ADDRESS,
     ERC1155_IS_APPROVED_ABI,
     provider
   );
 
-  const erc20Targets = [
-    CTF_ADDRESS,
+  const pusdSpenders = [
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_CTF_EXCHANGE_ADDRESS,
     NEG_RISK_ADAPTER_ADDRESS,
@@ -532,22 +534,32 @@ async function handleGetAllAllowances(
 
   const allowances: Record<string, number> = {};
 
-  const erc20Results = await Promise.all(
-    erc20Targets.map((t) =>
-      usdc.allowance(msg.ownerAddress, t).catch(() => ethers.BigNumber.from(0))
-    )
+  const [usdcOnramp, pusdResults, erc1155Results] = await Promise.all([
+    usdc
+      .allowance(msg.ownerAddress, COLLATERAL_ONRAMP_ADDRESS)
+      .catch(() => ethers.BigNumber.from(0)),
+    Promise.all(
+      pusdSpenders.map((s) =>
+        pusd
+          .allowance(msg.ownerAddress, s)
+          .catch(() => ethers.BigNumber.from(0))
+      )
+    ),
+    Promise.all(
+      erc1155Operators.map((op) =>
+        ctf.isApprovedForAll(msg.ownerAddress, op).catch(() => false)
+      )
+    ),
+  ]);
+
+  allowances[`usdce:${COLLATERAL_ONRAMP_ADDRESS}`] = Number(
+    ethers.utils.formatUnits(usdcOnramp, 6)
   );
-  for (let i = 0; i < erc20Targets.length; i++) {
-    allowances[erc20Targets[i]] = Number(
-      ethers.utils.formatUnits(erc20Results[i], 6)
+  for (let i = 0; i < pusdSpenders.length; i++) {
+    allowances[`pusd:${pusdSpenders[i]}`] = Number(
+      ethers.utils.formatUnits(pusdResults[i], 6)
     );
   }
-
-  const erc1155Results = await Promise.all(
-    erc1155Operators.map((op) =>
-      ctf.isApprovedForAll(msg.ownerAddress, op).catch(() => false)
-    )
-  );
   for (let i = 0; i < erc1155Operators.length; i++) {
     allowances[`erc1155:${erc1155Operators[i]}`] = erc1155Results[i] ? 1 : 0;
   }
@@ -778,12 +790,17 @@ async function handleRelayerApprove(
   const erc1155Iface = new ethers.utils.Interface(ERC1155_SET_APPROVAL_ABI);
   const MAX_UINT256 = ethers.constants.MaxUint256;
 
-  const erc20Targets = [
-    CTF_ADDRESS,
+  // USDC.e gets approved to the Onramp only (for wrap()).
+  const usdcSpender = COLLATERAL_ONRAMP_ADDRESS;
+
+  // pUSD gets approved to the V2 exchanges and adapter for trading.
+  const pusdSpenders = [
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_CTF_EXCHANGE_ADDRESS,
     NEG_RISK_ADAPTER_ADDRESS,
   ];
+
+  // ERC-1155 outcome tokens approve the same exchanges/adapter as operators.
   const erc1155Operators = [
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_CTF_EXCHANGE_ADDRESS,
@@ -792,12 +809,18 @@ async function handleRelayerApprove(
 
   const proxyAddress = deriveProxyAddressSync(msg.address);
 
-  const needsErc20: string[] = [];
+  let needsUsdc = false;
+  const needsPusd: string[] = [];
   const needsErc1155: string[] = [];
 
   try {
     const usdc = new ethers.Contract(
       USDC_E_ADDRESS,
+      ERC20_ALLOWANCE_ABI,
+      provider
+    );
+    const pusd = new ethers.Contract(
+      PUSD_ADDRESS,
       ERC20_ALLOWANCE_ABI,
       provider
     );
@@ -808,10 +831,13 @@ async function handleRelayerApprove(
     );
     const THRESHOLD = ethers.utils.parseUnits("1000000", 6);
 
-    const [erc20Results, erc1155Results] = await Promise.all([
+    const [usdcAllowance, pusdAllowances, erc1155Results] = await Promise.all([
+      usdc
+        .allowance(proxyAddress, usdcSpender)
+        .catch(() => ethers.BigNumber.from(0)),
       Promise.all(
-        erc20Targets.map((t) =>
-          usdc.allowance(proxyAddress, t).catch(() => ethers.BigNumber.from(0))
+        pusdSpenders.map((s) =>
+          pusd.allowance(proxyAddress, s).catch(() => ethers.BigNumber.from(0))
         )
       ),
       Promise.all(
@@ -821,26 +847,39 @@ async function handleRelayerApprove(
       ),
     ]);
 
-    for (let i = 0; i < erc20Targets.length; i++) {
-      if (erc20Results[i].lt(THRESHOLD)) needsErc20.push(erc20Targets[i]);
+    if (usdcAllowance.lt(THRESHOLD)) needsUsdc = true;
+    for (let i = 0; i < pusdSpenders.length; i++) {
+      if (pusdAllowances[i].lt(THRESHOLD)) needsPusd.push(pusdSpenders[i]);
     }
     for (let i = 0; i < erc1155Operators.length; i++) {
       if (!erc1155Results[i]) needsErc1155.push(erc1155Operators[i]);
     }
   } catch {
-    needsErc20.push(...erc20Targets);
+    needsUsdc = true;
+    needsPusd.push(...pusdSpenders);
     needsErc1155.push(...erc1155Operators);
   }
 
-  if (needsErc20.length === 0 && needsErc1155.length === 0) {
+  if (!needsUsdc && needsPusd.length === 0 && needsErc1155.length === 0) {
     return ok({ txHash: "", alreadyApproved: true });
   }
 
   const txns: Array<{ to: string; data: string; value: string }> = [];
 
-  for (const spender of needsErc20) {
+  if (needsUsdc) {
     txns.push({
       to: USDC_E_ADDRESS,
+      data: erc20Iface.encodeFunctionData("approve", [
+        usdcSpender,
+        MAX_UINT256,
+      ]),
+      value: "0",
+    });
+  }
+
+  for (const spender of needsPusd) {
+    txns.push({
+      to: PUSD_ADDRESS,
       data: erc20Iface.encodeFunctionData("approve", [spender, MAX_UINT256]),
       value: "0",
     });
@@ -857,9 +896,7 @@ async function handleRelayerApprove(
     });
   }
 
-  logInfo("trading.relayer-approve.submit", {
-    txnCount: txns.length,
-  });
+  logInfo("trading.relayer-approve.submit", { txnCount: txns.length });
   const result = await executeViaRelayer(signer, txns);
   return ok({ txHash: result.txHash, success: true });
 }

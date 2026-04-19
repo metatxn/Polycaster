@@ -335,6 +335,21 @@ async function handlePlaceOrder(
   const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
   const orderType = msg.orderType || "GTC";
 
+  if (msg.side === "BUY") {
+    // Required pUSD = price * size for limit, or amount for market BUY
+    const requiredPusd =
+      orderType === "FAK" || orderType === "FOK"
+        ? ethers.utils.parseUnits(String(msg.amount ?? msg.size), 6)
+        : ethers.utils.parseUnits(String(msg.price * msg.size), 6);
+
+    await ensurePusdSufficient(
+      signer,
+      msg.proxyAddress,
+      requiredPusd,
+      provider
+    );
+  }
+
   try {
     await client.updateBalanceAllowance({
       asset_type: "COLLATERAL" as any,
@@ -899,6 +914,61 @@ async function handleRelayerApprove(
   logInfo("trading.relayer-approve.submit", { txnCount: txns.length });
   const result = await executeViaRelayer(signer, txns);
   return ok({ txHash: result.txHash, success: true });
+}
+
+const COLLATERAL_ONRAMP_WRAP_ABI = [
+  "function wrap(address _asset, address _to, uint256 _amount)",
+];
+
+async function ensurePusdSufficient(
+  signer: BridgeSigner,
+  proxyAddress: string,
+  requiredPusd: ethers.BigNumber,
+  provider: ethers.providers.StaticJsonRpcProvider
+): Promise<void> {
+  const pusd = new ethers.Contract(
+    PUSD_ADDRESS,
+    ["function balanceOf(address) view returns (uint256)"],
+    provider
+  );
+  const usdc = new ethers.Contract(
+    USDC_E_ADDRESS,
+    ["function balanceOf(address) view returns (uint256)"],
+    provider
+  );
+
+  const pusdBalance: ethers.BigNumber = await pusd.balanceOf(proxyAddress);
+  if (pusdBalance.gte(requiredPusd)) return;
+
+  const shortfall = requiredPusd.sub(pusdBalance);
+  const usdcBalance: ethers.BigNumber = await usdc.balanceOf(proxyAddress);
+  if (usdcBalance.lt(shortfall)) {
+    throw new Error(
+      `Insufficient collateral: need ${shortfall.toString()} more pUSD (or USDC.e to wrap), have ${pusdBalance.toString()} pUSD + ${usdcBalance.toString()} USDC.e`
+    );
+  }
+
+  const erc20Iface = new ethers.utils.Interface([
+    "function approve(address spender, uint256 amount) returns (bool)",
+  ]);
+  const onrampIface = new ethers.utils.Interface(COLLATERAL_ONRAMP_WRAP_ABI);
+
+  const approveCalldata = erc20Iface.encodeFunctionData("approve", [
+    COLLATERAL_ONRAMP_ADDRESS,
+    shortfall,
+  ]);
+  const wrapCalldata = onrampIface.encodeFunctionData("wrap", [
+    USDC_E_ADDRESS,
+    proxyAddress,
+    shortfall,
+  ]);
+
+  await executeViaRelayer(signer, [
+    { to: USDC_E_ADDRESS, data: approveCalldata, value: "0" },
+    { to: COLLATERAL_ONRAMP_ADDRESS, data: wrapCalldata, value: "0" },
+  ]);
+
+  logInfo("trading.auto-wrap", { wrapped: shortfall.toString() });
 }
 
 function deriveProxyAddressSync(eoaAddress: string): string {

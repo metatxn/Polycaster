@@ -43,7 +43,6 @@ import type {
   TradingSuccessResponse,
 } from "../types/chrome-messages";
 import { BridgeSigner } from "./bridge-signer";
-import { createExtensionBuilderConfig } from "./builder-config";
 import { logInfo, logWarn } from "./logger";
 import { executeViaRelayer } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
@@ -312,13 +311,14 @@ async function handlePlaceOrder(
   );
   const signer = new BridgeSigner(msg.address, tabId, provider);
   const { ClobClient } = await import("@polymarket/clob-client-v2");
-  const builderConfig = createExtensionBuilderConfig();
 
   const creds = {
     key: msg.credentials.apiKey,
     secret: msg.credentials.apiSecret,
     passphrase: msg.credentials.apiPassphrase,
   };
+
+  const builderCode = process.env.POLY_BUILDER_CODE;
 
   const client = new ClobClient({
     host: CLOB_HOST,
@@ -327,8 +327,7 @@ async function handlePlaceOrder(
     creds,
     signatureType: SIGNATURE_TYPES.POLY_GNOSIS_SAFE,
     funderAddress: msg.proxyAddress,
-    // TEMP: legacy proxy-signing config; Task 3 swaps this to { builderCode }
-    builderConfig: builderConfig as unknown as { builderCode: string },
+    ...(builderCode ? { builderConfig: { builderCode } } : {}),
   });
 
   const orderOptions = msg.negRisk ? { negRisk: true } : undefined;

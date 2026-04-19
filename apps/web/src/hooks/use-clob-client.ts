@@ -9,9 +9,7 @@ import {
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
 import { SignatureType } from "@/lib/polymarket";
-import { createBuilderConfig } from "@/lib/remote-builder-config";
 import { getRpcUrl } from "@/lib/rpc";
-import { getBuilderSignProxyUrl } from "@/lib/sign-proxy-url";
 import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
 
@@ -99,15 +97,13 @@ export function useClobClient() {
       getEthersSigner(),
     ]);
 
-    const builderConfig = createBuilderConfig({
-      url: getBuilderSignProxyUrl(),
-    });
-
     const creds = {
       key: credentials.apiKey,
       secret: credentials.apiSecret,
       passphrase: credentials.apiPassphrase,
     };
+
+    const builderCode = process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
 
     return new ClobClient({
       host: CLOB_HOST,
@@ -116,8 +112,7 @@ export function useClobClient() {
       creds,
       signatureType: SignatureType.POLY_GNOSIS_SAFE as unknown as number,
       funderAddress: proxyAddress,
-      // TEMP: legacy proxy-signing config; Task 3 swaps this to { builderCode }
-      builderConfig: builderConfig as unknown as { builderCode: string },
+      ...(builderCode ? { builderConfig: { builderCode } } : {}),
     });
   }, [credentials, proxyAddress, getEthersSigner]);
 

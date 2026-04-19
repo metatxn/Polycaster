@@ -222,6 +222,9 @@ module.exports = (_env, argv) => {
         "process.env.NODE_ENV": JSON.stringify(
           isProduction ? "production" : "development"
         ),
+        "process.env.POLY_BUILDER_CODE": JSON.stringify(
+          process.env.POLY_BUILDER_CODE || ""
+        ),
       }),
       new webpack.ProvidePlugin({
         Buffer: ["buffer", "Buffer"],

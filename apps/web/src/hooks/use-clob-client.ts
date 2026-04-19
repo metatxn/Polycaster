@@ -1,15 +1,22 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useConnection } from "wagmi";
+import { useConnection, useWalletClient } from "wagmi";
+import { COLLATERAL_ONRAMP_ABI } from "@/constants/abi";
 import {
+  COLLATERAL_ONRAMP_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
+  PUSD_ADDRESS,
+  PUSD_DECIMALS,
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
+import { POLYGON_CHAIN_ID, RELAYER_API_URL } from "@/constants/polymarket";
 import { SignatureType } from "@/lib/polymarket";
+import { createBuilderConfig } from "@/lib/remote-builder-config";
 import { getRpcUrl } from "@/lib/rpc";
+import { getBuilderSignProxyUrl } from "@/lib/sign-proxy-url";
 import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
 
@@ -64,12 +71,41 @@ const CHAIN_ID = Number(process.env.NEXT_PUBLIC_POLYMARKET_CHAIN_ID || "137");
  */
 export function useClobClient() {
   const { address, isConnected } = useConnection();
+  const { data: walletClient } = useWalletClient();
   const { credentials, hasCredentials, deriveCredentials } =
     useClobCredentials();
   const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+
+  /**
+   * Lazily construct a Polymarket RelayClient.
+   *
+   * Mirrors the instantiation pattern in `use-ctf-operations.ts` and
+   * `use-withdraw.ts` so we can dispatch a gasless multiSend on behalf
+   * of the user's Safe (e.g. wrap USDC.e → pUSD before a BUY order).
+   */
+  const getRelayClient = useCallback(async () => {
+    if (!walletClient || !address) {
+      throw new Error("Wallet not connected");
+    }
+
+    const signProxyUrl = getBuilderSignProxyUrl();
+    if (!signProxyUrl) {
+      throw new Error("Builder sign proxy URL not configured");
+    }
+
+    const { RelayClient } = await import("@polymarket/builder-relayer-client");
+    const builderConfig = createBuilderConfig({ url: signProxyUrl });
+
+    return new RelayClient(
+      RELAYER_API_URL,
+      POLYGON_CHAIN_ID,
+      walletClient,
+      builderConfig
+    );
+  }, [walletClient, address]);
 
   /**
    * Internal helper to get ethers signer from window.ethereum
@@ -131,6 +167,138 @@ export function useClobClient() {
   }, [isConnected, hasCredentials, hasProxyWallet, proxyAddress]);
 
   /**
+   * Ensure the proxy wallet has enough pUSD to cover a BUY order.
+   *
+   * Polymarket CLOB V2 settles BUY orders in pUSD (wrapped USDC.e). Most
+   * users only hold USDC.e, so before posting a BUY we check the pUSD
+   * balance and, if short, dispatch a gasless relayer batch that:
+   *   1. approves USDC.e → CollateralOnramp (the shortfall)
+   *   2. calls CollateralOnramp.wrap(USDC.e, proxy, shortfall)
+   *
+   * The Onramp converts USDC.e → pUSD 1:1 and credits the proxy, so when
+   * the order is matched the CTF Exchange V2 can pull the pUSD directly.
+   *
+   * SELL orders receive pUSD and never need this, so callers should only
+   * invoke this for BUY paths.
+   *
+   * @param requiredPusdRaw - Required pUSD amount in base units (6 decimals).
+   */
+  const ensurePusdSufficient = useCallback(
+    async (requiredPusdRaw: bigint) => {
+      if (!proxyAddress) throw new Error("Proxy wallet not found");
+      if (requiredPusdRaw <= BigInt(0)) return;
+
+      const { createPublicClient, http, encodeFunctionData, formatUnits } =
+        await import("viem");
+      const { polygon } = await import("viem/chains");
+
+      const ERC20_READ_APPROVE_ABI = [
+        {
+          inputs: [{ name: "owner", type: "address" }],
+          name: "balanceOf",
+          outputs: [{ name: "", type: "uint256" }],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            { name: "spender", type: "address" },
+            { name: "amount", type: "uint256" },
+          ],
+          name: "approve",
+          outputs: [{ name: "", type: "bool" }],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+      ] as const;
+
+      const publicClient = createPublicClient({
+        chain: polygon,
+        transport: http(getRpcUrl()),
+      });
+
+      const pusdBalance = (await publicClient.readContract({
+        address: PUSD_ADDRESS,
+        abi: ERC20_READ_APPROVE_ABI,
+        functionName: "balanceOf",
+        args: [proxyAddress as `0x${string}`],
+      })) as bigint;
+
+      if (pusdBalance >= requiredPusdRaw) return;
+
+      const shortfall = requiredPusdRaw - pusdBalance;
+
+      const usdcBalance = (await publicClient.readContract({
+        address: USDC_E_ADDRESS,
+        abi: ERC20_READ_APPROVE_ABI,
+        functionName: "balanceOf",
+        args: [proxyAddress as `0x${string}`],
+      })) as bigint;
+
+      if (usdcBalance < shortfall) {
+        const needed = formatUnits(shortfall, PUSD_DECIMALS);
+        const haveUsdc = formatUnits(usdcBalance, USDC_E_DECIMALS);
+        const havePusd = formatUnits(pusdBalance, PUSD_DECIMALS);
+        throw new Error(
+          `Insufficient collateral: need $${needed} more to place this order. ` +
+            `Proxy holds $${havePusd} pUSD and $${haveUsdc} USDC.e — ` +
+            "please deposit more USDC.e."
+        );
+      }
+
+      const approveData = encodeFunctionData({
+        abi: ERC20_READ_APPROVE_ABI,
+        functionName: "approve",
+        args: [COLLATERAL_ONRAMP_ADDRESS, shortfall],
+      });
+      const wrapData = encodeFunctionData({
+        abi: COLLATERAL_ONRAMP_ABI,
+        functionName: "wrap",
+        args: [USDC_E_ADDRESS, proxyAddress as `0x${string}`, shortfall],
+      });
+
+      const relayClient = await getRelayClient();
+      const response = await relayClient.execute([
+        { to: USDC_E_ADDRESS, data: approveData, value: "0" },
+        { to: COLLATERAL_ONRAMP_ADDRESS, data: wrapData, value: "0" },
+      ]);
+
+      // Poll until the wrap lands — without this, the order post can race
+      // ahead and fail validation because pUSD isn't credited yet.
+      const transactionID = response.transactionID;
+      const successStates = [
+        "STATE_EXECUTED",
+        "STATE_MINED",
+        "STATE_CONFIRMED",
+      ];
+      const failureStates = ["STATE_FAILED", "STATE_INVALID"];
+      const maxAttempts = 15;
+      const pollInterval = 2000;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const txns = await relayClient.getTransaction(transactionID);
+        if (txns && txns.length > 0) {
+          const tx = txns[0];
+          if (failureStates.includes(tx.state)) {
+            throw new Error(
+              `Wrap USDC.e → pUSD failed with state: ${tx.state}`
+            );
+          }
+          if (successStates.includes(tx.state)) return;
+        }
+        if (attempt < maxAttempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        }
+      }
+
+      throw new Error(
+        "Wrap USDC.e → pUSD did not confirm in time. Please retry."
+      );
+    },
+    [proxyAddress, getRelayClient]
+  );
+
+  /**
    * Create and post an order
    */
   const createOrder = useCallback(
@@ -145,10 +313,32 @@ export function useClobClient() {
         const client = await getClient();
         const orderOptions = params.negRisk ? { negRisk: true } : undefined;
 
-        if (
+        const isMarket =
           params.orderType === OrderType.FAK ||
-          params.orderType === OrderType.FOK
-        ) {
+          params.orderType === OrderType.FOK;
+
+        // Wrap-on-trade pre-flight (BUY only). SELL receives pUSD and does
+        // not need collateral wrapped beforehand.
+        if (params.side === Side.BUY) {
+          const { parseUnits } = await import("viem");
+          let requiredPusdRaw: bigint;
+          if (isMarket) {
+            const notional = params.amount;
+            if (notional == null) {
+              throw new Error(
+                "BUY market orders require a notional amount (params.amount)"
+              );
+            }
+            requiredPusdRaw = parseUnits(notional.toString(), PUSD_DECIMALS);
+          } else {
+            // Limit BUY: price (dollars) * size (shares) = notional dollars.
+            const notional = params.price * params.size;
+            requiredPusdRaw = parseUnits(notional.toString(), PUSD_DECIMALS);
+          }
+          await ensurePusdSufficient(requiredPusdRaw);
+        }
+
+        if (isMarket) {
           const buyAmount = params.amount;
 
           if (params.side !== Side.SELL && buyAmount == null) {
@@ -204,7 +394,7 @@ export function useClobClient() {
         setIsLoading(false);
       }
     },
-    [address, canTrade, getClient]
+    [address, canTrade, getClient, ensurePusdSufficient]
   );
 
   /**
@@ -240,7 +430,17 @@ export function useClobClient() {
   }, [canTrade, getClient]);
 
   /**
-   * Update (set) the allowance for trading
+   * Update (set) the CLOB V2 allowance set for the connected EOA.
+   *
+   * V2 moves collateral through pUSD, so the manual approve flow must:
+   *   - Approve USDC.e → CollateralOnramp (so the Onramp can pull USDC.e
+   *     when wrapping to pUSD)
+   *   - Approve pUSD → standard CTF Exchange V2
+   *   - Approve pUSD → Neg Risk CTF Exchange V2
+   *
+   * Note: The gasless onboarding path in `use-relayer-client.ts` already
+   * sets approvals on the user's Safe. This callback is the fallback for
+   * manual EOA approvals.
    */
   const updateAllowance = useCallback(async () => {
     if (!address) throw new Error("Wallet not connected");
@@ -252,7 +452,7 @@ export function useClobClient() {
       const [{ createWalletClient, custom, maxUint256 }, { polygon }] =
         await Promise.all([import("viem"), import("viem/chains")]);
 
-      const ERC20_ABI = [
+      const ERC20_APPROVE_ABI = [
         {
           inputs: [
             { name: "spender", type: "address" },
@@ -280,11 +480,11 @@ export function useClobClient() {
 
       await walletClient.requestAddresses();
 
-      const approve = async (spender: `0x${string}`) => {
+      const approve = async (token: `0x${string}`, spender: `0x${string}`) => {
         const hash = await walletClient.writeContract({
           account: address,
-          address: USDC_E_ADDRESS,
-          abi: ERC20_ABI,
+          address: token,
+          abi: ERC20_APPROVE_ABI,
           functionName: "approve",
           args: [spender, maxUint256],
         });
@@ -301,18 +501,19 @@ export function useClobClient() {
       };
 
       const hashes = await Promise.all([
-        approve(CTF_EXCHANGE_ADDRESS),
-        approve(NEG_RISK_CTF_EXCHANGE_ADDRESS),
+        approve(USDC_E_ADDRESS, COLLATERAL_ONRAMP_ADDRESS),
+        approve(PUSD_ADDRESS, CTF_EXCHANGE_ADDRESS),
+        approve(PUSD_ADDRESS, NEG_RISK_CTF_EXCHANGE_ADDRESS),
       ]);
 
       return {
         success: true,
         hashes,
-        message: "Approved both CTF Exchange and NegRisk CTF Exchange",
+        message:
+          "Approved USDC.e → Onramp and pUSD → CTF Exchange V2 + Neg Risk Exchange V2",
       };
     } catch (err) {
-      const error =
-        err instanceof Error ? err : new Error("Failed to approve USDC");
+      const error = err instanceof Error ? err : new Error("Failed to approve");
       setError(error);
       throw error;
     } finally {
@@ -391,6 +592,52 @@ export function useClobClient() {
       }
     },
     [address]
+  );
+
+  /**
+   * Get pUSD balance for the given address (defaults to the proxy wallet).
+   *
+   * pUSD is what CLOB V2 actually settles against — BUY orders debit it,
+   * SELL orders credit it. Use this together with `getUsdcBalance` to
+   * determine whether a wrap (USDC.e → pUSD) is needed before posting.
+   */
+  const getPusdBalance = useCallback(
+    async (walletAddress?: string) => {
+      const targetAddress = walletAddress || proxyAddress;
+      if (!targetAddress) throw new Error("No wallet address");
+
+      const { createPublicClient, http, formatUnits } = await import("viem");
+      const { polygon } = await import("viem/chains");
+
+      const ERC20_BALANCE_ABI = [
+        {
+          inputs: [{ name: "owner", type: "address" }],
+          name: "balanceOf",
+          outputs: [{ name: "", type: "uint256" }],
+          stateMutability: "view",
+          type: "function",
+        },
+      ] as const;
+
+      const client = createPublicClient({
+        chain: polygon,
+        transport: http(getRpcUrl()),
+      });
+
+      const balance = await client.readContract({
+        address: PUSD_ADDRESS,
+        abi: ERC20_BALANCE_ABI,
+        functionName: "balanceOf",
+        args: [targetAddress as `0x${string}`],
+      });
+
+      return {
+        balance: Number(formatUnits(balance, PUSD_DECIMALS)),
+        balanceRaw: balance.toString(),
+        decimals: PUSD_DECIMALS,
+      };
+    },
+    [proxyAddress]
   );
 
   /**
@@ -521,6 +768,7 @@ export function useClobClient() {
     deriveCredentials,
     updateAllowance,
     getUsdcBalance,
+    getPusdBalance,
     getUsdcAllowance,
     getFeeRateBps,
     isOrderScoring,

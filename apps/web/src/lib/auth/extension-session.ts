@@ -7,7 +7,11 @@ const TOKEN_TTL_MS = 15 * 60 * 1000;
 const SESSION_RECORD_PREFIX = "extension-sessions/v1/records";
 const SUBJECT_RECORD_PREFIX = "extension-sessions/v1/subjects";
 
-export type ExtensionScope = "builder:sign" | "ai:extract" | "ai:validate";
+export type ExtensionScope =
+  | "builder:sign"
+  | "ai:extract"
+  | "ai:validate"
+  | "relayer:submit";
 
 export interface ExtensionSessionClaims {
   aud: string;
@@ -402,7 +406,12 @@ export async function issueExtensionSessionToken(input: {
     iat: now,
     iss: TOKEN_ISSUER,
     jti: crypto.randomUUID(),
-    scope: input.scope ?? ["builder:sign", "ai:extract", "ai:validate"],
+    scope: input.scope ?? [
+      "builder:sign",
+      "ai:extract",
+      "ai:validate",
+      "relayer:submit",
+    ],
     sub: input.address.toLowerCase(),
   };
 

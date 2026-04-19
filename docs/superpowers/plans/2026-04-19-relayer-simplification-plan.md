@@ -43,134 +43,228 @@
 - Create: `apps/web/src/app/api/relayer/[...path]/route.ts`
 - Modify: `apps/web/.env.local.example`
 
-- [ ] **Step R1.1: Create the proxy route**
+- [ ] **Step R1.1: Read the existing /api/sign route for the auth pattern**
+
+Open `apps/web/src/app/api/sign/route.ts`. Note the security model:
+- Extension requests: `requireExtensionSession(request, "<scope>")` from `@/lib/auth/extension-session`
+- Web requests: `checkOriginAndFetchSite(request)` from `@/lib/origin-guard`
+- Rate limiting: `checkRateLimit(request, ...)` from `@/lib/api-rate-limit`
+- Body size cap: streamed read with hard byte limit
+
+The new proxy mirrors all four layers, just with a different upstream + different auth scope name.
+
+- [ ] **Step R1.2: Create the proxy route**
 
 Create `apps/web/src/app/api/relayer/[...path]/route.ts`:
 
 ```ts
 import { type NextRequest, NextResponse } from "next/server";
-
-const UPSTREAM_BASE = "https://relayer-v2.polymarket.com";
-
-const RELAYER_API_KEY = process.env.POLY_RELAYER_API_KEY;
-const RELAYER_API_KEY_ADDRESS = process.env.POLY_RELAYER_API_KEY_ADDRESS;
-
-// Allow-listed paths under /api/relayer/* — anything else is rejected.
-const ALLOWED_PATHS = new Set(["submit", "nonce", "transaction", "deployed"]);
-
-function unauthorized(reason: string) {
-  return NextResponse.json({ ok: false, error: reason }, { status: 401 });
-}
-
-function badRequest(reason: string) {
-  return NextResponse.json({ ok: false, error: reason }, { status: 400 });
-}
-
-function serverError(reason: string) {
-  console.error("[relayer-proxy] server error:", reason);
-  return NextResponse.json({ ok: false, error: reason }, { status: 500 });
-}
+import { checkRateLimit } from "@/lib/api-rate-limit";
+import { requireExtensionSession } from "@/lib/auth/extension-session";
+import { checkOriginAndFetchSite } from "@/lib/origin-guard";
 
 /**
- * Authorize the caller. Two paths:
- * 1. Extension: requires Authorization: Bearer <EXTENSION_AUTH_TOKEN>
- * 2. Web: requires same-origin (Origin or Referer header matches NEXT_PUBLIC_APP_URL)
+ * Server-side proxy for Polymarket's V2 Relayer.
+ *
+ * The web app and extension call this route instead of relayer-v2.polymarket.com
+ * directly. This keeps POLY_RELAYER_API_KEY entirely server-side — it never
+ * appears in the browser bundle, extension bundle, or network requests from
+ * either client.
+ *
+ * Flow:
+ *   Browser    → POST /api/relayer/{path} → this route → relayer-v2.polymarket.com/{path}
+ *   Extension  → POST /api/relayer/{path} → this route → relayer-v2.polymarket.com/{path}
+ *
+ * Security layers (mirror /api/sign):
+ *   1. Origin + Sec-Fetch-Site validation for first-party web requests
+ *      — OR — signed extension bearer session for extension requests
+ *   2. Per-IP rate limiting (60 req/min — relayer flows are chattier than signing)
+ *   3. Body size limit (16 KB — multiSend payloads can be larger than HMAC asks)
+ *   4. Request timeout (30 s — relayer can be slower than signing server)
+ *
+ * Environment variables (server-only, NO NEXT_PUBLIC_ prefix):
+ *   POLY_RELAYER_API_KEY         – Polymarket V2 relayer API key
+ *   POLY_RELAYER_API_KEY_ADDRESS – Address that owns the relayer key
+ *   EXTENSION_SESSION_SECRET     – extension session signing secret
  */
-function authorize(req: NextRequest): { ok: true } | { ok: false; reason: string } {
-  // Extension path: bearer token
-  const auth = req.headers.get("authorization");
-  const expectedExtensionToken = process.env.EXTENSION_AUTH_TOKEN;
-  if (auth?.startsWith("Bearer ")) {
-    const token = auth.slice("Bearer ".length).trim();
-    if (expectedExtensionToken && token === expectedExtensionToken) {
-      return { ok: true };
-    }
-    return { ok: false, reason: "invalid extension token" };
-  }
 
-  // Web path: same-origin check
-  const expectedOrigin = process.env.NEXT_PUBLIC_APP_URL;
-  if (!expectedOrigin) {
-    return { ok: false, reason: "NEXT_PUBLIC_APP_URL not configured" };
+const UPSTREAM_BASE = "https://relayer-v2.polymarket.com";
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_BODY_SIZE = 16 * 1024;
+
+// Allow-listed Polymarket relayer endpoints.
+const ALLOWED_PATHS = new Set(["submit", "nonce", "transaction", "deployed"]);
+
+function getContentLength(request: NextRequest): number | null {
+  const header = request.headers.get("content-length");
+  if (!header) return null;
+  const parsed = Number.parseInt(header, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+async function readBodyWithLimit(
+  request: NextRequest,
+  maxBytes: number
+): Promise<string | null> {
+  const body = request.body;
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  const origin = req.headers.get("origin");
-  const referer = req.headers.get("referer");
-  if (origin === expectedOrigin) return { ok: true };
-  if (referer?.startsWith(expectedOrigin)) return { ok: true };
-  return { ok: false, reason: "origin not allowed" };
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+async function authorize(request: NextRequest): Promise<NextResponse | null> {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const { response } = await requireExtensionSession(request, "relayer:submit");
+    return response ?? null;
+  }
+  return checkOriginAndFetchSite(request) ?? null;
 }
 
 async function proxy(
-  req: NextRequest,
+  request: NextRequest,
   pathSegments: string[],
   method: "GET" | "POST"
-) {
-  if (!RELAYER_API_KEY || !RELAYER_API_KEY_ADDRESS) {
-    return serverError("relayer api key not configured");
-  }
+): Promise<NextResponse> {
+  // Layer 1: caller identity
+  const authError = await authorize(request);
+  if (authError) return authError;
 
-  const auth = authorize(req);
-  if (!auth.ok) return unauthorized(auth.reason);
+  // Layer 2: rate limit (60/min/IP)
+  const rateLimitResponse = checkRateLimit(request, {
+    uniqueTokenPerInterval: 60,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
 
-  const path = pathSegments.join("/");
-  if (!ALLOWED_PATHS.has(pathSegments[0] ?? "")) {
-    return badRequest(`path not allowed: /${path}`);
-  }
-
-  const search = req.nextUrl.search;
-  const upstreamUrl = `${UPSTREAM_BASE}/${path}${search}`;
-
-  const upstreamHeaders: Record<string, string> = {
-    RELAYER_API_KEY,
-    RELAYER_API_KEY_ADDRESS,
-  };
-  let body: string | undefined;
-  if (method === "POST") {
-    upstreamHeaders["Content-Type"] = "application/json";
-    body = await req.text();
-  }
-
-  let upstreamRes: Response;
-  try {
-    upstreamRes = await fetch(upstreamUrl, {
-      method,
-      headers: upstreamHeaders,
-      body,
-    });
-  } catch (err) {
-    return serverError(
-      `upstream fetch failed: ${err instanceof Error ? err.message : String(err)}`
+  // Layer 3a: path allow-list
+  const head = pathSegments[0] ?? "";
+  if (!ALLOWED_PATHS.has(head)) {
+    return NextResponse.json(
+      { error: `Path not allowed: /${head}` },
+      { status: 400 }
     );
   }
 
-  const responseBody = await upstreamRes.text();
-  return new NextResponse(responseBody, {
-    status: upstreamRes.status,
-    headers: {
-      "Content-Type":
-        upstreamRes.headers.get("Content-Type") ?? "application/json",
-    },
-  });
+  // Layer 3b: oversize body fast-reject
+  const contentLength = getContentLength(request);
+  if (contentLength !== null && contentLength > MAX_BODY_SIZE) {
+    return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+  }
+
+  // Server config check
+  const apiKey = process.env.POLY_RELAYER_API_KEY;
+  const apiKeyAddress = process.env.POLY_RELAYER_API_KEY_ADDRESS;
+  if (!apiKey || !apiKeyAddress) {
+    console.error("[Relayer Proxy] POLY_RELAYER_API_KEY(_ADDRESS) not configured");
+    return NextResponse.json(
+      { error: "Relayer not configured" },
+      { status: 503 }
+    );
+  }
+
+  // Layer 3c: streamed body with hard byte cap
+  let body: string | undefined;
+  if (method === "POST") {
+    const rawBody = await readBodyWithLimit(request, MAX_BODY_SIZE);
+    if (rawBody === null) {
+      return NextResponse.json({ error: "Request body too large" }, { status: 413 });
+    }
+    // Validate JSON shape so we don't forward garbage
+    try {
+      JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+    }
+    body = rawBody;
+  }
+
+  const upstreamUrl = `${UPSTREAM_BASE}/${pathSegments.join("/")}${request.nextUrl.search}`;
+  const upstreamHeaders: Record<string, string> = {
+    RELAYER_API_KEY: apiKey,
+    RELAYER_API_KEY_ADDRESS: apiKeyAddress,
+  };
+  if (method === "POST") {
+    upstreamHeaders["Content-Type"] = "application/json";
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    let upstream: Response;
+    try {
+      upstream = await fetch(upstreamUrl, {
+        method,
+        headers: upstreamHeaders,
+        body,
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      if (fetchError instanceof Error && fetchError.name === "AbortError") {
+        console.error("[Relayer Proxy] Upstream timed out");
+        return NextResponse.json({ error: "Relayer request timed out" }, { status: 504 });
+      }
+      throw fetchError;
+    }
+
+    const upstreamBody = await upstream.text();
+    return new NextResponse(upstreamBody, {
+      status: upstream.status,
+      headers: {
+        "Content-Type":
+          upstream.headers.get("Content-Type") ?? "application/json",
+      },
+    });
+  } catch (error) {
+    console.error("[Relayer Proxy] Error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function GET(
-  req: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await context.params;
-  return proxy(req, path, "GET");
+  return proxy(request, path, "GET");
 }
 
 export async function POST(
-  req: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await context.params;
-  return proxy(req, path, "POST");
+  return proxy(request, path, "POST");
 }
 ```
 
-- [ ] **Step R1.2: Add env placeholders**
+**Note on the extension session scope:** the value `"relayer:submit"` is passed to `requireExtensionSession`. Verify by reading `apps/web/src/lib/auth/extension-session.ts` what the scope argument is used for — if it's a free-form string used for logging/audit, anything descriptive is fine. If it's an enum/whitelist, add `"relayer:submit"` to the allowed list (or reuse an existing scope like `"builder:sign"` if there's one already valid for this kind of cross-origin call).
+
+- [ ] **Step R1.3: Add env placeholders**
 
 Append to `apps/web/.env.local.example`:
 
@@ -182,12 +276,12 @@ POLY_RELAYER_API_KEY=
 POLY_RELAYER_API_KEY_ADDRESS=
 ```
 
-- [ ] **Step R1.3: Verify build is green**
+- [ ] **Step R1.4: Verify build is green**
 
 Run: `pnpm -r typecheck && pnpm -r build`
 Expected: both pass. The new route's behavior isn't tested yet — that comes in R10.
 
-- [ ] **Step R1.4: Commit**
+- [ ] **Step R1.5: Commit**
 
 ```bash
 git add apps/web/src/app/api/relayer apps/web/.env.local.example

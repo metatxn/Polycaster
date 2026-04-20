@@ -25,10 +25,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useClobClient } from "@/hooks/use-clob-client";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
+import { checkAllApprovals } from "@/lib/approvals";
 import { cn } from "@/lib/utils";
 
 interface OnboardingStep {
@@ -68,7 +68,6 @@ export function TradingOnboarding({
     refresh: refreshProxyWallet,
     proxyAddress: computedProxyAddress,
   } = useProxyWallet();
-  const { getUsdcAllowance } = useClobClient();
 
   // Use relayer state as primary source (most reliable after deployment)
   const hasProxyWallet = hasDeployedSafe || hasProxyWalletFromHook;
@@ -101,8 +100,9 @@ export function TradingOnboarding({
     },
     {
       id: "approve",
-      title: "Enable USDC Trading",
-      description: "One-time approval to trade with USDC • Free & gasless",
+      title: "Approve Trading Permissions",
+      description:
+        "One-time approvals for pUSD, USDC.e (auto-wrap), and outcome tokens • Free & gasless",
       icon: <Zap className="h-5 w-5" />,
       status: "pending",
     },
@@ -131,32 +131,32 @@ export function TradingOnboarding({
   );
 
   /**
-   * Check if USDC is already approved for trading
-   * This is for returning users who have already completed onboarding
-   * IMPORTANT: Must check the PROXY WALLET's allowance, not the EOA's
+   * Check if ALL V2 trading approvals are already set on the Safe.
+   *
+   * V2 requires 7 approvals (see `checkAllApprovals` in `@/lib/approvals`):
+   *   pUSD → CTF Exchange V2, Neg Risk Exchange V2, Neg Risk Adapter
+   *   USDC.e → Collateral Onramp (for on-demand wrap on BUY)
+   *   CTF setApprovalForAll → those same three operators (needed for SELL)
+   *
+   * Returning users with legacy V1 (USDC.e-only) approvals must re-run the
+   * batch to unlock V2 settlement — hence we check every target, not just
+   * one USDC allowance.
    */
   const checkUsdcApproval = useCallback(async () => {
     if (!hasProxyWallet || !proxyAddress || isCheckingApproval) return;
 
     setIsCheckingApproval(true);
     try {
-      // Pass the proxy wallet address to check its allowance
-      const result = await getUsdcAllowance(proxyAddress);
-      // Consider approved if allowance is greater than 0 (any approval exists)
-      const isApproved = result && result.allowance > 0;
-      console.log("[TradingOnboarding] USDC allowance check:", {
-        proxyAddress,
-        allowance: result?.allowance,
-        isApproved,
-      });
-      setHasUsdcApproval(isApproved);
+      const status = await checkAllApprovals(proxyAddress);
+      console.log("[TradingOnboarding] V2 approval status:", status);
+      setHasUsdcApproval(status.allApproved);
     } catch (err) {
-      console.error("[TradingOnboarding] Failed to check USDC allowance:", err);
+      console.error("[TradingOnboarding] Failed to check V2 approvals:", err);
       setHasUsdcApproval(false);
     } finally {
       setIsCheckingApproval(false);
     }
-  }, [hasProxyWallet, proxyAddress, isCheckingApproval, getUsdcAllowance]);
+  }, [hasProxyWallet, proxyAddress, isCheckingApproval]);
 
   const handleConnectWallet = useCallback(async () => {
     updateStepStatus("connect", "in_progress");
@@ -205,7 +205,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "approve",
         "error",
-        err instanceof Error ? err.message : "Failed to approve USDC"
+        err instanceof Error ? err.message : "Failed to submit approval batch"
       );
     }
   }, [approveUsdcForTrading, updateStepStatus]);
@@ -225,7 +225,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "credentials",
         "error",
-        "Please complete the USDC approval step first"
+        "Please complete the approvals step first"
       );
       return;
     }
@@ -584,7 +584,7 @@ export function TradingOnboarding({
                     : step.id === "deploy"
                       ? "Wallet"
                       : step.id === "approve"
-                        ? "USDC"
+                        ? "Approvals"
                         : "API"}
                 </span>
               );
@@ -648,7 +648,7 @@ export function TradingOnboarding({
                       ? step.id === "deploy"
                         ? "Creating your secure wallet... This may take 10-30 seconds"
                         : step.id === "approve"
-                          ? "Approving USDC... This may take 10-30 seconds"
+                          ? "Submitting approval batch... This may take 10-30 seconds"
                           : step.id === "credentials"
                             ? "Generating your trading credentials..."
                             : step.id === "connect"
@@ -714,9 +714,11 @@ export function TradingOnboarding({
               </>
             ) : currentStep === 2 ? (
               <>
-                <strong>🔐 USDC Approval:</strong> This one-time approval lets
-                you trade instantly. Your funds stay in your wallet until you
-                place a trade.
+                <strong>🔐 V2 Trading Permissions:</strong> One gasless batch
+                grants 7 allowances so the V2 exchange can settle your trades:
+                pUSD → CTF Exchange (buy), USDC.e → Onramp (auto-wrap), and
+                outcome tokens → Exchange (sell). Funds never leave your Safe
+                until you trade.
               </>
             ) : currentStep === 3 ? (
               <>

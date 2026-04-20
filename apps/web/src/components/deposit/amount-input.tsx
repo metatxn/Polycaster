@@ -110,7 +110,7 @@ export function AmountInput({
             />
           </div>
           <span className="text-sm text-muted-foreground">You receive</span>
-          <span className="font-medium text-foreground">USDC.e</span>
+          <span className="font-medium text-foreground">pUSD</span>
         </div>
       </div>
 

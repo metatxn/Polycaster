@@ -1,6 +1,6 @@
 "use client";
 
-import { POLYMARKET_API, WEBSOCKET_CONFIG } from "@/constants/polymarket";
+import { CLOB_WS_MARKET_URL, WEBSOCKET_CONFIG } from "@/constants/polymarket";
 import { logger } from "@/lib/logger";
 import { filterValidTokenIds } from "@/lib/token-validation";
 import type { ConnectionState, WebSocketEvent } from "@/types/websocket";
@@ -206,7 +206,7 @@ class WebSocketManager {
     this.updateConnectionState("connecting");
 
     try {
-      this.ws = new WebSocket(POLYMARKET_API.WSS.MARKET);
+      this.ws = new WebSocket(CLOB_WS_MARKET_URL);
 
       this.ws.onopen = () => {
         logger.info("websocket.market.connected");

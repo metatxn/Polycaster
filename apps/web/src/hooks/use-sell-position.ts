@@ -4,20 +4,25 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { useCallback, useMemo, useState } from "react";
 import type { Position } from "@/components/portfolio/types";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import {
   OrderType as ClobOrderType,
   Side,
   useClobClient,
 } from "@/hooks/use-clob-client";
 import {
+  useOrderBook as useOrderBookFromStore,
+  useOrderBookStore,
+} from "@/hooks/use-orderbook-store";
+import {
   PROXY_WALLET_QUERY_KEY,
   useProxyWallet,
 } from "@/hooks/use-proxy-wallet";
+import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import { clearBalanceCache } from "@/lib/rpc";
 import { calculateSlippage, roundDownToTick } from "@/lib/slippage";
 
-const CLOB_HOST =
-  process.env.NEXT_PUBLIC_POLYMARKET_HOST || "https://clob.polymarket.com";
+const CLOB_HOST = CLOB_BASE_URL;
 
 interface OrderBookData {
   bids: Array<{ price: string; size: string }>;
@@ -58,28 +63,50 @@ export function useSellPosition({
     return position.asset || "";
   }, [position]);
 
-  const { data: orderBookData, isLoading: isLoadingOrderBook } =
-    useQuery<OrderBookData | null>({
-      queryKey: ["orderBook", tokenId],
-      queryFn: async (): Promise<OrderBookData | null> => {
-        if (!tokenId) return null;
-        const response = await fetch(`${CLOB_HOST}/book?token_id=${tokenId}`, {
-          headers: { Accept: "application/json" },
-        });
-        if (!response.ok) return null;
-        const data = (await response.json()) as {
-          bids?: Array<{ price: string; size: string }>;
-          asks?: Array<{ price: string; size: string }>;
-        };
-        return {
-          bids: Array.isArray(data?.bids) ? data?.bids : [],
-          asks: Array.isArray(data?.asks) ? data?.asks : [],
-        };
-      },
-      enabled: !!tokenId,
-      staleTime: 5000,
-      refetchInterval: 5000,
-    });
+  // Subscribe to the WebSocket orderbook for this token while the modal is
+  // open, and read book state from the shared store. Previously this hook
+  // owned its own REST-only snapshot refreshing every 5s, which disagreed
+  // with the market page's trading panel (WebSocket-backed). Sharing the
+  // store means both UIs show identical live depth, so a sell that the
+  // trading panel says is fillable will also be fillable here.
+  const wsAssetIds = useMemo(() => (tokenId ? [tokenId] : []), [tokenId]);
+  useOrderBookWebSocket(wsAssetIds);
+
+  const setOrderBookFromRest = useOrderBookStore((s) => s.setOrderBookFromRest);
+
+  // REST bootstrap: seeds the store before the first WebSocket snapshot
+  // arrives so the modal has data to render immediately on open. Once the
+  // WebSocket delivers the first `book` event, live updates take over.
+  const { isLoading: isLoadingOrderBook } = useQuery<OrderBookData | null>({
+    queryKey: ["orderBook", tokenId],
+    queryFn: async (): Promise<OrderBookData | null> => {
+      if (!tokenId) return null;
+      const response = await fetch(`${CLOB_HOST}/book?token_id=${tokenId}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return null;
+      const data = (await response.json()) as {
+        bids?: Array<{ price: string; size: string }>;
+        asks?: Array<{ price: string; size: string }>;
+      };
+      const bids = Array.isArray(data?.bids) ? data.bids : [];
+      const asks = Array.isArray(data?.asks) ? data.asks : [];
+      setOrderBookFromRest(tokenId, bids, asks);
+      return { bids, asks };
+    },
+    enabled: !!tokenId,
+    staleTime: 30_000,
+  });
+
+  const storeOrderBook = useOrderBookFromStore(tokenId);
+
+  const orderBookData = useMemo<OrderBookData | null>(() => {
+    if (!storeOrderBook) return null;
+    return {
+      bids: storeOrderBook.bids,
+      asks: storeOrderBook.asks,
+    };
+  }, [storeOrderBook]);
 
   const sellEstimate = useMemo(() => {
     if (!orderBookData || shares <= 0) {

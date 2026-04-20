@@ -24,6 +24,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import {
   useOrderBook as useOrderBookStore,
   useOrderBookStore as useStore,
@@ -44,11 +45,19 @@ interface OrderBookLevel {
 }
 
 /**
- * Order book data structure
+ * Order book data structure.
+ *
+ * `min_order_size` and `tick_size` are not used by this component but are
+ * included so the cached React Query result under queryKey
+ * `["orderBook", tokenId]` carries everything other consumers (the market /
+ * event detail pages, the sell-position modal) need when they share the
+ * deduplicated cache entry.
  */
 interface OrderBookData {
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
+  min_order_size?: string;
+  tick_size?: string;
   spread?: number;
   midpoint?: number;
 }
@@ -100,6 +109,8 @@ interface ClobOrderBookResponse {
   timestamp: string;
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
+  min_order_size?: string;
+  tick_size?: string;
 }
 
 /**
@@ -109,14 +120,11 @@ interface ClobOrderBookResponse {
  */
 async function fetchOrderBook(tokenId: string): Promise<OrderBookData> {
   // Direct call to Polymarket CLOB API (no proxy needed)
-  const response = await fetch(
-    `https://clob.polymarket.com/book?token_id=${tokenId}`,
-    {
-      headers: {
-        Accept: "application/json",
-      },
-    }
-  );
+  const response = await fetch(`${CLOB_BASE_URL}/book?token_id=${tokenId}`, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch order book: ${response.status}`);
@@ -127,6 +135,8 @@ async function fetchOrderBook(tokenId: string): Promise<OrderBookData> {
   return {
     bids: data.bids || [],
     asks: data.asks || [],
+    min_order_size: data.min_order_size,
+    tick_size: data.tick_size,
   };
 }
 
@@ -700,127 +710,5 @@ export function OrderBook({
         </CollapsibleContent>
       </div>
     </Collapsible>
-  );
-}
-
-/**
- * Legacy OrderBook component for backwards compatibility
- * Wraps the new component with single token ID support
- */
-export function OrderBookLegacy({
-  tokenId,
-  maxLevels = 10,
-  onPriceClick,
-  useWebSocket = true,
-  pollingInterval = 5000,
-}: {
-  tokenId: string;
-  maxLevels?: number;
-  onPriceClick?: (price: number, side: "BUY" | "SELL") => void;
-  useWebSocket?: boolean;
-  pollingInterval?: number;
-}) {
-  return (
-    <OrderBook
-      outcomes={[{ name: "Yes", tokenId }]}
-      maxLevels={maxLevels}
-      onPriceClick={onPriceClick}
-      useWebSocket={useWebSocket}
-      pollingInterval={pollingInterval}
-    />
-  );
-}
-
-/**
- * Compact order book for sidebar display
- */
-export function OrderBookCompact({
-  tokenId,
-  onPriceClick,
-  useWebSocket = true,
-}: {
-  tokenId: string;
-  onPriceClick?: (price: number, side: "BUY" | "SELL") => void;
-  useWebSocket?: boolean;
-}) {
-  const isTokenValid = isValidTokenId(tokenId);
-  const isTokenValidRest = isValidTokenIdForRest(tokenId);
-
-  // WebSocket connection (uses shared singleton manager)
-  const assetIds = useMemo(
-    () => (isTokenValid && useWebSocket ? [tokenId] : []),
-    [isTokenValid, useWebSocket, tokenId]
-  );
-  const { isConnected } = useOrderBookWebSocket(assetIds);
-
-  // Get order book from store (seeded by REST, updated by WebSocket)
-  const wsOrderBook = useOrderBookStore(tokenId);
-
-  // REST API fallback
-  const { data: restOrderBook, isLoading } = useQuery<OrderBookData>({
-    queryKey: ["orderBook", tokenId],
-    queryFn: () => fetchOrderBook(tokenId),
-    refetchInterval: !isConnected ? 10000 : false,
-    staleTime: 5000,
-    enabled: isTokenValidRest && (!useWebSocket || !isConnected),
-  });
-
-  // Use WebSocket data if available
-  const orderBook = wsOrderBook && isConnected ? wsOrderBook : restOrderBook;
-
-  if (isLoading || !orderBook) {
-    return (
-      <div className="space-y-1">
-        <Skeleton className="h-6 w-full" />
-        <Skeleton className="h-6 w-full" />
-      </div>
-    );
-  }
-
-  const bestBid = orderBook.bids?.[0];
-  const bestAsk = orderBook.asks?.[0];
-
-  return (
-    <div className="space-y-1">
-      {bestAsk && (
-        <button
-          type="button"
-          className="w-full flex justify-between items-center px-2 py-1 rounded hover:bg-muted/50 transition-colors"
-          onClick={() =>
-            onPriceClick?.(Number.parseFloat(bestAsk.price), "SELL")
-          }
-        >
-          <span className="text-xs text-muted-foreground">Best Ask</span>
-          <span className="text-sm font-medium text-red-500">
-            {formatPrice(bestAsk.price)}
-          </span>
-        </button>
-      )}
-      {bestBid && (
-        <button
-          type="button"
-          className="w-full flex justify-between items-center px-2 py-1 rounded hover:bg-muted/50 transition-colors"
-          onClick={() =>
-            onPriceClick?.(Number.parseFloat(bestBid.price), "BUY")
-          }
-        >
-          <span className="text-xs text-muted-foreground">Best Bid</span>
-          <span className="text-sm font-medium text-green-500">
-            {formatPrice(bestBid.price)}
-          </span>
-        </button>
-      )}
-      {/* Connection indicator */}
-      {useWebSocket && (
-        <div className="flex justify-center pt-1">
-          <div
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              isConnected ? "bg-emerald-500" : "bg-muted-foreground"
-            )}
-          />
-        </div>
-      )}
-    </div>
   );
 }

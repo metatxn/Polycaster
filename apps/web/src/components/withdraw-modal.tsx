@@ -314,6 +314,21 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
     return `$${total.toFixed(2)}`;
   }, [quote]);
 
+  // Per Polymarket bridge docs: surface a warning when the bridge's estimated
+  // output diverges from the input by more than 10bp (0.1%).
+  // `totalImpact` is returned as a percent (e.g. 0.11 = 0.11%).
+  const HIGH_IMPACT_BPS_THRESHOLD = 0.1;
+  const highImpactPercent = useMemo(() => {
+    if (!quote) return null;
+    const impact = quote.estFeeBreakdown.totalImpact;
+    return impact > HIGH_IMPACT_BPS_THRESHOLD ? impact : null;
+  }, [quote]);
+
+  // Per Polymarket bridge docs: recommend splitting withdrawals over $50k
+  // into smaller portions for better routing/execution.
+  const LARGE_WITHDRAWAL_THRESHOLD_USD = 50_000;
+  const isLargeWithdrawal = amountNum > LARGE_WITHDRAWAL_THRESHOLD_USD;
+
   // Handlers
   const handleUseConnected = useCallback(() => {
     if (address) {
@@ -492,7 +507,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                   <p className="text-sm text-muted-foreground mt-2">
                     {state === "bridge_complete"
                       ? `Your ${selectedTokenConfig.symbol} has arrived on ${selectedChain.name}.`
-                      : `${amount} USDC.e sent to Polymarket Bridge. Your ${selectedTokenConfig.symbol} will arrive on ${selectedChain.name} shortly.`}
+                      : `${amount} pUSD sent to Polymarket Bridge. Your ${selectedTokenConfig.symbol} will arrive on ${selectedChain.name} shortly.`}
                   </p>
                 </div>
 
@@ -612,7 +627,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                     <span>
                       ${amountNum > 0 ? amountNum.toFixed(2) : "0.00"}
                     </span>
-                    <span>Balance: {usdcBalance.toFixed(2)} USDC</span>
+                    <span>Balance: {usdcBalance.toFixed(2)} pUSD</span>
                   </div>
                 </div>
 
@@ -772,10 +787,46 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                 <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
                   <p className="text-xs text-blue-400">
                     {isCrossChain
-                      ? `Cross-chain withdrawal via Polymarket Bridge. Your USDC.e will be converted to ${selectedTokenConfig.symbol} and routed to ${selectedChain.name}. This typically takes 10-30 minutes.`
-                      : `Your USDC.e will be converted to ${selectedTokenConfig.symbol} via Polymarket Bridge.`}
+                      ? `Cross-chain withdrawal via Polymarket Bridge. Your pUSD will be converted to ${selectedTokenConfig.symbol} and routed to ${selectedChain.name}. This typically takes 10-30 minutes.`
+                      : `Your pUSD will be converted to ${selectedTokenConfig.symbol} via Polymarket Bridge.`}
                   </p>
                 </div>
+
+                {/* High-impact warning (output diverges > 10bp from input) */}
+                {highImpactPercent !== null ? (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-500">
+                        <p className="font-medium">
+                          Output differs by {highImpactPercent.toFixed(2)}%
+                        </p>
+                        <p className="text-amber-500/80 mt-0.5">
+                          The bridge quote shows more than 10bp swap impact —
+                          confirm the estimated receive amount before
+                          proceeding.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Large-withdrawal advisory (> $50k) */}
+                {isLargeWithdrawal ? (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-500">
+                        <p className="font-medium">Large withdrawal</p>
+                        <p className="text-amber-500/80 mt-0.5">
+                          Polymarket recommends splitting withdrawals over $
+                          {LARGE_WITHDRAWAL_THRESHOLD_USD.toLocaleString()} into
+                          smaller portions for better routing and execution.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* Summary */}
                 <div className="space-y-3 pt-2 border-t border-border">

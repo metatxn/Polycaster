@@ -101,7 +101,7 @@ export function Confirmation({
 }: ConfirmationProps) {
   // Use quote data for more accurate receive amount if available
   const displayReceiveAmount = quote
-    ? (Number(quote.estToTokenBaseUnit) / 1e6).toFixed(2) // USDC.e has 6 decimals
+    ? (Number(quote.estToTokenBaseUnit) / 1e6).toFixed(2) // pUSD has 6 decimals
     : receiveAmount;
 
   // Use quote for estimated time if available
@@ -172,7 +172,10 @@ export function Confirmation({
                     <p className="font-medium text-amber-400">
                       Minimum: ${selectedBridgeAsset.minCheckoutUsd}
                     </p>
-                    <p>Assets will be converted to USDC.e on Polygon.</p>
+                    <p>
+                      Assets will be converted to pUSD (Polymarket's V2 trading
+                      token) on Polygon.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -194,17 +197,18 @@ export function Confirmation({
           </div>
 
           {/* Bridge Info Banner - only show if conversion is actually happening */}
-          {selectedToken.symbol !== "USDC.e" && (
+          {selectedToken.symbol !== "pUSD" && (
             <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
               <div className="flex items-start gap-2">
                 <Zap className="h-4 w-4 text-blue-400 mt-0.5" />
                 <div className="text-xs text-muted-foreground">
                   <p className="font-medium text-blue-400">
-                    Auto-conversion to USDC.e
+                    Auto-conversion to pUSD
                   </p>
                   <p>
                     Your {selectedToken.symbol} will be automatically converted
-                    to USDC.e on Polygon via Polymarket Bridge.
+                    to pUSD (Polymarket's V2 trading token) on Polygon via
+                    Polymarket Bridge.
                   </p>
                 </div>
               </div>
@@ -263,7 +267,7 @@ export function Confirmation({
                 ) : null}
                 <span className="text-foreground">
                   {quote ? "" : "~"}
-                  {displayReceiveAmount} USDC.e
+                  {displayReceiveAmount} pUSD
                 </span>
               </div>
             </div>
@@ -311,7 +315,7 @@ export function Confirmation({
                       Min. received
                     </span>
                     <span className="text-foreground font-medium">
-                      {quote.estFeeBreakdown.minReceived.toFixed(2)} USDC.e
+                      {quote.estFeeBreakdown.minReceived.toFixed(2)} pUSD
                     </span>
                   </div>
                 </>
@@ -363,7 +367,7 @@ export function Confirmation({
                 <div className="text-sm text-blue-500">
                   <p className="font-medium">Transaction confirmed on-chain</p>
                   <p className="text-xs text-blue-400">
-                    Waiting for the bridge to credit USDC.e to your Polymarket
+                    Waiting for the bridge to credit pUSD to your Polymarket
                     wallet.
                   </p>
                 </div>
@@ -378,7 +382,7 @@ export function Confirmation({
                 <div className="text-sm text-green-500">
                   <p className="font-medium">Deposit complete!</p>
                   <p className="text-xs text-green-400">
-                    USDC.e has been credited to your Polymarket wallet.
+                    pUSD has been credited to your Polymarket wallet.
                   </p>
                 </div>
               </div>

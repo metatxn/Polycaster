@@ -18,10 +18,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useClobClient } from "@/hooks/use-clob-client";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
+import { checkAllApprovals } from "@/lib/approvals";
 
 // LocalStorage key for tracking completed onboarding
 const ONBOARDING_COMPLETE_KEY = "knoww_onboarding_complete";
@@ -133,9 +133,10 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   const { hasCredentials, isLoading: isCredentialsLoading } =
     useClobCredentials();
 
-  const { getUsdcAllowance } = useClobClient();
-
-  // Track USDC approval status
+  // Track V2 approval status. The name `hasUsdcApproval` is retained for
+  // backwards compatibility with downstream derived state, but semantically
+  // this now means "all V2 approvals set" (pUSD → 3 exchanges, USDC.e →
+  // Onramp, CTF → 3 operators).
   const [hasUsdcApproval, setHasUsdcApproval] = useState<boolean | null>(null);
   const [isCheckingUsdcApproval, setIsCheckingUsdcApproval] = useState(false);
 
@@ -143,10 +144,14 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   const hasProxyWallet = hasDeployedSafeFromRelayer || hasProxyWalletFromHook;
   const proxyAddress = proxyAddressFromHook || null;
 
-  // Track if we've already checked USDC approval for this proxy address
+  // Track if we've already checked V2 approvals for this proxy address
   const checkedProxyAddressRef = useRef<string | null>(null);
 
-  // Check USDC approval when proxy wallet is available
+  // Check V2 approvals when proxy wallet is available. Uses the shared
+  // `checkAllApprovals` helper so this gate matches what TradingOnboarding
+  // uses — previously this checked USDC.e→CTFExchange (a V1 allowance that
+  // can be set without any V2 approval existing), which produced both false
+  // positives for V1-only users and false negatives for clean V2 users.
   useEffect(() => {
     const checkApproval = async () => {
       // Skip if no proxy wallet or already checking
@@ -159,19 +164,14 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
       setIsCheckingUsdcApproval(true);
 
       try {
-        const result = await getUsdcAllowance(proxyAddress);
-        const isApproved = result && result.allowance > 0;
-        console.log("[OnboardingContext] USDC approval check:", {
+        const status = await checkAllApprovals(proxyAddress);
+        console.log("[OnboardingContext] V2 approval check:", {
           proxyAddress,
-          allowance: result?.allowance,
-          isApproved,
+          ...status,
         });
-        setHasUsdcApproval(isApproved);
+        setHasUsdcApproval(status.allApproved);
       } catch (err) {
-        console.error(
-          "[OnboardingContext] Failed to check USDC approval:",
-          err
-        );
+        console.error("[OnboardingContext] Failed to check V2 approvals:", err);
         setHasUsdcApproval(false);
       } finally {
         setIsCheckingUsdcApproval(false);
@@ -179,9 +179,10 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     };
 
     checkApproval();
-  }, [hasProxyWallet, proxyAddress, getUsdcAllowance]);
+  }, [hasProxyWallet, proxyAddress]);
 
-  // User is fully set up when they have: proxy wallet + USDC approval + credentials
+  // User is fully set up when they have: proxy wallet + full V2 approval
+  // set + credentials
   const isFullySetUp =
     hasCredentials && hasProxyWallet && hasUsdcApproval === true;
 

@@ -10,7 +10,7 @@
  * Split/Merge accessible via "..." dropdown menu.
  */
 
-import { USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
+import { PUSD_ADDRESS, USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import Decimal from "decimal.js";
@@ -41,6 +41,7 @@ const DEPOSIT_TOKENS: Array<{
   address: string;
   decimals: number;
 }> = [
+  { symbol: "pUSD", address: PUSD_ADDRESS, decimals: 6 },
   { symbol: "USDC.e", address: USDC_E_ADDRESS, decimals: 6 },
   {
     symbol: "USDC",
@@ -1832,7 +1833,7 @@ function addBalanceWarning(
     el(
       "div",
       "knoww-tp-warn-detail",
-      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} USDC.e`
+      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} pUSD`
     )
   );
   form.appendChild(w);
@@ -2629,7 +2630,14 @@ async function waitForTxReceipt(
   );
 }
 
-const STABLECOINS = new Set(["USDC", "USDC.e", "USDC.E", "USDT", "DAI"]);
+const STABLECOINS = new Set([
+  "USDC",
+  "USDC.e",
+  "USDC.E",
+  "pUSD",
+  "USDT",
+  "DAI",
+]);
 
 let cachedPrices: Record<string, number> | null = null;
 let pricesFetchedAt = 0;
@@ -2945,7 +2953,7 @@ function depositFetchQuote(): void {
     fromTokenAddress: depositSelected.address,
     recipientAddress: depositBridgeAddress,
     toChainId: "137",
-    toTokenAddress: USDC_E_ADDRESS,
+    toTokenAddress: PUSD_ADDRESS,
   })
     .then((q) => {
       depositQuote = q;
@@ -3130,7 +3138,9 @@ function computeReceiveAmount(): string {
   const numAmount = parseFloat(depositAmount);
   if (Number.isNaN(numAmount)) return "0";
   if (
-    ["USDC", "USDC.e", "USDC.E", "DAI", "USDT"].includes(depositSelected.symbol)
+    ["USDC", "USDC.e", "USDC.E", "pUSD", "DAI", "USDT"].includes(
+      depositSelected.symbol
+    )
   )
     return numAmount.toFixed(2);
   return (
@@ -3144,7 +3154,9 @@ function computeEnteredAmountUsd(): number {
   const numAmount = parseFloat(depositAmount);
   if (Number.isNaN(numAmount)) return 0;
   if (
-    ["USDC", "USDC.e", "USDC.E", "DAI", "USDT"].includes(depositSelected.symbol)
+    ["USDC", "USDC.e", "USDC.E", "pUSD", "DAI", "USDT"].includes(
+      depositSelected.symbol
+    )
   )
     return numAmount;
   return (depositSelected.usdValue / depositSelected.amount) * numAmount;
@@ -3421,7 +3433,7 @@ function renderDepositBridgeSelectStep(
     elHtml(
       "span",
       "",
-      `All deposits are automatically converted to <strong style="color:var(--knoww-accent, #1d9bf0)">USDC.e on Polygon</strong> at the best available rate.`
+      `All deposits are automatically converted to <strong style="color:var(--knoww-accent, #1d9bf0)">pUSD on Polygon</strong> (Polymarket's V2 trading token) at the best available rate.`
     )
   );
   form.appendChild(infoBanner);
@@ -3535,7 +3547,7 @@ function renderDepositAmountStep(form: HTMLElement): void {
     "",
     `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`
   );
-  const recvSide = el("span", "", "You receive: USDC.e");
+  const recvSide = el("span", "", "You receive: pUSD");
   sendRecv.appendChild(sendSide);
   sendRecv.appendChild(arrow);
   sendRecv.appendChild(recvSide);
@@ -3689,7 +3701,11 @@ function renderDepositConfirmStep(
         el("div", "", `Minimum: $${depositSelectedBridgeAsset.minCheckoutUsd}`)
       );
       minText.appendChild(
-        el("div", "", "Assets will be converted to USDC.e on Polygon.")
+        el(
+          "div",
+          "",
+          "Assets will be converted to pUSD (Polymarket's V2 trading token) on Polygon."
+        )
       );
       minText.style.fontSize = "11px";
       minInfo.appendChild(minText);
@@ -3726,16 +3742,16 @@ function renderDepositConfirmStep(
   );
 
   // Auto-conversion banner
-  if (depositSelected.symbol !== "USDC.e") {
+  if (depositSelected.symbol !== "pUSD") {
     const banner = el("div", "knoww-tp-deposit-info-banner info");
     banner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:var(--knoww-accent, #1d9bf0)"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>`;
     const text = el("div", "");
-    text.appendChild(el("div", "", "Auto-conversion to USDC.e"));
+    text.appendChild(el("div", "", "Auto-conversion to pUSD"));
     text.appendChild(
       el(
         "div",
         "",
-        `Your ${depositSelected.symbol} will be automatically converted to USDC.e on Polygon via Polymarket Bridge.`
+        `Your ${depositSelected.symbol} will be automatically converted to pUSD (Polymarket's V2 trading token) on Polygon via Polymarket Bridge.`
       )
     );
     text.style.fontSize = "11px";
@@ -3786,7 +3802,7 @@ function renderDepositConfirmStep(
   }
   recvVal.appendChild(
     document.createTextNode(
-      `${depositQuote ? "" : "~"}${displayReceiveAmt} USDC.e`
+      `${depositQuote ? "" : "~"}${displayReceiveAmt} pUSD`
     )
   );
   recvRow.appendChild(recvVal);
@@ -3827,7 +3843,7 @@ function renderDepositConfirmStep(
       el(
         "span",
         "knoww-tp-deposit-fee-value",
-        `${fb.minReceived.toFixed(2)} USDC.e`
+        `${fb.minReceived.toFixed(2)} pUSD`
       )
     );
     breakdown.appendChild(minRecvRow);
@@ -3878,7 +3894,7 @@ function renderDepositConfirmStep(
     const infoText = el("div", "");
     infoText.appendChild(el("div", "", "Transaction confirmed on-chain!"));
     infoText.appendChild(
-      el("div", "", "Waiting for bridge to credit USDC.e to your wallet...")
+      el("div", "", "Waiting for bridge to credit pUSD to your wallet...")
     );
     infoText.style.fontSize = "11px";
     infoBanner.appendChild(infoText);
@@ -3892,7 +3908,7 @@ function renderDepositConfirmStep(
     const successText = el("div", "");
     successText.appendChild(el("div", "", "Deposit complete!"));
     successText.appendChild(
-      el("div", "", "USDC.e has been credited to your Polymarket wallet.")
+      el("div", "", "pUSD has been credited to your Polymarket wallet.")
     );
     successText.style.fontSize = "11px";
     successBanner.appendChild(successText);

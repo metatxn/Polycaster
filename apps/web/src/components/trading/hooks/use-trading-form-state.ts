@@ -214,6 +214,21 @@ export function useTradingFormState({
       return Math.max(0.01, roundDownToTick(buffered, tickSize));
     }
 
+    // MARKET order but the current book can't fully fill the requested size.
+    // Do NOT synthesize a "reasonable" price from the Gamma/outcome price
+    // here — Polymarket V2 FOK/FAK orders are rejected server-side when depth
+    // is insufficient (per /developers/CLOB/orders/create-order and the error
+    // codes doc), so painting a plausible estimate would mislead the user
+    // into thinking an un-fillable order will settle at that price.
+    // Returning 0 surfaces an honest "0.0¢ / $0.00" in the summary, and the
+    // submit button is already disabled via `canFullyFill` → "Insufficient
+    // liquidity" in the parent form.
+    if (slippageResult && !slippageResult.canFill) {
+      return 0;
+    }
+
+    // Fallback path for non-MARKET orders (LIMIT) where slippageResult is
+    // intentionally null — used only to seed an initial price suggestion.
     const maxFrac = new Decimal(maxSlippagePercent).div(100);
     if (side === "BUY") {
       const base = new Decimal(bestAsk ?? selectedOutcome?.price ?? 0.5);

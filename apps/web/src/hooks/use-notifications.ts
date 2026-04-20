@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "wagmi";
+import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { SignatureType } from "@/lib/polymarket";
@@ -118,10 +119,8 @@ export function useNotifications() {
 
     // Use POLY_GNOSIS_SAFE signature type (1) for proxy wallet
     return new ClobClient({
-      host:
-        process.env.NEXT_PUBLIC_POLYMARKET_HOST ||
-        "https://clob.polymarket.com",
-      chain: 137,
+      host: CLOB_BASE_URL,
+      chain: POLYMARKET_CHAIN_ID,
       signer,
       creds,
       signatureType: SignatureType.POLY_GNOSIS_SAFE as unknown as number,

@@ -1,7 +1,7 @@
 "use client";
 
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -13,6 +13,7 @@ import { PageBackground } from "@/components/page-background";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import type { Event } from "@/hooks/use-event-detail";
 import { useEventDetail } from "@/hooks/use-event-detail";
 import {
@@ -156,27 +157,55 @@ export default function EventDetailClient({
   // Order book store action for preloading from REST
   // Select only the action (stable ref) to avoid re-rendering on every store update
   const setOrderBookFromRest = useOrderBookStore((s) => s.setOrderBookFromRest);
+  const queryClient = useQueryClient();
 
-  // Helper to quickly seed order book from REST (direct Polymarket call) for a token
+  // Helper to quickly seed order book from REST (direct Polymarket call) for
+  // a token. Routes through React Query's cache (`queryClient.fetchQuery`)
+  // using the same `["orderBook", tokenId]` key that every other orderbook
+  // consumer uses, so repeated preloads (StrictMode double-invokes, effect
+  // re-runs on dep changes, hover handlers in the outcomes table, etc.)
+  // share ONE in-flight network request per token instead of each issuing
+  // their own raw fetch.
   const preloadOrderBook = useCallback(
     async (tokenId: string | undefined) => {
       if (!tokenId) return;
       try {
-        const res = await fetch(
-          `https://clob.polymarket.com/book?token_id=${tokenId}`,
-          { headers: { Accept: "application/json" } }
-        );
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          bids?: Array<{ price: string; size: string }>;
-          asks?: Array<{ price: string; size: string }>;
-        };
-        setOrderBookFromRest(tokenId, data.bids || [], data.asks || []);
+        const data = await queryClient.fetchQuery<{
+          bids: Array<{ price: string; size: string }>;
+          asks: Array<{ price: string; size: string }>;
+          min_order_size?: string;
+          tick_size?: string;
+        }>({
+          queryKey: ["orderBook", tokenId],
+          queryFn: async () => {
+            const res = await fetch(
+              `${CLOB_BASE_URL}/book?token_id=${tokenId}`,
+              { headers: { Accept: "application/json" } }
+            );
+            if (!res.ok) {
+              throw new Error(`Failed to fetch order book: ${res.status}`);
+            }
+            const json = (await res.json()) as {
+              bids?: Array<{ price: string; size: string }>;
+              asks?: Array<{ price: string; size: string }>;
+              min_order_size?: string;
+              tick_size?: string;
+            };
+            return {
+              bids: json.bids || [],
+              asks: json.asks || [],
+              min_order_size: json.min_order_size,
+              tick_size: json.tick_size,
+            };
+          },
+          staleTime: 30_000,
+        });
+        setOrderBookFromRest(tokenId, data.bids, data.asks);
       } catch (err) {
         console.error("Preload order book failed", err);
       }
     },
-    [setOrderBookFromRest]
+    [queryClient, setOrderBookFromRest]
   );
 
   // Use slug from URL params - API handles both slugs and numeric IDs
@@ -575,15 +604,23 @@ export default function EventDetailClient({
   // This is how Binance, Coinbase, and Polymarket work
 
   // STEP 1: Fetch initial order book snapshot directly from Polymarket CLOB API
-  // Direct fetch is faster than going through our Next.js API route
+  // Direct fetch is faster than going through our Next.js API route.
+  //
+  // NOTE: shared queryKey `["orderBook", tokenId]` — same as the <OrderBook>
+  // component and the sell-position modal. React Query dedupes across all
+  // concurrent consumers so the page + the orderbook panel + the sell modal
+  // mounting together produces ONE /book request per token, not three. The
+  // queryFn returns the richer shape (tick_size + min_order_size) so consumers
+  // that need those fields still get them even when the shared cache entry
+  // was seeded by another call site.
   const { data: orderBookData } =
     useQuery<TradingPanelOrderBookSnapshot | null>({
-      queryKey: ["tradingPanelOrderBook", currentTokenId],
+      queryKey: ["orderBook", currentTokenId],
       queryFn: async (): Promise<TradingPanelOrderBookSnapshot | null> => {
         if (!currentTokenId) return null;
         // Direct call to Polymarket CLOB API (public, allows CORS)
         const response = await fetch(
-          `https://clob.polymarket.com/book?token_id=${currentTokenId}`,
+          `${CLOB_BASE_URL}/book?token_id=${currentTokenId}`,
           { headers: { Accept: "application/json" } }
         );
         if (!response.ok) return null;
@@ -901,54 +938,11 @@ export default function EventDetailClient({
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
             {/* Chart */}
             <Card>
-              <CardHeader className="pb-3">
-                <div className="flex flex-wrap gap-2 md:gap-4">
-                  {isSingleMarketEvent && singleMarketForChart ? (
-                    <>
-                      <div className="flex items-center gap-1.5 md:gap-2">
-                        <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0 bg-green-500" />
-                        <span className="text-xs md:text-sm">
-                          Yes {singleMarketForChart.yesProbability}%
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 md:gap-2">
-                        <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0 bg-red-500" />
-                        <span className="text-xs md:text-sm">
-                          No{" "}
-                          {Math.max(
-                            0,
-                            100 - singleMarketForChart.yesProbability
-                          )}
-                          %
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    topMarketsForChart.map((market, idx) => (
-                      <div
-                        key={market.id}
-                        className="flex items-center gap-1.5 md:gap-2"
-                      >
-                        <div
-                          className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0 ${
-                            idx === 0
-                              ? "bg-orange-500"
-                              : idx === 1
-                                ? "bg-blue-500"
-                                : idx === 2
-                                  ? "bg-purple-400"
-                                  : "bg-green-500"
-                          }`}
-                        />
-                        <span className="text-xs md:text-sm truncate max-w-[120px] sm:max-w-[150px] md:max-w-[200px]">
-                          {market.groupItemTitle} {market.yesProbability}%
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
+              {/* Legend is now rendered as a floating overlay inside the
+                  MarketPriceChart itself — dropping the CardHeader saves
+                  the ~48px of vertical padding that used to sit above the
+                  plot. */}
+              <CardContent className="py-3">
                 <ErrorBoundary name="Market Price Chart">
                   <MarketPriceChart
                     tokens={chartTokens}

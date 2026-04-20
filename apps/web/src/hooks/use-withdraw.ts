@@ -4,7 +4,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { encodeFunctionData, parseUnits } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
-import { USDC_E_ADDRESS, USDC_E_DECIMALS } from "@/constants/contracts";
+import {
+  PUSD_ADDRESS,
+  PUSD_DECIMALS,
+  USDC_E_ADDRESS,
+  USDC_E_DECIMALS,
+} from "@/constants/contracts";
 import { executeViaRelayer } from "@/lib/relayer-client";
 import type { DepositStatus, QuoteResponse } from "./use-bridge";
 import { useBridge } from "./use-bridge";
@@ -128,8 +133,8 @@ export interface WithdrawTokenConfig {
 }
 
 /**
- * Token configurations.
- * Polymarket uses USDC.e (Bridged USDC) internally.
+ * Token configurations — these are DESTINATION tokens the user can receive.
+ * The source pulled from the Safe is always pUSD (V2 trading collateral).
  * The `address` is the Polygon contract address for display / config purposes.
  * Destination-chain addresses are resolved dynamically from /supported-assets.
  */
@@ -385,11 +390,11 @@ export function useWithdraw() {
       setQuoteError(null);
 
       try {
-        const amountBaseUnit = parseUnits(amount, USDC_E_DECIMALS).toString();
+        const amountBaseUnit = parseUnits(amount, PUSD_DECIMALS).toString();
         const result = await getQuote({
           fromAmountBaseUnit: amountBaseUnit,
           fromChainId: "137",
-          fromTokenAddress: USDC_E_ADDRESS,
+          fromTokenAddress: PUSD_ADDRESS,
           recipientAddress,
           toChainId,
           toTokenAddress,
@@ -562,10 +567,10 @@ export function useWithdraw() {
   /**
    * Execute a withdrawal from the proxy wallet via the Polymarket Bridge API.
    *
-   * All withdrawals (including Polygon USDC/USDC.e) call `POST /withdraw`
-   * to obtain a bridge deposit address, then transfer USDC.e to that address
-   * via the relayer. The bridge handles routing, swapping, and delivery to
-   * the recipient on the destination chain.
+   * All withdrawals call `POST /withdraw` to obtain a bridge deposit address,
+   * then transfer pUSD (V2 collateral) from the Safe to that address via the
+   * relayer. The bridge handles conversion, routing, and delivery to the
+   * recipient on the destination chain.
    */
   const withdrawMutation = useMutation({
     mutationFn: async ({
@@ -621,7 +626,7 @@ export function useWithdraw() {
       setError(null);
 
       try {
-        const amountInWei = parseUnits(amount, USDC_E_DECIMALS);
+        const amountInWei = parseUnits(amount, PUSD_DECIMALS);
 
         // ─── Bridge path (all tokens, all chains) ───
         const toTokenAddress = resolveDestTokenAddress(
@@ -671,7 +676,7 @@ export function useWithdraw() {
 
         const transactions = [
           {
-            to: USDC_E_ADDRESS,
+            to: PUSD_ADDRESS,
             data: transferData,
             value: "0",
           },

@@ -1908,59 +1908,105 @@ GET /api/search?q=bitcoin&limit=2 HTTP/1.1
 }
 ```
 
-## Signing And RPC
+## Relayer And RPC
 
-### POST `/api/sign`
+### GET `/api/relayer/[...path]`
 
-Description: Proxies signing requests to the builder signing server. Intended for first-party web clients or bearer-authenticated extension sessions.
+Description: Server-side proxy for a small allow-listed subset of Polymarket relayer endpoints. Used by web and extension trading flows so relayer credentials stay server-side.
+
+Headers
+
+- Auth:
+  - Web app flow: first-party browser request that passes `checkOriginAndFetchSite()`
+  - Extension flow: `Authorization: Bearer <extension-session-token>` with scope `relayer:submit`
+
+Query parameters
+
+- Passed through to the upstream relayer unchanged.
+- The first path segment must be one of: `deployed`, `nonce`, `transaction`, `submit`.
+
+Success `200`
+
+- Schema: raw upstream relayer response body
+
+Errors
+
+- `400`: `{ error: "Path not allowed: /<segment>" }`
+- `401`: Possible when bearer auth is supplied but invalid or expired.
+- `403`: Possible when the request fails same-origin checks or extension auth checks.
+- `404`: Not used locally; upstream statuses are forwarded.
+- `413`: Not used for GET requests.
+- `500`: `{ error: "Internal server error" }`
+- `503`: `{ error: "Relayer not configured" }`
+- `504`: `{ error: "Relayer request timed out" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+Example
+
+```http
+GET /api/relayer/deployed?address=0x1234... HTTP/1.1
+Origin: https://knoww.app
+Sec-Fetch-Site: same-origin
+```
+
+```json
+{
+  "deployed": true
+}
+```
+
+### POST `/api/relayer/[...path]`
+
+Description: Same relayer proxy for JSON POST requests such as transaction submission.
 
 Headers
 
 - `Content-Type: application/json`
 - Auth:
-  - Web app flow: allowed `Origin`/`Referer` plus `Sec-Fetch-Site: same-origin` in production
-  - Extension flow: `Authorization: Bearer <extension-session-token>` with scope `builder:sign`
-- Optional upstream auth is injected server-side via `INTERNAL_AUTH_TOKEN`
+  - Web app flow: first-party browser request that passes `checkOriginAndFetchSite()`
+  - Extension flow: `Authorization: Bearer <extension-session-token>` with scope `relayer:submit`
 
 Request body
 
 - Any valid JSON object or array.
-- Body size is capped at `10 KB` using both `Content-Length` and streamed byte counting.
+- The first path segment must be one of: `deployed`, `nonce`, `transaction`, `submit`.
+- Body size is capped at `16 KB` using both `Content-Length` and streamed byte counting.
 
 Success `200`
 
-- Schema: raw upstream JSON from the builder signing service
+- Schema: raw upstream relayer response body
 
 Errors
 
-- `400`: `{ error: "Invalid JSON payload" }`
-- `401`: `{ error: "Unauthorized" }` when bearer token is missing/invalid for extension requests
-- `404`: Not used locally.
-- `500`: `{ error: "Internal server error" }`
-- `403`: `{ error: "Forbidden: origin not allowed" }`, `{ error: "Forbidden: cross-site request" }`, `{ error: "Forbidden: missing fetch metadata" }`, or `{ error: "Forbidden" }`
+- `400`: `{ error: "Path not allowed: /<segment>" }` or `{ error: "Invalid JSON payload" }`
+- `401`: Possible when bearer auth is supplied but invalid or expired.
+- `403`: Possible when the request fails same-origin checks or extension auth checks.
+- `404`: Not used locally; upstream statuses are forwarded.
 - `413`: `{ error: "Request body too large" }`
-- `503`: `{ error: "Signing service not configured" }`
-- `504`: `{ error: "Signing request timed out" }`
+- `500`: `{ error: "Internal server error" }`
+- `503`: `{ error: "Relayer not configured" }`
+- `504`: `{ error: "Relayer request timed out" }`
 
 Rate limiting
 
-- `30` requests/minute/IP
+- `60` requests/minute/IP
 
 Example
 
 ```http
-POST /api/sign HTTP/1.1
+POST /api/relayer/submit HTTP/1.1
 Content-Type: application/json
-Origin: https://knoww.app
-Sec-Fetch-Site: same-origin
+Authorization: Bearer eyJ...
 
-{"order":{"tokenId":"101","price":"0.58","size":"100"}}
+{"from":"0xabc...","to":"0xdef...","data":"0x1234","signature":"0x5678"}
 ```
 
 ```json
 {
-  "signature": "0xabc123",
-  "nonce": "42"
+  "transactionID": "relayer_tx_123"
 }
 ```
 

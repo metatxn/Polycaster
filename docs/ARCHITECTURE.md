@@ -55,7 +55,7 @@ flowchart LR
     A --> P["Polymarket APIs\nGamma / CLOB / Data / User PnL / Relayer / Bridge"]
     L --> CF["Cloudflare runtime\nWorkers + R2 incremental cache"]
     OF --> P
-    BG --> K["Knoww web API\n/api/sign, /api/ai/*, /api/extension/session/*"]
+    BG --> K["Knoww web API\n/api/relayer/*, /api/ai/*, /api/extension/session/*"]
     BG --> P
     BG --> HF["Hugging Face model download/cache\nvia transformers.js"]
 
@@ -69,10 +69,10 @@ flowchart LR
 | --- | --- | --- | --- |
 | Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, preconnects to upstream APIs, and serves the main pages | Hooks, contexts, server-cache, API routes |
 | Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
-| Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, and extension-session token issuance/verification used by `/api/sign` and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
+| Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
 | Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/notifications/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*` | Powers live sports markets, CLOB notifications, and browser-side price alerting around trading activity | Web data hooks, websocket managers, Polymarket CLOB |
-| API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI | Polymarket APIs, OpenRouter, builder signing service, Polygon RPC |
+| API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI | Polymarket APIs, OpenRouter, relayer proxy, Polygon RPC |
 | Web infra helpers | `apps/web/src/lib/*` | Caching, origin checks, auth helpers, websocket managers, server-side fetch memoization, RPC utilities, PostHog server capture | Cloudflare Worker runtime, browser, upstream APIs, PostHog |
 | Web constants and types | `apps/web/src/constants/*`, `apps/web/src/types/*` | Shared Polymarket constants, API enums, cache durations, and typed response shapes used across routes, hooks, and components | Web app shell, API routes, hooks |
 | Web platform guards | `apps/web/src/middleware.ts`, `apps/web/instrumentation-client.ts` | Applies security headers/CSP and bootstraps browser-side telemetry | Browser, Next.js runtime, PostHog |
@@ -208,16 +208,16 @@ There are two variants, but both rely on the same security idea: signing secrets
 1. The browser uses wallet providers configured in `apps/web/src/config/index.tsx`.
 2. When CLOB credentials are needed, `useClobCredentials()` signs Polymarket’s EIP-712 auth message and calls `/api/auth/derive-api-key`.
 3. The route creates or derives API credentials from Polymarket CLOB.
-4. For builder signing, the client uses `createBuilderConfig()` from `apps/web/src/lib/remote-builder-config.ts`, which calls `/api/sign`.
-5. `/api/sign` validates same-origin browser requests, then forwards to the upstream builder signing server using server-only auth.
+4. When gasless Safe execution is needed, the client uses `apps/web/src/lib/relayer-client.ts` and the hooks built on top of it.
+5. `/api/relayer/[...path]` validates same-origin browser requests or extension bearer sessions, then proxies the allow-listed relayer calls with server-only relayer credentials.
 
 #### Extension
 
 1. The extension first creates a signed session via `/api/extension/session/challenge` and `/api/extension/session/verify`.
 2. The background worker stores the resulting bearer token in `chrome.storage.session`.
 3. The offscreen document executes trading actions through `apps/extension/src/background/trading-handler.ts`.
-4. Builder headers are generated through `apps/extension/src/background/builder-config.ts`, which calls `knoww.app/api/sign` using the extension bearer token.
-5. The offscreen trading layer then talks to Polymarket CLOB, Relayer, Bridge, and Polygon RPC as needed.
+4. The extension relayer client in `apps/extension/src/background/relayer-client.ts` calls `knoww.app/api/relayer/*` using the extension bearer token.
+5. The offscreen trading layer then talks to Polymarket CLOB, the relayer proxy, Bridge, and Polygon RPC as needed.
 
 ```mermaid
 flowchart TD
@@ -225,9 +225,9 @@ flowchart TD
     B --> C["Polymarket CLOB auth endpoints"]
     C --> D["API credentials returned"]
     D --> E["Client or extension builds order"]
-    E --> F["/api/sign"]
-    F --> G["Upstream builder signing server\n(BUILDER_SIGNING_SERVER_URL)"]
-    G --> H["Builder headers"]
+    E --> F["apps/web/src/lib/relayer-client.ts\nor extension relayer client"]
+    F --> G["/api/relayer/*"]
+    G --> H["Polymarket relayer v2"]
     H --> I["CLOB / Relayer / Bridge / Polygon RPC"]
 ```
 
@@ -235,12 +235,12 @@ Relevant files:
 
 - `apps/web/src/hooks/use-clob-credentials.ts`
 - `apps/web/src/app/api/auth/derive-api-key/route.ts`
-- `apps/web/src/app/api/sign/route.ts`
-- `apps/web/src/lib/remote-builder-config.ts`
+- `apps/web/src/lib/relayer-client.ts`
+- `apps/web/src/hooks/use-relayer-client.ts`
 - `apps/web/src/lib/auth/extension-session.ts`
 - `apps/web/src/app/api/extension/session/challenge/route.ts`
 - `apps/web/src/app/api/extension/session/verify/route.ts`
-- `apps/extension/src/background/builder-config.ts`
+- `apps/web/src/app/api/relayer/[...path]/route.ts`
 - `apps/extension/src/background/trading-handler.ts`
 - `apps/extension/src/background/relayer-client.ts`
 - `apps/extension/src/offscreen/offscreen.ts`
@@ -395,12 +395,12 @@ Why:
 
 - `ALCHEMY_API_KEY`, `INTERNAL_AUTH_TOKEN`, and `EXTENSION_SESSION_SECRET` must not reach the browser bundle
 - `/api/rpc/polygon` hides the RPC key
-- `/api/sign` hides the builder-signing auth token
+- `/api/relayer/*` hides the relayer API key and relayer key owner address
 
 Where to see it:
 
 - `apps/web/src/app/api/rpc/polygon/route.ts`
-- `apps/web/src/app/api/sign/route.ts`
+- `apps/web/src/app/api/relayer/[...path]/route.ts`
 - `apps/web/src/lib/origin-guard.ts`
 
 ### 6.4 Shared package for protocol constants

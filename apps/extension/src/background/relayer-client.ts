@@ -18,13 +18,14 @@ import {
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
 } from "@knoww/shared-types/contracts";
-import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
 import { ethers } from "ethers";
+import { EXTENSION_AUTH_REQUIRED_ERROR } from "../types/chrome-messages";
 import type { BridgeSigner } from "./bridge-signer";
-import { createExtensionBuilderConfig } from "./builder-config";
+import { getAccessTokenViaMessage } from "./extension-auth";
+import { getKnowwAppUrl } from "./extension-session";
 import { logInfo } from "./logger";
 
-const RELAYER_URL = POLYMARKET_API.RELAYER.BASE.replace(/\/$/, "");
+const RELAYER_URL = `${getKnowwAppUrl().replace(/\/$/, "")}/api/relayer`;
 const CHAIN_ID = 137;
 const SAFE_MULTISEND = "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761";
 
@@ -204,28 +205,22 @@ async function relayerPost<T>(
   );
 }
 
-async function getBuilderHeaders(
-  method: string,
-  path: string,
-  body?: string
-): Promise<Record<string, string> | undefined> {
-  const config = createExtensionBuilderConfig();
-  const headers = await config.generateBuilderHeaders(method, path, body);
-  if (!headers) return undefined;
-  return headers as unknown as Record<string, string>;
-}
-
 async function sendAuthedRequest<T>(
   method: "GET" | "POST",
   path: string,
   body?: string,
   params?: Record<string, string>
 ): Promise<T> {
-  const builderHeaders = await getBuilderHeaders(method, path, body);
-  if (method === "GET") {
-    return relayerGet<T>(path, params ?? {}, builderHeaders);
+  const token = await getAccessTokenViaMessage();
+  if (!token) {
+    throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
   }
-  return relayerPost<T>(path, body ?? "", builderHeaders);
+  const headers = { Authorization: `Bearer ${token}` };
+
+  if (method === "GET") {
+    return relayerGet<T>(path, params ?? {}, headers);
+  }
+  return relayerPost<T>(path, body ?? "", headers);
 }
 
 export async function executeViaRelayer(

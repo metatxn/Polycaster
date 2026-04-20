@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import { MainContent } from "@/components/main-content";
 import { SidebarDesktopNoSSR } from "@/components/sidebar-desktop";
+import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import ContextProvider from "@/context";
 import "./globals.css";
 
@@ -99,14 +100,11 @@ export default async function RootLayout({
         <link rel="dns-prefetch" href="https://gamma-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://api.web3modal.org" />
         <link rel="dns-prefetch" href="https://bridge.polymarket.com" />
-        <link rel="dns-prefetch" href="https://clob.polymarket.com" />
+        <link rel="dns-prefetch" href={CLOB_BASE_URL} />
         <link rel="dns-prefetch" href="https://data-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://user-pnl-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://strapi-matic.poly.market" />
-        <link
-          rel="dns-prefetch"
-          href="https://ws-subscriptions-clob.polymarket.com"
-        />
+        <link rel="dns-prefetch" href={CLOB_WS_BASE_URL} />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

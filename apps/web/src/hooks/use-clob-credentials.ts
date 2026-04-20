@@ -6,6 +6,8 @@ import {
   CLOB_AUTH_DOMAIN,
   CLOB_AUTH_MESSAGE,
   CLOB_AUTH_TYPES,
+  CLOB_BASE_URL,
+  POLYMARKET_CHAIN_ID,
 } from "@/constants/polymarket";
 
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
@@ -352,10 +354,8 @@ export function useClobCredentials() {
 
       // Create CLOB client for credential derivation
       const clobClient = new ClobClient({
-        host:
-          process.env.NEXT_PUBLIC_POLYMARKET_HOST ||
-          "https://clob.polymarket.com",
-        chain: 137,
+        host: CLOB_BASE_URL,
+        chain: POLYMARKET_CHAIN_ID,
         signer,
       });
 
@@ -484,10 +484,8 @@ export function useClobCredentials() {
     };
 
     return new ClobClient({
-      host:
-        process.env.NEXT_PUBLIC_POLYMARKET_HOST ||
-        "https://clob.polymarket.com",
-      chain: 137,
+      host: CLOB_BASE_URL,
+      chain: POLYMARKET_CHAIN_ID,
       signer,
       creds,
     }) as InstanceType<typeof ClobClient> & ClobClientWithReadonlyMethods;
@@ -633,10 +631,8 @@ export function useClobCredentials() {
 
         // Create unauthenticated client for validation
         const client = new ClobClient({
-          host:
-            process.env.NEXT_PUBLIC_POLYMARKET_HOST ||
-            "https://clob.polymarket.com",
-          chain: 137,
+          host: CLOB_BASE_URL,
+          chain: POLYMARKET_CHAIN_ID,
         }) as InstanceType<typeof ClobClient> & ClobClientWithReadonlyMethods;
 
         const result = await client.validateReadonlyApiKey(targetAddress, key);

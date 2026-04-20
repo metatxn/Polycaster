@@ -12,11 +12,14 @@ import {
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
+import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
+import { checkAllApprovals } from "@/lib/approvals";
 import { SignatureType } from "@/lib/polymarket";
 import { executeViaRelayer } from "@/lib/relayer-client";
 import { getRpcUrl } from "@/lib/rpc";
 import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
+import { useRelayerClient } from "./use-relayer-client";
 
 /**
  * Order side enum
@@ -61,9 +64,35 @@ export interface CreateOrderParams {
 }
 
 // Module-level config to avoid hook dependencies
-const CLOB_HOST =
-  process.env.NEXT_PUBLIC_POLYMARKET_HOST || "https://clob.polymarket.com";
-const CHAIN_ID = Number(process.env.NEXT_PUBLIC_POLYMARKET_CHAIN_ID || "137");
+const CLOB_HOST = CLOB_BASE_URL;
+const CHAIN_ID = POLYMARKET_CHAIN_ID;
+
+/**
+ * The V2 ClobClient's `postOrder` does not throw on non-2xx responses — it
+ * logs the axios error internally and returns the server's error body as
+ * the resolved value (e.g. `{ error: "not enough balance / allowance", status: 400 }`).
+ * Detect that shape and raise a proper error so the UI surfaces it instead
+ * of silently reporting the order as submitted.
+ */
+function assertPostOrderSuccess(response: unknown): void {
+  if (!response || typeof response !== "object") return;
+  const r = response as {
+    success?: boolean;
+    error?: unknown;
+    errorMsg?: unknown;
+    status?: unknown;
+  };
+  const errMsg =
+    typeof r.error === "string" && r.error
+      ? r.error
+      : typeof r.errorMsg === "string" && r.errorMsg
+        ? r.errorMsg
+        : null;
+  if (errMsg || r.success === false) {
+    throw new Error(errMsg || "Order rejected by CLOB");
+  }
+}
+
 /**
  * Hook for interacting with Polymarket CLOB using the official SDK
  */
@@ -73,6 +102,7 @@ export function useClobClient() {
   const { credentials, hasCredentials, deriveCredentials } =
     useClobCredentials();
   const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
+  const { approveUsdcForTrading } = useRelayerClient();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -154,7 +184,7 @@ export function useClobClient() {
    * @param requiredPusdRaw - Required pUSD amount in base units (6 decimals).
    */
   const ensurePusdSufficient = useCallback(
-    async (requiredPusdRaw: bigint) => {
+    async (requiredPusdRaw: bigint, reservedPusdRaw: bigint = BigInt(0)) => {
       if (!proxyAddress) throw new Error("Proxy wallet not found");
       if (requiredPusdRaw <= BigInt(0)) return;
 
@@ -187,16 +217,37 @@ export function useClobClient() {
         transport: http(getRpcUrl()),
       });
 
-      const pusdBalance = (await publicClient.readContract({
+      const pusdBalanceOnChain = (await publicClient.readContract({
         address: PUSD_ADDRESS,
         abi: ERC20_READ_APPROVE_ABI,
         functionName: "balanceOf",
         args: [proxyAddress as `0x${string}`],
       })) as bigint;
 
-      if (pusdBalance >= requiredPusdRaw) return;
+      // The CLOB server reserves pUSD against the user's existing open BUY
+      // orders (price * unmatched size). A new order's required collateral
+      // must fit within the *available* balance, i.e. on-chain balance minus
+      // reservations — not the raw on-chain balance.
+      const pusdBalance =
+        pusdBalanceOnChain > reservedPusdRaw
+          ? pusdBalanceOnChain - reservedPusdRaw
+          : BigInt(0);
 
-      const shortfall = requiredPusdRaw - pusdBalance;
+      // V2 Exchange pulls `makerAmount + fees` from the Safe. The V2 SDK
+      // could shrink `amount` via `adjustBuyAmountForFees` when
+      // `userUSDCBalance` is passed, but that path depends on a valid
+      // `builderFeeRates` entry — which 404s in preprod and gets cached as
+      // NaN, disabling the adjustment. So we wrap a small buffer above the
+      // requested amount to cover fees directly on-chain.
+      const FEE_BUFFER_BPS = BigInt(300); // 3% — generous cap for V2 platform + builder fees
+      const BPS_DENOMINATOR = BigInt(10_000);
+      const targetPusdRaw =
+        (requiredPusdRaw * (BPS_DENOMINATOR + FEE_BUFFER_BPS)) /
+        BPS_DENOMINATOR;
+
+      if (pusdBalance >= targetPusdRaw) return;
+
+      const shortfall = targetPusdRaw - pusdBalance;
 
       const usdcBalance = (await publicClient.readContract({
         address: USDC_E_ADDRESS,
@@ -205,26 +256,41 @@ export function useClobClient() {
         args: [proxyAddress as `0x${string}`],
       })) as bigint;
 
-      if (usdcBalance < shortfall) {
-        const needed = formatUnits(shortfall, PUSD_DECIMALS);
+      // If the user doesn't have enough USDC.e to cover the buffered
+      // shortfall, fall back to covering at least the base requirement and
+      // let the Exchange reject if fees don't fit — at least the user isn't
+      // blocked when the shortfall is satisfiable without a fee buffer.
+      const baseShortfall =
+        requiredPusdRaw > pusdBalance
+          ? requiredPusdRaw - pusdBalance
+          : BigInt(0);
+
+      if (usdcBalance < baseShortfall) {
+        const needed = formatUnits(baseShortfall, PUSD_DECIMALS);
         const haveUsdc = formatUnits(usdcBalance, USDC_E_DECIMALS);
-        const havePusd = formatUnits(pusdBalance, PUSD_DECIMALS);
+        const haveAvailable = formatUnits(pusdBalance, PUSD_DECIMALS);
+        const reservedHint =
+          reservedPusdRaw > BigInt(0)
+            ? ` (${formatUnits(reservedPusdRaw, PUSD_DECIMALS)} pUSD is reserved by your open orders — cancel them to free it up)`
+            : "";
         throw new Error(
           `Insufficient collateral: need $${needed} more to place this order. ` +
-            `Proxy holds $${havePusd} pUSD and $${haveUsdc} USDC.e — ` +
-            "please deposit more USDC.e."
+            `Proxy has $${haveAvailable} pUSD available and $${haveUsdc} USDC.e${reservedHint} — ` +
+            "please deposit more USDC.e or cancel open orders."
         );
       }
+
+      const wrapAmount = usdcBalance < shortfall ? usdcBalance : shortfall;
 
       const approveData = encodeFunctionData({
         abi: ERC20_READ_APPROVE_ABI,
         functionName: "approve",
-        args: [COLLATERAL_ONRAMP_ADDRESS, shortfall],
+        args: [COLLATERAL_ONRAMP_ADDRESS, wrapAmount],
       });
       const wrapData = encodeFunctionData({
         abi: COLLATERAL_ONRAMP_ABI,
         functionName: "wrap",
-        args: [USDC_E_ADDRESS, proxyAddress as `0x${string}`, shortfall],
+        args: [USDC_E_ADDRESS, proxyAddress as `0x${string}`, wrapAmount],
       });
 
       if (!walletClient) throw new Error("Wallet not connected");
@@ -247,6 +313,30 @@ export function useClobClient() {
   );
 
   /**
+   * Ensure every V2 allowance (pUSD → exchanges, USDC.e → onramp, CTF
+   * setApprovalForAll → operators) is set on the Safe. If any is missing,
+   * submit the full approval batch via the relayer before the order call.
+   *
+   * This makes the trade flow self-healing: a user who skipped onboarding
+   * or was onboarded pre-V2 can place an order and the app will submit the
+   * one-time approval batch transparently rather than failing with a
+   * cryptic "not enough balance / allowance" from the server.
+   */
+  const ensureV2Approvals = useCallback(async () => {
+    if (!proxyAddress) throw new Error("Proxy wallet not found");
+    const status = await checkAllApprovals(proxyAddress);
+    if (status.allApproved) return;
+
+    const result = await approveUsdcForTrading();
+    if (!result.success) {
+      throw new Error(
+        result.error ||
+          "Failed to grant V2 trading approvals. Please open trading setup and try again."
+      );
+    }
+  }, [proxyAddress, approveUsdcForTrading]);
+
+  /**
    * Create and post an order
    */
   const createOrder = useCallback(
@@ -264,6 +354,12 @@ export function useClobClient() {
         const isMarket =
           params.orderType === OrderType.FAK ||
           params.orderType === OrderType.FOK;
+
+        // Approvals pre-flight: if any V2 allowance is missing, submit the
+        // full approval batch before continuing. Covers both BUY and SELL —
+        // SELL needs CTF.setApprovalForAll → exchanges to transfer outcome
+        // tokens, BUY needs pUSD → exchange allowance for settlement.
+        await ensureV2Approvals();
 
         // Wrap-on-trade pre-flight (BUY only). SELL receives pUSD and does
         // not need collateral wrapped beforehand.
@@ -283,7 +379,42 @@ export function useClobClient() {
             const notional = params.price * params.size;
             requiredPusdRaw = parseUnits(notional.toString(), PUSD_DECIMALS);
           }
-          await ensurePusdSufficient(requiredPusdRaw);
+
+          // The CLOB reserves pUSD against the user's existing open BUY
+          // orders (price * unmatched size). Count those reservations so
+          // we compare the new order against *available* pUSD, not just
+          // on-chain balance.
+          let reservedPusdRaw = BigInt(0);
+          try {
+            const openOrders = await client.getOpenOrders();
+            const arr = Array.isArray(openOrders) ? openOrders : [];
+            for (const raw of arr) {
+              const o = raw as {
+                side?: string;
+                price?: string | number;
+                original_size?: string | number;
+                size_matched?: string | number;
+              };
+              if (o?.side !== "BUY") continue;
+              const price = Number(o.price ?? 0);
+              const remaining =
+                Number(o.original_size ?? 0) - Number(o.size_matched ?? 0);
+              if (
+                !Number.isFinite(price) ||
+                !Number.isFinite(remaining) ||
+                remaining <= 0
+              )
+                continue;
+              reservedPusdRaw += BigInt(
+                Math.round(price * remaining * 1_000_000)
+              );
+            }
+          } catch {
+            // If getOpenOrders fails, proceed with 0 reserved — worst case
+            // the server rejects with its own error message.
+          }
+
+          await ensurePusdSufficient(requiredPusdRaw, reservedPusdRaw);
         }
 
         if (isMarket) {
@@ -314,7 +445,39 @@ export function useClobClient() {
             orderOptions
           );
 
+          // Resync the CLOB server's cached view of this user's on-chain
+          // balance/allowance before posting. Without this, the server
+          // returns a generic "not enough balance / allowance" 400 even
+          // when the Safe holds sufficient pUSD with unlimited allowances
+          // — the server simply hasn't observed the latest on-chain state
+          // for this funder. Mirrors the extension's trading-handler.ts.
+          try {
+            await (
+              client as unknown as {
+                updateBalanceAllowance: (args: {
+                  asset_type: string;
+                  token_id?: string;
+                }) => Promise<unknown>;
+              }
+            ).updateBalanceAllowance({ asset_type: "COLLATERAL" });
+            await (
+              client as unknown as {
+                updateBalanceAllowance: (args: {
+                  asset_type: string;
+                  token_id?: string;
+                }) => Promise<unknown>;
+              }
+            ).updateBalanceAllowance({
+              asset_type: "CONDITIONAL",
+              token_id: params.tokenId,
+            });
+          } catch {
+            // Non-fatal: the server may still accept the order if its
+            // cache is already fresh; postOrder surfaces any real issue.
+          }
+
           const response = await client.postOrder(order, params.orderType);
+          assertPostOrderSuccess(response);
           return { success: true, order: response };
         }
 
@@ -331,7 +494,36 @@ export function useClobClient() {
           orderOptions
         );
 
+        // Resync server-side cached balance/allowance before posting (V2
+        // requires this; without it the server returns a stale "not
+        // enough balance / allowance" 400). Mirrors the extension.
+        try {
+          await (
+            client as unknown as {
+              updateBalanceAllowance: (args: {
+                asset_type: string;
+                token_id?: string;
+              }) => Promise<unknown>;
+            }
+          ).updateBalanceAllowance({ asset_type: "COLLATERAL" });
+          await (
+            client as unknown as {
+              updateBalanceAllowance: (args: {
+                asset_type: string;
+                token_id?: string;
+              }) => Promise<unknown>;
+            }
+          ).updateBalanceAllowance({
+            asset_type: "CONDITIONAL",
+            token_id: params.tokenId,
+          });
+        } catch {
+          // Non-fatal: the server may still accept the order if its cache
+          // is already fresh; postOrder surfaces any real issue.
+        }
+
         const response = await client.postOrder(order, params.orderType);
+        assertPostOrderSuccess(response);
         return { success: true, order: response };
       } catch (err) {
         const error =
@@ -342,7 +534,7 @@ export function useClobClient() {
         setIsLoading(false);
       }
     },
-    [address, canTrade, getClient, ensurePusdSufficient]
+    [address, canTrade, getClient, ensurePusdSufficient, ensureV2Approvals]
   );
 
   /**

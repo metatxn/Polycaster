@@ -50,8 +50,8 @@ export function BridgeSelection({
           </div>
           <p className="text-[11px] text-muted-foreground leading-snug">
             All deposits are automatically converted to{" "}
-            <span className="text-primary font-bold">USDC.e on Polygon</span> at
-            the best available rate.
+            <span className="text-primary font-bold">pUSD on Polygon</span>{" "}
+            (Polymarket's V2 trading token) at the best available rate.
           </p>
         </div>
       </div>

@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { useMarketDetail } from "@/hooks/use-market-detail";
 import {
   useOrderBook as useOrderBookFromStore,
@@ -267,15 +268,23 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   const currentTokenId = tradingOutcomes[selectedOutcome]?.tokenId || "";
 
+  // Shared queryKey `["orderBook", tokenId]` — same as the <OrderBook>
+  // component and the sell-position modal. React Query dedupes across all
+  // concurrent consumers so this mounting-at-the-same-time-as-<OrderBook>
+  // produces ONE network request, not N. The first queryFn to register wins;
+  // the others just read from the shared cache entry. Keep this queryFn
+  // returning the richer shape (tick_size + min_order_size) so downstream
+  // consumers that need those fields get them even when the shared cache
+  // entry was seeded by another call site.
   const { data: orderBookData } =
     useQuery<MarketDetailTradingOrderBookSnapshot | null>({
-      queryKey: ["marketDetailTradingOrderBook", currentTokenId],
+      queryKey: ["orderBook", currentTokenId],
       queryFn:
         async (): Promise<MarketDetailTradingOrderBookSnapshot | null> => {
           if (!currentTokenId) return null;
 
           const response = await fetch(
-            `https://clob.polymarket.com/book?token_id=${currentTokenId}`,
+            `${CLOB_BASE_URL}/book?token_id=${currentTokenId}`,
             { headers: { Accept: "application/json" } }
           );
           if (!response.ok) return null;
@@ -710,7 +719,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
           {/* Chart Section - Left Side (2/3 width) */}
           <div className="lg:col-span-2 space-y-6">
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="py-3">
                 <ErrorBoundary name="Market Price Chart">
                   <MarketPriceChart
                     tokens={chartTokens}

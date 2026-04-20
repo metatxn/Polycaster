@@ -199,6 +199,7 @@ interface TokenDef {
 }
 
 const KNOWN_TOKENS: TokenDef[] = [
+  { symbol: "pUSD", address: PUSD_ADDRESS, decimals: 6 },
   { symbol: "USDC.e", address: USDC_E_ADDRESS, decimals: 6 },
   {
     symbol: "USDC",
@@ -273,7 +274,7 @@ async function handleGetBalance(
     if (raw.isZero()) continue;
     const amount = Number(ethers.utils.formatUnits(raw, tok.decimals));
     tokenBalances.push({ symbol: tok.symbol, amount });
-    if (tok.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()) {
+    if (tok.address.toLowerCase() === PUSD_ADDRESS.toLowerCase()) {
       primaryBalance = amount;
       primaryBalanceRaw = raw.toString();
     }
@@ -342,11 +343,48 @@ async function handlePlaceOrder(
         ? ethers.utils.parseUnits(String(msg.amount ?? msg.size), 6)
         : ethers.utils.parseUnits(String(msg.price * msg.size), 6);
 
+    // Subtract pUSD already reserved by the user's existing open BUY
+    // orders. Without this the Safe looks funded on-chain but the server
+    // returns "not enough balance / allowance" because its own view nets
+    // out reservations against the wallet balance. See web mirror in
+    // apps/web/src/hooks/use-clob-client.ts:createOrder.
+    let reservedPusd = ethers.BigNumber.from(0);
+    try {
+      const openOrders = (await client.getOpenOrders()) as unknown;
+      const arr = Array.isArray(openOrders) ? openOrders : [];
+      for (const raw of arr) {
+        const o = raw as {
+          side?: string;
+          price?: string | number;
+          original_size?: string | number;
+          size_matched?: string | number;
+        };
+        if (o?.side !== "BUY") continue;
+        const price = Number(o.price ?? 0);
+        const remaining =
+          Number(o.original_size ?? 0) - Number(o.size_matched ?? 0);
+        if (
+          !Number.isFinite(price) ||
+          !Number.isFinite(remaining) ||
+          remaining <= 0
+        )
+          continue;
+        reservedPusd = reservedPusd.add(
+          ethers.BigNumber.from(Math.round(price * remaining * 1_000_000))
+        );
+      }
+    } catch (err) {
+      logWarn("trading.open-orders-fetch-failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     await ensurePusdSufficient(
       signer,
       msg.proxyAddress,
       requiredPusd,
-      provider
+      provider,
+      reservedPusd
     );
   }
 
@@ -397,6 +435,22 @@ async function handlePlaceOrder(
       orderOptions
     );
     const response = await client.postOrder(order, orderType as any);
+
+    // The V2 SDK's `postOrder` resolves with the server's error body on
+    // non-2xx instead of throwing. Surface it as a real failure so the UI
+    // doesn't report a rejected order as successful.
+    if (
+      response &&
+      typeof response === "object" &&
+      "error" in (response as Record<string, unknown>)
+    ) {
+      const errorMsg =
+        typeof (response as Record<string, unknown>).error === "string"
+          ? ((response as Record<string, unknown>).error as string)
+          : JSON.stringify((response as Record<string, unknown>).error);
+      return fail(`CLOB rejected order: ${errorMsg}`);
+    }
+
     return ok(response);
   }
 
@@ -924,7 +978,8 @@ async function ensurePusdSufficient(
   signer: BridgeSigner,
   proxyAddress: string,
   requiredPusd: ethers.BigNumber,
-  provider: ethers.providers.StaticJsonRpcProvider
+  provider: ethers.providers.StaticJsonRpcProvider,
+  reservedPusd: ethers.BigNumber = ethers.BigNumber.from(0)
 ): Promise<void> {
   const pusd = new ethers.Contract(
     PUSD_ADDRESS,
@@ -937,16 +992,46 @@ async function ensurePusdSufficient(
     provider
   );
 
-  const pusdBalance: ethers.BigNumber = await pusd.balanceOf(proxyAddress);
-  if (pusdBalance.gte(requiredPusd)) return;
+  const pusdBalanceOnChain: ethers.BigNumber =
+    await pusd.balanceOf(proxyAddress);
 
-  const shortfall = requiredPusd.sub(pusdBalance);
+  // The CLOB server reserves pUSD against the user's existing open BUY
+  // orders (price * unmatched size). A new order's required collateral
+  // must fit within the *available* balance, i.e. on-chain balance minus
+  // reservations — not raw on-chain balance. Otherwise the Safe looks
+  // funded on-chain while the server's cached view rightly returns
+  // "not enough balance / allowance".
+  const pusdBalance = pusdBalanceOnChain.gt(reservedPusd)
+    ? pusdBalanceOnChain.sub(reservedPusd)
+    : ethers.BigNumber.from(0);
+
+  // V2 Exchange pulls makerAmount + fees from the Safe on BUY. Wrap a small
+  // buffer above the requested amount so the post-wrap pUSD balance covers
+  // both the order amount and the platform/builder fees the Exchange
+  // collects at match time. The SDK's `adjustBuyAmountForFees` can't be
+  // relied on during preprod (the /fees/builder-fees endpoint 404s → cached
+  // as NaN → adjustment disabled).
+  const FEE_BUFFER_BPS = ethers.BigNumber.from(300); // 3%
+  const BPS_DENOMINATOR = ethers.BigNumber.from(10_000);
+  const targetPusd = requiredPusd
+    .mul(BPS_DENOMINATOR.add(FEE_BUFFER_BPS))
+    .div(BPS_DENOMINATOR);
+
+  if (pusdBalance.gte(targetPusd)) return;
+
+  const shortfall = targetPusd.sub(pusdBalance);
+  const baseShortfall = pusdBalance.lt(requiredPusd)
+    ? requiredPusd.sub(pusdBalance)
+    : ethers.BigNumber.from(0);
+
   const usdcBalance: ethers.BigNumber = await usdc.balanceOf(proxyAddress);
-  if (usdcBalance.lt(shortfall)) {
+  if (usdcBalance.lt(baseShortfall)) {
     throw new Error(
-      `Insufficient collateral: need ${shortfall.toString()} more pUSD (or USDC.e to wrap), have ${pusdBalance.toString()} pUSD + ${usdcBalance.toString()} USDC.e`
+      `Insufficient collateral: need ${baseShortfall.toString()} more pUSD (or USDC.e to wrap), have ${pusdBalance.toString()} pUSD + ${usdcBalance.toString()} USDC.e`
     );
   }
+
+  const wrapAmount = usdcBalance.lt(shortfall) ? usdcBalance : shortfall;
 
   const erc20Iface = new ethers.utils.Interface([
     "function approve(address spender, uint256 amount) returns (bool)",
@@ -955,12 +1040,12 @@ async function ensurePusdSufficient(
 
   const approveCalldata = erc20Iface.encodeFunctionData("approve", [
     COLLATERAL_ONRAMP_ADDRESS,
-    shortfall,
+    wrapAmount,
   ]);
   const wrapCalldata = onrampIface.encodeFunctionData("wrap", [
     USDC_E_ADDRESS,
     proxyAddress,
-    shortfall,
+    wrapAmount,
   ]);
 
   await executeViaRelayer(signer, [
@@ -968,7 +1053,7 @@ async function ensurePusdSufficient(
     { to: COLLATERAL_ONRAMP_ADDRESS, data: wrapCalldata, value: "0" },
   ]);
 
-  logInfo("trading.auto-wrap", { wrapped: shortfall.toString() });
+  logInfo("trading.auto-wrap", { wrapped: wrapAmount.toString() });
 }
 
 function deriveProxyAddressSync(eoaAddress: string): string {

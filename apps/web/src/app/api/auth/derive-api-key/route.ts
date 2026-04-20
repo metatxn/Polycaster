@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import {
   getPostHogClient,
@@ -163,8 +164,7 @@ export async function POST(request: NextRequest) {
 
     const { address, signature, timestamp, nonce } = parsed.data;
 
-    const clobHost =
-      process.env.NEXT_PUBLIC_POLYMARKET_HOST || "https://clob.polymarket.com";
+    const clobHost = CLOB_BASE_URL;
 
     // Build L1 headers for Polymarket authentication
     const l1Headers: L1Headers = {

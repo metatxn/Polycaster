@@ -13,7 +13,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { USDC_E_ADDRESS as POLYGON_USDC_E_ADDRESS } from "@/constants/contracts";
+import { PUSD_ADDRESS as POLYGON_PUSD_ADDRESS } from "@/constants/contracts";
 import {
   type DepositTransaction,
   type QuoteResponse,
@@ -457,7 +457,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
         fromTokenAddress: tokenAddress,
         recipientAddress: bridgeAddress,
         toChainId: "137",
-        toTokenAddress: POLYGON_USDC_E_ADDRESS,
+        toTokenAddress: POLYGON_PUSD_ADDRESS,
       }),
       signal: controller.signal,
     })
@@ -569,7 +569,9 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     if (!amount || !selectedToken) return "0";
     const numAmount = Number.parseFloat(amount);
     if (Number.isNaN(numAmount)) return "0";
-    if (["USDC", "USDC.e", "DAI", "USDT"].includes(selectedToken.symbol))
+    if (
+      ["USDC", "USDC.e", "pUSD", "DAI", "USDT"].includes(selectedToken.symbol)
+    )
       return numAmount.toFixed(2);
     const ratio = selectedToken.usdValue / selectedToken.balance;
     return (numAmount * ratio).toFixed(2);
@@ -579,7 +581,9 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     if (!amount || !selectedToken) return 0;
     const numAmount = Number.parseFloat(amount);
     if (Number.isNaN(numAmount)) return 0;
-    if (["USDC", "USDC.e", "DAI", "USDT"].includes(selectedToken.symbol))
+    if (
+      ["USDC", "USDC.e", "pUSD", "DAI", "USDT"].includes(selectedToken.symbol)
+    )
       return numAmount;
     const ratio = selectedToken.usdValue / selectedToken.balance;
     return numAmount * ratio;

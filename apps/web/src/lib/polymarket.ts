@@ -88,17 +88,29 @@ function getEnvOptional(key: string): string | undefined {
 }
 
 /**
- * Get the CLOB API host URL
+ * Get the CLOB API host URL. Server-only code may set POLYMARKET_HOST to
+ * override the shared NEXT_PUBLIC_POLYMARKET_HOST value (e.g. to route server
+ * requests through an internal mirror); otherwise it inherits the client
+ * value.
  */
 export function getClobHost(): string {
-  return getEnvOptional("POLYMARKET_HOST") || "https://clob.polymarket.com";
+  return (
+    getEnvOptional("POLYMARKET_HOST") ||
+    getEnvOptional("NEXT_PUBLIC_POLYMARKET_HOST") ||
+    "https://clob.polymarket.com"
+  );
 }
 
 /**
  * Get the chain ID
  */
 export function getChainId(): number {
-  return Number.parseInt(getEnvOptional("POLYMARKET_CHAIN_ID") || "137", 10);
+  return Number.parseInt(
+    getEnvOptional("POLYMARKET_CHAIN_ID") ||
+      getEnvOptional("NEXT_PUBLIC_POLYMARKET_CHAIN_ID") ||
+      "137",
+    10
+  );
 }
 
 /**

@@ -31,82 +31,89 @@ export interface ApprovalStatus {
   allApproved: boolean;
 }
 
-let lastApprovalCheck = 0;
-const MIN_APPROVAL_CHECK_INTERVAL = 200;
-
-async function throttleApprovalCheck(): Promise<void> {
-  const now = Date.now();
-  const elapsed = now - lastApprovalCheck;
-  if (elapsed < MIN_APPROVAL_CHECK_INTERVAL) {
-    await new Promise((r) =>
-      setTimeout(r, MIN_APPROVAL_CHECK_INTERVAL - elapsed)
-    );
-  }
-  lastApprovalCheck = Date.now();
-}
-
-async function checkErc20Allowance(
-  token: `0x${string}`,
-  owner: `0x${string}`,
-  spender: `0x${string}`
-): Promise<boolean> {
-  try {
-    await throttleApprovalCheck();
-    const client = getPublicClient();
-    const allowance = await client.readContract({
-      address: token,
-      abi: erc20Abi,
-      functionName: "allowance",
-      args: [owner, spender],
-    });
-    return allowance >= APPROVAL_THRESHOLD;
-  } catch (err) {
-    console.error("[Approvals] Failed to check ERC-20 allowance:", err);
-    return false;
-  }
-}
-
-async function checkErc1155Approval(
-  owner: `0x${string}`,
-  operator: `0x${string}`
-): Promise<boolean> {
-  try {
-    await throttleApprovalCheck();
-    const client = getPublicClient();
-    return await client.readContract({
-      address: CONTRACTS.CTF,
-      abi: ERC1155_ABI,
-      functionName: "isApprovedForAll",
-      args: [owner, operator],
-    });
-  } catch (err) {
-    console.error("[Approvals] Failed to check ERC-1155 approval:", err);
-    return false;
-  }
-}
-
 export async function checkAllApprovals(
   safeAddress: string
 ): Promise<ApprovalStatus> {
   const owner = safeAddress as `0x${string}`;
+  const client = getPublicClient();
 
-  const [
-    pusdCtfExchange,
-    pusdNegRiskExchange,
-    pusdNegRiskAdapter,
-    usdcOnramp,
-    ctfExchangeApproval,
-    ctfNegRiskExchangeApproval,
-    ctfNegRiskAdapterApproval,
-  ] = await Promise.all([
-    checkErc20Allowance(CONTRACTS.PUSD, owner, CONTRACTS.CTF_EXCHANGE),
-    checkErc20Allowance(CONTRACTS.PUSD, owner, CONTRACTS.NEG_RISK_CTF_EXCHANGE),
-    checkErc20Allowance(CONTRACTS.PUSD, owner, CONTRACTS.NEG_RISK_ADAPTER),
-    checkErc20Allowance(CONTRACTS.USDC_E, owner, CONTRACTS.COLLATERAL_ONRAMP),
-    checkErc1155Approval(owner, CONTRACTS.CTF_EXCHANGE),
-    checkErc1155Approval(owner, CONTRACTS.NEG_RISK_CTF_EXCHANGE),
-    checkErc1155Approval(owner, CONTRACTS.NEG_RISK_ADAPTER),
-  ]);
+  // Batches all 7 reads into a single Multicall3 aggregate3 call, so we make
+  // one RPC round-trip instead of seven. `allowFailure: true` ensures one
+  // reverting sub-call can't take down the whole probe — failures show up as
+  // `{ status: "failure" }` and we treat them as not-approved.
+  const results = await client.multicall({
+    allowFailure: true,
+    contracts: [
+      {
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [owner, CONTRACTS.CTF_EXCHANGE],
+      },
+      {
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [owner, CONTRACTS.NEG_RISK_CTF_EXCHANGE],
+      },
+      {
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [owner, CONTRACTS.NEG_RISK_ADAPTER],
+      },
+      {
+        address: CONTRACTS.USDC_E,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [owner, CONTRACTS.COLLATERAL_ONRAMP],
+      },
+      {
+        address: CONTRACTS.CTF,
+        abi: ERC1155_ABI,
+        functionName: "isApprovedForAll",
+        args: [owner, CONTRACTS.CTF_EXCHANGE],
+      },
+      {
+        address: CONTRACTS.CTF,
+        abi: ERC1155_ABI,
+        functionName: "isApprovedForAll",
+        args: [owner, CONTRACTS.NEG_RISK_CTF_EXCHANGE],
+      },
+      {
+        address: CONTRACTS.CTF,
+        abi: ERC1155_ABI,
+        functionName: "isApprovedForAll",
+        args: [owner, CONTRACTS.NEG_RISK_ADAPTER],
+      },
+    ],
+  });
+
+  const allowanceOk = (i: number): boolean => {
+    const r = results[i];
+    if (r.status !== "success") {
+      console.error("[Approvals] allowance read failed:", r.error);
+      return false;
+    }
+    return (r.result as bigint) >= APPROVAL_THRESHOLD;
+  };
+
+  const approvalOk = (i: number): boolean => {
+    const r = results[i];
+    if (r.status !== "success") {
+      console.error("[Approvals] isApprovedForAll read failed:", r.error);
+      return false;
+    }
+    return r.result as boolean;
+  };
+
+  const pusdCtfExchange = allowanceOk(0);
+  const pusdNegRiskExchange = allowanceOk(1);
+  const pusdNegRiskAdapter = allowanceOk(2);
+  const usdcOnramp = allowanceOk(3);
+  const ctfExchangeApproval = approvalOk(4);
+  const ctfNegRiskExchangeApproval = approvalOk(5);
+  const ctfNegRiskAdapterApproval = approvalOk(6);
 
   const allApproved =
     pusdCtfExchange &&

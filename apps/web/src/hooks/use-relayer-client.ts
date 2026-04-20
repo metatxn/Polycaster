@@ -15,7 +15,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 
 // Contract addresses on Polygon Mainnet
-import { CONTRACTS } from "@/constants/contracts";
+import {
+  CONTRACTS,
+  CTF_APPROVAL_OPERATORS,
+  PUSD_APPROVAL_TARGETS,
+} from "@/constants/contracts";
 import { POLYGON_CHAIN_ID, RELAYER_API_URL } from "@/constants/polymarket";
 
 import {
@@ -153,22 +157,26 @@ export function useRelayerClient() {
   }, [walletClient, address]);
 
   /**
-   * Set all token approvals for trading (gasless)
+   * Set all token approvals for V2 trading (gasless)
    *
-   * This sets up ALL required approvals for Polymarket trading:
+   * V2 settles BUY orders in pUSD, so the Safe must approve pUSD (not USDC.e)
+   * to the V2 Exchange contracts. USDC.e is only approved to the Collateral
+   * Onramp so that `wrap()` can convert USDC.e → pUSD on demand.
    *
-   * ERC-20 (USDC.e) Approvals:
-   * - CTF Contract: For split/merge operations
-   * - CTF Exchange: For standard binary markets
-   * - Neg Risk CTF Exchange: For negative risk markets
-   * - Neg Risk Adapter: For converting between market types
+   * ERC-20 Approvals:
+   * - pUSD → CTF Exchange V2:            settle BUY on standard markets
+   * - pUSD → Neg Risk CTF Exchange V2:   settle BUY on neg-risk markets
+   * - pUSD → Neg Risk Adapter:           convert between market types
+   * - USDC.e → Collateral Onramp:        allow wrap() to pull USDC.e → mint pUSD
    *
    * ERC-1155 (Outcome Token) Approvals:
-   * - CTF Exchange: To sell positions in standard markets
-   * - Neg Risk CTF Exchange: To sell positions in neg risk markets
-   * - Neg Risk Adapter: To convert positions between market types
+   * - CTF → CTF Exchange V2:             sell positions on standard markets
+   * - CTF → Neg Risk CTF Exchange V2:    sell positions on neg-risk markets
+   * - CTF → Neg Risk Adapter:            convert positions between market types
    *
-   * Reference: https://github.com/Polymarket/wagmi-safe-builder-example
+   * This list must mirror `checkAllApprovals` in `@/lib/approvals` — adding a
+   * target there without adding it here leaves users stuck in a loop where
+   * the check fails after a "successful" batch.
    */
   const approveUsdcForTrading = useCallback(async () => {
     if (!walletClient || !address) {
@@ -242,99 +250,53 @@ export function useRelayerClient() {
         },
       ] as const;
 
-      // Create ALL approval transactions
-      // The SDK's execute() method expects Transaction objects with: to, data, value
-      // It internally converts these to SafeTransactions with operation: Call
-      const approvalTxs = [
-        // ========== ERC-20 (USDC.e) Approvals ==========
-        // Approve CTF Contract (for split/merge operations)
-        {
-          to: CONTRACTS.USDC_E,
-          data: encodeFunctionData({
-            abi: erc20ApproveAbi,
-            functionName: "approve",
-            args: [CONTRACTS.CTF, maxUint256],
-          }),
-          value: "0",
-        },
-        // Approve CTF Exchange (for standard binary markets)
-        {
-          to: CONTRACTS.USDC_E,
-          data: encodeFunctionData({
-            abi: erc20ApproveAbi,
-            functionName: "approve",
-            args: [CONTRACTS.CTF_EXCHANGE, maxUint256],
-          }),
-          value: "0",
-        },
-        // Approve Neg Risk CTF Exchange (for negative risk markets)
-        {
-          to: CONTRACTS.USDC_E,
-          data: encodeFunctionData({
-            abi: erc20ApproveAbi,
-            functionName: "approve",
-            args: [CONTRACTS.NEG_RISK_CTF_EXCHANGE, maxUint256],
-          }),
-          value: "0",
-        },
-        // Approve Neg Risk Adapter (for converting between market types)
-        {
-          to: CONTRACTS.USDC_E,
-          data: encodeFunctionData({
-            abi: erc20ApproveAbi,
-            functionName: "approve",
-            args: [CONTRACTS.NEG_RISK_ADAPTER, maxUint256],
-          }),
-          value: "0",
-        },
+      // Create ALL approval transactions.
+      // The SDK's execute() method expects Transaction objects with: to, data,
+      // value. It internally converts these to SafeTransactions (operation: Call).
+      const erc20Approve = (token: `0x${string}`, spender: `0x${string}`) => ({
+        to: token,
+        data: encodeFunctionData({
+          abi: erc20ApproveAbi,
+          functionName: "approve",
+          args: [spender, maxUint256],
+        }),
+        value: "0",
+      });
+      const erc1155ApproveAll = (operator: `0x${string}`) => ({
+        to: CONTRACTS.CTF,
+        data: encodeFunctionData({
+          abi: erc1155ApprovalAbi,
+          functionName: "setApprovalForAll",
+          args: [operator, true],
+        }),
+        value: "0",
+      });
 
-        // ========== ERC-1155 (Outcome Token) Approvals ==========
-        // Allow CTF Exchange to transfer outcome tokens (for selling positions)
-        {
-          to: CONTRACTS.CTF,
-          data: encodeFunctionData({
-            abi: erc1155ApprovalAbi,
-            functionName: "setApprovalForAll",
-            args: [CONTRACTS.CTF_EXCHANGE, true],
-          }),
-          value: "0",
-        },
-        // Allow Neg Risk CTF Exchange to transfer outcome tokens
-        {
-          to: CONTRACTS.CTF,
-          data: encodeFunctionData({
-            abi: erc1155ApprovalAbi,
-            functionName: "setApprovalForAll",
-            args: [CONTRACTS.NEG_RISK_CTF_EXCHANGE, true],
-          }),
-          value: "0",
-        },
-        // Allow Neg Risk Adapter to transfer outcome tokens
-        {
-          to: CONTRACTS.CTF,
-          data: encodeFunctionData({
-            abi: erc1155ApprovalAbi,
-            functionName: "setApprovalForAll",
-            args: [CONTRACTS.NEG_RISK_ADAPTER, true],
-          }),
-          value: "0",
-        },
+      const approvalTxs = [
+        // pUSD → V2 exchanges (settles BUY orders)
+        ...PUSD_APPROVAL_TARGETS.map((spender) =>
+          erc20Approve(CONTRACTS.PUSD, spender)
+        ),
+        // USDC.e → Onramp (lets wrap() pull USDC.e and mint pUSD)
+        erc20Approve(CONTRACTS.USDC_E, CONTRACTS.COLLATERAL_ONRAMP),
+        // CTF outcome tokens → operators (needed to SELL positions)
+        ...CTF_APPROVAL_OPERATORS.map((operator) =>
+          erc1155ApproveAll(operator)
+        ),
       ];
 
       console.log("[RelayerClient] Submitting token approval transactions...");
-      console.log("[RelayerClient] ERC-20 (USDC) approval targets:", {
-        CTF: CONTRACTS.CTF,
-        CTF_EXCHANGE: CONTRACTS.CTF_EXCHANGE,
-        NEG_RISK_CTF_EXCHANGE: CONTRACTS.NEG_RISK_CTF_EXCHANGE,
-        NEG_RISK_ADAPTER: CONTRACTS.NEG_RISK_ADAPTER,
-      });
       console.log(
-        "[RelayerClient] ERC-1155 (Outcome Token) approval targets:",
-        {
-          CTF_EXCHANGE: CONTRACTS.CTF_EXCHANGE,
-          NEG_RISK_CTF_EXCHANGE: CONTRACTS.NEG_RISK_CTF_EXCHANGE,
-          NEG_RISK_ADAPTER: CONTRACTS.NEG_RISK_ADAPTER,
-        }
+        "[RelayerClient] pUSD approval targets:",
+        PUSD_APPROVAL_TARGETS
+      );
+      console.log(
+        "[RelayerClient] USDC.e approval target:",
+        CONTRACTS.COLLATERAL_ONRAMP
+      );
+      console.log(
+        "[RelayerClient] CTF (ERC-1155) approval operators:",
+        CTF_APPROVAL_OPERATORS
       );
 
       // Execute the approval transactions with retry logic.

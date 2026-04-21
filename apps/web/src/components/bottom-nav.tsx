@@ -18,11 +18,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: "Home", href: "/", icon: Home },
+  { label: "Home", href: "/markets", icon: Home },
   { label: "Search", href: "/search", icon: Search },
   {
     label: "Breaking",
-    href: "/?view=breaking",
+    href: "/markets?view=breaking",
     icon: Zap,
     viewParam: "breaking",
   },
@@ -61,16 +61,16 @@ export function BottomNav() {
   const isItemActive = (item: NavItem) => {
     // Special handling for Breaking - active when on home with view=breaking
     if (item.viewParam) {
-      return pathname === "/" && viewParam === item.viewParam;
+      return pathname === "/markets" && viewParam === item.viewParam;
     }
-    // Home is active when on "/" without a view param
-    if (item.href === "/") {
-      return pathname === "/" && !viewParam;
+    // Home is active when on "/markets" without a view param
+    if (item.href === "/markets") {
+      return pathname === "/markets" && !viewParam;
     }
     // Other items - standard path matching
     return (
       pathname === item.href ||
-      (item.href !== "/" && pathname.startsWith(item.href))
+      (item.href !== "/markets" && pathname.startsWith(item.href))
     );
   };
 

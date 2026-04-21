@@ -27,11 +27,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Knoww - Know your Odds",
+    default: "Knoww — Every opinion is a position",
     template: "%s | Knoww",
   },
-  description:
-    "Trade on real-world events with Knoww. Explore prediction markets for politics, sports, crypto, and more.",
+  description: "A prediction market layer for the open internet.",
   keywords: ["prediction markets", "polymarket", "trading", "crypto", "odds"],
   metadataBase: new URL("https://knoww.app"),
   icons: {
@@ -54,21 +53,21 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     siteName: "Knoww",
-    title: "Knoww - Know your Odds",
-    description: "Trade on real-world events with prediction markets",
+    title: "Knoww — Every opinion is a position",
+    description: "A prediction market layer for the open internet.",
     images: [
       {
         url: "/logo-512x512.png",
         width: 512,
         height: 512,
-        alt: "Knoww Prediction Markets",
+        alt: "Knoww — A prediction market layer for the open internet",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Knoww - Know your Odds",
-    description: "Trade on real-world events with prediction markets",
+    title: "Knoww — Every opinion is a position",
+    description: "A prediction market layer for the open internet.",
     images: ["/logo-512x512.png"],
   },
   robots: {

@@ -528,7 +528,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
             <button
               type="button"
-              onClick={() => router.push("/")}
+              onClick={() => router.push("/markets")}
               className="flex items-center gap-1 hover:text-foreground transition-colors"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -543,7 +543,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => router.push("/")}>
+              <Button onClick={() => router.push("/markets")}>
                 <ChevronLeft className="mr-2 h-4 w-4" />
                 Back to Markets
               </Button>
@@ -569,7 +569,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/markets")}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />

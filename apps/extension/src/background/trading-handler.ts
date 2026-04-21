@@ -30,12 +30,12 @@ import {
 } from "@knoww/shared-types/polymarket";
 import { ethers } from "ethers";
 import type {
+  TradingDeploySafeMessage,
   TradingDeriveCredentialsMessage,
   TradingErrorResponse,
   TradingGetAllAllowancesMessage,
   TradingGetAllowanceMessage,
   TradingGetBalanceMessage,
-  TradingGetFeeRateMessage,
   TradingGetOrderBookMessage,
   TradingGetOutcomeBalancesMessage,
   TradingMergePositionsMessage,
@@ -46,7 +46,7 @@ import type {
 } from "../types/chrome-messages";
 import { BridgeSigner } from "./bridge-signer";
 import { logInfo, logWarn } from "./logger";
-import { executeViaRelayer } from "./relayer-client";
+import { deployProxyWallet, executeViaRelayer } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
@@ -89,10 +89,6 @@ export async function handleTradingMessage(
           message as unknown as TradingPlaceOrderMessage,
           sender
         );
-      case "trading:get-fee-rate":
-        return await handleGetFeeRate(
-          message as unknown as TradingGetFeeRateMessage
-        );
       case "trading:get-allowance":
         return await handleGetAllowance(
           message as unknown as TradingGetAllowanceMessage
@@ -126,6 +122,11 @@ export async function handleTradingMessage(
       case "trading:relayer-approve":
         return await handleRelayerApprove(
           message as unknown as TradingRelayerApproveMessage,
+          sender
+        );
+      case "trading:deploy-safe":
+        return await handleDeploySafe(
+          message as unknown as TradingDeploySafeMessage,
           sender
         );
       default:
@@ -259,8 +260,16 @@ async function handleGetBalance(
     },
   ];
 
-  const results: Array<{ success: boolean; returnData: string }> =
-    await mc.aggregate3(calls);
+  // Fetch balances and Safe bytecode in parallel. `isDeployed` piggybacks
+  // on every balance refresh so the trading panel can branch on deployment
+  // status without an extra round-trip.
+  const [results, safeCode] = await Promise.all([
+    mc.aggregate3(calls) as Promise<
+      Array<{ success: boolean; returnData: string }>
+    >,
+    provider.getCode(msg.proxyAddress).catch(() => "0x"),
+  ]);
+  const isDeployed = safeCode !== "0x";
 
   const tokenBalances: Array<{ symbol: string; amount: number }> = [];
   let primaryBalance = 0;
@@ -296,6 +305,7 @@ async function handleGetBalance(
     balanceRaw: primaryBalanceRaw,
     polBalance,
     tokenBalances,
+    isDeployed,
   });
 }
 
@@ -503,17 +513,6 @@ async function handlePlaceOrder(
   }
 
   return ok(response);
-}
-
-// ── Fee Rate ──
-
-async function handleGetFeeRate(
-  msg: TradingGetFeeRateMessage
-): Promise<TradingResponse> {
-  const { ClobClient } = await import("@polymarket/clob-client-v2");
-  const client = new ClobClient({ host: CLOB_HOST, chain: POLYGON_CHAIN_ID });
-  const feeRate = await client.getFeeRateBps(msg.tokenId);
-  return ok({ feeRate });
 }
 
 // ── Proxy Address ──
@@ -831,6 +830,43 @@ async function handleMergePositions(
   );
 
   return ok({ txHash: result.txHash, success: true });
+}
+
+// ── Gasless Safe Deployment via Relayer ──
+
+/**
+ * Deploys the user's Polymarket Safe (trading wallet) for new users who don't
+ * yet have one. Invoked from the content script when the trading panel detects
+ * `isDeployed === false` on an authenticated wallet.
+ *
+ * Pairs with `deployProxyWallet()` in `./relayer-client.ts` which handles the
+ * CreateProxy EIP-712 signing + /submit POST + /transaction polling.
+ */
+async function handleDeploySafe(
+  msg: TradingDeploySafeMessage,
+  sender: chrome.runtime.MessageSender
+): Promise<TradingResponse> {
+  const tabId = sender.tab?.id;
+  if (!tabId) return fail("No active tab for signing");
+
+  const provider = new ethers.providers.StaticJsonRpcProvider(
+    POLYGON_RPC,
+    POLYGON_CHAIN_ID
+  );
+  const signer = new BridgeSigner(msg.address, tabId, provider);
+
+  logInfo("trading.deploy-safe.submit", { address: msg.address });
+  try {
+    const result = await deployProxyWallet(signer);
+    return ok({
+      txHash: result.txHash,
+      proxyAddress: result.proxyAddress,
+      alreadyDeployed: result.alreadyDeployed ?? false,
+    });
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return fail(errMsg);
+  }
 }
 
 // ── Gasless Approvals via Relayer ──

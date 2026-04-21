@@ -343,10 +343,12 @@ export async function executeViaRelayer(
   });
   const packedSig = packSignature(signature);
 
+  // Post-Apr-21-2026: /submit returns immediately with { transactionID, state }
+  // — no `transactionHash`. We obtain the on-chain hash by polling /transaction
+  // with `transactionID` in `pollUntilConfirmed` below.
   const submitRes = await proxyPost<{
     transactionID: string;
     state: string;
-    transactionHash: string;
   }>("submit", {
     from: eoaAddress,
     to: aggregated.to,
@@ -367,9 +369,7 @@ export async function executeViaRelayer(
   });
 
   if (FAILURE_STATES.has(submitRes.state)) {
-    throw new Error(
-      `Relayer rejected submit immediately (${submitRes.state}) (hash: ${submitRes.transactionHash || "none"})`
-    );
+    throw new Error(`Relayer rejected submit immediately (${submitRes.state})`);
   }
 
   const txHash = await pollUntilConfirmed(submitRes.transactionID);
@@ -429,10 +429,16 @@ export async function deploySafe(
     },
   });
 
+  // SAFE-CREATE does not take a nonce — the factory deploys at a deterministic
+  // CREATE2 address with no pre-existing state. The upstream /nonce endpoint
+  // only accepts `type=SAFE | PROXY` (per the public OpenAPI spec); requesting
+  // `SAFECREATE` returns 400 "bad request".
+  //
+  // Post-Apr-21-2026: /submit returns immediately with { transactionID, state };
+  // the on-chain hash is only available from /transaction polling.
   const submitRes = await proxyPost<{
     transactionID: string;
     state: string;
-    transactionHash: string;
   }>("submit", {
     from: eoaAddress,
     to: SAFE_FACTORY_ADDRESS,
@@ -448,9 +454,7 @@ export async function deploySafe(
   });
 
   if (FAILURE_STATES.has(submitRes.state)) {
-    throw new Error(
-      `Relayer rejected deploy immediately (${submitRes.state}) (hash: ${submitRes.transactionHash || "none"})`
-    );
+    throw new Error(`Relayer rejected deploy immediately (${submitRes.state})`);
   }
 
   const txHash = await pollUntilConfirmed(submitRes.transactionID);

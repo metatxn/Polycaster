@@ -781,23 +781,6 @@ export function useClobClient() {
   );
 
   /**
-   * Get the fee rate in basis points for a specific token
-   */
-  const getFeeRateBps = useCallback(
-    async (tokenId: string): Promise<number> => {
-      try {
-        const { ClobClient } = await import("@polymarket/clob-client-v2");
-        const client = new ClobClient({ host: CLOB_HOST, chain: CHAIN_ID });
-        return await client.getFeeRateBps(tokenId);
-      } catch (err) {
-        console.error("Failed to get fee rate:", err);
-        throw err;
-      }
-    },
-    []
-  );
-
-  /**
    * Get USDC.e allowance
    */
   const getUsdcAllowance = useCallback(
@@ -910,7 +893,6 @@ export function useClobClient() {
     getUsdcBalance,
     getPusdBalance,
     getUsdcAllowance,
-    getFeeRateBps,
     isOrderScoring,
     areOrdersScoring,
   };

@@ -168,7 +168,7 @@ export function SportsContent({ initialData }: SportsContentProps) {
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/markets")}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />

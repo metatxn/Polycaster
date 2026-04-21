@@ -68,6 +68,7 @@ flowchart LR
 | Module | Key paths | Responsibility | Talks to |
 | --- | --- | --- | --- |
 | Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, preconnects to upstream APIs, and serves the main pages | Hooks, contexts, server-cache, API routes |
+| Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*` | Houses reusable UI primitives plus feature-level views for comments, deposits, portfolio, notifications, price alerts, and trading flows | App shell, hooks, contexts, wallet state |
 | Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
 | Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |

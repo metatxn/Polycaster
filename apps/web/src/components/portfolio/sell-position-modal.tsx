@@ -94,8 +94,14 @@ export function SellPositionModal({
     if (position.conditionId) {
       params.set("conditionId", position.conditionId);
     }
+    // `scroll: false` keeps the current scroll position. Without it, Next.js
+    // resets scroll to 0 on the param change; then the dialog's focus
+    // restoration to the off-screen Sell Position button triggers a smooth
+    // scrollIntoView — so the page jumps up and then animates back down,
+    // which reads as "the trading panel moved".
     router.push(
-      `/events/detail/${position.market.eventSlug}?${params.toString()}`
+      `/events/detail/${position.market.eventSlug}?${params.toString()}`,
+      { scroll: false }
     );
     onOpenChange(false);
   };

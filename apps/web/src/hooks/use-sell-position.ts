@@ -214,7 +214,13 @@ export function useSellPosition({
         );
       }
 
-      const negRisk = false;
+      // Multi-outcome markets use the Neg Risk CTF Exchange contract, so the
+      // signed order's verifying contract must match. Pull the flag from the
+      // position (surfaced by /api/user/positions) — hardcoding `false` here
+      // caused neg-risk Quick Sells to be signed against the wrong exchange
+      // and rejected server-side. See docs.polymarket.com/trading/orders
+      // /overview#negative-risk.
+      const negRisk = position?.negRisk ?? false;
 
       const result = await createOrder({
         tokenId,
@@ -308,6 +314,7 @@ export function useSellPosition({
     sellEstimate,
     bestBid,
     position?.currentPrice,
+    position?.negRisk,
     createOrder,
     proxyAddress,
     queryClient,

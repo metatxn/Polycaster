@@ -806,7 +806,13 @@ function addHeader(
     dcBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("wallet_disconnected");
-      setButtonLoading(dcBtn, "Disconnecting…");
+      // Icon-only button in the header — swap the icon for a same-sized spinner
+      // instead of injecting "Disconnecting…" text, which would stretch the
+      // button and wreck the header layout.
+      dcBtn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block"></span>`;
+      dcBtn.style.pointerEvents = "none";
+      dcBtn.style.opacity = "0.7";
+      dcBtn.title = "Disconnecting…";
       void TradingService.disconnect().catch(() => {
         TradingService.reset();
         CredentialManager.clear(address).catch(() => {});
@@ -1066,6 +1072,53 @@ function formatTradingPanelErrorMessage(
   }
 
   return trimmed || "Something went wrong. Retry the request.";
+}
+
+/**
+ * Deploy Safe gate — rendered after wallet connect but before "Enable Trading".
+ *
+ * The Safe must exist on-chain before CLOB credentials can be useful: orders
+ * are signed with `signatureType: POLY_GNOSIS_SAFE` and `funderAddress = safe`,
+ * so settlement fails if the Safe isn't deployed. Deploy is a one-click gasless
+ * flow via the relayer (`SAFE-CREATE`), same underlying mechanism as web
+ * onboarding.
+ */
+function addDeploySafe(
+  p: HTMLElement,
+  options?: { errorMessage?: string | null }
+): void {
+  const errorMessage = options?.errorMessage
+    ? formatTradingPanelErrorMessage(options.errorMessage)
+    : null;
+  const s = el("div", "knoww-tp-enable-section");
+  s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
+  s.appendChild(
+    el(
+      "div",
+      "knoww-tp-enable-msg",
+      errorMessage
+        ? "Deploy failed. Retry to start a new signing request."
+        : "Deploy your Polymarket trading wallet — free and gasless."
+    )
+  );
+  if (errorMessage) {
+    s.appendChild(el("div", "knoww-tp-enable-error", errorMessage));
+  }
+  const btn = el(
+    "button",
+    "knoww-tp-btn-enable",
+    errorMessage ? "Retry Deploy" : "Deploy Trading Wallet"
+  );
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    setButtonLoading(btn, "Waiting for signature…");
+    TradingService.deployWallet().catch(() => {
+      // Error flows through ctx.error via the state listener; the next render
+      // will surface it on this screen with a Retry button.
+    });
+  };
+  s.appendChild(btn);
+  p.appendChild(s);
 }
 
 function addEnableTrading(
@@ -4134,10 +4187,34 @@ function render(
 
   if (activeView === "deposit") {
     renderDepositForm(panel, ctx);
+  } else if (state === "deploying") {
+    addLoading(panel, "Deploying your trading wallet…");
+    return;
+  } else if (ctx.isDeployed === null && ctx.proxyAddress) {
+    // Initial on-chain deployment check still in flight (first balance fetch).
+    // Show a neutral spinner instead of flashing the Deploy gate for ~500ms
+    // on users who already have a Safe.
+    addLoading(panel, "Loading trading wallet…");
+    return;
+  } else if (ctx.isDeployed === false && ctx.proxyAddress) {
+    // Safe not deployed yet — takes precedence over "Enable Trading" because
+    // credentials derived for the EOA are useless until the Safe exists
+    // (CLOB orders sign against the Safe as funderAddress).
+    addDeploySafe(panel, { errorMessage: state === "error" ? error : null });
+    if (state !== "error") {
+      return;
+    }
   } else if (state === "deriving-credentials") {
     addLoading(panel, "Confirm signature in your wallet...");
     return;
-  } else if (!ctx.credentials && (state === "connected" || state === "error")) {
+  } else if (!ctx.credentials) {
+    // Credentials required before trading. Hit in two scenarios:
+    //   - right after Connect Wallet (state === "connected")
+    //   - right after Deploy Trading Wallet (state === "ready", Safe just
+    //     created but CLOB creds not yet derived)
+    // Earlier branches already handled the transient states (connecting,
+    // switching-chain, deploying, deriving-credentials), so reaching here
+    // with no credentials means the user needs to Enable Trading.
     addEnableTrading(panel, { errorMessage: state === "error" ? error : null });
     if (state !== "error") {
       return;

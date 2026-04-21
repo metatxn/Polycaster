@@ -57,6 +57,8 @@ export const ProxyWallet = {
     balanceRaw: string;
     polBalance?: number;
     tokenBalances?: Array<{ symbol: string; amount: number }>;
+    /** On-chain Safe-deployment status (true iff code exists at proxyAddress). */
+    isDeployed?: boolean;
   }> {
     return sendTradingMessage(
       { type: "trading:get-balance", proxyAddress },

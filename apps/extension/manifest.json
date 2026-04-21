@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Knoww - Prediction Markets for Social Media",
+  "name": "Knoww — Every opinion is a position",
   "version": "2.5.24",
-  "description": "Discover and navigate prediction markets",
+  "description": "A prediction market layer for the open internet.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

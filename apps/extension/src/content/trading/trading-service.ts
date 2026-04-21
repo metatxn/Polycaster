@@ -27,6 +27,7 @@ export type TradingState =
   | "ready"
   | "placing-order"
   | "approving"
+  | "deploying"
   | "splitting"
   | "merging"
   | "error";
@@ -40,7 +41,17 @@ export interface TradingContext {
   state: TradingState;
   address: string | null;
   proxyAddress: string | null;
-  isDeployed: boolean;
+  /**
+   * On-chain Safe-deployment status.
+   * `null` = not yet checked (initial state, or proxyAddress not derived yet).
+   * `true`  = confirmed deployed.
+   * `false` = confirmed absent — user needs to run the Deploy Safe flow.
+   *
+   * The null state lets the panel show a neutral loading spinner instead of
+   * flashing the "Deploy Trading Wallet" button for ~500ms on first open
+   * while `refreshBalance()` performs its `eth_getCode` check.
+   */
+  isDeployed: boolean | null;
   balance: number;
   polBalance: number;
   tokenBalances: TokenBalanceEntry[];
@@ -62,7 +73,7 @@ function createDisconnectedContext(): TradingContext {
     state: "disconnected",
     address: null,
     proxyAddress: null,
-    isDeployed: false,
+    isDeployed: null,
     balance: 0,
     polBalance: 0,
     tokenBalances: [],
@@ -249,6 +260,9 @@ export const TradingService = {
             balance: balData.balance,
             polBalance: balData.polBalance ?? 0,
             tokenBalances: balData.tokenBalances ?? [],
+            // Resolves the null→boolean transition so the panel can render
+            // the Deploy Safe gate (or skip it) on first paint after connect.
+            isDeployed: balData.isDeployed ?? false,
           });
         } catch (balErr) {
           console.warn(
@@ -343,6 +357,10 @@ export const TradingService = {
         balance: balData.balance,
         polBalance: balData.polBalance ?? 0,
         tokenBalances: balData.tokenBalances ?? [],
+        // Piggybacks on the balance fetch (background returns code presence
+        // from the same provider). Keeps the UI in sync with on-chain Safe
+        // deployment without an extra RPC round-trip.
+        isDeployed: balData.isDeployed ?? ctx.isDeployed,
       });
     } catch (err) {
       console.warn("[TradingService] Balance fetch failed:", err);
@@ -442,6 +460,52 @@ export const TradingService = {
       update({ state: "ready" });
       await this.refreshBalance();
       return result;
+    } catch (err) {
+      update({
+        state: "ready",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  },
+
+  // ── Safe Deployment (gasless via Relayer) ──
+
+  /**
+   * Deploys the user's Polymarket Safe for new users who don't have one yet.
+   * Resolves with the tx hash (or empty string if the Safe was already
+   * deployed on-chain). On success, flips `ctx.isDeployed` and refreshes the
+   * balance — so the trading panel can transition from "Deploy Wallet" to
+   * "Approve USDC" without manual refresh.
+   */
+  async deployWallet(): Promise<{ txHash: string; alreadyDeployed: boolean }> {
+    if (!ctx.address) throw new Error("Wallet not connected");
+
+    update({ state: "deploying", error: null });
+
+    try {
+      const result = await runWithAuthRetry(ctx.address, () =>
+        sendMsg<{
+          txHash: string;
+          proxyAddress: string;
+          alreadyDeployed: boolean;
+        }>(
+          { type: "trading:deploy-safe", address: ctx.address },
+          "Wallet deployment failed"
+        )
+      );
+
+      update({
+        state: "ready",
+        isDeployed: true,
+        proxyAddress: result.proxyAddress,
+      });
+      // Refresh so downstream UI (balances, allowances) reflects the new Safe.
+      await this.refreshBalance();
+      return {
+        txHash: result.txHash,
+        alreadyDeployed: result.alreadyDeployed,
+      };
     } catch (err) {
       update({
         state: "ready",

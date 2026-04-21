@@ -99,9 +99,8 @@ export default function PrivacyPage() {
               “we,” “us”) handles information when you use our website and web
               app at{" "}
               <ExternalLink href="https://knoww.app">knoww.app</ExternalLink>{" "}
-              (the “Web App”) and our Chrome extension{" "}
-              <strong>Knoww – Prediction Markets for Social Media</strong> (also
-              referred to as the <strong>Knoww Extension</strong>, the
+              (the “Web App”) and our Chrome extension <strong>Knoww</strong>{" "}
+              (also referred to as the <strong>Knoww Extension</strong>, the
               “Extension”).
             </p>
           </div>

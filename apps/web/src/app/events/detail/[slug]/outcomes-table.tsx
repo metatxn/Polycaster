@@ -265,7 +265,7 @@ function MarketExpandedContent({
                     </span>
                     <span
                       className={cn(
-                        "font-bold text-sm tabular-nums whitespace-nowrap",
+                        "font-bold text-sm tabular-nums",
                         userPosition.unrealizedPnl >= 0
                           ? "text-emerald-600 dark:text-emerald-400"
                           : "text-rose-600 dark:text-rose-400"
@@ -558,6 +558,11 @@ export function OutcomesTable({
       unrealizedPnlPercent: position.unrealizedPnlPercent,
       asset: position.asset,
       conditionId: position.conditionId,
+      // Neg-risk flag must flow through: Quick Sell signs the order and
+      // the exchange contract depends on this bit. Source of truth is the
+      // Polymarket Data API (`negativeRisk`) — our positions route surfaces
+      // it on the position.
+      negRisk: position.negRisk,
       market: {
         title: position.market.title,
         slug: position.market.slug,
@@ -665,7 +670,7 @@ export function OutcomesTable({
                     {/* Market Row Container - Using a div to avoid nested buttons */}
                     <div
                       className={cn(
-                        "w-full flex flex-col lg:grid lg:grid-cols-[1fr_220px] transition-[background-color,border-color] duration-150 border-l-2",
+                        "w-full flex flex-col lg:grid lg:grid-cols-[1fr_auto] transition-[background-color,border-color] duration-150 border-l-2",
                         selectedMarketId === market.id
                           ? "bg-primary/5 border-l-primary"
                           : "hover:bg-accent/30 border-l-transparent",
@@ -754,7 +759,7 @@ export function OutcomesTable({
                         </div>
 
                         {/* Desktop Layout Section (lg+) */}
-                        <div className="hidden lg:grid lg:grid-cols-[1fr_140px] lg:items-center lg:gap-4">
+                        <div className="hidden lg:grid lg:grid-cols-[1fr_auto] lg:items-center lg:gap-4">
                           {/* Column 1: Image + Title + Volume */}
                           <div className="flex items-center gap-3 min-w-0">
                             {market.image && (
@@ -770,7 +775,7 @@ export function OutcomesTable({
                             )}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <h3 className="font-semibold text-sm xl:text-base truncate group-hover:text-primary transition-colors">
+                                <h3 className="font-semibold text-sm xl:text-base leading-tight line-clamp-2 group-hover:text-primary transition-colors">
                                   {market.groupItemTitle}
                                 </h3>
                                 {userPosition && (
@@ -823,7 +828,7 @@ export function OutcomesTable({
                             type="button"
                             size="sm"
                             className={cn(
-                              "h-9 px-3 text-xs lg:w-[100px] lg:h-10 lg:text-sm bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-lg shadow-emerald-500/20 transition-[background-color,transform] duration-150 active:scale-95",
+                              "h-9 px-3 text-xs lg:w-[88px] lg:h-10 lg:text-sm bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-lg shadow-emerald-500/20 transition-[background-color,transform] duration-150 active:scale-95",
                               isExpanded &&
                                 selectedOutcomeIndex === 0 &&
                                 "ring-2 ring-emerald-400 ring-offset-2"
@@ -835,7 +840,6 @@ export function OutcomesTable({
                               void preloadOrderBook(market.yesTokenId);
                             }}
                           >
-                            <span className="lg:hidden xl:inline">Buy </span>
                             Yes {formatPrice(market.yesPrice)}
                           </Button>
                           <Button
@@ -843,7 +847,7 @@ export function OutcomesTable({
                             size="sm"
                             variant="destructive"
                             className={cn(
-                              "h-9 px-3 text-xs lg:w-[100px] lg:h-10 lg:text-sm font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95",
+                              "h-9 px-3 text-xs lg:w-[88px] lg:h-10 lg:text-sm font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95",
                               isExpanded &&
                                 selectedOutcomeIndex === 1 &&
                                 "ring-2 ring-rose-400 ring-offset-2"
@@ -855,7 +859,6 @@ export function OutcomesTable({
                               void preloadOrderBook(market.noTokenId);
                             }}
                           >
-                            <span className="lg:hidden xl:inline">Buy </span>
                             No {formatPrice(market.noPrice)}
                           </Button>
                         </div>

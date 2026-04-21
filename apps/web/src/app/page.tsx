@@ -2,7 +2,7 @@
 
 import { ArrowUpRight, Download, Moon, Sun } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const CHROME_STORE_URL =
   "https://chromewebstore.google.com/detail/knoww-prediction-markets/naoaonihikedoiemhbolbnolibpmojgf";
@@ -34,6 +34,26 @@ const MARKET_PREVIEW = [
     no: "86",
     vol: "412K",
   },
+  {
+    q: "Will AGI be declared before end of 2027?",
+    yes: "23",
+    no: "77",
+    vol: "1.1M",
+  },
+];
+
+// Dimmer "peek" cards flanking the main terminal on wide screens. Different
+// market mixes signal to visitors that Knoww handles diverse topics — not
+// just the three on the hero card.
+const PEEK_LEFT_MARKETS = [
+  { q: "Will OpenAI IPO before 2028?", yes: "37", no: "63" },
+  { q: "Will Tesla deliver 2.5M cars in 2025?", yes: "44", no: "56" },
+  { q: "Will the S&P hit a new ATH this quarter?", yes: "71", no: "29" },
+];
+const PEEK_RIGHT_MARKETS = [
+  { q: "Will Apple ship a foldable by 2027?", yes: "29", no: "71" },
+  { q: "Will Ukraine join NATO by 2030?", yes: "18", no: "82" },
+  { q: "Will Taylor Swift tour in 2026?", yes: "58", no: "42" },
 ];
 
 export default function LandingPage() {
@@ -64,7 +84,7 @@ export default function LandingPage() {
 
   return (
     <div
-      className="kw-landing fixed inset-0 z-50 overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans"
+      className="kw-landing fixed inset-0 z-60 overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans"
       data-theme={theme}
       style={{ colorScheme: theme }}
     >
@@ -139,27 +159,38 @@ export default function LandingPage() {
       </header>
 
       {/* HERO */}
-      <section className="border-b border-(--kw-fg)/10">
-        <div className="max-w-[1200px] mx-auto px-6 py-20 md:py-28 grid grid-cols-1 lg:grid-cols-12 gap-10">
-          <div className="lg:col-span-7">
+      <section className="relative border-b border-(--kw-fg)/10 overflow-hidden">
+        {/* ── Editorial statement (text block) ───────────────────────── */}
+        <div className="max-w-[1200px] mx-auto px-6 pt-20 md:pt-28 pb-10 md:pb-14">
+          <div className="max-w-[880px]">
             <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-(--kw-fg)/60 mb-8">
               <span className="w-1.5 h-1.5 bg-(--kw-accent) animate-pulse" />
               Issue № 01 — The Prediction Layer
             </div>
 
-            <h1 className="font-bold tracking-[-0.035em] leading-[0.92] text-[56px] sm:text-[80px] md:text-[96px] lg:text-[104px] mb-8">
-              Every opinion,
-              <br />a{" "}
+            <h1 className="font-bold tracking-[-0.035em] leading-[0.92] text-[56px] sm:text-[80px] md:text-[96px] lg:text-[112px] mb-8">
+              <span className="kw-stagger" style={{ animationDelay: "60ms" }}>
+                Every
+              </span>{" "}
+              <span className="kw-stagger" style={{ animationDelay: "160ms" }}>
+                opinion,
+              </span>
+              <br />
+              <span className="kw-stagger" style={{ animationDelay: "260ms" }}>
+                a
+              </span>{" "}
               <span
-                className="italic font-serif"
-                style={{ fontFamily: "'Times New Roman', Georgia, serif" }}
+                className="kw-stagger kw-tilt italic kw-editorial"
+                style={{ animationDelay: "360ms" }}
               >
                 position
               </span>
-              .
+              <span className="kw-stagger" style={{ animationDelay: "460ms" }}>
+                .
+              </span>
             </h1>
 
-            <p className="text-lg text-(--kw-fg)/70 max-w-[540px] leading-[1.55] mb-10">
+            <p className="text-lg text-(--kw-fg)/70 max-w-[560px] leading-[1.55] mb-10">
               Knoww reads the internet alongside you. When a claim, prediction,
               or forecast surfaces — on X, Reddit, Bloomberg, anywhere — we
               quietly surface the matching Polymarket and let you take the other
@@ -183,82 +214,155 @@ export default function LandingPage() {
               </Link>
             </div>
           </div>
+        </div>
 
-          {/* TERMINAL MOCK */}
-          <div className="lg:col-span-5 lg:pl-6">
-            <div className="border border-(--kw-fg)/15 bg-(--kw-bg-card) shadow-[0_24px_60px_-30px_rgba(0,0,0,0.25)]">
-              <div className="px-4 py-2.5 border-b border-(--kw-fg)/10 flex items-center justify-between bg-(--kw-fg)/2">
-                <div className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-(--kw-accent) animate-pulse" />
-                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-                    Knoww — Live Readout
+        {/* ── The Stage: full-width product demo with flanking peek cards ── */}
+        <div className="relative pb-24 md:pb-32">
+          {/* Soft accent-tinted glow behind the stage */}
+          <div aria-hidden className="kw-stage-glow" />
+
+          {/* Stage caption — small-caps label floating above the cards */}
+          <div className="max-w-[1400px] mx-auto px-6 mb-6 flex items-center justify-center gap-2">
+            <span className="w-1 h-1 rounded-full bg-(--kw-accent) animate-pulse" />
+            <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-(--kw-fg)/60">
+              Live product · matching against the order book in real time
+            </span>
+          </div>
+
+          {/* Card cluster */}
+          <div className="relative mx-auto flex justify-center items-start px-6 min-h-[440px] md:min-h-[500px]">
+            {/* ── Peek LEFT (hidden on small screens) ── */}
+            <aside
+              aria-hidden
+              className="hidden xl:block absolute top-16 left-[max(24px,calc(50%-660px))] w-[300px] -rotate-[4deg] transform-gpu pointer-events-none"
+            >
+              <div className="border border-(--kw-fg)/15 bg-(--kw-bg-card) shadow-[0_18px_48px_-24px_rgba(0,0,0,0.25)]">
+                <div className="px-3 py-2 border-b border-(--kw-fg)/10 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-(--kw-accent)" />
+                  <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
+                    Reddit · r/investing
                   </span>
                 </div>
-                <span className="text-[10px] font-mono text-(--kw-fg)/60">
-                  21:04:31
-                </span>
-              </div>
-
-              <div className="divide-y divide-(--kw-fg)/10">
-                <div className="px-4 py-2.5 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.12em] text-(--kw-fg)/60">
-                  <span>Market</span>
-                  <span className="flex gap-6">
-                    <span>YES</span>
-                    <span>NO</span>
-                    <span>VOL</span>
-                  </span>
-                </div>
-                {MARKET_PREVIEW.map((m) => (
-                  <div
-                    key={m.q}
-                    className="px-4 py-3.5 grid grid-cols-[1fr_auto] gap-4 hover:bg-(--kw-fg)/2 transition-colors"
-                  >
-                    <p className="text-[12px] leading-[1.4] text-(--kw-fg)/85">
-                      {m.q}
-                    </p>
-                    <div className="flex items-center gap-4 font-mono text-[12px] tabular-nums">
-                      <span className="text-(--kw-accent-text) font-semibold w-8 text-right">
+                <div className="divide-y divide-(--kw-fg)/10">
+                  {PEEK_LEFT_MARKETS.map((m) => (
+                    <div
+                      key={m.q}
+                      className="px-3 py-2.5 flex items-center gap-3"
+                    >
+                      <p className="flex-1 text-[11px] leading-[1.35] text-(--kw-fg)/80">
+                        {m.q}
+                      </p>
+                      <span className="font-mono text-[10px] text-(--kw-accent-text) font-semibold tabular-nums">
                         {m.yes}¢
                       </span>
-                      <span className="text-(--kw-danger-text) w-8 text-right">
-                        {m.no}¢
-                      </span>
-                      <span className="text-(--kw-fg)/60 w-10 text-right">
-                        {m.vol}
-                      </span>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
+            </aside>
 
-              <div className="px-4 py-3 border-t border-(--kw-fg)/10 bg-(--kw-fg)/2 flex items-center justify-between">
-                <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/60">
-                  3 matched · live
-                </span>
-                <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)">
-                  Trade
-                  <ArrowUpRight className="w-3 h-3" />
+            {/* ── Main terminal (the hero) ── */}
+            <div className="relative z-10 w-full max-w-[760px]">
+              <div className="border border-(--kw-fg)/20 bg-(--kw-bg-card) shadow-[0_40px_90px_-32px_rgba(0,0,0,0.38)]">
+                <div className="px-5 py-3 border-b border-(--kw-fg)/10 flex items-center justify-between bg-(--kw-fg)/2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-(--kw-accent) animate-pulse" />
+                    <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/70">
+                      Knoww — Live Readout
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] font-mono text-(--kw-fg)/60">
+                    <span>21:04:31</span>
+                    <span className="hidden sm:inline text-(--kw-fg)/30">
+                      ·
+                    </span>
+                    <span className="hidden sm:inline">x.com/elonmusk</span>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-(--kw-fg)/10">
+                  <div className="px-5 py-3 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.12em] text-(--kw-fg)/60">
+                    <span>Matched Market</span>
+                    <span className="flex gap-6 sm:gap-10">
+                      <span className="w-10 text-right">YES</span>
+                      <span className="w-10 text-right">NO</span>
+                      <span className="hidden sm:inline w-12 text-right">
+                        VOL
+                      </span>
+                    </span>
+                  </div>
+                  {MARKET_PREVIEW.map((m) => (
+                    <div
+                      key={m.q}
+                      className="px-5 py-4 grid grid-cols-[1fr_auto] gap-4 hover:bg-(--kw-fg)/2 transition-colors"
+                    >
+                      <p className="text-[14px] leading-[1.45] text-(--kw-fg)/90">
+                        {m.q}
+                      </p>
+                      <div className="flex items-center gap-6 sm:gap-10 font-mono text-[14px] tabular-nums">
+                        <span className="text-(--kw-accent-text) font-semibold w-10 text-right">
+                          {m.yes}¢
+                        </span>
+                        <span className="text-(--kw-danger-text) w-10 text-right">
+                          {m.no}¢
+                        </span>
+                        <span className="hidden sm:inline text-(--kw-fg)/60 w-12 text-right">
+                          {m.vol}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="px-5 py-3 border-t border-(--kw-fg)/10 bg-(--kw-fg)/2 flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/60">
+                    {MARKET_PREVIEW.length} matched · live
+                  </span>
+                  <div className="flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)">
+                    Trade
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 pl-6 border-l-2 border-(--kw-accent)">
-              <p className="text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/60 mb-1">
-                Note
-              </p>
-              <p className="text-[13px] text-(--kw-fg)/70 leading-[1.55]">
-                Every number here is a real position you can take. Knoww
-                surfaces them at the exact moment you&apos;d want to trade.
-              </p>
-            </div>
+            {/* ── Peek RIGHT (hidden on small screens) ── */}
+            <aside
+              aria-hidden
+              className="hidden xl:block absolute top-24 right-[max(24px,calc(50%-660px))] w-[300px] rotate-[4deg] transform-gpu pointer-events-none"
+            >
+              <div className="border border-(--kw-fg)/15 bg-(--kw-bg-card) shadow-[0_18px_48px_-24px_rgba(0,0,0,0.25)]">
+                <div className="px-3 py-2 border-b border-(--kw-fg)/10 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-(--kw-accent)" />
+                  <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
+                    Bloomberg · article
+                  </span>
+                </div>
+                <div className="divide-y divide-(--kw-fg)/10">
+                  {PEEK_RIGHT_MARKETS.map((m) => (
+                    <div
+                      key={m.q}
+                      className="px-3 py-2.5 flex items-center gap-3"
+                    >
+                      <p className="flex-1 text-[11px] leading-[1.35] text-(--kw-fg)/80">
+                        {m.q}
+                      </p>
+                      <span className="font-mono text-[10px] text-(--kw-accent-text) font-semibold tabular-nums">
+                        {m.yes}¢
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </aside>
           </div>
         </div>
       </section>
 
-      {/* BY THE NUMBERS (PROBLEM) */}
+      {/* BY THE NUMBERS (PROBLEM) — asymmetric grid, italic units, footnote marks */}
       <section className="border-b border-(--kw-fg)/10 bg-(--kw-bg-alt)">
         <div className="max-w-[1200px] mx-auto px-6 py-20">
-          <div className="flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5 mb-12">
+          <div className="kw-reveal flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5 mb-14">
             <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
               § I. The gap we&apos;re closing
             </h2>
@@ -267,49 +371,100 @@ export default function LandingPage() {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-0 border-t border-(--kw-fg)/15">
-            {[
-              {
-                value: "4.9",
-                unit: "BILLION",
-                desc: "people post, argue, and predict online every day — each one an unrealized market position.",
-              },
-              {
-                value: "0.1",
-                unit: "PERCENT",
-                desc: "of those opinions ever reach a prediction market. The signal-to-action gap is the product.",
-              },
-              {
-                value: "50",
-                unit: "BILLION $",
-                desc: "total prediction market opportunity by 2030, per industry forecasts.",
-              },
-            ].map((s, i) => (
-              <div
-                key={s.unit}
-                className={`py-10 px-6 ${i !== 2 ? "md:border-r border-(--kw-fg)/15" : ""} ${i !== 0 ? "border-t md:border-t-0 border-(--kw-fg)/15" : ""}`}
-              >
-                <div className="flex items-baseline gap-2 mb-4">
-                  <span className="font-bold text-7xl md:text-8xl tabular-nums tracking-[-0.04em] leading-none">
-                    {s.value}
-                  </span>
-                  <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/60">
-                    {s.unit}
-                  </span>
-                </div>
-                <p className="text-[14px] leading-[1.55] text-(--kw-fg)/65 max-w-[280px]">
-                  {s.desc}
-                </p>
+          {/* Asymmetric 12-col grid: first two stats each take 4 cols, third
+              stat (the prize) takes 4 cols but at dramatically larger type. */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-0 border-t border-(--kw-fg)/15">
+            <div className="kw-reveal md:col-span-4 py-12 px-6 md:border-r border-(--kw-fg)/15">
+              <div className="flex items-baseline gap-2 mb-1">
+                <sup className="kw-editorial italic text-[14px] text-(--kw-fg)/50 font-medium mr-1 -translate-y-2">
+                  i
+                </sup>
+                <span className="font-bold text-6xl md:text-7xl tabular-nums tracking-[-0.04em] leading-none">
+                  <CountUp target={4.9} decimals={1} />
+                </span>
+                <span className="kw-editorial italic text-[20px] md:text-[24px] text-(--kw-fg)/75 ml-1">
+                  billion
+                </span>
               </div>
-            ))}
+              <p className="text-[14px] leading-[1.55] text-(--kw-fg)/65 max-w-[260px] mt-5">
+                people post, argue, and predict online every day — each one an
+                unrealized market position.
+              </p>
+            </div>
+
+            <div className="kw-reveal md:col-span-3 py-12 px-6 md:border-r border-(--kw-fg)/15 border-t md:border-t-0">
+              <div className="flex items-baseline gap-2 mb-1">
+                <sup className="kw-editorial italic text-[14px] text-(--kw-fg)/50 font-medium mr-1 -translate-y-2">
+                  ii
+                </sup>
+                <span className="font-bold text-5xl md:text-6xl tabular-nums tracking-[-0.04em] leading-none">
+                  <CountUp target={0.1} decimals={1} />
+                </span>
+                <span className="kw-editorial italic text-[18px] md:text-[22px] text-(--kw-fg)/75 ml-1">
+                  %
+                </span>
+              </div>
+              <p className="text-[14px] leading-[1.55] text-(--kw-fg)/65 max-w-[220px] mt-5">
+                of those opinions ever reach a prediction market. The
+                signal-to-action gap is the product.
+              </p>
+            </div>
+
+            <div className="kw-reveal md:col-span-5 py-12 px-6 border-t md:border-t-0">
+              <div className="flex items-baseline gap-2 mb-1">
+                <sup className="kw-editorial italic text-[15px] text-(--kw-accent-text) font-medium mr-1 -translate-y-3">
+                  iii
+                </sup>
+                <span className="text-(--kw-fg)/55 font-bold text-4xl md:text-5xl tracking-[-0.04em] leading-none">
+                  $
+                </span>
+                <span className="font-bold text-7xl md:text-[128px] tabular-nums tracking-[-0.045em] leading-none">
+                  <CountUp target={50} decimals={0} />
+                </span>
+                <span className="kw-editorial italic text-[24px] md:text-[32px] text-(--kw-fg)/80 ml-2">
+                  billion
+                </span>
+              </div>
+              <p className="text-[14px] leading-[1.55] text-(--kw-fg)/65 max-w-[360px] mt-5">
+                total prediction market opportunity by 2030, per industry
+                forecasts — the market Knoww is building a layer into.
+              </p>
+            </div>
+          </div>
+
+          {/* Editorial citation strip */}
+          <div className="kw-reveal mt-10 pt-5 border-t border-(--kw-fg)/10 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/45">
+            <span>
+              <span className="kw-editorial italic normal-case tracking-normal text-[12px] text-(--kw-fg)/60 mr-2">
+                Sources —
+              </span>
+              i. Meltwater 2024 · ii. Polymarket usage data · iii. Gartner
+              projection
+            </span>
+            <span>Compiled Q2 2026</span>
           </div>
         </div>
       </section>
 
       {/* THESIS / SOLUTION */}
       <section id="thesis" className="border-b border-(--kw-fg)/10">
-        <div className="max-w-[1200px] mx-auto px-6 py-24">
-          <div className="flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5 mb-14">
+        <div className="max-w-[1200px] mx-auto px-6 py-24 relative">
+          {/* Marginalia — editor's note breaking out of the content column
+              into the left margin, magazine-style. Only shown on wide screens
+              where there's real outer whitespace to work with. */}
+          <aside
+            aria-label="Editor's note"
+            className="hidden xl:block absolute top-28 left-[max(20px,calc(50%-660px))] w-[180px] pl-3 border-l-2 border-(--kw-accent) pointer-events-none"
+          >
+            <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/50 mb-1.5">
+              Editor&apos;s note
+            </p>
+            <p className="kw-editorial italic text-[13px] leading-[1.45] text-(--kw-fg)/70">
+              A working thesis — subject to revision as the layer matures.
+            </p>
+          </aside>
+
+          <div className="kw-reveal flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5 mb-14">
             <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
               § II. The thesis
             </h2>
@@ -319,7 +474,7 @@ export default function LandingPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 mb-20">
-            <div className="lg:col-span-5">
+            <div className="kw-reveal lg:col-span-5">
               <h3 className="text-4xl md:text-5xl font-bold tracking-[-0.03em] leading-[1.02]">
                 Predictions live where conversations happen —
                 <span className="text-(--kw-fg)/60">
@@ -328,7 +483,7 @@ export default function LandingPage() {
                 </span>
               </h3>
             </div>
-            <div className="lg:col-span-6 lg:col-start-7 text-[15px] leading-[1.65] text-(--kw-fg)/70 space-y-4">
+            <div className="kw-reveal lg:col-span-6 lg:col-start-7 text-[15px] leading-[1.65] text-(--kw-fg)/70 space-y-4">
               <p>
                 Every trading platform asks the same question: come to us, log
                 in, find the market, then trade. Knoww inverts it. We meet you
@@ -363,7 +518,7 @@ export default function LandingPage() {
             ].map((f, i) => (
               <div
                 key={f.n}
-                className={`py-10 px-6 ${i !== 2 ? "md:border-r border-(--kw-fg)/15" : ""} ${i !== 0 ? "border-t md:border-t-0 border-(--kw-fg)/15" : ""}`}
+                className={`kw-reveal py-10 px-6 ${i !== 2 ? "md:border-r border-(--kw-fg)/15" : ""} ${i !== 0 ? "border-t md:border-t-0 border-(--kw-fg)/15" : ""}`}
               >
                 <div className="flex items-center gap-3 mb-6">
                   <span className="w-7 h-7 bg-(--kw-fg) text-(--kw-bg) flex items-center justify-center text-[11px] font-mono font-bold">
@@ -400,7 +555,7 @@ export default function LandingPage() {
             </span>
           </div>
 
-          <h3 className="text-5xl md:text-6xl font-bold tracking-[-0.035em] leading-[0.98] mb-16 max-w-[900px]">
+          <h3 className="kw-reveal text-5xl md:text-6xl font-bold tracking-[-0.035em] leading-[0.98] mb-16 max-w-[900px]">
             Three steps. No account. No onboarding. No spectator sport.
           </h3>
 
@@ -408,18 +563,21 @@ export default function LandingPage() {
             {[
               {
                 n: "01",
+                roman: "i",
                 time: "~30s",
                 title: "Install",
                 desc: "Add Knoww from the Chrome Web Store. One permission prompt, one click.",
               },
               {
                 n: "02",
+                roman: "ii",
                 time: "Passive",
                 title: "Browse",
                 desc: "Keep doing what you were doing. A small indicator appears when a market is near.",
               },
               {
                 n: "03",
+                roman: "iii",
                 time: "~5s",
                 title: "Trade",
                 desc: "Open the panel, pick a side, confirm. Your position is live on-chain.",
@@ -427,12 +585,16 @@ export default function LandingPage() {
             ].map((s, i) => (
               <div
                 key={s.n}
-                className={`py-8 px-6 ${i !== 2 ? "md:border-r border-(--kw-bg)/15" : ""} ${i !== 0 ? "border-t md:border-t-0 border-(--kw-bg)/15" : ""}`}
+                className={`kw-reveal py-8 px-6 ${i !== 2 ? "md:border-r border-(--kw-bg)/15" : ""} ${i !== 0 ? "border-t md:border-t-0 border-(--kw-bg)/15" : ""}`}
               >
-                <div className="flex items-center justify-between mb-10">
-                  <span className="font-mono font-bold text-[64px] leading-none text-(--kw-bg)">
-                    {s.n}
+                <div className="flex items-end justify-between mb-8">
+                  <span
+                    aria-hidden
+                    className="kw-editorial italic text-[96px] md:text-[112px] leading-[0.75] tracking-[-0.04em] text-(--kw-bg)"
+                  >
+                    {s.roman}
                   </span>
+                  <span className="sr-only">Step {s.n}:</span>
                   <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-accent-inv)">
                     {s.time}
                   </span>
@@ -476,13 +638,7 @@ export default function LandingPage() {
               <br />
               the market,
               <br />
-              <span
-                className="italic font-serif"
-                style={{ fontFamily: "'Times New Roman', Georgia, serif" }}
-              >
-                not around it
-              </span>
-              .
+              <span className="italic kw-editorial">not around it</span>.
             </h2>
 
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
@@ -494,9 +650,6 @@ export default function LandingPage() {
                 Add Knoww to Chrome — Free
                 <ArrowUpRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
               </a>
-              <p className="text-[12px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/60">
-                Chrome Web Store · 30 sec install · Free forever
-              </p>
             </div>
           </div>
         </div>
@@ -504,6 +657,21 @@ export default function LandingPage() {
 
       {/* FOOTER */}
       <footer className="border-t border-(--kw-fg)/10 bg-(--kw-bg-alt)">
+        {/* Publication-style issue line — editorial flourish at the top of the
+            footer, in Fraunces italic to echo the typographic system. */}
+        <div className="border-b border-(--kw-fg)/10">
+          <div className="max-w-[1200px] mx-auto px-6 py-3 flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/65">
+            <span className="flex items-baseline gap-3">
+              <span className="kw-editorial italic normal-case tracking-normal text-[13px] text-(--kw-fg)/80">
+                № 01 — Winter 2026
+              </span>
+              <span className="text-(--kw-fg)/25">·</span>
+              <span>An inaugural issue on the prediction layer</span>
+            </span>
+            <span>knoww.app</span>
+          </div>
+        </div>
+
         <div className="max-w-[1200px] mx-auto px-6 py-10 grid grid-cols-2 md:grid-cols-4 gap-8 text-[13px]">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 mb-3">
@@ -515,7 +683,11 @@ export default function LandingPage() {
               <span className="font-bold text-[14px]">Knoww</span>
             </div>
             <p className="text-[12px] text-(--kw-fg)/60 leading-[1.55] max-w-[220px]">
-              A prediction market layer for the open internet.
+              A prediction market layer for the{" "}
+              <span className="kw-editorial italic text-(--kw-fg)/80">
+                open internet
+              </span>
+              .
             </p>
           </div>
           <div>
@@ -591,19 +763,19 @@ function TickerBar() {
   const items = [...TICKER, ...TICKER];
   return (
     <div className="border-b border-(--kw-fg)/10 bg-(--kw-fg) text-(--kw-bg) overflow-hidden">
-      <div className="flex items-center h-9">
-        <div className="shrink-0 px-4 h-full flex items-center border-r border-(--kw-bg)/15">
-          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-accent-inv) flex items-center gap-2">
+      <div className="flex items-center h-11">
+        <div className="shrink-0 px-5 h-full flex items-center border-r border-(--kw-bg)/15">
+          <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-accent-inv) flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-(--kw-accent) animate-pulse" />
             Live
           </span>
         </div>
-        <div className="flex-1 overflow-hidden relative">
-          <div className="flex gap-10 animate-[ticker_60s_linear_infinite] whitespace-nowrap">
+        <div className="flex-1 overflow-hidden relative kw-ticker-track">
+          <div className="flex gap-12 animate-[ticker_60s_linear_infinite] whitespace-nowrap">
             {items.map((t, i) => (
               <span
                 key={`${t.label}-${i}`}
-                className="text-[11px] font-mono flex items-center gap-2 py-2"
+                className="text-[12px] font-mono flex items-center gap-2.5 py-2.5"
               >
                 <span className="text-(--kw-bg)/70">{t.label}</span>
                 <span
@@ -640,36 +812,221 @@ function ThemeVars() {
   return (
     <style>{`
       .kw-landing {
+        /*
+         * Green-token system (consolidated — same hue family in both themes):
+         *   --kw-accent       — solid brand green, decorative (dots, indicators)
+         *   --kw-accent-text  — text on the main background
+         *   --kw-accent-inv   — text on the inverted (--kw-fg) background
+         */
         --kw-bg: #f6f4ee;
         --kw-bg-alt: #eeebe1;
         --kw-bg-card: #fbfaf5;
         --kw-fg: #0a0a0a;
         --kw-accent: #0d9f6e;
-        --kw-accent-inv: #0d9f6e;
-        --kw-accent-text: #047857;
+        --kw-accent-text: #066d4c;
+        --kw-accent-inv: #3dd07f;
         --kw-danger-text: #b91c1c;
         --kw-danger-bright: #f87171;
+
+        /* Paper-grain noise — barely-there texture that keeps sections from
+         * reading as flat rectangles. The SVG uses fractalNoise + an alpha
+         * color matrix so it's neutral over any theme background. */
+        background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+        background-attachment: local;
       }
       .kw-landing[data-theme="dark"] {
         --kw-bg: #0c0a07;
         --kw-bg-alt: #15120d;
         --kw-bg-card: #19150f;
         --kw-fg: #f0ebe0;
-        --kw-accent: #10b981;
-        --kw-accent-inv: #047857;
-        --kw-accent-text: #34d399;
+        --kw-accent: #0d9f6e;
+        --kw-accent-text: #3dd07f;
+        --kw-accent-inv: #066d4c;
         --kw-danger-text: #fca5a5;
         --kw-danger-bright: #f87171;
+        /* Slightly higher alpha in dark mode — paper grain reads as "film
+         * grain" here, so a touch more presence keeps the texture legible. */
+        background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
       }
+
+      /* Soft ambient glow behind the hero stage — picks up the brand
+       * accent but barely; creates a "spotlit" feel without being showy. */
+      .kw-stage-glow {
+        position: absolute;
+        inset: -10% 0 0 0;
+        z-index: 0;
+        pointer-events: none;
+        background: radial-gradient(
+          ellipse 900px 420px at 50% 35%,
+          color-mix(in srgb, var(--kw-accent) 16%, transparent) 0%,
+          transparent 70%
+        );
+        filter: blur(40px);
+      }
+
+      /* Editorial display serif for the signature italic accents. Falls
+       * back to Georgia (not Times) for a more refined default. */
+      .kw-editorial {
+        font-family: var(--font-editorial), Georgia, "Hoefler Text", serif;
+        font-weight: 500;
+        /* Optical tuning — Fraunces italic runs a little wide at display
+         * sizes; tighten tracking to match Plus Jakarta's density. */
+        letter-spacing: -0.015em;
+      }
+
+      /* Signature hover tilt — applied sparingly to the hero italic so
+       * the page's most distinctive character has one moment of delight
+       * on interaction. Subtle — 1.8deg rotation, 3% scale. */
+      .kw-tilt {
+        display: inline-block;
+        transform-origin: center;
+        transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .kw-tilt:hover {
+        transform: rotate(-1.8deg) scale(1.03);
+      }
+
+      /* Ticker edge fade — masks the leftmost/rightmost pixels so labels
+       * fade out on the edges instead of hard-clipping. */
+      .kw-ticker-track {
+        mask-image: linear-gradient(
+          to right,
+          transparent 0%,
+          black 4%,
+          black 96%,
+          transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+          to right,
+          transparent 0%,
+          black 4%,
+          black 96%,
+          transparent 100%
+        );
+      }
+
+      /* Scroll-linked reveal animation. Uses the modern scroll-driven
+       * timelines spec (Chrome 115+ / Safari 18+); browsers without
+       * support fall through to the always-visible base state. */
+      @keyframes kwRevealIn {
+        from {
+          opacity: 0;
+          transform: translateY(28px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @supports (animation-timeline: view()) {
+        .kw-reveal {
+          opacity: 0;
+          animation: kwRevealIn linear both;
+          animation-timeline: view();
+          animation-range: entry 0% cover 30%;
+        }
+      }
+
+      /* Word-stagger entry animation on the hero headline. Each span gets
+       * its own animation-delay set inline so the words cascade in. */
+      .kw-stagger {
+        display: inline-block;
+        opacity: 0;
+        transform: translateY(14px);
+        animation: kwStaggerIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      }
+      @keyframes kwStaggerIn {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
       @keyframes ticker {
         0% { transform: translateX(0); }
         100% { transform: translateX(-50%); }
       }
+
       @media (prefers-reduced-motion: reduce) {
+        .kw-stagger,
+        .kw-reveal {
+          opacity: 1 !important;
+          transform: none !important;
+          animation: none !important;
+        }
+        .kw-tilt:hover {
+          transform: none !important;
+        }
         .animate-\\[ticker_60s_linear_infinite\\] {
           animation: none !important;
         }
       }
     `}</style>
   );
+}
+
+/**
+ * Counts up a number from zero to `target` when it scrolls into view.
+ * Uses IntersectionObserver against the viewport (the landing container
+ * is fixed, so children's viewport positions update with inner scroll).
+ */
+function CountUp({
+  target,
+  decimals = 0,
+  duration = 1400,
+}: {
+  target: number;
+  decimals?: number;
+  duration?: number;
+}) {
+  const [displayed, setDisplayed] = useState<string>(
+    decimals === 0 ? "0" : `0.${"0".repeat(decimals)}`
+  );
+  const ref = useRef<HTMLSpanElement>(null);
+  const hasRun = useRef(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const format = (v: number) =>
+      decimals === 0 ? String(Math.round(v)) : v.toFixed(decimals);
+
+    const animate = () => {
+      const start = performance.now();
+      const tick = (now: number) => {
+        const t = Math.min((now - start) / duration, 1);
+        const eased = 1 - (1 - t) ** 3; // cubic ease-out
+        setDisplayed(format(target * eased));
+        if (t < 1) requestAnimationFrame(tick);
+        else setDisplayed(format(target));
+      };
+      requestAnimationFrame(tick);
+    };
+
+    // Honor reduced-motion preferences by skipping straight to the end.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDisplayed(format(target));
+      hasRun.current = true;
+      return;
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && !hasRun.current) {
+            hasRun.current = true;
+            animate();
+            io.disconnect();
+          }
+        }
+      },
+      { threshold: 0.35 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [target, decimals, duration]);
+
+  return <span ref={ref}>{displayed}</span>;
 }

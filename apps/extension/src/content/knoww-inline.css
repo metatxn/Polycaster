@@ -1519,6 +1519,78 @@
   opacity: 0.7 !important;
 }
 
+/* First-run welcome card — replaces the scanning row on first install */
+.knoww-stack-welcome {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+  padding: 8px 4px 4px !important;
+  gap: 10px !important;
+  animation: knoww-welcome-fade-in 0.28s ease !important;
+}
+@keyframes knoww-welcome-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.knoww-stack-welcome-icon {
+  width: 32px !important;
+  height: 32px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+  background: color-mix(
+    in srgb,
+    var(--knoww-accent, rgb(29, 155, 240)) 14%,
+    transparent
+  ) !important;
+  color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+}
+.knoww-stack-welcome-icon svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+.knoww-stack-welcome-title {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-stack-welcome-body {
+  margin: 0 !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  max-width: 240px !important;
+}
+.knoww-stack-welcome-cta {
+  margin-top: 2px !important;
+  padding: 6px 14px !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--knoww-bg, rgb(0, 0, 0)) !important;
+  background: var(--knoww-text, rgb(231, 233, 234)) !important;
+  border: none !important;
+  border-radius: 9999px !important;
+  cursor: pointer !important;
+  transition:
+    opacity 0.15s,
+    transform 0.1s !important;
+}
+.knoww-stack-welcome-cta:hover {
+  opacity: 0.88 !important;
+}
+.knoww-stack-welcome-cta:active {
+  transform: scale(0.97) !important;
+}
+
 .knoww-stack-empty-title-row {
   display: inline-flex !important;
   align-items: center !important;

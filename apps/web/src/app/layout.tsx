@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import { MainContent } from "@/components/main-content";
@@ -17,6 +17,17 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
+});
+
+// Editorial display serif — used for the italic accent moments on the
+// landing page ("a position", "not around it"). Loading only the weights
+// we need keeps the font payload under 30KB.
+const fraunces = Fraunces({
+  variable: "--font-editorial",
+  subsets: ["latin"],
+  weight: ["500", "600"],
+  style: ["italic"],
+  display: "swap",
 });
 
 export const viewport: Viewport = {
@@ -110,7 +121,7 @@ export default async function RootLayout({
         />
       </head>
       <body
-        className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} font-sans antialiased`}
       >
         <ContextProvider cookies={cookies}>
           {/* Desktop sidebar (client-only to avoid rendering on mobile SSR) */}

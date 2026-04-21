@@ -1228,6 +1228,69 @@ let trendingShuffleTimer: ReturnType<typeof setInterval> | null = null;
 let trendingPool: Market[] = [];
 let visibleTrending: Market[] = [];
 
+// ─── Minimize / expand state ───────────────────────────────────────────
+//
+// The notification stack can be collapsed to just its header when users
+// want the panel out of the way. The collapsed preference is persisted
+// per-origin so it survives page navigations and reloads.
+
+const STACK_MINIMIZED_STORAGE_KEY = "knoww-stack-minimized";
+
+const STACK_MINIMIZE_ICON_HTML = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <polyline points="6 9 12 15 18 9"/>
+  </svg>
+`;
+
+const STACK_EXPAND_ICON_HTML = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <polyline points="18 15 12 9 6 15"/>
+  </svg>
+`;
+
+let cachedStackMinimized = false;
+
+function readPersistedStackMinimized(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage?.local.get(STACK_MINIMIZED_STORAGE_KEY, (result) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(result?.[STACK_MINIMIZED_STORAGE_KEY]));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function persistStackMinimized(value: boolean): void {
+  try {
+    chrome.storage?.local.set({ [STACK_MINIMIZED_STORAGE_KEY]: value });
+  } catch {
+    // Non-fatal; the UI state stays consistent for the current session.
+  }
+}
+
+function applyMinimizedState(
+  container: HTMLElement,
+  toggleBtn: HTMLElement,
+  minimized: boolean
+): void {
+  container.classList.toggle("knoww-stack-minimized", minimized);
+  toggleBtn.innerHTML = minimized
+    ? STACK_EXPAND_ICON_HTML
+    : STACK_MINIMIZE_ICON_HTML;
+  toggleBtn.title = minimized ? "Expand" : "Minimize";
+  toggleBtn.setAttribute(
+    "aria-label",
+    minimized ? "Expand markets panel" : "Minimize markets panel"
+  );
+  toggleBtn.setAttribute("aria-expanded", minimized ? "false" : "true");
+}
+
 /**
  * Create the notification stack container
  */
@@ -1317,7 +1380,17 @@ function createNotificationStack(): HTMLElement {
   `;
   searchToggle.title = "Search markets";
 
+  const minimizeToggle = document.createElement("button");
+  minimizeToggle.className = "knoww-stack-minimize";
+  minimizeToggle.id = "knoww-stack-minimize";
+  minimizeToggle.type = "button";
+  minimizeToggle.innerHTML = STACK_MINIMIZE_ICON_HTML;
+  minimizeToggle.title = "Minimize";
+  minimizeToggle.setAttribute("aria-label", "Minimize");
+  minimizeToggle.setAttribute("aria-expanded", "true");
+
   headerRight.appendChild(searchToggle);
+  headerRight.appendChild(minimizeToggle);
   header.appendChild(headerTitle);
   header.appendChild(headerRight);
 
@@ -1400,6 +1473,42 @@ function createNotificationStack(): HTMLElement {
     searchResults,
     clearBtn
   );
+
+  // Apply the cached minimized state synchronously so there's no flash of
+  // "expanded-then-collapsed" on subsequent stack re-creations. The initial
+  // load happens asynchronously via readPersistedStackMinimized() below.
+  applyMinimizedState(container, minimizeToggle, cachedStackMinimized);
+
+  const toggleMinimized = () => {
+    const next = !container.classList.contains("knoww-stack-minimized");
+    cachedStackMinimized = next;
+    applyMinimizedState(container, minimizeToggle, next);
+    persistStackMinimized(next);
+    void window.KNOWW_ANALYTICS?.track("notification_stack_toggled", {
+      minimized: next,
+    });
+  };
+
+  minimizeToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleMinimized();
+  });
+
+  // When minimized, clicking the title row (logo + "Markets" label) expands
+  // the panel — matches the affordance you'd expect from a collapsed pill.
+  headerTitle.addEventListener("click", () => {
+    if (container.classList.contains("knoww-stack-minimized")) {
+      toggleMinimized();
+    }
+  });
+
+  // Hydrate from persisted state on first creation.
+  void readPersistedStackMinimized().then((persisted) => {
+    if (persisted !== cachedStackMinimized) {
+      cachedStackMinimized = persisted;
+      applyMinimizedState(container, minimizeToggle, persisted);
+    }
+  });
 
   notificationStackContainer = container;
   return container;

@@ -34,6 +34,7 @@ import {
   type SupportedAsset,
 } from "./bridge-api";
 import { CredentialManager } from "./credentials";
+import { formatTradingErrorLine, mapTradingError } from "./error-mapping";
 import { type TradingContext, TradingService } from "./trading-service";
 
 const DEPOSIT_TOKENS: Array<{
@@ -1056,22 +1057,7 @@ function addLoading(p: HTMLElement, text: string): void {
 function formatTradingPanelErrorMessage(
   message: string | null | undefined
 ): string {
-  const trimmed = message?.trim() ?? "";
-  const normalized = trimmed.toLowerCase();
-
-  if (
-    normalized === "failed to fetch" ||
-    normalized.includes("networkerror") ||
-    normalized.includes("load failed")
-  ) {
-    return "Could not connect to Knoww. Retry to start a new signing request.";
-  }
-
-  if (normalized.includes("timed out")) {
-    return "Knoww took too long to respond. Retry to start a new signing request.";
-  }
-
-  return trimmed || "Something went wrong. Retry the request.";
+  return formatTradingErrorLine(message);
 }
 
 /**
@@ -4236,10 +4222,11 @@ function render(
   }
 
   if (error) {
-    const displayError = formatTradingPanelErrorMessage(error);
-    if (lastRenderedErrorToast !== displayError) {
-      showToast(panel, displayError, "error");
-      lastRenderedErrorToast = displayError;
+    // Key on the raw error string so we don't re-render the rich toast on
+    // each state tick when the underlying error hasn't changed.
+    if (lastRenderedErrorToast !== error) {
+      showRichErrorToast(panel, error);
+      lastRenderedErrorToast = error;
     }
   } else {
     lastRenderedErrorToast = null;
@@ -4260,6 +4247,74 @@ function showToast(
   const icon = type === "success" ? I.check : I.error;
   toast.innerHTML = `<span class="knoww-tp-toast-icon">${icon}</span><span>${escapeHtml(message)}</span>`;
   setTimeout(() => toast?.remove(), type === "success" ? 3500 : 6000);
+}
+
+/**
+ * Rich error toast for state-listener driven errors (order rejections,
+ * relayer/network failures, session drops). Maps the raw error to a human
+ * title + body via the error-mapping module, renders a dismissible toast,
+ * and — for unmapped errors — exposes a "Copy details" button so users can
+ * forward the raw text to support.
+ */
+function showRichErrorToast(panel: HTMLElement, rawError: string): void {
+  const mapped = mapTradingError(rawError);
+
+  let toast = panel.querySelector(".knoww-tp-toast") as HTMLElement | null;
+  if (!toast) {
+    toast = el("div", "knoww-tp-toast");
+    panel.appendChild(toast);
+  }
+  toast.className = "knoww-tp-toast knoww-tp-toast-error knoww-tp-toast-rich";
+
+  const copyBtnHtml = mapped.code
+    ? `<button type="button" class="knoww-tp-toast-action" data-knoww-copy-error>Copy details</button>`
+    : "";
+
+  toast.innerHTML = `
+    <span class="knoww-tp-toast-icon">${I.error}</span>
+    <div class="knoww-tp-toast-body">
+      <div class="knoww-tp-toast-title">${escapeHtml(mapped.title)}</div>
+      <div class="knoww-tp-toast-msg">${escapeHtml(mapped.body)}</div>
+    </div>
+    <div class="knoww-tp-toast-tail">
+      ${copyBtnHtml}
+      <button type="button" class="knoww-tp-toast-close" aria-label="Dismiss" data-knoww-dismiss>${I.close}</button>
+    </div>
+  `;
+
+  const dismiss = () => {
+    toast?.remove();
+    if (lastRenderedErrorToast === rawError) {
+      lastRenderedErrorToast = null;
+    }
+  };
+
+  toast
+    .querySelector<HTMLButtonElement>("[data-knoww-dismiss]")
+    ?.addEventListener("click", dismiss);
+
+  const copyBtn = toast.querySelector<HTMLButtonElement>(
+    "[data-knoww-copy-error]"
+  );
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      const payload = mapped.code
+        ? `[${mapped.code}] ${mapped.raw}`
+        : mapped.raw;
+      try {
+        await navigator.clipboard.writeText(payload);
+        copyBtn.textContent = "Copied";
+        copyBtn.disabled = true;
+      } catch {
+        copyBtn.textContent = "Copy failed";
+      }
+    });
+  }
+
+  // Unmapped errors linger (10s) so users have time to copy; mapped errors
+  // auto-dismiss at 8s. Users can always hit × to close immediately.
+  const duration = mapped.code ? 10_000 : 8_000;
+  setTimeout(dismiss, duration);
 }
 
 // ── Public API ──

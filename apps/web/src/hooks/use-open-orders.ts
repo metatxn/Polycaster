@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+
+const log = createLogger("open-orders");
+
 import { useClobClient } from "./use-clob-client";
 import { useClobCredentials } from "./use-clob-credentials";
 
@@ -211,7 +215,7 @@ export function useOpenOrders(options: UseOpenOrdersOptions = {}) {
             }))
           ),
           areOrdersScoring(orderIds).catch((err) => {
-            console.error("Failed to fetch scoring info:", err);
+            log.error("scoring.fetch_failed", { error: err });
             return {} as Record<string, boolean>;
           }),
         ]);
@@ -253,7 +257,7 @@ export function useOpenOrders(options: UseOpenOrdersOptions = {}) {
           orders: filteredOrders,
         };
       } catch (err) {
-        console.error("Failed to fetch open orders:", err);
+        log.error("fetch.failed", { error: err });
         // Return empty result on error instead of throwing
         return {
           success: false,

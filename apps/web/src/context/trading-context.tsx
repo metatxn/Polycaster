@@ -1,5 +1,6 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import {
   createContext,
   type ReactNode,
@@ -10,6 +11,9 @@ import {
   useState,
 } from "react";
 import { useConnection } from "wagmi";
+
+const log = createLogger("trading-provider");
+
 import {
   type ApiKeyCreds,
   useClobCredentials,
@@ -170,7 +174,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (eoaAddress) {
       const storedSession = getStoredSession(eoaAddress);
       if (storedSession) {
-        console.log("[TradingProvider] Loaded stored session:", storedSession);
+        log.debug("session.loaded", { storedSession });
         setHasApprovals(storedSession.hasApprovals);
       }
     }
@@ -191,10 +195,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         try {
           const { checkAllApprovals } = await import("@/lib/approvals");
           const status = await checkAllApprovals(safeAddress);
-          console.log("[TradingProvider] Approval status:", status);
+          log.debug("approvals.status", { status });
           setHasApprovals(status.allApproved);
         } catch (err) {
-          console.error("[TradingProvider] Failed to check approvals:", err);
+          log.error("approvals.check_failed", { error: err });
           // Fall back to assuming approvals are set if safe is deployed
           setHasApprovals(true);
         }
@@ -214,7 +218,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         safeAddress,
         hasApprovals,
       });
-      console.log("[TradingProvider] Session persisted");
+      log.debug("session.persisted");
     }
   }, [eoaAddress, safeAddress, isSafeDeployed, hasApprovals]);
 

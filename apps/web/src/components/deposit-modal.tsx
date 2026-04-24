@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { AnimatePresence } from "framer-motion";
 import { ArrowLeft, X } from "lucide-react";
+
+const log = createLogger("deposit-modal");
+
 import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { erc20Abi, parseUnits } from "viem";
@@ -267,7 +271,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
           if (matching) setBridgeAddress(matching.depositAddress);
         }
       } catch (err) {
-        console.error("Failed to get bridge address:", err);
+        log.error("bridge_address.fetch_failed", { error: err });
       } finally {
         setIsProcessing(false);
         setStep("confirm");
@@ -464,7 +468,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       .catch((err) => {
         if (!cancelled) {
           if (err.name !== "AbortError") {
-            console.warn("Failed to fetch quote:", err);
+            log.warn("quote.fetch_failed", { error: err });
           }
           setQuote(null);
           setIsLoadingQuoteLocal(false);

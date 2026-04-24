@@ -1,6 +1,9 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+
+const log = createLogger("api.sports.list");
 
 /**
  * GET /api/sports/list
@@ -39,7 +42,7 @@ export async function GET(request: NextRequest) {
       sports: data,
     });
   } catch (error) {
-    console.error("Error fetching sports:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

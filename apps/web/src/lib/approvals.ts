@@ -1,6 +1,9 @@
+import { createLogger } from "@knoww/logger";
 import { erc20Abi } from "viem";
 import { CONTRACTS } from "@/constants/contracts";
 import { getPublicClient } from "@/lib/rpc";
+
+const log = createLogger("approvals");
 
 const ERC1155_ABI = [
   {
@@ -92,7 +95,7 @@ export async function checkAllApprovals(
   const allowanceOk = (i: number): boolean => {
     const r = results[i];
     if (r.status !== "success") {
-      console.error("[Approvals] allowance read failed:", r.error);
+      log.error("allowance.read_failed", { error: r.error });
       return false;
     }
     return (r.result as bigint) >= APPROVAL_THRESHOLD;
@@ -101,7 +104,7 @@ export async function checkAllApprovals(
   const approvalOk = (i: number): boolean => {
     const r = results[i];
     if (r.status !== "success") {
-      console.error("[Approvals] isApprovedForAll read failed:", r.error);
+      log.error("approval_for_all.read_failed", { error: r.error });
       return false;
     }
     return r.result as boolean;

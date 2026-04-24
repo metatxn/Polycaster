@@ -4,6 +4,7 @@
  * Supports: limit (GTC/GTD), market (FAK/FOK), split, merge, and balance queries.
  */
 
+import { logInfo, logWarn } from "@knoww/logger";
 import {
   COLLATERAL_ONRAMP_ADDRESS,
   CTF_ADDRESS,
@@ -45,7 +46,6 @@ import type {
   TradingSuccessResponse,
 } from "../types/chrome-messages";
 import { BridgeSigner } from "./bridge-signer";
-import { logInfo, logWarn } from "./logger";
 import { deployProxyWallet, executeViaRelayer } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 

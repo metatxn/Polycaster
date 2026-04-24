@@ -9,6 +9,19 @@ import { type NextRequest, NextResponse } from "next/server";
  * Runs on Cloudflare Workers edge via OpenNext.
  */
 
+// Derive the image optimizer origin for the CSP img-src. When the env var
+// points at a different host (e.g. staging), the CSP follows automatically
+// instead of silently blocking images.
+const IMAGE_OPTIMIZER_ORIGIN = (() => {
+  const raw =
+    process.env.NEXT_PUBLIC_IMAGE_OPTIMIZER_URL || "https://images.knoww.app/";
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "https://images.knoww.app";
+  }
+})();
+
 /**
  * Security headers applied to all responses.
  */
@@ -45,8 +58,8 @@ const SECURITY_HEADERS: Record<string, string> = {
     `script-src 'self' 'unsafe-inline' https://us-assets.i.posthog.com https://static.cloudflareinsights.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
     // Styles: self + inline (required for Tailwind CSS-in-JS and Radix UI)
     "style-src 'self' 'unsafe-inline'",
-    // Images: self + Polymarket S3 + data URIs + blob URIs + crypto logos
-    "img-src 'self' data: blob: https://polymarket-upload.s3.us-east-2.amazonaws.com https://*.polymarket.com https://cryptologos.cc",
+    // Images: self + shared optimizer + Polymarket S3 + data URIs + blob URIs + crypto logos
+    `img-src 'self' data: blob: ${IMAGE_OPTIMIZER_ORIGIN} https://polymarket-upload.s3.us-east-2.amazonaws.com https://*.polymarket.com https://cryptologos.cc`,
     // Fonts: self + data URIs + Reown-hosted wallet fonts
     "font-src 'self' data: https://fonts.reown.com",
     // Connect: self + PostHog + Cloudflare Insights beacon + knoww.app subdomains
@@ -69,15 +82,6 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 export function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname === "/_next/image") {
-    const response = NextResponse.next();
-    response.headers.set(
-      "Cache-Control",
-      "public, max-age=31536000, immutable"
-    );
-    return response;
-  }
-
   const response = NextResponse.next();
 
   // Apply security headers to all responses
@@ -101,10 +105,10 @@ export function middleware(request: NextRequest) {
  */
 export const config = {
   matcher: [
-    "/_next/image",
     /*
      * Match all request paths except:
      * - _next/static (static files)
+     * - _next/image (Next's image optimizer route — unused with custom loader)
      * - favicon.ico, logo-*, manifest.json, robots.txt, sitemap.xml
      * - Public assets (svg, png, jpg, etc.)
      */

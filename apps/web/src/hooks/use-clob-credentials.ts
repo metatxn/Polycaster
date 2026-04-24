@@ -1,5 +1,6 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useSignTypedData } from "wagmi";
 import {
@@ -9,6 +10,8 @@ import {
   CLOB_BASE_URL,
   POLYMARKET_CHAIN_ID,
 } from "@/constants/polymarket";
+
+const log = createLogger("clob-credentials");
 
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
 
@@ -365,21 +368,16 @@ export function useClobCredentials() {
         // Try deriveApiKey first — most users already have keys from a
         // previous session, so this avoids the wasted createApiKey 400
         // and the extra wallet signature that createOrDeriveApiKey causes.
-        console.log("[ClobCredentials] Trying deriveApiKey first...");
+        log.debug("derive.attempt");
         creds = await clobClient.deriveApiKey();
-        console.log("[ClobCredentials] Successfully derived existing API key");
+        log.debug("derive.success");
       } catch {
         try {
-          console.log(
-            "[ClobCredentials] Derive failed, creating new API key..."
-          );
+          log.debug("create.attempt");
           creds = await clobClient.createApiKey();
-          console.log("[ClobCredentials] Successfully created new API key");
+          log.debug("create.success");
         } catch (sdkErr) {
-          console.log(
-            "[ClobCredentials] SDK failed, using API fallback...",
-            sdkErr
-          );
+          log.warn("sdk.failed.fallback_to_api", sdkErr);
           return await deriveCredentialsViaApi();
         }
       }
@@ -509,12 +507,12 @@ export function useClobCredentials() {
 
     try {
       const client = await getAuthenticatedClient();
-      console.log("[ClobCredentials] Creating read-only API key...");
+      log.debug("readonly_key.create.attempt");
 
       const response = await client.createReadonlyApiKey();
       const newKey = response.apiKey;
 
-      console.log("[ClobCredentials] Successfully created read-only API key");
+      log.info("readonly_key.create.success");
 
       // Update local state and storage
       const updatedKeys = [...readonlyKeys, newKey];
@@ -549,11 +547,11 @@ export function useClobCredentials() {
 
     try {
       const client = await getAuthenticatedClient();
-      console.log("[ClobCredentials] Fetching read-only API keys...");
+      log.debug("readonly_keys.fetch.attempt");
 
       const keys = await client.getReadonlyApiKeys();
 
-      console.log(`[ClobCredentials] Found ${keys.length} read-only API keys`);
+      log.debug("readonly_keys.fetch.success", { count: keys.length });
 
       // Update local state and storage
       setReadonlyKeys(keys);
@@ -588,14 +586,12 @@ export function useClobCredentials() {
 
       try {
         const client = await getAuthenticatedClient();
-        console.log("[ClobCredentials] Deleting read-only API key...");
+        log.debug("readonly_key.delete.attempt");
 
         const success = await client.deleteReadonlyApiKey(keyToDelete);
 
         if (success) {
-          console.log(
-            "[ClobCredentials] Successfully deleted read-only API key"
-          );
+          log.info("readonly_key.delete.success");
 
           // Update local state and storage
           const updatedKeys = readonlyKeys.filter((k) => k !== keyToDelete);

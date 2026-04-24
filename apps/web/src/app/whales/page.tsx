@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { Navbar } from "@/components/navbar";
 import {
   type InsiderSensitivity,
@@ -191,7 +191,7 @@ export default function WhalesPage() {
   return (
     <div className="min-h-screen relative overflow-x-hidden">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
         <WhaleHero

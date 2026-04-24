@@ -11,7 +11,6 @@ import { networks, projectId, wagmiAdapter } from "@/config";
 import { AccentColorProvider } from "@/context/color-theme-context";
 import { EventFilterProvider } from "@/context/event-filter-context";
 import { OnboardingProvider } from "@/context/onboarding-context";
-import { SidebarProvider } from "@/context/sidebar-context";
 import { TradingProvider } from "@/context/trading-context";
 import { WalletProvider } from "@/context/wallet-context";
 
@@ -92,13 +91,11 @@ function ContextProvider({
         >
           <AccentColorProvider>
             <WalletProvider>
-              <SidebarProvider>
-                <EventFilterProvider>
-                  <OnboardingProvider>
-                    <TradingProvider>{children}</TradingProvider>
-                  </OnboardingProvider>
-                </EventFilterProvider>
-              </SidebarProvider>
+              <EventFilterProvider>
+                <OnboardingProvider>
+                  <TradingProvider>{children}</TradingProvider>
+                </OnboardingProvider>
+              </EventFilterProvider>
             </WalletProvider>
           </AccentColorProvider>
           {process.env.NODE_ENV === "development" && (

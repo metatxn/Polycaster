@@ -11,8 +11,11 @@
 
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
+
+const log = createLogger("relayer-client");
 
 // Contract addresses on Polygon Mainnet
 import {
@@ -84,7 +87,7 @@ export function useRelayerClient() {
     try {
       return derivePolymarketSafe(address as `0x${string}`);
     } catch (err) {
-      console.warn("[RelayerClient] derive failed:", err);
+      log.warn("derive.failed", err);
       return null;
     }
   }, [address]);
@@ -107,7 +110,7 @@ export function useRelayerClient() {
       );
       const safe = derivePolymarketSafe(address as `0x${string}`);
 
-      console.log("[RelayerClient] Safe deployed successfully:", {
+      log.info("safe.deployed", {
         transactionHash: result.transactionHash,
         proxyAddress: safe,
       });
@@ -145,7 +148,7 @@ export function useRelayerClient() {
         };
       }
 
-      console.error("[RelayerClient] Deploy error:", deployErr);
+      log.error("deploy.error", deployErr);
       const errorMessage = errMessage || "Failed to deploy Safe";
       setState((prev) => ({
         ...prev,
@@ -197,18 +200,15 @@ export function useRelayerClient() {
       }
 
       const isDeployed = await getDeployed(expectedSafe as `0x${string}`);
-      console.log("[RelayerClient] Safe deployment check:", {
-        expectedSafe,
-        isDeployed,
-      });
+      log.debug("approvals.safe_check", { expectedSafe, isDeployed });
 
       // Check if approvals are already set
-      console.log("[RelayerClient] Checking existing approvals...");
+      log.debug("approvals.checking");
       const approvalStatus = await checkAllApprovals(expectedSafe);
-      console.log("[RelayerClient] Current approval status:", approvalStatus);
+      log.debug("approvals.status", approvalStatus);
 
       if (approvalStatus.allApproved) {
-        console.log("[RelayerClient] All approvals already set, skipping...");
+        log.debug("approvals.already_set");
         setState((prev) => ({ ...prev, isLoading: false }));
         return {
           success: true,
@@ -285,19 +285,11 @@ export function useRelayerClient() {
         ),
       ];
 
-      console.log("[RelayerClient] Submitting token approval transactions...");
-      console.log(
-        "[RelayerClient] pUSD approval targets:",
-        PUSD_APPROVAL_TARGETS
-      );
-      console.log(
-        "[RelayerClient] USDC.e approval target:",
-        CONTRACTS.COLLATERAL_ONRAMP
-      );
-      console.log(
-        "[RelayerClient] CTF (ERC-1155) approval operators:",
-        CTF_APPROVAL_OPERATORS
-      );
+      log.debug("approvals.submitting", {
+        pusdTargets: PUSD_APPROVAL_TARGETS,
+        usdcEOnramp: CONTRACTS.COLLATERAL_ONRAMP,
+        ctfOperators: CTF_APPROVAL_OPERATORS,
+      });
 
       // Execute the approval transactions with retry logic.
       // The new relayer client throws on failure states, so wrap in try/catch.
@@ -309,9 +301,7 @@ export function useRelayerClient() {
       for (let retry = 0; retry < maxRetries; retry++) {
         try {
           if (retry > 0) {
-            console.log(
-              `[RelayerClient] Retry attempt ${retry + 1}/${maxRetries}...`
-            );
+            log.debug("approvals.retry", { attempt: retry + 1, maxRetries });
             // Wait before retrying (exponential backoff: 1s, 2s, 4s)
             await new Promise((resolve) =>
               setTimeout(resolve, 1000 * 2 ** (retry - 1))
@@ -328,17 +318,17 @@ export function useRelayerClient() {
             }))
           );
 
-          console.log("[RelayerClient] Approval result:", {
+          log.info("approvals.result", {
             transactionID: result.transactionID,
             hash: result.transactionHash,
             retry,
           });
           break; // success
         } catch (executeErr) {
-          console.error(
-            `[RelayerClient] Execute error on attempt ${retry + 1}:`,
-            executeErr
-          );
+          log.error("approvals.execute_failed", {
+            attempt: retry + 1,
+            error: executeErr,
+          });
           lastError =
             executeErr instanceof Error
               ? executeErr
@@ -354,7 +344,7 @@ export function useRelayerClient() {
       setState((prev) => ({ ...prev, isLoading: false }));
       return { success: true, transactionHash: result.transactionHash };
     } catch (err) {
-      console.error("[RelayerClient] Approval error:", err);
+      log.error("approvals.error", err);
       const errorMessage =
         err instanceof Error ? err.message : "Failed to approve USDC";
       setState((prev) => ({
@@ -375,7 +365,7 @@ export function useRelayerClient() {
       try {
         return await rpcCheckIsDeployed(proxyAddress);
       } catch (err) {
-        console.error("[RelayerClient] Failed to check deployment:", err);
+        log.error("deployment.check_failed", err);
         return false;
       }
     },
@@ -429,15 +419,13 @@ export function useRelayerClient() {
         // For new users, this will be FALSE because their Safe doesn't exist yet
         const isDeployed = await checkIsDeployed(derivedAddress);
 
-        console.log(
-          "[RelayerClient] Safe check:",
+        log.debug("safe.check", {
           derivedAddress,
-          "deployed:",
           isDeployed,
-          isDeployed
-            ? "- Safe exists on-chain"
-            : "- Safe NOT deployed yet (new user)"
-        );
+          note: isDeployed
+            ? "Safe exists on-chain"
+            : "Safe NOT deployed yet (new user)",
+        });
 
         setState((prev) => ({
           ...prev,
@@ -449,7 +437,7 @@ export function useRelayerClient() {
           hasDeployedSafe: isDeployed,
         }));
       } catch (err) {
-        console.error("[RelayerClient] Check deployment error:", err);
+        log.error("deployment.check_error", err);
         setState((prev) => ({
           ...prev,
           isLoading: false,

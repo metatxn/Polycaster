@@ -1,8 +1,11 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
+
+const log = createLogger("api.user.portfolio-value");
 
 /**
  * Polymarket Data API base URL
@@ -116,7 +119,7 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[portfolio-value] Polymarket API error:", errorText);
+      log.error("upstream.error", { body: errorText });
       return NextResponse.json(
         {
           success: false,
@@ -143,7 +146,7 @@ export async function GET(request: NextRequest) {
       excludes: ["Open order collateral", "Unused USDC balance"],
     });
   } catch (error) {
-    console.error("[portfolio-value] Error:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

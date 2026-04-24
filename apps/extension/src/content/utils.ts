@@ -2,7 +2,11 @@
 // UTILITY FUNCTIONS
 // ============================================
 
+import { createLogger } from "@knoww/logger";
 import type { BackgroundResponse } from "../types/chrome-messages";
+
+const contentLog = createLogger("extension.content");
+
 import type { Market } from "../types/market";
 
 const HTML_ESCAPE_MAP: Record<string, string> = {
@@ -257,7 +261,7 @@ function log(...args: unknown[]): void {
 
   if (!isDebug) return;
 
-  console.log("[Knoww]", ...args);
+  contentLog.debug("log", { args });
 }
 
 // ============================================

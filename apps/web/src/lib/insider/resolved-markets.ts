@@ -5,8 +5,11 @@
  * trader could plausibly have accumulated a position.
  */
 
+import { createLogger } from "@knoww/logger";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { parseOutcomes, type ResolvedOutcomes } from "./pnl";
+
+const log = createLogger("insider.resolved-markets");
 
 interface GammaClosedMarket {
   conditionId?: string;
@@ -100,14 +103,15 @@ async function fetchClosedMarketsPage(
       cache: "no-store",
     });
     if (!response.ok) {
-      console.warn(
-        `[backtest] gamma page fetch failed: ${response.status} ${url.toString()}`
-      );
+      log.warn("gamma.page_fetch_failed", {
+        status: response.status,
+        url: url.toString(),
+      });
       return [];
     }
     return (await response.json()) as GammaClosedMarket[];
   } catch (err) {
-    console.warn(`[backtest] gamma page fetch threw:`, err);
+    log.warn("gamma.page_fetch_threw", { error: err });
     return [];
   }
 }

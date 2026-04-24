@@ -4,6 +4,7 @@
 // handles fetch proxying, and attaches extension auth headers.
 // ============================================
 
+import { logWarn } from "@knoww/logger";
 import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
 import {
   flushAnalyticsQueue,
@@ -17,7 +18,6 @@ import {
   isKnowwApiUrl,
   setExtensionAccessToken,
 } from "./background/extension-session";
-import { logWarn } from "./background/logger";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import type {
   BackgroundResponse,

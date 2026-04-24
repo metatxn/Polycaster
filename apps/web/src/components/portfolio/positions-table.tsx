@@ -321,7 +321,7 @@ export function PositionsTable({
         <div
           className={cn(
             DESKTOP_GRID,
-            "px-3 py-3 border-t-2 border-t-border/60 border-b border-b-border/40 bg-muted/10"
+            "px-3 py-3 border-t border-t-border/60 border-b border-b-border/40 bg-muted/10"
           )}
         >
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -475,7 +475,7 @@ export function PositionsTable({
         })}
 
         {/* Mobile Totals */}
-        <div className="py-4 mt-2 border-t-2 border-t-border/60 border-b border-b-border/40">
+        <div className="py-4 mt-2 border-t border-t-border/60 border-b border-b-border/40">
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
             §&nbsp;&nbsp;Portfolio Summary
             <span className="tabular-nums ml-1.5 opacity-70">

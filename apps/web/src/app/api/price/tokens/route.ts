@@ -1,5 +1,8 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+
+const log = createLogger("api.price.tokens");
 
 /**
  * CoinMarketCap API response types
@@ -136,7 +139,7 @@ export async function GET(request: NextRequest) {
     const apiKey = process.env.COINMARKET_API_KEY;
 
     if (!apiKey) {
-      console.warn("COINMARKET_API_KEY is not defined");
+      log.warn("config.missing", { key: "COINMARKET_API_KEY" });
       // Return fallback prices with warning
       return NextResponse.json(
         {
@@ -209,7 +212,7 @@ export async function GET(request: NextRequest) {
       timestamp: cachedPrices.timestamp,
     } satisfies TokenPricesResponse);
   } catch (error) {
-    console.error("Error fetching token prices:", error);
+    log.error("fetch.failed", { error });
 
     // Return cached prices if available, even if expired
     if (cachedPrices) {

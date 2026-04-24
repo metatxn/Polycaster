@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "wagmi";
+
+const log = createLogger("notifications");
+
 import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
@@ -163,7 +167,7 @@ export function useNotifications() {
       const error =
         err instanceof Error ? err : new Error("Failed to fetch notifications");
       setError(error);
-      console.error("[Notifications] Failed to fetch:", err);
+      log.error("fetch.failed", { error: err });
     } finally {
       setIsLoading(false);
     }
@@ -205,7 +209,7 @@ export function useNotifications() {
           }
           return next;
         });
-        console.error("[Notifications] Failed to dismiss:", err);
+        log.error("dismiss.failed", { error: err });
         throw err;
       }
     },

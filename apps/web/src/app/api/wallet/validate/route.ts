@@ -1,8 +1,11 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
+
+const log = createLogger("api.wallet.validate");
 
 // Validation schema
 const userAddressSchema = z.object({
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
       message: "Valid Ethereum address",
     });
   } catch (error) {
-    console.error("Error validating wallet:", error);
+    log.error("validate.failed", { error });
     return NextResponse.json(
       {
         success: false,

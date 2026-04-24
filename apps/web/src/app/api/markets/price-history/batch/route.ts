@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+
+const log = createLogger("api.markets.price-history.batch");
 
 interface PriceHistoryPoint {
   t: number;
@@ -107,7 +110,7 @@ export async function POST(request: NextRequest) {
       { headers: getCacheHeaders("priceHistory") }
     );
   } catch (error) {
-    console.error("Error fetching batch price history:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

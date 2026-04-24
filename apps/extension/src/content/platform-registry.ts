@@ -3,7 +3,10 @@
 // Manages platform adapters for different social networks
 // ============================================
 
+import { createLogger } from "@knoww/logger";
 import type { InjectionPoint, PlatformAdapter } from "../types/platform";
+
+const log = createLogger("extension.platform-registry");
 
 // Re-export types for consumers
 export type {
@@ -24,7 +27,7 @@ let currentPlatformAdapter: PlatformAdapter | null = null;
  */
 function registerPlatform(adapter: PlatformAdapter): void {
   if (!adapter?.name) {
-    console.error("[KnowwPlatform] Cannot register adapter without name");
+    log.error("register.missing_name");
     return;
   }
   platformAdapters.set(adapter.name, adapter);

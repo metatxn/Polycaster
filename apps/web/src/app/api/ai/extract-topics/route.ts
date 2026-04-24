@@ -1,3 +1,4 @@
+import { createLogger } from "@knoww/logger";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
@@ -8,6 +9,8 @@ import {
   handleExtensionPreflight,
   verifyExtensionAccessPreAuth,
 } from "@/lib/extension-auth";
+
+const log = createLogger("api.ai.extract-topics");
 
 const MAX_INPUT_CHARS = 500;
 const MIN_MEANINGFUL_CHARS = 20;
@@ -252,14 +255,12 @@ function createExtractionCache(): ExtractionCache {
   const backend = (process.env.CACHE_BACKEND || "memory").toLowerCase();
 
   if (backend !== "memory") {
-    console.warn(
-      `[extract-topics] CACHE_BACKEND="${backend}" is not configured in this route yet. Falling back to in-memory cache.`
-    );
+    log.warn("cache.backend_unsupported", { backend });
   }
 
-  console.info(
-    "[extract-topics] Using in-memory best-effort cache (instance-local, non-durable). Configure CACHE_BACKEND with a durable store implementation for cross-instance sharing."
-  );
+  log.info("cache.memory_backend_selected", {
+    note: "instance-local, non-durable",
+  });
 
   return new InMemoryExtractionCache(CACHE_MAX_ENTRIES);
 }
@@ -357,7 +358,7 @@ async function extractTopicsFromText(
 
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    console.error("OPENROUTER_API_KEY not configured");
+    log.error("config.missing", { key: "OPENROUTER_API_KEY" });
     return createResponse({
       success: false,
       category: "other",
@@ -428,7 +429,7 @@ ${truncatedText}
   } catch (error) {
     const isTimeout =
       error instanceof Error && error.message === "AI extraction timeout";
-    console.error("AI extraction error:", {
+    log.error("extraction.failed", {
       isTimeout,
       error,
       stack: error instanceof Error ? error.stack : undefined,
@@ -491,7 +492,7 @@ export async function POST(request: NextRequest) {
       headers: cors,
     });
   } catch (error) {
-    console.error("AI extraction request parse error:", error);
+    log.error("request.parse_failed", { error });
     return NextResponse.json(
       createResponse({
         success: false,

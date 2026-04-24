@@ -1,12 +1,16 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+
+const log = createLogger("event-detail");
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { CommentsSection } from "@/components/comments";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Navbar } from "@/components/navbar";
@@ -219,7 +223,7 @@ export default function EventDetailClient({
         if (data.bids.length === 0 && data.asks.length === 0) return;
         setOrderBookFromRest(tokenId, data.bids, data.asks);
       } catch (err) {
-        console.error("Preload order book failed", err);
+        log.error("orderbook.preload_failed", { error: err });
       }
     },
     [queryClient, setOrderBookFromRest]
@@ -818,7 +822,7 @@ export default function EventDetailClient({
     return (
       <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <Navbar />
-        <ProChromeHeader />
+        <ChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-8 space-y-8">
           <Skeleton className="h-10 w-32" />
           <Skeleton className="h-8 w-3/4" />
@@ -833,7 +837,7 @@ export default function EventDetailClient({
     return (
       <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <Navbar />
-        <ProChromeHeader />
+        <ChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
             <button
@@ -941,7 +945,7 @@ export default function EventDetailClient({
   return (
     <div className="min-h-screen bg-background relative selection:bg-foreground/15">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
       <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 min-h-screen">
         {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">

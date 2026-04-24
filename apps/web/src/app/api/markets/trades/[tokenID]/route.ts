@@ -1,6 +1,9 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { fetchTrades } from "@/lib/polymarket";
+
+const log = createLogger("api.markets.trades");
 
 /**
  * GET /api/markets/trades/:tokenID
@@ -30,7 +33,7 @@ export async function GET(
       trades,
     });
   } catch (error) {
-    console.error("Error fetching trades:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

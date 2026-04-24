@@ -2,6 +2,7 @@
 // API & DATA FUNCTIONS
 // ============================================
 
+import { createLogger } from "@knoww/logger";
 import type {
   KeywordExtractionResult,
   KeywordRegexEntry,
@@ -11,6 +12,8 @@ import type {
 } from "../types/market";
 import { KNOWW_CONFIG } from "./config";
 import { HIGH_SIGNAL_TOKENS } from "./scoring-policy";
+
+const log = createLogger("extension.api");
 
 // Cache for Polymarket tags
 let polymarketTagsCache: PolymarketTagsCache | null = null;
@@ -1505,7 +1508,7 @@ function testDeduplicationLogic(): DeduplicationTestResult | null {
     },
   ];
 
-  console.log("🧪 Running deduplication tests...\n");
+  log.info("dedup_tests.start", { total: testCases.length });
   let passed = 0;
   let failed = 0;
 
@@ -1518,23 +1521,26 @@ function testDeduplicationLogic(): DeduplicationTestResult | null {
 
     if (testPassed) {
       passed++;
-      console.log(`✅ PASS: ${test.description}`);
+      log.debug("dedup_tests.pass", {
+        description: test.description,
+        similarity: Number((similarity * 100).toFixed(1)),
+      });
     } else {
       failed++;
-      console.log(`❌ FAIL: ${test.description}`);
+      log.error("dedup_tests.fail", {
+        description: test.description,
+        title1: test.title1,
+        title2: test.title2,
+        norm1,
+        norm2,
+        similarityPercent: Number((similarity * 100).toFixed(1)),
+        wouldMerge,
+        shouldMerge: test.shouldMerge,
+      });
     }
-    console.log(`   Title 1: "${test.title1}"`);
-    console.log(`   Title 2: "${test.title2}"`);
-    console.log(`   Normalized 1: "${norm1}"`);
-    console.log(`   Normalized 2: "${norm2}"`);
-    console.log(`   Similarity: ${(similarity * 100).toFixed(1)}%`);
-    console.log(
-      `   Would merge: ${wouldMerge}, Should merge: ${test.shouldMerge}`
-    );
-    console.log("");
   }
 
-  console.log(`\n📊 Results: ${passed} passed, ${failed} failed`);
+  log.info("dedup_tests.done", { passed, failed, total: testCases.length });
   return { passed, failed, total: testCases.length };
 }
 

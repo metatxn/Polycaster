@@ -4,15 +4,19 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection } from "wagmi";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { EditorialFooter } from "@/components/editorial-footer";
-import { EditorialHero } from "@/components/editorial-hero";
+import {
+  EditorialHero,
+  HeroDataAge,
+  HeroRefreshButton,
+} from "@/components/editorial-hero";
 import { FilterChip } from "@/components/event-filter-bar";
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { Navbar } from "@/components/navbar";
 import {
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import {
   type LeaderboardCategory,
@@ -48,7 +52,7 @@ const TIME_PERIODS: { value: LeaderboardTimePeriod; label: string }[] = [
 ];
 
 const ORDER_OPTIONS: { value: LeaderboardOrderBy; label: string }[] = [
-  { value: "PNL", label: "Profit & Loss" },
+  { value: "PNL", label: "P&L" },
   { value: "VOL", label: "Volume" },
 ];
 
@@ -58,6 +62,52 @@ const ITEMS_PER_PAGE = 25;
 import type { InitialLeaderboardData } from "@/lib/server-cache";
 
 export type { InitialLeaderboardData } from "@/lib/server-cache";
+
+/**
+ * Editorial dropdown menu — replaces shadcn's `DropdownMenuCheckboxItem`
+ * (radio-dot check marks, rounded panel) with mono-caps items and an
+ * underline-active marker that matches the rest of the editorial voice.
+ */
+function EditorialDropdown<T extends string>({
+  options,
+  selected,
+  onSelect,
+}: {
+  options: readonly { value: T; label: string }[];
+  selected: T;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <DropdownMenuContent
+      align="start"
+      className="min-w-36 rounded-none border border-border/60 bg-popover/95 backdrop-blur-sm p-0 shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+    >
+      {options.map((option) => {
+        const isActive = selected === option.value;
+        return (
+          <DropdownMenuItem
+            key={option.value}
+            onSelect={() => onSelect(option.value)}
+            className={cn(
+              "rounded-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] focus:bg-foreground/5 focus:text-foreground",
+              isActive ? "text-foreground" : "text-muted-foreground"
+            )}
+          >
+            <span
+              className={cn(
+                "relative",
+                isActive &&
+                  "after:absolute after:left-0 after:-bottom-0.5 after:h-px after:w-full after:bg-foreground"
+              )}
+            >
+              {option.label}
+            </span>
+          </DropdownMenuItem>
+        );
+      })}
+    </DropdownMenuContent>
+  );
+}
 
 interface LeaderboardContentProps {
   initialData?: InitialLeaderboardData | null;
@@ -100,14 +150,28 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
   // Skip the client-side fetch for the seeded first page — the SSR'd
   // traders are already rendered.
   const skipInitialQuery = page === 1 && usingInitialSeed;
-  const { data, isLoading, error } = useLeaderboard({
-    category,
-    timePeriod,
-    orderBy,
-    limit: ITEMS_PER_PAGE,
-    offset,
-    enabled: !skipInitialQuery,
-  });
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } =
+    useLeaderboard({
+      category,
+      timePeriod,
+      orderBy,
+      limit: ITEMS_PER_PAGE,
+      offset,
+      enabled: !skipInitialQuery,
+    });
+
+  // Tick the "updated Xs ago" meta so it counts forward between refetches.
+  // When seeded from SSR the first client fetch is skipped, so
+  // dataUpdatedAt stays 0 until the first refetch — fall back to the
+  // mount timestamp so the meta still reads sensibly on arrival.
+  const [now, setNow] = useState(() => Date.now());
+  const [mountedAt] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const effectiveUpdatedAt = dataUpdatedAt || mountedAt;
+  const dataAgeMs = now - effectiveUpdatedAt;
 
   // Accumulate traders as pages arrive. Dedupe on proxyWallet so a
   // rapid filter-change race can't insert the same trader twice.
@@ -194,7 +258,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
         <EditorialHero
@@ -203,7 +267,16 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
             { label: "Leaderboard" },
           ]}
           title={<span>Leaderboard</span>}
-          subtitle="Who's making money on Polymarket — and who's losing it. Ranked by realised P&L, refreshed every page load."
+          subtitle="Who's making money on Polymarket — and who's losing it. Ranked by realised P&L, refreshed every minute."
+          rightSlot={
+            <>
+              <HeroDataAge dataAgeMs={dataAgeMs} />
+              <HeroRefreshButton
+                onRefresh={() => refetch()}
+                isFetching={isFetching}
+              />
+            </>
+          }
         />
 
         {/* Category row — italic Fraunces anchors the active category,
@@ -240,17 +313,11 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
               }
               isActive={timePeriod !== "DAY"}
             >
-              <DropdownMenuContent align="start" className="w-40">
-                {TIME_PERIODS.map((period) => (
-                  <DropdownMenuCheckboxItem
-                    key={period.value}
-                    checked={timePeriod === period.value}
-                    onCheckedChange={() => handleTimePeriodChange(period.value)}
-                  >
-                    {period.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuContent>
+              <EditorialDropdown
+                options={TIME_PERIODS}
+                selected={timePeriod}
+                onSelect={handleTimePeriodChange}
+              />
             </FilterChip>
             <FilterChip
               label="Rank By"
@@ -259,17 +326,11 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
               }
               isActive={orderBy !== "PNL"}
             >
-              <DropdownMenuContent align="start" className="w-44">
-                {ORDER_OPTIONS.map((option) => (
-                  <DropdownMenuCheckboxItem
-                    key={option.value}
-                    checked={orderBy === option.value}
-                    onCheckedChange={() => handleOrderByChange(option.value)}
-                  >
-                    {option.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuContent>
+              <EditorialDropdown
+                options={ORDER_OPTIONS}
+                selected={orderBy}
+                onSelect={handleOrderByChange}
+              />
             </FilterChip>
           </div>
 
@@ -282,16 +343,16 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
 
         {/* Error State */}
         {error && (
-          <div className="text-center py-12 border-y border-destructive/30">
+          <div className="py-12 border-y border-destructive/30">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-destructive mb-3">
               Failed to load leaderboard
             </p>
-            <p className="font-editorial italic text-lg text-muted-foreground mb-4 max-w-md mx-auto">
+            <p className="font-editorial text-lg leading-snug text-foreground mb-4 max-w-md">
               {error.message || "Something went wrong"}
             </p>
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              onClick={() => refetch()}
               className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground hover:text-destructive transition-colors underline underline-offset-4 decoration-border"
             >
               Try again

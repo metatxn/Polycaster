@@ -1,5 +1,6 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import {
   AlertCircle,
   ArrowRight,
@@ -9,6 +10,9 @@ import {
   Plus,
   TrendingDown,
 } from "lucide-react";
+
+const log = createLogger("sell-position-modal");
+
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import posthog from "posthog-js";
@@ -68,7 +72,7 @@ export function SellPositionModal({
       onOpenChange(false);
     },
     onSellError: (err) => {
-      console.error("Sell failed:", err);
+      log.error("sell.failed", { error: err });
     },
   });
 

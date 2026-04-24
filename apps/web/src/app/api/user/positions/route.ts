@@ -1,8 +1,11 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
+
+const log = createLogger("api.user.positions");
 
 /**
  * Polymarket Data API base URL
@@ -159,7 +162,7 @@ export async function GET(request: NextRequest) {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("[positions] API error:", errorText);
+        log.error("upstream.error", { body: errorText });
         return NextResponse.json(
           {
             success: false,
@@ -278,7 +281,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error fetching positions:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

@@ -2,10 +2,13 @@
 // KNOWW SETTINGS - Options Page
 // ============================================
 
+import { createLogger } from "@knoww/logger";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
+
+const log = createLogger("extension.options");
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -417,7 +420,9 @@ function OptionsApp() {
       { knowwSettings: DEFAULT_USER_SETTINGS },
       (result) => {
         if (chrome.runtime.lastError) {
-          console.error("Failed to load settings:", chrome.runtime.lastError);
+          log.error("settings.load_failed", {
+            error: chrome.runtime.lastError,
+          });
           return;
         }
         const storedSettings = result.knowwSettings as
@@ -442,10 +447,9 @@ function OptionsApp() {
     // Check if user is logged in
     chrome.runtime.sendMessage({ type: "auth:get-token" }, (response) => {
       if (chrome.runtime.lastError) {
-        console.error(
-          "auth:get-token failed:",
-          chrome.runtime.lastError.message
-        );
+        log.error("auth.get_token_failed", {
+          error: chrome.runtime.lastError.message,
+        });
         setHasToken(false);
         return;
       }
@@ -544,10 +548,9 @@ function OptionsApp() {
     ) {
       chrome.runtime.sendMessage({ type: "auth:logout" }, (response) => {
         if (chrome.runtime.lastError) {
-          console.error(
-            "auth:logout failed:",
-            chrome.runtime.lastError.message
-          );
+          log.error("auth.logout_failed", {
+            error: chrome.runtime.lastError.message,
+          });
           setHasToken(false);
           return;
         }
@@ -562,7 +565,7 @@ function OptionsApp() {
           setHasToken(false);
           showStatus("Wallet disconnected");
         } else {
-          console.error("auth:logout returned non-ok response:", response);
+          log.error("auth.logout_bad_response", { response });
           setHasToken(false);
         }
       });

@@ -1,9 +1,12 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
 import type { Comment } from "@/types/comments";
+
+const log = createLogger("api.comments");
 
 /**
  * Query parameter validation schema for GET
@@ -126,7 +129,10 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[comments] Gamma API error:", errorText);
+      log.error("gamma.get_failed", {
+        status: response.status,
+        body: errorText,
+      });
       return NextResponse.json(
         {
           success: false,
@@ -149,7 +155,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error fetching comments:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,
@@ -257,7 +263,10 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[comments] Gamma API POST error:", errorText);
+      log.error("gamma.post_failed", {
+        status: response.status,
+        body: errorText,
+      });
 
       // Handle specific error cases
       if (response.status === 401) {
@@ -297,7 +306,7 @@ export async function POST(request: NextRequest) {
       comment: result,
     });
   } catch (error) {
-    console.error("Error posting comment:", error);
+    log.error("post.failed", { error });
     return NextResponse.json(
       {
         success: false,

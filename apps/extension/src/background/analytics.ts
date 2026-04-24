@@ -1,6 +1,6 @@
+import { logDebug, logWarn } from "@knoww/logger";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "../types/settings";
 import { getKnowwAppUrl } from "./extension-session";
-import { logDebug, logWarn } from "./logger";
 
 const ANALYTICS_QUEUE_KEY = "knoww_analytics_queue_v1";
 const ANALYTICS_INSTALL_ID_KEY = "knoww_analytics_install_id_v1";

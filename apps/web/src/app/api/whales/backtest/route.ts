@@ -1,5 +1,8 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { runBacktest } from "@/lib/insider/backtest";
+
+const log = createLogger("api.whales.backtest");
 
 /**
  * One-shot insider-detector backtest runner.
@@ -83,7 +86,7 @@ export async function GET(request: NextRequest) {
     const result = await runBacktest(options);
     return NextResponse.json(result);
   } catch (error) {
-    console.error("Backtest runner error:", error);
+    log.error("run.failed", { error });
     return NextResponse.json(
       {
         error:

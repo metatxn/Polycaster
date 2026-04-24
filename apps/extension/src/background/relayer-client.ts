@@ -14,6 +14,7 @@
  *  6. Poll GET /transaction until confirmed
  */
 
+import { logInfo } from "@knoww/logger";
 import {
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
@@ -23,7 +24,6 @@ import { EXTENSION_AUTH_REQUIRED_ERROR } from "../types/chrome-messages";
 import type { BridgeSigner } from "./bridge-signer";
 import { getAccessTokenViaMessage } from "./extension-auth";
 import { getKnowwAppUrl } from "./extension-session";
-import { logInfo } from "./logger";
 
 const RELAYER_URL = `${getKnowwAppUrl().replace(/\/$/, "")}/api/relayer`;
 const CHAIN_ID = 137;

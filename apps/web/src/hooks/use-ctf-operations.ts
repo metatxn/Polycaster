@@ -11,11 +11,15 @@
 
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import {
   BINARY_PARTITION_BIGINT as BINARY_PARTITION,
   CTF_JSON_ABI as CTF_ABI,
   PARENT_COLLECTION_ID,
 } from "@knoww/shared-types/ctf";
+
+const log = createLogger("ctf-operations");
+
 import { useCallback, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 import { CONTRACTS, CTF_ADDRESS, USDC_E_DECIMALS } from "@/constants/contracts";
@@ -129,7 +133,7 @@ export function useCtfOperations() {
         const rawMessage =
           err instanceof Error ? err.message : `${operationName} failed`;
         const errorMessage = parseUserFriendlyError(rawMessage);
-        console.error(`[CTF] ${operationName} error:`, err);
+        log.error("operation.failed", { operation: operationName, error: err });
         setState({ isLoading: false, error: errorMessage, txHash: null });
         return { success: false, error: errorMessage };
       }

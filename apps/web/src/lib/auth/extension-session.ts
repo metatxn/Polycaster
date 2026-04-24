@@ -1,5 +1,8 @@
+import { createLogger } from "@knoww/logger";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { type NextRequest, NextResponse } from "next/server";
+
+const log = createLogger("extension-session");
 
 const TOKEN_AUDIENCE = "knoww-extension";
 const TOKEN_ISSUER = "knoww.app";
@@ -95,10 +98,9 @@ async function getExtensionSessionStore(): Promise<ExtensionSessionStore> {
 
   if (process.env.NODE_ENV === "production" && !memoryFallbackWarned) {
     memoryFallbackWarned = true;
-    console.warn(
-      "[extension-session] R2 bucket unavailable — using in-memory session store. " +
-        "Session revocation will NOT persist across isolates or redeployments."
-    );
+    log.warn("storage.memory_fallback", {
+      note: "R2 unavailable; session revocation will NOT persist across isolates or redeployments",
+    });
   }
 
   return { kind: "memory" };

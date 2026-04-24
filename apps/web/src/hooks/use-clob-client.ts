@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useCallback, useMemo, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
+
+const log = createLogger("clob-client");
+
 import { COLLATERAL_ONRAMP_ABI } from "@/constants/abi";
 import {
   COLLATERAL_ONRAMP_ADDRESS,
@@ -548,7 +552,7 @@ export function useClobClient() {
       }
       return await response.json();
     } catch (err) {
-      console.error("Failed to get order book:", err);
+      log.error("order_book.fetch_failed", { error: err });
       throw err;
     }
   }, []);
@@ -564,7 +568,7 @@ export function useClobClient() {
       const orders = await client.getOpenOrders();
       return orders || [];
     } catch (err) {
-      console.error("Failed to get open orders:", err);
+      log.error("open_orders.fetch_failed", { error: err });
       return [];
     }
   }, [canTrade, getClient]);
@@ -727,7 +731,7 @@ export function useClobClient() {
           decimals: USDC_E_DECIMALS,
         };
       } catch (err) {
-        console.error("Failed to get USDC balance:", err);
+        log.error("usdc_balance.fetch_failed", { error: err });
         throw err;
       }
     },
@@ -828,7 +832,7 @@ export function useClobClient() {
           exchange: negRisk ? "NEG_RISK_CTF_EXCHANGE" : "CTF_EXCHANGE",
         };
       } catch (err) {
-        console.error("Failed to get USDC allowance:", err);
+        log.error("usdc_allowance.fetch_failed", { error: err });
         throw err;
       }
     },
@@ -848,7 +852,7 @@ export function useClobClient() {
         const response = await client.isOrderScoring({ order_id: orderId });
         return !!response.scoring;
       } catch (err) {
-        console.error("Failed to check order scoring:", err);
+        log.error("order_scoring.check_failed", { error: err });
         return false;
       }
     },
@@ -866,7 +870,7 @@ export function useClobClient() {
         // The SDK method might return a dictionary/record of orderId -> scoring
         return await client.areOrdersScoring({ orderIds });
       } catch (err) {
-        console.error("Failed to check batch order scoring:", err);
+        log.error("order_scoring.batch_check_failed", { error: err });
         return {};
       }
     },

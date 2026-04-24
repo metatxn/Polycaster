@@ -1,3 +1,4 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
@@ -7,6 +8,8 @@ import {
   isPostHogServerConfigured,
 } from "@/lib/posthog-server";
 import { isValidAddress } from "@/lib/validation";
+
+const log = createLogger("api.auth.derive-api-key");
 
 /**
  * Schema for L1 authentication headers
@@ -199,7 +202,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Both create and derive failed
-    console.error("[api-key] Both create and derive failed:", {
+    log.error("auth.both_failed", {
       createError: createResult.error,
       deriveError: deriveResult.error,
     });
@@ -232,7 +235,7 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   } catch (error) {
-    console.error("[api-key] Error:", error);
+    log.error("request.failed", { error });
     return NextResponse.json(
       {
         success: false,

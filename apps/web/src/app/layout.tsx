@@ -2,9 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
-import { ProChromeController } from "@/components/app-pro-layout";
 import { MainContent } from "@/components/main-content";
-import { SidebarDesktopNoSSR } from "@/components/sidebar-desktop";
 import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import ContextProvider from "@/context";
 import "./globals.css";
@@ -120,34 +118,11 @@ export default async function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
-        {/* Set app-pro-chrome on <html> synchronously, before React
-            hydrates, so the app sidebar doesn't flash in and then
-            disappear when the page's useEffect runs. Pro chrome is the
-            default on every app route listed below, plus any path under
-            /events/, /profile/, or /whales/ (covers /events/detail/…,
-            /profile/[address], /whales/backtest, etc.); on /markets
-            specifically, `?layout=legacy` escapes back to the card grid.
-            Other routes (/, /privacy, /terms) keep the app sidebar. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var path=location.pathname;var p=new URLSearchParams(location.search);var proPaths=['/markets','/whales','/leaderboard','/live','/search','/portfolio'];var eventsAny=path.startsWith('/events/');var profileAny=path.startsWith('/profile/');var whalesAny=path.startsWith('/whales/');var marketsAny=path.startsWith('/markets/');var matches=proPaths.indexOf(path)!==-1||eventsAny||profileAny||whalesAny||marketsAny;var legacyOnMarkets=path==='/markets'&&p.get('layout')==='legacy';if(matches&&!legacyOnMarkets){document.documentElement.classList.add('app-pro-chrome');}}catch(e){}})();`,
-          }}
-        />
       </head>
       <body
         className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} font-sans antialiased`}
       >
         <ContextProvider cookies={cookies}>
-          {/* Keep the `app-pro-chrome` class on <html> in sync with the
-              current pathname. Centralizing this prevents the sidebar
-              flash that used to appear when navigating between two pro
-              routes (e.g. /markets → /live), where the old page's
-              cleanup removed the class before the new page's effect
-              could re-add it. */}
-          <ProChromeController />
-          {/* Desktop sidebar (client-only to avoid rendering on mobile SSR) */}
-          <SidebarDesktopNoSSR />
-          {/* Main content with responsive margin */}
           <MainContent>{children}</MainContent>
           <Toaster
             position="bottom-right"

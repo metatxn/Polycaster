@@ -5,7 +5,7 @@ import {
   type ProgressInfo,
   pipeline,
 } from "@huggingface/transformers";
-import { logDebug, logInfo, logWarn } from "./logger";
+import { logDebug, logInfo, logWarn } from "@knoww/logger";
 import { LRUCache } from "./lru-cache";
 
 env.allowLocalModels = false;

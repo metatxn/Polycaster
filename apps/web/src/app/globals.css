@@ -649,20 +649,6 @@ html.softpop {
     -webkit-touch-callout: none;
   }
 
-  /* Pro markets layout — when home-content sets .app-pro-chrome on
-   * <html>, the trading-terminal view goes full-bleed by hiding the app
-   * sidebar and zeroing the main-content's left margin. Only takes
-   * effect at xl+ where the sidebar is visible anyway. */
-  @media (min-width: 1280px) {
-    html.app-pro-chrome aside {
-      display: none;
-    }
-    html.app-pro-chrome .xl\:ml-56,
-    html.app-pro-chrome .xl\:ml-16 {
-      margin-left: 0;
-    }
-  }
-
   /* Paper-grain skeleton — used on /markets loading state so cards feel
    * like they're developing in from texture rather than popping out of
    * flat muted blocks. Same fractalNoise SVG as the marketing pages,
@@ -914,7 +900,11 @@ html.softpop {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  /* biome-ignore lint/complexity/noImportantStyles: overrides Tailwind
+     typography's <h3> margins at equal specificity — editorial tighter
+     rhythm is intentional for legal sub-headings. */
   margin-top: 1.4em !important;
+  /* biome-ignore lint/complexity/noImportantStyles: see above. */
   margin-bottom: 0.3em !important;
 }
 
@@ -943,16 +933,24 @@ html.softpop {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Reduced-motion overrides must win regardless of specificity or
+     source order — users opting out of motion get a guaranteed
+     still UI. */
   .kw-stagger,
   .kw-reveal {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     opacity: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     transform: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     animation: none !important;
   }
   .kw-tilt:hover {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     transform: none !important;
   }
   .animate-\[ticker_60s_linear_infinite\] {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     animation: none !important;
   }
 }

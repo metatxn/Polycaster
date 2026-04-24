@@ -368,6 +368,7 @@ function MarketExpandedContent({
                 ]}
                 outcomes={["Yes", "No"]}
                 outcomePrices={[market.yesPrice, market.noPrice]}
+                hideBothToggle
               />
             </TabsContent>
           )}

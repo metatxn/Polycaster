@@ -3,7 +3,7 @@
  * scoring runtime or the trading runtime on first use.
  */
 
-import { logWarn } from "../background/logger";
+import { logWarn } from "@knoww/logger";
 import type { ScoreMarketsMessage } from "../types/chrome-messages";
 
 type ScoringRuntimeModule = typeof import("./scoring-runtime");

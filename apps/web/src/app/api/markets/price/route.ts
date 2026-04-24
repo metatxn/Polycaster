@@ -1,8 +1,11 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 import { fetchPrice } from "@/lib/polymarket";
+
+const log = createLogger("api.markets.price");
 
 // Validation schema
 const priceSchema = z.object({
@@ -55,7 +58,7 @@ export async function GET(request: NextRequest) {
       { headers: getCacheHeaders("realtime") }
     );
   } catch (error) {
-    console.error("Error fetching price:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

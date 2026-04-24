@@ -1,3 +1,4 @@
+import { createLogger } from "@knoww/logger";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
@@ -8,6 +9,8 @@ import {
   handleExtensionPreflight,
   verifyExtensionAccessPreAuth,
 } from "@/lib/extension-auth";
+
+const log = createLogger("api.ai.validate-relevance");
 
 const AI_TIMEOUT_MS = 5000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -206,7 +209,7 @@ Is this market relevant to what the post is discussing?`,
   } catch (error) {
     const isTimeout =
       error instanceof Error && error.message === "Validation timeout";
-    console.error("Validate relevance error:", { isTimeout, error });
+    log.error("validate.failed", { isTimeout, error });
     // On failure, allow the market through (fail-open)
     return {
       relevant: true,
@@ -278,7 +281,7 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json(result, { status: 200, headers: cors });
   } catch (error) {
-    console.error("Validate relevance request error:", error);
+    log.error("request.failed", { error });
     const isClientError =
       error instanceof SyntaxError ||
       (error instanceof Error && error.message.includes("JSON"));

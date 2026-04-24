@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 import { sanitizeSearchQuery } from "@/lib/validation";
+
+const log = createLogger("api.search");
 
 const GAMMA_API_BASE = "https://gamma-api.polymarket.com";
 
@@ -138,7 +141,10 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      console.error("Search API error:", response.status, response.statusText);
+      log.error("upstream.error", {
+        status: response.status,
+        statusText: response.statusText,
+      });
       return NextResponse.json(
         { error: "Failed to search" },
         {
@@ -175,7 +181,7 @@ export async function GET(request: NextRequest) {
       headers: getCacheHeaders("search"),
     });
   } catch (error) {
-    console.error("Search error:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       { error: "Internal server error" },
       {

@@ -6,7 +6,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Check, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConnection } from "wagmi";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { DepositModal } from "@/components/deposit-modal";
 import { EditorialHero, HeroRefreshButton } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
@@ -312,7 +312,7 @@ export default function PortfolioPage() {
     return (
       <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <Navbar />
-        <ProChromeHeader />
+        <ChromeHeader />
         <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-8">
           <EditorialHero
             breadcrumbs={[
@@ -357,7 +357,7 @@ export default function PortfolioPage() {
   return (
     <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
       <motion.main
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -373,7 +373,14 @@ export default function PortfolioPage() {
           rightSlot={
             <HeroRefreshButton
               onRefresh={handleRefresh}
-              isFetching={loadingPositions || loadingPnl}
+              isFetching={
+                loadingPositions ||
+                loadingPnl ||
+                loadingOrders ||
+                loadingTrades ||
+                loadingUserDetails ||
+                isProxyLoading
+              }
             />
           }
           belowSlot={
@@ -399,11 +406,10 @@ export default function PortfolioPage() {
                   <button
                     type="button"
                     onClick={() => setShowDepositModal(true)}
-                    className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
+                    className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition-colors"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     <ArrowDownToLine className="h-3 w-3" />
-                    <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
+                    <span className="border-b-2 border-foreground pb-0.5 group-hover:border-foreground/60 transition-colors">
                       Deposit
                     </span>
                   </button>
@@ -413,7 +419,7 @@ export default function PortfolioPage() {
                     className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <ArrowUpFromLine className="h-3 w-3" />
-                    <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
+                    <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
                       Withdraw
                     </span>
                   </button>
@@ -472,9 +478,19 @@ export default function PortfolioPage() {
         </div>
 
         {/* P&L Chart */}
-        <div className="mb-6">
-          <PnLChart userAddress={tradingAddress || undefined} height={160} />
-        </div>
+        <section className="mb-6">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+              §&nbsp;&nbsp;Performance
+            </h2>
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+              All time
+            </span>
+          </div>
+          <div className="border-y border-border/40 py-2">
+            <PnLChart userAddress={tradingAddress || undefined} height={160} />
+          </div>
+        </section>
 
         {/* Tabs Content */}
         <section>

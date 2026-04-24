@@ -1,8 +1,11 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
+
+const log = createLogger("api.user.pnl");
 
 /**
  * Polymarket Data API base URL
@@ -231,7 +234,7 @@ export async function GET(request: NextRequest) {
         }
       } catch {
         // Fallback to position-based calculation
-        console.warn("Failed to parse P&L API response, using position data");
+        log.warn("parse.fallback_to_positions");
       }
     }
 
@@ -389,7 +392,7 @@ export async function GET(request: NextRequest) {
       pnlHistory: pnlApiData,
     });
   } catch (error) {
-    console.error("Error calculating P&L:", error);
+    log.error("calculate.failed", { error });
     return NextResponse.json(
       {
         success: false,

@@ -1,5 +1,6 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { encodeFunctionData, parseUnits } from "viem";
@@ -14,6 +15,8 @@ import { executeViaRelayer } from "@/lib/relayer-client";
 import type { DepositStatus, QuoteResponse } from "./use-bridge";
 import { useBridge } from "./use-bridge";
 import { PROXY_WALLET_QUERY_KEY, useProxyWallet } from "./use-proxy-wallet";
+
+const log = createLogger("withdraw");
 
 /**
  * ERC20 transfer ABI for encoding the transfer call
@@ -401,7 +404,7 @@ export function useWithdraw() {
         });
         setQuote(result);
       } catch (err) {
-        console.error("[Withdraw] Quote error:", err);
+        log.error("quote.failed", err);
         setQuoteError(
           err instanceof Error ? err.message : "Failed to fetch quote"
         );
@@ -450,7 +453,7 @@ export function useWithdraw() {
             }
           }
         } catch (err) {
-          console.error("[Withdraw] Bridge status poll error:", err);
+          log.error("bridge.status_poll.failed", err);
         }
       };
 
@@ -558,7 +561,7 @@ export function useWithdraw() {
       }))
     );
 
-    console.log("[Withdraw] Transaction confirmed:", result.transactionHash);
+    log.info("tx.confirmed", { transactionHash: result.transactionHash });
     setState("confirmed");
     await refreshBalance();
     return { success: true, transactionHash: result.transactionHash };
@@ -641,7 +644,7 @@ export function useWithdraw() {
           );
         }
 
-        console.log("[Withdraw] Requesting bridge withdrawal addresses:", {
+        log.debug("bridge.addresses.requesting", {
           address: proxyAddress,
           toChainId,
           toTokenAddress,
@@ -666,7 +669,7 @@ export function useWithdraw() {
           );
         }
 
-        console.log("[Withdraw] Bridge deposit address:", bridgeDepositAddress);
+        log.debug("bridge.deposit_address.received", { bridgeDepositAddress });
 
         const transferData = encodeFunctionData({
           abi: ERC20_TRANSFER_ABI,
@@ -682,7 +685,7 @@ export function useWithdraw() {
           },
         ];
 
-        console.log("[Withdraw] Bridge withdrawal:", {
+        log.debug("bridge.withdrawal.submitting", {
           from: proxyAddress,
           bridgeAddress: bridgeDepositAddress,
           recipient: destinationAddress,
@@ -707,7 +710,7 @@ export function useWithdraw() {
           bridgeDepositAddress,
         };
       } catch (err) {
-        console.error("[Withdraw] Error:", err);
+        log.error("withdraw.failed", err);
         const errorMessage =
           err instanceof Error ? err.message : "Withdrawal failed";
         setState("failed");

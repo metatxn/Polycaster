@@ -9,22 +9,21 @@ import { NotificationBellMobile } from "@/components/notifications";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
- * Pro top nav — the two-row bar that replaces the app sidebar when pro
- * chrome is active. Row 1: wordmark + primary links + wallet + theme.
- * Row 2: category strip (horizontal, overflow-scroll at narrow widths).
+ * Top nav — the two-row bar above every app page at xl+. Row 1: wordmark
+ * + primary links + wallet + theme. Row 2: category strip (horizontal,
+ * overflow-scroll at narrow widths).
  *
  * This is the single source of truth for top-level navigation in the
- * pro experience. Used by both /markets (via MarketsProView) and the
- * sibling app pages (via AppProLayout).
+ * app. Used by both /markets (via MarketsView) and the sibling app
+ * pages (via AppLayout).
  *
  * Active-link detection uses `usePathname` + `startsWith` so that
  * category pages (/events/politics) correctly highlight the Politics
  * chip, and /markets highlights the Markets primary link.
  */
 
-/** Primary-nav links. Sourced from the sidebar's main section so every
- *  top-level destination stays reachable in pro mode. */
-const PRO_PRIMARY_LINKS: Array<{ label: string; href: string }> = [
+/** Primary-nav links — every top-level destination in the app. */
+const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Markets", href: "/markets" },
   { label: "Live", href: "/live" },
   { label: "Whales", href: "/whales" },
@@ -33,9 +32,9 @@ const PRO_PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Search", href: "/search" },
 ];
 
-/** Category taxonomy — mirrors the list in [sidebar.tsx:67-78]. Each
- *  item maps to the `/events/{slug}` browse page. */
-const PRO_CATEGORIES: Array<{ label: string; href: string }> = [
+/** Category taxonomy — each item maps to the `/events/{slug}` browse
+ *  page. Mirrored in [sidebar-mobile.tsx] for the mobile drawer. */
+const CATEGORIES: Array<{ label: string; href: string }> = [
   { label: "Politics", href: "/events/politics" },
   { label: "Sports", href: "/events/sports" },
   { label: "Crypto", href: "/events/crypto" },
@@ -55,7 +54,7 @@ function formatAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-export function ProTopNav() {
+export function TopNav() {
   const pathname = usePathname();
   const { address, isConnected } = useConnection();
   const { open } = useAppKit();
@@ -79,7 +78,7 @@ export function ProTopNav() {
           <span aria-hidden="true" className="h-4 w-px bg-border/60" />
 
           <nav aria-label="Primary" className="flex items-center gap-1">
-            {PRO_PRIMARY_LINKS.map((link) => {
+            {PRIMARY_LINKS.map((link) => {
               const isActive =
                 pathname === link.href ||
                 (link.href !== "/" && pathname?.startsWith(link.href));
@@ -145,7 +144,7 @@ export function ProTopNav() {
         <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 pr-2">
           §
         </span>
-        {PRO_CATEGORIES.map((cat, i) => {
+        {CATEGORIES.map((cat, i) => {
           const isActive = pathname === cat.href;
           return (
             <div key={cat.href} className="flex items-center">
@@ -159,7 +158,7 @@ export function ProTopNav() {
               >
                 {cat.label}
               </Link>
-              {i < PRO_CATEGORIES.length - 1 && (
+              {i < CATEGORIES.length - 1 && (
                 <span
                   aria-hidden="true"
                   className="text-muted-foreground/40 px-0.5 select-none"

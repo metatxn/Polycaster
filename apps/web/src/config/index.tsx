@@ -1,3 +1,4 @@
+import { createLogger } from "@knoww/logger";
 import {
   type AppKitNetwork,
   arbitrum,
@@ -7,6 +8,8 @@ import {
 } from "@reown/appkit/networks";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { cookieStorage, createStorage, http } from "wagmi";
+
+const log = createLogger("config");
 
 // Get projectId from https://dashboard.reown.com2
 export const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
@@ -27,24 +30,23 @@ function getPolygonRpcUrl(): string {
 
   if (isClient) {
     // On client: Use the proxy to hide API key
-    console.log("[Config] Using RPC proxy for Polygon (API key hidden)");
+    log.debug("rpc.select", { provider: "proxy" });
     return "/api/rpc/polygon";
   }
 
   // On server (SSR): Use Alchemy directly
   const alchemyKey = process.env.ALCHEMY_API_KEY;
   if (alchemyKey) {
-    console.log("[Config] Using Alchemy RPC for Polygon (server-side)");
+    log.debug("rpc.select", { provider: "alchemy" });
     return `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`;
   }
 
   const customRpcUrl = process.env.POLYGON_RPC_URL;
   if (customRpcUrl) {
-    //console.log("[Config] Using custom RPC for Polygon:", customRpcUrl);
     return customRpcUrl;
   }
 
-  console.warn("[Config] Using public Polygon RPC (rate limited)");
+  log.warn("rpc.select", { provider: "public", note: "rate limited" });
   return "https://polygon-rpc.com";
 }
 

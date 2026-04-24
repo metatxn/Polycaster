@@ -18,7 +18,7 @@ import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
 import { cn } from "@/lib/utils";
 
-/** Primary destinations — mirror of PRO_PRIMARY_LINKS in pro-top-nav. */
+/** Primary destinations — mirror of PRIMARY_LINKS in top-nav. */
 const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Markets", href: "/markets" },
   { label: "Live", href: "/live" },
@@ -28,7 +28,7 @@ const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Search", href: "/search" },
 ];
 
-/** Category taxonomy — mirror of PRO_CATEGORIES in pro-top-nav. */
+/** Category taxonomy — mirror of CATEGORIES in top-nav. */
 const CATEGORIES: Array<{ label: string; href: string }> = [
   { label: "Politics", href: "/events/politics" },
   { label: "Sports", href: "/events/sports" },
@@ -90,7 +90,7 @@ export function SidebarMobile() {
             your trading wallet.
           </SheetDescription>
 
-          {/* Header — editorial K-block wordmark, matches ProTopNav */}
+          {/* Header — editorial K-block wordmark, matches TopNav */}
           <div className="flex items-center gap-2 px-4 h-14 border-b border-border/60">
             <span className="inline-flex h-6 w-6 items-center justify-center bg-foreground text-background text-[11px] font-bold leading-none">
               K

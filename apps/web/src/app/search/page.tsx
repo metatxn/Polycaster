@@ -6,7 +6,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import posthog from "posthog-js";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { EditorialHero } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
 import { type SearchEvent, useSearch } from "@/hooks/use-search";
@@ -216,7 +216,7 @@ function SearchContent() {
   return (
     <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24">
         <div className="max-w-4xl mx-auto">
@@ -422,21 +422,23 @@ function SearchContent() {
                     {/* Tags Section */}
                     {data?.tags && data.tags.length > 0 && (
                       <div>
-                        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
-                          §&nbsp;&nbsp;Categories
-                          <span className="tabular-nums ml-1.5">
-                            ({data.tags.length})
+                        <div className="flex items-baseline justify-between mb-3">
+                          <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+                            §&nbsp;&nbsp;Categories
+                          </h2>
+                          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+                            {data.tags.length} total
                           </span>
-                        </h2>
+                        </div>
                         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                           {data.tags.map((tag) => (
                             <button
                               type="button"
                               key={tag.id}
                               onClick={() => handleTagClick(tag.slug)}
-                              className="inline-flex items-baseline gap-2 py-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                              className="group inline-flex items-baseline gap-2 py-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
                             >
-                              <span className="font-editorial italic text-base">
+                              <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
                                 {tag.label}
                               </span>
                               {tag.event_count && (
@@ -453,12 +455,14 @@ function SearchContent() {
                     {/* Events Section */}
                     {data?.events && data.events.length > 0 && (
                       <div>
-                        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
-                          §&nbsp;&nbsp;Markets
-                          <span className="tabular-nums ml-1.5">
-                            ({data.events.length})
+                        <div className="flex items-baseline justify-between mb-3">
+                          <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+                            §&nbsp;&nbsp;Markets
+                          </h2>
+                          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+                            {data.events.length} total
                           </span>
-                        </h2>
+                        </div>
                         <div className="border-t border-border/40">
                           {data.events.map((event, index) => (
                             <motion.button
@@ -474,7 +478,7 @@ function SearchContent() {
                             >
                               {event.topOutcome && (
                                 <div
-                                  className="absolute inset-0 bg-linear-to-r from-foreground/[0.04] to-transparent dark:from-foreground/[0.06] pointer-events-none"
+                                  className="absolute inset-0 bg-linear-to-r from-foreground/4 to-transparent dark:from-foreground/6 pointer-events-none"
                                   style={{
                                     width: `${Math.round(event.topOutcome.price * 100)}%`,
                                   }}
@@ -541,7 +545,13 @@ function SearchContent() {
                                   )}
                                   {event.competitive !== undefined &&
                                     event.competitive >= 0.4 && (
-                                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400">
+                                      <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-amber-600 dark:text-amber-400">
+                                        <span
+                                          aria-hidden="true"
+                                          className="text-[10px] leading-none opacity-80"
+                                        >
+                                          ◆
+                                        </span>
                                         Hot
                                       </span>
                                     )}

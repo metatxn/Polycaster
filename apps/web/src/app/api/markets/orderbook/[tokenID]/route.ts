@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 import { fetchOrderBook } from "@/lib/polymarket";
+
+const log = createLogger("api.markets.orderbook");
 
 /**
  * GET /api/markets/orderbook/:tokenID
@@ -35,7 +38,7 @@ export async function GET(
       { headers: getCacheHeaders("realtime") }
     );
   } catch (error) {
-    console.error("Error fetching order book:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

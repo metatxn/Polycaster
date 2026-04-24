@@ -22,8 +22,11 @@
  * up owners for already-flagged wallets (typically 5-20 per request).
  */
 
+import { createLogger } from "@knoww/logger";
 import { erc20Abi } from "viem";
 import { getPublicClient } from "@/lib/rpc";
+
+const log = createLogger("safe-owner");
 
 /** Minimal Safe ABI for getOwners(). */
 const SAFE_ABI = [
@@ -155,7 +158,7 @@ export async function getSafeOwnersBatch(
       out.set(addr, value);
     }
   } catch (err) {
-    console.error("[safe-owner] multicall failed:", err);
+    log.error("multicall.failed", { error: err });
     // Populate failures with empty results so callers don't re-query
     // in tight loops on transient RPC outages.
     for (const addr of toFetch) {

@@ -18,7 +18,10 @@
  * lookups per run, each costing ~150 CU).
  */
 
+import { createLogger } from "@knoww/logger";
 import { classifyFunder, type FunderCategory } from "@/constants/cex-addresses";
+
+const log = createLogger("insider.funding-source");
 
 export interface WalletFunding {
   /** Original (mixed-case) address that was looked up. Always lowercased in
@@ -95,13 +98,13 @@ async function fetchFirstTransfers(
     if (!response.ok) return null;
     const data = (await response.json()) as AlchemyResponse;
     if (data.error) {
-      console.error("[funding-source] Alchemy error:", data.error.message);
+      log.error("alchemy.error", { message: data.error.message });
       return null;
     }
     const transfers = data.result?.transfers;
     return Array.isArray(transfers) ? transfers : [];
   } catch (err) {
-    console.error("[funding-source] fetch failed:", err);
+    log.error("fetch.failed", { error: err });
     return null;
   }
 }

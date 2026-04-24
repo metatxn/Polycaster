@@ -1,5 +1,8 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+
+const log = createLogger("api.markets.by-token");
 
 /**
  * Polymarket Gamma API URL
@@ -141,7 +144,7 @@ export async function GET(
       error: "Market not found for token ID",
     });
   } catch (error) {
-    console.error("Error fetching market by token ID:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

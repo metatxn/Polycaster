@@ -3,7 +3,7 @@
 import { ChevronLeft, Sparkles, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import {
   EventCard,
   EventCardSkeleton,
@@ -141,7 +141,7 @@ export function TagEventsContent({
   return (
     <div className="min-h-screen relative overflow-x-hidden">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
         <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground mb-6 animate-in fade-in duration-500">

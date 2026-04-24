@@ -5,7 +5,7 @@ import { ArrowLeft, BadgeCheck, Check, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { EditorialFooter } from "@/components/editorial-footer";
 import { EditorialHero } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
@@ -118,7 +118,7 @@ export default function ProfilePage() {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Navbar />
-        <ProChromeHeader />
+        <ChromeHeader />
         <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
           <div className="max-w-4xl mx-auto">
             <Skeleton className="h-9 w-24 rounded-none mb-6" />
@@ -147,7 +147,7 @@ export default function ProfilePage() {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Navbar />
-        <ProChromeHeader />
+        <ChromeHeader />
         <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8 flex items-center justify-center">
           <div className="max-w-md text-center">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-4">
@@ -182,7 +182,7 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
         <div className="max-w-4xl mx-auto">

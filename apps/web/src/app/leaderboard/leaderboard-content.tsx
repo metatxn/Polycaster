@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection } from "wagmi";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { EditorialFooter } from "@/components/editorial-footer";
 import { EditorialHero } from "@/components/editorial-hero";
 import { FilterChip } from "@/components/event-filter-bar";
@@ -194,7 +194,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
         <EditorialHero

@@ -6,7 +6,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Check, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConnection } from "wagmi";
-import { ProChromeHeader } from "@/components/app-pro-layout";
+import { ChromeHeader } from "@/components/app-layout";
 import { DepositModal } from "@/components/deposit-modal";
 import { EditorialHero, HeroRefreshButton } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
@@ -312,7 +312,7 @@ export default function PortfolioPage() {
     return (
       <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <Navbar />
-        <ProChromeHeader />
+        <ChromeHeader />
         <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-8">
           <EditorialHero
             breadcrumbs={[
@@ -357,7 +357,7 @@ export default function PortfolioPage() {
   return (
     <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <Navbar />
-      <ProChromeHeader />
+      <ChromeHeader />
       <motion.main
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}

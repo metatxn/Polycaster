@@ -14,14 +14,14 @@ import { useOnboarding } from "@/context/onboarding-context";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 
 /** Truncate a 0x… address to `0x1234…abcd` for the mobile wallet pill.
- *  Mirrors the helper in ProTopNav so the two bars render the wallet in
+ *  Mirrors the helper in TopNav so the two bars render the wallet in
  *  the same shape even though the layouts differ. */
 function formatAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 /**
- * Mobile top bar (below xl). Visually mirrors `<ProTopNav>` — editorial
+ * Mobile top bar (below xl). Visually mirrors `<TopNav>` — editorial
  * K-block wordmark, mono caps wallet pill, hairline borders — so the
  * aesthetic is continuous across breakpoints. Only the layout compresses
  * (no primary-nav row, no category strip) because those collapse into
@@ -110,7 +110,7 @@ export function Navbar() {
           )}
 
           {/* Force icon-only dimensions so theme label expansion doesn't
-              reflow the wallet pill horizontally (matches ProTopNav). */}
+              reflow the wallet pill horizontally (matches TopNav). */}
           <div className="[&_button]:h-9 [&_button]:w-9 [&_button]:px-0 [&_button]:justify-center [&_button>span:not(.sr-only)]:hidden">
             <ThemeToggle />
           </div>

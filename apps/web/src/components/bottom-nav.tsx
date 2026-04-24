@@ -28,12 +28,12 @@ const navItems: NavItem[] = [
 ];
 
 /**
- * Mobile bottom dock. Visual grammar mirrors `<ProTopNav>`'s primary nav
+ * Mobile bottom dock. Visual grammar mirrors `<TopNav>`'s primary nav
  * row: mono caps labels, no rounded tabs, active state carried by the
  * underline glyph only. No colored accents, no glows — the hairline
  * `border-t` plus editorial typography does the work.
  *
- * Rendered only below xl; at xl+ the sidebar or ProTopNav takes over.
+ * Rendered only below xl; at xl+ the TopNav takes over.
  */
 export function BottomNav() {
   const router = useRouter();

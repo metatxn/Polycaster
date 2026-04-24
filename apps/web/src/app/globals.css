@@ -649,20 +649,6 @@ html.softpop {
     -webkit-touch-callout: none;
   }
 
-  /* Pro markets layout — when home-content sets .app-pro-chrome on
-   * <html>, the trading-terminal view goes full-bleed by hiding the app
-   * sidebar and zeroing the main-content's left margin. Only takes
-   * effect at xl+ where the sidebar is visible anyway. */
-  @media (min-width: 1280px) {
-    html.app-pro-chrome aside {
-      display: none;
-    }
-    html.app-pro-chrome .xl\:ml-56,
-    html.app-pro-chrome .xl\:ml-16 {
-      margin-left: 0;
-    }
-  }
-
   /* Paper-grain skeleton — used on /markets loading state so cards feel
    * like they're developing in from texture rather than popping out of
    * flat muted blocks. Same fractalNoise SVG as the marketing pages,

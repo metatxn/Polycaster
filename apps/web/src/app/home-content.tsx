@@ -32,9 +32,9 @@ import {
 } from "@/components/event-filter-bar";
 import { MarketSearch } from "@/components/market-search";
 import {
-  MarketsProView,
+  MarketsView,
   TableSkeleton as ProTableSkeleton,
-} from "@/components/markets-pro-view";
+} from "@/components/markets-view";
 import { Navbar } from "@/components/navbar";
 import { PageBackground } from "@/components/page-background";
 import { Button } from "@/components/ui/button";
@@ -282,11 +282,11 @@ interface HomeContentProps {
 export function HomeContent({ initialData }: HomeContentProps) {
   const searchParams = useSearchParams();
   const viewParam = searchParams.get("view") as ViewMode | null;
-  // Pro layout is the desktop default at /markets. `?layout=legacy` is
-  // kept as an escape hatch for a transition period — we can drop it
-  // once the team's confident in the new chrome. Mobile/tablet (< lg)
-  // always get the card grid — tables don't fit at narrow widths.
-  const isProLayout = searchParams.get("layout") !== "legacy";
+  // Pro layout is the only desktop layout at /markets now. The old
+  // `?layout=legacy` escape hatch has been retired. Mobile/tablet (< lg)
+  // still get the card grid because tables don't fit at narrow widths —
+  // that behavior is handled via Tailwind breakpoints, not this flag.
+  const isProLayout = true;
 
   const [viewMode, setViewMode] = useState<ViewMode>("categories");
   const [mounted, setMounted] = useState(false);
@@ -326,19 +326,6 @@ export function HomeContent({ initialData }: HomeContentProps) {
       }
     }
   }, [viewMode, mounted]);
-
-  // When pro is active, tag <html> so globals.css can hide the app
-  // sidebar and zero the main-content left margin at xl+. The class
-  // only takes effect above the xl breakpoint — mobile layout is
-  // untouched. Cleanup restores the default chrome when the user
-  // navigates away or toggles back to legacy.
-  useEffect(() => {
-    const root = document.documentElement;
-    if (isProLayout) {
-      root.classList.add("app-pro-chrome");
-      return () => root.classList.remove("app-pro-chrome");
-    }
-  }, [isProLayout]);
 
   // Get filter context with server-side filter params
   const {
@@ -601,7 +588,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           </h1>
 
           {/* Right: Sibling views — mono caps with hairline underline
-              active states, same grammar as ProTopNav. */}
+              active states, same grammar as TopNav. */}
           <nav
             aria-label="Market views"
             className="flex items-center flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-[0.15em]"
@@ -696,7 +683,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
             className="flex items-center justify-between gap-2 sm:gap-4 mb-2"
           >
             {/* Tab strip — editorial mono caps with underline-active,
-                matches the ProTopNav primary nav pattern. */}
+                matches the TopNav primary nav pattern. */}
             <div className="relative flex-1 sm:flex-initial">
               <div
                 role="tablist"
@@ -771,9 +758,9 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 the grid reads as "developing in from texture" rather than
                 popping out of flat muted rectangles. AnimatePresence handles
                 the dissolve when real cards arrive.
-                In pro mode at lg+, MarketsProView renders its own
-                TableSkeleton via the isTransitioning prop — so we hide
-                the card skeletons there to avoid a duplicate. */}
+                At lg+, MarketsView renders its own TableSkeleton via
+                the isTransitioning prop — so we hide the card skeletons
+                there to avoid a duplicate. */}
             {currentData.isLoading && !currentData.error && (
               <div
                 className={`${isProLayout ? "lg:hidden" : ""} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5`}
@@ -797,11 +784,11 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 ))}
               </div>
             )}
-            {/* Pro-mode loading: render the pro view with its own
+            {/* Desktop loading: render the terminal view with its own
                 table-shaped skeleton so tab switches don't reveal cards. */}
             {currentData.isLoading && !currentData.error && isProLayout && (
               <div className="hidden lg:block">
-                <MarketsProView
+                <MarketsView
                   events={[]}
                   viewMode={viewMode}
                   onViewChange={handleQuickCategoryClick}
@@ -812,15 +799,14 @@ export function HomeContent({ initialData }: HomeContentProps) {
               </div>
             )}
 
-            {/* Events Grid. When `?layout=pro` is set we render the
-                trading-terminal view at lg+, and fall back to the card
-                grid below lg where tables don't fit. Without the param,
-                the card grid renders at every breakpoint as before. */}
+            {/* Events Grid. At lg+ we render the trading-terminal
+                view, and fall back to the card grid below lg where
+                tables don't fit. */}
             {!currentData.isLoading && currentData.events.length > 0 && (
               <>
                 {isProLayout && (
                   <div className="hidden lg:block">
-                    <MarketsProView
+                    <MarketsView
                       events={currentData.events}
                       viewMode={viewMode}
                       onViewChange={handleQuickCategoryClick}

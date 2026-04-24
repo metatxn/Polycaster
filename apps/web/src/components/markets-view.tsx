@@ -3,11 +3,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
-import { ProTopNav } from "@/components/pro-top-nav";
+import { TopNav } from "@/components/top-nav";
 import { formatVolume } from "@/lib/formatters";
 
 /**
- * Markets "Pro" view — trading-terminal aesthetic for /markets?layout=pro.
+ * Markets view — trading-terminal aesthetic for /markets at lg+.
  *
  * The desktop-only surface is structured as four stacked layers:
  *   1. Auto-scrolling ticker strip (top 12 markets by 24h volume)
@@ -16,8 +16,7 @@ import { formatVolume } from "@/lib/formatters";
  *   4. Dense data table — every other market as a ~56px row
  *
  * Numeric cells use JetBrains Mono (`font-mono`) and `tabular-nums` so
- * prices align across rows. Δ24h and the sparkline column are dashes in
- * Pass A — they require price-history data we don't fetch here yet.
+ * prices align across rows.
  *
  * Mobile/tablet (< lg) fall back to the standard card grid, which is
  * rendered by the parent; this component only mounts at lg+.
@@ -31,7 +30,7 @@ import { formatVolume } from "@/lib/formatters";
 // are optional because they're only included when the API is called
 // with `?markets=full`. Without them, the top-candidates list falls
 // back to just the outcome count.
-export interface ProViewEvent {
+export interface MarketViewEvent {
   id: string;
   slug?: string;
   title: string;
@@ -49,11 +48,11 @@ export interface ProViewEvent {
   }>;
 }
 
-/** One sub-market summarized for pro-view rendering. `title` prefers
+/** One sub-market summarized for row rendering. `title` prefers
  *  groupItemTitle (the short candidate name like "Oklahoma City
  *  Thunder") and falls back to question ("Will the Thunder win?") when
  *  the group title isn't set. */
-interface ProSubMarket {
+interface SubMarket {
   id: string;
   title: string;
   yes: number;
@@ -64,16 +63,16 @@ interface ProSubMarket {
  *  ViewMode type from home-content.tsx. Kept as a string literal here so
  *  this module doesn't need to import from home-content (which would
  *  risk a circular import). */
-type ProViewTab = "categories" | "trending" | "breaking" | "new";
+type MarketViewTab = "categories" | "trending" | "breaking" | "new";
 
-interface MarketsProViewProps {
-  events: ProViewEvent[];
+interface MarketsViewProps {
+  events: MarketViewEvent[];
   totalResults?: number;
   /** Active tab for the primary market filter. */
-  viewMode: ProViewTab;
+  viewMode: MarketViewTab;
   /** Invoked when the user picks a new tab. Parent decides whether to
    *  wrap in startTransition for non-urgent updates. */
-  onViewChange: (next: ProViewTab) => void;
+  onViewChange: (next: MarketViewTab) => void;
   /** Slot for the existing `<DesktopFilterChips>` — advanced filters
    *  (Created date, Liquidity, Status, Tags, Volume window). Rendered
    *  inline in the pro filter bar without any wrapping. */
@@ -86,7 +85,7 @@ interface MarketsProViewProps {
   isTransitioning?: boolean;
 }
 
-const PRO_TABS: Array<{ key: ProViewTab; label: string }> = [
+const TABS: Array<{ key: MarketViewTab; label: string }> = [
   { key: "categories", label: "All" },
   { key: "trending", label: "Trending" },
   { key: "breaking", label: "Breaking" },
@@ -96,15 +95,15 @@ const PRO_TABS: Array<{ key: ProViewTab; label: string }> = [
 /** Terminal-style filter bar. Mono-caps tab labels with a thin primary
  *  underline marking the active tab. Advanced filter chips and search
  *  live on the right, separated by a hairline. Renders only inside
- *  MarketsProView — the card-grid layout keeps its original styling. */
-function ProFilterBar({
+ *  MarketsView — the card-grid layout keeps its original styling. */
+function FilterBar({
   viewMode,
   onViewChange,
   advancedFilters,
   search,
 }: {
-  viewMode: ProViewTab;
-  onViewChange: (next: ProViewTab) => void;
+  viewMode: MarketViewTab;
+  onViewChange: (next: MarketViewTab) => void;
   advancedFilters?: React.ReactNode;
   search?: React.ReactNode;
 }) {
@@ -112,7 +111,7 @@ function ProFilterBar({
     <div className="flex items-center justify-between gap-6 border-y border-border/60 px-1 py-3">
       {/* Tabs */}
       <div className="flex items-center gap-1">
-        {PRO_TABS.map((tab) => {
+        {TABS.map((tab) => {
           const isActive = viewMode === tab.key;
           return (
             <button
@@ -197,9 +196,9 @@ function toNumber(v: number | string | undefined): number {
  *    the outcome count in that case.
  *
  *  For a truly binary event (1 market, YES/NO), returns a single entry. */
-function extractTopMarkets(event: ProViewEvent, limit = 3): ProSubMarket[] {
+function extractTopMarkets(event: MarketViewEvent, limit = 3): SubMarket[] {
   const markets = event.markets ?? [];
-  const parsed: ProSubMarket[] = [];
+  const parsed: SubMarket[] = [];
   for (const m of markets) {
     const prices = parseJsonField<string[]>(m.outcomePrices);
     if (!prices || prices.length < 2) continue;
@@ -219,9 +218,9 @@ function extractTopMarkets(event: ProViewEvent, limit = 3): ProSubMarket[] {
 
 /** Event-level summary: outcome count + the leader (highest YES
  *  price). Leader is null for events with no parseable sub-markets. */
-function summarizeEvent(event: ProViewEvent): {
+function summarizeEvent(event: MarketViewEvent): {
   outcomes: number;
-  leader: ProSubMarket | null;
+  leader: SubMarket | null;
 } {
   const count = event.markets?.length || 0;
   const [leader] = extractTopMarkets(event, 1);
@@ -286,7 +285,7 @@ function SplitBar({
  *  `.kw-ticker-track` primitives from globals.css (originally built for
  *  the landing page). Content doubles so the scroll can loop
  *  seamlessly. */
-function ProTicker({ events }: { events: ProViewEvent[] }) {
+function Ticker({ events }: { events: MarketViewEvent[] }) {
   // Take top 12 by 24h volume (events are already sorted upstream, but
   // this guards against the caller passing an unsorted list).
   const items = useMemo(() => {
@@ -351,7 +350,7 @@ function ProTicker({ events }: { events: ProViewEvent[] }) {
  *  For multi-market events with full data, the top candidates read as
  *  mini leaderboard rows. Without full data (slim markets from SSR or
  *  before the pro fetch lands), falls back to an "N outcomes" pill. */
-function FeaturedTile({ event }: { event: ProViewEvent }) {
+function FeaturedTile({ event }: { event: MarketViewEvent }) {
   const vol24 = toNumber(event.volume24hr);
   const outcomesCount = event.markets?.length || 0;
   const topMarkets = extractTopMarkets(event, 3);
@@ -438,7 +437,7 @@ const TABLE_GRID =
   "grid grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_130px_130px] items-center gap-4";
 
 /** Table skeleton — renders during tab transitions, initial load, and
- *  infinite-scroll appends so the pro view never shows card skeletons.
+ *  infinite-scroll appends so this view never shows card skeletons.
  *  Row count matches the typical page size (20) so the layout height
  *  is stable across transitions. Each row has placeholder bars that
  *  mirror the real TableRow structure.
@@ -480,7 +479,7 @@ export function TableSkeleton({ rows = 15 }: { rows?: number }) {
  *  Polymarket are multi-market (N candidates / outcomes), a single
  *  YES/NO at the event level isn't meaningful. The outcome count column
  *  (× N) carries the "click through to see positions" signal instead. */
-function TableRow({ event }: { event: ProViewEvent }) {
+function TableRow({ event }: { event: MarketViewEvent }) {
   const { outcomes, leader } = summarizeEvent(event);
   const href = event.slug ? `/events/detail/${event.slug}` : "#";
   const vol24 = toNumber(event.volume24hr);
@@ -546,7 +545,7 @@ function TableRow({ event }: { event: ProViewEvent }) {
   );
 }
 
-export function MarketsProView({
+export function MarketsView({
   events,
   totalResults,
   viewMode,
@@ -554,7 +553,7 @@ export function MarketsProView({
   advancedFilters,
   search,
   isTransitioning = false,
-}: MarketsProViewProps) {
+}: MarketsViewProps) {
   // Sort by 24h volume so "Top of Book" is genuinely the top. Hooks run
   // unconditionally (Rules of Hooks) — the empty-state early return
   // happens after all hook calls.
@@ -582,17 +581,17 @@ export function MarketsProView({
 
   return (
     <div className="space-y-8">
-      {/* Top nav — replaces the app sidebar in pro mode; provides every
-          primary link + the full category taxonomy + wallet + theme. */}
+      {/* Top nav — provides every primary link + the full category
+          taxonomy + wallet + theme. */}
       <div className="-mt-[18px]">
         {/* Small negative margin pulls the nav tight to the Navbar's
             (invisible at xl+) slot — keeps the ticker and header from
             sitting too far down the viewport. */}
-        <ProTopNav />
+        <TopNav />
       </div>
 
       {/* Ticker strip */}
-      <ProTicker events={sorted} />
+      <Ticker events={sorted} />
 
       {/* Editorial header */}
       <div className="flex items-end justify-between gap-6 px-1">
@@ -626,7 +625,7 @@ export function MarketsProView({
       </div>
 
       {/* Pro filter bar — terminal-style tabs + advanced filters + search */}
-      <ProFilterBar
+      <FilterBar
         viewMode={viewMode}
         onViewChange={onViewChange}
         advancedFilters={advancedFilters}

@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+
+const log = createLogger("api.leaderboard");
 
 /**
  * Leaderboard API Route
@@ -139,7 +142,7 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Polymarket leaderboard API error:", errorText);
+      log.error("upstream.error", { body: errorText });
       return NextResponse.json(
         { error: "Failed to fetch leaderboard data" },
         { status: response.status }
@@ -161,7 +164,7 @@ export async function GET(request: NextRequest) {
       headers: getCacheHeaders("leaderboard"),
     });
   } catch (error) {
-    console.error("Leaderboard API error:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

@@ -1,6 +1,10 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useAppKit } from "@reown/appkit/react";
+
+const log = createLogger("wallet-provider");
+
 import {
   createContext,
   type ReactNode,
@@ -109,7 +113,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       await provider.send("eth_requestAccounts", []);
       return provider.getSigner();
     } catch (err) {
-      console.error("[WalletProvider] Failed to get ethers signer:", err);
+      log.error("ethers_signer.failed", { error: err });
       return null;
     }
   }, []);

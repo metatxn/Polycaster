@@ -41,6 +41,9 @@ importers:
       '@huggingface/transformers':
         specifier: 4.1.0
         version: 4.1.0
+      '@knoww/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
       '@knoww/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -108,6 +111,9 @@ importers:
       '@coinbase/wallet-sdk':
         specifier: 4.3.7
         version: 4.3.7(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@4.3.6)
+      '@knoww/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
       '@knoww/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -298,6 +304,12 @@ importers:
       wrangler:
         specifier: 4.84.0
         version: 4.84.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+
+  packages/logger:
+    devDependencies:
+      typescript:
+        specifier: 6.0.2
+        version: 6.0.2
 
   packages/shared-types:
     dependencies:

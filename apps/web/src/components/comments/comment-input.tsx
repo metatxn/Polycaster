@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Loader2, Send, X } from "lucide-react";
+
+const log = createLogger("comment-input");
+
 import posthog from "posthog-js";
 import { useCallback, useRef, useState } from "react";
 import { useSignTypedData } from "wagmi";
@@ -173,7 +177,7 @@ export function CommentInput({
         onCancel?.();
       }
     } catch (err) {
-      console.error("Failed to post comment:", err);
+      log.error("post.failed", { error: err });
       // Handle user rejection
       if (err instanceof Error && err.message.includes("rejected")) {
         setError("Signature request was rejected");

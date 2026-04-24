@@ -1,7 +1,10 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { POLYMARKET_API, WEBSOCKET_CONFIG } from "@/constants/polymarket";
 import type { ConnectionState } from "@/types/websocket";
+
+const log = createLogger("sports-ws");
 
 /**
  * Singleton WebSocket Manager for Polymarket Sports Channel
@@ -155,7 +158,7 @@ class SportsWebSocketManager {
       this.ws = new WebSocket(POLYMARKET_API.WSS.SPORTS);
 
       this.ws.onopen = () => {
-        console.log("[SportsWS] Connected to Sports Channel");
+        log.info("connected");
         this.updateConnectionState("connected");
         this.reconnectAttempt = 0;
         this.firstReconnectTime = 0;
@@ -181,14 +184,12 @@ class SportsWebSocketManager {
       };
 
       this.ws.onerror = (err) => {
-        console.error("[SportsWS] Error:", err);
+        log.error("socket.error", { error: err });
         this.updateConnectionState("error");
       };
 
       this.ws.onclose = (event) => {
-        console.log(
-          `[SportsWS] Closed: code=${event.code}, reason=${event.reason}`
-        );
+        log.info("closed", { code: event.code, reason: event.reason });
         this.clearPongTimeout();
         this.ws = null;
 
@@ -200,7 +201,7 @@ class SportsWebSocketManager {
         this.scheduleReconnect();
       };
     } catch (err) {
-      console.error("[SportsWS] Failed to connect:", err);
+      log.error("connect.failed", { error: err });
       this.updateConnectionState("error");
       this.scheduleReconnect();
     }
@@ -214,7 +215,7 @@ class SportsWebSocketManager {
   private resetPongTimeout(): void {
     this.clearPongTimeout();
     this.pongTimeout = setTimeout(() => {
-      console.warn("[SportsWS] No ping from server in 10s, reconnecting…");
+      log.warn("ping.timeout", { timeoutMs: PONG_TIMEOUT_MS });
       this.reconnect();
     }, PONG_TIMEOUT_MS);
   }
@@ -245,9 +246,9 @@ class SportsWebSocketManager {
     this.reconnectAttempt++;
 
     if (this.reconnectAttempt > RECONNECT_LIMITS.MAX_ATTEMPTS) {
-      console.warn(
-        `[SportsWS] Max reconnection attempts (${RECONNECT_LIMITS.MAX_ATTEMPTS}) reached.`
-      );
+      log.warn("reconnect.max_attempts", {
+        maxAttempts: RECONNECT_LIMITS.MAX_ATTEMPTS,
+      });
       this.updateConnectionState("disconnected");
       return;
     }
@@ -258,9 +259,11 @@ class SportsWebSocketManager {
       WEBSOCKET_CONFIG.MAX_RECONNECT_DELAY_MS
     );
 
-    console.log(
-      `[SportsWS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt}/${RECONNECT_LIMITS.MAX_ATTEMPTS})`
-    );
+    log.info("reconnect.schedule", {
+      delayMs: delay,
+      attempt: this.reconnectAttempt,
+      maxAttempts: RECONNECT_LIMITS.MAX_ATTEMPTS,
+    });
     this.updateConnectionState("reconnecting");
 
     this.reconnectTimeout = setTimeout(() => {
@@ -293,7 +296,7 @@ class SportsWebSocketManager {
       try {
         cb(state);
       } catch (err) {
-        console.error("[SportsWS] Connection listener error:", err);
+        log.error("listener.connection.error", { error: err });
       }
     }
   }
@@ -303,7 +306,7 @@ class SportsWebSocketManager {
       try {
         cb(event);
       } catch (err) {
-        console.error("[SportsWS] Event listener error:", err);
+        log.error("listener.event.error", { error: err });
       }
     }
   }

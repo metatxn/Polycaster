@@ -17,6 +17,10 @@
  * Reference: https://github.com/Polymarket/wagmi-safe-builder-example
  */
 
+import { createLogger } from "@knoww/logger";
+
+const log = createLogger("session");
+
 /**
  * Trading session data structure
  */
@@ -139,7 +143,7 @@ export function getStoredSession(address: string): StoredTradingSession | null {
       const expectedChecksum = computeChecksum(envelope.data);
       if (envelope.checksum !== expectedChecksum) {
         // Integrity check failed — data may have been tampered with
-        console.warn("[Session] Integrity check failed, clearing session");
+        log.warn("integrity.check_failed");
         localStorage.removeItem(key);
         return null;
       }
@@ -199,7 +203,7 @@ export function storeSession(
 
     localStorage.setItem(key, JSON.stringify(envelope));
   } catch (err) {
-    console.error("[Session] Failed to store session:", err);
+    log.error("store.failed", { error: err });
   }
 }
 
@@ -232,7 +236,7 @@ export function clearSession(address: string): void {
     const key = getStorageKey(address);
     localStorage.removeItem(key);
   } catch (err) {
-    console.error("[Session] Failed to clear session:", err);
+    log.error("clear.failed", { error: err });
   }
 }
 
@@ -256,6 +260,6 @@ export function clearAllSessions(): void {
       localStorage.removeItem(key);
     }
   } catch (err) {
-    console.error("[Session] Failed to clear all sessions:", err);
+    log.error("clear_all.failed", { error: err });
   }
 }

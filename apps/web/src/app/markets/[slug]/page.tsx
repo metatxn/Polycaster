@@ -1,6 +1,9 @@
+import { createLogger } from "@knoww/logger";
 import type { Metadata } from "next";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import MarketDetailClient from "./market-detail-client";
+
+const log = createLogger("market-page");
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -26,7 +29,7 @@ async function getMarket(slug: string): Promise<GammaMarket | null> {
     const data = (await res.json()) as GammaMarket[];
     return data?.[0] || null;
   } catch (error) {
-    console.error("Error fetching market for metadata:", error);
+    log.error("metadata.fetch_failed", { error });
     return null;
   }
 }

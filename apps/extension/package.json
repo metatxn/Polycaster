@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "4.1.0",
+    "@knoww/logger": "workspace:*",
     "@knoww/shared-types": "workspace:*",
     "@polymarket/clob-client-v2": "1.0.0",
     "decimal.js": "^10.6.0",

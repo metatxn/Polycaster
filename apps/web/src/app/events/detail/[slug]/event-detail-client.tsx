@@ -1,6 +1,10 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+
+const log = createLogger("event-detail");
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -219,7 +223,7 @@ export default function EventDetailClient({
         if (data.bids.length === 0 && data.asks.length === 0) return;
         setOrderBookFromRest(tokenId, data.bids, data.asks);
       } catch (err) {
-        console.error("Preload order book failed", err);
+        log.error("orderbook.preload_failed", { error: err });
       }
     },
     [queryClient, setOrderBookFromRest]

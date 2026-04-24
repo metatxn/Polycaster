@@ -6,9 +6,13 @@
  * Also supports split (USDC→YES+NO) and merge (YES+NO→USDC) operations.
  */
 
+import { createLogger } from "@knoww/logger";
 import type { ClobOrderType } from "@knoww/shared-types/polymarket";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import type { OrderBook } from "@knoww/shared-types/slippage";
+
+const log = createLogger("trading-service");
+
 import {
   EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
@@ -246,7 +250,7 @@ export const TradingService = {
           chainId: POLYGON_CHAIN_ID_HEX,
           errorMessage: err instanceof Error ? err.message : String(err),
         });
-        console.warn("[TradingService] Chain switch failed:", err);
+        log.warn("chain.switch_failed", { error: err });
       }
 
       update({ state: "connected" });
@@ -265,16 +269,11 @@ export const TradingService = {
             isDeployed: balData.isDeployed ?? false,
           });
         } catch (balErr) {
-          console.warn(
-            "[TradingService] Balance fetch failed for proxy",
-            proxyAddress,
-            ":",
-            balErr
-          );
+          log.warn("balance.fetch_failed", { proxyAddress, error: balErr });
           update({ balance: 0, polBalance: 0, tokenBalances: [] });
         }
       } catch (err) {
-        console.warn("[TradingService] Proxy derivation failed:", err);
+        log.warn("proxy.derive_failed", { error: err });
       }
 
       const cached = await CredentialManager.getStored(address);
@@ -343,10 +342,7 @@ export const TradingService = {
         const proxyAddress = await ProxyWallet.deriveAddress(ctx.address);
         update({ proxyAddress });
       } catch (err) {
-        console.warn(
-          "[TradingService] Proxy derivation failed during refresh:",
-          err
-        );
+        log.warn("proxy.derive_failed_during_refresh", { error: err });
         return;
       }
     }
@@ -363,7 +359,7 @@ export const TradingService = {
         isDeployed: balData.isDeployed ?? ctx.isDeployed,
       });
     } catch (err) {
-      console.warn("[TradingService] Balance fetch failed:", err);
+      log.warn("balance.refresh_failed", { error: err });
     }
 
     try {

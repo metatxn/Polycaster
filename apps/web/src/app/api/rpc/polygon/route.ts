@@ -1,6 +1,9 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isAllowedOrigin } from "@/lib/origin-guard";
+
+const log = createLogger("api.rpc.polygon");
 
 /**
  * Server-side RPC Proxy for Polygon
@@ -80,7 +83,7 @@ function getServerRpcUrl(): string {
   // Priority 1: Alchemy (best for production)
   const alchemyKey = process.env.ALCHEMY_API_KEY;
   if (alchemyKey) {
-    console.log("[RPC Proxy] Using Alchemy RPC for Polygon (server-side)");
+    log.debug("upstream.select", { provider: "alchemy" });
     return `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`;
   }
 
@@ -98,10 +101,7 @@ export async function POST(request: NextRequest) {
   const requestOrigin = request.headers.get("origin");
 
   if (!requestOrigin || !isAllowedOrigin(requestOrigin)) {
-    console.warn(
-      "[RPC Proxy] Rejected request from disallowed origin:",
-      requestOrigin || "(no origin)"
-    );
+    log.warn("origin.rejected", { origin: requestOrigin || "(no origin)" });
     return NextResponse.json(
       { error: "Forbidden: origin not allowed" },
       { status: 403 }
@@ -138,10 +138,7 @@ export async function POST(request: NextRequest) {
     body = JSON.parse(rawBody);
   } catch (parseError) {
     // Handle JSON parse errors (SyntaxError) with a 400 response
-    console.warn(
-      "[RPC Proxy] Invalid JSON payload:",
-      parseError instanceof Error ? parseError.message : parseError
-    );
+    log.warn("body.invalid_json", { error: parseError });
     return NextResponse.json(
       { error: "Invalid JSON payload" },
       { status: 400, headers: corsHeaders }
@@ -202,11 +199,7 @@ export async function POST(request: NextRequest) {
     } catch (fetchError) {
       // Handle abort/timeout errors
       if (fetchError instanceof Error && fetchError.name === "AbortError") {
-        console.error(
-          "[RPC Proxy] Request timed out after",
-          RPC_TIMEOUT_MS,
-          "ms"
-        );
+        log.error("upstream.timeout", { timeoutMs: RPC_TIMEOUT_MS });
         return NextResponse.json(
           { error: "RPC request timed out" },
           { status: 504, headers: corsHeaders }
@@ -218,11 +211,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (!response.ok) {
-      console.error(
-        "[RPC Proxy] Upstream error:",
-        response.status,
-        response.statusText
-      );
+      log.error("upstream.non2xx", {
+        status: response.status,
+        statusText: response.statusText,
+      });
       return NextResponse.json(
         { error: `RPC request failed: ${response.statusText}` },
         { status: response.status, headers: corsHeaders }
@@ -232,7 +224,7 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
     return NextResponse.json(data, { headers: corsHeaders });
   } catch (error) {
-    console.error("[RPC Proxy] Error:", error);
+    log.error("proxy.failed", { error });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500, headers: corsHeaders }

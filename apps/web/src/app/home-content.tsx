@@ -36,7 +36,6 @@ import {
   TableSkeleton as ProTableSkeleton,
 } from "@/components/markets-view";
 import { Navbar } from "@/components/navbar";
-import { PageBackground } from "@/components/page-background";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -282,11 +281,6 @@ interface HomeContentProps {
 export function HomeContent({ initialData }: HomeContentProps) {
   const searchParams = useSearchParams();
   const viewParam = searchParams.get("view") as ViewMode | null;
-  // Pro layout is the only desktop layout at /markets now. The old
-  // `?layout=legacy` escape hatch has been retired. Mobile/tablet (< lg)
-  // still get the card grid because tables don't fit at narrow widths —
-  // that behavior is handled via Tailwind breakpoints, not this flag.
-  const isProLayout = true;
 
   const [viewMode, setViewMode] = useState<ViewMode>("categories");
   const [mounted, setMounted] = useState(false);
@@ -397,9 +391,10 @@ export function HomeContent({ initialData }: HomeContentProps) {
     tagSlug: apiQueryParams.tagSlug,
     filters: serverFilterParams,
     enabled: viewMode === "categories",
-    // Pro view needs sub-market details (groupItemTitle, outcomePrices)
-    // to render top-candidate rows; card grid only needs market count.
-    fullMarkets: isProLayout,
+    // Terminal view needs sub-market details (groupItemTitle,
+    // outcomePrices) to render top-candidate rows; card grid only
+    // needs market count.
+    fullMarkets: true,
   });
 
   const {
@@ -409,12 +404,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextTrending,
     fetchNextPage: fetchNextTrending,
     isFetchingNextPage: isFetchingNextTrending,
-  } = useTrendingEvents(
-    20,
-    serverFilterParams,
-    viewMode === "trending",
-    isProLayout
-  );
+  } = useTrendingEvents(20, serverFilterParams, viewMode === "trending", true);
 
   const {
     data: newPaginatedData,
@@ -423,7 +413,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextNew,
     fetchNextPage: fetchNextNew,
     isFetchingNextPage: isFetchingNextNew,
-  } = useNewEvents(20, serverFilterParams, viewMode === "new", isProLayout);
+  } = useNewEvents(20, serverFilterParams, viewMode === "new", true);
 
   const {
     data: breakingPaginatedData,
@@ -432,12 +422,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextBreaking,
     fetchNextPage: fetchNextBreaking,
     isFetchingNextPage: isFetchingNextBreaking,
-  } = useBreakingEvents(
-    20,
-    serverFilterParams,
-    viewMode === "breaking",
-    isProLayout
-  );
+  } = useBreakingEvents(20, serverFilterParams, viewMode === "breaking", true);
 
   // Wrap view mode changes in startTransition for non-blocking UI updates
   const handleQuickCategoryClick = (mode: ViewMode) => {
@@ -561,27 +546,23 @@ export function HomeContent({ initialData }: HomeContentProps) {
 
   return (
     <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
-      {/* The flashy grid + animated orbs fight the terminal aesthetic;
-          pro mode uses a clean solid-bg canvas instead. */}
-      {!isProLayout && <PageBackground />}
-
       <Navbar />
 
       {/* Main Content - Added bottom padding for mobile nav, pt aligned with 60px grid */}
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
         {/* Header Row: Title + Live Badge + Leaderboard Button.
-            Hidden at lg+ when ?layout=pro — the pro view has its own
-            editorial header and meta-strip. Mobile/tablet always see
-            this header regardless of layout, since the pro table falls
-            back to the card grid below lg. */}
+            Hidden at lg+ — the terminal view has its own editorial
+            header and meta-strip. Mobile/tablet always see this
+            header since the terminal view falls back to the card
+            grid below lg. */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className={`flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-5 sm:mb-6 ${isProLayout ? "lg:hidden" : ""}`}
+          className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-5 sm:mb-6 lg:hidden"
         >
-          {/* Left: Editorial title — matches the Fraunces italic used on
-              sibling pro pages, just one notch smaller since /markets
+          {/* Left: Editorial title — matches the Fraunces italic used
+              on sibling pages, just one notch smaller since /markets
               hosts the dense card grid below. */}
           <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl md:text-6xl leading-[1.02] tracking-tight text-foreground">
             Markets
@@ -619,58 +600,6 @@ export function HomeContent({ initialData }: HomeContentProps) {
               Top Traders
             </Link>
           </nav>
-        </motion.div>
-
-        {/* Combined Filter Row - Desktop (lg+).
-            Hidden at lg+ when ?layout=pro — the pro view renders its
-            own terminal-style filter bar inline. */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-          className={`${isProLayout ? "hidden" : "hidden lg:flex"} items-center gap-4 mb-4`}
-        >
-          {/* Filter Container */}
-          <div className="flex items-center gap-2 p-1.5 bg-gray-100/80 dark:bg-white/5 rounded-2xl border border-gray-200/60 dark:border-white/8">
-            {/* Tab Pills - Quick Filters */}
-            <div className="flex items-center gap-0.5 shrink-0">
-              {TAB_CATEGORIES.map((tab) => {
-                const isActive = viewMode === tab.slug;
-                const Icon = tab.icon;
-                return (
-                  <button
-                    type="button"
-                    key={tab.slug}
-                    onClick={() =>
-                      tab.slug === "categories"
-                        ? setViewMode("categories")
-                        : handleQuickCategoryClick(tab.slug as ViewMode)
-                    }
-                    className={`relative flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-semibold text-[13px] whitespace-nowrap transition-[color,background-color,box-shadow,transform] duration-200 shrink-0 active:scale-[0.97] ${
-                      isActive
-                        ? "bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm dark:shadow-none"
-                        : "text-gray-500 dark:text-white/60 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-white/8"
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Subtle Divider */}
-            <div className="h-5 w-px bg-gray-300/60 dark:bg-white/15 mx-0.5 shrink-0" />
-
-            {/* Filter Chips - Advanced Filters */}
-            <DesktopFilterChips />
-          </div>
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Search Input - Separate */}
-          <MarketSearch className="w-56 xl:w-64" />
         </motion.div>
 
         {/* Mobile/Tablet Filter Rows (below lg) */}
@@ -762,9 +691,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 the isTransitioning prop — so we hide the card skeletons
                 there to avoid a duplicate. */}
             {currentData.isLoading && !currentData.error && (
-              <div
-                className={`${isProLayout ? "lg:hidden" : ""} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5`}
-              >
+              <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
                 {[...Array(10)].map((_, i) => (
                   <motion.div
                     key={`skeleton-${i}`}
@@ -786,7 +713,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
             )}
             {/* Desktop loading: render the terminal view with its own
                 table-shaped skeleton so tab switches don't reveal cards. */}
-            {currentData.isLoading && !currentData.error && isProLayout && (
+            {currentData.isLoading && !currentData.error && (
               <div className="hidden lg:block">
                 <MarketsView
                   events={[]}
@@ -804,20 +731,18 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 tables don't fit. */}
             {!currentData.isLoading && currentData.events.length > 0 && (
               <>
-                {isProLayout && (
-                  <div className="hidden lg:block">
-                    <MarketsView
-                      events={currentData.events}
-                      viewMode={viewMode}
-                      onViewChange={handleQuickCategoryClick}
-                      advancedFilters={<DesktopFilterChips />}
-                      search={<MarketSearch className="w-56 xl:w-64" />}
-                      isTransitioning={isPending}
-                    />
-                  </div>
-                )}
+                <div className="hidden lg:block">
+                  <MarketsView
+                    events={currentData.events}
+                    viewMode={viewMode}
+                    onViewChange={handleQuickCategoryClick}
+                    advancedFilters={<DesktopFilterChips />}
+                    search={<MarketSearch className="w-56 xl:w-64" />}
+                    isTransitioning={isPending}
+                  />
+                </div>
                 <div
-                  className={`${isProLayout ? "lg:hidden" : ""} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
+                  className={`lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
                     isPending ? "opacity-70" : "opacity-100"
                   }`}
                 >
@@ -831,15 +756,13 @@ export function HomeContent({ initialData }: HomeContentProps) {
                   ))}
                 </div>
 
-                {/* Loading More — card-grain skeletons in card view,
-                    table-row skeletons in pro view at lg+. Split so the
-                    two layouts stay visually consistent during infinite
+                {/* Loading More — card-grain skeletons below lg,
+                    table-row skeletons at lg+. Split so the two
+                    layouts stay visually consistent during infinite
                     scroll. */}
                 {currentData.isFetchingMore && (
                   <>
-                    <div
-                      className={`${isProLayout ? "lg:hidden" : ""} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5`}
-                    >
+                    <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
                       {[...Array(20)].map((_, i) => (
                         <div
                           key={`loading-${i}`}
@@ -853,11 +776,9 @@ export function HomeContent({ initialData }: HomeContentProps) {
                         </div>
                       ))}
                     </div>
-                    {isProLayout && (
-                      <div className="hidden lg:block border-x border-b border-border rounded-b-sm -mt-px">
-                        <ProTableSkeleton rows={5} />
-                      </div>
-                    )}
+                    <div className="hidden lg:block border-x border-b border-border rounded-b-sm -mt-px">
+                      <ProTableSkeleton rows={5} />
+                    </div>
                   </>
                 )}
 

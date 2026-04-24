@@ -4,10 +4,14 @@ import { motion } from "framer-motion";
 import { ArrowLeft, BadgeCheck, Check, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
 import { EditorialFooter } from "@/components/editorial-footer";
-import { EditorialHero } from "@/components/editorial-hero";
+import {
+  EditorialHero,
+  HeroDataAge,
+  HeroRefreshButton,
+} from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
 import { PullStat, PullStatGrid, TrendGlyph } from "@/components/pull-stat";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -86,7 +90,10 @@ function RankCaption({
   const pnlStr = `${sign}${formatCurrencyCompact(Math.abs(pnlValue))}`;
   return (
     <>
-      {pnlStr} · {formatCurrencyCompact(volValue)} vol
+      {pnlStr}
+      <span className="mx-1.5 text-border/80">·</span>
+      <span className="opacity-60 mr-1">VOL</span>
+      {formatCurrencyCompact(volValue)}
     </>
   );
 }
@@ -96,7 +103,24 @@ export default function ProfilePage() {
   const router = useRouter();
   const address = params.address as string;
 
-  const { data: profile, isLoading, error } = useTraderProfile(address);
+  const {
+    data: profile,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useTraderProfile(address);
+
+  // Tick the "updated Xs ago" meta so it counts forward between refetches.
+  const [now, setNow] = useState(() => Date.now());
+  const [mountedAt] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const effectiveUpdatedAt = dataUpdatedAt || mountedAt;
+  const dataAgeMs = now - effectiveUpdatedAt;
 
   // The API returns a valid empty profile for any 0x address. Treat a
   // trader with zero volume, no username, and no rankings at all as a
@@ -123,16 +147,23 @@ export default function ProfilePage() {
           <div className="max-w-4xl mx-auto">
             <Skeleton className="h-9 w-24 rounded-none mb-6" />
             <div className="flex items-start gap-4 mb-8">
-              <Skeleton className="h-24 w-24 rounded-2xl" />
+              <Skeleton className="h-20 w-20 rounded-sm" />
               <div className="space-y-3 flex-1">
-                <Skeleton className="h-8 w-48" />
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-4 w-64" />
+                <Skeleton className="h-10 w-64 rounded-none" />
+                <Skeleton className="h-3 w-40 rounded-none" />
+                <Skeleton className="h-3 w-56 rounded-none" />
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-4 border-y border-border/50 divide-x divide-y divide-border/40 md:divide-y-0 mb-8">
               {[...Array(4)].map((_, i) => (
-                <Skeleton key={`stat-${i}`} className="h-28 rounded-none" />
+                <div
+                  key={`stat-${i}`}
+                  className="px-4 py-5 flex flex-col gap-2"
+                >
+                  <Skeleton className="h-2.5 w-16 rounded-none" />
+                  <Skeleton className="h-7 w-24 rounded-none" />
+                  <Skeleton className="h-2.5 w-20 rounded-none" />
+                </div>
               ))}
             </div>
             <Skeleton className="h-64 rounded-none" />
@@ -196,14 +227,14 @@ export default function ProfilePage() {
             ]}
             title={
               <>
-                <Avatar className="h-12 w-12 sm:h-16 sm:w-16 lg:h-20 lg:w-20 rounded-2xl border border-border/60 shrink-0">
+                <Avatar className="h-12 w-12 sm:h-16 sm:w-16 lg:h-20 lg:w-20 rounded-sm border border-border/60 shrink-0">
                   {profile.profileImage && (
                     <AvatarImage
                       src={profile.profileImage}
                       alt={profile.userName || "Trader"}
                     />
                   )}
-                  <AvatarFallback className="rounded-2xl bg-muted font-mono text-sm sm:text-base lg:text-lg uppercase tracking-[0.1em] text-foreground/80">
+                  <AvatarFallback className="rounded-sm bg-muted font-mono text-sm sm:text-base lg:text-lg uppercase tracking-widest text-foreground/80">
                     {getInitials(profile.userName, profile.proxyWallet)}
                   </AvatarFallback>
                 </Avatar>
@@ -219,6 +250,15 @@ export default function ProfilePage() {
               profile.bio ? (
                 <p className="line-clamp-2">{profile.bio}</p>
               ) : undefined
+            }
+            rightSlot={
+              <>
+                <HeroDataAge dataAgeMs={dataAgeMs} />
+                <HeroRefreshButton
+                  onRefresh={() => refetch()}
+                  isFetching={isFetching}
+                />
+              </>
             }
             belowSlot={
               <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -351,27 +391,46 @@ export default function ProfilePage() {
             </PullStatGrid>
           </div>
 
-          {/* View on Leaderboard CTA — editorial mono underline link */}
+          {/* Related — editorial mono links to adjacent surfaces */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
             className="mt-12 border-t border-border/40 pt-6"
           >
-            <Link
-              href="/leaderboard"
-              className="group inline-flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
-                View full leaderboard
-              </span>
-              <span
-                aria-hidden="true"
-                className="translate-y-px transition-transform group-hover:translate-x-0.5"
-              >
-                →
-              </span>
-            </Link>
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-4">
+              §&nbsp;&nbsp;Related
+            </h2>
+            <ul className="flex flex-col gap-2.5">
+              {[
+                { href: "/leaderboard", label: "Full leaderboard" },
+                {
+                  href: `https://polygonscan.com/address/${profile.proxyWallet}`,
+                  label: "On-chain activity",
+                  external: true,
+                },
+                { href: "/markets", label: "Browse markets" },
+              ].map((item) => (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    target={item.external ? "_blank" : undefined}
+                    rel={item.external ? "noopener noreferrer" : undefined}
+                    className="group inline-flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
+                      {item.label}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="translate-y-px transition-transform group-hover:translate-x-0.5"
+                    >
+                      →
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </motion.div>
         </div>
       </main>

@@ -1,5 +1,5 @@
+import { logWarn } from "@knoww/logger";
 import { computeSimilarities } from "./embeddings";
-import { logWarn } from "./logger";
 import { bm25Score, nlpContextGateBatch } from "./nlp";
 import { createScoreMarkets } from "./score-markets-core";
 

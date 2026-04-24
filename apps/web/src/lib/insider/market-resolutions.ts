@@ -12,9 +12,12 @@
  * wallet-edge stats.
  */
 
+import { createLogger } from "@knoww/logger";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { type Category, categorize } from "./category";
 import { parseOutcomes, type ResolvedOutcomes } from "./pnl";
+
+const log = createLogger("insider.market-resolutions");
 
 export interface KnownResolution {
   conditionId: string;
@@ -185,7 +188,7 @@ function triggerBackgroundBuild(opts: {
       return kb;
     })
     .catch((err) => {
-      console.error("[market-resolutions] background KB build failed:", err);
+      log.error("kb.build_failed", { error: err });
       throw err;
     })
     .finally(() => {

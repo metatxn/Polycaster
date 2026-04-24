@@ -1,5 +1,6 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -38,6 +39,8 @@ import { usePriceAlertDetection } from "@/hooks/use-price-alerts";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import { formatPrice, formatVolume } from "@/lib/formatters";
 import type { OutcomeData } from "@/types/market";
+
+const log = createLogger("market-detail");
 
 // Lazy load heavy components - they're code-split into separate chunks
 const MarketPriceChart = dynamic(
@@ -99,7 +102,7 @@ function safeParseStringArray(
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.map((x) => String(x)) : [];
   } catch {
-    console.warn(`Failed to parse ${field} for market ${marketLabel}:`, raw);
+    log.warn("field.parse_failed", { field, marketLabel, raw });
     return [];
   }
 }
@@ -655,7 +658,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                   } catch (err) {
                     // User cancelled or share failed - ignore
                     if ((err as Error).name !== "AbortError") {
-                      console.error("Share failed:", err);
+                      log.error("share.failed", { error: err });
                     }
                   }
                 }

@@ -2,12 +2,15 @@
 // CONFIGURATION
 // ============================================
 
+import { createLogger } from "@knoww/logger";
 import {
   type Config,
   DEFAULT_USER_SETTINGS,
   type EnabledSources,
   type UserSettings,
 } from "../types/settings";
+
+const log = createLogger("extension.config");
 
 // ============================================
 // BUILD MODE
@@ -145,7 +148,7 @@ async function loadUserSettings(): Promise<UserSettings> {
           };
 
           if (USER_SETTINGS.debugMode || DEV_MODE) {
-            console.log("[KnowwConfig] Loaded user settings:", USER_SETTINGS);
+            log.debug("settings.loaded", { USER_SETTINGS });
           }
 
           resolve(USER_SETTINGS);
@@ -255,7 +258,7 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             try {
               listener(USER_SETTINGS);
             } catch (e) {
-              console.error("[KnowwConfig] Error in settings listener:", e);
+              log.error("settings.listener_error", { error: e });
             }
           }
         }

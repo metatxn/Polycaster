@@ -11,8 +11,12 @@
  * 3. Throttle balance checks
  */
 
+import { createLogger } from "@knoww/logger";
 import { createPublicClient, erc20Abi, http, type PublicClient } from "viem";
 import { polygon } from "viem/chains";
+
+const log = createLogger("rpc");
+
 import {
   PUSD_ADDRESS,
   PUSD_DECIMALS,
@@ -232,7 +236,7 @@ export async function checkIsDeployed(
 
     return isDeployed;
   } catch (err) {
-    console.error("[RPC] Failed to check deployment:", err);
+    log.error("deployment.check_failed", { error: err });
     const stale = getCachedValue(deploymentCache, cacheKey, true);
     return stale ?? false;
   }
@@ -305,7 +309,7 @@ export async function fetchUsdcBalance(
 
     return balance;
   } catch (err) {
-    console.error("[RPC] Failed to fetch trading balance:", err);
+    log.error("balance.fetch_failed", { error: err });
     const stale = getCachedValue(balanceCache, cacheKey, true);
     return stale ?? 0;
   }

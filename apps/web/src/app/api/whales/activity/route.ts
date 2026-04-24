@@ -1,6 +1,9 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+
+const log = createLogger("api.whales.activity");
 
 /**
  * Whale Activity API Route v2
@@ -377,7 +380,7 @@ export async function GET(request: NextRequest) {
       dataAge,
     } satisfies WhaleActivityResponse);
   } catch (error) {
-    console.error("Whale activity API error:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

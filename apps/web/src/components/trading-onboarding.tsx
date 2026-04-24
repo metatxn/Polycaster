@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useAppKit } from "@reown/appkit/react";
 import { AnimatePresence, motion } from "framer-motion";
+
+const log = createLogger("trading-onboarding");
+
 import {
   AlertCircle,
   Check,
@@ -138,10 +142,10 @@ export function TradingOnboarding({
     setIsCheckingApproval(true);
     try {
       const status = await checkAllApprovals(proxyAddress);
-      console.log("[TradingOnboarding] V2 approval status:", status);
+      log.debug("approvals.status", { status });
       setHasUsdcApproval(status.allApproved);
     } catch (err) {
-      console.error("[TradingOnboarding] Failed to check V2 approvals:", err);
+      log.error("approvals.check_failed", { error: err });
       setHasUsdcApproval(false);
     } finally {
       setIsCheckingApproval(false);
@@ -310,9 +314,7 @@ export function TradingOnboarding({
     const nowComplete = allStepsComplete === true;
 
     if (wasIncomplete && nowComplete) {
-      console.log(
-        "[TradingOnboarding] All steps completed! Showing celebration"
-      );
+      log.debug("steps.all_complete");
       setShowCelebration(true);
       // Auto-hide celebration after 3 seconds
       const timer = setTimeout(() => setShowCelebration(false), 3000);

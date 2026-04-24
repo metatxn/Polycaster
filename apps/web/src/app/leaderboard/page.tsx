@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getInitialLeaderboard } from "@/lib/server-cache";
 import { LeaderboardContent } from "./leaderboard-content";
+
+const log = createLogger("leaderboard-page");
 
 /**
  * Leaderboard Page - Server Component
@@ -15,7 +18,7 @@ export default async function LeaderboardPage() {
   try {
     initialData = await getInitialLeaderboard();
   } catch (error) {
-    console.error("[LeaderboardPage] Failed to pre-fetch data:", error);
+    log.error("prefetch.failed", { error });
     // Continue with null - client will fetch on mount
   }
 
@@ -23,9 +26,9 @@ export default async function LeaderboardPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="space-y-4 text-center">
-            <Skeleton className="h-12 w-48 mx-auto rounded-xl" />
-            <Skeleton className="h-4 w-32 mx-auto rounded-lg" />
+          <div className="space-y-3 text-center">
+            <Skeleton className="h-10 w-48 mx-auto rounded-none" />
+            <Skeleton className="h-3 w-32 mx-auto rounded-none" />
           </div>
         </div>
       }

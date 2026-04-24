@@ -1,6 +1,9 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { fetchMarket } from "@/lib/polymarket";
+
+const log = createLogger("api.markets.info");
 
 /**
  * GET /api/markets/info/:conditionID
@@ -29,7 +32,7 @@ export async function GET(
       market,
     });
   } catch (error) {
-    console.error("Error fetching market info:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

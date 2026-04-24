@@ -1,8 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+
+const log = createLogger("error-boundary");
 
 interface Props {
   children?: ReactNode;
@@ -26,11 +29,11 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error(
-      `ErrorBoundary caught error in [${this.props.name || "Unknown"}]:`,
+    log.error("caught", {
+      boundary: this.props.name || "Unknown",
       error,
-      errorInfo
-    );
+      errorInfo,
+    });
   }
 
   public render() {

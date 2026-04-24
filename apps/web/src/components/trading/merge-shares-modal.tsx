@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, ArrowRight, Loader2, X } from "lucide-react";
+
+const log = createLogger("merge-modal");
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Dialog,
@@ -64,7 +68,7 @@ export function MergeSharesModal({
           setAvailableShares(minBalanceDisplay);
         })
         .catch((err) => {
-          console.error("[MergeModal] Failed to fetch balances:", err);
+          log.error("balances.fetch_failed", { error: err });
           setAvailableShares(0);
         })
         .finally(() => {

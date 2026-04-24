@@ -2,6 +2,10 @@
 // STYLES INJECTION - Multi-Source Market Cards
 // ============================================
 
+import { createLogger } from "@knoww/logger";
+
+const log = createLogger("extension.styles");
+
 /**
  * Styles API interface
  */
@@ -1566,7 +1570,7 @@ function injectInlineStyles(): void {
     `;
     document.head.appendChild(style);
   } catch (e) {
-    console.error("[KnowwInline] Failed to inject styles:", e);
+    log.error("inject.failed", { error: e });
   }
 }
 

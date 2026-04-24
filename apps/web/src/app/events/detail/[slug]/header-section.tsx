@@ -1,10 +1,13 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import type { LucideIcon } from "lucide-react";
 import { Clock, Share2, Trophy } from "lucide-react";
 import Image from "next/image";
 import { NegRiskBadge } from "@/components/neg-risk-badge";
 import { cn } from "@/lib/utils";
+
+const log = createLogger("event-header");
 
 interface HeaderSectionProps {
   event: {
@@ -148,7 +151,7 @@ export function HeaderSection({
                             });
                           } catch (err) {
                             if ((err as Error).name !== "AbortError") {
-                              console.error("Share failed:", err);
+                              log.error("share.failed", { error: err });
                             }
                           }
                         }

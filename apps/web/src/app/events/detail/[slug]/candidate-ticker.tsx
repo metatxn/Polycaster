@@ -76,21 +76,30 @@ export function CandidateTicker({
               ref={isSelected ? selectedRef : undefined}
               type="button"
               onClick={() => onSelectMarket(m.id)}
+              aria-pressed={isSelected}
               className={cn(
                 "relative flex-1 flex flex-col gap-1 px-3 py-2.5 text-left transition-colors min-w-[160px] border-r border-border/40 last:border-r-0",
                 isSelected
-                  ? "text-foreground"
-                  : "text-foreground hover:bg-foreground/2"
+                  ? "bg-foreground/5 text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-foreground/2"
               )}
             >
               {isSelected && (
-                <span className="absolute inset-x-0 -top-px h-px bg-foreground" />
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-0 top-0 h-0.5 bg-foreground"
+                />
               )}
               <div className="truncate text-xs font-semibold leading-tight">
                 {m.groupItemTitle}
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="font-mono text-lg font-semibold tabular-nums leading-none">
+                <span
+                  className={cn(
+                    "font-mono text-lg tabular-nums leading-none",
+                    isSelected ? "font-bold" : "font-semibold"
+                  )}
+                >
                   {pct.toFixed(0)}%
                 </span>
                 <span className="font-mono text-[10px] tabular-nums text-muted-foreground leading-none">

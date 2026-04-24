@@ -900,7 +900,11 @@ html.softpop {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  /* biome-ignore lint/complexity/noImportantStyles: overrides Tailwind
+     typography's <h3> margins at equal specificity — editorial tighter
+     rhythm is intentional for legal sub-headings. */
   margin-top: 1.4em !important;
+  /* biome-ignore lint/complexity/noImportantStyles: see above. */
   margin-bottom: 0.3em !important;
 }
 
@@ -929,16 +933,24 @@ html.softpop {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Reduced-motion overrides must win regardless of specificity or
+     source order — users opting out of motion get a guaranteed
+     still UI. */
   .kw-stagger,
   .kw-reveal {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     opacity: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     transform: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     animation: none !important;
   }
   .kw-tilt:hover {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     transform: none !important;
   }
   .animate-\[ticker_60s_linear_infinite\] {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     animation: none !important;
   }
 }

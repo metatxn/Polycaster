@@ -1,6 +1,10 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { useQuery } from "@tanstack/react-query";
+
+const log = createLogger("market-price-chart");
+
 import {
   type CrosshairMode,
   createChart,
@@ -65,6 +69,10 @@ interface MarketPriceChartProps {
   defaultTimeRange?: TimeRange;
   /** Called when per-outcome price changes for the active time range are available */
   onOutcomeRangeChanges?: (changes: number[]) => void;
+  /** Hide the "Both" outcomes toggle (primary-only view, no user toggle).
+   *  Used by the compact per-candidate chart inside the outcomes table,
+   *  where YES/NO mirror each other and the toggle adds no signal. */
+  hideBothToggle?: boolean;
 }
 
 export type TimeRange = "1H" | "6H" | "1D" | "1W" | "1M" | "ALL";
@@ -146,7 +154,7 @@ async function fetchPriceHistoryBatch(
       body: JSON.stringify({ tokenIds: valid, startTs, fidelity }),
     });
     if (!response.ok) {
-      console.warn("Batch price history fetch failed", response.status);
+      log.warn("batch_price_history.fetch_failed", { status: response.status });
       return result;
     }
     const data = (await response.json()) as BatchPriceHistoryResponse;
@@ -156,7 +164,7 @@ async function fetchPriceHistoryBatch(
     }
     return result;
   } catch (error) {
-    console.error("Error fetching batch price history:", error);
+    log.error("batch_price_history.fetch_error", { error });
     return result;
   }
 }
@@ -208,8 +216,16 @@ export function MarketPriceChart({
   startDate,
   defaultTimeRange = "ALL",
   onOutcomeRangeChanges,
+  hideBothToggle = false,
 }: MarketPriceChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>(defaultTimeRange);
+  // `showBothOutcomes` controls whether the secondary series (NO tokens for
+  // multi-outcome, NO token for single-market) are layered in alongside the
+  // primary YES series. Off by default: a cleaner view that only shows YES
+  // trajectories. Toggling on adds matching NO lines for each market. The
+  // toggle itself is hidden when `hideBothToggle` is true, pinning the view
+  // to primary-only for compact per-candidate charts.
+  const [showBothOutcomes, setShowBothOutcomes] = useState(false);
   // Hover-only flag labels, Polymarket-style. Each pill is positioned at
   // the crosshair X (horizontal) and its own series' Y at the hovered time
   // (vertical). Only populated while the cursor is inside the plot;
@@ -230,11 +246,6 @@ export function MarketPriceChart({
       y: number;
     }>;
   } | null>(null);
-  // `showBothOutcomes` controls whether the secondary series (NO tokens for
-  // multi-outcome, NO token for single-market) are layered in alongside the
-  // primary YES series. Off by default: a cleaner view that only shows YES
-  // trajectories. Toggling on adds matching NO lines for each market.
-  const [showBothOutcomes, setShowBothOutcomes] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -324,8 +335,8 @@ export function MarketPriceChart({
   });
 
   // Resolved series config (real history when available, mock otherwise).
-  // When `showBothOutcomes` is false we keep only the first outcome — matching
-  // Polymarket's default single-line view.
+  // When `showBothOutcomes` is false we keep only the first outcome —
+  // matching Polymarket's default single-line view.
   //
   // We deliberately *do not* fall back to mock while the query is loading or
   // refetching. If we did, a time-range switch would briefly render mock
@@ -1011,20 +1022,23 @@ export function MarketPriceChart({
             {range}
           </Button>
         ))}
-        {/* Only offer the toggle when there's more than one outcome to toggle to */}
-        {(priceHistories?.length ?? tokens.length ?? outcomes.length) > 1 && (
-          <Button
-            type="button"
-            variant={showBothOutcomes ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setShowBothOutcomes((v) => !v)}
-            className="h-8 px-3 ml-2"
-            aria-pressed={showBothOutcomes}
-            title="Show both outcomes"
-          >
-            Both
-          </Button>
-        )}
+        {/* Only offer the toggle when:
+            - the caller hasn't suppressed it (per-candidate charts do),
+            - and there's more than one outcome to toggle to. */}
+        {!hideBothToggle &&
+          (priceHistories?.length ?? tokens.length ?? outcomes.length) > 1 && (
+            <Button
+              type="button"
+              variant={showBothOutcomes ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setShowBothOutcomes((v) => !v)}
+              className="h-8 px-3 ml-2"
+              aria-pressed={showBothOutcomes}
+              title="Show both outcomes"
+            >
+              Both
+            </Button>
+          )}
       </div>
     </div>
   );

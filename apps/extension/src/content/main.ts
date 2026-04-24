@@ -2,11 +2,14 @@
 // MAIN ENTRY POINT
 // ============================================
 
+import { createLogger } from "@knoww/logger";
 import type {
   KalshiCategoriesCache,
   PolymarketTagsCache,
 } from "../types/market";
 import type { UserSettings } from "../types/settings";
+
+const logger = createLogger("extension.main");
 
 // Declare NTH_INSERTER as a global that may or may not exist
 declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
@@ -39,9 +42,7 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
   // Check if current platform is enabled by user
   if (!isPlatformEnabled(platformName)) {
     if (isDebugMode()) {
-      console.log(
-        `[Knoww] Extension disabled for ${platformName} by user settings`
-      );
+      logger.debug("platform.disabled", { platformName });
     }
     return; // Exit early - user has disabled this platform
   }
@@ -85,7 +86,7 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
           })
           .catch((error: unknown) => {
             if (isDebugMode()) {
-              console.error("[Knoww] Polymarket prefetch failed:", error);
+              logger.error("polymarket.prefetch_failed", { error });
             }
           })
       );

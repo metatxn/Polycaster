@@ -1,8 +1,12 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { scoreFundingCluster } from "@/lib/insider/archetypes/funding-cluster";
 import { scoreOwnerCluster } from "@/lib/insider/archetypes/owner-cluster";
+
+const log = createLogger("api.whales.suspicious");
+
 import type {
   AccumulatedTrade,
   AccumulatorContext,
@@ -666,7 +670,7 @@ export async function GET(request: NextRequest) {
       lastUpdated: new Date().toISOString(),
     } satisfies SuspiciousActivityResponse);
   } catch (error) {
-    console.error("Suspicious activity API error:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

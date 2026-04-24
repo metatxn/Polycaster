@@ -1,8 +1,11 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
+
+const log = createLogger("api.user.trades");
 
 /**
  * Polymarket Data API base URL
@@ -178,7 +181,7 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[trades] API error:", errorText);
+      log.error("upstream.error", { body: errorText });
       return NextResponse.json(
         {
           success: false,
@@ -268,7 +271,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error fetching trades:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

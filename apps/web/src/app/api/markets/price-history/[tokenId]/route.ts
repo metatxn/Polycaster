@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+
+const log = createLogger("api.markets.price-history");
 
 /**
  * Price history response from Polymarket CLOB API
@@ -94,7 +97,7 @@ export async function GET(
       }
 
       const errorText = await response.text();
-      console.error("Polymarket price history API error:", errorText);
+      log.error("upstream.error", { body: errorText });
 
       return NextResponse.json(
         { success: false, error: "Failed to fetch price history", history: [] },
@@ -116,7 +119,7 @@ export async function GET(
       { headers: getCacheHeaders("priceHistory") }
     );
   } catch (error) {
-    console.error("Error fetching price history:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       {
         success: false,

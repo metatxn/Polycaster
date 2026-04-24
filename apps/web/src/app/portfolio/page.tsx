@@ -373,7 +373,14 @@ export default function PortfolioPage() {
           rightSlot={
             <HeroRefreshButton
               onRefresh={handleRefresh}
-              isFetching={loadingPositions || loadingPnl}
+              isFetching={
+                loadingPositions ||
+                loadingPnl ||
+                loadingOrders ||
+                loadingTrades ||
+                loadingUserDetails ||
+                isProxyLoading
+              }
             />
           }
           belowSlot={
@@ -399,11 +406,10 @@ export default function PortfolioPage() {
                   <button
                     type="button"
                     onClick={() => setShowDepositModal(true)}
-                    className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
+                    className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition-colors"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     <ArrowDownToLine className="h-3 w-3" />
-                    <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
+                    <span className="border-b-2 border-foreground pb-0.5 group-hover:border-foreground/60 transition-colors">
                       Deposit
                     </span>
                   </button>
@@ -413,7 +419,7 @@ export default function PortfolioPage() {
                     className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <ArrowUpFromLine className="h-3 w-3" />
-                    <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
+                    <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
                       Withdraw
                     </span>
                   </button>
@@ -472,9 +478,19 @@ export default function PortfolioPage() {
         </div>
 
         {/* P&L Chart */}
-        <div className="mb-6">
-          <PnLChart userAddress={tradingAddress || undefined} height={160} />
-        </div>
+        <section className="mb-6">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+              §&nbsp;&nbsp;Performance
+            </h2>
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+              All time
+            </span>
+          </div>
+          <div className="border-y border-border/40 py-2">
+            <PnLChart userAddress={tradingAddress || undefined} height={160} />
+          </div>
+        </section>
 
         {/* Tabs Content */}
         <section>

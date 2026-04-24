@@ -1,7 +1,11 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+
+const log = createLogger("onboarding-context");
+
 import {
   createContext,
   useCallback,
@@ -112,12 +116,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     if (address) {
       const isComplete = isOnboardingComplete(address);
       setHasCompletedOnboarding(isComplete);
-      console.log(
-        "[OnboardingContext] Checked localStorage for",
-        address,
-        ":",
-        isComplete
-      );
+      log.debug("localStorage.checked", { address, isComplete });
     } else {
       setHasCompletedOnboarding(null);
     }
@@ -170,13 +169,10 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
 
       try {
         const status = await checkAllApprovals(proxyAddress);
-        console.log("[OnboardingContext] V2 approval check:", {
-          proxyAddress,
-          ...status,
-        });
+        log.debug("approvals.v2_check", { proxyAddress, ...status });
         setHasUsdcApproval(status.allApproved);
       } catch (err) {
-        console.error("[OnboardingContext] Failed to check V2 approvals:", err);
+        log.error("approvals.v2_check_failed", { error: err });
         setHasUsdcApproval(false);
       } finally {
         setIsCheckingUsdcApproval(false);
@@ -261,10 +257,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     if (address) {
       markOnboardingComplete(address);
       setHasCompletedOnboarding(true);
-      console.log(
-        "[OnboardingContext] Marked onboarding complete for",
-        address
-      );
+      log.debug("onboarding.marked_complete", { address });
     }
 
     // Do a full page reload to ensure all components (especially sidebar)

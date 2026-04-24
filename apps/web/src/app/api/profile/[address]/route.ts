@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
+
+const log = createLogger("api.profile");
 
 /**
  * Profile API Route
@@ -214,7 +217,7 @@ export async function GET(
 
     return NextResponse.json(profile);
   } catch (error) {
-    console.error("Profile API error:", error);
+    log.error("fetch.failed", { error });
     return NextResponse.json(
       { error: "Failed to fetch profile" },
       { status: 500 }

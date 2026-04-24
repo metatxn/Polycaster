@@ -1,7 +1,10 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { requireExtensionSession } from "@/lib/auth/extension-session";
 import { checkOriginAndFetchSite } from "@/lib/origin-guard";
+
+const log = createLogger("api.relayer");
 
 /**
  * Server-side proxy for Polymarket's V2 Relayer.
@@ -72,9 +75,10 @@ async function getBuilderHmacHeaders(
   const signUrl = process.env.BUILDER_SIGNING_SERVER_URL;
   const token = process.env.INTERNAL_AUTH_TOKEN;
   if (!signUrl || !token) {
-    console.error(
-      "[Relayer Proxy] BUILDER_SIGNING_SERVER_URL / INTERNAL_AUTH_TOKEN not configured — cannot sign SAFE / SAFE-CREATE"
-    );
+    log.error("signing.config.missing", {
+      reason:
+        "BUILDER_SIGNING_SERVER_URL / INTERNAL_AUTH_TOKEN not configured — cannot sign SAFE / SAFE-CREATE",
+    });
     return null;
   }
 
@@ -88,16 +92,15 @@ async function getBuilderHmacHeaders(
       body: JSON.stringify({ method, path, body }),
     });
     if (!res.ok) {
-      console.error(
-        "[Relayer Proxy] signing server returned non-2xx:",
-        res.status,
-        await res.text().catch(() => "")
-      );
+      log.error("signing.response.non2xx", {
+        status: res.status,
+        body: await res.text().catch(() => ""),
+      });
       return null;
     }
     return (await res.json()) as BuilderHmacHeaders;
   } catch (err) {
-    console.error("[Relayer Proxy] signing server fetch failed:", err);
+    log.error("signing.fetch.failed", { err });
     return null;
   }
 }
@@ -190,9 +193,9 @@ async function proxy(
   const apiKey = process.env.POLY_RELAYER_API_KEY;
   const apiKeyAddress = process.env.POLY_RELAYER_API_KEY_ADDRESS;
   if (!apiKey || !apiKeyAddress) {
-    console.error(
-      "[Relayer Proxy] POLY_RELAYER_API_KEY(_ADDRESS) not configured"
-    );
+    log.error("config.missing", {
+      reason: "POLY_RELAYER_API_KEY(_ADDRESS) not configured",
+    });
     return NextResponse.json(
       { error: "Relayer not configured" },
       { status: 503 }
@@ -276,7 +279,10 @@ async function proxy(
       });
     } catch (fetchError) {
       if (fetchError instanceof Error && fetchError.name === "AbortError") {
-        console.error("[Relayer Proxy] Upstream timed out");
+        log.error("upstream.timeout", {
+          method,
+          path: pathSegments.join("/"),
+        });
         return NextResponse.json(
           { error: "Relayer request timed out" },
           { status: 504 }
@@ -288,13 +294,12 @@ async function proxy(
     const upstreamBody = await upstream.text();
 
     if (upstream.status < 200 || upstream.status >= 300) {
-      console.error(
-        "[Relayer Proxy] Upstream non-2xx:",
+      log.error("upstream.non2xx", {
         method,
-        pathSegments.join("/"),
-        upstream.status,
-        upstreamBody.slice(0, 500)
-      );
+        path: pathSegments.join("/"),
+        status: upstream.status,
+        body: upstreamBody.slice(0, 500),
+      });
     }
 
     return new NextResponse(upstreamBody, {
@@ -305,7 +310,11 @@ async function proxy(
       },
     });
   } catch (error) {
-    console.error("[Relayer Proxy] Error:", error);
+    log.error("proxy.failed", {
+      method,
+      path: pathSegments.join("/"),
+      err: error,
+    });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

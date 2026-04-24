@@ -1,5 +1,5 @@
+import { logWarn } from "@knoww/logger";
 import { warmUp } from "../background/embeddings";
-import { logWarn } from "../background/logger";
 import { scoreMarkets } from "../background/scoring";
 import type {
   ScoreMarketsMessage,

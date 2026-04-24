@@ -18,15 +18,23 @@ import {
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
 } from "@knoww/shared-types/contracts";
-import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
 import { ethers } from "ethers";
+import { EXTENSION_AUTH_REQUIRED_ERROR } from "../types/chrome-messages";
 import type { BridgeSigner } from "./bridge-signer";
-import { createExtensionBuilderConfig } from "./builder-config";
+import { getAccessTokenViaMessage } from "./extension-auth";
+import { getKnowwAppUrl } from "./extension-session";
 import { logInfo } from "./logger";
 
-const RELAYER_URL = POLYMARKET_API.RELAYER.BASE.replace(/\/$/, "");
+const RELAYER_URL = `${getKnowwAppUrl().replace(/\/$/, "")}/api/relayer`;
 const CHAIN_ID = 137;
 const SAFE_MULTISEND = "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761";
+/**
+ * EIP-712 domain `name` used when signing SAFE-CREATE intents (distinct from
+ * SafeTx, which doesn't include `name`). Must match Polymarket's factory
+ * domain exactly — a mismatch makes the recovered signer wrong and the
+ * relayer will reject.
+ */
+const SAFE_FACTORY_NAME = "Polymarket Contract Proxy Factory";
 
 interface Transaction {
   to: string;
@@ -157,7 +165,9 @@ function proxyFetch<T>(
         url,
         method,
         headers: headers ?? {},
-        body: body ? JSON.parse(body) : undefined,
+        // Keep JSON as the original string — parse+stringify can theoretically
+        // alter edge-case payloads; the background handler accepts raw strings.
+        body: body ?? undefined,
       },
       (response: {
         ok: boolean;
@@ -171,8 +181,28 @@ function proxyFetch<T>(
           );
           return;
         }
+        // The background's `fetch-json` handler sets `ok: true` whenever the
+        // response body parses as JSON — even for HTTP 4xx/5xx. Without this
+        // status check, a 400 from the upstream relayer would be handed to
+        // the caller as a "successful" payload containing the error body,
+        // producing opaque downstream failures (e.g. signature-mismatched
+        // SAFE-CREATE surfaced as undefined `transactionID` during polling).
         if (!response?.ok) {
           reject(new Error(response?.error || `Relayer request failed`));
+          return;
+        }
+        const status = response.status ?? 0;
+        if (status < 200 || status >= 300) {
+          const body = response.data
+            ? typeof response.data === "string"
+              ? response.data
+              : JSON.stringify(response.data)
+            : "";
+          reject(
+            new Error(
+              `Relayer ${status}${body ? `: ${body.slice(0, 300)}` : ""}`
+            )
+          );
           return;
         }
         resolve(response.data as T);
@@ -204,28 +234,22 @@ async function relayerPost<T>(
   );
 }
 
-async function getBuilderHeaders(
-  method: string,
-  path: string,
-  body?: string
-): Promise<Record<string, string> | undefined> {
-  const config = createExtensionBuilderConfig();
-  const headers = await config.generateBuilderHeaders(method, path, body);
-  if (!headers) return undefined;
-  return headers as unknown as Record<string, string>;
-}
-
 async function sendAuthedRequest<T>(
   method: "GET" | "POST",
   path: string,
   body?: string,
   params?: Record<string, string>
 ): Promise<T> {
-  const builderHeaders = await getBuilderHeaders(method, path, body);
-  if (method === "GET") {
-    return relayerGet<T>(path, params ?? {}, builderHeaders);
+  const token = await getAccessTokenViaMessage();
+  if (!token) {
+    throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
   }
-  return relayerPost<T>(path, body ?? "", builderHeaders);
+  const headers = { Authorization: `Bearer ${token}` };
+
+  if (method === "GET") {
+    return relayerGet<T>(path, params ?? {}, headers);
+  }
+  return relayerPost<T>(path, body ?? "", headers);
 }
 
 export async function executeViaRelayer(
@@ -306,10 +330,12 @@ export async function executeViaRelayer(
       metadata: "",
     });
 
+    // Post-Apr-21-2026: /submit returns immediately with { transactionID, state }
+    // — no `transactionHash`. pollTransaction() below fetches the on-chain hash
+    // by polling /transaction with `transactionID`.
     const submitResponse = await sendAuthedRequest<{
       transactionID: string;
       state: string;
-      transactionHash: string;
     }>("POST", "/submit", requestPayload);
 
     logInfo("relayer.submitted", {
@@ -374,4 +400,123 @@ async function pollTransaction(transactionID: string): Promise<string> {
   }
 
   return transactionID;
+}
+
+/**
+ * Deploy the user's Polymarket Safe (trading wallet) via the relayer.
+ *
+ * Mirrors `deploySafe()` in `apps/web/src/lib/relayer-client.ts`. The SAFE-CREATE
+ * request differs from a regular SafeTx:
+ *   - No multiSend, no SafeTx EIP-712 hash.
+ *   - `nonce` comes from GET /nonce?type=SAFECREATE (required by relayer /submit).
+ *   - The user signs a CreateProxy EIP-712 message against the Safe factory's
+ *     domain (name="Polymarket Contract Proxy Factory", chainId, verifyingContract
+ *     = SAFE_FACTORY_ADDRESS) — note the `name` field, which SafeTx doesn't have.
+ *   - `to` is the Safe factory, `data` is "0x" — the relayer builds the factory
+ *     call server-side.
+ *   - `type` is "SAFE-CREATE" (not "SAFE").
+ *   - `signatureParams` mirror the EIP-712 values: { paymentToken, payment,
+ *     paymentReceiver }. All three are zero for gasless onboarding.
+ *
+ * Returns `alreadyDeployed: true` if the Safe already exists on-chain, so
+ * callers can short-circuit without double-prompting the user.
+ */
+export async function deployProxyWallet(signer: BridgeSigner): Promise<{
+  transactionID: string;
+  txHash: string;
+  proxyAddress: string;
+  alreadyDeployed?: boolean;
+}> {
+  // Checksum the EOA — MetaMask returns addresses in lowercase, but the web
+  // path uses viem's already-checksummed `Address` type. Some relayer
+  // validators do case-sensitive address comparisons against the signature
+  // recovery, and we want the extension to send the exact same bytes the web
+  // sends.
+  const eoaAddress = ethers.utils.getAddress(await signer.getAddress());
+  const safeAddress = deriveSafeAddress(eoaAddress);
+
+  logInfo("relayer.deploy-safe.start", { eoaAddress, safeAddress });
+
+  // Short-circuit if the Safe is already on-chain. Without this the relayer
+  // would bounce the SAFE-CREATE with an opaque error, and the user would
+  // see a failed signing request for a no-op.
+  const deployedCheck = await sendAuthedRequest<{ deployed: boolean }>(
+    "GET",
+    "/deployed",
+    undefined,
+    { address: safeAddress }
+  );
+  if (deployedCheck.deployed) {
+    logInfo("relayer.deploy-safe.already-deployed", { safeAddress });
+    return {
+      transactionID: "",
+      txHash: "",
+      proxyAddress: safeAddress,
+      alreadyDeployed: true,
+    };
+  }
+
+  const paymentToken = ethers.constants.AddressZero;
+  const payment = "0";
+  const paymentReceiver = ethers.constants.AddressZero;
+
+  const domain = {
+    name: SAFE_FACTORY_NAME,
+    chainId: CHAIN_ID,
+    verifyingContract: SAFE_FACTORY_ADDRESS,
+  };
+  const types = {
+    CreateProxy: [
+      { name: "paymentToken", type: "address" },
+      { name: "payment", type: "uint256" },
+      { name: "paymentReceiver", type: "address" },
+    ],
+  };
+  const message = { paymentToken, payment, paymentReceiver };
+
+  const signature = await signer._signTypedData(domain, types, message);
+
+  // SAFE-CREATE does not take a nonce — the factory deploys at a deterministic
+  // CREATE2 address with no pre-existing state. The upstream relayer's /nonce
+  // endpoint only accepts `type=SAFE | PROXY` (verified against the public
+  // OpenAPI spec); requesting `SAFECREATE` returns 400 "bad request".
+  const requestBody = {
+    from: eoaAddress,
+    to: SAFE_FACTORY_ADDRESS,
+    proxyWallet: safeAddress,
+    data: "0x",
+    signature,
+    signatureParams: {
+      paymentToken,
+      payment,
+      paymentReceiver,
+    },
+    type: "SAFE-CREATE",
+  };
+  const requestPayload = JSON.stringify(requestBody);
+
+  // Post-Apr-21-2026: /submit returns immediately with { transactionID, state };
+  // the on-chain hash comes from the /transaction poll below.
+  const submitResponse = await sendAuthedRequest<{
+    transactionID: string;
+    state: string;
+  }>("POST", "/submit", requestPayload);
+
+  if (FAILURE_STATES.includes(submitResponse.state)) {
+    throw new Error(
+      `Relayer rejected deploy immediately (${submitResponse.state})`
+    );
+  }
+
+  logInfo("relayer.deploy-safe.submitted", {
+    transactionID: submitResponse.transactionID,
+    state: submitResponse.state,
+  });
+
+  const txHash = await pollTransaction(submitResponse.transactionID);
+  return {
+    transactionID: submitResponse.transactionID,
+    txHash,
+    proxyAddress: safeAddress,
+  };
 }

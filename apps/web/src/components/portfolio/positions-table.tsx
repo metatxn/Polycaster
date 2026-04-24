@@ -1,24 +1,8 @@
 import { motion } from "framer-motion";
-import {
-  ArrowDownRight,
-  ArrowUpRight,
-  BarChart3,
-  LayoutGrid,
-} from "lucide-react";
+import { BarChart3 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Tooltip,
   TooltipContent,
@@ -26,9 +10,59 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatCurrency, formatPercent, formatPrice } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import { EmptyState } from "./empty-state";
 import { SortableHeader } from "./sortable-header";
 import type { PnLFilter, Position, SortDirection, SortField } from "./types";
+
+const DESKTOP_GRID =
+  "grid grid-cols-[minmax(0,1fr)_100px_88px_88px_128px_120px] items-center gap-3";
+
+function marketHref(position: Position): string {
+  const base = `/events/detail/${position.market.eventSlug}`;
+  return position.conditionId
+    ? `${base}?conditionId=${position.conditionId}`
+    : base;
+}
+
+function MarketIcon({ position, size }: { position: Position; size: number }) {
+  return (
+    <div
+      className="relative rounded-sm overflow-hidden bg-muted border border-border/50 shrink-0"
+      style={{ width: size, height: size }}
+    >
+      {position.market.icon ? (
+        <Image
+          src={position.market.icon}
+          alt={position.market.title}
+          fill
+          sizes={`${size}px`}
+          className="object-cover"
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <BarChart3 className="h-4 w-4 text-muted-foreground" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OutcomeLabel({ position }: { position: Position }) {
+  const isYes = position.outcome === "Yes";
+  return (
+    <span
+      className={cn(
+        "font-mono text-[10px] uppercase tracking-[0.12em]",
+        isYes
+          ? "text-emerald-600 dark:text-emerald-400"
+          : "text-red-600 dark:text-red-400"
+      )}
+    >
+      {position.outcome} {formatPrice(position.avgPrice)}
+    </span>
+  );
+}
 
 export function PositionsTable({
   positions,
@@ -49,20 +83,17 @@ export function PositionsTable({
   onSort: (field: SortField) => void;
   onSell?: (position: Position) => void;
 }) {
-  // Filter and sort positions
   const filteredPositions = useMemo(() => {
     let result = positions.filter((p) =>
       p.market.title.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    // Apply P&L filter
     if (pnlFilter === "profit") {
       result = result.filter((p) => p.unrealizedPnl >= 0);
     } else if (pnlFilter === "loss") {
       result = result.filter((p) => p.unrealizedPnl < 0);
     }
 
-    // Apply sorting
     result = [...result].sort((a, b) => {
       let comparison = 0;
       switch (sortField) {
@@ -86,9 +117,19 @@ export function PositionsTable({
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 space-y-2">
+      <div className="border-t border-border/40">
         {[1, 2, 3, 4, 5].map((i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+          <div
+            key={i}
+            className="flex items-center gap-3 px-3 py-4 border-b border-border/40"
+          >
+            <div className="h-9 w-9 rounded-sm bg-muted-foreground/10 animate-pulse shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-2/3 rounded bg-muted-foreground/10 animate-pulse" />
+              <div className="h-3 w-1/3 rounded bg-muted-foreground/10 animate-pulse" />
+            </div>
+            <div className="h-4 w-20 rounded bg-muted-foreground/10 animate-pulse" />
+          </div>
         ))}
       </div>
     );
@@ -97,28 +138,26 @@ export function PositionsTable({
   if (filteredPositions.length === 0) {
     return (
       <EmptyState
-        icon={LayoutGrid}
-        title="No positions found"
+        title="No positions"
         description={
           searchQuery || pnlFilter !== "all"
-            ? "Try adjusting your search or filters"
-            : "Start trading to build your portfolio and see your positions here"
+            ? "Try a different search term or clear the filter."
+            : "Nothing open yet. Find a market and take a side to start your book."
         }
         action={
           !searchQuery && pnlFilter === "all"
-            ? { label: "Explore Markets", href: "/" }
+            ? { label: "Explore markets", href: "/markets" }
             : undefined
         }
         secondaryAction={
           !searchQuery && pnlFilter === "all"
-            ? { label: "View Trending", href: "/?sort=trending" }
+            ? { label: "View trending", href: "/markets?sort=trending" }
             : undefined
         }
       />
     );
   }
 
-  // Calculate totals
   const totalBet = filteredPositions.reduce(
     (sum, p) => sum + p.initialValue,
     0
@@ -139,374 +178,348 @@ export function PositionsTable({
 
   return (
     <TooltipProvider>
-      {/* Mobile Card View */}
-      <div className="md:hidden space-y-3 p-4">
-        {filteredPositions.map((position) => {
+      {/* Desktop — editorial hairline grid */}
+      <div className="hidden md:block">
+        <div
+          className={cn(
+            DESKTOP_GRID,
+            "px-3 py-2.5 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+          )}
+        >
+          <SortableHeader
+            label="Market"
+            field="name"
+            currentSort={sortField}
+            onSort={onSort}
+          />
+          <Tooltip>
+            <TooltipTrigger className="cursor-help text-center">
+              Avg → Now
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs max-w-[200px]">
+              Your average buy price → current market price
+            </TooltipContent>
+          </Tooltip>
+          <span className="text-right tabular-nums">Bet</span>
+          <span className="text-right tabular-nums">To Win</span>
+          <div className="flex justify-end">
+            <SortableHeader
+              label="Value / P&L"
+              field="value"
+              currentSort={sortField}
+              onSort={onSort}
+            />
+          </div>
+          <span className="text-right">Actions</span>
+        </div>
+
+        {filteredPositions.map((position, index) => {
           const isProfit = position.unrealizedPnl >= 0;
           const toWin = position.size * (1 - position.avgPrice);
+          const priceDrift =
+            position.currentPrice > position.avgPrice
+              ? "text-emerald-600 dark:text-emerald-400"
+              : position.currentPrice < position.avgPrice
+                ? "text-red-600 dark:text-red-400"
+                : "text-muted-foreground";
 
           return (
             <motion.div
               key={position.id}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-background border border-border rounded-xl p-4 space-y-3"
+              transition={{ delay: Math.min(index * 0.015, 0.3) }}
+              className={cn(
+                DESKTOP_GRID,
+                "px-3 py-3.5 border-b border-border/40 hover:bg-muted/30 transition-colors"
+              )}
             >
               <Link
-                href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
-                className="flex items-start gap-3"
+                href={marketHref(position)}
+                className="flex items-center gap-3 min-w-0 group"
               >
-                <div className="relative w-12 h-12 rounded-full overflow-hidden bg-muted shrink-0">
-                  {position.market.icon ? (
-                    <Image
-                      src={position.market.icon}
-                      alt={position.market.title}
-                      fill
-                      sizes="48px"
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <BarChart3 className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm line-clamp-2 leading-tight">
+                <MarketIcon position={position} size={36} />
+                <div className="min-w-0">
+                  <p className="font-medium text-sm truncate text-foreground group-hover:text-foreground transition-colors">
                     {position.market.title}
                   </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span
-                      className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                        position.outcome === "Yes"
-                          ? "bg-emerald-500/15 text-emerald-500"
-                          : "bg-red-500/15 text-red-500"
-                      }`}
-                    >
-                      {position.outcome}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {position.size.toFixed(1)} shares
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <OutcomeLabel position={position} />
+                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground/80">
+                      · {position.size.toFixed(1)} shares
                     </span>
                   </div>
                 </div>
               </Link>
 
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                    Avg → Now
-                  </p>
-                  <p className="text-sm font-medium">
-                    <span className="text-muted-foreground">
-                      {formatPrice(position.avgPrice)}
-                    </span>
-                    <span className="mx-1 text-muted-foreground">→</span>
-                    <span
-                      className={
-                        position.currentPrice > position.avgPrice
-                          ? "text-emerald-500"
-                          : position.currentPrice < position.avgPrice
-                            ? "text-red-500"
-                            : ""
-                      }
-                    >
-                      {formatPrice(position.currentPrice)}
-                    </span>
-                  </p>
+              <div className="text-center font-mono tabular-nums text-xs">
+                <span className="text-muted-foreground">
+                  {formatPrice(position.avgPrice)}
+                </span>
+                <span className="mx-1 text-muted-foreground/60">→</span>
+                <span className={priceDrift}>
+                  {formatPrice(position.currentPrice)}
+                </span>
+              </div>
+
+              <div className="text-right font-mono tabular-nums text-sm text-foreground">
+                {formatCurrency(position.initialValue)}
+              </div>
+
+              <div className="text-right font-mono tabular-nums text-sm text-muted-foreground">
+                {formatCurrency(toWin)}
+              </div>
+
+              <div className="text-right font-mono tabular-nums">
+                <div className="text-sm font-medium text-foreground">
+                  {formatCurrency(position.currentValue)}
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                    Value
-                  </p>
-                  <p className="text-sm font-bold">
-                    {formatCurrency(position.currentValue)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                    Bet / To Win
-                  </p>
-                  <p className="text-sm">
-                    {formatCurrency(position.initialValue)} /{" "}
-                    {formatCurrency(toWin)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                    P&L
-                  </p>
-                  <p
-                    className={`text-sm font-medium flex items-center justify-end gap-1 ${
-                      isProfit ? "text-emerald-500" : "text-red-500"
-                    }`}
-                  >
-                    {isProfit ? (
-                      <ArrowUpRight className="h-3 w-3" />
-                    ) : (
-                      <ArrowDownRight className="h-3 w-3" />
-                    )}
-                    {formatCurrency(position.unrealizedPnl, true)}
-                    <span className="text-xs opacity-80">
-                      ({formatPercent(position.unrealizedPnlPercent)})
-                    </span>
-                  </p>
+                <div
+                  className={cn(
+                    "text-[11px] font-semibold whitespace-nowrap",
+                    isProfit
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400"
+                  )}
+                >
+                  {isProfit ? "+" : ""}
+                  {formatCurrency(position.unrealizedPnl, true)}
+                  <span className="ml-1 opacity-70">
+                    ({formatPercent(position.unrealizedPnlPercent)})
+                  </span>
                 </div>
               </div>
 
-              <div className="flex gap-2 mt-2">
-                <Button
-                  size="sm"
-                  variant="default"
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+              <div className="flex items-center justify-end gap-4">
+                <button
+                  type="button"
                   onClick={() => onSell?.(position)}
+                  className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60"
                 >
                   Sell
-                </Button>
-                <Button asChild size="sm" variant="outline" className="flex-1">
-                  <Link
-                    href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
-                  >
+                </button>
+                <Link
+                  href={marketHref(position)}
+                  className="group inline-flex items-baseline gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
+                >
+                  <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
                     Trade
-                  </Link>
-                </Button>
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="translate-y-px transition-transform group-hover:translate-x-0.5"
+                  >
+                    →
+                  </span>
+                </Link>
               </div>
             </motion.div>
           );
         })}
 
-        {/* Mobile Total Summary */}
-        <div className="bg-muted/50 rounded-xl p-4 border border-border">
-          <p className="text-xs font-medium text-muted-foreground mb-2">
-            Portfolio Summary
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-[10px] text-muted-foreground uppercase">
-                Total Bet
-              </p>
-              <p className="font-semibold">{formatCurrency(totalBet)}</p>
+        {/* Totals — hairline-anchored summary row */}
+        <div
+          className={cn(
+            DESKTOP_GRID,
+            "px-3 py-3 border-t-2 border-t-border/60 border-b border-b-border/40 bg-muted/10"
+          )}
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Total{" "}
+            <span className="tabular-nums opacity-70">
+              ({filteredPositions.length})
+            </span>
+          </div>
+          <span aria-hidden="true" />
+          <div className="text-right font-mono tabular-nums text-sm font-semibold text-foreground">
+            {formatCurrency(totalBet)}
+          </div>
+          <div className="text-right font-mono tabular-nums text-sm text-muted-foreground">
+            {formatCurrency(totalToWin)}
+          </div>
+          <div className="text-right font-mono tabular-nums">
+            <div className="text-sm font-semibold text-foreground">
+              {formatCurrency(totalValue)}
             </div>
-            <div className="text-right">
-              <p className="text-[10px] text-muted-foreground uppercase">
-                Total Value
-              </p>
-              <p className="font-semibold">{formatCurrency(totalValue)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground uppercase">
-                To Win
-              </p>
-              <p className="font-medium">{formatCurrency(totalToWin)}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] text-muted-foreground uppercase">
-                Total P&L
-              </p>
-              <p
-                className={`font-semibold ${
-                  totalPnl >= 0 ? "text-emerald-500" : "text-red-500"
-                }`}
-              >
-                {formatCurrency(totalPnl, true)} (
-                {formatPercent(totalPnlPercent)})
-              </p>
+            <div
+              className={cn(
+                "text-[11px] font-semibold whitespace-nowrap",
+                totalPnl >= 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-red-600 dark:text-red-400"
+              )}
+            >
+              {totalPnl >= 0 ? "+" : ""}
+              {formatCurrency(totalPnl, true)}
+              <span className="ml-1 opacity-70">
+                ({formatPercent(totalPnlPercent)})
+              </span>
             </div>
           </div>
+          <span aria-hidden="true" />
         </div>
       </div>
 
-      {/* Desktop Table View */}
-      <div className="hidden md:block overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent border-b">
-              <TableHead className="w-[40%] min-w-[200px]">
-                <SortableHeader
-                  label="Market"
-                  field="name"
-                  currentSort={sortField}
-                  onSort={onSort}
-                />
-              </TableHead>
-              <TableHead className="text-center min-w-[100px]">
-                <Tooltip>
-                  <TooltipTrigger className="cursor-help">
-                    Avg → Now
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs max-w-[200px]">
-                    Your average buy price → Current market price
-                  </TooltipContent>
-                </Tooltip>
-              </TableHead>
-              <TableHead className="text-right min-w-[80px]">Bet</TableHead>
-              <TableHead className="text-right min-w-[80px]">To Win</TableHead>
-              <TableHead className="min-w-[100px]">
-                <div className="flex justify-end">
-                  <SortableHeader
-                    label="Value"
-                    field="value"
-                    currentSort={sortField}
-                    onSort={onSort}
-                    tooltip="Current market value of your position"
-                  />
-                </div>
-              </TableHead>
-              <TableHead className="w-[80px]"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredPositions.map((position) => {
-              const isProfit = position.unrealizedPnl >= 0;
-              const toWin = position.size * (1 - position.avgPrice);
+      {/* Mobile — hairline stacked rows */}
+      <div className="md:hidden border-t border-border/40">
+        {filteredPositions.map((position, index) => {
+          const isProfit = position.unrealizedPnl >= 0;
+          const toWin = position.size * (1 - position.avgPrice);
+          const priceDrift =
+            position.currentPrice > position.avgPrice
+              ? "text-emerald-600 dark:text-emerald-400"
+              : position.currentPrice < position.avgPrice
+                ? "text-red-600 dark:text-red-400"
+                : "text-muted-foreground";
 
-              return (
-                <TableRow
-                  key={position.id}
-                  className="group hover:bg-muted/50 transition-colors"
-                >
-                  <TableCell>
-                    <Link
-                      href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
-                      className="flex items-center gap-3"
-                    >
-                      <div className="relative w-10 h-10 rounded-full overflow-hidden bg-muted shrink-0">
-                        {position.market.icon ? (
-                          <Image
-                            src={position.market.icon}
-                            alt={position.market.title}
-                            fill
-                            sizes="40px"
-                            className="object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm truncate max-w-[280px] group-hover:text-primary transition-colors">
-                          {position.market.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          <span
-                            className={
-                              position.outcome === "Yes"
-                                ? "text-emerald-500"
-                                : "text-red-500"
-                            }
-                          >
-                            {position.outcome} {formatPrice(position.avgPrice)}
-                          </span>
-                          <span className="mx-1.5">·</span>
-                          {position.size.toFixed(1)} shares
-                        </p>
-                      </div>
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <span className="text-muted-foreground">
-                      {formatPrice(position.avgPrice)}
+          return (
+            <motion.div
+              key={position.id}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(index * 0.015, 0.3) }}
+              className="border-b border-border/40 py-4 space-y-3"
+            >
+              <Link
+                href={marketHref(position)}
+                className="flex items-start gap-3"
+              >
+                <MarketIcon position={position} size={44} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm line-clamp-2 leading-tight text-foreground">
+                    {position.market.title}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <OutcomeLabel position={position} />
+                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground/80">
+                      · {position.size.toFixed(1)} shares
                     </span>
-                    <span className="mx-1 text-muted-foreground">→</span>
-                    <span
-                      className={
-                        position.currentPrice > position.avgPrice
-                          ? "text-emerald-500"
-                          : position.currentPrice < position.avgPrice
-                            ? "text-red-500"
-                            : ""
-                      }
-                    >
-                      {formatPrice(position.currentPrice)}
+                  </div>
+                </div>
+              </Link>
+
+              <div className="flex items-baseline justify-between gap-3 font-mono tabular-nums text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/70">
+                    Avg→Now
+                  </span>
+                  <span className="text-muted-foreground">
+                    {formatPrice(position.avgPrice)}
+                  </span>
+                  <span className="text-muted-foreground/60">→</span>
+                  <span className={priceDrift}>
+                    {formatPrice(position.currentPrice)}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-semibold text-foreground">
+                    {formatCurrency(position.currentValue)}
+                  </div>
+                  <div
+                    className={cn(
+                      "text-[11px] font-semibold",
+                      isProfit
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-red-600 dark:text-red-400"
+                    )}
+                  >
+                    {isProfit ? "+" : ""}
+                    {formatCurrency(position.unrealizedPnl, true)}
+                    <span className="ml-1 opacity-70">
+                      ({formatPercent(position.unrealizedPnlPercent)})
                     </span>
-                  </TableCell>
-                  <TableCell className="text-right">
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-baseline justify-between gap-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span>
+                  Bet{" "}
+                  <span className="tabular-nums normal-case text-foreground ml-1">
                     {formatCurrency(position.initialValue)}
-                  </TableCell>
-                  <TableCell className="text-right">
+                  </span>
+                </span>
+                <span>
+                  To Win{" "}
+                  <span className="tabular-nums normal-case text-foreground ml-1">
                     {formatCurrency(toWin)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="font-medium">
-                      {formatCurrency(position.currentValue)}
-                    </div>
-                    <div
-                      className={`text-xs flex items-center justify-end gap-0.5 ${
-                        isProfit ? "text-emerald-500" : "text-red-500"
-                      }`}
-                    >
-                      {isProfit ? (
-                        <ArrowUpRight className="h-3 w-3" />
-                      ) : (
-                        <ArrowDownRight className="h-3 w-3" />
-                      )}
-                      {formatCurrency(position.unrealizedPnl, true)} (
-                      {formatPercent(position.unrealizedPnlPercent)})
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        className="bg-red-600 hover:bg-red-700 text-white h-8"
-                        onClick={() => onSell?.(position)}
-                      >
-                        Sell
-                      </Button>
-                      <Button
-                        asChild
-                        size="sm"
-                        variant="outline"
-                        className="h-8"
-                      >
-                        <Link
-                          href={`/events/detail/${position.market.eventSlug}${position.conditionId ? `?conditionId=${position.conditionId}` : ""}`}
-                        >
-                          Trade
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-          <TableFooter>
-            <TableRow className="bg-muted/30">
-              <TableCell className="font-semibold">
-                Total ({filteredPositions.length})
-              </TableCell>
-              <TableCell></TableCell>
-              <TableCell className="text-right font-semibold">
-                {formatCurrency(totalBet)}
-              </TableCell>
-              <TableCell className="text-right font-semibold">
-                {formatCurrency(totalToWin)}
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="font-semibold">
-                  {formatCurrency(totalValue)}
-                </div>
-                <div
-                  className={`text-xs flex items-center justify-end gap-0.5 ${
-                    totalPnl >= 0 ? "text-emerald-500" : "text-red-500"
-                  }`}
+                  </span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-6 pt-2 border-t border-border/30">
+                <button
+                  type="button"
+                  onClick={() => onSell?.(position)}
+                  className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60"
                 >
-                  {totalPnl >= 0 ? (
-                    <ArrowUpRight className="h-3 w-3" />
-                  ) : (
-                    <ArrowDownRight className="h-3 w-3" />
-                  )}
-                  {formatCurrency(totalPnl, true)} (
-                  {formatPercent(totalPnlPercent)})
-                </div>
-              </TableCell>
-              <TableCell></TableCell>
-            </TableRow>
-          </TableFooter>
-        </Table>
+                  Sell
+                </button>
+                <Link
+                  href={marketHref(position)}
+                  className="group inline-flex items-baseline gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
+                >
+                  <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
+                    Trade
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="translate-y-px transition-transform group-hover:translate-x-0.5"
+                  >
+                    →
+                  </span>
+                </Link>
+              </div>
+            </motion.div>
+          );
+        })}
+
+        {/* Mobile Totals */}
+        <div className="py-4 mt-2 border-t-2 border-t-border/60 border-b border-b-border/40">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
+            §&nbsp;&nbsp;Portfolio Summary
+            <span className="tabular-nums ml-1.5 opacity-70">
+              ({filteredPositions.length})
+            </span>
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div>
+              Bet{" "}
+              <span className="tabular-nums normal-case text-foreground font-semibold ml-1">
+                {formatCurrency(totalBet)}
+              </span>
+            </div>
+            <div className="text-right">
+              Value{" "}
+              <span className="tabular-nums normal-case text-foreground font-semibold ml-1">
+                {formatCurrency(totalValue)}
+              </span>
+            </div>
+            <div>
+              To Win{" "}
+              <span className="tabular-nums normal-case text-foreground ml-1">
+                {formatCurrency(totalToWin)}
+              </span>
+            </div>
+            <div className="text-right">
+              P&amp;L{" "}
+              <span
+                className={cn(
+                  "tabular-nums normal-case font-semibold ml-1",
+                  totalPnl >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                )}
+              >
+                {totalPnl >= 0 ? "+" : ""}
+                {formatCurrency(totalPnl, true)}{" "}
+                <span className="opacity-70">
+                  ({formatPercent(totalPnlPercent)})
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </TooltipProvider>
   );

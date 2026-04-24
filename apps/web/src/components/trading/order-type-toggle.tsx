@@ -8,32 +8,45 @@ interface OrderTypeToggleProps {
   onChange: (type: OrderTypeSelection) => void;
 }
 
+const OPTIONS: { value: OrderTypeSelection; label: string; icon?: boolean }[] =
+  [
+    { value: "MARKET", label: "Market", icon: true },
+    { value: "LIMIT", label: "Limit" },
+  ];
+
 export function OrderTypeToggle({ orderType, onChange }: OrderTypeToggleProps) {
   return (
-    <div className="flex rounded-xl bg-muted p-1">
-      <button
-        type="button"
-        className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 ${
-          orderType === "MARKET"
-            ? "bg-background text-foreground shadow-md border border-border/50"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        onClick={() => onChange("MARKET")}
-      >
-        <Zap className="h-3.5 w-3.5" />
-        Market
-      </button>
-      <button
-        type="button"
-        className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all ${
-          orderType === "LIMIT"
-            ? "bg-background text-foreground shadow-md border border-border/50"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        onClick={() => onChange("LIMIT")}
-      >
-        Limit
-      </button>
+    <div
+      role="tablist"
+      aria-label="Order type"
+      className="flex items-stretch border-b border-border/40"
+    >
+      {OPTIONS.map((opt) => {
+        const isActive = orderType === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(opt.value)}
+            className={`relative flex-1 inline-flex items-center justify-center gap-1.5 py-3 font-mono text-[11px] uppercase tracking-[0.15em] transition-colors ${
+              isActive
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {opt.icon && <Zap className="h-3 w-3" />}
+            <span>{opt.label}</span>
+            {isActive && (
+              <span
+                aria-hidden="true"
+                className="absolute inset-x-0 -bottom-px h-px bg-foreground"
+              />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

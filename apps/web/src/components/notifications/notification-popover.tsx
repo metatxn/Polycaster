@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCheck,
-  RefreshCw,
-  Settings,
-} from "lucide-react";
-import Link from "next/link";
+import { AlertCircle, CheckCheck, RefreshCw, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -36,8 +29,9 @@ interface NotificationPopoverProps {
   needsSetup?: boolean;
 }
 
-/** Maximum notifications to show in popover */
-const MAX_POPOVER_ITEMS = 5;
+/** Maximum notifications to show in popover. The full list scrolls
+ *  inside the popover — there's no separate /notifications page. */
+const MAX_POPOVER_ITEMS = 20;
 
 /**
  * Notification popover component
@@ -58,7 +52,6 @@ export function NotificationPopover({
   needsSetup = false,
 }: NotificationPopoverProps) {
   const { setShowOnboarding } = useOnboarding();
-  const hasMore = notifications.length > MAX_POPOVER_ITEMS;
   const hasNotifications = notifications.length > 0;
 
   const handleSetupClick = () => {
@@ -114,23 +107,32 @@ export function NotificationPopover({
         {/* Setup Required Message */}
         {needsSetup ? (
           <div className="p-6 text-center">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-500/10 mb-4">
-              <AlertCircle className="h-6 w-6 text-red-500" />
+            <div className="inline-flex items-center justify-center w-12 h-12 border border-border/60 mb-4">
+              <AlertCircle className="h-5 w-5 text-foreground" />
             </div>
-            <h4 className="font-semibold text-sm mb-2">Setup Required</h4>
-            <p className="text-xs text-muted-foreground mb-4">
-              Complete your trading account setup to receive notifications about
-              your orders and positions.
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2">
+              § Setup Required
             </p>
-            <Button size="sm" className="gap-2" onClick={handleSetupClick}>
+            <h4 className="font-editorial italic font-medium text-xl mb-3">
+              Sign in to see what moved.
+            </h4>
+            <p className="text-xs text-muted-foreground mb-5 max-w-[220px] mx-auto">
+              Complete trading account setup to receive notifications about your
+              orders and positions.
+            </p>
+            <Button
+              size="sm"
+              className="gap-2 font-mono text-[11px] uppercase tracking-[0.14em] font-semibold"
+              onClick={handleSetupClick}
+            >
               <Settings className="h-3.5 w-3.5" />
-              Setup Trading Account
+              Setup Trading
             </Button>
           </div>
         ) : (
           <>
-            {/* Notification List */}
-            <div className="max-h-[320px] overflow-y-auto">
+            {/* Notification List — scroll inside the popover, no separate page */}
+            <div className="max-h-[420px] overflow-y-auto">
               <NotificationList
                 notifications={notifications}
                 isLoading={isLoading}
@@ -142,22 +144,12 @@ export function NotificationPopover({
               />
             </div>
 
-            {/* Footer - Show More Link */}
+            {/* Footer — auto-clear notice */}
             {hasNotifications && (
-              <div className="border-t border-border/50 p-2">
-                <Link href="/notifications" className="block">
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-between h-9 text-xs font-medium hover:bg-muted/60"
-                  >
-                    <span>
-                      {hasMore
-                        ? `View all ${notifications.length} notifications`
-                        : "View all notifications"}
-                    </span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Button>
-                </Link>
+              <div className="border-t border-border/50 px-4 py-2">
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground text-center">
+                  Auto-clears after 48h
+                </p>
               </div>
             )}
           </>

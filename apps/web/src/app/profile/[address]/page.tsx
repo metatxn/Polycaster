@@ -1,31 +1,16 @@
 "use client";
 
 import { motion } from "framer-motion";
-import {
-  ArrowLeft,
-  BadgeCheck,
-  BarChart3,
-  Check,
-  Copy,
-  Crown,
-  ExternalLink,
-  Medal,
-  TrendingDown,
-  TrendingUp,
-  Trophy,
-  User,
-  Wallet,
-} from "lucide-react";
-import Image from "next/image";
+import { ArrowLeft, BadgeCheck, Check, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
+import { ProChromeHeader } from "@/components/app-pro-layout";
+import { EditorialFooter } from "@/components/editorial-footer";
+import { EditorialHero } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
-import { PageBackground } from "@/components/page-background";
+import { PullStat, PullStatGrid, TrendGlyph } from "@/components/pull-stat";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -52,32 +37,6 @@ function getInitials(name: string | null, _address: string) {
   return "0x";
 }
 
-function getRankIcon(rank: number) {
-  switch (rank) {
-    case 1:
-      return <Crown className="h-5 w-5 text-yellow-500" />;
-    case 2:
-      return <Medal className="h-5 w-5 text-gray-400" />;
-    case 3:
-      return <Medal className="h-5 w-5 text-amber-600" />;
-    default:
-      return <Trophy className="h-5 w-5 text-muted-foreground" />;
-  }
-}
-
-function getRankBadgeClass(rank: number) {
-  switch (rank) {
-    case 1:
-      return "bg-gradient-to-r from-yellow-500 to-amber-500 text-white";
-    case 2:
-      return "bg-gradient-to-r from-gray-400 to-gray-500 text-white";
-    case 3:
-      return "bg-gradient-to-r from-amber-600 to-orange-600 text-white";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
-
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -94,15 +53,15 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
           <button
             type="button"
             onClick={handleCopy}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-muted/60 transition-colors text-sm"
+            className="inline-flex items-center gap-1.5 py-1 text-muted-foreground hover:text-foreground transition-colors"
           >
-            <span className="font-mono text-muted-foreground">
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em]">
               {label || text}
             </span>
             {copied ? (
-              <Check className="h-3.5 w-3.5 text-emerald-500" />
+              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
             ) : (
-              <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+              <Copy className="h-3 w-3 opacity-60" />
             )}
           </button>
         </TooltipTrigger>
@@ -112,116 +71,23 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   );
 }
 
-function StatCard({
-  title,
-  value,
-  icon: Icon,
-  trend,
-  className,
-}: {
-  title: string;
-  value: string;
-  icon: React.ComponentType<{ className?: string }>;
-  trend?: "up" | "down" | null;
-  className?: string;
-}) {
-  return (
-    <Card
-      className={cn(
-        "bg-card/50 backdrop-blur-sm border-border/50 overflow-hidden",
-        className
-      )}
-    >
-      <CardContent className="p-4 sm:p-5">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm text-muted-foreground">{title}</span>
-          <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-        </div>
-        <div className="flex items-center gap-2">
-          {trend &&
-            (trend === "up" ? (
-              <TrendingUp className="h-5 w-5 text-emerald-500 shrink-0" />
-            ) : (
-              <TrendingDown className="h-5 w-5 text-red-500 shrink-0" />
-            ))}
-          <span
-            className={cn(
-              "text-xl sm:text-2xl font-bold",
-              trend === "up" && "text-emerald-500",
-              trend === "down" && "text-red-500"
-            )}
-          >
-            {value}
-          </span>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function RankCard({
-  title,
-  rank,
+function RankCaption({
   pnl,
   volume,
 }: {
-  title: string;
-  rank: string | null;
   pnl: number | null;
   volume: number | null;
 }) {
-  if (!rank) {
-    return (
-      <Card className="bg-card/30 backdrop-blur-sm border-border/30">
-        <CardContent className="p-4 sm:p-5 text-center h-full flex flex-col justify-center">
-          <span className="text-sm text-muted-foreground">{title}</span>
-          <p className="text-muted-foreground mt-3 text-sm">Not ranked</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const rankNum = Number.parseInt(rank, 10);
-  const isProfitable = (pnl || 0) >= 0;
-
+  const hasData = pnl !== null || volume !== null;
+  if (!hasData) return <>Not ranked</>;
+  const pnlValue = pnl ?? 0;
+  const volValue = volume ?? 0;
+  const sign = pnlValue >= 0 ? "+" : "−";
+  const pnlStr = `${sign}${formatCurrencyCompact(Math.abs(pnlValue))}`;
   return (
-    <Card className="bg-card/50 backdrop-blur-sm border-border/50 hover:border-violet-500/30 transition-colors overflow-hidden">
-      <CardContent className="p-4 sm:p-5">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm text-muted-foreground">{title}</span>
-          {getRankIcon(rankNum)}
-        </div>
-        <div className="flex items-center gap-2 mb-3">
-          <span
-            className={cn(
-              "inline-flex items-center justify-center w-10 h-10 rounded-full text-base font-bold",
-              getRankBadgeClass(rankNum)
-            )}
-          >
-            #{rank}
-          </span>
-        </div>
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground shrink-0">P&L</span>
-            <span
-              className={cn(
-                "font-semibold",
-                isProfitable ? "text-emerald-500" : "text-red-500"
-              )}
-            >
-              {formatCurrencyCompact(pnl || 0, true)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground shrink-0">Volume</span>
-            <span className="font-medium">
-              {formatCurrencyCompact(volume || 0)}
-            </span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <>
+      {pnlStr} · {formatCurrencyCompact(volValue)} vol
+    </>
   );
 }
 
@@ -232,14 +98,30 @@ export default function ProfilePage() {
 
   const { data: profile, isLoading, error } = useTraderProfile(address);
 
+  // The API returns a valid empty profile for any 0x address. Treat a
+  // trader with zero volume, no username, and no rankings at all as a
+  // 404 — otherwise users hitting a typo'd address see a ghost profile
+  // indistinguishable from a legit zero-activity trader.
+  const isEmptyTrader =
+    !!profile &&
+    !profile.userName &&
+    profile.totalVolume === 0 &&
+    profile.totalPnl === 0 &&
+    profile.tradesCount === 0 &&
+    profile.positionsCount === 0 &&
+    !profile.rankings.overall &&
+    !profile.rankings.day &&
+    !profile.rankings.week &&
+    !profile.rankings.month;
+
   if (isLoading) {
     return (
-      <div className="min-h-screen flex flex-col bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background">
-        <PageBackground />
+      <div className="min-h-screen flex flex-col bg-background">
         <Navbar />
+        <ProChromeHeader />
         <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
           <div className="max-w-4xl mx-auto">
-            <Skeleton className="h-9 w-24 rounded-xl mb-6" />
+            <Skeleton className="h-9 w-24 rounded-none mb-6" />
             <div className="flex items-start gap-4 mb-8">
               <Skeleton className="h-24 w-24 rounded-2xl" />
               <div className="space-y-3 flex-1">
@@ -250,74 +132,47 @@ export default function ProfilePage() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
               {[...Array(4)].map((_, i) => (
-                <Skeleton key={`stat-${i}`} className="h-28 rounded-xl" />
+                <Skeleton key={`stat-${i}`} className="h-28 rounded-none" />
               ))}
             </div>
-            <Skeleton className="h-64 rounded-xl" />
+            <Skeleton className="h-64 rounded-none" />
           </div>
         </main>
-        <footer className="relative z-10 border-t border-border/30 py-6 bg-background/50 backdrop-blur-xl">
-          <div className="px-3 sm:px-4 md:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <Image
-                src="/logo-256x256.png"
-                alt="Knoww Logo"
-                width={24}
-                height={24}
-                className="rounded-md"
-              />
-              <span className="font-bold text-foreground">Knoww</span>
-              <span>•</span>
-              <span>Powered by Polymarket</span>
-            </div>
-            <span>© 2025</span>
-          </div>
-        </footer>
+        <EditorialFooter />
       </div>
     );
   }
 
-  if (error || !profile) {
+  if (error || !profile || isEmptyTrader) {
     return (
-      <div className="min-h-screen flex flex-col bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background">
-        <PageBackground />
+      <div className="min-h-screen flex flex-col bg-background">
         <Navbar />
+        <ProChromeHeader />
         <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8 flex items-center justify-center">
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-muted/50 mb-6">
-              <User className="h-10 w-10 text-muted-foreground" />
-            </div>
-            <h1 className="text-2xl font-bold mb-2">Profile Not Found</h1>
-            <p className="text-muted-foreground mb-6 max-w-md">
-              We couldn't find a trader with this address. They may not have any
-              trading activity yet.
+          <div className="max-w-md text-center">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-4">
+              404 · Trader
             </p>
-            <Button
+            <h1 className="font-editorial italic font-medium text-5xl sm:text-6xl leading-[1.02] tracking-tight text-foreground mb-4">
+              Not found
+            </h1>
+            <p className="font-editorial text-base text-muted-foreground mb-8 leading-snug">
+              No trader with this address has traded on Polymarket. Check the
+              address or browse the leaderboard.
+            </p>
+            <button
+              type="button"
               onClick={() => router.push("/leaderboard")}
-              className="rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600"
+              className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground hover:text-muted-foreground transition-colors"
             >
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Leaderboard
-            </Button>
+              <ArrowLeft className="h-3 w-3" />
+              <span className="underline underline-offset-4 decoration-border">
+                Back to Leaderboard
+              </span>
+            </button>
           </div>
         </main>
-        <footer className="relative z-10 border-t border-border/30 py-6 bg-background/50 backdrop-blur-xl">
-          <div className="px-3 sm:px-4 md:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <Image
-                src="/logo-256x256.png"
-                alt="Knoww Logo"
-                width={24}
-                height={24}
-                className="rounded-md"
-              />
-              <span className="font-bold text-foreground">Knoww</span>
-              <span>•</span>
-              <span>Powered by Polymarket</span>
-            </div>
-            <span>© 2025</span>
-          </div>
-        </footer>
+        <EditorialFooter />
       </div>
     );
   }
@@ -325,217 +180,203 @@ export default function ProfilePage() {
   const isProfitable = profile.totalPnl >= 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background">
-      <PageBackground />
+    <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
+      <ProChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
         <div className="max-w-4xl mx-auto">
-          {/* Back Button */}
-          <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="mb-6"
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => router.back()}
-              className="gap-2 rounded-xl hover:bg-muted/60"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Button>
-          </motion.div>
-
-          {/* Profile Header */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="flex flex-col sm:flex-row items-start gap-5 sm:gap-6 mb-8"
-          >
-            <Avatar className="h-20 w-20 sm:h-24 sm:w-24 rounded-2xl border-4 border-violet-500/20 shadow-xl">
-              {profile.profileImage && (
-                <AvatarImage
-                  src={profile.profileImage}
-                  alt={profile.userName || "Trader"}
-                />
-              )}
-              <AvatarFallback className="rounded-2xl bg-gradient-to-br from-violet-500 to-purple-500 text-white text-2xl font-bold">
-                {getInitials(profile.userName, profile.proxyWallet)}
-              </AvatarFallback>
-            </Avatar>
-
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-2xl sm:text-3xl font-bold truncate">
+          <EditorialHero
+            breadcrumbs={[
+              { label: "Leaderboard", href: "/leaderboard" },
+              { label: "Trader" },
+              {
+                label: profile.userName || formatAddress(profile.proxyWallet),
+              },
+            ]}
+            title={
+              <>
+                <Avatar className="h-12 w-12 sm:h-16 sm:w-16 lg:h-20 lg:w-20 rounded-2xl border border-border/60 shrink-0">
+                  {profile.profileImage && (
+                    <AvatarImage
+                      src={profile.profileImage}
+                      alt={profile.userName || "Trader"}
+                    />
+                  )}
+                  <AvatarFallback className="rounded-2xl bg-muted font-mono text-sm sm:text-base lg:text-lg uppercase tracking-[0.1em] text-foreground/80">
+                    {getInitials(profile.userName, profile.proxyWallet)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="truncate">
                   {profile.userName || formatAddress(profile.proxyWallet)}
-                </h1>
+                </span>
                 {profile.verifiedBadge && (
-                  <BadgeCheck className="h-6 w-6 text-blue-500 shrink-0" />
+                  <BadgeCheck className="h-6 w-6 sm:h-8 sm:w-8 text-sky-600 dark:text-sky-400 shrink-0" />
                 )}
-              </div>
-
-              <CopyButton
-                text={profile.proxyWallet}
-                label={formatAddress(profile.proxyWallet)}
-              />
-
-              {profile.bio && (
-                <p className="text-muted-foreground mt-2 line-clamp-2">
-                  {profile.bio}
-                </p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2 mt-3">
+              </>
+            }
+            subtitle={
+              profile.bio ? (
+                <p className="line-clamp-2">{profile.bio}</p>
+              ) : undefined
+            }
+            belowSlot={
+              <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
+                <CopyButton
+                  text={profile.proxyWallet}
+                  label={formatAddress(profile.proxyWallet)}
+                />
                 {profile.xUsername && (
                   <Link
                     href={`https://x.com/${profile.xUsername}`}
                     target="_blank"
                     rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    <Badge
-                      variant="secondary"
-                      className="gap-1.5 hover:bg-violet-100 dark:hover:bg-violet-500/20"
-                    >
-                      <ExternalLink className="h-3 w-3" />@{profile.xUsername}
-                    </Badge>
+                    <ExternalLink className="h-3 w-3 opacity-60" />@
+                    {profile.xUsername}
                   </Link>
                 )}
                 <Link
                   href={`https://polygonscan.com/address/${profile.proxyWallet}`}
                   target="_blank"
                   rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  <Badge
-                    variant="outline"
-                    className="gap-1.5 hover:bg-muted/50"
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                    Polygonscan
-                  </Badge>
+                  <ExternalLink className="h-3 w-3 opacity-60" />
+                  Polygonscan
                 </Link>
               </div>
-            </div>
-          </motion.div>
+            }
+          />
 
-          {/* Stats Grid */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-8"
-          >
-            <StatCard
-              title="Total P&L"
-              value={formatCurrencyCompact(profile.totalPnl, true)}
-              icon={isProfitable ? TrendingUp : TrendingDown}
-              trend={isProfitable ? "up" : "down"}
-            />
-            <StatCard
-              title="Total Volume"
-              value={formatCurrencyCompact(profile.totalVolume)}
-              icon={BarChart3}
-            />
-            <StatCard
-              title="Positions"
-              value={profile.positionsCount.toString()}
-              icon={Wallet}
-            />
-            <StatCard
-              title="Trades"
-              value={
-                profile.tradesCount > 100
-                  ? "100+"
-                  : profile.tradesCount.toString()
-              }
-              icon={BarChart3}
-            />
-          </motion.div>
+          {/* Pull-numbers */}
+          <div className="mb-8">
+            <PullStatGrid cols={4}>
+              <PullStat
+                label="Total P&L"
+                value={formatCurrencyCompact(profile.totalPnl, true)}
+                valueClassName={cn(
+                  isProfitable
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                )}
+                mark={<TrendGlyph direction={isProfitable ? "up" : "down"} />}
+                caption="Realised + unrealised"
+              />
+              <PullStat
+                label="Total Volume"
+                value={formatCurrencyCompact(profile.totalVolume)}
+                caption="All categories"
+              />
+              <PullStat
+                label="Positions"
+                value={profile.positionsCount.toString()}
+                caption="Open markets"
+              />
+              <PullStat
+                label="Trades"
+                value={
+                  profile.tradesCount > 100
+                    ? "100+"
+                    : profile.tradesCount.toString()
+                }
+                caption="Last 100"
+              />
+            </PullStatGrid>
+          </div>
 
-          {/* Rankings Section */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Card className="bg-card/30 backdrop-blur-sm border-border/50">
-              <CardHeader className="pb-4">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Crown className="h-5 w-5 text-yellow-500" />
-                  Leaderboard Rankings
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                  <RankCard
-                    title="Today"
-                    rank={profile.rankings.day?.rank || null}
-                    pnl={profile.rankings.day?.pnl || null}
-                    volume={profile.rankings.day?.vol || null}
+          {/* Rankings */}
+          <div className="mb-8">
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
+              §&nbsp;&nbsp;Leaderboard Rankings
+            </h2>
+            <PullStatGrid cols={4}>
+              <PullStat
+                label="Today"
+                value={
+                  profile.rankings.day?.rank
+                    ? `#${profile.rankings.day.rank}`
+                    : "—"
+                }
+                caption={
+                  <RankCaption
+                    pnl={profile.rankings.day?.pnl ?? null}
+                    volume={profile.rankings.day?.vol ?? null}
                   />
-                  <RankCard
-                    title="This Week"
-                    rank={profile.rankings.week?.rank || null}
-                    pnl={profile.rankings.week?.pnl || null}
-                    volume={profile.rankings.week?.vol || null}
+                }
+              />
+              <PullStat
+                label="This Week"
+                value={
+                  profile.rankings.week?.rank
+                    ? `#${profile.rankings.week.rank}`
+                    : "—"
+                }
+                caption={
+                  <RankCaption
+                    pnl={profile.rankings.week?.pnl ?? null}
+                    volume={profile.rankings.week?.vol ?? null}
                   />
-                  <RankCard
-                    title="This Month"
-                    rank={profile.rankings.month?.rank || null}
-                    pnl={profile.rankings.month?.pnl || null}
-                    volume={profile.rankings.month?.vol || null}
+                }
+              />
+              <PullStat
+                label="This Month"
+                value={
+                  profile.rankings.month?.rank
+                    ? `#${profile.rankings.month.rank}`
+                    : "—"
+                }
+                caption={
+                  <RankCaption
+                    pnl={profile.rankings.month?.pnl ?? null}
+                    volume={profile.rankings.month?.vol ?? null}
                   />
-                  <RankCard
-                    title="All Time"
-                    rank={profile.rankings.overall?.rank || null}
-                    pnl={profile.rankings.overall?.pnl || null}
-                    volume={profile.rankings.overall?.vol || null}
+                }
+              />
+              <PullStat
+                label="All Time"
+                value={
+                  profile.rankings.overall?.rank
+                    ? `#${profile.rankings.overall.rank}`
+                    : "—"
+                }
+                caption={
+                  <RankCaption
+                    pnl={profile.rankings.overall?.pnl ?? null}
+                    volume={profile.rankings.overall?.vol ?? null}
                   />
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+                }
+              />
+            </PullStatGrid>
+          </div>
 
-          {/* View on Leaderboard CTA */}
+          {/* View on Leaderboard CTA — editorial mono underline link */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
-            className="mt-8 text-center"
+            className="mt-12 border-t border-border/40 pt-6"
           >
-            <Link href="/leaderboard">
-              <Button
-                variant="outline"
-                className="gap-2 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-500/10 hover:border-violet-500/50"
+            <Link
+              href="/leaderboard"
+              className="group inline-flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
+                View full leaderboard
+              </span>
+              <span
+                aria-hidden="true"
+                className="translate-y-px transition-transform group-hover:translate-x-0.5"
               >
-                <Trophy className="h-4 w-4" />
-                View Full Leaderboard
-              </Button>
+                →
+              </span>
             </Link>
           </motion.div>
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-border/30 py-6 bg-background/50 backdrop-blur-xl">
-        <div className="px-3 sm:px-4 md:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <Image
-              src="/logo-256x256.png"
-              alt="Knoww Logo"
-              width={24}
-              height={24}
-              className="rounded-md"
-            />
-            <span className="font-bold text-foreground">Knoww</span>
-            <span>•</span>
-            <span>Powered by Polymarket</span>
-          </div>
-          <span>© 2025</span>
-        </div>
-      </footer>
+      <EditorialFooter />
     </div>
   );
 }

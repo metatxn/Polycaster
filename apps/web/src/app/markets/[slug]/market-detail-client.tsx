@@ -19,7 +19,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Navbar } from "@/components/navbar";
 import { PageBackground } from "@/components/page-background";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -29,7 +28,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { useMarketDetail } from "@/hooks/use-market-detail";
 import {
   useOrderBook as useOrderBookFromStore,
@@ -267,15 +266,23 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   const currentTokenId = tradingOutcomes[selectedOutcome]?.tokenId || "";
 
+  // Shared queryKey `["orderBook", tokenId]` — same as the <OrderBook>
+  // component and the sell-position modal. React Query dedupes across all
+  // concurrent consumers so this mounting-at-the-same-time-as-<OrderBook>
+  // produces ONE network request, not N. The first queryFn to register wins;
+  // the others just read from the shared cache entry. Keep this queryFn
+  // returning the richer shape (tick_size + min_order_size) so downstream
+  // consumers that need those fields get them even when the shared cache
+  // entry was seeded by another call site.
   const { data: orderBookData } =
     useQuery<MarketDetailTradingOrderBookSnapshot | null>({
-      queryKey: ["marketDetailTradingOrderBook", currentTokenId],
+      queryKey: ["orderBook", currentTokenId],
       queryFn:
         async (): Promise<MarketDetailTradingOrderBookSnapshot | null> => {
           if (!currentTokenId) return null;
 
           const response = await fetch(
-            `https://clob.polymarket.com/book?token_id=${currentTokenId}`,
+            `${CLOB_BASE_URL}/book?token_id=${currentTokenId}`,
             { headers: { Accept: "application/json" } }
           );
           if (!response.ok) return null;
@@ -393,7 +400,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
+      <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <PageBackground />
         <Navbar />
         <main className="px-4 md:px-6 lg:px-8 py-8 space-y-8">
@@ -512,14 +519,14 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   if (error || !market) {
     return (
-      <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
+      <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <PageBackground />
         <Navbar />
         <main className="px-4 md:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
             <button
               type="button"
-              onClick={() => router.push("/")}
+              onClick={() => router.push("/markets")}
               className="flex items-center gap-1 hover:text-foreground transition-colors"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -534,7 +541,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => router.push("/")}>
+              <Button onClick={() => router.push("/markets")}>
                 <ChevronLeft className="mr-2 h-4 w-4" />
                 Back to Markets
               </Button>
@@ -546,7 +553,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
+    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <PageBackground />
       <Navbar />
       <motion.main
@@ -556,54 +563,55 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
         transition={{ duration: 0.3 }}
         className="relative z-10 px-4 md:px-6 lg:px-8 py-6 space-y-6"
       >
-        {/* Breadcrumb Navigation */}
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        {/* Breadcrumb Navigation — editorial mono-caps */}
+        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground flex-wrap">
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/markets")}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
-            <ChevronLeft className="h-4 w-4" />
-            <span>All Markets</span>
+            <ChevronLeft className="h-3.5 w-3.5" />
+            <span>Markets</span>
           </button>
-          <span>/</span>
-          <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">
+          <span className="text-border/80">&rsaquo;</span>
+          <span className="text-foreground truncate max-w-[240px] sm:max-w-md normal-case tracking-normal font-sans">
             {market.question}
           </span>
         </div>
 
-        {/* Header Section */}
+        {/* Header Section — editorial hero */}
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div className="flex items-start gap-4 flex-1">
+          <div className="flex items-start gap-4 flex-1 min-w-0">
             {market.image && (
-              <div className="relative w-16 h-16 md:w-20 md:h-20 shrink-0">
+              <div className="relative w-16 h-16 md:w-20 md:h-20 shrink-0 border border-border/60">
                 <Image
                   src={market.image}
                   alt={market.question}
                   fill
                   sizes="80px"
-                  className="rounded-xl object-cover"
+                  className="rounded-sm object-cover"
                 />
               </div>
             )}
 
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl md:text-3xl font-bold mb-2">
+              <h1 className="font-editorial italic font-medium text-3xl md:text-4xl lg:text-5xl leading-[1.05] tracking-tight text-foreground mb-3 wrap-break-word">
                 {market.question}
               </h1>
 
-              {/* Metadata */}
-              <div className="flex flex-wrap items-center gap-3 md:gap-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-1.5 bg-muted/50 px-2.5 py-1 rounded-full">
-                  <Trophy className="h-4 w-4" />
-                  <span className="font-medium">
-                    {formatVolume(market.volumeNum || market.volume)} Vol.
+              {/* Metadata strip — mono-caps inline, no pills */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <Trophy className="h-3 w-3" />
+                  <span className="tabular-nums text-foreground">
+                    {formatVolume(market.volumeNum || market.volume)}
                   </span>
-                </div>
+                  <span>Vol</span>
+                </span>
                 {market.end_date_iso && (
-                  <div className="flex items-center gap-1.5 bg-muted/50 px-2.5 py-1 rounded-full">
-                    <Clock className="h-4 w-4" />
-                    <span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Clock className="h-3 w-3" />
+                    <span className="tabular-nums">
                       {new Date(market.end_date_iso).toLocaleDateString(
                         "en-US",
                         {
@@ -613,13 +621,14 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                         }
                       )}
                     </span>
-                  </div>
-                )}
-                <div className="flex items-center gap-1.5 bg-muted/50 px-2.5 py-1 rounded-full">
-                  <span className="font-medium">
-                    {outcomes.length} outcomes
                   </span>
-                </div>
+                )}
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="tabular-nums text-foreground">
+                    {outcomes.length}
+                  </span>
+                  <span>{outcomes.length === 1 ? "Outcome" : "Outcomes"}</span>
+                </span>
               </div>
             </div>
           </div>
@@ -662,20 +671,29 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
           </div>
         </div>
 
-        {/* Date Selection Pills - Mock for now */}
-        <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-muted-foreground" />
-          <div className="flex gap-2 overflow-x-auto">
-            <Badge variant="default" className="shrink-0">
-              Dec 10
-            </Badge>
-            <Badge variant="outline" className="shrink-0">
-              Jan 28, 2026
-            </Badge>
-            <Badge variant="outline" className="shrink-0">
-              Mar 18, 2026
-            </Badge>
-          </div>
+        {/* Date Selection — editorial inline with underline-active */}
+        <div className="flex items-center gap-4 overflow-x-auto scrollbar-hide">
+          <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          {[
+            { label: "Dec 10", active: true },
+            { label: "Jan 28, 2026", active: false },
+            { label: "Mar 18, 2026", active: false },
+          ].map((date) => (
+            <button
+              key={date.label}
+              type="button"
+              className={`relative shrink-0 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] tabular-nums transition-colors ${
+                date.active
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {date.label}
+              {date.active && (
+                <span className="absolute inset-x-0 -bottom-px h-px bg-foreground" />
+              )}
+            </button>
+          ))}
         </div>
 
         {/* Probability Legend */}
@@ -687,18 +705,21 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
             ) => (
               <div key={idx} className="flex items-center gap-2">
                 <div
-                  className={`w-3 h-3 rounded-full ${
+                  className={`w-1.5 h-1.5 rounded-full ${
                     outcome.color === "orange"
-                      ? "bg-orange-500"
+                      ? "bg-amber-500"
                       : outcome.color === "blue"
-                        ? "bg-blue-500"
+                        ? "bg-emerald-500"
                         : outcome.color === "purple"
-                          ? "bg-purple-400"
-                          : "bg-green-500"
+                          ? "bg-foreground/60"
+                          : "bg-foreground"
                   }`}
                 />
-                <span className="text-sm">
-                  {outcome.name} {outcome.probability}%
+                <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                  {outcome.name}{" "}
+                  <span className="tabular-nums text-foreground font-semibold">
+                    {outcome.probability}%
+                  </span>
                 </span>
               </div>
             )
@@ -710,7 +731,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
           {/* Chart Section - Left Side (2/3 width) */}
           <div className="lg:col-span-2 space-y-6">
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="py-3">
                 <ErrorBoundary name="Market Price Chart">
                   <MarketPriceChart
                     tokens={chartTokens}
@@ -732,10 +753,10 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                     price: o.price,
                   }))}
                   defaultOutcomeIndex={selectedOutcome}
-                  maxLevels={5}
                   onPriceClick={handlePriceClick}
                   onOutcomeChange={(index) => setSelectedOutcome(index)}
                   defaultCollapsed={false}
+                  scrollable
                 />
               </ErrorBoundary>
             )}
@@ -770,69 +791,74 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
           </div>
         </div>
 
-        {/* Outcomes List */}
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold">OUTCOME</h2>
-          <div className="space-y-3">
-            {outcomeData.map((outcome, idx: number) => (
-              <Card key={idx}>
-                <CardContent className="p-4">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Outcomes List — editorial hairline rows */}
+        <div className="space-y-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-muted-foreground/60">§</span>
+            <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+              Outcome
+            </h2>
+          </div>
+          <div className="border-t border-border/40">
+            {outcomeData.map((outcome, idx: number) => {
+              const isActive = showOrderBook && selectedOutcome === idx;
+              const yesPrice = formatPrice(prices[idx] || "0");
+              const noPrice = formatPrice(
+                (1 - Number.parseFloat(prices[idx] || "0")).toString()
+              );
+              return (
+                <div key={idx} className="border-b border-border/40">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 py-4">
                     {/* Left: Outcome info */}
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold">{outcome.name}</h3>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl font-bold">
-                            {outcome.probability}%
-                          </span>
-                          <div
-                            className={`flex items-center gap-1 text-sm ${
-                              outcome.change >= 0
-                                ? "text-green-500"
-                                : "text-red-500"
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <h3 className="font-medium text-base leading-tight">
+                        {outcome.name}
+                      </h3>
+                      <div className="flex items-baseline gap-4 flex-wrap">
+                        <span className="font-mono tabular-nums text-2xl font-semibold text-foreground leading-none">
+                          {outcome.probability}%
+                        </span>
+                        <div
+                          className={`inline-flex items-center gap-1 font-mono text-[11px] tabular-nums ${
+                            outcome.change >= 0
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-red-600 dark:text-red-400"
+                          }`}
+                        >
+                          <TrendingUp
+                            className={`h-3 w-3 ${
+                              outcome.change < 0 ? "rotate-180" : ""
                             }`}
-                          >
-                            <TrendingUp
-                              className={`h-4 w-4 ${
-                                outcome.change < 0 ? "rotate-180" : ""
-                              }`}
-                            />
-                            <span>
-                              {outcome.change >= 0 ? "+" : ""}
-                              {outcome.change}%
-                            </span>
-                          </div>
+                          />
+                          <span>
+                            {outcome.change >= 0 ? "+" : ""}
+                            {outcome.change}%
+                          </span>
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <span>{formatVolume(outcome.volume)} Vol.</span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() =>
-                              copyToClipboard(formatVolume(outcome.volume))
-                            }
-                            aria-label="Copy volume"
-                          >
-                            <Copy className="h-3 w-3" aria-hidden="true" />
-                          </Button>
-                        </div>
+                        <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                          {formatVolume(outcome.volume)} Vol
+                        </span>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() =>
+                            copyToClipboard(formatVolume(outcome.volume))
+                          }
+                          aria-label="Copy volume"
+                        >
+                          <Copy className="h-3 w-3" aria-hidden="true" />
+                        </button>
                       </div>
                     </div>
 
-                    {/* Right: Action buttons */}
-                    <div className="flex items-center gap-3">
-                      <Button
+                    {/* Right: Editorial Yes/No CTAs */}
+                    <div className="flex items-stretch gap-2 shrink-0">
+                      <button
                         type="button"
-                        size="lg"
-                        className={`bg-green-600 hover:bg-green-700 text-white min-w-[120px] transition-[background-color,box-shadow] duration-150 ${
-                          showOrderBook && selectedOutcome === idx
-                            ? "ring-2 ring-green-400 ring-offset-2 ring-offset-background"
-                            : ""
+                        className={`relative min-w-[110px] h-11 px-4 border transition-colors font-mono text-[11px] uppercase tracking-[0.16em] font-semibold ${
+                          isActive
+                            ? "border-emerald-600 dark:border-emerald-400 text-emerald-700 dark:text-emerald-300 bg-emerald-500/5"
+                            : "border-border/60 text-foreground hover:border-emerald-600/60 hover:text-emerald-700 dark:hover:text-emerald-300"
                         }`}
                         onClick={() => {
                           if (showOrderBook && selectedOutcome === idx) {
@@ -843,16 +869,17 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                           }
                         }}
                       >
-                        Yes {formatPrice(prices[idx] || "0")}¢
-                      </Button>
-                      <Button
+                        <span className="inline-flex items-baseline gap-2">
+                          <span>Yes</span>
+                          <span className="tabular-nums">{yesPrice}¢</span>
+                        </span>
+                      </button>
+                      <button
                         type="button"
-                        size="lg"
-                        variant="destructive"
-                        className={`min-w-[120px] transition-[background-color,box-shadow] duration-150 ${
-                          showOrderBook && selectedOutcome === idx
-                            ? "ring-2 ring-red-400 ring-offset-2 ring-offset-background"
-                            : ""
+                        className={`relative min-w-[110px] h-11 px-4 border transition-colors font-mono text-[11px] uppercase tracking-[0.16em] font-semibold ${
+                          isActive
+                            ? "border-red-600 dark:border-red-400 text-red-700 dark:text-red-300 bg-red-500/5"
+                            : "border-border/60 text-foreground hover:border-red-600/60 hover:text-red-700 dark:hover:text-red-300"
                         }`}
                         onClick={() => {
                           if (showOrderBook && selectedOutcome === idx) {
@@ -863,202 +890,163 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
                           }
                         }}
                       >
-                        No{" "}
-                        {formatPrice(
-                          (1 - Number.parseFloat(prices[idx] || "0")).toString()
-                        )}
-                        ¢
-                      </Button>
+                        <span className="inline-flex items-baseline gap-2">
+                          <span>No</span>
+                          <span className="tabular-nums">{noPrice}¢</span>
+                        </span>
+                      </button>
                     </div>
                   </div>
 
-                  {/* Order Book - Shown below this outcome when clicked (only for > 1 outcomes) */}
-                  {showOrderBook &&
-                    selectedOutcome === idx &&
-                    tradingOutcomes.length > 1 && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="mt-4 pt-4 border-t border-border"
-                      >
-                        <OrderBook
-                          outcomes={tradingOutcomes.map((o) => ({
-                            name: o.name,
-                            tokenId: o.tokenId,
-                            price: o.price,
-                          }))}
-                          defaultOutcomeIndex={selectedOutcome}
-                          maxLevels={4}
-                          onPriceClick={handlePriceClick}
-                          onOutcomeChange={(index) => setSelectedOutcome(index)}
-                          defaultCollapsed={false}
-                          embedded
-                        />
-                      </motion.div>
-                    )}
-                </CardContent>
-              </Card>
-            ))}
+                  {/* Order Book drawer */}
+                  {isActive && tradingOutcomes.length > 1 && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="pb-4 border-t border-border/40"
+                    >
+                      <OrderBook
+                        outcomes={tradingOutcomes.map((o) => ({
+                          name: o.name,
+                          tokenId: o.tokenId,
+                          price: o.price,
+                        }))}
+                        defaultOutcomeIndex={selectedOutcome}
+                        onPriceClick={handlePriceClick}
+                        onOutcomeChange={(index) => setSelectedOutcome(index)}
+                        defaultCollapsed={false}
+                        embedded
+                        scrollable
+                      />
+                    </motion.div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          {/* Trading Notice */}
-          <p className="text-sm text-muted-foreground text-center pt-4">
-            Trading functionality coming soon. Connect your wallet to get
-            started.
+          {/* Trading notice — restrained mono-caps */}
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground text-center pt-3">
+            Trading coming soon — connect wallet to get started
           </p>
         </div>
 
-        {/* Related Markets Section */}
-        <Card>
-          <CardContent className="pt-6">
-            <Tabs defaultValue="all" className="w-full">
-              <TabsList className="w-full justify-start h-auto p-1 bg-transparent border-b rounded-none">
-                <TabsTrigger
-                  value="all"
-                  className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none bg-transparent"
-                >
-                  All
-                </TabsTrigger>
-                <TabsTrigger
-                  value="politics"
-                  className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none bg-transparent"
-                >
-                  Politics
-                </TabsTrigger>
-                <TabsTrigger
-                  value="trump"
-                  className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none bg-transparent"
-                >
-                  Trump
-                </TabsTrigger>
-                <TabsTrigger
-                  value="fed-rates"
-                  className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none bg-transparent"
-                >
-                  Fed Rates
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="all" className="mt-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Mock Related Market Cards */}
-                  {[
-                    {
-                      title: "Fed rate hike in 2025?",
-                      probability: "1%",
-                      image: market.image,
-                    },
-                    {
-                      title: "Will 2 Fed rate cuts happen in 2026?",
-                      probability: "25%",
-                      image: market.image,
-                    },
-                    {
-                      title: "Fed emergency rate cut in 2025?",
-                      probability: "3%",
-                      image: market.image,
-                    },
-                  ].map((relatedMarket) => (
-                    <Card
-                      key={relatedMarket.title}
-                      className="cursor-pointer hover:bg-accent/50 transition-colors"
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start gap-3">
-                          {relatedMarket.image && (
-                            <div className="relative w-12 h-12 shrink-0">
-                              <Image
-                                src={relatedMarket.image}
-                                alt={relatedMarket.title}
-                                fill
-                                sizes="48px"
-                                className="rounded object-cover"
-                              />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-semibold text-sm mb-2 line-clamp-2">
-                              {relatedMarket.title}
-                            </h4>
-                            <div className="text-2xl font-bold text-primary">
-                              {relatedMarket.probability}
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </TabsContent>
-
-              <TabsContent value="politics" className="mt-6">
-                <div className="text-center py-8 text-muted-foreground">
-                  No related markets in Politics
-                </div>
-              </TabsContent>
-
-              <TabsContent value="trump" className="mt-6">
-                <div className="text-center py-8 text-muted-foreground">
-                  No related markets in Trump
-                </div>
-              </TabsContent>
-
-              <TabsContent value="fed-rates" className="mt-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {[
-                    {
-                      title: "Fed rate hike in 2025?",
-                      probability: "1%",
-                      image: market.image,
-                    },
-                    {
-                      title: "Will 2 Fed rate cuts happen in 2026?",
-                      probability: "25%",
-                      image: market.image,
-                    },
-                    {
-                      title: "Fed emergency rate cut in 2025?",
-                      probability: "3%",
-                      image: market.image,
-                    },
-                  ].map((relatedMarket) => (
-                    <Card
-                      key={relatedMarket.title}
-                      className="cursor-pointer hover:bg-accent/50 transition-colors"
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start gap-3">
-                          {relatedMarket.image && (
-                            <div className="relative w-12 h-12 shrink-0">
-                              <Image
-                                src={relatedMarket.image}
-                                alt={relatedMarket.title}
-                                fill
-                                sizes="48px"
-                                className="rounded object-cover"
-                              />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-semibold text-sm mb-2 line-clamp-2">
-                              {relatedMarket.title}
-                            </h4>
-                            <div className="text-2xl font-bold text-primary">
-                              {relatedMarket.probability}
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
+        {/* Related Markets — editorial */}
+        <RelatedMarkets marketImage={market.image} />
       </motion.main>
     </div>
+  );
+}
+
+const RELATED_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "politics", label: "Politics" },
+  { id: "trump", label: "Trump" },
+  { id: "fed-rates", label: "Fed Rates" },
+] as const;
+
+type RelatedFilterId = (typeof RELATED_FILTERS)[number]["id"];
+
+const MOCK_RELATED: Record<
+  RelatedFilterId,
+  { title: string; probability: string }[]
+> = {
+  all: [
+    { title: "Fed rate hike in 2025?", probability: "1%" },
+    { title: "Will 2 Fed rate cuts happen in 2026?", probability: "25%" },
+    { title: "Fed emergency rate cut in 2025?", probability: "3%" },
+  ],
+  politics: [],
+  trump: [],
+  "fed-rates": [
+    { title: "Fed rate hike in 2025?", probability: "1%" },
+    { title: "Will 2 Fed rate cuts happen in 2026?", probability: "25%" },
+    { title: "Fed emergency rate cut in 2025?", probability: "3%" },
+  ],
+};
+
+function RelatedMarkets({ marketImage }: { marketImage?: string }) {
+  const [active, setActive] = useState<RelatedFilterId>("all");
+  const items = MOCK_RELATED[active];
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-baseline gap-2">
+        <span className="text-muted-foreground/60">§</span>
+        <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+          Related Markets
+        </h2>
+      </div>
+
+      {/* Filter chips — underline-active */}
+      <div className="flex items-center gap-5 sm:gap-6 overflow-x-auto scrollbar-hide border-b border-border/40">
+        {RELATED_FILTERS.map((f) => {
+          const isActive = active === f.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setActive(f.id)}
+              className={`relative shrink-0 py-3 font-mono text-[11px] uppercase tracking-[0.16em] transition-colors ${
+                isActive
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {isActive ? (
+                <span className="font-editorial italic text-[15px] tracking-normal normal-case">
+                  {f.label}
+                </span>
+              ) : (
+                f.label
+              )}
+              {isActive && (
+                <span className="absolute inset-x-0 -bottom-px h-px bg-foreground" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Results — hairline rows */}
+      {items.length === 0 ? (
+        <p className="font-editorial italic text-muted-foreground text-center py-10">
+          No related markets in{" "}
+          {RELATED_FILTERS.find((f) => f.id === active)?.label}
+        </p>
+      ) : (
+        <div className="border-t border-border/40">
+          {items.map((item) => (
+            <button
+              key={item.title}
+              type="button"
+              className="w-full flex items-center gap-3 py-3 border-b border-border/40 text-left hover:bg-foreground/2 transition-colors group"
+            >
+              {marketImage && (
+                <div className="relative w-10 h-10 shrink-0 overflow-hidden rounded-sm">
+                  <Image
+                    src={marketImage}
+                    alt=""
+                    fill
+                    sizes="40px"
+                    className="object-cover"
+                  />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <h4 className="text-sm leading-snug text-foreground group-hover:underline decoration-foreground/40 underline-offset-4 line-clamp-2">
+                  {item.title}
+                </h4>
+              </div>
+              <div className="font-mono tabular-nums text-xl font-semibold text-foreground shrink-0">
+                {item.probability}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

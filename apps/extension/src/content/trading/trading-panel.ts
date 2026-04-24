@@ -10,7 +10,7 @@
  * Split/Merge accessible via "..." dropdown menu.
  */
 
-import { USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
+import { PUSD_ADDRESS, USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import Decimal from "decimal.js";
@@ -34,6 +34,7 @@ import {
   type SupportedAsset,
 } from "./bridge-api";
 import { CredentialManager } from "./credentials";
+import { formatTradingErrorLine, mapTradingError } from "./error-mapping";
 import { type TradingContext, TradingService } from "./trading-service";
 
 const DEPOSIT_TOKENS: Array<{
@@ -41,6 +42,7 @@ const DEPOSIT_TOKENS: Array<{
   address: string;
   decimals: number;
 }> = [
+  { symbol: "pUSD", address: PUSD_ADDRESS, decimals: 6 },
   { symbol: "USDC.e", address: USDC_E_ADDRESS, decimals: 6 },
   {
     symbol: "USDC",
@@ -805,7 +807,13 @@ function addHeader(
     dcBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("wallet_disconnected");
-      setButtonLoading(dcBtn, "Disconnecting…");
+      // Icon-only button in the header — swap the icon for a same-sized spinner
+      // instead of injecting "Disconnecting…" text, which would stretch the
+      // button and wreck the header layout.
+      dcBtn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block"></span>`;
+      dcBtn.style.pointerEvents = "none";
+      dcBtn.style.opacity = "0.7";
+      dcBtn.title = "Disconnecting…";
       void TradingService.disconnect().catch(() => {
         TradingService.reset();
         CredentialManager.clear(address).catch(() => {});
@@ -1049,22 +1057,54 @@ function addLoading(p: HTMLElement, text: string): void {
 function formatTradingPanelErrorMessage(
   message: string | null | undefined
 ): string {
-  const trimmed = message?.trim() ?? "";
-  const normalized = trimmed.toLowerCase();
+  return formatTradingErrorLine(message);
+}
 
-  if (
-    normalized === "failed to fetch" ||
-    normalized.includes("networkerror") ||
-    normalized.includes("load failed")
-  ) {
-    return "Could not connect to Knoww. Retry to start a new signing request.";
+/**
+ * Deploy Safe gate — rendered after wallet connect but before "Enable Trading".
+ *
+ * The Safe must exist on-chain before CLOB credentials can be useful: orders
+ * are signed with `signatureType: POLY_GNOSIS_SAFE` and `funderAddress = safe`,
+ * so settlement fails if the Safe isn't deployed. Deploy is a one-click gasless
+ * flow via the relayer (`SAFE-CREATE`), same underlying mechanism as web
+ * onboarding.
+ */
+function addDeploySafe(
+  p: HTMLElement,
+  options?: { errorMessage?: string | null }
+): void {
+  const errorMessage = options?.errorMessage
+    ? formatTradingPanelErrorMessage(options.errorMessage)
+    : null;
+  const s = el("div", "knoww-tp-enable-section");
+  s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
+  s.appendChild(
+    el(
+      "div",
+      "knoww-tp-enable-msg",
+      errorMessage
+        ? "Deploy failed. Retry to start a new signing request."
+        : "Deploy your Polymarket trading wallet — free and gasless."
+    )
+  );
+  if (errorMessage) {
+    s.appendChild(el("div", "knoww-tp-enable-error", errorMessage));
   }
-
-  if (normalized.includes("timed out")) {
-    return "Knoww took too long to respond. Retry to start a new signing request.";
-  }
-
-  return trimmed || "Something went wrong. Retry the request.";
+  const btn = el(
+    "button",
+    "knoww-tp-btn-enable",
+    errorMessage ? "Retry Deploy" : "Deploy Trading Wallet"
+  );
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    setButtonLoading(btn, "Waiting for signature…");
+    TradingService.deployWallet().catch(() => {
+      // Error flows through ctx.error via the state listener; the next render
+      // will surface it on this screen with a Retry button.
+    });
+  };
+  s.appendChild(btn);
+  p.appendChild(s);
 }
 
 function addEnableTrading(
@@ -1832,7 +1872,7 @@ function addBalanceWarning(
     el(
       "div",
       "knoww-tp-warn-detail",
-      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} USDC.e`
+      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} pUSD`
     )
   );
   form.appendChild(w);
@@ -2629,7 +2669,14 @@ async function waitForTxReceipt(
   );
 }
 
-const STABLECOINS = new Set(["USDC", "USDC.e", "USDC.E", "USDT", "DAI"]);
+const STABLECOINS = new Set([
+  "USDC",
+  "USDC.e",
+  "USDC.E",
+  "pUSD",
+  "USDT",
+  "DAI",
+]);
 
 let cachedPrices: Record<string, number> | null = null;
 let pricesFetchedAt = 0;
@@ -2945,7 +2992,7 @@ function depositFetchQuote(): void {
     fromTokenAddress: depositSelected.address,
     recipientAddress: depositBridgeAddress,
     toChainId: "137",
-    toTokenAddress: USDC_E_ADDRESS,
+    toTokenAddress: PUSD_ADDRESS,
   })
     .then((q) => {
       depositQuote = q;
@@ -3130,7 +3177,9 @@ function computeReceiveAmount(): string {
   const numAmount = parseFloat(depositAmount);
   if (Number.isNaN(numAmount)) return "0";
   if (
-    ["USDC", "USDC.e", "USDC.E", "DAI", "USDT"].includes(depositSelected.symbol)
+    ["USDC", "USDC.e", "USDC.E", "pUSD", "DAI", "USDT"].includes(
+      depositSelected.symbol
+    )
   )
     return numAmount.toFixed(2);
   return (
@@ -3144,7 +3193,9 @@ function computeEnteredAmountUsd(): number {
   const numAmount = parseFloat(depositAmount);
   if (Number.isNaN(numAmount)) return 0;
   if (
-    ["USDC", "USDC.e", "USDC.E", "DAI", "USDT"].includes(depositSelected.symbol)
+    ["USDC", "USDC.e", "USDC.E", "pUSD", "DAI", "USDT"].includes(
+      depositSelected.symbol
+    )
   )
     return numAmount;
   return (depositSelected.usdValue / depositSelected.amount) * numAmount;
@@ -3421,7 +3472,7 @@ function renderDepositBridgeSelectStep(
     elHtml(
       "span",
       "",
-      `All deposits are automatically converted to <strong style="color:var(--knoww-accent, #1d9bf0)">USDC.e on Polygon</strong> at the best available rate.`
+      `All deposits are automatically converted to <strong style="color:var(--knoww-accent, #1d9bf0)">pUSD on Polygon</strong> (Polymarket's V2 trading token) at the best available rate.`
     )
   );
   form.appendChild(infoBanner);
@@ -3535,7 +3586,7 @@ function renderDepositAmountStep(form: HTMLElement): void {
     "",
     `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`
   );
-  const recvSide = el("span", "", "You receive: USDC.e");
+  const recvSide = el("span", "", "You receive: pUSD");
   sendRecv.appendChild(sendSide);
   sendRecv.appendChild(arrow);
   sendRecv.appendChild(recvSide);
@@ -3689,7 +3740,11 @@ function renderDepositConfirmStep(
         el("div", "", `Minimum: $${depositSelectedBridgeAsset.minCheckoutUsd}`)
       );
       minText.appendChild(
-        el("div", "", "Assets will be converted to USDC.e on Polygon.")
+        el(
+          "div",
+          "",
+          "Assets will be converted to pUSD (Polymarket's V2 trading token) on Polygon."
+        )
       );
       minText.style.fontSize = "11px";
       minInfo.appendChild(minText);
@@ -3726,16 +3781,16 @@ function renderDepositConfirmStep(
   );
 
   // Auto-conversion banner
-  if (depositSelected.symbol !== "USDC.e") {
+  if (depositSelected.symbol !== "pUSD") {
     const banner = el("div", "knoww-tp-deposit-info-banner info");
     banner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:var(--knoww-accent, #1d9bf0)"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>`;
     const text = el("div", "");
-    text.appendChild(el("div", "", "Auto-conversion to USDC.e"));
+    text.appendChild(el("div", "", "Auto-conversion to pUSD"));
     text.appendChild(
       el(
         "div",
         "",
-        `Your ${depositSelected.symbol} will be automatically converted to USDC.e on Polygon via Polymarket Bridge.`
+        `Your ${depositSelected.symbol} will be automatically converted to pUSD (Polymarket's V2 trading token) on Polygon via Polymarket Bridge.`
       )
     );
     text.style.fontSize = "11px";
@@ -3786,7 +3841,7 @@ function renderDepositConfirmStep(
   }
   recvVal.appendChild(
     document.createTextNode(
-      `${depositQuote ? "" : "~"}${displayReceiveAmt} USDC.e`
+      `${depositQuote ? "" : "~"}${displayReceiveAmt} pUSD`
     )
   );
   recvRow.appendChild(recvVal);
@@ -3827,7 +3882,7 @@ function renderDepositConfirmStep(
       el(
         "span",
         "knoww-tp-deposit-fee-value",
-        `${fb.minReceived.toFixed(2)} USDC.e`
+        `${fb.minReceived.toFixed(2)} pUSD`
       )
     );
     breakdown.appendChild(minRecvRow);
@@ -3878,7 +3933,7 @@ function renderDepositConfirmStep(
     const infoText = el("div", "");
     infoText.appendChild(el("div", "", "Transaction confirmed on-chain!"));
     infoText.appendChild(
-      el("div", "", "Waiting for bridge to credit USDC.e to your wallet...")
+      el("div", "", "Waiting for bridge to credit pUSD to your wallet...")
     );
     infoText.style.fontSize = "11px";
     infoBanner.appendChild(infoText);
@@ -3892,7 +3947,7 @@ function renderDepositConfirmStep(
     const successText = el("div", "");
     successText.appendChild(el("div", "", "Deposit complete!"));
     successText.appendChild(
-      el("div", "", "USDC.e has been credited to your Polymarket wallet.")
+      el("div", "", "pUSD has been credited to your Polymarket wallet.")
     );
     successText.style.fontSize = "11px";
     successBanner.appendChild(successText);
@@ -4118,10 +4173,34 @@ function render(
 
   if (activeView === "deposit") {
     renderDepositForm(panel, ctx);
+  } else if (state === "deploying") {
+    addLoading(panel, "Deploying your trading wallet…");
+    return;
+  } else if (ctx.isDeployed === null && ctx.proxyAddress) {
+    // Initial on-chain deployment check still in flight (first balance fetch).
+    // Show a neutral spinner instead of flashing the Deploy gate for ~500ms
+    // on users who already have a Safe.
+    addLoading(panel, "Loading trading wallet…");
+    return;
+  } else if (ctx.isDeployed === false && ctx.proxyAddress) {
+    // Safe not deployed yet — takes precedence over "Enable Trading" because
+    // credentials derived for the EOA are useless until the Safe exists
+    // (CLOB orders sign against the Safe as funderAddress).
+    addDeploySafe(panel, { errorMessage: state === "error" ? error : null });
+    if (state !== "error") {
+      return;
+    }
   } else if (state === "deriving-credentials") {
     addLoading(panel, "Confirm signature in your wallet...");
     return;
-  } else if (!ctx.credentials && (state === "connected" || state === "error")) {
+  } else if (!ctx.credentials) {
+    // Credentials required before trading. Hit in two scenarios:
+    //   - right after Connect Wallet (state === "connected")
+    //   - right after Deploy Trading Wallet (state === "ready", Safe just
+    //     created but CLOB creds not yet derived)
+    // Earlier branches already handled the transient states (connecting,
+    // switching-chain, deploying, deriving-credentials), so reaching here
+    // with no credentials means the user needs to Enable Trading.
     addEnableTrading(panel, { errorMessage: state === "error" ? error : null });
     if (state !== "error") {
       return;
@@ -4143,10 +4222,11 @@ function render(
   }
 
   if (error) {
-    const displayError = formatTradingPanelErrorMessage(error);
-    if (lastRenderedErrorToast !== displayError) {
-      showToast(panel, displayError, "error");
-      lastRenderedErrorToast = displayError;
+    // Key on the raw error string so we don't re-render the rich toast on
+    // each state tick when the underlying error hasn't changed.
+    if (lastRenderedErrorToast !== error) {
+      showRichErrorToast(panel, error);
+      lastRenderedErrorToast = error;
     }
   } else {
     lastRenderedErrorToast = null;
@@ -4167,6 +4247,74 @@ function showToast(
   const icon = type === "success" ? I.check : I.error;
   toast.innerHTML = `<span class="knoww-tp-toast-icon">${icon}</span><span>${escapeHtml(message)}</span>`;
   setTimeout(() => toast?.remove(), type === "success" ? 3500 : 6000);
+}
+
+/**
+ * Rich error toast for state-listener driven errors (order rejections,
+ * relayer/network failures, session drops). Maps the raw error to a human
+ * title + body via the error-mapping module, renders a dismissible toast,
+ * and — for unmapped errors — exposes a "Copy details" button so users can
+ * forward the raw text to support.
+ */
+function showRichErrorToast(panel: HTMLElement, rawError: string): void {
+  const mapped = mapTradingError(rawError);
+
+  let toast = panel.querySelector(".knoww-tp-toast") as HTMLElement | null;
+  if (!toast) {
+    toast = el("div", "knoww-tp-toast");
+    panel.appendChild(toast);
+  }
+  toast.className = "knoww-tp-toast knoww-tp-toast-error knoww-tp-toast-rich";
+
+  const copyBtnHtml = mapped.code
+    ? `<button type="button" class="knoww-tp-toast-action" data-knoww-copy-error>Copy details</button>`
+    : "";
+
+  toast.innerHTML = `
+    <span class="knoww-tp-toast-icon">${I.error}</span>
+    <div class="knoww-tp-toast-body">
+      <div class="knoww-tp-toast-title">${escapeHtml(mapped.title)}</div>
+      <div class="knoww-tp-toast-msg">${escapeHtml(mapped.body)}</div>
+    </div>
+    <div class="knoww-tp-toast-tail">
+      ${copyBtnHtml}
+      <button type="button" class="knoww-tp-toast-close" aria-label="Dismiss" data-knoww-dismiss>${I.close}</button>
+    </div>
+  `;
+
+  const dismiss = () => {
+    toast?.remove();
+    if (lastRenderedErrorToast === rawError) {
+      lastRenderedErrorToast = null;
+    }
+  };
+
+  toast
+    .querySelector<HTMLButtonElement>("[data-knoww-dismiss]")
+    ?.addEventListener("click", dismiss);
+
+  const copyBtn = toast.querySelector<HTMLButtonElement>(
+    "[data-knoww-copy-error]"
+  );
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      const payload = mapped.code
+        ? `[${mapped.code}] ${mapped.raw}`
+        : mapped.raw;
+      try {
+        await navigator.clipboard.writeText(payload);
+        copyBtn.textContent = "Copied";
+        copyBtn.disabled = true;
+      } catch {
+        copyBtn.textContent = "Copy failed";
+      }
+    });
+  }
+
+  // Unmapped errors linger (10s) so users have time to copy; mapped errors
+  // auto-dismiss at 8s. Users can always hit × to close immediately.
+  const duration = mapped.code ? 10_000 : 8_000;
+  setTimeout(dismiss, duration);
 }
 
 // ── Public API ──

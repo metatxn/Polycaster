@@ -1228,6 +1228,109 @@ let trendingShuffleTimer: ReturnType<typeof setInterval> | null = null;
 let trendingPool: Market[] = [];
 let visibleTrending: Market[] = [];
 
+// ─── First-run welcome state ──────────────────────────────────────────
+//
+// On first install, users who reach the notification stack with no matched
+// markets yet would otherwise see a terse "Searching for markets…" spinner
+// with no indication that the extension is working correctly. A one-time
+// welcome card orients them; once dismissed, we revert to the compact
+// scanning state for the rest of the user's lifetime on this profile.
+
+const WELCOME_SEEN_STORAGE_KEY = "knoww-stack-welcome-seen";
+
+const WELCOME_SPARKLE_ICON_HTML = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M5.64 18.36l2.12-2.12M16.24 7.76l2.12-2.12"/>
+  </svg>
+`;
+
+function readPersistedWelcomeSeen(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage?.local.get(WELCOME_SEEN_STORAGE_KEY, (result) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(result?.[WELCOME_SEEN_STORAGE_KEY]));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function persistWelcomeSeen(): void {
+  try {
+    chrome.storage?.local.set({ [WELCOME_SEEN_STORAGE_KEY]: true });
+  } catch {
+    // Non-fatal — if persistence fails, the welcome just shows again next time.
+  }
+}
+
+// ─── Minimize / expand state ───────────────────────────────────────────
+//
+// The notification stack can be collapsed to just its header when users
+// want the panel out of the way. The collapsed preference is persisted
+// per-origin so it survives page navigations and reloads.
+
+const STACK_MINIMIZED_STORAGE_KEY = "knoww-stack-minimized";
+
+const STACK_MINIMIZE_ICON_HTML = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <polyline points="6 9 12 15 18 9"/>
+  </svg>
+`;
+
+const STACK_EXPAND_ICON_HTML = `
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <polyline points="18 15 12 9 6 15"/>
+  </svg>
+`;
+
+let cachedStackMinimized = false;
+
+function readPersistedStackMinimized(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage?.local.get(STACK_MINIMIZED_STORAGE_KEY, (result) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(result?.[STACK_MINIMIZED_STORAGE_KEY]));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function persistStackMinimized(value: boolean): void {
+  try {
+    chrome.storage?.local.set({ [STACK_MINIMIZED_STORAGE_KEY]: value });
+  } catch {
+    // Non-fatal; the UI state stays consistent for the current session.
+  }
+}
+
+function applyMinimizedState(
+  container: HTMLElement,
+  toggleBtn: HTMLElement,
+  minimized: boolean
+): void {
+  container.classList.toggle("knoww-stack-minimized", minimized);
+  toggleBtn.innerHTML = minimized
+    ? STACK_EXPAND_ICON_HTML
+    : STACK_MINIMIZE_ICON_HTML;
+  toggleBtn.title = minimized ? "Expand" : "Minimize";
+  toggleBtn.setAttribute(
+    "aria-label",
+    minimized ? "Expand markets panel" : "Minimize markets panel"
+  );
+  toggleBtn.setAttribute("aria-expanded", minimized ? "false" : "true");
+}
+
 /**
  * Create the notification stack container
  */
@@ -1317,7 +1420,17 @@ function createNotificationStack(): HTMLElement {
   `;
   searchToggle.title = "Search markets";
 
+  const minimizeToggle = document.createElement("button");
+  minimizeToggle.className = "knoww-stack-minimize";
+  minimizeToggle.id = "knoww-stack-minimize";
+  minimizeToggle.type = "button";
+  minimizeToggle.innerHTML = STACK_MINIMIZE_ICON_HTML;
+  minimizeToggle.title = "Minimize";
+  minimizeToggle.setAttribute("aria-label", "Minimize");
+  minimizeToggle.setAttribute("aria-expanded", "true");
+
   headerRight.appendChild(searchToggle);
+  headerRight.appendChild(minimizeToggle);
   header.appendChild(headerTitle);
   header.appendChild(headerRight);
 
@@ -1372,18 +1485,62 @@ function createNotificationStack(): HTMLElement {
   emptyState.className = "knoww-stack-empty";
   emptyState.id = "knoww-stack-empty";
   emptyState.innerHTML = `
-    <div class="knoww-stack-empty-title-row">
-      <span class="knoww-stack-empty-pulse" aria-hidden="true"></span>
-      <span class="knoww-stack-empty-title">Searching for markets</span>
-      <span class="knoww-stack-empty-dots" aria-hidden="true">
-        <span></span><span></span><span></span>
-      </span>
+    <div class="knoww-stack-welcome" data-knoww-welcome style="display:none">
+      <div class="knoww-stack-welcome-icon">${WELCOME_SPARKLE_ICON_HTML}</div>
+      <div class="knoww-stack-welcome-title">Knoww is listening</div>
+      <p class="knoww-stack-welcome-body">
+        As you browse, we surface Polymarket positions matching predictive
+        claims on this page. Nothing here yet? Keep scrolling &mdash; markets
+        appear the moment we find one.
+      </p>
+      <button type="button" class="knoww-stack-welcome-cta" data-knoww-welcome-dismiss>
+        Got it
+      </button>
     </div>
-    <span class="knoww-stack-empty-sub">Scroll your feed to discover markets</span>
+    <div class="knoww-stack-scanning" data-knoww-scanning>
+      <div class="knoww-stack-empty-title-row">
+        <span class="knoww-stack-empty-pulse" aria-hidden="true"></span>
+        <span class="knoww-stack-empty-title">Searching for markets</span>
+        <span class="knoww-stack-empty-dots" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+      </div>
+      <span class="knoww-stack-empty-sub">Scroll your feed to discover markets</span>
+    </div>
   `;
 
   contentArea.appendChild(itemsContainer);
   contentArea.appendChild(emptyState);
+
+  // Wire up first-run welcome. If the user has never dismissed the welcome
+  // card, swap the "Searching for markets…" scanning row for the richer
+  // welcome message. Reverts permanently once they click "Got it".
+  const welcomeEl = emptyState.querySelector<HTMLElement>(
+    "[data-knoww-welcome]"
+  );
+  const scanningEl = emptyState.querySelector<HTMLElement>(
+    "[data-knoww-scanning]"
+  );
+  const welcomeDismissBtn = emptyState.querySelector<HTMLButtonElement>(
+    "[data-knoww-welcome-dismiss]"
+  );
+
+  const dismissWelcome = () => {
+    if (welcomeEl) welcomeEl.style.display = "none";
+    if (scanningEl) scanningEl.style.display = "";
+    persistWelcomeSeen();
+    void window.KNOWW_ANALYTICS?.track("welcome_dismissed", {});
+  };
+
+  welcomeDismissBtn?.addEventListener("click", dismissWelcome);
+
+  void readPersistedWelcomeSeen().then((seen) => {
+    if (!seen && welcomeEl && scanningEl) {
+      welcomeEl.style.display = "";
+      scanningEl.style.display = "none";
+      void window.KNOWW_ANALYTICS?.track("welcome_shown", {});
+    }
+  });
 
   container.appendChild(header);
   container.appendChild(searchContainer);
@@ -1400,6 +1557,42 @@ function createNotificationStack(): HTMLElement {
     searchResults,
     clearBtn
   );
+
+  // Apply the cached minimized state synchronously so there's no flash of
+  // "expanded-then-collapsed" on subsequent stack re-creations. The initial
+  // load happens asynchronously via readPersistedStackMinimized() below.
+  applyMinimizedState(container, minimizeToggle, cachedStackMinimized);
+
+  const toggleMinimized = () => {
+    const next = !container.classList.contains("knoww-stack-minimized");
+    cachedStackMinimized = next;
+    applyMinimizedState(container, minimizeToggle, next);
+    persistStackMinimized(next);
+    void window.KNOWW_ANALYTICS?.track("notification_stack_toggled", {
+      minimized: next,
+    });
+  };
+
+  minimizeToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleMinimized();
+  });
+
+  // When minimized, clicking the title row (logo + "Markets" label) expands
+  // the panel — matches the affordance you'd expect from a collapsed pill.
+  headerTitle.addEventListener("click", () => {
+    if (container.classList.contains("knoww-stack-minimized")) {
+      toggleMinimized();
+    }
+  });
+
+  // Hydrate from persisted state on first creation.
+  void readPersistedStackMinimized().then((persisted) => {
+    if (persisted !== cachedStackMinimized) {
+      cachedStackMinimized = persisted;
+      applyMinimizedState(container, minimizeToggle, persisted);
+    }
+  });
 
   notificationStackContainer = container;
   return container;

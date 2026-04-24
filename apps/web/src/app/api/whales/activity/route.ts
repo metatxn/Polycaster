@@ -191,7 +191,12 @@ export async function GET(request: NextRequest) {
       ? (timePeriodParam as "DAY" | "WEEK" | "MONTH" | "ALL")
       : "WEEK";
 
-    // Step 1: Fetch leaderboard whales + global large trades in parallel
+    // Step 1: Fetch leaderboard whales + global large trades in parallel.
+    // We always pull the MONTH leaderboard so the set of observed whales is
+    // stable across filter changes — the user's selected `timePeriod` only
+    // controls how far back we display their trades below. This makes
+    // 24H ⊂ 7D ⊂ 30D ⊂ ALL behave like windows on the same dataset instead
+    // of switching between unrelated leaderboards.
     const tradesMultiplier: Record<string, number> = {
       DAY: 1,
       WEEK: 1,
@@ -204,7 +209,7 @@ export async function GET(request: NextRequest) {
     );
 
     const [topTraders, globalTrades] = await Promise.all([
-      fetchTopTraders(whaleCount, timePeriod),
+      fetchTopTraders(whaleCount, "MONTH"),
       fetchGlobalLargeTrades(200),
     ]);
 

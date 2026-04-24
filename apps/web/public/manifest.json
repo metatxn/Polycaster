@@ -1,7 +1,7 @@
 {
-  "name": "Knoww - Know your Odds",
+  "name": "Knoww — Every opinion is a position",
   "short_name": "Knoww",
-  "description": "Trade on real-world events with prediction markets",
+  "description": "A prediction market layer for the open internet.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

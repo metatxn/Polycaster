@@ -88,10 +88,28 @@ export async function GET(
       if (Array.isArray(gammaData) && gammaData.length > 0) {
         const market = gammaData[0];
 
+        // Gamma returns `clobTokenIds` and `outcomes` as JSON-stringified
+        // arrays (e.g. `'["<id1>", "<id2>"]'`, `'["Yes", "No"]'`), not CSV.
+        // The previous implementation used `.split(",")`, which produced
+        // `['["<id1>"', ' "<id2>"]']` and never matched the raw tokenId —
+        // so the outcome defaulted to "Yes" for every row, which is why
+        // portfolio's open-orders tab mislabelled NO orders as Yes.
+        const parseArrayField = (value: unknown): string[] => {
+          if (Array.isArray(value)) return value as string[];
+          if (typeof value !== "string") return [];
+          try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed.map((v) => String(v));
+          } catch {
+            // Fall back to CSV for older/legacy rows just in case.
+          }
+          return value.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
+        };
+
         let outcome = "Yes";
         if (market.clobTokenIds && market.outcomes) {
-          const tokenIds = market.clobTokenIds.split(",");
-          const outcomes = market.outcomes.split(",");
+          const tokenIds = parseArrayField(market.clobTokenIds);
+          const outcomes = parseArrayField(market.outcomes);
           const tokenIndex = tokenIds.findIndex(
             (id: string) => id.trim() === tokenId
           );

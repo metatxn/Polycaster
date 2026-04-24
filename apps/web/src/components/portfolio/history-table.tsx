@@ -1,27 +1,7 @@
 import { motion } from "framer-motion";
-import {
-  BarChart3,
-  Check,
-  ExternalLink,
-  FileText,
-  History,
-  Loader2,
-  Minus,
-  Plus,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import { BarChart3, ExternalLink, Loader2, Trash2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Tooltip,
   TooltipContent,
@@ -29,61 +9,129 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatCurrency, formatPrice, timeAgo } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import { EmptyState } from "./empty-state";
 import type { Trade } from "./types";
 
-function getActivityInfo(
+const DESKTOP_GRID =
+  "grid grid-cols-[120px_minmax(0,1fr)_112px_112px_64px] items-center gap-3";
+
+type ActivityTone = "profit" | "loss" | "in" | "out" | "neutral";
+
+function getActivity(
   type: string,
   side?: string | null,
-  pnl?: number
-): { label: string; icon: React.ElementType; color: string } {
+  amount?: number
+): { label: string; tone: ActivityTone } {
   if (type === "REDEEM") {
-    if (pnl && pnl > 0) {
-      return {
-        label: "Claimed",
-        icon: Check,
-        color: "text-emerald-500 bg-emerald-500/15",
-      };
-    }
-    return {
-      label: "Lost",
-      icon: XCircle,
-      color: "text-red-500 bg-red-500/15",
-    };
+    if (amount && amount > 0) return { label: "Claimed", tone: "profit" };
+    return { label: "Lost", tone: "loss" };
   }
-  if (type === "DEPOSIT") {
-    return {
-      label: "Deposited",
-      icon: Plus,
-      color: "text-sky-500 bg-sky-500/15",
-    };
+  if (type === "DEPOSIT") return { label: "Deposited", tone: "in" };
+  if (type === "WITHDRAW") return { label: "Withdrew", tone: "out" };
+  if (side === "BUY") return { label: "Bought", tone: "in" };
+  if (side === "SELL") return { label: "Sold", tone: "neutral" };
+  return { label: type, tone: "neutral" };
+}
+
+const TONE_DOT: Record<ActivityTone, string> = {
+  profit: "bg-emerald-500",
+  loss: "bg-red-500",
+  in: "bg-emerald-500/80",
+  out: "bg-amber-500",
+  neutral: "bg-muted-foreground/60",
+};
+
+const TONE_LABEL: Record<ActivityTone, string> = {
+  profit: "text-emerald-600 dark:text-emerald-400",
+  loss: "text-red-600 dark:text-red-400",
+  in: "text-foreground",
+  out: "text-foreground",
+  neutral: "text-muted-foreground",
+};
+
+function ActivityLabel({ label, tone }: { label: string; tone: ActivityTone }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className={cn("h-1.5 w-1.5 rounded-full shrink-0", TONE_DOT[tone])}
+      />
+      <span
+        className={cn(
+          "font-mono text-[11px] uppercase tracking-[0.14em] font-semibold",
+          TONE_LABEL[tone]
+        )}
+      >
+        {label}
+      </span>
+    </span>
+  );
+}
+
+function tradeHref(trade: Trade): string | null {
+  const slug = trade.market.eventSlug || trade.market.slug;
+  if (!slug) return null;
+  const base = `/events/detail/${slug}`;
+  return trade.market.conditionId
+    ? `${base}?conditionId=${trade.market.conditionId}`
+    : base;
+}
+
+function TradeIcon({ trade, size }: { trade: Trade; size: number }) {
+  if (!trade.market.icon) {
+    return (
+      <div
+        className="rounded-sm bg-muted border border-border/50 flex items-center justify-center shrink-0"
+        style={{ width: size, height: size }}
+      >
+        <BarChart3 className="h-4 w-4 text-muted-foreground" />
+      </div>
+    );
   }
-  if (type === "WITHDRAW") {
-    return {
-      label: "Withdrew",
-      icon: Minus,
-      color: "text-orange-500 bg-orange-500/15",
-    };
-  }
-  if (side === "BUY") {
-    return {
-      label: "Bought",
-      icon: Plus,
-      color: "text-emerald-500 bg-emerald-500/15",
-    };
-  }
-  if (side === "SELL") {
-    return {
-      label: "Sold",
-      icon: Minus,
-      color: "text-muted-foreground bg-muted",
-    };
-  }
-  return {
-    label: type,
-    icon: FileText,
-    color: "text-muted-foreground bg-muted",
-  };
+  return (
+    <div
+      className="relative rounded-sm overflow-hidden bg-muted border border-border/50 shrink-0"
+      style={{ width: size, height: size }}
+    >
+      <Image
+        src={trade.market.icon}
+        alt={trade.market.title}
+        fill
+        sizes={`${size}px`}
+        className="object-cover"
+      />
+    </div>
+  );
+}
+
+function ValueCell({ trade }: { trade: Trade }) {
+  const isBuy = trade.side === "BUY";
+  const isPositive = !isBuy && trade.usdcAmount > 0;
+  const isNegative = isBuy;
+  const hasAmount = trade.usdcAmount > 0;
+
+  return (
+    <span
+      className={cn(
+        "font-mono tabular-nums text-sm font-semibold whitespace-nowrap",
+        isNegative
+          ? "text-red-600 dark:text-red-400"
+          : isPositive
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-muted-foreground"
+      )}
+    >
+      {hasAmount ? (
+        <>
+          {isNegative ? "−" : "+"}
+          {formatCurrency(trade.usdcAmount)}
+        </>
+      ) : (
+        "—"
+      )}
+    </span>
+  );
 }
 
 export function HistoryTable({
@@ -105,9 +153,20 @@ export function HistoryTable({
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 space-y-2">
+      <div className="border-t border-border/40">
         {[1, 2, 3, 4, 5].map((i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+          <div
+            key={i}
+            className="flex items-center gap-3 px-3 py-4 border-b border-border/40"
+          >
+            <div className="h-3 w-20 rounded bg-muted-foreground/10 animate-pulse" />
+            <div className="h-9 w-9 rounded-sm bg-muted-foreground/10 animate-pulse shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-2/3 rounded bg-muted-foreground/10 animate-pulse" />
+              <div className="h-3 w-1/3 rounded bg-muted-foreground/10 animate-pulse" />
+            </div>
+            <div className="h-4 w-16 rounded bg-muted-foreground/10 animate-pulse" />
+          </div>
         ))}
       </div>
     );
@@ -116,148 +175,230 @@ export function HistoryTable({
   if (filteredTrades.length === 0) {
     return (
       <EmptyState
-        icon={History}
         title="No trading history"
         description={
           searchQuery
-            ? "Try a different search term"
-            : "Your trades, deposits, and withdrawals will appear here once you start trading"
+            ? "Try a different search term."
+            : "Your trades, deposits, and redemptions will show up here once you start."
         }
         action={
-          !searchQuery ? { label: "Start Trading", href: "/" } : undefined
+          !searchQuery
+            ? { label: "Start trading", href: "/markets" }
+            : undefined
         }
       />
     );
   }
 
   return (
-    <>
-      {/* Mobile Card View */}
-      <div className="md:hidden space-y-3 p-4">
-        {filteredTrades.map((trade) => {
-          const activityInfo = getActivityInfo(
+    <TooltipProvider>
+      {/* Desktop — hairline grid */}
+      <div className="hidden md:block">
+        <div
+          className={cn(
+            DESKTOP_GRID,
+            "px-3 py-2.5 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+          )}
+        >
+          <span>Activity</span>
+          <span>Market</span>
+          <span className="text-right tabular-nums">Value</span>
+          <span className="text-right">Time</span>
+          <span className="text-right">Tx</span>
+        </div>
+
+        {filteredTrades.map((trade, index) => {
+          const activity = getActivity(
             trade.type,
             trade.side,
             trade.usdcAmount
           );
-          const ActivityIcon = activityInfo.icon;
-          const isBuy = trade.side === "BUY";
-          const isLost = activityInfo.label === "Lost";
+          const href = tradeHref(trade);
+          const isLost = activity.label === "Lost";
           const isClosing = closingPositionId === trade.market.conditionId;
+          const outcomeColor =
+            trade.outcome === "Yes"
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-red-600 dark:text-red-400";
 
           return (
             <motion.div
               key={trade.id}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-background border border-border rounded-xl p-4 space-y-3"
+              transition={{ delay: Math.min(index * 0.015, 0.3) }}
+              className={cn(
+                DESKTOP_GRID,
+                "px-3 py-3.5 border-b border-border/40 hover:bg-muted/30 transition-colors"
+              )}
             >
-              {/* Top row: Activity + Time + Amount */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${activityInfo.color}`}
-                  >
-                    <ActivityIcon className="h-4 w-4" />
+              <ActivityLabel label={activity.label} tone={activity.tone} />
+
+              {href ? (
+                <Link
+                  href={href}
+                  className="flex items-center gap-3 min-w-0 group"
+                >
+                  <TradeIcon trade={trade} size={32} />
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate text-foreground">
+                      {trade.market.title}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5 font-mono text-[10px] uppercase tracking-[0.12em]">
+                      <span className={outcomeColor}>
+                        {trade.outcome} {formatPrice(trade.price)}
+                      </span>
+                      <span className="text-muted-foreground/60">·</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {trade.size.toFixed(1)} shares
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-semibold text-sm">
-                      {activityInfo.label}
+                </Link>
+              ) : (
+                <div className="flex items-center gap-3 min-w-0">
+                  <TradeIcon trade={trade} size={32} />
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate text-foreground">
+                      {trade.market.title}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {timeAgo(trade.timestamp)}
-                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5 font-mono text-[10px] uppercase tracking-[0.12em]">
+                      <span className={outcomeColor}>
+                        {trade.outcome} {formatPrice(trade.price)}
+                      </span>
+                      <span className="text-muted-foreground/60">·</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {trade.size.toFixed(1)} shares
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <p
-                  className={`font-semibold ${
-                    isBuy
-                      ? "text-red-500"
-                      : trade.usdcAmount > 0
-                        ? "text-emerald-500"
-                        : "text-muted-foreground"
-                  }`}
-                >
-                  {isBuy ? "-" : trade.usdcAmount > 0 ? "+" : ""}
-                  {trade.usdcAmount > 0
-                    ? formatCurrency(trade.usdcAmount)
-                    : "-"}
-                </p>
+              )}
+
+              <div className="text-right">
+                <ValueCell trade={trade} />
               </div>
 
-              {/* Market info row - aligned with activity icon */}
-              <div className="flex items-center gap-2">
-                {trade.market.eventSlug || trade.market.slug ? (
-                  <Link
-                    href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
-                    className="relative w-8 h-8 rounded-full overflow-hidden bg-muted shrink-0"
+              <div className="text-right font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+                {timeAgo(trade.timestamp)}
+              </div>
+
+              <div className="flex items-center justify-end">
+                {isLost && onCloseLostPosition && trade.market.conditionId ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onCloseLostPosition(
+                            trade.market.conditionId as string
+                          )
+                        }
+                        disabled={isClosing}
+                        className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                        aria-label="Close lost position"
+                      >
+                        {isClosing ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Close lost position</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <a
+                    href={`https://polygonscan.com/tx/${trade.transactionHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="View transaction on Polygonscan"
+                    className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    {trade.market.icon ? (
-                      <Image
-                        src={trade.market.icon}
-                        alt={trade.market.title}
-                        fill
-                        sizes="32px"
-                        className="object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
-                      </div>
-                    )}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {/* Mobile — hairline stacked rows */}
+      <div className="md:hidden border-t border-border/40">
+        {filteredTrades.map((trade, index) => {
+          const activity = getActivity(
+            trade.type,
+            trade.side,
+            trade.usdcAmount
+          );
+          const href = tradeHref(trade);
+          const isLost = activity.label === "Lost";
+          const isClosing = closingPositionId === trade.market.conditionId;
+          const outcomeColor =
+            trade.outcome === "Yes"
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-red-600 dark:text-red-400";
+
+          return (
+            <motion.div
+              key={trade.id}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(index * 0.015, 0.3) }}
+              className="border-b border-border/40 py-4 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <ActivityLabel label={activity.label} tone={activity.tone} />
+                <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+                  <span>{timeAgo(trade.timestamp)}</span>
+                  <ValueCell trade={trade} />
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                {href ? (
+                  <Link href={href} className="shrink-0">
+                    <TradeIcon trade={trade} size={40} />
                   </Link>
                 ) : (
-                  <div className="relative w-8 h-8 rounded-full overflow-hidden bg-muted shrink-0">
-                    {trade.market.icon ? (
-                      <Image
-                        src={trade.market.icon}
-                        alt={trade.market.title}
-                        fill
-                        sizes="32px"
-                        className="object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
-                      </div>
-                    )}
-                  </div>
+                  <TradeIcon trade={trade} size={40} />
                 )}
                 <div className="flex-1 min-w-0">
-                  {trade.market.eventSlug || trade.market.slug ? (
+                  {href ? (
                     <Link
-                      href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
-                      className="text-sm truncate block hover:text-primary transition-colors"
+                      href={href}
+                      className="text-sm truncate block text-foreground"
                     >
                       {trade.market.title}
                     </Link>
                   ) : (
-                    <p className="text-sm truncate">{trade.market.title}</p>
+                    <p className="text-sm truncate text-foreground">
+                      {trade.market.title}
+                    </p>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    <span
-                      className={
-                        trade.outcome === "Yes"
-                          ? "text-emerald-500"
-                          : "text-red-500"
-                      }
-                    >
+                  <div className="flex items-center gap-1.5 mt-0.5 font-mono text-[10px] uppercase tracking-[0.12em]">
+                    <span className={outcomeColor}>
                       {trade.outcome} {formatPrice(trade.price)}
                     </span>
-                    <span className="mx-1">·</span>
-                    {trade.size.toFixed(1)} shares
-                  </p>
+                    <span className="text-muted-foreground/60">·</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {trade.size.toFixed(1)} shares
+                    </span>
+                  </div>
                 </div>
+
                 {isLost && onCloseLostPosition && trade.market.conditionId ? (
                   <button
                     type="button"
-                    aria-label="Close lost position"
-                    title="Close lost position"
                     onClick={() =>
                       onCloseLostPosition(trade.market.conditionId as string)
                     }
                     disabled={isClosing}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 disabled:opacity-50"
+                    aria-label="Close lost position"
+                    className="shrink-0 inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                   >
                     {isClosing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -271,8 +412,7 @@ export function HistoryTable({
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label="View transaction on Polygonscan"
-                    title="View transaction on Polygonscan"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                    className="shrink-0 inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ExternalLink className="h-4 w-4" />
                   </a>
@@ -282,189 +422,6 @@ export function HistoryTable({
           );
         })}
       </div>
-
-      {/* Desktop Table View */}
-      <div className="hidden md:block overflow-x-auto">
-        <TooltipProvider>
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent border-b">
-                <TableHead className="w-[120px] min-w-[100px]">
-                  Activity
-                </TableHead>
-                <TableHead className="min-w-[200px]">Market</TableHead>
-                <TableHead className="text-right w-[100px] min-w-[80px]">
-                  Value
-                </TableHead>
-                <TableHead className="text-right w-[120px] min-w-[100px]">
-                  Time
-                </TableHead>
-                <TableHead className="w-[60px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredTrades.map((trade) => {
-                const activityInfo = getActivityInfo(
-                  trade.type,
-                  trade.side,
-                  trade.usdcAmount
-                );
-                const ActivityIcon = activityInfo.icon;
-                const isBuy = trade.side === "BUY";
-                const isLost = activityInfo.label === "Lost";
-                const isClosing =
-                  closingPositionId === trade.market.conditionId;
-
-                return (
-                  <TableRow
-                    key={trade.id}
-                    className="hover:bg-muted/50 transition-colors"
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${activityInfo.color}`}
-                        >
-                          <ActivityIcon className="h-3.5 w-3.5" />
-                        </div>
-                        <span className="text-sm font-medium">
-                          {activityInfo.label}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        {trade.market.eventSlug || trade.market.slug ? (
-                          <Link
-                            href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
-                            className="relative w-9 h-9 rounded-full overflow-hidden bg-muted shrink-0"
-                          >
-                            {trade.market.icon ? (
-                              <Image
-                                src={trade.market.icon}
-                                alt={trade.market.title}
-                                fill
-                                sizes="36px"
-                                className="object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                              </div>
-                            )}
-                          </Link>
-                        ) : (
-                          <div className="relative w-9 h-9 rounded-full overflow-hidden bg-muted shrink-0">
-                            {trade.market.icon ? (
-                              <Image
-                                src={trade.market.icon}
-                                alt={trade.market.title}
-                                fill
-                                sizes="36px"
-                                className="object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        <div className="min-w-0">
-                          {trade.market.eventSlug || trade.market.slug ? (
-                            <Link
-                              href={`/events/detail/${trade.market.eventSlug || trade.market.slug}${trade.market.conditionId ? `?conditionId=${trade.market.conditionId}` : ""}`}
-                              className="font-medium text-sm truncate max-w-[300px] block hover:text-primary transition-colors"
-                            >
-                              {trade.market.title}
-                            </Link>
-                          ) : (
-                            <p className="font-medium text-sm truncate max-w-[300px]">
-                              {trade.market.title}
-                            </p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            <span
-                              className={
-                                trade.outcome === "Yes"
-                                  ? "text-emerald-500"
-                                  : "text-red-500"
-                              }
-                            >
-                              {trade.outcome} {formatPrice(trade.price)}
-                            </span>
-                            <span className="mx-1.5">·</span>
-                            {trade.size.toFixed(1)} shares
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span
-                        className={`font-medium ${
-                          isBuy
-                            ? "text-red-500"
-                            : trade.usdcAmount > 0
-                              ? "text-emerald-500"
-                              : "text-muted-foreground"
-                        }`}
-                      >
-                        {isBuy ? "-" : trade.usdcAmount > 0 ? "+" : ""}
-                        {trade.usdcAmount > 0
-                          ? formatCurrency(trade.usdcAmount)
-                          : "-"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className="text-sm text-muted-foreground">
-                        {timeAgo(trade.timestamp)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isLost &&
-                      onCloseLostPosition &&
-                      trade.market.conditionId ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onCloseLostPosition(
-                                  trade.market.conditionId as string
-                                )
-                              }
-                              disabled={isClosing}
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                            >
-                              {isClosing ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Close lost position</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        <a
-                          href={`https://polygonscan.com/tx/${trade.transactionHash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TooltipProvider>
-      </div>
-    </>
+    </TooltipProvider>
   );
 }

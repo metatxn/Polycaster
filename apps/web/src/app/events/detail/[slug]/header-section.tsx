@@ -37,21 +37,24 @@ function StatItem({
   return (
     <div
       className={cn(
-        "flex items-center gap-1 bg-muted/50 rounded-full shrink-0 transition-all duration-300",
-        compact
-          ? "px-1.5 py-0.5 text-[10px] sm:text-[11px] bg-muted/40 backdrop-blur-xs border border-border/20"
-          : "px-2.5 py-1.5 text-sm",
+        "inline-flex items-center gap-1.5 shrink-0 transition-colors",
+        compact ? "text-[10px] sm:text-[11px]" : "text-xs sm:text-[13px]",
         className
       )}
     >
       {Icon && (
         <Icon
-          className={cn("shrink-0", compact ? "h-2.5 w-2.5" : "h-3.5 w-3.5")}
+          className={cn(
+            "shrink-0 text-muted-foreground/60",
+            compact ? "h-2.5 w-2.5" : "h-3 w-3"
+          )}
         />
       )}
-      <span className="font-medium truncate">
+      <span className="font-mono uppercase tracking-[0.12em] font-semibold tabular-nums text-foreground">
         {value}
-        {label && !compact && ` ${label}`}
+        {label && !compact && (
+          <span className="ml-1.5 text-muted-foreground/70">{label}</span>
+        )}
       </span>
     </div>
   );
@@ -80,18 +83,18 @@ export function HeaderSection({
           {event.image && (
             <div
               className={cn(
-                "relative shrink-0 transition-all duration-300",
+                "relative shrink-0 aspect-video overflow-hidden rounded-sm border border-border/60 transition-all duration-300",
                 isScrolled
-                  ? "lg:w-10 lg:h-10 w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20"
-                  : "w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20"
+                  ? "lg:w-16 w-20 sm:w-24 md:w-28"
+                  : "w-20 sm:w-24 md:w-28"
               )}
             >
               <Image
                 src={event.image}
                 alt={event.title}
                 fill
-                sizes="(max-width: 640px) 48px, 80px"
-                className="rounded-xl object-cover"
+                sizes="(max-width: 640px) 80px, (max-width: 768px) 96px, 112px"
+                className="object-cover"
               />
             </div>
           )}
@@ -110,10 +113,10 @@ export function HeaderSection({
                 <div className="flex items-center justify-between gap-2">
                   <h1
                     className={cn(
-                      "font-bold leading-tight transition-all duration-300 flex-1 min-w-0",
+                      "font-editorial italic font-medium leading-[1.05] tracking-tight transition-all duration-300 flex-1 min-w-0",
                       isScrolled
-                        ? "lg:text-2xl text-xl sm:text-2xl md:text-3xl"
-                        : "text-xl sm:text-2xl md:text-3xl"
+                        ? "lg:text-[28px] text-2xl sm:text-3xl md:text-4xl"
+                        : "text-2xl sm:text-3xl md:text-[38px]"
                     )}
                   >
                     {event.title}
@@ -133,8 +136,8 @@ export function HeaderSection({
                     <button
                       type="button"
                       className={cn(
-                        "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
-                        "h-8 w-8 lg:h-9 lg:w-auto lg:px-3 lg:gap-2"
+                        "inline-flex items-center justify-center rounded-md text-xs font-medium text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent/60 hover:text-foreground",
+                        "h-8 w-8 lg:h-8 lg:w-auto lg:px-2.5 lg:gap-1.5"
                       )}
                       onClick={async () => {
                         if (typeof window !== "undefined" && navigator.share) {

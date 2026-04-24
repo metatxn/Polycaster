@@ -24,38 +24,40 @@ export function OutcomeSelector({
     <div className="flex gap-2">
       {outcomes.map((outcome, idx) => {
         const green = isGreenOutcome(outcome.name, idx);
+        const isActive = selectedOutcomeIndex === idx;
         return (
           <button
-            key={outcome.tokenId}
+            key={outcome.tokenId || `outcome-${idx}`}
             type="button"
-            className={`flex-1 relative px-4 py-3 rounded-xl border-2 transition-all ${
-              selectedOutcomeIndex === idx
+            className={`group flex-1 relative px-4 py-3 border transition-colors text-left ${
+              isActive
                 ? green
                   ? "border-emerald-500 bg-emerald-500/5"
                   : "border-red-500 bg-red-500/5"
-                : "border-border hover:border-muted-foreground/50 bg-secondary/30"
+                : "border-border/60 hover:border-foreground/40 bg-transparent"
             }`}
             onClick={() => onOutcomeChange(idx)}
           >
-            {selectedOutcomeIndex === idx && (
+            {isActive && (
               <span
-                className={`absolute top-2 right-2 h-2 w-2 rounded-full ${
+                aria-hidden
+                className={`absolute top-2 right-2 h-1.5 w-1.5 rounded-full ${
                   green ? "bg-emerald-500" : "bg-red-500"
                 }`}
               />
             )}
             <span
-              className={`block text-sm font-medium ${
+              className={`block font-mono text-[10px] uppercase tracking-[0.14em] ${
                 green
                   ? "text-emerald-600 dark:text-emerald-400"
                   : outcome.name === "No" || idx === 1
                     ? "text-red-600 dark:text-red-400"
-                    : "text-foreground"
+                    : "text-muted-foreground"
               }`}
             >
               {outcome.name}
             </span>
-            <span className="block text-lg font-semibold font-mono text-foreground mt-0.5">
+            <span className="block text-lg font-semibold font-mono tabular-nums text-foreground mt-0.5">
               {formatPrice(outcome.price)}
             </span>
           </button>

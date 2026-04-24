@@ -82,11 +82,6 @@ export interface TradingPlaceOrderMessage {
   credentials: { apiKey: string; apiSecret: string; apiPassphrase: string };
 }
 
-export interface TradingGetFeeRateMessage {
-  type: "trading:get-fee-rate";
-  tokenId: string;
-}
-
 export interface TradingGetAllowanceMessage {
   type: "trading:get-allowance";
   ownerAddress: string;
@@ -137,6 +132,11 @@ export interface TradingRelayerApproveMessage {
   address: string;
 }
 
+export interface TradingDeploySafeMessage {
+  type: "trading:deploy-safe";
+  address: string;
+}
+
 export interface TradingPrewarmOffscreenMessage {
   type: "trading:prewarm-offscreen";
 }
@@ -169,7 +169,6 @@ export type TradingMessage =
   | TradingDeriveCredentialsMessage
   | TradingGetBalanceMessage
   | TradingPlaceOrderMessage
-  | TradingGetFeeRateMessage
   | TradingGetAllowanceMessage
   | TradingGetAllAllowancesMessage
   | TradingGetOrderBookMessage
@@ -177,6 +176,7 @@ export type TradingMessage =
   | TradingMergePositionsMessage
   | TradingGetOutcomeBalancesMessage
   | TradingRelayerApproveMessage
+  | TradingDeploySafeMessage
   | TradingPrewarmOffscreenMessage;
 
 export type BackgroundMessage =

@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
+import { ProChromeController } from "@/components/app-pro-layout";
 import { MainContent } from "@/components/main-content";
 import { SidebarDesktopNoSSR } from "@/components/sidebar-desktop";
+import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import ContextProvider from "@/context";
 import "./globals.css";
 
@@ -18,6 +20,17 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
+// Editorial display serif — used for the italic accent moments on the
+// landing page ("a position", "not around it"). Loading only the weights
+// we need keeps the font payload under 30KB.
+const fraunces = Fraunces({
+  variable: "--font-editorial",
+  subsets: ["latin"],
+  weight: ["500", "600"],
+  style: ["italic"],
+  display: "swap",
+});
+
 export const viewport: Viewport = {
   themeColor: "#8b5cf6",
   width: "device-width",
@@ -26,11 +39,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Knoww - Know your Odds",
+    default: "Knoww — Every opinion is a position",
     template: "%s | Knoww",
   },
-  description:
-    "Trade on real-world events with Knoww. Explore prediction markets for politics, sports, crypto, and more.",
+  description: "A prediction market layer for the open internet.",
   keywords: ["prediction markets", "polymarket", "trading", "crypto", "odds"],
   metadataBase: new URL("https://knoww.app"),
   icons: {
@@ -53,21 +65,21 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     siteName: "Knoww",
-    title: "Knoww - Know your Odds",
-    description: "Trade on real-world events with prediction markets",
+    title: "Knoww — Every opinion is a position",
+    description: "A prediction market layer for the open internet.",
     images: [
       {
         url: "/logo-512x512.png",
         width: 512,
         height: 512,
-        alt: "Knoww Prediction Markets",
+        alt: "Knoww — A prediction market layer for the open internet",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Knoww - Know your Odds",
-    description: "Trade on real-world events with prediction markets",
+    title: "Knoww — Every opinion is a position",
+    description: "A prediction market layer for the open internet.",
     images: ["/logo-512x512.png"],
   },
   robots: {
@@ -99,23 +111,40 @@ export default async function RootLayout({
         <link rel="dns-prefetch" href="https://gamma-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://api.web3modal.org" />
         <link rel="dns-prefetch" href="https://bridge.polymarket.com" />
-        <link rel="dns-prefetch" href="https://clob.polymarket.com" />
+        <link rel="dns-prefetch" href={CLOB_BASE_URL} />
         <link rel="dns-prefetch" href="https://data-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://user-pnl-api.polymarket.com" />
         <link rel="dns-prefetch" href="https://strapi-matic.poly.market" />
-        <link
-          rel="dns-prefetch"
-          href="https://ws-subscriptions-clob.polymarket.com"
-        />
+        <link rel="dns-prefetch" href={CLOB_WS_BASE_URL} />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        {/* Set app-pro-chrome on <html> synchronously, before React
+            hydrates, so the app sidebar doesn't flash in and then
+            disappear when the page's useEffect runs. Pro chrome is the
+            default on every app route listed below, plus any path under
+            /events/, /profile/, or /whales/ (covers /events/detail/…,
+            /profile/[address], /whales/backtest, etc.); on /markets
+            specifically, `?layout=legacy` escapes back to the card grid.
+            Other routes (/, /privacy, /terms) keep the app sidebar. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var path=location.pathname;var p=new URLSearchParams(location.search);var proPaths=['/markets','/whales','/leaderboard','/live','/search','/portfolio'];var eventsAny=path.startsWith('/events/');var profileAny=path.startsWith('/profile/');var whalesAny=path.startsWith('/whales/');var marketsAny=path.startsWith('/markets/');var matches=proPaths.indexOf(path)!==-1||eventsAny||profileAny||whalesAny||marketsAny;var legacyOnMarkets=path==='/markets'&&p.get('layout')==='legacy';if(matches&&!legacyOnMarkets){document.documentElement.classList.add('app-pro-chrome');}}catch(e){}})();`,
+          }}
+        />
       </head>
       <body
-        className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} font-sans antialiased`}
       >
         <ContextProvider cookies={cookies}>
+          {/* Keep the `app-pro-chrome` class on <html> in sync with the
+              current pathname. Centralizing this prevents the sidebar
+              flash that used to appear when navigating between two pro
+              routes (e.g. /markets → /live), where the old page's
+              cleanup removed the class before the new page's effect
+              could re-add it. */}
+          <ProChromeController />
           {/* Desktop sidebar (client-only to avoid rendering on mobile SSR) */}
           <SidebarDesktopNoSSR />
           {/* Main content with responsive margin */}

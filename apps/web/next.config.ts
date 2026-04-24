@@ -11,6 +11,16 @@ const nextConfig: NextConfig = {
     // external: ["pino-pretty", "lokijs", "encoding"],
   },
   serverExternalPackages: ["pino-pretty", "lokijs", "encoding"],
+  webpack: (config, { webpack }) => {
+    // @polymarket/clob-client-v2 uses `node:crypto` (createHash) in an
+    // optional orderbook-hash helper. Rewrite the prefixed import to the
+    // bare `crypto` specifier so webpack's polyfill resolution applies for
+    // browser bundles.
+    config.plugins.push(
+      new webpack.NormalModuleReplacementPlugin(/^node:crypto$/, "crypto")
+    );
+    return config;
+  },
   async rewrites() {
     return [
       {

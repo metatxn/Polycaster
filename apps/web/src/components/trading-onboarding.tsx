@@ -9,26 +9,16 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
-  PartyPopper,
   Shield,
-  Sparkles,
   Wallet,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection } from "wagmi";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { useClobClient } from "@/hooks/use-clob-client";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
+import { checkAllApprovals } from "@/lib/approvals";
 import { cn } from "@/lib/utils";
 
 interface OnboardingStep {
@@ -68,7 +58,6 @@ export function TradingOnboarding({
     refresh: refreshProxyWallet,
     proxyAddress: computedProxyAddress,
   } = useProxyWallet();
-  const { getUsdcAllowance } = useClobClient();
 
   // Use relayer state as primary source (most reliable after deployment)
   const hasProxyWallet = hasDeployedSafe || hasProxyWalletFromHook;
@@ -101,8 +90,9 @@ export function TradingOnboarding({
     },
     {
       id: "approve",
-      title: "Enable USDC Trading",
-      description: "One-time approval to trade with USDC • Free & gasless",
+      title: "Approve Trading Permissions",
+      description:
+        "One-time approvals for pUSD, USDC.e (auto-wrap), and outcome tokens • Free & gasless",
       icon: <Zap className="h-5 w-5" />,
       status: "pending",
     },
@@ -131,32 +121,32 @@ export function TradingOnboarding({
   );
 
   /**
-   * Check if USDC is already approved for trading
-   * This is for returning users who have already completed onboarding
-   * IMPORTANT: Must check the PROXY WALLET's allowance, not the EOA's
+   * Check if ALL V2 trading approvals are already set on the Safe.
+   *
+   * V2 requires 7 approvals (see `checkAllApprovals` in `@/lib/approvals`):
+   *   pUSD → CTF Exchange V2, Neg Risk Exchange V2, Neg Risk Adapter
+   *   USDC.e → Collateral Onramp (for on-demand wrap on BUY)
+   *   CTF setApprovalForAll → those same three operators (needed for SELL)
+   *
+   * Returning users with legacy V1 (USDC.e-only) approvals must re-run the
+   * batch to unlock V2 settlement — hence we check every target, not just
+   * one USDC allowance.
    */
   const checkUsdcApproval = useCallback(async () => {
     if (!hasProxyWallet || !proxyAddress || isCheckingApproval) return;
 
     setIsCheckingApproval(true);
     try {
-      // Pass the proxy wallet address to check its allowance
-      const result = await getUsdcAllowance(proxyAddress);
-      // Consider approved if allowance is greater than 0 (any approval exists)
-      const isApproved = result && result.allowance > 0;
-      console.log("[TradingOnboarding] USDC allowance check:", {
-        proxyAddress,
-        allowance: result?.allowance,
-        isApproved,
-      });
-      setHasUsdcApproval(isApproved);
+      const status = await checkAllApprovals(proxyAddress);
+      console.log("[TradingOnboarding] V2 approval status:", status);
+      setHasUsdcApproval(status.allApproved);
     } catch (err) {
-      console.error("[TradingOnboarding] Failed to check USDC allowance:", err);
+      console.error("[TradingOnboarding] Failed to check V2 approvals:", err);
       setHasUsdcApproval(false);
     } finally {
       setIsCheckingApproval(false);
     }
-  }, [hasProxyWallet, proxyAddress, isCheckingApproval, getUsdcAllowance]);
+  }, [hasProxyWallet, proxyAddress, isCheckingApproval]);
 
   const handleConnectWallet = useCallback(async () => {
     updateStepStatus("connect", "in_progress");
@@ -205,7 +195,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "approve",
         "error",
-        err instanceof Error ? err.message : "Failed to approve USDC"
+        err instanceof Error ? err.message : "Failed to submit approval batch"
       );
     }
   }, [approveUsdcForTrading, updateStepStatus]);
@@ -225,7 +215,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "credentials",
         "error",
-        "Please complete the USDC approval step first"
+        "Please complete the approvals step first"
       );
       return;
     }
@@ -340,428 +330,342 @@ export function TradingOnboarding({
   const getStepAction = (step: OnboardingStep, index: number) => {
     if (step.status === "completed") {
       return (
-        <CheckCircle2 className="h-5 w-5 text-green-500 dark:text-green-400" />
+        <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
       );
     }
 
     if (step.status === "in_progress") {
       return (
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          <span className="text-xs text-muted-foreground hidden sm:inline">
-            {step.id === "deploy" && "Deploying..."}
-            {step.id === "approve" && "Approving..."}
-            {step.id === "credentials" && "Setting up..."}
-            {step.id === "connect" && "Connecting..."}
-          </span>
-        </div>
+        <Loader2 className="h-4 w-4 animate-spin text-foreground shrink-0" />
       );
     }
 
     if (step.status === "error") {
-      return <AlertCircle className="h-5 w-5 text-destructive" />;
+      return (
+        <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
+      );
     }
 
     if (index !== currentStep) {
-      return <ChevronRight className="h-5 w-5 text-muted-foreground" />;
+      return (
+        <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+      );
     }
 
-    // Current step actions
+    const ctaClass =
+      "h-8 px-3 font-mono text-[11px] uppercase tracking-[0.16em] font-semibold bg-foreground text-background hover:bg-foreground/90 disabled:opacity-50 transition-colors";
+
     switch (step.id) {
       case "connect":
         return (
-          <Button size="sm" onClick={handleConnectWallet} disabled={isLoading}>
+          <button
+            type="button"
+            onClick={handleConnectWallet}
+            disabled={isLoading}
+            className={ctaClass}
+          >
             Connect
-          </Button>
+          </button>
         );
       case "deploy":
         return (
-          <Button size="sm" onClick={handleDeploySafe} disabled={isLoading}>
+          <button
+            type="button"
+            onClick={handleDeploySafe}
+            disabled={isLoading}
+            className={ctaClass}
+          >
             Deploy
-          </Button>
+          </button>
         );
       case "approve":
         return (
-          <Button size="sm" onClick={handleApproveUsdc} disabled={isLoading}>
+          <button
+            type="button"
+            onClick={handleApproveUsdc}
+            disabled={isLoading}
+            className={ctaClass}
+          >
             Approve
-          </Button>
+          </button>
         );
       case "credentials":
         return (
-          <Button
-            size="sm"
+          <button
+            type="button"
             onClick={handleDeriveCredentials}
             disabled={isLoading}
+            className={ctaClass}
           >
             Setup
-          </Button>
+          </button>
         );
       default:
         return null;
     }
   };
 
+  const contextCopy = (): string | null => {
+    if (allStepsComplete) return null;
+    if (currentStep === 1)
+      return "Your trading wallet is a Gnosis Safe — the most trusted smart-contract wallet in crypto.";
+    if (currentStep === 2)
+      return "One gasless batch grants seven allowances so the V2 exchange can settle your trades: pUSD → CTF Exchange (buy), USDC.e → Onramp (auto-wrap), and outcome tokens → Exchange (sell). Funds never leave your Safe until you trade.";
+    if (currentStep === 3)
+      return "Sign a message to create your unique trading credentials. No private keys are shared.";
+    return "All setup transactions are gasless — Polymarket covers the gas fees through their relayer.";
+  };
+
   return (
-    <Card className="w-full max-w-md mx-auto relative overflow-hidden border-0 shadow-none rounded-none">
-      {/* Celebration Animation Overlay */}
+    <div className="relative w-full max-w-md mx-auto bg-background">
+      {/* Celebration — quiet editorial moment */}
       <AnimatePresence>
         {showCelebration && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-sm"
+            className="absolute inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
           >
             <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.5, opacity: 0 }}
-              transition={{ type: "spring", duration: 0.5 }}
-              className="text-center"
+              initial={{ y: 8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ duration: 0.4 }}
+              className="text-center px-6"
             >
-              {/* Confetti particles */}
-              <div className="relative">
-                {[...Array(12)].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{
-                      x: 0,
-                      y: 0,
-                      scale: 0,
-                      rotate: 0,
-                    }}
-                    animate={{
-                      x: Math.cos((i * 30 * Math.PI) / 180) * 80,
-                      y: Math.sin((i * 30 * Math.PI) / 180) * 80 - 20,
-                      scale: [0, 1, 0.8],
-                      rotate: Math.random() * 360,
-                    }}
-                    transition={{
-                      duration: 0.8,
-                      delay: i * 0.05,
-                      ease: "easeOut",
-                    }}
-                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-                  >
-                    <Sparkles
-                      className={`h-4 w-4 ${
-                        i % 4 === 0
-                          ? "text-yellow-400"
-                          : i % 4 === 1
-                            ? "text-green-400"
-                            : i % 4 === 2
-                              ? "text-purple-400"
-                              : "text-blue-400"
-                      }`}
-                    />
-                  </motion.div>
-                ))}
-
-                {/* Center icon */}
-                <motion.div
-                  animate={{
-                    scale: [1, 1.2, 1],
-                    rotate: [0, 10, -10, 0],
-                  }}
-                  transition={{
-                    duration: 0.6,
-                    repeat: 2,
-                    repeatType: "reverse",
-                  }}
-                >
-                  <PartyPopper className="h-16 w-16 text-yellow-500 mx-auto" />
-                </motion.div>
-              </div>
-
-              <motion.h3
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.3 }}
-                className="text-2xl font-bold mt-4 bg-linear-to-r from-green-400 to-emerald-500 bg-clip-text text-transparent"
-              >
-                You&apos;re All Set! 🎉
-              </motion.h3>
-              <motion.p
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.4 }}
-                className="text-muted-foreground mt-2"
-              >
-                Ready to start trading on Polymarket
-              </motion.p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-4">
+                § Setup Complete
+              </p>
+              <h3 className="font-editorial italic font-medium text-4xl leading-[1.05] tracking-tight">
+                You&apos;re set.
+              </h3>
+              <p className="text-sm text-muted-foreground mt-3">
+                Ready to start trading on Polymarket.
+              </p>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-xl">
-          {allStepsComplete ? "🎉 Setup Complete!" : "Setup Trading"}
-        </CardTitle>
-        <CardDescription>
+      {/* Header */}
+      <div className="px-6 pt-7 pb-5 border-b border-border/40">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-3">
+          § {allStepsComplete ? "Setup Complete" : "Setup Trading"}
+        </p>
+        <h2 className="font-editorial italic font-medium text-3xl sm:text-4xl leading-[1.05] tracking-tight">
+          {allStepsComplete ? "You're set." : "A few steps, then trade."}
+        </h2>
+        <p className="text-sm text-muted-foreground mt-3">
           {allStepsComplete
-            ? "Your trading account is ready to go!"
-            : "Complete these steps to start trading on Polymarket"}
-        </CardDescription>
+            ? "Your trading account is ready."
+            : "Complete these once to start trading on Polymarket."}
+        </p>
 
-        {/* Custom Progress Bar with Checkpoints */}
-        <div className="pt-3 pb-1">
+        {/* Hairline progress track with checkpoints */}
+        <div className="pt-6">
           <div className="relative">
-            {/* Background track */}
-            <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-muted/50" />
-
-            {/* Filled progress */}
+            <div className="absolute top-1/2 -translate-y-1/2 h-px w-full bg-border/60" />
             <motion.div
-              className="absolute top-0 left-0 h-2 rounded-full bg-linear-to-r from-emerald-500 via-green-500 to-teal-500"
+              className="absolute top-1/2 -translate-y-1/2 h-px bg-foreground"
               initial={{ width: 0 }}
               animate={{ width: `${progress}%` }}
               transition={{ duration: 0.5, ease: "easeOut" }}
             />
-
-            {/* Checkpoints */}
-            <div className="absolute top-1/2 -translate-y-1/2 w-full flex justify-between px-0">
+            <div className="relative flex justify-between">
               {steps.map((step, index) => {
                 const stepProgress = ((index + 1) / steps.length) * 100;
                 const isCompleted = progress >= stepProgress;
                 const isCurrent = index === currentStep;
-
                 return (
                   <div
                     key={step.id}
-                    className="relative flex items-center justify-center"
-                    style={{
-                      left: index === 0 ? "0" : "auto",
-                      right: index === steps.length - 1 ? "0" : "auto",
-                    }}
+                    className="flex items-center justify-center"
                   >
-                    <motion.div
-                      initial={{ scale: 0.8 }}
-                      animate={{ scale: isCompleted || isCurrent ? 1 : 0.9 }}
+                    <div
                       className={cn(
-                        "w-5 h-5 rounded-full flex items-center justify-center border-2 transition-all duration-300",
+                        "flex items-center justify-center w-5 h-5 tabular-nums border transition-colors",
                         isCompleted
-                          ? "bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-500/30"
+                          ? "bg-foreground border-foreground text-background"
                           : isCurrent
-                            ? "bg-white dark:bg-gray-900 border-emerald-500 text-emerald-500 shadow-md"
-                            : "bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500"
+                            ? "bg-background border-foreground text-foreground"
+                            : "bg-background border-border/60 text-muted-foreground/70"
                       )}
                     >
                       {isCompleted ? (
                         <Check className="h-3 w-3" />
                       ) : (
-                        <span className="text-[10px] font-bold">
+                        <span className="font-mono text-[9px] font-semibold">
                           {index + 1}
                         </span>
                       )}
-                    </motion.div>
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Step labels below checkpoints */}
-          <div className="flex justify-between mt-2">
+          <div className="flex justify-between mt-2.5">
             {steps.map((step, index) => {
               const stepProgress = ((index + 1) / steps.length) * 100;
               const isCompleted = progress >= stepProgress;
               const isCurrent = index === currentStep;
-
+              const label =
+                step.id === "connect"
+                  ? "Connect"
+                  : step.id === "deploy"
+                    ? "Wallet"
+                    : step.id === "approve"
+                      ? "Approvals"
+                      : "API";
               return (
                 <span
                   key={`label-${step.id}`}
                   className={cn(
-                    "text-[9px] font-medium text-center max-w-[60px] leading-tight",
-                    isCompleted
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : isCurrent
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-gray-400 dark:text-gray-500"
+                    "font-mono text-[9px] uppercase tracking-[0.14em] text-center max-w-[60px] leading-tight transition-colors",
+                    isCompleted || isCurrent
+                      ? "text-foreground"
+                      : "text-muted-foreground/60"
                   )}
                 >
-                  {step.id === "connect"
-                    ? "Connect"
-                    : step.id === "deploy"
-                      ? "Wallet"
-                      : step.id === "approve"
-                        ? "USDC"
-                        : "API"}
+                  {label}
                 </span>
               );
             })}
           </div>
         </div>
-      </CardHeader>
+      </div>
 
-      <CardContent className="space-y-4">
-        <AnimatePresence>
-          {steps.map((step, index) => (
+      {/* Step rows — hairline-divided */}
+      <div className="divide-y divide-border/40">
+        {steps.map((step, index) => {
+          const isCurrent = index === currentStep;
+          const isCompleted = step.status === "completed";
+          const isError = step.status === "error";
+          const isInProgress = step.status === "in_progress";
+
+          const progressCopy =
+            step.id === "deploy"
+              ? "Creating your secure wallet — 10–30 seconds"
+              : step.id === "approve"
+                ? "Submitting approval batch — 10–30 seconds"
+                : step.id === "credentials"
+                  ? "Generating your trading credentials…"
+                  : step.id === "connect"
+                    ? "Waiting for wallet connection…"
+                    : step.description;
+
+          return (
             <motion.div
               key={step.id}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ delay: index * 0.1 }}
-              className={`flex items-center gap-4 p-3 rounded-lg border transition-colors ${
-                index === currentStep
-                  ? "border-primary bg-primary/5"
-                  : step.status === "completed"
-                    ? "border-green-500/30 bg-green-500/5"
-                    : step.status === "error"
-                      ? "border-destructive/30 bg-destructive/5"
-                      : "border-border"
-              }`}
+              transition={{ delay: index * 0.05 }}
+              className={cn(
+                "flex items-center gap-4 px-6 py-4 transition-colors",
+                isCurrent && !isCompleted && "bg-foreground/3"
+              )}
             >
-              {/* Step Icon */}
+              {/* Step icon — hairline square */}
               <div
-                className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                  step.status === "completed"
-                    ? "bg-green-500/20 text-green-600 dark:text-green-400"
-                    : step.status === "error"
-                      ? "bg-destructive/20 text-destructive"
-                      : index === currentStep
-                        ? "bg-primary/20 text-primary"
-                        : "bg-muted text-muted-foreground"
-                }`}
+                className={cn(
+                  "flex items-center justify-center w-10 h-10 border shrink-0 transition-colors",
+                  isCompleted
+                    ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                    : isError
+                      ? "border-red-600/40 text-red-700 dark:text-red-300"
+                      : isCurrent || isInProgress
+                        ? "border-foreground/60 text-foreground"
+                        : "border-border/60 text-muted-foreground/60"
+                )}
               >
                 {step.icon}
               </div>
 
-              {/* Step Info */}
               <div className="flex-1 min-w-0">
                 <p
-                  className={`font-medium text-sm ${
-                    step.status === "completed"
-                      ? "text-green-600 dark:text-green-400"
-                      : step.status === "error"
-                        ? "text-destructive"
-                        : step.status === "in_progress"
-                          ? "text-primary"
-                          : ""
-                  }`}
+                  className={cn(
+                    "font-mono text-[11px] uppercase tracking-[0.14em] font-semibold",
+                    isCompleted
+                      ? "text-emerald-700 dark:text-emerald-300"
+                      : isError
+                        ? "text-red-700 dark:text-red-300"
+                        : isInProgress || isCurrent
+                          ? "text-foreground"
+                          : "text-muted-foreground"
+                  )}
                 >
                   {step.title}
                 </p>
-                <p className="text-xs text-muted-foreground truncate">
+                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                   {step.errorMessage ||
-                    (step.status === "in_progress"
-                      ? step.id === "deploy"
-                        ? "Creating your secure wallet... This may take 10-30 seconds"
-                        : step.id === "approve"
-                          ? "Approving USDC... This may take 10-30 seconds"
-                          : step.id === "credentials"
-                            ? "Generating your trading credentials..."
-                            : step.id === "connect"
-                              ? "Waiting for wallet connection..."
-                              : step.description
-                      : step.description)}
+                    (isInProgress ? progressCopy : step.description)}
                 </p>
               </div>
 
-              {/* Step Action */}
               <div className="shrink-0">{getStepAction(step, index)}</div>
             </motion.div>
-          ))}
-        </AnimatePresence>
+          );
+        })}
+      </div>
 
-        {/* Proxy Address Display */}
+      {/* Meta row — proxy address + contextual copy */}
+      <div className="px-6 py-5 space-y-4 border-t border-border/40">
         {proxyAddress && (
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20"
+            className="space-y-1.5"
           >
-            <p className="text-xs text-muted-foreground mb-1">
-              Your Polymarket Wallet
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              § Your Polymarket Wallet
             </p>
             <a
               href={`https://polygonscan.com/address/${proxyAddress}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm font-mono text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+              className="inline-flex items-center gap-1.5 font-mono text-xs tabular-nums text-foreground hover:underline decoration-foreground/40 underline-offset-4"
             >
-              {proxyAddress.slice(0, 10)}...{proxyAddress.slice(-8)}
+              <span>
+                {proxyAddress.slice(0, 10)}…{proxyAddress.slice(-8)}
+              </span>
               <ExternalLink className="h-3 w-3" />
             </a>
           </motion.div>
         )}
 
-        {/* Info Box - contextual based on current step */}
-        <div
-          className={`p-3 rounded-lg border ${
-            allStepsComplete
-              ? "bg-green-500/10 border-green-500/20"
-              : "bg-blue-500/10 border-blue-500/20"
-          }`}
-        >
-          <p
-            className={`text-xs ${
-              allStepsComplete
-                ? "text-green-600 dark:text-green-400"
-                : "text-blue-600 dark:text-blue-400"
-            }`}
-          >
-            {allStepsComplete ? (
-              <>
-                <strong>🚀 Ready to Trade:</strong> Your account is fully set
-                up! Click the button below to close this dialog and start
-                exploring markets.
-              </>
-            ) : currentStep === 1 ? (
-              <>
-                <strong>🛡️ Secure Wallet:</strong> Your trading wallet is a
-                Gnosis Safe - the most trusted smart contract wallet in crypto.
-              </>
-            ) : currentStep === 2 ? (
-              <>
-                <strong>🔐 USDC Approval:</strong> This one-time approval lets
-                you trade instantly. Your funds stay in your wallet until you
-                place a trade.
-              </>
-            ) : currentStep === 3 ? (
-              <>
-                <strong>🔑 API Credentials:</strong> Sign a message to create
-                your unique trading credentials. No private keys are shared.
-              </>
-            ) : (
-              <>
-                <strong>💡 Gasless Setup:</strong> All setup transactions are
-                free! Polymarket covers the gas fees through their relayer.
-              </>
-            )}
+        {contextCopy() && (
+          <p className="font-editorial italic text-sm text-muted-foreground leading-relaxed">
+            {contextCopy()}
           </p>
-        </div>
+        )}
+      </div>
 
-        {/* Finish Button - show when all steps complete */}
+      {/* Footer actions */}
+      <div className="px-6 pb-6 space-y-2">
         {allStepsComplete && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
+          <motion.button
+            initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ delay: 0.1 }}
+            type="button"
+            onClick={onComplete}
+            className="w-full h-11 bg-foreground text-background hover:bg-foreground/90 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors"
           >
-            <Button
-              className="w-full bg-linear-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg shadow-green-500/25"
-              onClick={onComplete}
-              size="lg"
-            >
-              <PartyPopper className="mr-2 h-5 w-5" />
-              Start Trading
-            </Button>
-          </motion.div>
+            Start Trading
+          </motion.button>
         )}
 
-        {/* Skip Option - only show if not all complete */}
         {onSkip && !allStepsComplete && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full text-muted-foreground"
+          <button
+            type="button"
             onClick={onSkip}
+            className="w-full h-10 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border hover:decoration-foreground/60"
           >
             Skip for now
-          </Button>
+          </button>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

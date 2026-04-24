@@ -182,6 +182,10 @@ module.exports = (_env, argv) => {
       },
     },
     plugins: [
+      // @polymarket/clob-client-v2 imports `node:crypto` (createHash) for an
+      // optional orderbook-hash helper; rewrite the prefixed import to the
+      // bare specifier so the existing `crypto: false` fallback applies.
+      new webpack.NormalModuleReplacementPlugin(/^node:crypto$/, "crypto"),
       {
         apply(compiler) {
           const pluginName = "ReplaceImportMetaPlugin";
@@ -217,6 +221,9 @@ module.exports = (_env, argv) => {
         "process.env.NODE_DEBUG": JSON.stringify(""),
         "process.env.NODE_ENV": JSON.stringify(
           isProduction ? "production" : "development"
+        ),
+        "process.env.POLY_BUILDER_CODE": JSON.stringify(
+          process.env.POLY_BUILDER_CODE || ""
         ),
       }),
       new webpack.ProvidePlugin({

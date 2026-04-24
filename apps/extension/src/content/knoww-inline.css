@@ -1189,6 +1189,31 @@
   height: 16px !important;
 }
 
+/* Minimize / expand toggle — matches search toggle styling */
+.knoww-stack-minimize {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  transition: all 0.15s ease !important;
+  flex-shrink: 0 !important;
+  padding: 0 !important;
+}
+.knoww-stack-minimize:hover {
+  background: rgba(29, 155, 240, 0.1) !important;
+  color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+}
+.knoww-stack-minimize svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
 /* Search container */
 .knoww-search-container {
   display: none !important;
@@ -1492,6 +1517,78 @@
 .knoww-stack-empty-sub {
   font-size: 12px !important;
   opacity: 0.7 !important;
+}
+
+/* First-run welcome card — replaces the scanning row on first install */
+.knoww-stack-welcome {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+  padding: 8px 4px 4px !important;
+  gap: 10px !important;
+  animation: knoww-welcome-fade-in 0.28s ease !important;
+}
+@keyframes knoww-welcome-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.knoww-stack-welcome-icon {
+  width: 32px !important;
+  height: 32px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+  background: color-mix(
+    in srgb,
+    var(--knoww-accent, rgb(29, 155, 240)) 14%,
+    transparent
+  ) !important;
+  color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+}
+.knoww-stack-welcome-icon svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+.knoww-stack-welcome-title {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-stack-welcome-body {
+  margin: 0 !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  max-width: 240px !important;
+}
+.knoww-stack-welcome-cta {
+  margin-top: 2px !important;
+  padding: 6px 14px !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--knoww-bg, rgb(0, 0, 0)) !important;
+  background: var(--knoww-text, rgb(231, 233, 234)) !important;
+  border: none !important;
+  border-radius: 9999px !important;
+  cursor: pointer !important;
+  transition:
+    opacity 0.15s,
+    transform 0.1s !important;
+}
+.knoww-stack-welcome-cta:hover {
+  opacity: 0.88 !important;
+}
+.knoww-stack-welcome-cta:active {
+  transform: scale(0.97) !important;
 }
 
 .knoww-stack-empty-title-row {
@@ -3814,6 +3911,86 @@
   color: rgb(249, 24, 128) !important;
 }
 
+/* ── Rich error toast ── */
+
+.knoww-tp-toast-rich {
+  align-items: flex-start !important;
+  gap: 10px !important;
+  padding: 12px 12px 12px 14px !important;
+}
+.knoww-tp-toast-rich .knoww-tp-toast-icon {
+  margin-top: 2px !important;
+}
+.knoww-tp-toast-body {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+}
+.knoww-tp-toast-title {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.3 !important;
+}
+.knoww-tp-toast-msg {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.45 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  opacity: 0.85 !important;
+  overflow-wrap: anywhere !important;
+}
+.knoww-tp-toast-tail {
+  flex-shrink: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin-left: 4px !important;
+}
+.knoww-tp-toast-action {
+  padding: 4px 8px !important;
+  font-family: inherit !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: inherit !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid currentColor !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s,
+    opacity 0.15s !important;
+}
+.knoww-tp-toast-action:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+}
+.knoww-tp-toast-action:disabled {
+  opacity: 0.6 !important;
+  cursor: default !important;
+}
+.knoww-tp-toast-close {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  color: inherit !important;
+  opacity: 0.6 !important;
+  cursor: pointer !important;
+  border-radius: 4px !important;
+  transition:
+    opacity 0.15s,
+    background 0.15s !important;
+}
+.knoww-tp-toast-close:hover {
+  opacity: 1 !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
 /* ── Back Button (split/merge view) ── */
 
 .knoww-tp-back-btn {
@@ -4555,4 +4732,28 @@
   --knoww-accent: rgb(0, 0, 0) !important;
   --knoww-card-bg: rgb(250, 250, 250) !important;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* ============================================
+   MINIMIZED STACK STATE
+   Higher-specificity overrides — kept at the end of the file so they
+   always cascade after the base `.knoww-search-container` / content rules.
+   ============================================ */
+
+.knoww-notification-stack.knoww-stack-minimized {
+  width: auto !important;
+  min-width: 180px !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25) !important;
+}
+.knoww-notification-stack.knoww-stack-minimized .knoww-stack-header {
+  border-bottom: none !important;
+  padding: 8px 10px 8px 14px !important;
+}
+.knoww-notification-stack.knoww-stack-minimized .knoww-stack-title {
+  cursor: pointer !important;
+}
+.knoww-notification-stack.knoww-stack-minimized .knoww-search-container,
+.knoww-notification-stack.knoww-stack-minimized .knoww-stack-content,
+.knoww-notification-stack.knoww-stack-minimized .knoww-search-toggle {
+  display: none !important;
 }

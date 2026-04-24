@@ -6,6 +6,8 @@ import {
   CLOB_AUTH_DOMAIN,
   CLOB_AUTH_MESSAGE,
   CLOB_AUTH_TYPES,
+  CLOB_BASE_URL,
+  POLYMARKET_CHAIN_ID,
 } from "@/constants/polymarket";
 
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
@@ -338,7 +340,7 @@ export function useClobCredentials() {
     try {
       // Dynamic imports to avoid SSR issues
       const [{ ClobClient }, ethersModule] = await Promise.all([
-        import("@polymarket/clob-client"),
+        import("@polymarket/clob-client-v2"),
         import("ethers"),
       ]);
 
@@ -351,12 +353,11 @@ export function useClobCredentials() {
       const signer = provider.getSigner();
 
       // Create CLOB client for credential derivation
-      const clobClient = new ClobClient(
-        process.env.NEXT_PUBLIC_POLYMARKET_HOST ||
-          "https://clob.polymarket.com",
-        137,
-        signer
-      );
+      const clobClient = new ClobClient({
+        host: CLOB_BASE_URL,
+        chain: POLYMARKET_CHAIN_ID,
+        signer,
+      });
 
       let creds: { key: string; secret: string; passphrase: string };
 
@@ -465,7 +466,7 @@ export function useClobCredentials() {
     }
 
     const [{ ClobClient }, ethersModule] = await Promise.all([
-      import("@polymarket/clob-client"),
+      import("@polymarket/clob-client-v2"),
       import("ethers"),
     ]);
 
@@ -482,12 +483,12 @@ export function useClobCredentials() {
       passphrase: credentials.apiPassphrase,
     };
 
-    return new ClobClient(
-      process.env.NEXT_PUBLIC_POLYMARKET_HOST || "https://clob.polymarket.com",
-      137,
+    return new ClobClient({
+      host: CLOB_BASE_URL,
+      chain: POLYMARKET_CHAIN_ID,
       signer,
-      creds
-    ) as InstanceType<typeof ClobClient> & ClobClientWithReadonlyMethods;
+      creds,
+    }) as InstanceType<typeof ClobClient> & ClobClientWithReadonlyMethods;
   }, [credentials]);
 
   /**
@@ -626,14 +627,13 @@ export function useClobCredentials() {
   const validateReadonlyApiKey = useCallback(
     async (targetAddress: string, key: string): Promise<boolean> => {
       try {
-        const { ClobClient } = await import("@polymarket/clob-client");
+        const { ClobClient } = await import("@polymarket/clob-client-v2");
 
         // Create unauthenticated client for validation
-        const client = new ClobClient(
-          process.env.NEXT_PUBLIC_POLYMARKET_HOST ||
-            "https://clob.polymarket.com",
-          137
-        ) as InstanceType<typeof ClobClient> & ClobClientWithReadonlyMethods;
+        const client = new ClobClient({
+          host: CLOB_BASE_URL,
+          chain: POLYMARKET_CHAIN_ID,
+        }) as InstanceType<typeof ClobClient> & ClobClientWithReadonlyMethods;
 
         const result = await client.validateReadonlyApiKey(targetAddress, key);
         return !!result;

@@ -7,37 +7,48 @@
  * Docs: https://docs.polymarket.com
  */
 
-/** USDC.e (Bridged USDC) - ERC20 token used for trading */
+/** USDC.e (Bridged USDC) — kept for bridge flows and Onramp wrapping */
 export const USDC_E_ADDRESS =
   "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174" as const;
 export const USDC_E_DECIMALS = 6;
 
-/** Conditional Tokens Framework (CTF) - ERC1155 outcome tokens */
+/** Polymarket USD (pUSD) — V2 trading collateral */
+export const PUSD_ADDRESS =
+  "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB" as const;
+export const PUSD_DECIMALS = 6;
+
+/** Collateral Onramp — wraps USDC.e → pUSD */
+export const COLLATERAL_ONRAMP_ADDRESS =
+  "0x93070a847efEf7F70739046A929D47a521F5B8ee" as const;
+
+/** Conditional Tokens Framework (CTF) — ERC1155 outcome tokens (unchanged) */
 export const CTF_ADDRESS =
   "0x4d97dcd97ec945f40cf65f87097ace5ea0476045" as const;
 
-/** CTF Exchange - Standard binary markets */
+/** CTF Exchange V2 — Standard binary markets */
 export const CTF_EXCHANGE_ADDRESS =
-  "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E" as const;
+  "0xE111180000d2663C0091e4f400237545B87B996B" as const;
 
-/** Neg Risk CTF Exchange - Negative risk (mutually exclusive outcomes) markets */
+/** Neg Risk CTF Exchange V2 — Negative risk markets */
 export const NEG_RISK_CTF_EXCHANGE_ADDRESS =
-  "0xC5d563A36AE78145C45a50134d48A1215220f80a" as const;
+  "0xe2222d279d744050d28e00520010520000310F59" as const;
 
-/** Neg Risk Adapter - Converts between neg risk and standard markets */
+/** Neg Risk Adapter (unchanged) */
 export const NEG_RISK_ADAPTER_ADDRESS =
   "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296" as const;
 
-/** Polymarket Safe Factory - Custom factory for deploying user Safe wallets */
+/** Polymarket Safe Factory (unchanged) */
 export const SAFE_FACTORY_ADDRESS =
   "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b" as const;
 
-/** Safe init code hash for CREATE2 address derivation */
+/** Safe init code hash for CREATE2 (unchanged) */
 export const SAFE_INIT_CODE_HASH =
   "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf" as const;
 
 export const CONTRACTS = {
   USDC_E: USDC_E_ADDRESS,
+  PUSD: PUSD_ADDRESS,
+  COLLATERAL_ONRAMP: COLLATERAL_ONRAMP_ADDRESS,
   CTF: CTF_ADDRESS,
   CTF_EXCHANGE: CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE: NEG_RISK_CTF_EXCHANGE_ADDRESS,
@@ -45,15 +56,17 @@ export const CONTRACTS = {
   SAFE_FACTORY: SAFE_FACTORY_ADDRESS,
 } as const;
 
-/** Contracts that need USDC.e approval (ERC-20) */
-export const USDC_APPROVAL_TARGETS = [
-  CTF_ADDRESS,
+/** USDC.e approval target — needed for the Onramp `wrap()` call */
+export const USDC_E_ONRAMP_APPROVAL_TARGET = COLLATERAL_ONRAMP_ADDRESS;
+
+/** pUSD approval targets — V2 trading collateral approvals */
+export const PUSD_APPROVAL_TARGETS = [
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   NEG_RISK_ADAPTER_ADDRESS,
 ] as const;
 
-/** Contracts that need outcome token approval (ERC-1155) */
+/** ERC-1155 outcome token approval targets (unchanged) */
 export const CTF_APPROVAL_OPERATORS = [
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,

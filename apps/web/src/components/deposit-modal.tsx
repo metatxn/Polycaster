@@ -13,7 +13,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { USDC_E_ADDRESS as POLYGON_USDC_E_ADDRESS } from "@/constants/contracts";
+import { PUSD_ADDRESS as POLYGON_PUSD_ADDRESS } from "@/constants/contracts";
 import {
   type DepositTransaction,
   type QuoteResponse,
@@ -34,16 +34,6 @@ interface DepositModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const CHAIN_CONFIG: Record<string, { icon: string; gradient: string }> = {
-  "137": { icon: "⬡", gradient: "from-purple-500 to-violet-600" },
-  "1": { icon: "⟠", gradient: "from-blue-500 to-indigo-600" },
-  "42161": { icon: "🔷", gradient: "from-sky-400 to-blue-600" },
-  "8453": { icon: "🔵", gradient: "from-blue-500 to-blue-700" },
-  "10": { icon: "🔴", gradient: "from-red-500 to-rose-600" },
-  "43114": { icon: "🔺", gradient: "from-red-500 to-red-700" },
-  "56": { icon: "⛓️", gradient: "from-yellow-400 to-amber-600" },
-};
 
 export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   const { address, isConnected } = useConnection();
@@ -457,7 +447,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
         fromTokenAddress: tokenAddress,
         recipientAddress: bridgeAddress,
         toChainId: "137",
-        toTokenAddress: POLYGON_USDC_E_ADDRESS,
+        toTokenAddress: POLYGON_PUSD_ADDRESS,
       }),
       signal: controller.signal,
     })
@@ -569,7 +559,9 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     if (!amount || !selectedToken) return "0";
     const numAmount = Number.parseFloat(amount);
     if (Number.isNaN(numAmount)) return "0";
-    if (["USDC", "USDC.e", "DAI", "USDT"].includes(selectedToken.symbol))
+    if (
+      ["USDC", "USDC.e", "pUSD", "DAI", "USDT"].includes(selectedToken.symbol)
+    )
       return numAmount.toFixed(2);
     const ratio = selectedToken.usdValue / selectedToken.balance;
     return (numAmount * ratio).toFixed(2);
@@ -579,7 +571,9 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     if (!amount || !selectedToken) return 0;
     const numAmount = Number.parseFloat(amount);
     if (Number.isNaN(numAmount)) return 0;
-    if (["USDC", "USDC.e", "DAI", "USDT"].includes(selectedToken.symbol))
+    if (
+      ["USDC", "USDC.e", "pUSD", "DAI", "USDT"].includes(selectedToken.symbol)
+    )
       return numAmount;
     const ratio = selectedToken.usdValue / selectedToken.balance;
     return numAmount * ratio;
@@ -608,44 +602,44 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="sm:max-w-[420px] p-0 gap-0 overflow-hidden bg-background border-border"
+        className="sm:max-w-[440px] max-h-[calc(100dvh-32px)] p-0 gap-0 overflow-hidden bg-background border-border/60 rounded-none flex flex-col"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
-        <div className="relative h-[68px] border-b border-border flex items-center justify-between px-4 shrink-0">
-          <div className="w-8 flex items-center justify-start">
+        <div className="relative flex items-center justify-between px-5 pt-5 pb-4 border-b border-border/40 shrink-0">
+          <div className="w-6 flex items-center justify-start">
             {step !== "method" && (
               <button
                 type="button"
                 onClick={handleBack}
-                className="p-1.5 -ml-1.5 rounded-full hover:bg-secondary/80 transition-colors"
+                className="text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Go back"
               >
-                <ArrowLeft className="h-5 w-5 text-foreground" />
+                <ArrowLeft className="h-4 w-4" />
               </button>
             )}
           </div>
-          <div className="flex flex-col items-center justify-center flex-1 min-w-0">
-            <DialogTitle className="text-[17px] font-semibold text-foreground tracking-tight">
+          <div className="flex flex-col items-center justify-center flex-1 min-w-0 gap-1">
+            <DialogTitle className="font-editorial italic text-2xl leading-none text-foreground">
               Deposit
             </DialogTitle>
-            <DialogDescription className="text-[11px] text-muted-foreground font-medium mt-0.5">
-              Balance: ${polymarketBalance?.toFixed(2) || "0.00"}
+            <DialogDescription className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+              Balance · ${polymarketBalance?.toFixed(2) || "0.00"}
             </DialogDescription>
           </div>
-          <div className="w-8 flex items-center justify-end">
+          <div className="w-6 flex items-center justify-end">
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="p-1.5 -mr-1.5 rounded-full hover:bg-secondary/80 transition-colors"
+              className="text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Close"
             >
-              <X className="h-5 w-5 text-muted-foreground" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        <div className="p-4 max-h-[calc(100vh-120px)] overflow-y-auto">
+        <div className="px-5 py-5 flex-1 min-h-0 overflow-y-auto">
           <AnimatePresence mode="wait">
             {step === "method" && (
               <MethodSelection
@@ -673,12 +667,6 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
                 isProcessing={isProcessing}
                 onSearchChange={setSearchQuery}
                 onSelectAsset={handleSelectBridgeAsset}
-                getChainConfig={(chainId) =>
-                  CHAIN_CONFIG[chainId] || {
-                    icon: "🔗",
-                    gradient: "from-gray-400 to-gray-600",
-                  }
-                }
               />
             )}
             {step === "amount" && selectedToken && (

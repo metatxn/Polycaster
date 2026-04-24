@@ -20,6 +20,31 @@ export {
  * Web-app-specific constants below
  */
 
+/**
+ * Single source of truth for the Polymarket CLOB REST host. Reads
+ * NEXT_PUBLIC_POLYMARKET_HOST with a pre-cutover fallback. During V2 preprod
+ * testing point this at https://clob-v2.polymarket.com; post-cutover the
+ * primary host (https://clob.polymarket.com) serves V2.
+ */
+export const CLOB_BASE_URL =
+  process.env.NEXT_PUBLIC_POLYMARKET_HOST || "https://clob-v2.polymarket.com";
+
+/**
+ * Single source of truth for the Polymarket CLOB WebSocket base host (no
+ * path). Reads NEXT_PUBLIC_POLYMARKET_WS_HOST with a fallback. Per Polymarket
+ * V2 migration docs WebSocket URLs are unchanged at cutover.
+ */
+export const CLOB_WS_BASE_URL =
+  process.env.NEXT_PUBLIC_POLYMARKET_WS_HOST ||
+  "wss://ws-subscriptions-clob.polymarket.com";
+
+export const CLOB_WS_MARKET_URL = `${CLOB_WS_BASE_URL}/ws/market`;
+export const CLOB_WS_USER_URL = `${CLOB_WS_BASE_URL}/ws/user`;
+
+export const POLYMARKET_CHAIN_ID = Number(
+  process.env.NEXT_PUBLIC_POLYMARKET_CHAIN_ID || "137"
+);
+
 export const WEBSOCKET_CONFIG = {
   RECONNECT_DELAY_MS: 1000,
   MAX_RECONNECT_DELAY_MS: 30000,

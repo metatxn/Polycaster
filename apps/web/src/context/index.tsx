@@ -46,7 +46,7 @@ if (!projectId) {
 // Set up metadata
 const metadata = {
   name: "Knoww",
-  description: "Know your Odds",
+  description: "A prediction market layer for the open internet.",
   url: "https://knoww.app", // origin must match your domain & subdomain
   icons: ["https://avatars.githubusercontent.com/u/179229932"],
 };

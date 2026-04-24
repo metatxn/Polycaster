@@ -1,217 +1,122 @@
 "use client";
 
 import { useAppKit } from "@reown/appkit/react";
-import {
-  ArrowDownToLine,
-  ChevronDown,
-  LogOut,
-  Rocket,
-  User,
-  Wallet,
-} from "lucide-react";
-import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { ArrowDownToLine, Rocket, Wallet } from "lucide-react";
+import Link from "next/link";
 import posthog from "posthog-js";
 import { useState } from "react";
-import { useBalance, useConnection, useDisconnect } from "wagmi";
+import { useConnection } from "wagmi";
 import { DepositModal } from "@/components/deposit-modal";
 import { NotificationBellMobile } from "@/components/notifications";
 import { SidebarMobile } from "@/components/sidebar-mobile";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useOnboarding } from "@/context/onboarding-context";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 
+/** Truncate a 0x… address to `0x1234…abcd` for the mobile wallet pill.
+ *  Mirrors the helper in ProTopNav so the two bars render the wallet in
+ *  the same shape even though the layouts differ. */
+function formatAddress(addr: string): string {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/**
+ * Mobile top bar (below xl). Visually mirrors `<ProTopNav>` — editorial
+ * K-block wordmark, mono caps wallet pill, hairline borders — so the
+ * aesthetic is continuous across breakpoints. Only the layout compresses
+ * (no primary-nav row, no category strip) because those collapse into
+ * the `<SidebarMobile>` sheet at mobile widths.
+ */
 export function Navbar() {
-  const router = useRouter();
-  const { address, isConnected, chain } = useConnection();
-  const disconnect = useDisconnect();
-  const { data: balance } = useBalance({ address });
+  const { address, isConnected } = useConnection();
   const { open } = useAppKit();
   const [showDepositModal, setShowDepositModal] = useState(false);
 
-  // Use the global onboarding context
   const { setShowOnboarding, needsTradingSetup } = useOnboarding();
-
-  // Proxy wallet for deposit functionality
   const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
 
-  const formatAddress = (addr: string) => {
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  };
-
-  const formatBalance = (value: bigint, decimals: number) => {
-    const divisor = BigInt(10 ** decimals);
-    const integerPart = value / divisor;
-    const fractionalPart = value % divisor;
-    const fractionalStr = fractionalPart
-      .toString()
-      .padStart(decimals, "0")
-      .slice(0, 2);
-    return `${integerPart}.${fractionalStr}`;
-  };
-
   return (
-    <nav className="xl:hidden sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
-      {/* Main Navbar - Mobile Only */}
-      <div className="flex h-14 items-center px-4 md:px-6">
-        {/* Mobile Sidebar Trigger + Logo */}
-        <div className="flex items-center gap-2">
-          <SidebarMobile />
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="flex items-center gap-2 font-bold text-lg hover:opacity-80 transition-opacity"
-          >
-            <Image
-              src="/logo-256x256.png"
-              alt="Knoww"
-              width={24}
-              height={24}
-              className="sm:w-7 sm:h-7"
-            />
-            <span>Knoww</span>
-          </button>
-        </div>
+    <nav className="xl:hidden sticky top-0 z-50 w-full border-b border-border/60 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
+      <div className="flex h-14 items-center gap-3 px-3 sm:px-4">
+        {/* Left: hamburger + wordmark */}
+        <SidebarMobile />
+        <Link
+          href="/"
+          className="flex items-center gap-2 font-bold text-[14px] tracking-tight hover:opacity-80 transition-opacity"
+        >
+          <span className="inline-flex h-6 w-6 items-center justify-center bg-foreground text-background text-[11px] font-bold leading-none">
+            K
+          </span>
+          Knoww
+        </Link>
 
-        {/* Right Side - Theme Toggle, Wallet Info & Actions */}
+        {/* Right: contextual actions + wallet + theme */}
         <div className="flex items-center gap-2 ml-auto">
-          {/* Theme Toggle */}
-          <ThemeToggle />
-
           {isConnected ? (
             <>
-              {/* Notification Bell - Mobile */}
               <NotificationBellMobile />
 
-              {/* Setup Trading Account Button - Show when user hasn't completed setup */}
               {needsTradingSetup && (
-                <Button
+                <button
+                  type="button"
                   onClick={() => {
                     posthog.capture("trading_account_setup_clicked", {
                       wallet_address: address,
                     });
                     setShowOnboarding(true);
                   }}
-                  size="sm"
-                  className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                  className="inline-flex items-center gap-1.5 bg-foreground text-background px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.15em] hover:bg-foreground/90 transition-colors"
                 >
-                  <Rocket className="mr-2 h-4 w-4" />
+                  <Rocket className="h-3 w-3" />
                   <span className="hidden sm:inline">Setup Trading</span>
                   <span className="sm:hidden">Setup</span>
-                </Button>
+                </button>
               )}
 
-              {/* Deposit Button - Hidden on mobile, shown on tablet+ */}
               {hasProxyWallet && proxyAddress && !needsTradingSetup && (
-                <Button
+                <button
+                  type="button"
                   onClick={() => setShowDepositModal(true)}
-                  size="sm"
-                  className="hidden sm:flex bg-linear-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-sm shadow-emerald-500/25"
+                  className="hidden sm:inline-flex items-center gap-1.5 border border-border hover:border-foreground/40 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.15em] text-foreground transition-colors"
                 >
-                  <ArrowDownToLine className="mr-1 h-4 w-4" />
+                  <ArrowDownToLine className="h-3 w-3" />
                   Deposit
-                </Button>
+                </button>
               )}
 
-              {/* Balance Badge */}
-              {balance && (
-                <Badge variant="secondary" className="hidden sm:inline-flex">
-                  {formatBalance(balance.value, balance.decimals)}{" "}
-                  {balance.symbol}
-                </Badge>
-              )}
-
-              {/* Account Dropdown */}
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <Wallet className="h-4 w-4" />
-                    <span className="hidden sm:inline">
-                      {formatAddress(address || "")}
-                    </span>
-                    <ChevronDown className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuLabel>Account</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-
-                  <div className="px-2 py-2 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Address:</span>
-                      <span className="font-mono text-xs">
-                        {formatAddress(address || "")}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Network:</span>
-                      <span className="font-medium text-xs">
-                        {chain?.name || "Unknown"}
-                      </span>
-                    </div>
-
-                    {balance && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Balance:</span>
-                        <span className="font-medium text-xs">
-                          {formatBalance(balance.value, balance.decimals)}{" "}
-                          {balance.symbol}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <DropdownMenuSeparator />
-
-                  <DropdownMenuItem onClick={() => open()}>
-                    <User className="mr-2 h-4 w-4" />
-                    <span>Account Settings</span>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    onClick={() => {
-                      posthog.capture("wallet_disconnected", {
-                        wallet_address: address,
-                        chain_name: chain?.name,
-                      });
-                      posthog.reset();
-                      disconnect.mutate({});
-                    }}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Disconnect</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <button
+                type="button"
+                onClick={() => open()}
+                className="flex items-center gap-2 px-2.5 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[11px] uppercase tracking-[0.12em]"
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline tabular-nums normal-case tracking-normal text-[12px]">
+                  {formatAddress(address || "")}
+                </span>
+              </button>
             </>
           ) : (
-            <Button
+            <button
+              type="button"
               onClick={() => {
                 posthog.capture("wallet_connect_clicked");
                 open();
               }}
-              size="sm"
+              className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] hover:bg-foreground/90 transition-colors"
             >
-              <Wallet className="mr-2 h-4 w-4" />
-              Connect Wallet
-            </Button>
+              <Wallet className="h-3.5 w-3.5" />
+              Connect
+            </button>
           )}
+
+          {/* Force icon-only dimensions so theme label expansion doesn't
+              reflow the wallet pill horizontally (matches ProTopNav). */}
+          <div className="[&_button]:h-9 [&_button]:w-9 [&_button]:px-0 [&_button]:justify-center [&_button>span:not(.sr-only)]:hidden">
+            <ThemeToggle />
+          </div>
         </div>
       </div>
 
-      {/* Deposit Modal */}
       <DepositModal
         open={showDepositModal}
         onOpenChange={setShowDepositModal}

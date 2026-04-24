@@ -13,7 +13,12 @@
 
 import { createPublicClient, erc20Abi, http, type PublicClient } from "viem";
 import { polygon } from "viem/chains";
-import { USDC_E_ADDRESS, USDC_E_DECIMALS } from "@/constants/contracts";
+import {
+  PUSD_ADDRESS,
+  PUSD_DECIMALS,
+  USDC_E_ADDRESS,
+  USDC_E_DECIMALS,
+} from "@/constants/contracts";
 
 const DEPLOYMENT_CACHE_TTL = 5 * 60 * 1000;
 const BALANCE_CACHE_TTL = 30 * 1000;
@@ -234,11 +239,20 @@ export async function checkIsDeployed(
 }
 
 /**
- * Fetch USDC.e balance for an address
+ * Fetch the Safe proxy's effective V2 trading balance.
  *
- * @param address - The wallet address
+ * Polymarket V2 settles trades in pUSD, but a Safe can also hold legacy
+ * USDC.e that `CollateralOnramp.wrap()` converts to pUSD on demand (e.g.
+ * during a BUY). Users think of the sum as "money on Polymarket", so we
+ * return `pUSD + USDC.e`.
+ *
+ * Callers that specifically need pUSD-only (withdrawal via bridge requires
+ * real pUSD on the Safe) should read `PUSD_ADDRESS` directly — not through
+ * this helper.
+ *
+ * @param address - Safe proxy address
  * @param options - Optional configuration
- * @returns The USDC balance as a number
+ * @returns Combined pUSD + USDC.e balance as a number (USD-scaled)
  */
 export async function fetchUsdcBalance(
   address: string,
@@ -256,20 +270,42 @@ export async function fetchUsdcBalance(
     const client = getPublicClient();
     const { formatUnits } = await import("viem");
 
-    const rawBalance = await client.readContract({
-      address: USDC_E_ADDRESS as `0x${string}`,
-      abi: erc20Abi,
-      functionName: "balanceOf",
-      args: [address as `0x${string}`],
+    // One multicall round-trip instead of two parallel eth_calls.
+    const [pusdResult, usdcEResult] = await client.multicall({
+      allowFailure: true,
+      contracts: [
+        {
+          address: PUSD_ADDRESS as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [address as `0x${string}`],
+        },
+        {
+          address: USDC_E_ADDRESS as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [address as `0x${string}`],
+        },
+      ],
     });
 
-    const balance = Number(formatUnits(rawBalance, USDC_E_DECIMALS));
+    const rawPusd =
+      pusdResult.status === "success"
+        ? (pusdResult.result as bigint)
+        : BigInt(0);
+    const rawUsdcE =
+      usdcEResult.status === "success"
+        ? (usdcEResult.result as bigint)
+        : BigInt(0);
+    const pusd = Number(formatUnits(rawPusd, PUSD_DECIMALS));
+    const usdcE = Number(formatUnits(rawUsdcE, USDC_E_DECIMALS));
+    const balance = pusd + usdcE;
 
     setCachedValue(balanceCache, cacheKey, balance);
 
     return balance;
   } catch (err) {
-    console.error("[RPC] Failed to fetch USDC balance:", err);
+    console.error("[RPC] Failed to fetch trading balance:", err);
     const stale = getCachedValue(balanceCache, cacheKey, true);
     return stale ?? 0;
   }

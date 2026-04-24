@@ -33,7 +33,7 @@ export function SortableHeader({
     >
       {label}
       <ArrowUpDown
-        className={`h-3 w-3 ${isActive ? "text-primary" : "opacity-50"}`}
+        className={`h-3 w-3 ${isActive ? "text-foreground" : "opacity-40"}`}
       />
     </button>
   );

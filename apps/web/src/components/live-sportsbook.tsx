@@ -1,19 +1,11 @@
 "use client";
 
-import {
-  Calendar,
-  ChevronRight,
-  Clock,
-  History,
-  LineChart,
-  Radio,
-} from "lucide-react";
+import { Calendar, ChevronRight } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useOrderBookStore } from "@/hooks/use-orderbook-store";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import type { LiveGameState } from "@/hooks/use-sports-websocket";
@@ -903,6 +895,8 @@ function TeamAvatar({
   );
 }
 
+/** Editorial price cell — hairline border, mono ticker, tabular-nums price.
+ *  Favored side gets emerald text; underdog stays neutral. No color fills. */
 function PriceButton({
   abbr,
   price,
@@ -923,17 +917,24 @@ function PriceButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-sm font-bold tabular-nums whitespace-nowrap transition-colors cursor-pointer",
-        isFavored
-          ? "bg-emerald-600/90 text-white hover:bg-emerald-600"
-          : "bg-rose-800/70 text-white/90 hover:bg-rose-800/90",
-        selected &&
-          "ring-2 ring-white/90 dark:ring-white ring-offset-1 ring-offset-background",
+        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        selected
+          ? "border-foreground"
+          : "border-border/60 hover:border-foreground/60",
         className
       )}
     >
-      <span className="font-semibold">{abbr}</span>
-      <span>{formatPrice(price)}</span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        {abbr}
+      </span>
+      <span
+        className={cn(
+          "font-mono text-sm font-medium tabular-nums",
+          isFavored ? "text-emerald-700" : "text-foreground"
+        )}
+      >
+        {formatPrice(price)}
+      </span>
     </button>
   );
 }
@@ -956,15 +957,18 @@ function SpreadCell({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold tabular-nums whitespace-nowrap bg-muted/80 hover:bg-muted border border-border/50 transition-colors cursor-pointer",
-        selected &&
-          "border-white/80 dark:border-white ring-1 ring-white/50 dark:ring-white/60"
+        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        selected
+          ? "border-foreground"
+          : "border-border/60 hover:border-foreground/60"
       )}
     >
-      <span className="font-semibold text-foreground/80">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         {abbr} {handicap}
       </span>
-      <span className="text-foreground">{formatPrice(price)}</span>
+      <span className="font-mono text-sm font-medium tabular-nums text-foreground">
+        {formatPrice(price)}
+      </span>
     </button>
   );
 }
@@ -987,15 +991,18 @@ function TotalCell({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold tabular-nums whitespace-nowrap bg-muted/80 hover:bg-muted border border-border/50 transition-colors cursor-pointer",
-        selected &&
-          "border-white/80 dark:border-white ring-1 ring-white/50 dark:ring-white/60"
+        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        selected
+          ? "border-foreground"
+          : "border-border/60 hover:border-foreground/60"
       )}
     >
-      <span className="font-semibold text-foreground/80">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         {label} {line}
       </span>
-      <span className="text-foreground">{formatPrice(price)}</span>
+      <span className="font-mono text-sm font-medium tabular-nums text-foreground">
+        {formatPrice(price)}
+      </span>
     </button>
   );
 }
@@ -1014,14 +1021,18 @@ function DrawButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-sm font-bold tabular-nums whitespace-nowrap transition-colors cursor-pointer",
-        "bg-amber-600 text-white hover:bg-amber-500 border border-amber-500/40",
-        selected &&
-          "ring-2 ring-white/90 dark:ring-white ring-offset-1 ring-offset-background"
+        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        selected
+          ? "border-foreground"
+          : "border-border/60 hover:border-foreground/60"
       )}
     >
-      <span className="font-semibold">DRAW</span>
-      <span>{formatPrice(price)}</span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-700">
+        Draw
+      </span>
+      <span className="font-mono text-sm font-medium tabular-nums text-foreground">
+        {formatPrice(price)}
+      </span>
     </button>
   );
 }
@@ -1045,7 +1056,9 @@ function ExpandedMarketPanel({
   defaultOutcomeIndex?: number;
   moneylineChartTokens?: MoneylineChartToken[];
 }) {
-  const [activeTab, setActiveTab] = useState("orderbook");
+  const [activeTab, setActiveTab] = useState<"orderbook" | "graph">(
+    "orderbook"
+  );
   const outcomeTokens = useMemo(() => resolveOutcomeTokenIds(market), [market]);
   const hasTokenIds = outcomeTokens.some((o) => o.tokenId);
 
@@ -1079,29 +1092,48 @@ function ExpandedMarketPanel({
 
   if (!isExpanded) return null;
 
-  return (
-    <div className="border-t border-border/30 bg-muted/10">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="flex items-center px-4 border-b border-border/30 overflow-x-auto no-scrollbar">
-          <TabsList className="h-auto p-0 bg-transparent gap-0 shrink-0 flex">
-            <TabsTrigger
-              value="orderbook"
-              className="h-auto flex-none px-4 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm font-medium"
-            >
-              <History className="h-3.5 w-3.5 mr-2 inline-block" />
-              Order Book
-            </TabsTrigger>
-            <TabsTrigger
-              value="graph"
-              className="h-auto flex-none px-4 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm font-medium"
-            >
-              <LineChart className="h-3.5 w-3.5 mr-2 inline-block" />
-              Graph
-            </TabsTrigger>
-          </TabsList>
-        </div>
+  const tabs: Array<{ value: "orderbook" | "graph"; label: string }> = [
+    { value: "orderbook", label: "Order Book" },
+    { value: "graph", label: "Graph" },
+  ];
 
-        <TabsContent value="orderbook" className="m-0 p-4">
+  return (
+    <div className="border-t border-border/60 bg-muted/10">
+      <div
+        role="tablist"
+        aria-label="Market details"
+        className="flex items-center gap-1 px-4 border-b border-border/40 overflow-x-auto no-scrollbar"
+      >
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.value;
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setActiveTab(tab.value)}
+              className={cn(
+                "relative px-3 py-3 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors shrink-0",
+                isActive
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab.label}
+              {isActive && (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-3 -bottom-px h-px bg-foreground"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "orderbook" && (
+        <div className="p-4">
           {hasTokenIds ? (
             <OrderBook
               outcomes={outcomeTokens.map((o) => ({
@@ -1115,27 +1147,29 @@ function ExpandedMarketPanel({
               maxLevels={8}
             />
           ) : (
-            <p className="text-sm text-muted-foreground text-center py-8">
+            <p className="font-editorial italic text-base text-muted-foreground text-center py-8">
               Order book data unavailable for this market.
             </p>
           )}
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="graph" className="m-0 p-4">
+      {activeTab === "graph" && (
+        <div className="p-4">
           {chartTokens.length > 0 ? (
             <div className="space-y-3">
               {chartTokens.length > 1 && (
-                <div className="flex items-center justify-center gap-4 flex-wrap">
+                <div className="flex items-center justify-center gap-5 flex-wrap">
                   {chartTokens.map((token) => (
                     <div
                       key={token.tokenId}
-                      className="flex items-center gap-1.5"
+                      className="flex items-center gap-2"
                     >
                       <span
-                        className="inline-block w-2.5 h-2.5 rounded-full"
+                        className="inline-block w-2 h-2 rounded-none"
                         style={{ backgroundColor: token.color }}
                       />
-                      <span className="text-sm font-medium text-foreground/80">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                         {token.name}
                       </span>
                     </div>
@@ -1150,12 +1184,12 @@ function ExpandedMarketPanel({
               />
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground text-center py-8">
+            <p className="font-editorial italic text-base text-muted-foreground text-center py-8">
               Chart data unavailable for this market.
             </p>
           )}
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
     </div>
   );
 }
@@ -1374,64 +1408,50 @@ function SportEventRow({
         if (e.key === "Enter" || e.key === " ") handleRowClick();
       }}
       className={cn(
-        "border rounded-lg bg-card/50 backdrop-blur-sm overflow-hidden transition-colors cursor-pointer",
-        isExpanded ? "border-primary/30" : "border-border/40"
+        "border-y overflow-hidden transition-colors",
+        isExpanded ? "border-foreground" : "border-border/40"
       )}
     >
-      {/* Header bar */}
-      <div
-        className={cn(
-          "flex items-center justify-between px-4 py-2.5 border-b border-border/30",
-          isLive ? "bg-muted/30" : "bg-muted/20"
-        )}
-      >
-        <div className="flex items-center gap-3 min-w-0">
+      {/* Header bar — hairline, editorial */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
+        <div className="flex items-baseline gap-4 min-w-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           {isLive ? (
-            <>
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-red-600/90 text-white shrink-0">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white" />
-                </span>
-                <span className="text-xs font-bold uppercase tracking-wider">
-                  LIVE
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
-                {game?.period && (
-                  <span className="font-semibold text-foreground/80 shrink-0">
-                    {game.period}
-                  </span>
-                )}
-                {game?.period && seriesInfo && <span>•</span>}
-                {seriesInfo && <span className="shrink-0">{seriesInfo}</span>}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-sky-600/80 text-white shrink-0">
-                <Clock className="h-3 w-3" />
-                <span className="text-xs font-bold uppercase tracking-wider">
-                  {gameStart ? formatStartTime(gameStart) : "Scheduled"}
-                </span>
-              </div>
-              {gameStart && (
-                <span className="text-xs text-muted-foreground font-medium shrink-0">
-                  {formatRelativeTime(gameStart)}
+            <span className="inline-flex items-center gap-1.5 text-red-700 shrink-0">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500/70" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+              </span>
+              <span>Live</span>
+              {game?.period && (
+                <span className="text-muted-foreground ml-1">
+                  · {game.period}
                 </span>
               )}
-              <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
-                {seriesInfo && <span className="shrink-0">{seriesInfo}</span>}
-              </div>
-            </>
+            </span>
+          ) : (
+            <span className="inline-flex items-baseline gap-1.5 text-foreground shrink-0">
+              <span className="tabular-nums">
+                {gameStart ? formatStartTime(gameStart) : "Scheduled"}
+              </span>
+              {gameStart && (
+                <span className="text-muted-foreground">
+                  · {formatRelativeTime(gameStart)}
+                </span>
+              )}
+            </span>
+          )}
+          {seriesInfo && (
+            <span className="shrink-0 normal-case tracking-normal text-[11px] text-muted-foreground">
+              {seriesInfo}
+            </span>
           )}
           {volume && (
-            <span className="text-xs text-muted-foreground font-medium shrink-0">
-              {formatVolume(volume)} Vol.
+            <span className="tabular-nums shrink-0">
+              {formatVolume(volume)} Vol
             </span>
           )}
           {tournament && (
-            <span className="text-xs text-muted-foreground truncate hidden lg:inline">
+            <span className="truncate hidden lg:inline normal-case tracking-normal text-[11px]">
               · {tournament}
             </span>
           )}
@@ -1441,15 +1461,15 @@ function SportEventRow({
           <span role="presentation" onClick={(e) => e.stopPropagation()}>
             <Link
               href={href}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex items-baseline gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors"
             >
               {marketCount > 0 && (
-                <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 text-xs font-bold tabular-nums rounded bg-muted/60 leading-none translate-y-px">
+                <span className="tabular-nums text-foreground">
                   {marketCount}
                 </span>
               )}
               <span>Game View</span>
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3 w-3 translate-y-px" />
             </Link>
           </span>
         </div>
@@ -1809,43 +1829,38 @@ function CompactEventRow({
         if (e.key === "Enter" || e.key === " ") handleCardTap();
       }}
       className={cn(
-        "border rounded-lg bg-card/50 backdrop-blur-sm overflow-hidden cursor-pointer transition-colors",
-        expandedMarket ? "border-primary/30" : "border-border/40"
+        "border-y overflow-hidden transition-colors",
+        expandedMarket ? "border-foreground" : "border-border/40"
       )}
     >
-      <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border/30">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
+        <div className="flex items-baseline gap-3 min-w-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           {variant === "live" ? (
-            <>
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-600/90 text-white">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white" />
-                </span>
-                <span className="text-xs font-bold uppercase">LIVE</span>
-              </div>
+            <span className="inline-flex items-center gap-1.5 text-red-700 shrink-0">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500/70" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+              </span>
+              <span>Live</span>
               {game?.period && (
-                <span className="text-xs font-semibold text-foreground/70">
-                  {game.period}
+                <span className="text-muted-foreground ml-1">
+                  · {game.period}
                 </span>
               )}
-            </>
+            </span>
           ) : (
             (() => {
               const gameStart = getGameStartTime(event);
               return (
-                <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-600/80 text-white">
-                  <Clock className="h-3 w-3" />
-                  <span className="text-xs font-bold uppercase tracking-wider">
-                    {gameStart ? formatStartTime(gameStart) : "Scheduled"}
-                  </span>
-                </div>
+                <span className="text-foreground tabular-nums shrink-0">
+                  {gameStart ? formatStartTime(gameStart) : "Scheduled"}
+                </span>
               );
             })()
           )}
           {volume && (
-            <span className="text-xs text-muted-foreground">
-              {formatVolume(volume)} Vol.
+            <span className="tabular-nums shrink-0">
+              {formatVolume(volume)} Vol
             </span>
           )}
         </div>
@@ -1853,10 +1868,10 @@ function CompactEventRow({
         <span role="presentation" onClick={(e) => e.stopPropagation()}>
           <Link
             href={href}
-            className="text-xs font-semibold text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+            className="inline-flex items-baseline gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors"
           >
-            Game View
-            <ChevronRight className="h-3.5 w-3.5" />
+            <span>Game View</span>
+            <ChevronRight className="h-3 w-3 translate-y-px" />
           </Link>
         </span>
       </div>
@@ -2000,24 +2015,27 @@ function LeagueSection({
   const leagueIcon = events[0]?.image;
 
   return (
-    <div className="space-y-2.5">
-      <div className="flex items-center">
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between pb-1">
         <div className="flex items-center gap-2.5">
           {leagueIcon && (
             <Image
               src={leagueIcon}
               alt={leagueDisplayName(league)}
-              width={24}
-              height={24}
+              width={20}
+              height={20}
               className="rounded object-contain"
             />
           )}
-          <h3 className="text-base font-bold text-foreground/90 tracking-wide">
+          <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
             {leagueDisplayName(league)}
           </h3>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+            · {events.length}
+          </span>
         </div>
       </div>
-      <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 border border-transparent px-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+      <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         <span className="w-6 text-center">Score</span>
         <span className="w-7" />
         <span>Team</span>
@@ -2025,11 +2043,11 @@ function LeagueSection({
         <span className="hidden lg:inline w-[132px] text-center">Spread</span>
         <span className="hidden lg:inline w-[122px] text-center">Total</span>
       </div>
-      <div className="space-y-2.5">
+      <div className="-mt-px">
         {events.map((event) => {
           const game = eventGameMap.get(event.id) ?? null;
           return (
-            <div key={event.id}>
+            <div key={event.id} className="-mt-px">
               <div className="hidden md:block">
                 <SportEventRow
                   variant="live"
@@ -2154,35 +2172,38 @@ function ScheduledLeagueSection({
   const leagueIcon = events[0]?.image;
 
   return (
-    <div className="space-y-2.5">
-      <div className="flex items-center">
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between pb-1">
         <div className="flex items-center gap-2.5">
           {leagueIcon && (
             <Image
               src={leagueIcon}
               alt={leagueDisplayName(league)}
-              width={24}
-              height={24}
+              width={20}
+              height={20}
               className="rounded object-contain"
             />
           )}
-          <h3 className="text-base font-bold text-foreground/90 tracking-wide">
+          <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
             {leagueDisplayName(league)}
           </h3>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+            · {events.length}
+          </span>
         </div>
       </div>
-      <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 border border-transparent px-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+      <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         <span className="w-7" />
         <span>Team</span>
         <span className="w-[106px] text-center">Moneyline</span>
         <span className="hidden lg:inline w-[132px] text-center">Spread</span>
         <span className="hidden lg:inline w-[122px] text-center">Total</span>
       </div>
-      <div className="space-y-2.5">
+      <div className="-mt-px">
         {events.map((event) => {
           const game = eventGameMap.get(event.id) ?? null;
           return (
-            <div key={event.id}>
+            <div key={event.id} className="-mt-px">
               <div className="hidden md:block">
                 <SportEventRow
                   variant="scheduled"
@@ -2289,20 +2310,23 @@ export function LiveSportsbook({
   if (events.length === 0) return null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center w-9 h-9 rounded-full bg-red-600/10 border border-red-600/20">
-          <Radio className="h-4.5 w-4.5 text-red-500" />
+    <section className="space-y-6">
+      <header className="flex items-baseline justify-between gap-4 pb-3 border-b border-border/40">
+        <div className="flex items-baseline gap-3">
+          <span className="relative inline-flex h-1.5 w-1.5 translate-y-[-2px]">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500/70" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+          </span>
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+            Live
+          </h2>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+            · {events.length} in progress
+          </span>
         </div>
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">Live</h2>
-          <p className="text-sm text-muted-foreground">
-            {events.length} market{events.length !== 1 ? "s" : ""} in progress
-          </p>
-        </div>
-      </div>
+      </header>
 
-      <div className="space-y-6">
+      <div className="space-y-8">
         {Array.from(groupedByLeague.entries()).map(([league, leagueEvents]) => (
           <LeagueSection
             key={league}
@@ -2318,7 +2342,7 @@ export function LiveSportsbook({
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -2384,20 +2408,20 @@ export function ScheduledSportsbook({
   if (events.length === 0) return null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center w-9 h-9 rounded-full bg-sky-600/10 border border-sky-600/20">
-          <Calendar className="h-4.5 w-4.5 text-sky-500" />
+    <section className="space-y-6">
+      <header className="flex items-baseline justify-between gap-4 pb-3 border-b border-border/40">
+        <div className="flex items-baseline gap-3">
+          <Calendar className="h-3 w-3 text-muted-foreground translate-y-px" />
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+            Upcoming
+          </h2>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+            · {events.length} scheduled
+          </span>
         </div>
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">Upcoming</h2>
-          <p className="text-sm text-muted-foreground">
-            {events.length} game{events.length !== 1 ? "s" : ""} scheduled
-          </p>
-        </div>
-      </div>
+      </header>
 
-      <div className="space-y-6">
+      <div className="space-y-8">
         {Array.from(groupedByLeague.entries()).map(([league, leagueEvents]) => (
           <ScheduledLeagueSection
             key={league}
@@ -2413,6 +2437,6 @@ export function ScheduledSportsbook({
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }

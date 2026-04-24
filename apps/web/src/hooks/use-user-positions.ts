@@ -20,6 +20,8 @@ export interface Position {
   unrealizedPnl: number;
   unrealizedPnlPercent: number;
   realizedPnl: number;
+  /** Multi-outcome negative-risk market — required for order signing */
+  negRisk?: boolean;
   market: {
     title: string;
     slug: string;

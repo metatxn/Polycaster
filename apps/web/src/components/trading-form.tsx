@@ -130,7 +130,7 @@ export function TradingForm(props: TradingFormProps) {
 
   return (
     <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
-      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+      <div className="border border-border/60 bg-card overflow-hidden">
         {/* Market Header */}
         <div className="flex items-center gap-3 p-4 border-b border-border">
           {marketImage && (
@@ -140,7 +140,7 @@ export function TradingForm(props: TradingFormProps) {
                 alt={marketTitle || "Market"}
                 fill
                 sizes="40px"
-                className="rounded-full object-cover"
+                className="rounded-sm object-cover"
               />
             </div>
           )}
@@ -156,7 +156,7 @@ export function TradingForm(props: TradingFormProps) {
             </div>
             <div className="flex items-center gap-2">
               {props.negRisk && (
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] border border-red-500/50 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-sm">
                   Neg Risk
                 </span>
               )}
@@ -182,10 +182,10 @@ export function TradingForm(props: TradingFormProps) {
                 <button
                   type="button"
                   onClick={() => setShowMoreMenu(!showMoreMenu)}
-                  className={`w-11 h-[46px] rounded-xl transition-colors flex items-center justify-center border ${
+                  className={`w-10 h-10 transition-colors flex items-center justify-center border-b ${
                     showMoreMenu
-                      ? "bg-background text-foreground shadow-sm border-border/50"
-                      : "bg-muted text-muted-foreground hover:text-foreground border-transparent"
+                      ? "border-b-foreground text-foreground"
+                      : "border-b-transparent text-muted-foreground hover:text-foreground"
                   }`}
                   title="More options"
                 >
@@ -199,7 +199,7 @@ export function TradingForm(props: TradingFormProps) {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.95 }}
                       transition={{ duration: 0.15 }}
-                      className="absolute right-0 top-full mt-2 z-50 min-w-[140px] rounded-xl bg-card border border-border shadow-lg overflow-hidden"
+                      className="absolute right-0 top-full mt-2 z-50 min-w-[140px] bg-card border border-border/60 overflow-hidden"
                     >
                       <button
                         type="button"
@@ -290,7 +290,7 @@ export function TradingForm(props: TradingFormProps) {
 
           {/* Partial Fill Toggle - Only for market orders */}
           {orderType === "MARKET" && (
-            <div className="p-3 rounded-lg bg-secondary/30 border border-border/50">
+            <div className="p-3 bg-secondary/30 border border-border/50">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0 pr-3">
                   <span className="text-sm font-medium text-foreground">
@@ -338,7 +338,7 @@ export function TradingForm(props: TradingFormProps) {
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
               >
-                <div className="flex items-center gap-3 p-3 bg-destructive/10 border border-destructive/20 rounded-xl">
+                <div className="flex items-center gap-3 p-3 bg-destructive/10 border border-destructive/20">
                   <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
                   <span className="text-sm text-destructive">
                     {error.message}
@@ -353,7 +353,7 @@ export function TradingForm(props: TradingFormProps) {
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
               >
-                <div className="flex items-center gap-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                <div className="flex items-center gap-3 p-3 bg-amber-500/10 border border-amber-500/20">
                   <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
                   <span className="text-sm text-amber-600 dark:text-amber-400">
                     You don't have any {selectedOutcome?.name || "shares"} to
@@ -399,7 +399,7 @@ export function TradingForm(props: TradingFormProps) {
             {!isConnected ? (
               <button
                 type="button"
-                className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+                className="w-full h-11 bg-foreground hover:bg-foreground/90 text-background font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors flex items-center justify-center gap-2"
                 onClick={() => open()}
               >
                 <Wallet className="h-4 w-4" />
@@ -408,7 +408,7 @@ export function TradingForm(props: TradingFormProps) {
             ) : !hasCredentials ? (
               <button
                 type="button"
-                className="w-full h-12 bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-purple-600/20"
+                className="w-full h-11 bg-foreground hover:bg-foreground/90 text-background font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 onClick={() => setShowOnboarding(true)}
                 disabled={isLoading}
               >
@@ -427,14 +427,14 @@ export function TradingForm(props: TradingFormProps) {
             ) : (
               <button
                 type="button"
-                className={`w-full h-12 font-medium rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`w-full h-11 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                   (side === "BUY" && hasInsufficientBalance) ||
                   (side === "SELL" && maxSellShares <= 0) ||
                   (side === "BUY" && shares < minShares)
                     ? "bg-muted text-muted-foreground"
                     : side === "BUY"
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20"
-                      : "bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20"
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                      : "bg-red-600 hover:bg-red-700 text-white"
                 }`}
                 onClick={async () => {
                   const success = await handleSubmit();

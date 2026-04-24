@@ -1,18 +1,19 @@
 "use client";
 
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ProChromeHeader } from "@/components/app-pro-layout";
 import { CommentsSection } from "@/components/comments";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Navbar } from "@/components/navbar";
-import { PageBackground } from "@/components/page-background";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import type { Event } from "@/hooks/use-event-detail";
 import { useEventDetail } from "@/hooks/use-event-detail";
 import {
@@ -26,6 +27,7 @@ import { type Position, useUserPositions } from "@/hooks/use-user-positions";
 import { formatVolume } from "@/lib/formatters";
 import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
+import { CandidateTicker } from "./candidate-ticker";
 import { HeaderSection } from "./header-section";
 import { OutcomesTable } from "./outcomes-table";
 
@@ -50,7 +52,7 @@ const TradingForm = dynamic(
     ssr: false,
     loading: () => (
       <div className="w-full">
-        <div className="rounded-2xl border border-border bg-card p-4 space-y-4">
+        <div className="border-t border-b border-border/40 py-4 space-y-4">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-32 w-full" />
@@ -68,6 +70,38 @@ interface EventDetailClientProps {
 
 // Cap list-row live quotes to keep WS subscription bounded on large events.
 const MAX_MARKETS_WITH_LIVE_QUOTES = 20;
+
+type BookSnapshot = {
+  bids: Array<{ price: string; size: string }>;
+  asks: Array<{ price: string; size: string }>;
+  min_order_size?: string;
+  tick_size?: string;
+};
+
+async function fetchBookSnapshot(
+  tokenId: string
+): Promise<BookSnapshot | null> {
+  try {
+    const res = await fetch(`${CLOB_BASE_URL}/book?token_id=${tokenId}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      bids?: Array<{ price: string; size: string }>;
+      asks?: Array<{ price: string; size: string }>;
+      min_order_size?: string;
+      tick_size?: string;
+    };
+    return {
+      bids: json.bids || [],
+      asks: json.asks || [],
+      min_order_size: json.min_order_size,
+      tick_size: json.tick_size,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Dedicated trading-panel order book snapshot shape.
 // Keep this separate from other ["orderBook", tokenId] query consumers so the
@@ -156,27 +190,39 @@ export default function EventDetailClient({
   // Order book store action for preloading from REST
   // Select only the action (stable ref) to avoid re-rendering on every store update
   const setOrderBookFromRest = useOrderBookStore((s) => s.setOrderBookFromRest);
+  const queryClient = useQueryClient();
 
-  // Helper to quickly seed order book from REST (direct Polymarket call) for a token
+  // Helper to quickly seed order book from REST (direct Polymarket call) for
+  // a token. Routes through React Query's cache (`queryClient.fetchQuery`)
+  // using the same `["orderBook", tokenId]` key that every other orderbook
+  // consumer uses, so repeated preloads (StrictMode double-invokes, effect
+  // re-runs on dep changes, hover handlers in the outcomes table, etc.)
+  // share ONE in-flight network request per token instead of each issuing
+  // their own raw fetch.
   const preloadOrderBook = useCallback(
     async (tokenId: string | undefined) => {
       if (!tokenId) return;
       try {
-        const res = await fetch(
-          `https://clob.polymarket.com/book?token_id=${tokenId}`,
-          { headers: { Accept: "application/json" } }
-        );
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          bids?: Array<{ price: string; size: string }>;
-          asks?: Array<{ price: string; size: string }>;
-        };
-        setOrderBookFromRest(tokenId, data.bids || [], data.asks || []);
+        const data = await queryClient.fetchQuery<BookSnapshot>({
+          queryKey: ["orderBook", tokenId],
+          queryFn: async () => {
+            const snapshot = await fetchBookSnapshot(tokenId);
+            if (!snapshot) {
+              throw new Error("Failed to fetch order book");
+            }
+            return snapshot;
+          },
+          staleTime: 30_000,
+        });
+        // Still skip seeding if both endpoints returned empty — preserves
+        // any WS-delivered data already in the store.
+        if (data.bids.length === 0 && data.asks.length === 0) return;
+        setOrderBookFromRest(tokenId, data.bids, data.asks);
       } catch (err) {
         console.error("Preload order book failed", err);
       }
     },
-    [setOrderBookFromRest]
+    [queryClient, setOrderBookFromRest]
   );
 
   // Use slug from URL params - API handles both slugs and numeric IDs
@@ -358,7 +404,6 @@ export default function EventDetailClient({
           change: number;
           volume: string;
           color: string;
-          image: string | undefined;
         }>,
       };
     }
@@ -425,7 +470,6 @@ export default function EventDetailClient({
         change,
         volume: market.volume || "0",
         color: colors[idx % colors.length],
-        image: market.image,
       };
     });
 
@@ -536,13 +580,20 @@ export default function EventDetailClient({
 
     setSelectedMarketId((prev) => prev || onlyMarketId);
     setExpandedOrderBookMarketId((prev) => prev ?? onlyMarketId);
+  }, [isSingleMarketEvent, openMarkets]);
 
-    // Preload both sides so the order book renders immediately once expanded.
-    if (selectedMarket) {
-      void preloadOrderBook(selectedMarket.yesTokenId);
-      void preloadOrderBook(selectedMarket.noTokenId);
-    }
-  }, [isSingleMarketEvent, openMarkets, preloadOrderBook, selectedMarket]);
+  // Preload Yes + No books whenever the selected market's tokens change —
+  // this is what keeps the BID/ASK/SPREAD strip populated after a candidate
+  // click. Without this preload, switching candidates made the strip flash
+  // em-dashes until the trading-panel's own useQuery completed a round
+  // trip. `preloadOrderBook` is React-Query deduped, so repeated calls are
+  // cheap when the cache is already warm.
+  const selectedYesTokenId = selectedMarket?.yesTokenId;
+  const selectedNoTokenId = selectedMarket?.noTokenId;
+  useEffect(() => {
+    if (selectedYesTokenId) void preloadOrderBook(selectedYesTokenId);
+    if (selectedNoTokenId) void preloadOrderBook(selectedNoTokenId);
+  }, [selectedYesTokenId, selectedNoTokenId, preloadOrderBook]);
 
   // Pre-select market based on conditionId from URL (for "Modify Order" from sell modal)
   useEffect(() => {
@@ -575,44 +626,54 @@ export default function EventDetailClient({
   // This is how Binance, Coinbase, and Polymarket work
 
   // STEP 1: Fetch initial order book snapshot directly from Polymarket CLOB API
-  // Direct fetch is faster than going through our Next.js API route
+  // Direct fetch is faster than going through our Next.js API route.
+  //
+  // NOTE: shared queryKey `["orderBook", tokenId]` — same as the <OrderBook>
+  // component and the sell-position modal. React Query dedupes across all
+  // concurrent consumers so the page + the orderbook panel + the sell modal
+  // mounting together produces ONE /book request per token, not three. The
+  // queryFn returns the richer shape (tick_size + min_order_size) so consumers
+  // that need those fields still get them even when the shared cache entry
+  // was seeded by another call site.
   const { data: orderBookData } =
     useQuery<TradingPanelOrderBookSnapshot | null>({
-      queryKey: ["tradingPanelOrderBook", currentTokenId],
+      queryKey: ["orderBook", currentTokenId],
       queryFn: async (): Promise<TradingPanelOrderBookSnapshot | null> => {
         if (!currentTokenId) return null;
-        // Direct call to Polymarket CLOB API (public, allows CORS)
-        const response = await fetch(
-          `https://clob.polymarket.com/book?token_id=${currentTokenId}`,
-          { headers: { Accept: "application/json" } }
-        );
-        if (!response.ok) return null;
-        const data = (await response.json()) as {
-          bids?: Array<{ price: string; size: string }>;
-          asks?: Array<{ price: string; size: string }>;
-          min_order_size?: string;
-          tick_size?: string;
-        };
+        // Uses the shared V2→V1 fallback helper: during pre-cutover, V2
+        // `/book` often returns empty levels even when the book has depth
+        // on legacy. Without the fallback, switching candidates leaves
+        // BID/ASK/SPREAD as em-dashes until the WebSocket catches up.
+        const snapshot = await fetchBookSnapshot(currentTokenId);
+        if (!snapshot) return null;
         return {
-          bids: data.bids || [],
-          asks: data.asks || [],
-          min_order_size: data.min_order_size || "1",
-          tick_size: data.tick_size || "0.01",
+          bids: snapshot.bids,
+          asks: snapshot.asks,
+          min_order_size: snapshot.min_order_size || "1",
+          tick_size: snapshot.tick_size || "0.01",
         };
       },
       enabled: !!currentTokenId,
       staleTime: 30000, // Consider fresh for 30s (WebSocket will update)
     });
 
-  // STEP 2: Seed the store with REST data when it arrives
+  // STEP 2: Seed the store with REST data when it arrives.
+  //
+  // Guard: only seed if the REST response actually carries levels. CLOB V2
+  // currently returns `{bids: [], asks: []}` for many of the tokens we care
+  // about while the legacy CLOB (and the WebSocket feed, which mirrors it)
+  // still carries the real book. Without the guard, switching candidates
+  // and returning would re-seed the store with the empty V2 snapshot,
+  // clobbering the real WS-delivered data and flashing em-dashes in the
+  // BID/ASK/SPREAD strip until the next WS book event. Passing through
+  // only non-empty snapshots means we never destructively overwrite good
+  // data — empties are left alone for the WS feed to fill in.
   useEffect(() => {
-    if (orderBookData && currentTokenId) {
-      setOrderBookFromRest(
-        currentTokenId,
-        orderBookData.bids || [],
-        orderBookData.asks || []
-      );
-    }
+    if (!orderBookData || !currentTokenId) return;
+    const bids = orderBookData.bids || [];
+    const asks = orderBookData.asks || [];
+    if (bids.length === 0 && asks.length === 0) return;
+    setOrderBookFromRest(currentTokenId, bids, asks);
   }, [orderBookData, currentTokenId, setOrderBookFromRest]);
 
   // STEP 3: Connect to shared WebSocket for real-time incremental updates
@@ -746,7 +807,6 @@ export default function EventDetailClient({
           noTokenId: noTokenId || "",
           change: 0,
           volume: market.volume || "0",
-          image: market.image,
           closed: true,
         };
       }),
@@ -756,10 +816,9 @@ export default function EventDetailClient({
   // Loading state - AFTER all hooks
   if (loading) {
     return (
-      <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
-        <PageBackground />
-
+      <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <Navbar />
+        <ProChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-8 space-y-8">
           <Skeleton className="h-10 w-32" />
           <Skeleton className="h-8 w-3/4" />
@@ -772,15 +831,14 @@ export default function EventDetailClient({
   // Error state - AFTER all hooks
   if (error || !event) {
     return (
-      <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
-        <PageBackground />
-
+      <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <Navbar />
+        <ProChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
             <button
               type="button"
-              onClick={() => router.push("/")}
+              onClick={() => router.push("/markets")}
               className="flex items-center gap-1 hover:text-foreground transition-colors"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -791,7 +849,7 @@ export default function EventDetailClient({
             <CardHeader>
               <CardTitle>Event Not Found</CardTitle>
             </CardHeader>
-            <Button onClick={() => router.push("/")}>
+            <Button onClick={() => router.push("/markets")}>
               <ChevronLeft className="mr-2 h-4 w-4" />
               Back to Markets
             </Button>
@@ -805,51 +863,68 @@ export default function EventDetailClient({
 
   // closedMarketData is now memoized above the early returns
 
-  // Chart behavior:
-  // - If the event has ONE market, show BOTH Yes + No on the main chart.
-  // - If the event has multiple markets, show top 4 markets (Yes) like before.
-  const topMarketsForChart = isSingleMarketEvent
-    ? sortedMarketData.slice(0, 1)
-    : sortedMarketData.slice(0, 4);
-
-  const singleMarketForChart = topMarketsForChart[0];
-
-  const chartColors = [
-    "hsl(25, 95%, 53%)", // Orange
+  // Chart + ticker behavior:
+  // - Single-market event: YES line (primary). NO is the secondary series
+  //   that's revealed when the "Both" toggle is on.
+  // - Multi-outcome event: top-5 candidate YES lines (primary), each in
+  //   its own palette color so they're individually identifiable. Toggling
+  //   "Both" adds the corresponding NO lines. The currently-selected
+  //   candidate renders thicker than the rest so it stays findable.
+  //   Capping at 5 keeps the chart legend readable and matches the ticker —
+  //   lower-ranked markets stay visible in the outcomes table below.
+  const chartMarket = selectedMarket ?? sortedMarketData[0];
+  const CANDIDATE_PALETTE = [
     "hsl(221, 83%, 53%)", // Blue
-    "hsl(280, 100%, 70%)", // Purple/Pink
+    "hsl(25, 95%, 53%)", // Orange
+    "hsl(280, 70%, 55%)", // Purple
     "hsl(142, 76%, 36%)", // Green
+    "hsl(340, 82%, 52%)", // Rose
   ];
+  const topChartMarkets = sortedMarketData.slice(0, 5);
 
   const marketTitles = isSingleMarketEvent
     ? ["Yes", "No"]
-    : topMarketsForChart.map((m) => m.groupItemTitle);
+    : topChartMarkets.map((m) => m.groupItemTitle);
 
   const yesProb = isSingleMarketEvent
-    ? [
-        singleMarketForChart?.yesPrice || "0",
-        singleMarketForChart?.noPrice || "0",
-      ]
-    : topMarketsForChart.map((m) => m.yesPrice);
+    ? [chartMarket?.yesPrice || "0", chartMarket?.noPrice || "0"]
+    : topChartMarkets.map((m) => m.yesPrice);
 
   const chartTokens = isSingleMarketEvent
     ? [
         {
-          tokenId: singleMarketForChart?.yesTokenId || "",
+          tokenId: chartMarket?.yesTokenId || "",
           name: "Yes",
-          color: "hsl(142, 76%, 36%)", // Green
-        },
-        {
-          tokenId: singleMarketForChart?.noTokenId || "",
-          name: "No",
-          color: "hsl(0, 84%, 60%)", // Red
+          color: "hsl(142, 76%, 36%)",
         },
       ]
-    : topMarketsForChart.map((m, idx) => ({
+    : topChartMarkets.map((m, idx) => ({
         tokenId: m.yesTokenId,
         name: m.groupItemTitle,
-        color: chartColors[idx % chartColors.length],
+        color: CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length],
       }));
+
+  const chartSecondaryTokens = isSingleMarketEvent
+    ? [
+        {
+          tokenId: chartMarket?.noTokenId || "",
+          name: "No",
+          color: "hsl(0, 84%, 60%)",
+        },
+      ]
+    : topChartMarkets.map((m, idx) => ({
+        tokenId: m.noTokenId,
+        name: `${m.groupItemTitle} · No`,
+        // Dim the NO lines to a muted variant of the YES hue so they
+        // visually group with their YES counterpart without competing.
+        color: CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length]
+          .replace("hsl(", "hsla(")
+          .replace(/%\)$/, "%, 0.45)"),
+      }));
+
+  const chartActiveTokenId = isSingleMarketEvent
+    ? chartMarket?.yesTokenId
+    : chartMarket?.yesTokenId;
 
   // Find the earliest createdAt from all markets or use event createdAt
   const earliestCreatedAt = openMarkets.reduce<string | undefined>(
@@ -864,16 +939,15 @@ export default function EventDetailClient({
   );
 
   return (
-    <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative selection:bg-purple-500/30">
-      <PageBackground />
-
+    <div className="min-h-screen bg-background relative selection:bg-foreground/15">
       <Navbar />
+      <ProChromeHeader />
       <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 min-h-screen">
         {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/markets")}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -899,59 +973,29 @@ export default function EventDetailClient({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           {/* Left Column: Chart + Outcomes Table */}
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+            {/* Multi-outcome only: horizontal candidate ticker. Clicking a
+                candidate selects that market and re-renders the chart /
+                trading panel / stats strip below. */}
+            {!isSingleMarketEvent && (
+              <CandidateTicker
+                markets={topChartMarkets}
+                selectedMarketId={selectedMarket?.id ?? ""}
+                onSelectMarket={setSelectedMarketId}
+              />
+            )}
+
             {/* Chart */}
             <Card>
-              <CardHeader className="pb-3">
-                <div className="flex flex-wrap gap-2 md:gap-4">
-                  {isSingleMarketEvent && singleMarketForChart ? (
-                    <>
-                      <div className="flex items-center gap-1.5 md:gap-2">
-                        <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0 bg-green-500" />
-                        <span className="text-xs md:text-sm">
-                          Yes {singleMarketForChart.yesProbability}%
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 md:gap-2">
-                        <div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0 bg-red-500" />
-                        <span className="text-xs md:text-sm">
-                          No{" "}
-                          {Math.max(
-                            0,
-                            100 - singleMarketForChart.yesProbability
-                          )}
-                          %
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    topMarketsForChart.map((market, idx) => (
-                      <div
-                        key={market.id}
-                        className="flex items-center gap-1.5 md:gap-2"
-                      >
-                        <div
-                          className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full shrink-0 ${
-                            idx === 0
-                              ? "bg-orange-500"
-                              : idx === 1
-                                ? "bg-blue-500"
-                                : idx === 2
-                                  ? "bg-purple-400"
-                                  : "bg-green-500"
-                          }`}
-                        />
-                        <span className="text-xs md:text-sm truncate max-w-[120px] sm:max-w-[150px] md:max-w-[200px]">
-                          {market.groupItemTitle} {market.yesProbability}%
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
+              {/* Legend is now rendered as a floating overlay inside the
+                  MarketPriceChart itself — dropping the CardHeader saves
+                  the ~48px of vertical padding that used to sit above the
+                  plot. */}
+              <CardContent className="py-3">
                 <ErrorBoundary name="Market Price Chart">
                   <MarketPriceChart
                     tokens={chartTokens}
+                    secondaryTokens={chartSecondaryTokens}
+                    activeTokenId={chartActiveTokenId}
                     outcomes={marketTitles}
                     outcomePrices={yesProb}
                     startDate={earliestCreatedAt}
@@ -1002,7 +1046,7 @@ export default function EventDetailClient({
                   maxSlippagePercent={2}
                   onOrderSuccess={handleOrderSuccess}
                   onOrderError={handleOrderError}
-                  marketImage={selectedMarket.image}
+                  marketImage={event?.image}
                   yesProbability={selectedMarket.yesProbability}
                   isLiveData={isConnected}
                   initialSide={initialSide}

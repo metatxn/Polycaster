@@ -1,24 +1,14 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  Activity,
-  Clock,
-  Droplets,
-  Loader2,
-  Search,
-  Sparkles,
-  Tag,
-  TrendingUp,
-  X,
-} from "lucide-react";
+import { Loader2, TrendingUp, X } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import posthog from "posthog-js";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { ProChromeHeader } from "@/components/app-pro-layout";
+import { EditorialHero } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
-import { PageBackground } from "@/components/page-background";
-import { Input } from "@/components/ui/input";
 import { type SearchEvent, useSearch } from "@/hooks/use-search";
 import { formatVolume } from "@/lib/formatters";
 
@@ -224,356 +214,385 @@ function SearchContent() {
     !showResults && lastSearchedMarkets.length > 0;
 
   return (
-    <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-50 dark:from-background dark:via-background dark:to-background relative overflow-x-hidden selection:bg-purple-500/30">
-      <PageBackground />
-
+    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <Navbar />
+      <ProChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24">
-        {/* Search Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="max-w-2xl mx-auto mb-8"
-        >
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mb-4 text-center">
-            Search Markets
-          </h1>
+        <div className="max-w-4xl mx-auto">
+          <EditorialHero
+            breadcrumbs={[
+              { label: "Markets", href: "/markets" },
+              { label: "Search" },
+            ]}
+            title={<span>Search</span>}
+            subtitle="Every market on Polymarket — searchable by name, candidate, ticker, or theme."
+          />
 
-          {/* Search Input */}
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-            <Input
-              ref={inputRef}
-              type="text"
-              placeholder="Search for markets, events, or categories..."
-              value={query}
-              onChange={handleInputChange}
-              className="pl-12 pr-10 w-full h-14 text-lg bg-background border-border/50 rounded-2xl shadow-sm"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={handleClear}
-                className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 hover:bg-muted rounded-lg transition-colors"
-              >
-                <X className="h-4 w-4 text-muted-foreground" />
-              </button>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Last Searched Markets */}
-        <AnimatePresence mode="wait">
-          {showLastSearchedMarkets && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="max-w-4xl mx-auto mb-8"
+          {/* Search Input — editorial underline field, no shell */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="mb-12"
+          >
+            <label
+              htmlFor="search-input"
+              className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-2"
             >
-              <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-                <Clock className="h-4 w-4" />
-                Recently Viewed Markets
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {lastSearchedMarkets.map((market, index) => (
-                  <motion.button
-                    key={market.id}
-                    type="button"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    onClick={() => handleLastMarketClick(market)}
-                    className="flex items-start gap-4 p-4 rounded-2xl bg-card/50 hover:bg-card border border-border/50 hover:border-border transition-all text-left group"
-                  >
-                    {/* Market Image */}
-                    {market.image ? (
-                      <div className="relative w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-muted">
-                        <Image
-                          src={market.image}
-                          alt={market.title}
-                          fill
-                          sizes="56px"
-                          className="object-cover group-hover:scale-105 transition-transform"
-                        />
+              §&nbsp;&nbsp;Query
+            </label>
+            <div className="relative max-w-2xl">
+              <input
+                id="search-input"
+                ref={inputRef}
+                type="text"
+                placeholder="An event, a candidate, a ticker…"
+                value={query}
+                onChange={handleInputChange}
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full border-0 border-b-2 border-foreground/80 bg-transparent rounded-none px-0 pt-1 pb-3 pr-10 text-2xl sm:text-3xl font-editorial italic text-foreground placeholder:font-editorial placeholder:italic placeholder:text-muted-foreground/50 focus:outline-none focus:border-foreground transition-colors"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  aria-label="Clear search"
+                  className="absolute right-0 bottom-3 p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Last Searched Markets */}
+          <AnimatePresence mode="wait">
+            {showLastSearchedMarkets && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="mb-8"
+              >
+                <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
+                  §&nbsp;&nbsp;Recently Viewed
+                </h2>
+                <div className="border-t border-border/40">
+                  {lastSearchedMarkets.map((market, index) => (
+                    <motion.button
+                      key={market.id}
+                      type="button"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.03 }}
+                      onClick={() => handleLastMarketClick(market)}
+                      className="group w-full flex items-center gap-4 py-3 border-b border-border/40 text-left hover:bg-muted/30 transition-colors"
+                    >
+                      {market.image ? (
+                        <div className="relative w-11 h-11 rounded-sm overflow-hidden shrink-0 bg-muted border border-border/60">
+                          <Image
+                            src={market.image}
+                            alt={market.title}
+                            fill
+                            sizes="44px"
+                            className="object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-11 h-11 rounded-sm bg-muted flex items-center justify-center shrink-0 border border-border/60">
+                          <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm line-clamp-1 leading-snug text-foreground group-hover:text-foreground transition-colors">
+                          {market.title}
+                        </p>
+                        <div className="flex items-center gap-4 mt-0.5">
+                          {market.volume24hr && (
+                            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+                              {formatVolume(market.volume24hr)} · 24h
+                            </span>
+                          )}
+                          {market.live && (
+                            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                              <span className="relative flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/75" />
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                              </span>
+                              Live
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center shrink-0">
-                        <TrendingUp className="h-5 w-5 text-muted-foreground" />
+                    </motion.button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Recent Searches */}
+          <AnimatePresence mode="wait">
+            {showRecentSearches && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
+                  §&nbsp;&nbsp;Recent Searches
+                </h2>
+                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                  {recentSearches.map((search) => (
+                    <div
+                      key={search}
+                      className="group inline-flex items-center gap-1.5 py-1 text-muted-foreground"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleRecentSearchClick(search)}
+                        className="text-sm hover:text-foreground transition-colors"
+                      >
+                        {search}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRecentSearch(search)}
+                        className="p-0.5 opacity-40 group-hover:opacity-80 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Search Results */}
+          <AnimatePresence mode="wait">
+            {showResults && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                {/* Loading State — row-shaped shimmer matching result geometry */}
+                {(isLoading || isTyping) && (
+                  <div>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
+                      §&nbsp;&nbsp;Searching
+                    </p>
+                    <div className="border-t border-border/40">
+                      {[0, 1, 2].map((i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-4 py-3 border-b border-border/40"
+                        >
+                          <div className="w-11 h-11 rounded-sm bg-muted-foreground/10 animate-pulse shrink-0" />
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="h-4 w-2/3 rounded bg-muted-foreground/10 animate-pulse" />
+                            <div className="h-3 w-1/3 rounded bg-muted-foreground/10 animate-pulse" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* No Results */}
+                {!isLoading && !isTyping && !hasResults && (
+                  <div className="py-12 border-y border-border/40">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+                      No matches
+                    </p>
+                    <p className="font-editorial italic text-xl leading-snug text-foreground max-w-md">
+                      Nothing on Polymarket matches "{query}". Try a different
+                      term or browse by category.
+                    </p>
+                  </div>
+                )}
+
+                {/* Results */}
+                {!isLoading && !isTyping && hasResults && (
+                  <div className="space-y-8">
+                    {/* Tags Section */}
+                    {data?.tags && data.tags.length > 0 && (
+                      <div>
+                        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
+                          §&nbsp;&nbsp;Categories
+                          <span className="tabular-nums ml-1.5">
+                            ({data.tags.length})
+                          </span>
+                        </h2>
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                          {data.tags.map((tag) => (
+                            <button
+                              type="button"
+                              key={tag.id}
+                              onClick={() => handleTagClick(tag.slug)}
+                              className="inline-flex items-baseline gap-2 py-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <span className="font-editorial italic text-base">
+                                {tag.label}
+                              </span>
+                              {tag.event_count && (
+                                <span className="font-mono text-[10px] uppercase tracking-[0.12em] opacity-60 tabular-nums">
+                                  {tag.event_count}
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
 
-                    {/* Market Details */}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm line-clamp-2 leading-snug mb-2 group-hover:text-primary transition-colors">
-                        {market.title}
-                      </p>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {market.volume24hr && (
-                          <span className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold">
-                            {formatVolume(market.volume24hr)} 24h
+                    {/* Events Section */}
+                    {data?.events && data.events.length > 0 && (
+                      <div>
+                        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
+                          §&nbsp;&nbsp;Markets
+                          <span className="tabular-nums ml-1.5">
+                            ({data.events.length})
                           </span>
-                        )}
-                        {market.live && (
-                          <span className="text-[10px] px-2 py-1 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1">
-                            <span className="relative flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
-                            </span>
-                            LIVE
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </motion.button>
-                ))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                        </h2>
+                        <div className="border-t border-border/40">
+                          {data.events.map((event, index) => (
+                            <motion.button
+                              key={event.id}
+                              type="button"
+                              initial={{ opacity: 0, y: 4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{
+                                delay: Math.min(index * 0.02, 0.3),
+                              }}
+                              onClick={() => handleEventClick(event)}
+                              className="group relative overflow-hidden w-full flex items-center gap-4 py-3 border-b border-border/40 text-left hover:bg-muted/30 transition-colors"
+                            >
+                              {event.topOutcome && (
+                                <div
+                                  className="absolute inset-0 bg-linear-to-r from-foreground/[0.04] to-transparent dark:from-foreground/[0.06] pointer-events-none"
+                                  style={{
+                                    width: `${Math.round(event.topOutcome.price * 100)}%`,
+                                  }}
+                                />
+                              )}
 
-        {/* Recent Searches */}
-        <AnimatePresence mode="wait">
-          {showRecentSearches && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="max-w-2xl mx-auto"
-            >
-              <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-                <Sparkles className="h-4 w-4" />
-                Recent Searches
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {recentSearches.map((search) => (
-                  <div
-                    key={search}
-                    className="flex items-center gap-1 px-3 py-2 rounded-xl bg-muted/50 border border-border/50 group"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleRecentSearchClick(search)}
-                      className="text-sm font-medium hover:text-primary transition-colors"
-                    >
-                      {search}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveRecentSearch(search)}
-                      className="p-0.5 rounded hover:bg-muted-foreground/20 opacity-50 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Search Results */}
-        <AnimatePresence mode="wait">
-          {showResults && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="max-w-4xl mx-auto"
-            >
-              {/* Loading State */}
-              {(isLoading || isTyping) && (
-                <div className="flex flex-col items-center justify-center py-16">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
-                  <p className="text-sm text-muted-foreground">Searching...</p>
-                </div>
-              )}
-
-              {/* No Results */}
-              {!isLoading && !isTyping && !hasResults && (
-                <div className="text-center py-16">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-muted/50 mb-4">
-                    <Search className="h-8 w-8 text-muted-foreground/50" />
-                  </div>
-                  <h3 className="text-lg font-bold mb-2">No results found</h3>
-                  <p className="text-sm text-muted-foreground">
-                    No markets found for "{query}". Try a different search term.
-                  </p>
-                </div>
-              )}
-
-              {/* Results */}
-              {!isLoading && !isTyping && hasResults && (
-                <div className="space-y-8">
-                  {/* Tags Section */}
-                  {data?.tags && data.tags.length > 0 && (
-                    <div>
-                      <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-                        <Tag className="h-4 w-4" />
-                        Categories ({data.tags.length})
-                      </h2>
-                      <div className="flex flex-wrap gap-2">
-                        {data.tags.map((tag) => (
-                          <button
-                            type="button"
-                            key={tag.id}
-                            onClick={() => handleTagClick(tag.slug)}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-muted/50 hover:bg-muted border border-border/50 text-sm font-medium transition-colors"
-                          >
-                            <Tag className="h-4 w-4 text-primary" />
-                            {tag.label}
-                            {tag.event_count && (
-                              <span className="text-muted-foreground">
-                                ({tag.event_count})
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Events Section */}
-                  {data?.events && data.events.length > 0 && (
-                    <div>
-                      <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4" />
-                        Markets ({data.events.length})
-                      </h2>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {data.events.map((event, index) => (
-                          <motion.button
-                            key={event.id}
-                            type="button"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: index * 0.03 }}
-                            onClick={() => handleEventClick(event)}
-                            className="relative overflow-hidden rounded-2xl bg-card hover:bg-card/80 border border-border/50 hover:border-border hover:shadow-lg transition-all text-left group"
-                          >
-                            {/* Top Outcome Progress Bar Background */}
-                            {event.topOutcome && (
-                              <div
-                                className="absolute inset-0 bg-gradient-to-r from-primary/8 to-transparent dark:from-primary/12"
-                                style={{
-                                  width: `${Math.round(event.topOutcome.price * 100)}%`,
-                                }}
-                              />
-                            )}
-
-                            <div className="relative flex items-center gap-4 p-4">
-                              {/* Event Image */}
                               {event.image ? (
-                                <div className="relative w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-muted ring-2 ring-background shadow-md">
+                                <div className="relative w-11 h-11 rounded-sm overflow-hidden shrink-0 bg-muted border border-border/60 z-10">
                                   <Image
                                     src={event.image}
                                     alt={event.title}
                                     fill
-                                    sizes="56px"
-                                    className="object-cover group-hover:scale-105 transition-transform"
+                                    sizes="44px"
+                                    className="object-cover"
                                   />
                                 </div>
                               ) : (
-                                <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center shrink-0 ring-2 ring-background shadow-md">
-                                  <TrendingUp className="h-5 w-5 text-muted-foreground" />
+                                <div className="w-11 h-11 rounded-sm bg-muted flex items-center justify-center shrink-0 border border-border/60 z-10">
+                                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
                                 </div>
                               )}
 
-                              {/* Event Details */}
-                              <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-sm line-clamp-2 leading-snug mb-1.5 group-hover:text-primary transition-colors">
+                              <div className="relative flex-1 min-w-0 z-10">
+                                <p className="font-medium text-sm line-clamp-1 leading-snug text-foreground">
                                   {event.title}
                                 </p>
 
-                                {/* Top Outcome - Leading Position */}
-                                {event.topOutcome && (
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <span className="text-lg font-bold text-primary">
+                                <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                                  {event.topOutcome && (
+                                    <span className="font-mono text-[11px] tabular-nums text-foreground font-semibold">
                                       {Math.round(event.topOutcome.price * 100)}
                                       %
+                                      <span className="font-sans font-normal text-muted-foreground ml-1.5 normal-case">
+                                        {event.topOutcome.name}
+                                      </span>
                                     </span>
-                                    <span className="text-xs text-muted-foreground truncate">
-                                      {event.topOutcome.name}
-                                    </span>
-                                  </div>
-                                )}
-
-                                {/* Stats Row */}
-                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  )}
                                   {event.volume24hr !== undefined &&
                                     event.volume24hr > 0 && (
-                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                                        <Activity className="h-2.5 w-2.5" />
+                                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+                                        <span className="opacity-60 mr-1">
+                                          Vol
+                                        </span>
                                         {formatVolume(event.volume24hr)}
                                       </span>
                                     )}
                                   {event.liquidity !== undefined &&
                                     event.liquidity > 0 && (
-                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 font-medium flex items-center gap-1">
-                                        <Droplets className="h-2.5 w-2.5" />
+                                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+                                        <span className="opacity-60 mr-1">
+                                          Liq
+                                        </span>
                                         {formatVolume(event.liquidity)}
                                       </span>
                                     )}
                                   {event.live && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1">
+                                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                                       <span className="relative flex h-1.5 w-1.5">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/75" />
+                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                                       </span>
-                                      LIVE
+                                      Live
                                     </span>
                                   )}
                                   {event.competitive !== undefined &&
                                     event.competitive >= 0.4 && (
-                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium">
-                                        🔥 Hot
+                                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400">
+                                        Hot
                                       </span>
                                     )}
                                 </div>
                               </div>
-                            </div>
-                          </motion.button>
-                        ))}
+                            </motion.button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Results Summary */}
-                  {data?.pagination && (
-                    <div className="text-center pt-4 border-t border-border/50">
-                      <p className="text-xs text-muted-foreground">
-                        Showing {data.events?.length || 0} markets
+                    {/* Results Summary — editorial terminus */}
+                    {data?.pagination && (
+                      <div className="flex items-center justify-center py-6 border-t border-border/40 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+                        <span className="tabular-nums">
+                          {data.events?.length || 0}
+                        </span>
                         {data.pagination.totalResults >
-                          (data.events?.length || 0) &&
-                          ` of ${data.pagination.totalResults} total`}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+                          (data.events?.length || 0) && (
+                          <span className="tabular-nums">
+                            &nbsp;of&nbsp;
+                            {data.pagination.totalResults}
+                          </span>
+                        )}
+                        <span className="mx-3 text-border/80">·</span>
+                        <span>markets shown</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Empty State - No query and no recent data */}
+          {!showResults && !showRecentSearches && !showLastSearchedMarkets && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="py-10 max-w-md"
+            >
+              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+                Try searching
+              </p>
+              <p className="font-editorial italic text-xl leading-snug text-foreground">
+                An event name, a candidate, a ticker, or a topic — type at least
+                two characters to see markets.
+              </p>
             </motion.div>
           )}
-        </AnimatePresence>
-
-        {/* Empty State - No query and no recent data */}
-        {!showResults && !showRecentSearches && !showLastSearchedMarkets && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center py-16 max-w-md mx-auto"
-          >
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-muted/50 mb-6">
-              <Search className="h-10 w-10 text-muted-foreground/50" />
-            </div>
-            <h3 className="text-lg font-bold mb-2">Find prediction markets</h3>
-            <p className="text-sm text-muted-foreground">
-              Search for markets by topic, event name, or category. Start typing
-              to see results.
-            </p>
-          </motion.div>
-        )}
+        </div>
       </main>
     </div>
   );

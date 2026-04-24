@@ -19,21 +19,7 @@ import {
 import { useCallback, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 import { CONTRACTS, CTF_ADDRESS, USDC_E_DECIMALS } from "@/constants/contracts";
-import { POLYGON_CHAIN_ID, RELAYER_API_URL } from "@/constants/polymarket";
-import { createBuilderConfig } from "@/lib/remote-builder-config";
-import { getBuilderSignProxyUrl } from "@/lib/sign-proxy-url";
-
-/** Transaction polling configuration */
-const POLL_CONFIG = {
-  maxAttempts: 15,
-  intervalMs: 2000,
-  successStates: [
-    "STATE_EXECUTED",
-    "STATE_MINED",
-    "STATE_CONFIRMED",
-  ] as string[],
-  failureStates: ["STATE_FAILED", "STATE_INVALID"] as string[],
-};
+import { executeViaRelayer } from "@/lib/relayer-client";
 
 // ============================================================================
 // Types
@@ -95,43 +81,6 @@ function parseUserFriendlyError(errorMessage: string): string {
     : errorMessage;
 }
 
-/**
- * Poll for transaction confirmation
- */
-async function pollForConfirmation(
-  client: {
-    getTransaction: (
-      id: string
-    ) => Promise<Array<{ state: string; transactionHash: string }>>;
-  },
-  transactionID: string,
-  operationName: string
-): Promise<string | null> {
-  for (let attempt = 0; attempt < POLL_CONFIG.maxAttempts; attempt++) {
-    const txns = await client.getTransaction(transactionID);
-
-    if (txns?.length > 0) {
-      const tx = txns[0];
-
-      if (POLL_CONFIG.failureStates.includes(tx.state)) {
-        throw new Error(`${operationName} failed with state: ${tx.state}`);
-      }
-
-      if (POLL_CONFIG.successStates.includes(tx.state)) {
-        return tx.transactionHash;
-      }
-    }
-
-    if (attempt < POLL_CONFIG.maxAttempts - 1) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, POLL_CONFIG.intervalMs)
-      );
-    }
-  }
-
-  return null; // Timeout - transaction submitted but not confirmed
-}
-
 // ============================================================================
 // Hook
 // ============================================================================
@@ -147,33 +96,6 @@ export function useCtfOperations() {
   });
 
   /**
-   * Get the RelayClient for gasless transactions
-   */
-  const getRelayClient = useCallback(async () => {
-    if (!walletClient || !address) {
-      throw new Error("Wallet not connected");
-    }
-
-    const signProxyUrl = getBuilderSignProxyUrl();
-
-    if (!signProxyUrl) {
-      throw new Error("Builder sign proxy URL not configured");
-    }
-
-    const { RelayClient } = await import("@polymarket/builder-relayer-client");
-    const builderConfig = createBuilderConfig({
-      url: signProxyUrl,
-    });
-
-    return new RelayClient(
-      RELAYER_API_URL,
-      POLYGON_CHAIN_ID,
-      walletClient,
-      builderConfig
-    );
-  }, [walletClient, address]);
-
-  /**
    * Execute a CTF operation via relayer with polling
    */
   const executeCTFOperation = useCallback(
@@ -184,21 +106,23 @@ export function useCtfOperations() {
       setState({ isLoading: true, error: null, txHash: null });
 
       try {
-        const client = await getRelayClient();
+        if (!walletClient || !address) {
+          throw new Error("Wallet not connected");
+        }
 
-        const response = await client.execute([
-          { to: CTF_ADDRESS, data: encodedData, value: "0" },
-        ]);
-
-        const confirmedHash = await pollForConfirmation(
-          client,
-          response.transactionID,
-          operationName
+        const result = await executeViaRelayer(
+          walletClient,
+          address as `0x${string}`,
+          [
+            {
+              to: CTF_ADDRESS as `0x${string}`,
+              data: encodedData,
+              value: "0",
+            },
+          ]
         );
 
-        const txHash =
-          confirmedHash || response.transactionHash || response.transactionID;
-
+        const txHash = result.transactionHash;
         setState({ isLoading: false, error: null, txHash });
         return { success: true, txHash };
       } catch (err) {
@@ -210,7 +134,7 @@ export function useCtfOperations() {
         return { success: false, error: errorMessage };
       }
     },
-    [getRelayClient]
+    [walletClient, address]
   );
 
   /**

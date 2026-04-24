@@ -1,6 +1,6 @@
 "use client";
 
-import { POLYMARKET_API, WEBSOCKET_CONFIG } from "@/constants/polymarket";
+import { CLOB_WS_MARKET_URL, WEBSOCKET_CONFIG } from "@/constants/polymarket";
 import { logger } from "@/lib/logger";
 import { filterValidTokenIds } from "@/lib/token-validation";
 import type { ConnectionState, WebSocketEvent } from "@/types/websocket";
@@ -68,6 +68,13 @@ class WebSocketManager {
   // Pending subscriptions (when WS not yet connected)
   private pendingSubscriptions: Set<string> = new Set();
 
+  // Delayed teardown timer. When the last subscription goes away we hold the
+  // connection open briefly so that React 18 strict-mode double-mounts and
+  // component remounts don't tear down a socket that's about to be used
+  // again. Closing a WebSocket in CONNECTING state logs "closed before the
+  // connection is established" in the console.
+  private disconnectTimeout: NodeJS.Timeout | null = null;
+
   private constructor() {
     // Private constructor for singleton
   }
@@ -125,6 +132,13 @@ class WebSocketManager {
   subscribe(assetIds: string[]): () => void {
     const validIds = filterValidTokenIds(assetIds);
     if (validIds.length === 0) return () => {};
+
+    // A new subscription arrived — cancel any pending teardown so we reuse
+    // the existing (or still-connecting) socket instead of racing a close.
+    if (this.disconnectTimeout) {
+      clearTimeout(this.disconnectTimeout);
+      this.disconnectTimeout = null;
+    }
 
     const newSubscriptions: string[] = [];
 
@@ -184,9 +198,17 @@ class WebSocketManager {
       this.sendSubscription("unsubscribe", toUnsubscribe);
     }
 
-    // Disconnect if no more subscriptions
-    if (this.subscriptions.size === 0) {
-      this.disconnect();
+    // Disconnect if no more subscriptions, but wait a short grace period
+    // first — React strict mode and remounts commonly unsubscribe and then
+    // re-subscribe within a single tick. Closing immediately would abort a
+    // CONNECTING socket and force a fresh handshake on remount.
+    if (this.subscriptions.size === 0 && this.disconnectTimeout === null) {
+      this.disconnectTimeout = setTimeout(() => {
+        this.disconnectTimeout = null;
+        if (this.subscriptions.size === 0) {
+          this.disconnect();
+        }
+      }, 500);
     }
   }
 
@@ -206,7 +228,7 @@ class WebSocketManager {
     this.updateConnectionState("connecting");
 
     try {
-      this.ws = new WebSocket(POLYMARKET_API.WSS.MARKET);
+      this.ws = new WebSocket(CLOB_WS_MARKET_URL);
 
       this.ws.onopen = () => {
         logger.info("websocket.market.connected");
@@ -307,6 +329,11 @@ class WebSocketManager {
   disconnect(): void {
     this.clearReconnectTimeout();
     this.stopHeartbeat();
+
+    if (this.disconnectTimeout) {
+      clearTimeout(this.disconnectTimeout);
+      this.disconnectTimeout = null;
+    }
 
     if (this.ws) {
       this.ws.close(1000, "Client disconnect");

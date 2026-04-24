@@ -145,7 +145,7 @@ export interface WithdrawalRequest {
 
 /**
  * Response from the withdrawal endpoint — bridge deposit addresses
- * to which you transfer USDC.e from the proxy wallet;
+ * to which you transfer pUSD from the proxy wallet;
  * the bridge then routes funds cross-chain to the recipient.
  * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
  */
@@ -468,7 +468,8 @@ export function useBridge() {
    * - svm: For Solana
    * - btc: For Bitcoin
    *
-   * Assets sent to these addresses are automatically bridged to USDC.e on Polygon.
+   * Assets sent to these addresses are automatically bridged to pUSD on Polygon
+   * (Polymarket's V2 trading token).
    *
    * @param walletAddress - Optional wallet address (defaults to proxy wallet)
    */
@@ -568,7 +569,7 @@ export function useBridge() {
    * Create withdrawal addresses for cross-chain withdrawals
    *
    * Calls POST /withdraw on the Bridge API. Returns bridge deposit addresses
-   * (evm, svm, btc) to which USDC.e should be transferred from the proxy wallet.
+   * (evm, svm, btc) to which pUSD should be transferred from the proxy wallet.
    * The bridge handles converting and routing the funds to the recipient on the
    * destination chain.
    *

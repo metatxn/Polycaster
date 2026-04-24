@@ -1,5 +1,3 @@
-import type { ElementType } from "react";
-
 export type TabType = "positions" | "orders" | "history";
 export type SortField = "value" | "pnl" | "name" | "date";
 export type SortDirection = "asc" | "desc";
@@ -72,7 +70,6 @@ export interface Trade {
 }
 
 export interface EmptyStateProps {
-  icon: ElementType;
   title: string;
   description: string;
   action?: { label: string; href: string };

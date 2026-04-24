@@ -224,6 +224,11 @@ export async function GET(request: NextRequest) {
       totalBought: p.totalBought,
       redeemable: p.redeemable,
       mergeable: p.mergeable,
+      // Surfaced at top level so Quick Sell (see use-sell-position.ts) can
+      // sign against the correct exchange contract — multi-outcome
+      // negative-risk markets require `{ negRisk: true }` in the order
+      // options so the signature is verified against NEG_RISK_CTF_EXCHANGE.
+      negRisk: p.negativeRisk,
       market: {
         title: p.title,
         slug: p.slug,

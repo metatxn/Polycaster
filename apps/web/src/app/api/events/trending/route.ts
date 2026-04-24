@@ -29,6 +29,11 @@ export async function GET(request: NextRequest) {
     const liquidityMin = searchParams.get("liquidity_min");
     const tagSlug = searchParams.get("tag_slug");
     const closed = searchParams.get("closed");
+    // `?markets=full` opts into the richer sub-market payload
+    // (groupItemTitle, outcomePrices) that the pro view needs to surface
+    // top candidates per event. Default is slim to keep payload size
+    // low for the card grid.
+    const fullMarkets = searchParams.get("markets") === "full";
 
     if (searchParams.has("offset")) {
       return NextResponse.json(
@@ -78,7 +83,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        data: page.items.map((event) => toSlimGammaEvent(event)),
+        data: page.items.map((event) => toSlimGammaEvent(event, fullMarkets)),
         pagination: {
           hasMore: Boolean(page.nextCursor),
           nextCursor: page.nextCursor,

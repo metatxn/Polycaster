@@ -48,16 +48,21 @@ export function SharesInput({
       ? !maxSellShares || maxSellShares <= 0
       : !effectiveBalance || price <= 0;
 
+  const stepperClass =
+    "px-2.5 py-2 text-xs font-mono tabular-nums text-muted-foreground border border-border/60 hover:bg-secondary/50 hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0";
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium text-foreground">Shares</span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          Shares
+        </span>
         <button
           type="button"
-          className={`text-xs font-medium ${
+          className={`font-mono text-[10px] uppercase tracking-[0.14em] transition-colors ${
             isMaxDisabled
-              ? "text-muted-foreground cursor-not-allowed"
-              : "text-emerald-600 dark:text-emerald-400 hover:text-emerald-500"
+              ? "text-muted-foreground/50 cursor-not-allowed"
+              : "text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 underline underline-offset-4 decoration-border"
           }`}
           onClick={handleMaxClick}
           disabled={isMaxDisabled}
@@ -69,19 +74,19 @@ export function SharesInput({
       <div className="flex items-stretch gap-1.5">
         <button
           type="button"
-          className="px-2 py-2 text-xs font-medium text-muted-foreground rounded-lg border border-border hover:bg-secondary/50 hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+          className={stepperClass}
           onClick={() => onIncrement(-10)}
           disabled={shares - 10 < effectiveMinShares}
         >
-          -10
+          −10
         </button>
         <button
           type="button"
-          className="px-2.5 py-2 text-xs font-medium text-muted-foreground rounded-lg border border-border hover:bg-secondary/50 hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+          className={stepperClass}
           onClick={() => onIncrement(-1)}
           disabled={shares - 1 < effectiveMinShares}
         >
-          -1
+          −1
         </button>
 
         <input
@@ -95,19 +100,19 @@ export function SharesInput({
           }}
           min={effectiveMinShares}
           step={side === "SELL" ? 0.01 : 1}
-          className="flex-1 min-w-0 bg-secondary/30 border border-border rounded-xl px-2 py-2.5 text-center text-base font-semibold font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
+          className="flex-1 min-w-0 bg-secondary/30 border border-border/60 px-2 py-2.5 text-center text-base font-semibold font-mono tabular-nums text-foreground focus:outline-none focus:border-foreground transition-colors"
         />
 
         <button
           type="button"
-          className="px-2.5 py-2 text-xs font-medium text-muted-foreground rounded-lg border border-border hover:bg-secondary/50 hover:text-foreground transition-colors shrink-0"
+          className={stepperClass}
           onClick={() => onIncrement(1)}
         >
           +1
         </button>
         <button
           type="button"
-          className="px-2 py-2 text-xs font-medium text-muted-foreground rounded-lg border border-border hover:bg-secondary/50 hover:text-foreground transition-colors shrink-0"
+          className={stepperClass}
           onClick={() => onIncrement(10)}
         >
           +10

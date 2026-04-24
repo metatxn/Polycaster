@@ -24,6 +24,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import {
   useOrderBook as useOrderBookStore,
   useOrderBookStore as useStore,
@@ -44,11 +45,19 @@ interface OrderBookLevel {
 }
 
 /**
- * Order book data structure
+ * Order book data structure.
+ *
+ * `min_order_size` and `tick_size` are not used by this component but are
+ * included so the cached React Query result under queryKey
+ * `["orderBook", tokenId]` carries everything other consumers (the market /
+ * event detail pages, the sell-position modal) need when they share the
+ * deduplicated cache entry.
  */
 interface OrderBookData {
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
+  min_order_size?: string;
+  tick_size?: string;
   spread?: number;
   midpoint?: number;
 }
@@ -88,6 +97,12 @@ export interface OrderBookProps {
   embedded?: boolean;
   /** Hide the outcome tabs (when parent handles tab switching) */
   hideOutcomeTabs?: boolean;
+  /** Scrollable mode — renders the full ladder inside a fixed-height
+   *  scroll container (Polymarket-style). When true, `maxLevels` is ignored. */
+  scrollable?: boolean;
+  /** Max height for the scrollable body when `scrollable` is true.
+   *  Default "360px" (matches Polymarket). */
+  scrollMaxHeight?: string;
 }
 
 /**
@@ -100,6 +115,8 @@ interface ClobOrderBookResponse {
   timestamp: string;
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
+  min_order_size?: string;
+  tick_size?: string;
 }
 
 /**
@@ -109,14 +126,11 @@ interface ClobOrderBookResponse {
  */
 async function fetchOrderBook(tokenId: string): Promise<OrderBookData> {
   // Direct call to Polymarket CLOB API (no proxy needed)
-  const response = await fetch(
-    `https://clob.polymarket.com/book?token_id=${tokenId}`,
-    {
-      headers: {
-        Accept: "application/json",
-      },
-    }
-  );
+  const response = await fetch(`${CLOB_BASE_URL}/book?token_id=${tokenId}`, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch order book: ${response.status}`);
@@ -127,6 +141,8 @@ async function fetchOrderBook(tokenId: string): Promise<OrderBookData> {
   return {
     bids: data.bids || [],
     asks: data.asks || [],
+    min_order_size: data.min_order_size,
+    tick_size: data.tick_size,
   };
 }
 
@@ -237,6 +253,8 @@ export function OrderBook({
   onOutcomeChange,
   embedded = false,
   hideOutcomeTabs = false,
+  scrollable = false,
+  scrollMaxHeight = "360px",
 }: OrderBookProps) {
   const [selectedOutcome, setSelectedOutcome] = useState(defaultOutcomeIndex);
   const [isOpen, setIsOpen] = useState(!defaultCollapsed);
@@ -326,13 +344,17 @@ export function OrderBook({
   const processedData = useMemo(() => {
     if (!orderBook) return null;
 
-    const bids = [...(orderBook.bids || [])]
-      .sort((a, b) => Number.parseFloat(b.price) - Number.parseFloat(a.price))
-      .slice(0, maxLevels);
+    const sortedBids = [...(orderBook.bids || [])].sort(
+      (a, b) => Number.parseFloat(b.price) - Number.parseFloat(a.price)
+    );
+    const bids = scrollable ? sortedBids : sortedBids.slice(0, maxLevels);
 
-    const sortedAsks = [...(orderBook.asks || [])]
-      .sort((a, b) => Number.parseFloat(a.price) - Number.parseFloat(b.price))
-      .slice(0, maxLevels);
+    const allSortedAsks = [...(orderBook.asks || [])].sort(
+      (a, b) => Number.parseFloat(a.price) - Number.parseFloat(b.price)
+    );
+    const sortedAsks = scrollable
+      ? allSortedAsks
+      : allSortedAsks.slice(0, maxLevels);
 
     const bestBid = bids[0] ? Number.parseFloat(bids[0].price) : 0;
     const bestAsk = sortedAsks[0] ? Number.parseFloat(sortedAsks[0].price) : 1;
@@ -364,7 +386,7 @@ export function OrderBook({
       bestBid,
       bestAsk,
     };
-  }, [orderBook, maxLevels]);
+  }, [orderBook, maxLevels, scrollable]);
 
   // Calculate last trade price display
   const displayLastPrice = useMemo(() => {
@@ -424,8 +446,7 @@ export function OrderBook({
       )}
 
       {/* Trade Yes/No selector for embedded mode */}
-      {/* Trade Yes/No selector for embedded mode */}
-      {embedded && (
+      {embedded && !hideOutcomeTabs && (
         <div className="flex items-center gap-1 px-4 py-2 border-b border-border bg-muted/20">
           <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
             Trade {currentOutcome?.name}
@@ -498,144 +519,157 @@ export function OrderBook({
                 <col className="w-auto sm:w-[30%]" />
               </colgroup>
               <thead>
-                <tr className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-                  <th className="text-left px-2 sm:px-4 py-2" />
-                  <th className="text-right px-2 sm:px-4 py-2">Price</th>
-                  <th className="text-right px-2 sm:px-4 py-2">Shares</th>
-                  <th className="text-right px-2 sm:px-4 py-2">Total</th>
+                <tr className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.14em]">
+                  <th className="text-left px-2 sm:px-4 py-1.5" />
+                  <th className="text-right px-2 sm:px-4 py-1.5">Price</th>
+                  <th className="text-right px-2 sm:px-4 py-1.5">Shares</th>
+                  <th className="text-right px-2 sm:px-4 py-1.5">Total</th>
                 </tr>
               </thead>
             </table>
           </div>
 
-          {/* Asks (Sells) - Red */}
-          <div className="relative">
-            <table className="w-full table-fixed">
-              <colgroup>
-                <col className="w-[42px] sm:w-[18%]" />
-                <col className="w-auto sm:w-[22%]" />
-                <col className="w-auto sm:w-[30%]" />
-                <col className="w-auto sm:w-[30%]" />
-              </colgroup>
-              <tbody>
-                {processedData.asks.map((level, index) => {
-                  const size = Number.parseFloat(level.size);
-                  const depthPercent = (size / processedData.maxSize) * 100;
+          {/* Scrollable body: asks + spread + bids in a single scroll
+              container when scrollable=true (Polymarket-style). When
+              scrollable=false the wrapper is inert and the sections flow
+              naturally. */}
+          <div
+            className={cn(scrollable && "overflow-y-auto")}
+            style={scrollable ? { maxHeight: scrollMaxHeight } : undefined}
+          >
+            {/* Asks (Sells) - Red */}
+            <div className="relative">
+              <table className="w-full table-fixed">
+                <colgroup>
+                  <col className="w-[42px] sm:w-[18%]" />
+                  <col className="w-auto sm:w-[22%]" />
+                  <col className="w-auto sm:w-[30%]" />
+                  <col className="w-auto sm:w-[30%]" />
+                </colgroup>
+                <tbody>
+                  {processedData.asks.map((level, index) => {
+                    const size = Number.parseFloat(level.size);
+                    const depthPercent = (size / processedData.maxSize) * 100;
 
-                  return (
-                    <tr
-                      key={`ask-${level.price}`}
-                      className="relative cursor-pointer hover:bg-muted/30 transition-colors group"
-                      onClick={() =>
-                        onPriceClick?.(Number.parseFloat(level.price), "SELL")
-                      }
-                    >
-                      <td className="relative px-2 sm:px-4 py-1.5">
-                        <div
-                          className="absolute left-0 top-0 bottom-0 bg-red-500/20 transition-all duration-300"
-                          style={{
-                            width: `${Math.min(depthPercent * 2, 100)}%`,
-                          }}
-                        />
-                        {index === processedData.asks.length - 1 && (
-                          <span className="relative text-[10px] font-medium px-1 sm:px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">
-                            Asks
-                          </span>
-                        )}
-                      </td>
-                      <td className="text-right px-2 sm:px-4 py-1.5 text-red-400 font-medium text-sm">
-                        {formatPrice(level.price)}
-                      </td>
-                      <td className="text-right px-2 sm:px-4 py-1.5 text-sm tabular-nums">
-                        {formatSize(size)}
-                      </td>
-                      <td className="text-right px-2 sm:px-4 py-1.5 text-sm text-muted-foreground tabular-nums">
-                        {formatDollar(processedData.askCumTotals[index])}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    return (
+                      <tr
+                        key={`ask-${level.price}`}
+                        className="relative cursor-pointer hover:bg-muted/40 transition-colors group"
+                        onClick={() =>
+                          onPriceClick?.(Number.parseFloat(level.price), "SELL")
+                        }
+                      >
+                        <td className="relative px-2 sm:px-4 py-1">
+                          <div
+                            className="absolute left-0 top-0 bottom-0 bg-rose-500/25 dark:bg-rose-500/30 transition-all duration-300"
+                            style={{
+                              width: `${Math.min(depthPercent * 2, 100)}%`,
+                            }}
+                          />
+                          {index === processedData.asks.length - 1 && (
+                            <span className="relative text-[10px] font-bold uppercase tracking-[0.14em] px-1 sm:px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-500 dark:text-rose-400">
+                              Asks
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-right px-2 sm:px-4 py-1 text-rose-500 dark:text-rose-400 font-mono font-semibold text-sm tabular-nums">
+                          {formatPrice(level.price)}
+                        </td>
+                        <td className="text-right px-2 sm:px-4 py-1 text-sm font-mono tabular-nums">
+                          {formatSize(size)}
+                        </td>
+                        <td className="text-right px-2 sm:px-4 py-1 text-sm text-muted-foreground font-mono tabular-nums">
+                          {formatDollar(processedData.askCumTotals[index])}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
 
-            {processedData.asks.length === 0 && (
-              <div className="px-2 sm:px-4 py-4 text-center text-xs text-muted-foreground">
-                No asks available
-              </div>
-            )}
-          </div>
-
-          {/* Spread Divider */}
-          <div className="flex items-center justify-between px-2 sm:px-4 py-2 bg-muted/20 border-y border-border">
-            <div className="text-xs text-muted-foreground">
-              Last:{" "}
-              <span className="text-foreground font-medium">
-                {displayLastPrice ? formatPrice(displayLastPrice) : "—"}
-              </span>
+              {processedData.asks.length === 0 && (
+                <div className="px-2 sm:px-4 py-4 text-center text-xs text-muted-foreground">
+                  No asks available
+                </div>
+              )}
             </div>
-            <div className="text-xs text-muted-foreground">
-              Spread:{" "}
-              <span className="text-foreground font-medium">
-                {formatPrice(processedData.spread)}
-              </span>
-            </div>
-          </div>
 
-          {/* Bids (Buys) - Green */}
-          <div className="relative">
-            <table className="w-full table-fixed">
-              <colgroup>
-                <col className="w-[42px] sm:w-[18%]" />
-                <col className="w-auto sm:w-[22%]" />
-                <col className="w-auto sm:w-[30%]" />
-                <col className="w-auto sm:w-[30%]" />
-              </colgroup>
-              <tbody>
-                {processedData.bids.map((level, index) => {
-                  const size = Number.parseFloat(level.size);
-                  const depthPercent = (size / processedData.maxSize) * 100;
-
-                  return (
-                    <tr
-                      key={`bid-${level.price}`}
-                      className="relative cursor-pointer hover:bg-muted/30 transition-colors group"
-                      onClick={() =>
-                        onPriceClick?.(Number.parseFloat(level.price), "BUY")
-                      }
-                    >
-                      <td className="relative px-2 sm:px-4 py-1.5">
-                        <div
-                          className="absolute left-0 top-0 bottom-0 bg-green-500/20 transition-all duration-300"
-                          style={{
-                            width: `${Math.min(depthPercent * 2, 100)}%`,
-                          }}
-                        />
-                        {index === 0 && (
-                          <span className="relative text-[10px] font-medium px-1 sm:px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">
-                            Bids
-                          </span>
-                        )}
-                      </td>
-                      <td className="text-right px-2 sm:px-4 py-1.5 text-green-400 font-medium text-sm">
-                        {formatPrice(level.price)}
-                      </td>
-                      <td className="text-right px-2 sm:px-4 py-1.5 text-sm tabular-nums">
-                        {formatSize(size)}
-                      </td>
-                      <td className="text-right px-2 sm:px-4 py-1.5 text-sm text-muted-foreground tabular-nums">
-                        {formatDollar(processedData.bidCumTotals[index])}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-
-            {processedData.bids.length === 0 && (
-              <div className="px-2 sm:px-4 py-4 text-center text-xs text-muted-foreground">
-                No bids available
+            {/* Spread Divider */}
+            <div className="flex items-center justify-between px-2 sm:px-4 py-1.5 bg-muted/30 border-y border-border">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                  Last
+                </span>
+                <span className="text-foreground font-mono font-semibold text-xs tabular-nums">
+                  {displayLastPrice ? formatPrice(displayLastPrice) : "—"}
+                </span>
               </div>
-            )}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                  Spread
+                </span>
+                <span className="text-foreground font-mono font-semibold text-xs tabular-nums">
+                  {formatPrice(processedData.spread)}
+                </span>
+              </div>
+            </div>
+
+            {/* Bids (Buys) - Green */}
+            <div className="relative">
+              <table className="w-full table-fixed">
+                <colgroup>
+                  <col className="w-[42px] sm:w-[18%]" />
+                  <col className="w-auto sm:w-[22%]" />
+                  <col className="w-auto sm:w-[30%]" />
+                  <col className="w-auto sm:w-[30%]" />
+                </colgroup>
+                <tbody>
+                  {processedData.bids.map((level, index) => {
+                    const size = Number.parseFloat(level.size);
+                    const depthPercent = (size / processedData.maxSize) * 100;
+
+                    return (
+                      <tr
+                        key={`bid-${level.price}`}
+                        className="relative cursor-pointer hover:bg-muted/40 transition-colors group"
+                        onClick={() =>
+                          onPriceClick?.(Number.parseFloat(level.price), "BUY")
+                        }
+                      >
+                        <td className="relative px-2 sm:px-4 py-1">
+                          <div
+                            className="absolute left-0 top-0 bottom-0 bg-emerald-500/25 dark:bg-emerald-500/30 transition-all duration-300"
+                            style={{
+                              width: `${Math.min(depthPercent * 2, 100)}%`,
+                            }}
+                          />
+                          {index === 0 && (
+                            <span className="relative text-[10px] font-bold uppercase tracking-[0.14em] px-1 sm:px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                              Bids
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-right px-2 sm:px-4 py-1 text-emerald-600 dark:text-emerald-400 font-mono font-semibold text-sm tabular-nums">
+                          {formatPrice(level.price)}
+                        </td>
+                        <td className="text-right px-2 sm:px-4 py-1 text-sm font-mono tabular-nums">
+                          {formatSize(size)}
+                        </td>
+                        <td className="text-right px-2 sm:px-4 py-1 text-sm text-muted-foreground font-mono tabular-nums">
+                          {formatDollar(processedData.bidCumTotals[index])}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {processedData.bids.length === 0 && (
+                <div className="px-2 sm:px-4 py-4 text-center text-xs text-muted-foreground">
+                  No bids available
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Bottom padding */}
@@ -700,127 +734,5 @@ export function OrderBook({
         </CollapsibleContent>
       </div>
     </Collapsible>
-  );
-}
-
-/**
- * Legacy OrderBook component for backwards compatibility
- * Wraps the new component with single token ID support
- */
-export function OrderBookLegacy({
-  tokenId,
-  maxLevels = 10,
-  onPriceClick,
-  useWebSocket = true,
-  pollingInterval = 5000,
-}: {
-  tokenId: string;
-  maxLevels?: number;
-  onPriceClick?: (price: number, side: "BUY" | "SELL") => void;
-  useWebSocket?: boolean;
-  pollingInterval?: number;
-}) {
-  return (
-    <OrderBook
-      outcomes={[{ name: "Yes", tokenId }]}
-      maxLevels={maxLevels}
-      onPriceClick={onPriceClick}
-      useWebSocket={useWebSocket}
-      pollingInterval={pollingInterval}
-    />
-  );
-}
-
-/**
- * Compact order book for sidebar display
- */
-export function OrderBookCompact({
-  tokenId,
-  onPriceClick,
-  useWebSocket = true,
-}: {
-  tokenId: string;
-  onPriceClick?: (price: number, side: "BUY" | "SELL") => void;
-  useWebSocket?: boolean;
-}) {
-  const isTokenValid = isValidTokenId(tokenId);
-  const isTokenValidRest = isValidTokenIdForRest(tokenId);
-
-  // WebSocket connection (uses shared singleton manager)
-  const assetIds = useMemo(
-    () => (isTokenValid && useWebSocket ? [tokenId] : []),
-    [isTokenValid, useWebSocket, tokenId]
-  );
-  const { isConnected } = useOrderBookWebSocket(assetIds);
-
-  // Get order book from store (seeded by REST, updated by WebSocket)
-  const wsOrderBook = useOrderBookStore(tokenId);
-
-  // REST API fallback
-  const { data: restOrderBook, isLoading } = useQuery<OrderBookData>({
-    queryKey: ["orderBook", tokenId],
-    queryFn: () => fetchOrderBook(tokenId),
-    refetchInterval: !isConnected ? 10000 : false,
-    staleTime: 5000,
-    enabled: isTokenValidRest && (!useWebSocket || !isConnected),
-  });
-
-  // Use WebSocket data if available
-  const orderBook = wsOrderBook && isConnected ? wsOrderBook : restOrderBook;
-
-  if (isLoading || !orderBook) {
-    return (
-      <div className="space-y-1">
-        <Skeleton className="h-6 w-full" />
-        <Skeleton className="h-6 w-full" />
-      </div>
-    );
-  }
-
-  const bestBid = orderBook.bids?.[0];
-  const bestAsk = orderBook.asks?.[0];
-
-  return (
-    <div className="space-y-1">
-      {bestAsk && (
-        <button
-          type="button"
-          className="w-full flex justify-between items-center px-2 py-1 rounded hover:bg-muted/50 transition-colors"
-          onClick={() =>
-            onPriceClick?.(Number.parseFloat(bestAsk.price), "SELL")
-          }
-        >
-          <span className="text-xs text-muted-foreground">Best Ask</span>
-          <span className="text-sm font-medium text-red-500">
-            {formatPrice(bestAsk.price)}
-          </span>
-        </button>
-      )}
-      {bestBid && (
-        <button
-          type="button"
-          className="w-full flex justify-between items-center px-2 py-1 rounded hover:bg-muted/50 transition-colors"
-          onClick={() =>
-            onPriceClick?.(Number.parseFloat(bestBid.price), "BUY")
-          }
-        >
-          <span className="text-xs text-muted-foreground">Best Bid</span>
-          <span className="text-sm font-medium text-green-500">
-            {formatPrice(bestBid.price)}
-          </span>
-        </button>
-      )}
-      {/* Connection indicator */}
-      {useWebSocket && (
-        <div className="flex justify-center pt-1">
-          <div
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              isConnected ? "bg-emerald-500" : "bg-muted-foreground"
-            )}
-          />
-        </div>
-      )}
-    </div>
   );
 }

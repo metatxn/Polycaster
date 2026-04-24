@@ -1,7 +1,6 @@
 "use client";
 
 import { AlertCircle, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface AllowanceWarningProps {
   totalCost: number;
@@ -18,29 +17,29 @@ export function AllowanceWarning({
 }: AllowanceWarningProps) {
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-        <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
-        <span className="text-sm text-blue-600 dark:text-blue-400">
+      <div className="flex items-center gap-3 p-3 bg-foreground/5 border border-border/60">
+        <AlertCircle className="h-4 w-4 text-foreground shrink-0" />
+        <span className="text-sm text-foreground">
           {hasNoAllowance
             ? "Approve USDC.e spending to trade"
             : `Increase allowance to $${totalCost.toFixed(2)}`}
         </span>
       </div>
-      <Button
+      <button
         type="button"
-        className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl"
+        className="w-full h-11 bg-foreground hover:bg-foreground/90 text-background font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
         onClick={onApprove}
         disabled={isUpdating}
       >
         {isUpdating ? (
           <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Approving...
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Approving…
           </>
         ) : (
           "Approve USDC.e"
         )}
-      </Button>
+      </button>
     </div>
   );
 }

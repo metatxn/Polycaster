@@ -27,7 +27,9 @@ import {
 import { useTags } from "@/hooks/use-tags";
 import { cn } from "@/lib/utils";
 
-// Reusable filter chip component - exported for use in combined filter row
+// Reusable filter chip — editorial mono style. Label sits inline as
+// small caps; value is the typographic anchor. Active state gets a
+// foreground underline to match the category/sport row language.
 export function FilterChip({
   icon: Icon,
   label,
@@ -36,7 +38,8 @@ export function FilterChip({
   children,
   compact = false,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  /** Optional leading glyph. Omit for pure-text editorial chips. */
+  icon?: React.ComponentType<{ className?: string }>;
   label: string;
   value: string;
   isActive?: boolean;
@@ -49,53 +52,25 @@ export function FilterChip({
         <button
           type="button"
           className={cn(
-            "inline-flex items-center gap-1.5 font-medium transition-all",
-            "active:scale-[0.97] shrink-0",
-            compact
-              ? "px-2.5 py-1.5 text-[13px] rounded-lg hover:bg-white/70 dark:hover:bg-white/10"
-              : "px-3.5 py-2 text-sm rounded-full border border-border/60 hover:border-border bg-background hover:bg-muted/50",
-            isActive
-              ? compact
-                ? "bg-white dark:bg-white/15 text-primary dark:text-primary shadow-sm dark:shadow-none"
-                : "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15"
-              : compact
-                ? "text-gray-600 dark:text-white/70"
-                : ""
+            "relative inline-flex items-center gap-1.5 px-2 py-1.5 text-[13px] transition-colors shrink-0",
+            "hover:text-foreground",
+            isActive ? "text-foreground" : "text-muted-foreground",
+            compact && "gap-1"
           )}
         >
-          <Icon
-            className={cn(
-              compact ? "h-3.5 w-3.5" : "h-4 w-4",
-              isActive
-                ? "text-primary"
-                : compact
-                  ? "text-gray-500 dark:text-white/60"
-                  : "text-muted-foreground"
-            )}
-          />
+          {Icon && <Icon className="h-3.5 w-3.5 opacity-70" />}
           {!compact && (
-            <span className="hidden xs:inline text-muted-foreground">
-              {label}:
+            <span className="hidden sm:inline font-mono text-[10px] uppercase tracking-[0.12em] opacity-60">
+              {label}
             </span>
           )}
-          <span
-            className={cn(
-              "font-semibold",
-              isActive ? "text-primary" : compact ? "dark:text-white/90" : ""
-            )}
-          >
+          <span className={cn("font-medium", isActive && "font-semibold")}>
             {value}
           </span>
-          <ChevronDown
-            className={cn(
-              compact ? "h-3 w-3" : "h-3.5 w-3.5",
-              isActive
-                ? "text-primary/70"
-                : compact
-                  ? "text-gray-500 dark:text-white/50"
-                  : "text-muted-foreground/60"
-            )}
-          />
+          <ChevronDown className="h-3 w-3 opacity-50" />
+          {isActive && (
+            <span className="absolute inset-x-2 -bottom-px h-px bg-foreground" />
+          )}
         </button>
       </DropdownMenuTrigger>
       {children}
@@ -251,9 +226,16 @@ export function useFilterBarState() {
 
 interface EventFilterBarProps {
   className?: string;
+  /** Show the Status (Active / Live / Ended) chip. Live/Ended are
+   *  game-state concepts, so the chip only makes sense for sports —
+   *  keep it off elsewhere. */
+  showStatus?: boolean;
 }
 
-export function EventFilterBar({ className }: EventFilterBarProps) {
+export function EventFilterBar({
+  className,
+  showStatus = false,
+}: EventFilterBarProps) {
   const {
     filters,
     tags,
@@ -336,25 +318,28 @@ export function EventFilterBar({ className }: EventFilterBarProps) {
           </DropdownMenuContent>
         </FilterChip>
 
-        {/* Status Filter */}
-        <FilterChip
-          icon={Activity}
-          label="Status"
-          value={statusLabel || "All"}
-          isActive={isStatusActive}
-        >
-          <DropdownMenuContent align="start" className="w-36">
-            {STATUS_OPTIONS.map((option) => (
-              <DropdownMenuCheckboxItem
-                key={option.value}
-                checked={filters.status.includes(option.value)}
-                onCheckedChange={() => toggleStatus(option.value)}
-              >
-                {option.label}
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </FilterChip>
+        {/* Status Filter — sports-only. Live/Ended are game-state
+            concepts; on non-sports pages the chip is just noise. */}
+        {showStatus && (
+          <FilterChip
+            icon={Activity}
+            label="Status"
+            value={statusLabel || "All"}
+            isActive={isStatusActive}
+          >
+            <DropdownMenuContent align="start" className="w-36">
+              {STATUS_OPTIONS.map((option) => (
+                <DropdownMenuCheckboxItem
+                  key={option.value}
+                  checked={filters.status.includes(option.value)}
+                  onCheckedChange={() => toggleStatus(option.value)}
+                >
+                  {option.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </FilterChip>
+        )}
 
         {/* Tags Filter */}
         <FilterChip
@@ -411,9 +396,9 @@ export function EventFilterBar({ className }: EventFilterBarProps) {
           <button
             type="button"
             onClick={clearAllFilters}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium text-destructive bg-destructive/10 hover:bg-destructive/15 border border-destructive/20 transition-all active:scale-[0.97] shrink-0"
+            className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-mono uppercase tracking-[0.12em] text-destructive hover:text-destructive/80 transition-colors shrink-0"
           >
-            <X className="h-4 w-4" />
+            <X className="h-3 w-3" />
             <span className="hidden sm:inline">Clear</span>
           </button>
         )}

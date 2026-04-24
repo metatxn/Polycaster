@@ -2,18 +2,20 @@
 
 import { motion } from "framer-motion";
 import {
-  ArrowDownRight,
-  ArrowUpRight,
-  TrendingDown,
-  TrendingUp,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   type PnLDataPoint,
   type PnLInterval,
   usePnLHistory,
 } from "@/hooks/use-pnl-history";
+import { cn } from "@/lib/utils";
 
 interface PnLChartProps {
   userAddress?: string;
@@ -68,40 +70,63 @@ const INTERVAL_OPTIONS: { value: PnLInterval; label: string }[] = [
 function InteractiveLineChart({
   data,
   height = 200,
-  isPositive,
 }: {
   data: PnLDataPoint[];
   height: number;
-  isPositive: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const gradientId = useId();
 
-  // Calculate chart bounds and points
-  const { points } = useMemo(() => {
-    if (data.length === 0) return { points: [], minPnl: 0, maxPnl: 0 };
+  // Calculate chart bounds, points, and where zero sits vertically.
+  const { points, zeroY, zeroRatio, peakIdx, troughIdx, hasZeroLine } =
+    useMemo(() => {
+      if (data.length === 0) {
+        return {
+          points: [] as { x: number; y: number; data: PnLDataPoint }[],
+          zeroY: 0,
+          zeroRatio: 0,
+          peakIdx: -1,
+          troughIdx: -1,
+          hasZeroLine: false,
+        };
+      }
 
-    const pnlValues = data.map((d) => d.pnl);
-    const min = Math.min(...pnlValues);
-    const max = Math.max(...pnlValues);
-    const range = max - min || 1;
+      const pnlValues = data.map((d) => d.pnl);
+      const min = Math.min(...pnlValues);
+      const max = Math.max(...pnlValues);
+      const range = max - min || 1;
 
-    // Add 10% padding
-    const padding = range * 0.1;
-    const adjMin = min - padding;
-    const adjMax = max + padding;
-    const adjRange = adjMax - adjMin;
+      const padding = range * 0.1;
+      const adjMin = min - padding;
+      const adjMax = max + padding;
+      const adjRange = adjMax - adjMin;
 
-    const pts = data.map((d, i) => {
-      const x = data.length === 1 ? 50 : (i / (data.length - 1)) * 100;
-      const y = height - ((d.pnl - adjMin) / adjRange) * height;
-      return { x, y, data: d };
-    });
+      const pts = data.map((d, i) => {
+        const x = data.length === 1 ? 50 : (i / (data.length - 1)) * 100;
+        const y = height - ((d.pnl - adjMin) / adjRange) * height;
+        return { x, y, data: d };
+      });
 
-    return { points: pts, minPnl: min, maxPnl: max };
-  }, [data, height]);
+      // Zero anchor — only meaningful when the series crosses it.
+      const hasZero = min < 0 && max > 0;
+      const zY = hasZero ? height - ((0 - adjMin) / adjRange) * height : 0;
+      const zRatio = hasZero ? zY / height : 0;
 
-  // Generate simple polyline path (straight lines between points)
+      const peak = pnlValues.indexOf(max);
+      const trough = pnlValues.indexOf(min);
+
+      return {
+        points: pts,
+        zeroY: zY,
+        zeroRatio: zRatio,
+        peakIdx: peak,
+        troughIdx: trough,
+        hasZeroLine: hasZero,
+      };
+    }, [data, height]);
+
+  // Straight polyline between points.
   const linePath = useMemo(() => {
     if (points.length === 0) return "";
     return points
@@ -109,13 +134,15 @@ function InteractiveLineChart({
       .join(" ");
   }, [points]);
 
-  // Generate area path
+  // Area fill baseline — sits on the zero line when available, otherwise
+  // on the chart floor, so positive area never bleeds below the line.
   const areaPath = useMemo(() => {
     if (points.length === 0) return "";
-    return `${linePath} L ${points[points.length - 1].x} ${height} L ${
+    const baseline = hasZeroLine ? zeroY : height;
+    return `${linePath} L ${points[points.length - 1].x} ${baseline} L ${
       points[0].x
-    } ${height} Z`;
-  }, [linePath, points, height]);
+    } ${baseline} Z`;
+  }, [linePath, points, height, hasZeroLine, zeroY]);
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -146,8 +173,16 @@ function InteractiveLineChart({
     );
   }
 
-  const strokeColor = isPositive ? "#10b981" : "#ef4444";
+  const EMERALD = "#10b981";
+  const RED = "#ef4444";
   const hoveredPoint = hoveredIndex !== null ? points[hoveredIndex] : null;
+  const hoveredIsPositive = hoveredPoint ? hoveredPoint.data.pnl >= 0 : false;
+
+  // Peak/trough only worth annotating when there's meaningful separation.
+  const showMarkers =
+    data.length >= 4 && peakIdx !== troughIdx && peakIdx >= 0 && troughIdx >= 0;
+  const peakPt = showMarkers ? points[peakIdx] : null;
+  const troughPt = showMarkers ? points[troughIdx] : null;
 
   return (
     <div
@@ -168,19 +203,79 @@ function InteractiveLineChart({
         aria-hidden="true"
       >
         <defs>
+          {/* Stroke gradient — sharp switch at zero. Positive half is
+              emerald, negative half is red. Hard stops instead of a
+              smooth ramp so the line reads like a ticker. */}
           <linearGradient
-            id={`gradient-${isPositive}`}
+            id={`stroke-${gradientId}`}
             x1="0"
             y1="0"
             x2="0"
             y2="1"
           >
-            <stop offset="0%" stopColor={strokeColor} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={strokeColor} stopOpacity="0.02" />
+            {hasZeroLine ? (
+              <>
+                <stop offset="0%" stopColor={EMERALD} />
+                <stop offset={`${zeroRatio * 100}%`} stopColor={EMERALD} />
+                <stop offset={`${zeroRatio * 100}%`} stopColor={RED} />
+                <stop offset="100%" stopColor={RED} />
+              </>
+            ) : (
+              <>
+                <stop
+                  offset="0%"
+                  stopColor={
+                    points[points.length - 1].data.pnl >= 0 ? EMERALD : RED
+                  }
+                />
+                <stop
+                  offset="100%"
+                  stopColor={
+                    points[points.length - 1].data.pnl >= 0 ? EMERALD : RED
+                  }
+                />
+              </>
+            )}
+          </linearGradient>
+          {/* Area fill gradient — matches the stroke colors but faint. */}
+          <linearGradient id={`fill-${gradientId}`} x1="0" y1="0" x2="0" y2="1">
+            {hasZeroLine ? (
+              <>
+                <stop offset="0%" stopColor={EMERALD} stopOpacity="0.18" />
+                <stop
+                  offset={`${zeroRatio * 100}%`}
+                  stopColor={EMERALD}
+                  stopOpacity="0.02"
+                />
+                <stop
+                  offset={`${zeroRatio * 100}%`}
+                  stopColor={RED}
+                  stopOpacity="0.02"
+                />
+                <stop offset="100%" stopColor={RED} stopOpacity="0.18" />
+              </>
+            ) : (
+              <>
+                <stop
+                  offset="0%"
+                  stopColor={
+                    points[points.length - 1].data.pnl >= 0 ? EMERALD : RED
+                  }
+                  stopOpacity="0.22"
+                />
+                <stop
+                  offset="100%"
+                  stopColor={
+                    points[points.length - 1].data.pnl >= 0 ? EMERALD : RED
+                  }
+                  stopOpacity="0.02"
+                />
+              </>
+            )}
           </linearGradient>
         </defs>
 
-        {/* Subtle grid lines */}
+        {/* Grid rules — faint */}
         {[0.25, 0.5, 0.75].map((tick) => (
           <line
             key={tick}
@@ -189,94 +284,156 @@ function InteractiveLineChart({
             x2="100"
             y2={height * tick}
             stroke="currentColor"
-            strokeOpacity="0.06"
+            strokeOpacity="0.05"
             vectorEffect="non-scaling-stroke"
           />
         ))}
 
+        {/* Zero reference line — only when the series crosses zero */}
+        {hasZeroLine && (
+          <line
+            x1="0"
+            y1={zeroY}
+            x2="100"
+            y2={zeroY}
+            stroke="currentColor"
+            strokeOpacity="0.35"
+            strokeDasharray="2,3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+
         {/* Area fill */}
-        <path d={areaPath} fill={`url(#gradient-${isPositive})`} />
+        <path d={areaPath} fill={`url(#fill-${gradientId})`} />
 
         {/* Main line */}
         <path
           d={linePath}
           fill="none"
-          stroke={strokeColor}
+          stroke={`url(#stroke-${gradientId})`}
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
           vectorEffect="non-scaling-stroke"
         />
 
-        {/* Hover vertical line */}
+        {/* Hover vertical guide */}
         {hoveredPoint && (
           <line
             x1={hoveredPoint.x}
             y1="0"
             x2={hoveredPoint.x}
             y2={height}
-            stroke={strokeColor}
-            strokeWidth="1"
-            strokeOpacity="0.4"
-            strokeDasharray="4,4"
+            stroke="currentColor"
+            strokeOpacity="0.3"
+            strokeDasharray="2,3"
             vectorEffect="non-scaling-stroke"
           />
         )}
       </svg>
 
-      {/* Hover dot (HTML element for perfect circle) */}
+      {/* Zero-line label — broadsheet style */}
+      {hasZeroLine && (
+        <span
+          className="pointer-events-none absolute font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground/70 bg-background px-1"
+          style={{
+            left: 0,
+            top: zeroY,
+            transform: "translateY(-50%)",
+          }}
+        >
+          $0
+        </span>
+      )}
+
+      {/* Peak marker — small upward triangle + inline mono label */}
+      {peakPt && (
+        <div
+          className="pointer-events-none absolute"
+          style={{
+            left: `${peakPt.x}%`,
+            top: peakPt.y,
+            transform: "translate(-50%, -100%)",
+          }}
+        >
+          <div className="flex flex-col items-center gap-1 -mt-1">
+            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-500 tabular-nums whitespace-nowrap">
+              ▲ {formatCurrency(peakPt.data.pnl)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Trough marker — downward triangle + inline mono label */}
+      {troughPt && (
+        <div
+          className="pointer-events-none absolute"
+          style={{
+            left: `${troughPt.x}%`,
+            top: troughPt.y,
+            transform: "translate(-50%, 0)",
+          }}
+        >
+          <div className="flex flex-col items-center gap-1 mt-1">
+            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-red-600 dark:text-red-500 tabular-nums whitespace-nowrap">
+              ▼ {formatCurrency(troughPt.data.pnl)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Hover dot */}
       {hoveredPoint && (
         <div
-          className="absolute w-3 h-3 rounded-full border-2 border-background pointer-events-none"
+          className="absolute w-2.5 h-2.5 rounded-full border-2 border-background pointer-events-none"
           style={{
             left: `${hoveredPoint.x}%`,
             top: hoveredPoint.y,
-            backgroundColor: strokeColor,
-            boxShadow: `0 0 8px ${strokeColor}`,
+            backgroundColor: hoveredIsPositive ? EMERALD : RED,
             transform: "translate(-50%, -50%)",
           }}
         />
       )}
 
-      {/* Tooltip */}
+      {/* Hairline editorial tooltip */}
       {hoveredPoint && hoveredIndex !== null && (
         <div
           className="absolute z-20 pointer-events-none"
           style={{
-            left: `${Math.min(Math.max(hoveredPoint.x, 12), 88)}%`,
-            top: 8,
+            left: `${Math.min(Math.max(hoveredPoint.x, 14), 86)}%`,
+            top: 4,
             transform: "translateX(-50%)",
           }}
         >
           <motion.div
-            initial={{ opacity: 0, y: 4 }}
+            initial={{ opacity: 0, y: 2 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.15 }}
-            className="bg-popover border border-border rounded-lg shadow-lg px-3 py-2 text-center min-w-[110px]"
+            transition={{ duration: 0.12 }}
+            className="border border-border/60 bg-background px-3 py-2 min-w-[120px]"
           >
-            <p className="text-[10px] text-muted-foreground mb-1">
+            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground mb-1">
               {formatDate(hoveredPoint.data.timestamp)}
             </p>
             <p
-              className={`text-sm font-bold ${
-                hoveredPoint.data.pnl >= 0 ? "text-emerald-500" : "text-red-500"
-              }`}
+              className={cn(
+                "font-mono tabular-nums text-sm font-semibold",
+                hoveredIsPositive ? "text-emerald-500" : "text-red-500"
+              )}
             >
               {formatCurrency(hoveredPoint.data.pnl)}
             </p>
             {hoveredIndex > 0 && (
               <p
-                className={`text-[10px] flex items-center justify-center gap-0.5 mt-0.5 ${
+                className={cn(
+                  "font-mono tabular-nums text-[10px] mt-0.5",
                   hoveredPoint.data.pnl - data[hoveredIndex - 1].pnl >= 0
                     ? "text-emerald-500"
                     : "text-red-500"
-                }`}
-              >
-                {hoveredPoint.data.pnl - data[hoveredIndex - 1].pnl >= 0 ? (
-                  <ArrowUpRight className="h-2.5 w-2.5" />
-                ) : (
-                  <ArrowDownRight className="h-2.5 w-2.5" />
                 )}
+              >
+                {hoveredPoint.data.pnl - data[hoveredIndex - 1].pnl >= 0
+                  ? "↑"
+                  : "↓"}{" "}
                 {formatCurrency(
                   Math.abs(hoveredPoint.data.pnl - data[hoveredIndex - 1].pnl)
                 )}
@@ -325,134 +482,115 @@ export function PnLChart({
   const chartHeight = isSmallScreen ? Math.min(height, 160) : height;
 
   return (
-    <div className="rounded-xl sm:rounded-2xl bg-card border border-border overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div
-            className={`p-1 sm:p-1.5 rounded-lg ${
-              hasData
-                ? isPositive
-                  ? "bg-emerald-500/10"
-                  : "bg-red-500/10"
-                : "bg-muted"
-            }`}
-          >
-            {isPositive ? (
-              <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-500" />
-            ) : (
-              <TrendingDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-red-500" />
-            )}
-          </div>
-          <div>
-            <h3 className="font-semibold text-xs sm:text-sm">P&L History</h3>
-            {hasData && (
-              <p className="text-[9px] sm:text-[10px] text-muted-foreground">
-                {data.summary.dataPoints} points
-              </p>
-            )}
-          </div>
-        </div>
+    <section>
+      {/* Header — editorial section label + interval strip */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-3">
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          P&L History
+        </h2>
 
         {showIntervalSelector && (
-          <div className="flex items-center gap-0.5 p-0.5 sm:p-1 bg-muted/50 rounded-lg overflow-x-auto">
-            {INTERVAL_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setInterval(opt.value)}
-                className={`px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                  interval === opt.value
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide font-mono text-[10px] uppercase tracking-[0.14em]">
+            {INTERVAL_OPTIONS.map((opt) => {
+              const isActive = interval === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setInterval(opt.value)}
+                  className={`relative px-2 py-1.5 whitespace-nowrap transition-colors shrink-0 ${
+                    isActive
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {opt.label}
+                  {isActive && (
+                    <span className="absolute inset-x-2 -bottom-px h-px bg-foreground" />
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Content */}
-      <div className="p-3 sm:p-4">
+      {/* Content — bounded by hairline rules, no card */}
+      <div className="border-y border-border/50 py-4 sm:py-5">
         {isLoading ? (
           <div className="space-y-3 sm:space-y-4">
-            <div className="flex items-baseline gap-2 sm:gap-3">
-              <Skeleton className="h-7 sm:h-9 w-24 sm:w-28" />
-              <Skeleton className="h-5 sm:h-6 w-20 sm:w-24" />
+            <div className="flex items-baseline gap-3">
+              <Skeleton className="h-8 sm:h-9 w-24 sm:w-28" />
+              <Skeleton className="h-5 w-24" />
             </div>
             <Skeleton className="w-full" style={{ height: chartHeight }} />
           </div>
         ) : error ? (
           <div
-            className="flex flex-col items-center justify-center text-muted-foreground text-xs sm:text-sm"
+            className="flex items-center text-muted-foreground font-editorial italic text-sm px-1"
             style={{ height: chartHeight }}
           >
-            <p>Failed to load P&L data</p>
+            <p>Failed to load P&L data.</p>
           </div>
         ) : !hasData ? (
-          <div
-            className="flex flex-col items-center justify-center text-muted-foreground"
-            style={{ height: chartHeight }}
-          >
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-muted flex items-center justify-center mb-2 sm:mb-3">
-              <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6 opacity-40" />
-            </div>
-            <p className="text-xs sm:text-sm font-medium">No trading history</p>
-            <p className="text-[10px] sm:text-xs opacity-60 mt-1">
-              Start trading to see data
+          <div className="py-2 px-1">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-2">
+              No data yet
+            </p>
+            <p className="font-editorial italic text-lg text-muted-foreground leading-snug">
+              Your P&L curve shows up here once you've traded.
             </p>
           </div>
         ) : (
           <div>
             {/* Summary */}
-            <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 mb-3 sm:mb-5">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3 sm:mb-5">
               <span
-                className={`text-2xl sm:text-3xl font-bold ${
+                className={`text-2xl sm:text-3xl font-semibold tabular-nums tracking-[-0.015em] ${
                   isPositive ? "text-emerald-500" : "text-red-500"
                 }`}
               >
                 {formatCurrency(data.summary.endPnl)}
               </span>
               <span
-                className={`text-[10px] sm:text-sm flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-0.5 rounded-full font-medium ${
-                  data.summary.change >= 0
-                    ? "bg-emerald-500/10 text-emerald-500"
-                    : "bg-red-500/10 text-red-500"
+                className={`font-mono text-[11px] uppercase tracking-[0.12em] tabular-nums flex items-center gap-1 ${
+                  data.summary.change >= 0 ? "text-emerald-500" : "text-red-500"
                 }`}
               >
-                {data.summary.change >= 0 ? (
-                  <ArrowUpRight className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                ) : (
-                  <ArrowDownRight className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                )}
-                {formatCurrency(Math.abs(data.summary.change))} (
-                {formatPercent(data.summary.changePercent)})
+                {data.summary.change >= 0 ? "↑" : "↓"}
+                {formatCurrency(Math.abs(data.summary.change))}
+                <span className="text-muted-foreground/70">
+                  ({formatPercent(data.summary.changePercent)})
+                </span>
               </span>
             </div>
 
             {/* Chart */}
-            <InteractiveLineChart
-              data={data.data}
-              height={chartHeight}
-              isPositive={isPositive}
-            />
+            <InteractiveLineChart data={data.data} height={chartHeight} />
 
-            {/* Footer */}
-            <div className="flex justify-between items-center text-[10px] sm:text-xs text-muted-foreground mt-3 sm:mt-4 pt-2 sm:pt-3 border-t border-border">
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-emerald-500"></span>
-                High: {formatCurrency(data.summary.high)}
-              </span>
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-red-500"></span>
-                Low: {formatCurrency(data.summary.low)}
+            {/* Footer — editorial date range caption. Peak/trough
+                values live inside the chart as inline markers now, so
+                this row is only for the temporal span. */}
+            <div className="flex justify-center items-center font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80 mt-4 pt-3 border-t border-border/40 tabular-nums">
+              <span>
+                {formatRangeDate(data.data[0]?.timestamp)}
+                <span className="mx-2 text-border">—</span>
+                {formatRangeDate(data.data[data.data.length - 1]?.timestamp)}
+                <span className="mx-2 text-border">·</span>
+                {data.summary.dataPoints} points
               </span>
             </div>
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
+}
+
+/** Short date format for the range strip: "Apr 14" */
+function formatRangeDate(iso?: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }

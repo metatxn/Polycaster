@@ -5,10 +5,12 @@
  */
 
 import {
+  COLLATERAL_ONRAMP_ADDRESS,
   CTF_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
+  PUSD_ADDRESS,
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
   USDC_E_ADDRESS,
@@ -26,15 +28,14 @@ import {
   POLYMARKET_API,
   SIGNATURE_TYPES,
 } from "@knoww/shared-types/polymarket";
-import { ClobClient } from "@polymarket/clob-client";
 import { ethers } from "ethers";
 import type {
+  TradingDeploySafeMessage,
   TradingDeriveCredentialsMessage,
   TradingErrorResponse,
   TradingGetAllAllowancesMessage,
   TradingGetAllowanceMessage,
   TradingGetBalanceMessage,
-  TradingGetFeeRateMessage,
   TradingGetOrderBookMessage,
   TradingGetOutcomeBalancesMessage,
   TradingMergePositionsMessage,
@@ -44,9 +45,8 @@ import type {
   TradingSuccessResponse,
 } from "../types/chrome-messages";
 import { BridgeSigner } from "./bridge-signer";
-import { createExtensionBuilderConfig } from "./builder-config";
 import { logInfo, logWarn } from "./logger";
-import { executeViaRelayer } from "./relayer-client";
+import { deployProxyWallet, executeViaRelayer } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
@@ -89,10 +89,6 @@ export async function handleTradingMessage(
           message as unknown as TradingPlaceOrderMessage,
           sender
         );
-      case "trading:get-fee-rate":
-        return await handleGetFeeRate(
-          message as unknown as TradingGetFeeRateMessage
-        );
       case "trading:get-allowance":
         return await handleGetAllowance(
           message as unknown as TradingGetAllowanceMessage
@@ -126,6 +122,11 @@ export async function handleTradingMessage(
       case "trading:relayer-approve":
         return await handleRelayerApprove(
           message as unknown as TradingRelayerApproveMessage,
+          sender
+        );
+      case "trading:deploy-safe":
+        return await handleDeploySafe(
+          message as unknown as TradingDeploySafeMessage,
           sender
         );
       default:
@@ -199,6 +200,7 @@ interface TokenDef {
 }
 
 const KNOWN_TOKENS: TokenDef[] = [
+  { symbol: "pUSD", address: PUSD_ADDRESS, decimals: 6 },
   { symbol: "USDC.e", address: USDC_E_ADDRESS, decimals: 6 },
   {
     symbol: "USDC",
@@ -258,8 +260,16 @@ async function handleGetBalance(
     },
   ];
 
-  const results: Array<{ success: boolean; returnData: string }> =
-    await mc.aggregate3(calls);
+  // Fetch balances and Safe bytecode in parallel. `isDeployed` piggybacks
+  // on every balance refresh so the trading panel can branch on deployment
+  // status without an extra round-trip.
+  const [results, safeCode] = await Promise.all([
+    mc.aggregate3(calls) as Promise<
+      Array<{ success: boolean; returnData: string }>
+    >,
+    provider.getCode(msg.proxyAddress).catch(() => "0x"),
+  ]);
+  const isDeployed = safeCode !== "0x";
 
   const tokenBalances: Array<{ symbol: string; amount: number }> = [];
   let primaryBalance = 0;
@@ -273,7 +283,7 @@ async function handleGetBalance(
     if (raw.isZero()) continue;
     const amount = Number(ethers.utils.formatUnits(raw, tok.decimals));
     tokenBalances.push({ symbol: tok.symbol, amount });
-    if (tok.address.toLowerCase() === USDC_E_ADDRESS.toLowerCase()) {
+    if (tok.address.toLowerCase() === PUSD_ADDRESS.toLowerCase()) {
       primaryBalance = amount;
       primaryBalanceRaw = raw.toString();
     }
@@ -295,6 +305,7 @@ async function handleGetBalance(
     balanceRaw: primaryBalanceRaw,
     polBalance,
     tokenBalances,
+    isDeployed,
   });
 }
 
@@ -312,7 +323,7 @@ async function handlePlaceOrder(
     POLYGON_CHAIN_ID
   );
   const signer = new BridgeSigner(msg.address, tabId, provider);
-  const builderConfig = createExtensionBuilderConfig();
+  const { ClobClient } = await import("@polymarket/clob-client-v2");
 
   const creds = {
     key: msg.credentials.apiKey,
@@ -320,21 +331,72 @@ async function handlePlaceOrder(
     passphrase: msg.credentials.apiPassphrase,
   };
 
-  const client = new ClobClient(
-    CLOB_HOST,
-    POLYGON_CHAIN_ID,
+  const builderCode = process.env.POLY_BUILDER_CODE;
+
+  const client = new ClobClient({
+    host: CLOB_HOST,
+    chain: POLYGON_CHAIN_ID,
     signer,
     creds,
-    SIGNATURE_TYPES.POLY_GNOSIS_SAFE,
-    msg.proxyAddress,
-    undefined,
-    false,
-    builderConfig as any
-  );
+    signatureType: SIGNATURE_TYPES.POLY_GNOSIS_SAFE,
+    funderAddress: msg.proxyAddress,
+    ...(builderCode ? { builderConfig: { builderCode } } : {}),
+  });
 
-  const feeRateBps = await client.getFeeRateBps(msg.tokenId);
   const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
   const orderType = msg.orderType || "GTC";
+
+  if (msg.side === "BUY") {
+    // Required pUSD = price * size for limit, or amount for market BUY
+    const requiredPusd =
+      orderType === "FAK" || orderType === "FOK"
+        ? ethers.utils.parseUnits(String(msg.amount ?? msg.size), 6)
+        : ethers.utils.parseUnits(String(msg.price * msg.size), 6);
+
+    // Subtract pUSD already reserved by the user's existing open BUY
+    // orders. Without this the Safe looks funded on-chain but the server
+    // returns "not enough balance / allowance" because its own view nets
+    // out reservations against the wallet balance. See web mirror in
+    // apps/web/src/hooks/use-clob-client.ts:createOrder.
+    let reservedPusd = ethers.BigNumber.from(0);
+    try {
+      const openOrders = (await client.getOpenOrders()) as unknown;
+      const arr = Array.isArray(openOrders) ? openOrders : [];
+      for (const raw of arr) {
+        const o = raw as {
+          side?: string;
+          price?: string | number;
+          original_size?: string | number;
+          size_matched?: string | number;
+        };
+        if (o?.side !== "BUY") continue;
+        const price = Number(o.price ?? 0);
+        const remaining =
+          Number(o.original_size ?? 0) - Number(o.size_matched ?? 0);
+        if (
+          !Number.isFinite(price) ||
+          !Number.isFinite(remaining) ||
+          remaining <= 0
+        )
+          continue;
+        reservedPusd = reservedPusd.add(
+          ethers.BigNumber.from(Math.round(price * remaining * 1_000_000))
+        );
+      }
+    } catch (err) {
+      logWarn("trading.open-orders-fetch-failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    await ensurePusdSufficient(
+      signer,
+      msg.proxyAddress,
+      requiredPusd,
+      provider,
+      reservedPusd
+    );
+  }
 
   try {
     await client.updateBalanceAllowance({
@@ -363,7 +425,7 @@ async function handlePlaceOrder(
       tokenID: msg.tokenId,
       amount: marketAmount,
       side: msg.side,
-      feeRateBps,
+      // feeRateBps removed (V2: protocol-determined at match time)
       orderType,
     };
     if (msg.price && msg.price > 0) {
@@ -383,6 +445,22 @@ async function handlePlaceOrder(
       orderOptions
     );
     const response = await client.postOrder(order, orderType as any);
+
+    // The V2 SDK's `postOrder` resolves with the server's error body on
+    // non-2xx instead of throwing. Surface it as a real failure so the UI
+    // doesn't report a rejected order as successful.
+    if (
+      response &&
+      typeof response === "object" &&
+      "error" in (response as Record<string, unknown>)
+    ) {
+      const errorMsg =
+        typeof (response as Record<string, unknown>).error === "string"
+          ? ((response as Record<string, unknown>).error as string)
+          : JSON.stringify((response as Record<string, unknown>).error);
+      return fail(`CLOB rejected order: ${errorMsg}`);
+    }
+
     return ok(response);
   }
 
@@ -391,7 +469,6 @@ async function handlePlaceOrder(
     price: msg.price,
     size: msg.size,
     side: msg.side,
-    feeRateBps,
     orderType,
     expiration: orderType === "GTD" ? msg.expiration : 0,
     negRisk: !!msg.negRisk,
@@ -403,7 +480,7 @@ async function handlePlaceOrder(
       price: msg.price,
       size: msg.size,
       side: msg.side as any,
-      feeRateBps,
+      // feeRateBps removed (V2: protocol-determined at match time)
       expiration: orderType === "GTD" ? msg.expiration : 0,
     },
     orderOptions
@@ -436,16 +513,6 @@ async function handlePlaceOrder(
   }
 
   return ok(response);
-}
-
-// ── Fee Rate ──
-
-async function handleGetFeeRate(
-  msg: TradingGetFeeRateMessage
-): Promise<TradingResponse> {
-  const client = new ClobClient(CLOB_HOST, POLYGON_CHAIN_ID);
-  const feeRate = await client.getFeeRateBps(msg.tokenId);
-  return ok({ feeRate });
 }
 
 // ── Proxy Address ──
@@ -515,14 +582,14 @@ async function handleGetAllAllowances(
     ERC20_ALLOWANCE_ABI,
     provider
   );
+  const pusd = new ethers.Contract(PUSD_ADDRESS, ERC20_ALLOWANCE_ABI, provider);
   const ctf = new ethers.Contract(
     CTF_ADDRESS,
     ERC1155_IS_APPROVED_ABI,
     provider
   );
 
-  const erc20Targets = [
-    CTF_ADDRESS,
+  const pusdSpenders = [
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_CTF_EXCHANGE_ADDRESS,
     NEG_RISK_ADAPTER_ADDRESS,
@@ -535,22 +602,32 @@ async function handleGetAllAllowances(
 
   const allowances: Record<string, number> = {};
 
-  const erc20Results = await Promise.all(
-    erc20Targets.map((t) =>
-      usdc.allowance(msg.ownerAddress, t).catch(() => ethers.BigNumber.from(0))
-    )
+  const [usdcOnramp, pusdResults, erc1155Results] = await Promise.all([
+    usdc
+      .allowance(msg.ownerAddress, COLLATERAL_ONRAMP_ADDRESS)
+      .catch(() => ethers.BigNumber.from(0)),
+    Promise.all(
+      pusdSpenders.map((s) =>
+        pusd
+          .allowance(msg.ownerAddress, s)
+          .catch(() => ethers.BigNumber.from(0))
+      )
+    ),
+    Promise.all(
+      erc1155Operators.map((op) =>
+        ctf.isApprovedForAll(msg.ownerAddress, op).catch(() => false)
+      )
+    ),
+  ]);
+
+  allowances[`usdce:${COLLATERAL_ONRAMP_ADDRESS}`] = Number(
+    ethers.utils.formatUnits(usdcOnramp, 6)
   );
-  for (let i = 0; i < erc20Targets.length; i++) {
-    allowances[erc20Targets[i]] = Number(
-      ethers.utils.formatUnits(erc20Results[i], 6)
+  for (let i = 0; i < pusdSpenders.length; i++) {
+    allowances[`pusd:${pusdSpenders[i]}`] = Number(
+      ethers.utils.formatUnits(pusdResults[i], 6)
     );
   }
-
-  const erc1155Results = await Promise.all(
-    erc1155Operators.map((op) =>
-      ctf.isApprovedForAll(msg.ownerAddress, op).catch(() => false)
-    )
-  );
   for (let i = 0; i < erc1155Operators.length; i++) {
     allowances[`erc1155:${erc1155Operators[i]}`] = erc1155Results[i] ? 1 : 0;
   }
@@ -755,6 +832,43 @@ async function handleMergePositions(
   return ok({ txHash: result.txHash, success: true });
 }
 
+// ── Gasless Safe Deployment via Relayer ──
+
+/**
+ * Deploys the user's Polymarket Safe (trading wallet) for new users who don't
+ * yet have one. Invoked from the content script when the trading panel detects
+ * `isDeployed === false` on an authenticated wallet.
+ *
+ * Pairs with `deployProxyWallet()` in `./relayer-client.ts` which handles the
+ * CreateProxy EIP-712 signing + /submit POST + /transaction polling.
+ */
+async function handleDeploySafe(
+  msg: TradingDeploySafeMessage,
+  sender: chrome.runtime.MessageSender
+): Promise<TradingResponse> {
+  const tabId = sender.tab?.id;
+  if (!tabId) return fail("No active tab for signing");
+
+  const provider = new ethers.providers.StaticJsonRpcProvider(
+    POLYGON_RPC,
+    POLYGON_CHAIN_ID
+  );
+  const signer = new BridgeSigner(msg.address, tabId, provider);
+
+  logInfo("trading.deploy-safe.submit", { address: msg.address });
+  try {
+    const result = await deployProxyWallet(signer);
+    return ok({
+      txHash: result.txHash,
+      proxyAddress: result.proxyAddress,
+      alreadyDeployed: result.alreadyDeployed ?? false,
+    });
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return fail(errMsg);
+  }
+}
+
 // ── Gasless Approvals via Relayer ──
 
 const ERC20_APPROVE_ABI = [
@@ -781,12 +895,17 @@ async function handleRelayerApprove(
   const erc1155Iface = new ethers.utils.Interface(ERC1155_SET_APPROVAL_ABI);
   const MAX_UINT256 = ethers.constants.MaxUint256;
 
-  const erc20Targets = [
-    CTF_ADDRESS,
+  // USDC.e gets approved to the Onramp only (for wrap()).
+  const usdcSpender = COLLATERAL_ONRAMP_ADDRESS;
+
+  // pUSD gets approved to the V2 exchanges and adapter for trading.
+  const pusdSpenders = [
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_CTF_EXCHANGE_ADDRESS,
     NEG_RISK_ADAPTER_ADDRESS,
   ];
+
+  // ERC-1155 outcome tokens approve the same exchanges/adapter as operators.
   const erc1155Operators = [
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_CTF_EXCHANGE_ADDRESS,
@@ -795,12 +914,18 @@ async function handleRelayerApprove(
 
   const proxyAddress = deriveProxyAddressSync(msg.address);
 
-  const needsErc20: string[] = [];
+  let needsUsdc = false;
+  const needsPusd: string[] = [];
   const needsErc1155: string[] = [];
 
   try {
     const usdc = new ethers.Contract(
       USDC_E_ADDRESS,
+      ERC20_ALLOWANCE_ABI,
+      provider
+    );
+    const pusd = new ethers.Contract(
+      PUSD_ADDRESS,
       ERC20_ALLOWANCE_ABI,
       provider
     );
@@ -811,10 +936,13 @@ async function handleRelayerApprove(
     );
     const THRESHOLD = ethers.utils.parseUnits("1000000", 6);
 
-    const [erc20Results, erc1155Results] = await Promise.all([
+    const [usdcAllowance, pusdAllowances, erc1155Results] = await Promise.all([
+      usdc
+        .allowance(proxyAddress, usdcSpender)
+        .catch(() => ethers.BigNumber.from(0)),
       Promise.all(
-        erc20Targets.map((t) =>
-          usdc.allowance(proxyAddress, t).catch(() => ethers.BigNumber.from(0))
+        pusdSpenders.map((s) =>
+          pusd.allowance(proxyAddress, s).catch(() => ethers.BigNumber.from(0))
         )
       ),
       Promise.all(
@@ -824,26 +952,39 @@ async function handleRelayerApprove(
       ),
     ]);
 
-    for (let i = 0; i < erc20Targets.length; i++) {
-      if (erc20Results[i].lt(THRESHOLD)) needsErc20.push(erc20Targets[i]);
+    if (usdcAllowance.lt(THRESHOLD)) needsUsdc = true;
+    for (let i = 0; i < pusdSpenders.length; i++) {
+      if (pusdAllowances[i].lt(THRESHOLD)) needsPusd.push(pusdSpenders[i]);
     }
     for (let i = 0; i < erc1155Operators.length; i++) {
       if (!erc1155Results[i]) needsErc1155.push(erc1155Operators[i]);
     }
   } catch {
-    needsErc20.push(...erc20Targets);
+    needsUsdc = true;
+    needsPusd.push(...pusdSpenders);
     needsErc1155.push(...erc1155Operators);
   }
 
-  if (needsErc20.length === 0 && needsErc1155.length === 0) {
+  if (!needsUsdc && needsPusd.length === 0 && needsErc1155.length === 0) {
     return ok({ txHash: "", alreadyApproved: true });
   }
 
   const txns: Array<{ to: string; data: string; value: string }> = [];
 
-  for (const spender of needsErc20) {
+  if (needsUsdc) {
     txns.push({
       to: USDC_E_ADDRESS,
+      data: erc20Iface.encodeFunctionData("approve", [
+        usdcSpender,
+        MAX_UINT256,
+      ]),
+      value: "0",
+    });
+  }
+
+  for (const spender of needsPusd) {
+    txns.push({
+      to: PUSD_ADDRESS,
       data: erc20Iface.encodeFunctionData("approve", [spender, MAX_UINT256]),
       value: "0",
     });
@@ -860,11 +1001,95 @@ async function handleRelayerApprove(
     });
   }
 
-  logInfo("trading.relayer-approve.submit", {
-    txnCount: txns.length,
-  });
+  logInfo("trading.relayer-approve.submit", { txnCount: txns.length });
   const result = await executeViaRelayer(signer, txns);
   return ok({ txHash: result.txHash, success: true });
+}
+
+const COLLATERAL_ONRAMP_WRAP_ABI = [
+  "function wrap(address _asset, address _to, uint256 _amount)",
+];
+
+async function ensurePusdSufficient(
+  signer: BridgeSigner,
+  proxyAddress: string,
+  requiredPusd: ethers.BigNumber,
+  provider: ethers.providers.StaticJsonRpcProvider,
+  reservedPusd: ethers.BigNumber = ethers.BigNumber.from(0)
+): Promise<void> {
+  const pusd = new ethers.Contract(
+    PUSD_ADDRESS,
+    ["function balanceOf(address) view returns (uint256)"],
+    provider
+  );
+  const usdc = new ethers.Contract(
+    USDC_E_ADDRESS,
+    ["function balanceOf(address) view returns (uint256)"],
+    provider
+  );
+
+  const pusdBalanceOnChain: ethers.BigNumber =
+    await pusd.balanceOf(proxyAddress);
+
+  // The CLOB server reserves pUSD against the user's existing open BUY
+  // orders (price * unmatched size). A new order's required collateral
+  // must fit within the *available* balance, i.e. on-chain balance minus
+  // reservations — not raw on-chain balance. Otherwise the Safe looks
+  // funded on-chain while the server's cached view rightly returns
+  // "not enough balance / allowance".
+  const pusdBalance = pusdBalanceOnChain.gt(reservedPusd)
+    ? pusdBalanceOnChain.sub(reservedPusd)
+    : ethers.BigNumber.from(0);
+
+  // V2 Exchange pulls makerAmount + fees from the Safe on BUY. Wrap a small
+  // buffer above the requested amount so the post-wrap pUSD balance covers
+  // both the order amount and the platform/builder fees the Exchange
+  // collects at match time. The SDK's `adjustBuyAmountForFees` can't be
+  // relied on during preprod (the /fees/builder-fees endpoint 404s → cached
+  // as NaN → adjustment disabled).
+  const FEE_BUFFER_BPS = ethers.BigNumber.from(300); // 3%
+  const BPS_DENOMINATOR = ethers.BigNumber.from(10_000);
+  const targetPusd = requiredPusd
+    .mul(BPS_DENOMINATOR.add(FEE_BUFFER_BPS))
+    .div(BPS_DENOMINATOR);
+
+  if (pusdBalance.gte(targetPusd)) return;
+
+  const shortfall = targetPusd.sub(pusdBalance);
+  const baseShortfall = pusdBalance.lt(requiredPusd)
+    ? requiredPusd.sub(pusdBalance)
+    : ethers.BigNumber.from(0);
+
+  const usdcBalance: ethers.BigNumber = await usdc.balanceOf(proxyAddress);
+  if (usdcBalance.lt(baseShortfall)) {
+    throw new Error(
+      `Insufficient collateral: need ${baseShortfall.toString()} more pUSD (or USDC.e to wrap), have ${pusdBalance.toString()} pUSD + ${usdcBalance.toString()} USDC.e`
+    );
+  }
+
+  const wrapAmount = usdcBalance.lt(shortfall) ? usdcBalance : shortfall;
+
+  const erc20Iface = new ethers.utils.Interface([
+    "function approve(address spender, uint256 amount) returns (bool)",
+  ]);
+  const onrampIface = new ethers.utils.Interface(COLLATERAL_ONRAMP_WRAP_ABI);
+
+  const approveCalldata = erc20Iface.encodeFunctionData("approve", [
+    COLLATERAL_ONRAMP_ADDRESS,
+    wrapAmount,
+  ]);
+  const wrapCalldata = onrampIface.encodeFunctionData("wrap", [
+    USDC_E_ADDRESS,
+    proxyAddress,
+    wrapAmount,
+  ]);
+
+  await executeViaRelayer(signer, [
+    { to: USDC_E_ADDRESS, data: approveCalldata, value: "0" },
+    { to: COLLATERAL_ONRAMP_ADDRESS, data: wrapCalldata, value: "0" },
+  ]);
+
+  logInfo("trading.auto-wrap", { wrapped: wrapAmount.toString() });
 }
 
 function deriveProxyAddressSync(eoaAddress: string): string {

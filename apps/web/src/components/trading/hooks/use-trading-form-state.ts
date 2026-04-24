@@ -13,6 +13,7 @@ import {
   PROXY_WALLET_QUERY_KEY,
   useProxyWallet,
 } from "@/hooks/use-proxy-wallet";
+import { useUserPositions } from "@/hooks/use-user-positions";
 import { calculatePotentialPnL, OrderSide } from "@/lib/polymarket";
 import { clearBalanceCache } from "@/lib/rpc";
 import {
@@ -73,28 +74,11 @@ export function useTradingFormState({
     };
   }, []);
 
-  // Type for user positions response
-  interface UserPositionsResponse {
-    positions?: Array<{
-      asset?: string;
-      size?: number;
-    }>;
-  }
-
-  // Fetch user's position for the current token (for SELL max shares)
-  const { data: userPositionData } = useQuery<UserPositionsResponse | null>({
-    queryKey: ["userPositions", proxyAddress],
-    queryFn: async (): Promise<UserPositionsResponse | null> => {
-      if (!proxyAddress) return null;
-      const response = await fetch(
-        `/api/user/positions?user=${proxyAddress}&active=true`
-      );
-      if (!response.ok) return null;
-      return response.json() as Promise<UserPositionsResponse>;
-    },
+  // Shares the React Query cache with other callers of `useUserPositions`
+  // (e.g. the outcomes table), so we only pay for one network round trip.
+  const { data: userPositionData } = useUserPositions({
+    userAddress: proxyAddress ?? undefined,
     enabled: !!proxyAddress && hasProxyWallet,
-    staleTime: 10_000,
-    refetchInterval: 30_000,
   });
 
   const [side, setSide] = useState<TradingSide>(initialSide ?? "BUY");
@@ -214,6 +198,21 @@ export function useTradingFormState({
       return Math.max(0.01, roundDownToTick(buffered, tickSize));
     }
 
+    // MARKET order but the current book can't fully fill the requested size.
+    // Do NOT synthesize a "reasonable" price from the Gamma/outcome price
+    // here — Polymarket V2 FOK/FAK orders are rejected server-side when depth
+    // is insufficient (per /developers/CLOB/orders/create-order and the error
+    // codes doc), so painting a plausible estimate would mislead the user
+    // into thinking an un-fillable order will settle at that price.
+    // Returning 0 surfaces an honest "0.0¢ / $0.00" in the summary, and the
+    // submit button is already disabled via `canFullyFill` → "Insufficient
+    // liquidity" in the parent form.
+    if (slippageResult && !slippageResult.canFill) {
+      return 0;
+    }
+
+    // Fallback path for non-MARKET orders (LIMIT) where slippageResult is
+    // intentionally null — used only to seed an initial price suggestion.
     const maxFrac = new Decimal(maxSlippagePercent).div(100);
     if (side === "BUY") {
       const base = new Decimal(bestAsk ?? selectedOutcome?.price ?? 0.5);

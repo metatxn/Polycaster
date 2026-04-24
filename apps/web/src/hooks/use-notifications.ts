@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "wagmi";
+import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { SignatureType } from "@/lib/polymarket";
@@ -99,7 +100,7 @@ export function useNotifications() {
     }
 
     const [{ ClobClient }, ethersModule] = await Promise.all([
-      import("@polymarket/clob-client"),
+      import("@polymarket/clob-client-v2"),
       import("ethers"),
     ]);
 
@@ -117,14 +118,14 @@ export function useNotifications() {
     };
 
     // Use POLY_GNOSIS_SAFE signature type (1) for proxy wallet
-    return new ClobClient(
-      process.env.NEXT_PUBLIC_POLYMARKET_HOST || "https://clob.polymarket.com",
-      137,
+    return new ClobClient({
+      host: CLOB_BASE_URL,
+      chain: POLYMARKET_CHAIN_ID,
       signer,
       creds,
-      SignatureType.POLY_GNOSIS_SAFE,
-      proxyAddress
-    ) as InstanceType<typeof ClobClient> & ClobClientWithNotificationMethods;
+      signatureType: SignatureType.POLY_GNOSIS_SAFE as unknown as number,
+      funderAddress: proxyAddress,
+    }) as InstanceType<typeof ClobClient> & ClobClientWithNotificationMethods;
   }, [credentials, proxyAddress]);
 
   /**

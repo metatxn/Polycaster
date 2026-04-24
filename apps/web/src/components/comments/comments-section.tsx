@@ -1,10 +1,9 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Clock, Heart, MessageCircle, Users } from "lucide-react";
+import { Check, Clock, Heart, Users } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -94,22 +93,28 @@ export function CommentsSection({
 
   const content = (
     <>
-      {/* Header with filter options */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <MessageCircle className="h-5 w-5 text-muted-foreground" />
-          <h3 className="font-semibold text-lg">Comments</h3>
+      {/* Section header — editorial */}
+      <div className="flex items-center justify-between gap-4 mb-4 pb-3 border-b border-border/40">
+        <div className="flex items-baseline gap-2">
+          <span className="text-muted-foreground/60">§</span>
+          <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+            Comments
+          </h3>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {/* Sort dropdown */}
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] hover:bg-foreground/5"
+              >
                 {sortBy === "most_liked" ? (
-                  <Heart className="h-3.5 w-3.5" />
+                  <Heart className="h-3 w-3" />
                 ) : (
-                  <Clock className="h-3.5 w-3.5" />
+                  <Clock className="h-3 w-3" />
                 )}
                 {currentSortLabel}
               </Button>
@@ -124,7 +129,7 @@ export function CommentsSection({
                   <option.icon className="h-4 w-4" />
                   {option.label}
                   {sortBy === option.value && (
-                    <Check className="h-4 w-4 ml-auto text-primary" />
+                    <Check className="h-4 w-4 ml-auto text-foreground" />
                   )}
                 </DropdownMenuItem>
               ))}
@@ -136,13 +141,13 @@ export function CommentsSection({
             <label
               htmlFor="holders-filter"
               className={cn(
-                "flex items-center gap-1.5 text-sm cursor-pointer transition-colors",
+                "flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] cursor-pointer transition-colors",
                 holdersOnly
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-muted-foreground"
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Users className="h-3.5 w-3.5" />
+              <Users className="h-3 w-3" />
               <span className="hidden sm:inline">Holders</span>
             </label>
             <Switch
@@ -176,32 +181,32 @@ export function CommentsSection({
             exit={{ opacity: 0, height: 0 }}
             className="mb-4"
           >
-            <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
               {holdersOnly && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                  <Users className="h-3 w-3" />
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 border border-border/60 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-foreground">
+                  <Users className="h-2.5 w-2.5" />
                   Holders only
                   <button
                     type="button"
                     onClick={() => setHoldersOnly(false)}
-                    className="ml-1 hover:text-emerald-800 dark:hover:text-emerald-200"
+                    className="ml-1 text-muted-foreground hover:text-foreground"
                   >
                     ×
                   </button>
                 </span>
               )}
               {sortBy !== "latest" && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400">
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 border border-border/60 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-foreground">
                   {sortBy === "most_liked" ? (
-                    <Heart className="h-3 w-3" />
+                    <Heart className="h-2.5 w-2.5" />
                   ) : (
-                    <Clock className="h-3 w-3" />
+                    <Clock className="h-2.5 w-2.5" />
                   )}
                   {currentSortLabel}
                   <button
                     type="button"
                     onClick={() => setSortBy("latest")}
-                    className="ml-1 hover:text-violet-800 dark:hover:text-violet-200"
+                    className="ml-1 text-muted-foreground hover:text-foreground"
                   >
                     ×
                   </button>
@@ -213,7 +218,7 @@ export function CommentsSection({
                   setHoldersOnly(false);
                   setSortBy("latest");
                 }}
-                className="text-muted-foreground hover:text-foreground transition-colors"
+                className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border hover:decoration-foreground/60"
               >
                 Clear all
               </button>
@@ -245,8 +250,8 @@ export function CommentsSection({
   }
 
   return (
-    <Card className={cn("overflow-hidden py-4", className)}>
-      <CardContent className="pt-0">{content}</CardContent>
-    </Card>
+    <div className={cn("border-t border-border/40 pt-6", className)}>
+      {content}
+    </div>
   );
 }

@@ -191,7 +191,7 @@ CommentItemProps) {
       <div
         className={cn(
           "flex gap-3",
-          depth > 0 && "pl-4 border-l-2 border-border/50 ml-4"
+          depth > 0 && "pl-4 border-l border-border/40 ml-4"
         )}
       >
         {/* Minimize/Expand toggle button */}
@@ -214,18 +214,18 @@ CommentItemProps) {
             href={`/profile/${profileAddress}`}
             className="shrink-0 transition-transform hover:scale-105"
           >
-            <Avatar className="h-8 w-8 ring-2 ring-background cursor-pointer">
+            <Avatar className="h-8 w-8 rounded-sm overflow-hidden cursor-pointer">
               <AvatarImage
                 src={avatarUrl || undefined}
                 alt={displayName || "User"}
               />
-              <AvatarFallback className="bg-linear-to-br from-primary/20 to-accent/20 text-sm font-medium">
+              <AvatarFallback className="bg-foreground/5 border border-border/60 font-mono text-xs font-semibold text-foreground">
                 {displayName?.charAt(0).toUpperCase() || "?"}
               </AvatarFallback>
             </Avatar>
           </Link>
         ) : (
-          <Avatar className="h-8 w-8 shrink-0 ring-2 ring-background">
+          <Avatar className="h-8 w-8 shrink-0 rounded-sm overflow-hidden">
             <AvatarImage
               src={avatarUrl || undefined}
               alt={displayName || "User"}
@@ -242,7 +242,7 @@ CommentItemProps) {
             {profileAddress ? (
               <Link
                 href={`/profile/${profileAddress}`}
-                className="font-semibold text-sm text-foreground hover:text-primary hover:underline transition-colors"
+                className="font-semibold text-sm text-foreground hover:underline decoration-foreground/40 underline-offset-4 transition-colors"
               >
                 {displayName}
               </Link>
@@ -252,15 +252,15 @@ CommentItemProps) {
               </span>
             )}
 
-            {/* Badges */}
+            {/* Badges — editorial mono-caps outline */}
             {isMod && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-500 dark:text-blue-400 font-medium">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] font-semibold text-foreground border border-border/60">
                 <Shield className="h-2.5 w-2.5" />
                 Mod
               </span>
             )}
             {isCreator && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-500 dark:text-purple-400 font-medium">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] font-semibold text-foreground border border-foreground/60 bg-foreground/5">
                 <Sparkles className="h-2.5 w-2.5" />
                 Creator
               </span>
@@ -270,35 +270,35 @@ CommentItemProps) {
               positionDetails &&
               positionDetails.length > 0 &&
               (positionDetails.length === 1 ? (
-                // Single position - show inline badge
+                // Single position — editorial mono-caps outline
                 <span
                   className={cn(
-                    "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                    "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
                     positionDetails[0].isYes
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-red-500/15 text-red-600 dark:text-red-400"
+                      ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                      : "border-red-600/40 text-red-700 dark:text-red-300"
                   )}
                 >
                   {positionDetails[0].size} {positionDetails[0].marketName}
                 </span>
               ) : (
-                // Multiple positions - show dropdown like Polymarket
+                // Multiple positions — dropdown
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
                       className={cn(
-                        "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium cursor-pointer hover:opacity-80 transition-opacity",
+                        "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums cursor-pointer hover:bg-foreground/5 transition-colors",
                         positionDetails[0].isYes
-                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                          : "bg-red-500/15 text-red-600 dark:text-red-400"
+                          ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                          : "border-red-600/40 text-red-700 dark:text-red-300"
                       )}
                     >
                       {positionDetails[0].size} {positionDetails[0].marketName}
                       <ChevronDown className="h-2.5 w-2.5 ml-0.5" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="min-w-[180px]">
+                  <DropdownMenuContent align="start" className="min-w-[200px]">
                     {positionDetails.map((pos, idx) => (
                       <DropdownMenuItem
                         key={idx}
@@ -309,10 +309,10 @@ CommentItemProps) {
                         </span>
                         <span
                           className={cn(
-                            "font-medium px-1.5 py-0.5 rounded text-[10px]",
+                            "px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
                             pos.isYes
-                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                              : "bg-red-500/15 text-red-600 dark:text-red-400"
+                              ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                              : "border-red-600/40 text-red-700 dark:text-red-300"
                           )}
                         >
                           {pos.size} {pos.isYes ? "Yes" : "No"}
@@ -329,12 +329,12 @@ CommentItemProps) {
               (profileAddress ? (
                 <Link
                   href={`/profile/${profileAddress}`}
-                  className="text-[10px] text-muted-foreground/70 font-mono hover:text-primary hover:underline transition-colors"
+                  className="text-[10px] text-muted-foreground/70 font-mono tabular-nums hover:text-foreground hover:underline decoration-foreground/40 underline-offset-4 transition-colors"
                 >
                   {shortAddress}
                 </Link>
               ) : (
-                <span className="text-[10px] text-muted-foreground/70 font-mono">
+                <span className="text-[10px] text-muted-foreground/70 font-mono tabular-nums">
                   {shortAddress}
                 </span>
               ))}

@@ -20,7 +20,7 @@ export function BalanceWarning({
   }, [effectiveBalance, totalCost]);
 
   return (
-    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-3">
+    <div className="p-3 bg-amber-500/10 border border-amber-500/20 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -31,9 +31,9 @@ export function BalanceWarning({
         <button
           type="button"
           onClick={onDeposit}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-linear-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white transition-all shadow-sm shadow-emerald-500/25"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
         >
-          <ArrowDownToLine className="h-3.5 w-3.5" />
+          <ArrowDownToLine className="h-3 w-3" />
           Deposit
         </button>
       </div>

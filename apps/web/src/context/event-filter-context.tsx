@@ -45,11 +45,14 @@ export type VolumeWindow = "24h" | "1wk" | "1mo" | "1yr";
 // Status filter options
 export type StatusFilter = "active" | "live" | "ended" | "closed";
 
+// Dropdown options — `closed` is intentionally omitted from the UI
+// (APIs can still receive it, but it isn't user-selectable). Live/Ended
+// are game-state concepts, so the whole Status chip is only shown on
+// sports pages.
 export const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "active", label: "Active" },
   { value: "live", label: "Live" },
   { value: "ended", label: "Ended" },
-  { value: "closed", label: "Closed" },
 ];
 
 // Volume window options for the Volume filter dropdown

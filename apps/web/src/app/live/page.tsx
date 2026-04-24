@@ -3,9 +3,15 @@
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { CircleDot, Radio, Sparkles, Wifi, WifiOff } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ProChromeHeader } from "@/components/app-pro-layout";
+import { EditorialFooter } from "@/components/editorial-footer";
+import {
+  EditorialHero,
+  HeroLiveDot,
+  HeroRefreshButton,
+} from "@/components/editorial-hero";
 import { ErrorBoundary } from "@/components/error-boundary";
 import {
   buildSelectedMarket,
@@ -15,13 +21,7 @@ import {
   type SelectedMarketInfo,
 } from "@/components/live-sportsbook";
 import { Navbar } from "@/components/navbar";
-import { PageBackground } from "@/components/page-background";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PullStat, PullStatGrid } from "@/components/pull-stat";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBestPrices, useOrderBookStore } from "@/hooks/use-orderbook-store";
 import { usePaginatedEvents } from "@/hooks/use-paginated-events";
@@ -41,7 +41,7 @@ const TradingForm = dynamic(
     ssr: false,
     loading: () => (
       <div className="w-full">
-        <Skeleton className="h-[350px] w-full rounded-xl" />
+        <Skeleton className="h-[350px] w-full" />
       </div>
     ),
   }
@@ -144,7 +144,7 @@ function matchEventToGame(
 function timeAgo(ts: number | null): string {
   if (!ts) return "";
   const seconds = Math.floor((Date.now() - ts) / 1000);
-  if (seconds < 5) return "just now";
+  if (seconds < 5) return "Just now";
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return `${Math.floor(seconds / 3600)}h ago`;
@@ -230,7 +230,6 @@ export default function LiveMarketsPage() {
       if (liveIds.has(event.id)) return false;
       if (event.live || event.ended) return false;
 
-      // Use event.startDate first, then scan markets for earliest gameStartTime
       let startMs = Number.NaN;
       if (event.startDate) {
         startMs = new Date(event.startDate).getTime();
@@ -257,7 +256,7 @@ export default function LiveMarketsPage() {
         (e) =>
           e.slug &&
           !e.title.toLowerCase().includes("more markets") &&
-          e.slug.match(/-\d{4}-\d{2}-\d{2}$/) // match slugs end with a date
+          e.slug.match(/-\d{4}-\d{2}-\d{2}$/)
       )
       .map((e) => `${e.slug}-more-markets`);
   }, [rawEventsBase, scheduledEventsBase]);
@@ -372,7 +371,6 @@ export default function LiveMarketsPage() {
   const liveEventCount = rawEvents.length;
   const scheduledEventCount = scheduledEvents.length;
 
-  // CLOB WebSocket for the selected market's token IDs
   const selectedTokenIds = useMemo(() => {
     if (!selectedMarket) return [];
     return selectedMarket.outcomes.map((o) => o.tokenId).filter(Boolean);
@@ -496,160 +494,124 @@ export default function LiveMarketsPage() {
     });
   }, [selectedMarket, orderBooks, lastTrades]);
 
+  const feedLabel = isConnected
+    ? "Live Feed"
+    : connectionState === "reconnecting"
+      ? "Reconnecting"
+      : "Offline";
+
   return (
-    <div className="min-h-screen bg-background relative selection:bg-purple-500/30">
-      <PageBackground />
+    <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden selection:bg-foreground/15">
       <Navbar />
+      <ProChromeHeader />
 
-      <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="flex items-center justify-between mb-4 sm:mb-6"
-        >
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="absolute inset-0 bg-emerald-500/20 rounded-full blur-xl animate-pulse" />
-              <div className="relative flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30">
-                <Radio className="h-6 w-6 text-emerald-500" />
-              </div>
-            </div>
-            <div>
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight flex items-center gap-2">
-                Live Sports
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+      <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-12">
+        <EditorialHero
+          breadcrumbs={[
+            { label: "Markets", href: "/markets" },
+            { label: "Live" },
+          ]}
+          title={
+            <span>
+              Live<span className="mx-3 text-muted-foreground/60">·</span>
+              <span className="italic">Sports</span>
+            </span>
+          }
+          subtitle="Real-time odds, live order books and one-tap trading. Matches update as games move."
+          rightSlot={
+            <>
+              <HeroLiveDot
+                isLive={isConnected}
+                liveLabel={feedLabel}
+                offlineLabel={feedLabel}
+              />
+              {lastMessageAt && (
+                <span className="text-muted-foreground tabular-nums">
+                  · {timeAgo(lastMessageAt)}
                 </span>
-              </h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Real-time games, order books & trading
-              </p>
-            </div>
-          </div>
+              )}
+              <HeroRefreshButton
+                onRefresh={reconnect}
+                isFetching={connectionState === "reconnecting"}
+                label="Reconnect"
+              />
+            </>
+          }
+        />
 
-          <button
-            type="button"
-            onClick={reconnect}
-            className={cn(
-              "hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all",
-              isConnected
-                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                : connectionState === "reconnecting"
-                  ? "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400 animate-pulse"
-                  : "bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400"
-            )}
-          >
-            {isConnected ? (
-              <Wifi className="h-3.5 w-3.5" />
-            ) : (
-              <WifiOff className="h-3.5 w-3.5" />
-            )}
-            {isConnected
-              ? "Live Feed"
-              : connectionState === "reconnecting"
-                ? "Reconnecting…"
-                : "Disconnected"}
-            {isConnected && lastMessageAt && (
-              <span className="text-[10px] font-normal text-muted-foreground">
-                · {timeAgo(lastMessageAt)}
-              </span>
-            )}
-          </button>
-        </motion.div>
+        {/* Live metrics — pull-number grid */}
+        <PullStatGrid cols={4} className="mb-8">
+          <PullStat
+            label="Live Now"
+            value={liveEventCount}
+            caption={liveEventCount === 1 ? "Event" : "Events"}
+            isLoading={isLoading}
+          />
+          <PullStat
+            label="Upcoming"
+            value={scheduledEventCount}
+            caption="Next 48h"
+            isLoading={scheduledLoading && !isLoading}
+          />
+          <PullStat
+            label="Feed Status"
+            value={isConnected ? "Live" : "Offline"}
+            caption={
+              connectionState === "reconnecting" ? "Reconnecting…" : feedLabel
+            }
+            valueClassName={
+              isConnected ? "text-emerald-600" : "text-muted-foreground"
+            }
+          />
+          <PullStat
+            label="Last Update"
+            value={timeAgo(lastMessageAt) || "—"}
+            caption={isConnected ? "Streaming" : "Disconnected"}
+          />
+        </PullStatGrid>
 
-        {/* Live metrics */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.03 }}
-          className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-3"
-        >
-          <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-3">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-              Live Now
-            </p>
-            <p className="text-xl font-bold tabular-nums">{liveEventCount}</p>
-          </div>
-          <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-3">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-              Upcoming
-            </p>
-            <p className="text-xl font-bold tabular-nums">
-              {scheduledEventCount}
-            </p>
-          </div>
-          <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-3">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-              Feed Status
-            </p>
-            <p className="text-xl font-bold">
-              {isConnected ? "Live" : "Offline"}
-            </p>
-          </div>
-          <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-3">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-              Last Update
-            </p>
-            <p className="text-xl font-bold">{timeAgo(lastMessageAt) || "—"}</p>
-          </div>
-        </motion.div>
+        {/* League filter — editorial category row (italic active + mono default) */}
+        <div className="flex items-baseline gap-5 sm:gap-6 overflow-x-auto scrollbar-hide mb-6 pb-3 border-b border-border/40">
+          {LEAGUE_FILTERS.map((league) => {
+            const isActive = leagueFilter === league.value;
+            const liveCount = liveGames.filter(
+              (g) =>
+                !league.value ||
+                g.leagueAbbreviation?.toLowerCase() === league.value
+            ).length;
 
-        {/* League Quick Filters */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.05 }}
-          className="mb-1"
-        >
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-3">
-            {LEAGUE_FILTERS.map((league) => {
-              const isActive = leagueFilter === league.value;
-              const liveCount = liveGames.filter(
-                (g) =>
-                  !league.value ||
-                  g.leagueAbbreviation?.toLowerCase() === league.value
-              ).length;
-
-              return (
-                <button
-                  type="button"
-                  key={league.value}
-                  onClick={() => setLeagueFilter(league.value)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium rounded-full border whitespace-nowrap transition-all active:scale-[0.97] shrink-0",
-                    isActive
-                      ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15"
-                      : "border-border/60 bg-background text-muted-foreground hover:border-border hover:bg-muted/50"
-                  )}
-                >
+            return (
+              <button
+                key={league.value}
+                type="button"
+                onClick={() => setLeagueFilter(league.value)}
+                className={cn(
+                  "shrink-0 whitespace-nowrap transition-colors inline-flex items-baseline gap-1.5",
+                  isActive
+                    ? "font-editorial italic text-lg sm:text-xl leading-none text-foreground"
+                    : "font-mono text-[11px] uppercase tracking-[0.14em] leading-none text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span>{league.label}</span>
+                {liveCount > 0 && (
                   <span
-                    className={cn("font-semibold", isActive && "text-primary")}
+                    className={cn(
+                      "tabular-nums",
+                      isActive
+                        ? "font-mono text-[10px] text-muted-foreground not-italic"
+                        : "text-emerald-600 font-mono text-[10px]"
+                    )}
                   >
-                    {league.label}
+                    {liveCount}
                   </span>
-                  {liveCount > 0 && (
-                    <span
-                      className={cn(
-                        "min-w-5 text-center px-1.5 py-0.5 text-[10px] font-bold rounded-full leading-none",
-                        isActive
-                          ? "bg-primary/20 text-primary"
-                          : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      )}
-                    >
-                      {liveCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </motion.div>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
         {/* Two-column layout: Sportsbook + Trade Panel */}
-        <div className="grid gap-4 lg:gap-6 lg:grid-cols-[1fr_400px] xl:grid-cols-[1fr_440px]">
+        <div className="grid gap-6 lg:gap-8 lg:grid-cols-[1fr_400px] xl:grid-cols-[1fr_440px]">
           {/* Left: Sportsbook */}
           <AnimatePresence mode="wait">
             <motion.div
@@ -658,38 +620,35 @@ export default function LiveMarketsPage() {
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.3 }}
             >
+              {/* Error */}
               {error && (
-                <Card className="border-destructive/50 bg-destructive/5 backdrop-blur-sm mb-6">
-                  <CardHeader>
-                    <CardTitle className="text-destructive flex items-center gap-2">
-                      <Sparkles className="h-5 w-5" />
-                      Oops! Something went wrong
-                    </CardTitle>
-                    <CardDescription>
-                      {error?.message || "Unable to load live markets"}
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              )}
-
-              {/* Skeleton loading state */}
-              {!error && isLoading && (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-3">
-                    <Skeleton className="w-9 h-9 rounded-full" />
-                    <div className="space-y-1.5">
-                      <Skeleton className="h-5 w-16" />
-                      <Skeleton className="h-3.5 w-32" />
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <Skeleton key={i} className="h-28 w-full rounded-lg" />
-                    ))}
-                  </div>
+                <div className="border-l-2 border-red-600 dark:border-red-400 pl-3 py-2 mb-6">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-red-600 dark:text-red-400 mb-1">
+                    Feed Error
+                  </p>
+                  <p className="text-sm text-foreground leading-snug">
+                    {error?.message || "Unable to load live markets"}
+                  </p>
                 </div>
               )}
 
+              {/* Loading skeleton */}
+              {!error && isLoading && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Skeleton className="w-8 h-8" />
+                    <div className="space-y-1.5">
+                      <Skeleton className="h-4 w-16" />
+                      <Skeleton className="h-3 w-32" />
+                    </div>
+                  </div>
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-24 w-full" />
+                  ))}
+                </div>
+              )}
+
+              {/* Live events */}
               {!error && !isLoading && liveEventCount > 0 && (
                 <LiveSportsbook
                   events={rawEvents}
@@ -700,27 +659,29 @@ export default function LiveMarketsPage() {
                 />
               )}
 
+              {/* No live events */}
               {!error && !isLoading && liveEventCount === 0 && (
-                <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-                  <CardHeader className="text-center py-12">
-                    <div className="mx-auto w-14 h-14 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-                      <CircleDot className="h-7 w-7 text-muted-foreground" />
-                    </div>
-                    <CardTitle className="text-xl">
-                      No Live Markets Right Now
-                    </CardTitle>
-                    <CardDescription className="max-w-md mx-auto">
-                      {`No live markets right now${selectedLeague ? ` for ${selectedLeague.label}` : ""}. Check back when games are underway.`}
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
+                <div className="py-16 text-center border-y border-border/40">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+                    No Live Events
+                  </p>
+                  <p className="font-editorial italic text-xl text-foreground max-w-md mx-auto leading-snug">
+                    {selectedLeague?.value
+                      ? `Nothing live in ${selectedLeague.label} right now.`
+                      : "Nothing live right now."}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-3 max-w-md mx-auto">
+                    Check back when games tip off, or browse the upcoming
+                    schedule below.
+                  </p>
+                </div>
               )}
 
-              {/* Scheduled / Upcoming section */}
+              {/* Scheduled section */}
               {!scheduledError && scheduledLoading && !isLoading && (
-                <div className="mt-6 space-y-3">
+                <div className="mt-8 space-y-3">
                   {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-24 w-full rounded-lg" />
+                    <Skeleton key={i} className="h-20 w-full" />
                   ))}
                 </div>
               )}
@@ -728,7 +689,7 @@ export default function LiveMarketsPage() {
               {!scheduledError &&
                 !scheduledLoading &&
                 scheduledEventCount > 0 && (
-                  <div className="mt-8">
+                  <div className="mt-10">
                     <ScheduledSportsbook
                       events={scheduledEvents}
                       eventGameMap={eventGameMap}
@@ -741,9 +702,9 @@ export default function LiveMarketsPage() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Right: Trade Panel (sticky sidebar - always visible) */}
+          {/* Right: Trade Panel — sticky sidebar */}
           <div className="hidden lg:block">
-            <div className="sticky top-4 self-start space-y-3">
+            <div className="sticky top-4 self-start">
               {selectedMarket && tradingOutcomes.length > 0 ? (
                 <ErrorBoundary name="Trading Form">
                   <TradingForm
@@ -765,15 +726,16 @@ export default function LiveMarketsPage() {
                   />
                 </ErrorBoundary>
               ) : (
-                <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm p-6 text-center">
-                  <div className="mx-auto w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
-                    <Radio className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-sm font-bold text-foreground/80 mb-1">
+                <div className="border-y border-border/40 py-10 text-center">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-2">
                     Trade Panel
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    Click on any market or price button to start trading
+                  </p>
+                  <p className="font-editorial italic text-lg text-foreground max-w-[260px] mx-auto leading-snug">
+                    Pick a market to open the ticket.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-2 max-w-[240px] mx-auto">
+                    Tap any event or price on the left and the order book opens
+                    here.
                   </p>
                 </div>
               )}
@@ -781,33 +743,33 @@ export default function LiveMarketsPage() {
           </div>
         </div>
 
-        {/* Mobile: Bottom sheet trade button */}
+        {/* Mobile: bottom sheet trade bar */}
         {selectedMarket && tradingOutcomes.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 p-3 bg-background/95 backdrop-blur-md border-t border-border/50 lg:hidden z-50">
-            <div className="flex items-center justify-between gap-3">
+          <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border/60 lg:hidden z-50">
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate">
-                  {selectedMarket.marketTitle}
-                </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                   {tradingOutcomes[selectedOutcomeIndex]?.name} ·{" "}
                   {Math.round(
                     (tradingOutcomes[selectedOutcomeIndex]?.price ?? 0) * 100
                   )}
                   ¢
                 </p>
+                <p className="text-sm font-medium text-foreground truncate mt-0.5">
+                  {selectedMarket.marketTitle}
+                </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-4 shrink-0">
                 <button
                   type="button"
                   onClick={handleCloseTradePanel}
-                  className="px-3 py-2 text-xs font-semibold rounded-lg border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
+                  className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border"
                 >
                   Dismiss
                 </button>
                 <a
                   href={`/events/detail/${selectedMarket.eventSlug || selectedMarket.eventId}`}
-                  className="px-4 py-2 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  className="inline-flex items-center h-10 px-4 bg-foreground text-background font-mono text-[11px] uppercase tracking-[0.18em] hover:bg-foreground/90 transition-colors"
                 >
                   Trade
                 </a>
@@ -816,6 +778,8 @@ export default function LiveMarketsPage() {
           </div>
         )}
       </main>
+
+      <EditorialFooter context="Live Sports" />
     </div>
   );
 }

@@ -5,6 +5,7 @@ This document is generated from the route handlers under `apps/web/src/app/api`.
 ## Conventions
 
 - Base path: all routes are rooted at `/api`.
+- Dynamic path parameters are shown as `:param` for runtime URLs, even though the filesystem routes live under Next.js segments such as `[param]`.
 - Content type: all request and response bodies are JSON unless noted otherwise.
 - Rate limiting: routes that call `checkRateLimit()` are limited per IP and per normalized route template.
 - Shared `429` response shape:
@@ -927,7 +928,7 @@ GET /api/events/paginated?tag_slug=crypto&limit=2&markets=full HTTP/1.1
 }
 ```
 
-### GET `/api/events/[id]`
+### GET `/api/events/:id`
 
 Description: Fetches an event by numeric ID or slug. Returns the event plus its markets.
 
@@ -1217,7 +1218,7 @@ GET /api/leaderboard?category=SPORTS&timePeriod=WEEK&orderBy=VOL&limit=2 HTTP/1.
 }
 ```
 
-### GET `/api/profile/[address]`
+### GET `/api/profile/:address`
 
 Description: Builds a composite trader profile by fanning out to public profile, PnL, positions, trades, and leaderboard endpoints.
 
@@ -1347,7 +1348,7 @@ GET /api/markets/by-tag?tag_id=342&limit=2 HTTP/1.1
 }
 ```
 
-### GET `/api/markets/by-token/[tokenId]`
+### GET `/api/markets/by-token/:tokenId`
 
 Description: Resolves a market from a CLOB token ID using Gamma and returns a normalized subset used by the UI.
 
@@ -1445,7 +1446,7 @@ GET /api/markets/closed-time?ids=0xabc,0xdef HTTP/1.1
 }
 ```
 
-### GET `/api/markets/info/[conditionID]`
+### GET `/api/markets/info/:conditionID`
 
 Description: Passes through the raw CLOB market payload for a condition ID.
 
@@ -1491,7 +1492,7 @@ GET /api/markets/info/0xabc HTTP/1.1
 }
 ```
 
-### GET `/api/markets/orderbook/[tokenID]`
+### GET `/api/markets/orderbook/:tokenID`
 
 Description: Passes through the raw CLOB order book for a token.
 
@@ -1537,7 +1538,7 @@ GET /api/markets/orderbook/101 HTTP/1.1
 }
 ```
 
-### GET `/api/markets/price-history/[tokenId]`
+### GET `/api/markets/price-history/:tokenId`
 
 Description: Fetches historical price candles for a token from the CLOB API.
 
@@ -1598,6 +1599,73 @@ GET /api/markets/price-history/1010101010?startTs=1710000000&fidelity=60 HTTP/1.
 }
 ```
 
+### POST `/api/markets/price-history/batch`
+
+Description: Fetches historical price candles for multiple token IDs in one request. The handler deduplicates `tokenIds`, fans out to the CLOB `/prices-history` endpoint, and returns one combined payload.
+
+Headers
+
+- `Content-Type: application/json`
+- Auth: none
+
+Request body
+
+| Field      | Type               | Required | Validation                                                                              |
+| ---------- | ------------------ | -------- | --------------------------------------------------------------------------------------- |
+| `tokenIds` | `string[]`         | Yes      | Must include at least one string token ID with length `>= 10`; duplicates are removed. |
+| `startTs`  | `number \| string` | No       | Passed upstream as a string. Defaults to 30 days ago in Unix seconds.                   |
+| `fidelity` | `number \| string` | No       | Passed upstream as a string. Default `"60"`.                                            |
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `histories: { tokenId: string, history: { t: number, p: number }[] }[]`
+  - `startTs: number`
+  - `fidelity: number`
+
+Errors
+
+- `400`: `{ success: false, error: "tokenIds is required" }` or `{ success: false, error: "Too many tokenIds (max 40)" }`
+- `401`: Not used.
+- `404`: Not used.
+- `500`: `{ success: false, error: string, histories: [] }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+Example
+
+```http
+POST /api/markets/price-history/batch HTTP/1.1
+Content-Type: application/json
+
+{
+  "tokenIds": ["1010101010", "2020202020"],
+  "startTs": 1710000000,
+  "fidelity": 60
+}
+```
+
+```json
+{
+  "success": true,
+  "histories": [
+    {
+      "tokenId": "1010101010",
+      "history": [{ "t": 1710000000, "p": 0.54 }]
+    },
+    {
+      "tokenId": "2020202020",
+      "history": [{ "t": 1710000000, "p": 0.43 }]
+    }
+  ],
+  "startTs": 1710000000,
+  "fidelity": 60
+}
+```
+
 ### GET `/api/markets/price`
 
 Description: Passes through the CLOB price response for a token.
@@ -1645,7 +1713,7 @@ GET /api/markets/price?tokenID=101&side=BUY HTTP/1.1
 }
 ```
 
-### GET `/api/markets/slug/[slug]`
+### GET `/api/markets/slug/:slug`
 
 Description: Looks up a market by slug using Gamma and returns the first match.
 
@@ -1691,7 +1759,7 @@ GET /api/markets/slug/bitcoin-above-100k-in-2026 HTTP/1.1
 }
 ```
 
-### GET `/api/markets/trades/[tokenID]`
+### GET `/api/markets/trades/:tokenID`
 
 Description: Passes through recent CLOB trades for a token.
 
@@ -1910,7 +1978,7 @@ GET /api/search?q=bitcoin&limit=2 HTTP/1.1
 
 ## Relayer And RPC
 
-### GET `/api/relayer/[...path]`
+### GET `/api/relayer/:path`
 
 Description: Server-side proxy for a small allow-listed subset of Polymarket relayer endpoints. Used by web and extension trading flows so relayer credentials stay server-side.
 
@@ -1958,7 +2026,7 @@ Sec-Fetch-Site: same-origin
 }
 ```
 
-### POST `/api/relayer/[...path]`
+### POST `/api/relayer/:path`
 
 Description: Same relayer proxy for JSON POST requests such as transaction submission.
 
@@ -2314,9 +2382,9 @@ GET /api/tags?limit=5 HTTP/1.1
 }
 ```
 
-### GET `/api/tags/[slug]`
+### GET `/api/tags/:slug`
 
-Description: Returns tag details for a tag slug.
+Description: Returns normalized tag details for a tag slug. The handler canonicalizes aliases before calling Gamma.
 
 Headers
 
@@ -2336,8 +2404,9 @@ Errors
 
 - `400`: `{ success: false, error: "Tag slug is required" }`
 - `401`: Not used.
-- `404`: `{ success: false, error: "Tag not found: <slug>" }`
-- `500`: `{ success: false, error: string }`
+- `404`: `{ success: false, error: "Tag not found: <canonicalSlug>" }`
+- Other upstream non-OK statuses: forwarded with `{ success: false, error: "Tag not found: <canonicalSlug>" }`
+- `500`: `{ success: false, error: "Unable to load tag details" }`
 
 Rate limiting
 
@@ -2383,8 +2452,8 @@ Success `200`
 - Schema:
   - `success: true`
   - `user: string`
-  - `timePeriod?: string`
-  - `category?: string`
+  - `timePeriod: string`
+  - `category: string`
   - `details: null | { rank: number, proxyWallet: string, userName: string, xUsername: string | null, verifiedBadge: boolean, volume: number, pnl: number, profileImage: string | null }`
   - Optional `message` when the user is not found
 
@@ -3112,6 +3181,75 @@ GET /api/whales/activity?whaleCount=10&minTradeSize=5000&timePeriod=WEEK HTTP/1.
   "totalTrades": 1,
   "lastUpdated": "2026-04-02T10:00:00.000Z",
   "dataAge": 412
+}
+```
+
+### GET `/api/whales/backtest`
+
+Description: Runs the insider-detector backtest against recently resolved Polymarket markets. This route executes in the Node.js runtime and can take tens of seconds because it paginates markets, trades, price history, and trader histories.
+
+Headers
+
+- Auth: none
+
+Query parameters
+
+| Name               | Type     | Required | Validation                                                                   |
+| ------------------ | -------- | -------- | ---------------------------------------------------------------------------- |
+| `maxDaysAgo`       | `number` | No       | Parsed integer, clamped to `2..60`, default `21`.                            |
+| `minDaysAgo`       | `number` | No       | Parsed integer, clamped to `0..30`, default `2`. Must be less than `maxDaysAgo`. |
+| `minDurationHours` | `number` | No       | Parsed integer, clamped to `0..720`, default `24`.                           |
+| `minVolumeUsd`     | `number` | No       | Parsed float, clamped to `0..10000000`, default `5000`.                      |
+| `maxMarkets`       | `number` | No       | Parsed integer, clamped to `1..40`, default `20`.                            |
+| `minScore`         | `number` | No       | Parsed integer, clamped to `1..100`, default `30`; stored as `minSuspicionScore`. |
+| `minTradeUsd`      | `number` | No       | Parsed float, clamped to `0..1000000`, default `500`.                        |
+
+Success `200`
+
+- Schema:
+  - `generatedAt: string`
+  - `options: { maxDaysAgo: number, minDaysAgo: number, minDurationHours: number, minVolumeUsd: number, maxMarkets: number, minSuspicionScore: number, minTradeUsd: number }`
+  - `marketsScanned: number`
+  - `totalTrades: number`
+  - `eligibleTrades: number`
+  - `flaggedTrades: number`
+  - `uniqueFlaggedWallets: number`
+  - `baseline: PnlAggregate`
+  - `flagged: PnlAggregate`
+  - `winRateLift: number`
+  - `meanProfitLift: number`
+  - `precisionAtK: { k: number, precision: number, n: number }[]`
+  - `perMarket: { conditionId: string, question: string, volumeUsd: number, totalTrades: number, eligibleTrades: number, flaggedTrades: number, baseline: PnlAggregate, flagged: PnlAggregate }[]`
+  - `perArchetype: { archetype: "account_loader" | "size_hider" | "timing_cluster", label: string, flaggedCount: number, aggregate: PnlAggregate, winRateLift: number, precisionAtK: { k: number, precision: number, n: number }[] }[]`
+  - `topFlagged: object[]`
+  - `runtimeMs: number`
+  - `resolvedMarketsDiagnostics: { pagesFetched: number, rawMarketsSeen: number, drops: { parse: number, tooOld: number, tooFresh: number, draw: number, dur: number, vol: number, uma: number, outcomes: number } }`
+- `PnlAggregate` contains `count`, `wins`, `losses`, `pushes`, `winRate`, `totalProfit`, `meanProfit`, `meanProfitPerShare`, and `totalVolume`.
+
+Errors
+
+- `400`: `{ error: "minDaysAgo must be less than maxDaysAgo" }`
+- `401`: Not used.
+- `404`: Not used.
+- `500`: `{ error: string }`
+
+Rate limiting
+
+- No explicit rate limiter
+
+Example
+
+```http
+GET /api/whales/backtest?maxDaysAgo=21&minDaysAgo=2&maxMarkets=10&minScore=30 HTTP/1.1
+```
+
+```json
+{
+  "generatedAt": "2026-04-23T03:30:23.335Z",
+  "marketsScanned": 10,
+  "flaggedTrades": 27,
+  "winRateLift": 1.34,
+  "runtimeMs": 48211
 }
 ```
 

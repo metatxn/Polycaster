@@ -1,0 +1,178 @@
+<svg width="2760" height="1380" viewBox="0 0 2760 1380" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="2760" height="1380" fill="#FCFBF7"/>
+  <defs>
+    <style>
+      .title { font: 700 56px "Comic Sans MS", "Segoe Print", cursive; fill: #161616; }
+      .subtitle { font: 500 22px "Comic Sans MS", "Segoe Print", cursive; fill: #2A2A2A; }
+      .section { font: 700 32px "Comic Sans MS", "Segoe Print", cursive; fill: #F08C00; }
+      .cardtitle { font: 700 24px "Comic Sans MS", "Segoe Print", cursive; fill: #161616; }
+      .body { font: 500 20px "Comic Sans MS", "Segoe Print", cursive; fill: #1F1F1F; }
+      .small { font: 500 18px "Comic Sans MS", "Segoe Print", cursive; fill: #1F1F1F; }
+    </style>
+  </defs>
+
+  <text x="1380" y="72" text-anchor="middle" class="title">KNOWW</text>
+  <text x="1380" y="118" text-anchor="middle" class="subtitle">Technical architecture: web app, extension runtime, Cloudflare deployment, and Polymarket-backed data + trading flows</text>
+
+  <line x1="670" y1="170" x2="670" y2="1030" stroke="#B0B4BA" stroke-width="3" stroke-dasharray="10 12"/>
+  <line x1="1360" y1="170" x2="1360" y2="1030" stroke="#B0B4BA" stroke-width="3" stroke-dasharray="10 12"/>
+  <line x1="2060" y1="170" x2="2060" y2="1030" stroke="#B0B4BA" stroke-width="3" stroke-dasharray="10 12"/>
+
+  <circle cx="65" cy="202" r="21" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="65" y="209" text-anchor="middle" class="small" fill="#F08C00">1</text>
+  <text x="100" y="210" class="section">End Users &amp; Entry Surfaces</text>
+
+  <rect x="40" y="250" width="560" height="350" rx="24" fill="#FFFFFF" stroke="#1E1E1E" stroke-width="3"/>
+  <text x="72" y="288" class="body">• Web users on knoww.app</text>
+  <text x="72" y="320" class="body">• Chrome extension users on social and news pages</text>
+  <text x="72" y="352" class="body">• Wallet owners connecting Polygon wallets</text>
+  <text x="72" y="398" class="body">• Supported surfaces:</text>
+  <text x="96" y="430" class="body">X, Reddit, Farcaster, LinkedIn, Discord,</text>
+  <text x="96" y="462" class="body">editorial pages, crypto/news sites</text>
+  <text x="72" y="508" class="body">• Entry actions:</text>
+  <text x="96" y="540" class="body">browse markets, inspect whales, search,</text>
+  <text x="96" y="572" class="body">portfolio views, live events, trade initiation</text>
+
+  <rect x="40" y="650" width="560" height="250" rx="24" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="70" y="690" class="cardtitle">Frontend + extension surfaces</text>
+  <text x="70" y="736" class="body">• Web pages in `apps/web/src/app/*`</text>
+  <text x="70" y="768" class="body">• Content runtime in `apps/extension/src/content/*`</text>
+  <text x="70" y="800" class="body">• Wallet bridge in `apps/extension/src/page-bridge.ts`</text>
+  <text x="70" y="832" class="body">• Session + local runtime state in browser storage</text>
+
+  <circle cx="735" cy="202" r="21" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="735" y="209" text-anchor="middle" class="small" fill="#F08C00">2</text>
+  <text x="770" y="210" class="section">Web Runtime + API Layer</text>
+
+  <rect x="720" y="250" width="580" height="310" rx="24" fill="#FFFDF7" stroke="#F08C00" stroke-width="3"/>
+  <text x="752" y="290" class="cardtitle">Next.js App Router on Cloudflare Workers</text>
+  <text x="752" y="336" class="body">• `apps/web` packaged through OpenNext</text>
+  <text x="752" y="368" class="body">• SSR + server-cache for home, events, detail pages</text>
+  <text x="752" y="400" class="body">• client hooks + React Query after hydration</text>
+  <text x="752" y="432" class="body">• singleton websocket managers for live odds</text>
+  <text x="776" y="464" class="body">and sports updates</text>
+  <text x="752" y="496" class="body">• middleware/CSP, observability, image binding</text>
+  <text x="752" y="528" class="body">• Worker config + R2 incremental cache</text>
+
+  <rect x="720" y="620" width="170" height="250" rx="22" fill="#E7F5FF" stroke="#1971C2" stroke-width="3"/>
+  <text x="742" y="658" class="cardtitle">API / BFF</text>
+  <text x="742" y="704" class="small">• `/api/events/*`</text>
+  <text x="742" y="732" class="small">• `/api/markets/*`</text>
+  <text x="742" y="760" class="small">• `/api/user/*`</text>
+  <text x="742" y="788" class="small">• `/api/whales/*`</text>
+  <text x="742" y="816" class="small">• `/api/search`</text>
+  <text x="742" y="844" class="small">• shaping + rate limit</text>
+
+  <rect x="925" y="620" width="170" height="250" rx="22" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="946" y="658" class="cardtitle">Secret proxies</text>
+  <text x="946" y="704" class="small">• `/api/rpc/polygon`</text>
+  <text x="946" y="732" class="small">• `/api/relayer/*`</text>
+  <text x="946" y="760" class="small">• extension verify</text>
+  <text x="946" y="788" class="small">• origin + token guards</text>
+  <text x="946" y="816" class="small">• server-only creds</text>
+
+  <rect x="1130" y="620" width="170" height="250" rx="22" fill="#EBFBEE" stroke="#2F9E44" stroke-width="3"/>
+  <text x="1152" y="658" class="cardtitle">Shared kernel</text>
+  <text x="1152" y="704" class="small">`packages/shared-types`</text>
+  <text x="1152" y="736" class="small">• endpoints</text>
+  <text x="1152" y="764" class="small">• contract addrs</text>
+  <text x="1152" y="792" class="small">• ABIs</text>
+  <text x="1152" y="820" class="small">• auth consts + helpers</text>
+
+  <circle cx="1425" cy="202" r="21" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="1425" y="209" text-anchor="middle" class="small" fill="#F08C00">3</text>
+  <text x="1460" y="210" class="section">Extension Processing Runtime</text>
+
+  <rect x="1420" y="250" width="580" height="280" rx="24" fill="#F8FBFF" stroke="#1971C2" stroke-width="3"/>
+  <text x="1452" y="290" class="cardtitle">MV3 extension split by responsibility</text>
+  <text x="1452" y="336" class="body">• content scripts detect platforms, extract text,</text>
+  <text x="1476" y="368" class="body">and inject inline UI</text>
+  <text x="1452" y="400" class="body">• `page-bridge.ts` discovers page wallets</text>
+  <text x="1452" y="432" class="body">• background worker owns messages, tokens,</text>
+  <text x="1476" y="464" class="body">analytics, caches</text>
+  <text x="1452" y="496" class="body">• offscreen runtime isolates heavy crypto,</text>
+  <text x="1476" y="528" class="body">CLOB, and trading libraries</text>
+
+  <rect x="1420" y="620" width="250" height="260" rx="22" fill="#F3F0FF" stroke="#845EF7" stroke-width="3"/>
+  <text x="1444" y="658" class="cardtitle">Scoring / relevance</text>
+  <text x="1444" y="704" class="small">• local BM25 and embeddings</text>
+  <text x="1444" y="732" class="small">• `background/nlp.ts`</text>
+  <text x="1444" y="760" class="small">• `background/embeddings.ts`</text>
+  <text x="1444" y="788" class="small">• IndexedDB `knoww-embeddings`</text>
+  <text x="1444" y="816" class="small">• AI fallback routes for topic</text>
+  <text x="1468" y="844" class="small">extraction and relevance</text>
+
+  <rect x="1750" y="620" width="250" height="260" rx="22" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="1774" y="658" class="cardtitle">Trading / auth</text>
+  <text x="1774" y="704" class="small">• challenge + verify session</text>
+  <text x="1774" y="732" class="small">• token in `chrome.storage.session`</text>
+  <text x="1774" y="760" class="small">• `trading-handler.ts`</text>
+  <text x="1774" y="788" class="small">• offscreen trading runtime</text>
+  <text x="1774" y="816" class="small">• relayer client -&gt;</text>
+  <text x="1798" y="844" class="small">`knoww.app/api/relayer/*`</text>
+
+  <circle cx="2125" cy="202" r="21" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="2125" y="209" text-anchor="middle" class="small" fill="#F08C00">4</text>
+  <text x="2160" y="210" class="section">External Systems</text>
+
+  <rect x="2120" y="250" width="560" height="180" rx="24" fill="#EBFBEE" stroke="#2F9E44" stroke-width="3"/>
+  <text x="2150" y="290" class="cardtitle">Polymarket data plane</text>
+  <text x="2150" y="336" class="body">• Gamma API for events, tags, comments</text>
+  <text x="2150" y="368" class="body">• CLOB market data + auth derivation</text>
+  <text x="2150" y="400" class="body">• user PnL / Data API / leaderboard / live websockets</text>
+
+  <rect x="2120" y="490" width="560" height="180" rx="24" fill="#F3F0FF" stroke="#845EF7" stroke-width="3"/>
+  <text x="2150" y="530" class="cardtitle">Trading infrastructure</text>
+  <text x="2150" y="576" class="body">• Polymarket relayer v2</text>
+  <text x="2150" y="608" class="body">• bridge API for deposit/withdraw quoting</text>
+  <text x="2150" y="640" class="body">• Polygon RPC / Alchemy for chain reads</text>
+
+  <rect x="2120" y="730" width="560" height="180" rx="24" fill="#FFF5F5" stroke="#E03131" stroke-width="3"/>
+  <text x="2150" y="770" class="cardtitle">Supporting services + storage</text>
+  <text x="2150" y="816" class="body">• OpenRouter for topic extraction and relevance</text>
+  <text x="2150" y="848" class="body">• PostHog analytics</text>
+  <text x="2150" y="880" class="body">• R2 incremental cache, browser storage, IndexedDB</text>
+
+  <path d="M600 425L720 425" stroke="#1E1E1E" stroke-width="3"/>
+  <path d="M705 415L720 425L705 435" stroke="#1E1E1E" stroke-width="3" fill="none"/>
+
+  <path d="M1300 330L1360 240L2060 240L2120 330" stroke="#F08C00" stroke-width="3" stroke-dasharray="10 10" fill="none"/>
+  <path d="M2104 319L2120 330L2104 341" stroke="#F08C00" stroke-width="3" fill="none"/>
+
+  <path d="M1095 745L1095 570L2120 570" stroke="#1E1E1E" stroke-width="3" fill="none"/>
+  <path d="M2105 560L2120 570L2105 580" stroke="#1E1E1E" stroke-width="3" fill="none"/>
+
+  <path d="M2000 350L2120 350" stroke="#1971C2" stroke-width="3" fill="none"/>
+  <path d="M2105 340L2120 350L2105 360" stroke="#1971C2" stroke-width="3" fill="none"/>
+
+  <path d="M2000 748L2000 580L2120 580" stroke="#F08C00" stroke-width="3" fill="none"/>
+  <path d="M2105 570L2120 580L2105 590" stroke="#F08C00" stroke-width="3" fill="none"/>
+
+  <rect x="40" y="1090" width="2640" height="250" rx="28" fill="#FFFDF7" stroke="#1E1E1E" stroke-width="3"/>
+  <text x="1380" y="1126" text-anchor="middle" class="cardtitle">Engineering Decisions Encoded In The Architecture</text>
+
+  <rect x="80" y="1175" width="480" height="120" rx="22" fill="#FFF4E6" stroke="#F08C00" stroke-width="3"/>
+  <text x="106" y="1210" class="body">1. BFF instead of a separate backend</text>
+  <text x="106" y="1242" class="small">Validation, auth, rate limiting, and upstream reshaping</text>
+  <text x="106" y="1270" class="small">live in Next.js API routes.</text>
+
+  <rect x="600" y="1175" width="480" height="120" rx="22" fill="#E7F5FF" stroke="#1971C2" stroke-width="3"/>
+  <text x="626" y="1210" class="body">2. Edge-first read path</text>
+  <text x="626" y="1242" class="small">Cloudflare Workers + OpenNext speed up reads while</text>
+  <text x="626" y="1270" class="small">R2 backs incremental cache artifacts.</text>
+
+  <rect x="1120" y="1175" width="480" height="120" rx="22" fill="#EBFBEE" stroke="#2F9E44" stroke-width="3"/>
+  <text x="1146" y="1210" class="body">3. No app-owned business database</text>
+  <text x="1146" y="1242" class="small">Polymarket is the source of truth; Knoww stores</text>
+  <text x="1146" y="1270" class="small">cache and runtime state only.</text>
+
+  <rect x="1640" y="1175" width="480" height="120" rx="22" fill="#F3F0FF" stroke="#845EF7" stroke-width="3"/>
+  <text x="1666" y="1210" class="body">4. MV3 split runtime</text>
+  <text x="1666" y="1242" class="small">Content, background, and offscreen layers keep DOM</text>
+  <text x="1666" y="1270" class="small">work light and trading isolated.</text>
+
+  <rect x="2160" y="1175" width="480" height="120" rx="22" fill="#FFF5F5" stroke="#E03131" stroke-width="3"/>
+  <text x="2186" y="1210" class="body">5. Secrets never reach the client</text>
+  <text x="2186" y="1242" class="small">Relayer credentials, RPC keys, and extension verification</text>
+  <text x="2186" y="1270" class="small">stay behind guarded routes.</text>
+</svg>

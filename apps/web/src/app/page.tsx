@@ -1,13 +1,16 @@
 "use client";
 
-import { ArrowUpRight, Download, Moon, Sun } from "lucide-react";
+import { ArrowUpRight, Download } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import {
+  KW_PAGE_CLASS,
+  KwThemeToggle,
+  useKwTheme,
+} from "@/components/kw-theme";
 
 const CHROME_STORE_URL =
   "https://chromewebstore.google.com/detail/knoww-prediction-markets/naoaonihikedoiemhbolbnolibpmojgf";
-const THEME_STORAGE_KEY = "knoww-landing-theme";
-type Theme = "light" | "dark";
 
 const TICKER = [
   { label: "BTC-100K-EOY", side: "YES", price: "68¢", delta: "+2" },
@@ -57,38 +60,14 @@ const PEEK_RIGHT_MARKETS = [
 ];
 
 export default function LandingPage() {
-  const [theme, setTheme] = useState<Theme>("light");
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-      if (saved === "dark" || saved === "light") {
-        setTheme(saved);
-        return;
-      }
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-        setTheme("dark");
-      }
-    } catch {}
-  }, []);
-
-  const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === "light" ? "dark" : "light";
-      try {
-        localStorage.setItem(THEME_STORAGE_KEY, next);
-      } catch {}
-      return next;
-    });
-  };
+  const { theme, toggleTheme } = useKwTheme();
 
   return (
     <div
-      className="kw-landing fixed inset-0 z-60 overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans"
+      className={`${KW_PAGE_CLASS} fixed inset-0 z-60 overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans`}
       data-theme={theme}
       style={{ colorScheme: theme }}
     >
-      <ThemeVars />
       <TickerBar />
 
       <header className="border-b border-(--kw-fg)/10 bg-(--kw-bg)">
@@ -131,22 +110,7 @@ export default function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              aria-label={
-                theme === "light"
-                  ? "Switch to dark theme"
-                  : "Switch to light theme"
-              }
-              onClick={toggleTheme}
-              className="w-9 h-9 flex items-center justify-center border border-(--kw-fg)/15 hover:border-(--kw-fg)/40 hover:bg-(--kw-fg)/5 transition-colors"
-            >
-              {theme === "light" ? (
-                <Moon className="w-3.5 h-3.5" />
-              ) : (
-                <Sun className="w-3.5 h-3.5" />
-              )}
-            </button>
+            <KwThemeToggle theme={theme} onToggle={toggleTheme} />
             <a
               href={CHROME_STORE_URL}
               className="inline-flex items-center gap-2 bg-(--kw-fg) text-(--kw-bg) px-4 py-2 text-[13px] font-medium hover:bg-(--kw-fg)/90 transition-colors"
@@ -805,164 +769,6 @@ function TickerBar() {
         </div>
       </div>
     </div>
-  );
-}
-
-function ThemeVars() {
-  return (
-    <style>{`
-      .kw-landing {
-        /*
-         * Green-token system (consolidated — same hue family in both themes):
-         *   --kw-accent       — solid brand green, decorative (dots, indicators)
-         *   --kw-accent-text  — text on the main background
-         *   --kw-accent-inv   — text on the inverted (--kw-fg) background
-         */
-        --kw-bg: #f6f4ee;
-        --kw-bg-alt: #eeebe1;
-        --kw-bg-card: #fbfaf5;
-        --kw-fg: #0a0a0a;
-        --kw-accent: #0d9f6e;
-        --kw-accent-text: #066d4c;
-        --kw-accent-inv: #3dd07f;
-        --kw-danger-text: #b91c1c;
-        --kw-danger-bright: #f87171;
-
-        /* Paper-grain noise — barely-there texture that keeps sections from
-         * reading as flat rectangles. The SVG uses fractalNoise + an alpha
-         * color matrix so it's neutral over any theme background. */
-        background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-        background-size: 200px 200px;
-        background-attachment: local;
-      }
-      .kw-landing[data-theme="dark"] {
-        --kw-bg: #0c0a07;
-        --kw-bg-alt: #15120d;
-        --kw-bg-card: #19150f;
-        --kw-fg: #f0ebe0;
-        --kw-accent: #0d9f6e;
-        --kw-accent-text: #3dd07f;
-        --kw-accent-inv: #066d4c;
-        --kw-danger-text: #fca5a5;
-        --kw-danger-bright: #f87171;
-        /* Slightly higher alpha in dark mode — paper grain reads as "film
-         * grain" here, so a touch more presence keeps the texture legible. */
-        background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      }
-
-      /* Soft ambient glow behind the hero stage — picks up the brand
-       * accent but barely; creates a "spotlit" feel without being showy. */
-      .kw-stage-glow {
-        position: absolute;
-        inset: -10% 0 0 0;
-        z-index: 0;
-        pointer-events: none;
-        background: radial-gradient(
-          ellipse 900px 420px at 50% 35%,
-          color-mix(in srgb, var(--kw-accent) 16%, transparent) 0%,
-          transparent 70%
-        );
-        filter: blur(40px);
-      }
-
-      /* Editorial display serif for the signature italic accents. Falls
-       * back to Georgia (not Times) for a more refined default. */
-      .kw-editorial {
-        font-family: var(--font-editorial), Georgia, "Hoefler Text", serif;
-        font-weight: 500;
-        /* Optical tuning — Fraunces italic runs a little wide at display
-         * sizes; tighten tracking to match Plus Jakarta's density. */
-        letter-spacing: -0.015em;
-      }
-
-      /* Signature hover tilt — applied sparingly to the hero italic so
-       * the page's most distinctive character has one moment of delight
-       * on interaction. Subtle — 1.8deg rotation, 3% scale. */
-      .kw-tilt {
-        display: inline-block;
-        transform-origin: center;
-        transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      .kw-tilt:hover {
-        transform: rotate(-1.8deg) scale(1.03);
-      }
-
-      /* Ticker edge fade — masks the leftmost/rightmost pixels so labels
-       * fade out on the edges instead of hard-clipping. */
-      .kw-ticker-track {
-        mask-image: linear-gradient(
-          to right,
-          transparent 0%,
-          black 4%,
-          black 96%,
-          transparent 100%
-        );
-        -webkit-mask-image: linear-gradient(
-          to right,
-          transparent 0%,
-          black 4%,
-          black 96%,
-          transparent 100%
-        );
-      }
-
-      /* Scroll-linked reveal animation. Uses the modern scroll-driven
-       * timelines spec (Chrome 115+ / Safari 18+); browsers without
-       * support fall through to the always-visible base state. */
-      @keyframes kwRevealIn {
-        from {
-          opacity: 0;
-          transform: translateY(28px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      @supports (animation-timeline: view()) {
-        .kw-reveal {
-          opacity: 0;
-          animation: kwRevealIn linear both;
-          animation-timeline: view();
-          animation-range: entry 0% cover 30%;
-        }
-      }
-
-      /* Word-stagger entry animation on the hero headline. Each span gets
-       * its own animation-delay set inline so the words cascade in. */
-      .kw-stagger {
-        display: inline-block;
-        opacity: 0;
-        transform: translateY(14px);
-        animation: kwStaggerIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-      }
-      @keyframes kwStaggerIn {
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      @keyframes ticker {
-        0% { transform: translateX(0); }
-        100% { transform: translateX(-50%); }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .kw-stagger,
-        .kw-reveal {
-          opacity: 1 !important;
-          transform: none !important;
-          animation: none !important;
-        }
-        .kw-tilt:hover {
-          transform: none !important;
-        }
-        .animate-\\[ticker_60s_linear_infinite\\] {
-          animation: none !important;
-        }
-      }
-    `}</style>
   );
 }
 

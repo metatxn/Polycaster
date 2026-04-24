@@ -1,6 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type {
+  ArchetypeId,
+  ArchetypeScore,
+} from "@/lib/insider/archetypes/types";
+import type { WalletFunding } from "@/lib/insider/funding-source";
+import type { SafeOwners } from "@/lib/insider/safe-owner";
 
 export interface SuspicionFactor {
   name: string;
@@ -44,6 +50,19 @@ export interface SuspiciousAnalysis {
   factors: SuspicionFactor[];
   repeatOffender: boolean;
   marketsInvolved: number;
+  /** Phase 2+: which archetype detectors fired on this trade.
+   *  Optional on the client type so old cached responses don't
+   *  break when the hook rehydrates across a server deploy. */
+  firedArchetypes?: ArchetypeId[];
+  /** Phase 2+: full per-archetype score breakdown for drilldown. */
+  archetypes?: ArchetypeScore[];
+  /** Phase 3-½: tier for UI sorting/tinting. 2=gold, 1=silver, 0=baseline. */
+  sortPriority?: number;
+  /** Phase 4: on-chain funding lookup (null unless specialist fired). */
+  funding?: WalletFunding | null;
+  /** Phase 5: Safe owner lookup. Present for every flagged wallet;
+   *  null when the address isn't a Safe (EOA or non-Safe contract). */
+  owner?: SafeOwners | null;
 }
 
 export interface SuspiciousActivity {
@@ -92,24 +111,28 @@ export const SENSITIVITY_PRESETS: Record<
     description: string;
   }
 > = {
+  // Thresholds tuned for current Polymarket activity (post-election
+  // quiet period). Original values ($10k/$5k/$1k) were set during
+  // high-volume periods and now produce zero hits because few recent
+  // trades cross $5k. Relative ordering between presets is preserved.
   conservative: {
     minScore: 50,
     maxAccountAge: 72,
-    minUsdValue: 10000,
+    minUsdValue: 5000,
     label: "Conservative",
     description: "High-confidence flags only",
   },
   balanced: {
     minScore: 30,
     maxAccountAge: 168,
-    minUsdValue: 5000,
+    minUsdValue: 500,
     label: "Balanced",
     description: "Default detection sensitivity",
   },
   aggressive: {
     minScore: 15,
     maxAccountAge: 336,
-    minUsdValue: 1000,
+    minUsdValue: 100,
     label: "Aggressive",
     description: "Catches more, more false positives",
   },

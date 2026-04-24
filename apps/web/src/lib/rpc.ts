@@ -270,21 +270,33 @@ export async function fetchUsdcBalance(
     const client = getPublicClient();
     const { formatUnits } = await import("viem");
 
-    const [rawPusd, rawUsdcE] = await Promise.all([
-      client.readContract({
-        address: PUSD_ADDRESS as `0x${string}`,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [address as `0x${string}`],
-      }),
-      client.readContract({
-        address: USDC_E_ADDRESS as `0x${string}`,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [address as `0x${string}`],
-      }),
-    ]);
+    // One multicall round-trip instead of two parallel eth_calls.
+    const [pusdResult, usdcEResult] = await client.multicall({
+      allowFailure: true,
+      contracts: [
+        {
+          address: PUSD_ADDRESS as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [address as `0x${string}`],
+        },
+        {
+          address: USDC_E_ADDRESS as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [address as `0x${string}`],
+        },
+      ],
+    });
 
+    const rawPusd =
+      pusdResult.status === "success"
+        ? (pusdResult.result as bigint)
+        : BigInt(0);
+    const rawUsdcE =
+      usdcEResult.status === "success"
+        ? (usdcEResult.result as bigint)
+        : BigInt(0);
     const pusd = Number(formatUnits(rawPusd, PUSD_DECIMALS));
     const usdcE = Number(formatUnits(rawUsdcE, USDC_E_DECIMALS));
     const balance = pusd + usdcE;

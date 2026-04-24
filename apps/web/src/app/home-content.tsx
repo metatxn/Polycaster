@@ -4,9 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
   Clock,
-  Crown,
   Droplets,
-  Fish,
   Flame,
   SlidersHorizontal,
   Sparkles,
@@ -33,6 +31,10 @@ import {
   useFilterBarState,
 } from "@/components/event-filter-bar";
 import { MarketSearch } from "@/components/market-search";
+import {
+  MarketsProView,
+  TableSkeleton as ProTableSkeleton,
+} from "@/components/markets-pro-view";
 import { Navbar } from "@/components/navbar";
 import { PageBackground } from "@/components/page-background";
 import { Button } from "@/components/ui/button";
@@ -280,6 +282,11 @@ interface HomeContentProps {
 export function HomeContent({ initialData }: HomeContentProps) {
   const searchParams = useSearchParams();
   const viewParam = searchParams.get("view") as ViewMode | null;
+  // Pro layout is the desktop default at /markets. `?layout=legacy` is
+  // kept as an escape hatch for a transition period — we can drop it
+  // once the team's confident in the new chrome. Mobile/tablet (< lg)
+  // always get the card grid — tables don't fit at narrow widths.
+  const isProLayout = searchParams.get("layout") !== "legacy";
 
   const [viewMode, setViewMode] = useState<ViewMode>("categories");
   const [mounted, setMounted] = useState(false);
@@ -319,6 +326,19 @@ export function HomeContent({ initialData }: HomeContentProps) {
       }
     }
   }, [viewMode, mounted]);
+
+  // When pro is active, tag <html> so globals.css can hide the app
+  // sidebar and zero the main-content left margin at xl+. The class
+  // only takes effect above the xl breakpoint — mobile layout is
+  // untouched. Cleanup restores the default chrome when the user
+  // navigates away or toggles back to legacy.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isProLayout) {
+      root.classList.add("app-pro-chrome");
+      return () => root.classList.remove("app-pro-chrome");
+    }
+  }, [isProLayout]);
 
   // Get filter context with server-side filter params
   const {
@@ -390,6 +410,9 @@ export function HomeContent({ initialData }: HomeContentProps) {
     tagSlug: apiQueryParams.tagSlug,
     filters: serverFilterParams,
     enabled: viewMode === "categories",
+    // Pro view needs sub-market details (groupItemTitle, outcomePrices)
+    // to render top-candidate rows; card grid only needs market count.
+    fullMarkets: isProLayout,
   });
 
   const {
@@ -399,7 +422,12 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextTrending,
     fetchNextPage: fetchNextTrending,
     isFetchingNextPage: isFetchingNextTrending,
-  } = useTrendingEvents(20, serverFilterParams, viewMode === "trending");
+  } = useTrendingEvents(
+    20,
+    serverFilterParams,
+    viewMode === "trending",
+    isProLayout
+  );
 
   const {
     data: newPaginatedData,
@@ -408,7 +436,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextNew,
     fetchNextPage: fetchNextNew,
     isFetchingNextPage: isFetchingNextNew,
-  } = useNewEvents(20, serverFilterParams, viewMode === "new");
+  } = useNewEvents(20, serverFilterParams, viewMode === "new", isProLayout);
 
   const {
     data: breakingPaginatedData,
@@ -417,7 +445,12 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextBreaking,
     fetchNextPage: fetchNextBreaking,
     isFetchingNextPage: isFetchingNextBreaking,
-  } = useBreakingEvents(20, serverFilterParams, viewMode === "breaking");
+  } = useBreakingEvents(
+    20,
+    serverFilterParams,
+    viewMode === "breaking",
+    isProLayout
+  );
 
   // Wrap view mode changes in startTransition for non-blocking UI updates
   const handleQuickCategoryClick = (mode: ViewMode) => {
@@ -540,74 +573,75 @@ export function HomeContent({ initialData }: HomeContentProps) {
   }, [loadMoreElement, currentData.hasMore, currentData.isFetchingMore]);
 
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-purple-500/30">
-      <PageBackground />
+    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
+      {/* The flashy grid + animated orbs fight the terminal aesthetic;
+          pro mode uses a clean solid-bg canvas instead. */}
+      {!isProLayout && <PageBackground />}
 
       <Navbar />
 
       {/* Main Content - Added bottom padding for mobile nav, pt aligned with 60px grid */}
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
-        {/* Header Row: Title + Live Badge + Leaderboard Button */}
+        {/* Header Row: Title + Live Badge + Leaderboard Button.
+            Hidden at lg+ when ?layout=pro — the pro view has its own
+            editorial header and meta-strip. Mobile/tablet always see
+            this header regardless of layout, since the pro table falls
+            back to the card grid below lg. */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex items-end justify-between mb-4 sm:mb-6"
+          className={`flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-5 sm:mb-6 ${isProLayout ? "lg:hidden" : ""}`}
         >
-          {/* Left: Title */}
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight leading-none">
-            Explore Markets
+          {/* Left: Editorial title — matches the Fraunces italic used on
+              sibling pro pages, just one notch smaller since /markets
+              hosts the dense card grid below. */}
+          <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl md:text-6xl leading-[1.02] tracking-tight text-foreground">
+            Markets
           </h1>
 
-          {/* Right: Live Badge + Leaderboard Button - All capsule shaped, aligned to baseline */}
-          <div className="flex items-end gap-2 sm:gap-2.5">
-            {/* Live Markets Badge - Clickable - Visible on all screens */}
-            <Link href="/live">
-              <div className="flex items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-10 px-3 sm:px-4 rounded-full bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 hover:border-emerald-500/40 transition-[background-color,border-color,transform] duration-150 cursor-pointer active:scale-95">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                </span>
-                <span className="text-xs sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                  Live
-                </span>
-              </div>
+          {/* Right: Sibling views — mono caps with hairline underline
+              active states, same grammar as ProTopNav. */}
+          <nav
+            aria-label="Market views"
+            className="flex items-center flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-[0.15em]"
+          >
+            <Link
+              href="/live"
+              className="group inline-flex items-center gap-1.5 py-1 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/70" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+              </span>
+              Live
             </Link>
-
-            {/* Whale Tracker Badge - Highlighted */}
-            <Link href="/whales">
-              <div className="relative flex items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-10 px-3 sm:px-4 rounded-full bg-linear-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 transition-[background-color,transform,box-shadow] duration-150 cursor-pointer active:scale-95 shadow-md hover:shadow-lg hover:shadow-cyan-500/30">
-                <Fish className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white" />
-                <span className="text-xs sm:text-sm font-bold text-white">
-                  <span className="sm:hidden">🐋</span>
-                  <span className="hidden sm:inline">Whales</span>
-                </span>
-                {/* NEW badge */}
-                <span className="absolute -top-1.5 -right-1 px-1.5 py-0.5 text-[9px] font-bold bg-amber-500 text-white rounded-full shadow-sm animate-pulse">
-                  NEW
-                </span>
-              </div>
+            <Link
+              href="/whales"
+              className="group inline-flex items-baseline gap-1.5 py-1 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span>Whales</span>
+              <span className="text-[9px] tracking-[0.18em] text-emerald-600 dark:text-emerald-400">
+                new
+              </span>
             </Link>
-
-            {/* Top Traders Badge - Shows "Top" on mobile, "Top Traders" on larger screens */}
-            <Link href="/leaderboard">
-              <div className="flex items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-10 px-3 sm:px-4 rounded-full bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 hover:border-amber-500/40 transition-[background-color,border-color,transform] duration-150 cursor-pointer active:scale-95">
-                <Crown className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-500" />
-                <span className="text-xs sm:text-sm font-semibold text-amber-600 dark:text-amber-400">
-                  <span className="sm:hidden">Top</span>
-                  <span className="hidden sm:inline">Top Traders</span>
-                </span>
-              </div>
+            <Link
+              href="/leaderboard"
+              className="group inline-flex items-center py-1 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Top Traders
             </Link>
-          </div>
+          </nav>
         </motion.div>
 
-        {/* Combined Filter Row - Desktop (lg+) */}
+        {/* Combined Filter Row - Desktop (lg+).
+            Hidden at lg+ when ?layout=pro — the pro view renders its
+            own terminal-style filter bar inline. */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
-          className="hidden lg:flex items-center gap-4 mb-4"
+          className={`${isProLayout ? "hidden" : "hidden lg:flex"} items-center gap-4 mb-4`}
         >
           {/* Filter Container */}
           <div className="flex items-center gap-2 p-1.5 bg-gray-100/80 dark:bg-white/5 rounded-2xl border border-gray-200/60 dark:border-white/8">
@@ -661,29 +695,40 @@ export function HomeContent({ initialData }: HomeContentProps) {
             transition={{ duration: 0.4, delay: 0.1 }}
             className="flex items-center justify-between gap-2 sm:gap-4 mb-2"
           >
-            {/* Tab Pills - Scrollable on mobile */}
+            {/* Tab strip — editorial mono caps with underline-active,
+                matches the ProTopNav primary nav pattern. */}
             <div className="relative flex-1 sm:flex-initial">
-              <div className="flex items-center gap-1 bg-gray-100 dark:bg-muted/30 rounded-full p-1 overflow-x-auto scrollbar-hide border border-gray-200/50 dark:border-transparent">
+              <div
+                role="tablist"
+                aria-label="Market view"
+                className="flex items-center gap-5 sm:gap-6 overflow-x-auto scrollbar-hide pb-1 border-b border-border/40"
+              >
                 {TAB_CATEGORIES.map((tab) => {
                   const isActive = viewMode === tab.slug;
-                  const Icon = tab.icon;
                   return (
                     <button
                       type="button"
                       key={tab.slug}
+                      role="tab"
+                      aria-selected={isActive}
                       onClick={() =>
                         tab.slug === "categories"
                           ? setViewMode("categories")
                           : handleQuickCategoryClick(tab.slug as ViewMode)
                       }
-                      className={`relative flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-full font-semibold text-xs sm:text-sm whitespace-nowrap transition-[color,background-color,box-shadow,transform] duration-200 shrink-0 active:scale-95 ${
+                      className={`relative shrink-0 py-2 font-mono text-[11px] uppercase tracking-[0.15em] transition-colors ${
                         isActive
-                          ? "bg-gray-900 dark:bg-primary text-white dark:text-primary-foreground shadow-md"
-                          : "text-gray-600 dark:text-muted-foreground hover:text-gray-900 dark:hover:text-foreground hover:bg-white/80 dark:hover:bg-muted/50"
+                          ? "text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       {tab.label}
+                      {isActive && (
+                        <span
+                          aria-hidden="true"
+                          className="absolute inset-x-0 -bottom-1 h-px bg-foreground"
+                        />
+                      )}
                     </button>
                   );
                 })}
@@ -722,16 +767,25 @@ export function HomeContent({ initialData }: HomeContentProps) {
               </Card>
             )}
 
-            {/* Loading State */}
+            {/* Loading State — skeleton cards sit on paper-grain backdrop so
+                the grid reads as "developing in from texture" rather than
+                popping out of flat muted rectangles. AnimatePresence handles
+                the dissolve when real cards arrive.
+                In pro mode at lg+, MarketsProView renders its own
+                TableSkeleton via the isTransitioning prop — so we hide
+                the card skeletons there to avoid a duplicate. */}
             {currentData.isLoading && !currentData.error && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
+              <div
+                className={`${isProLayout ? "lg:hidden" : ""} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5`}
+              >
                 {[...Array(10)].map((_, i) => (
                   <motion.div
                     key={`skeleton-${i}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    className="rounded-2xl sm:rounded-3xl bg-card/30 backdrop-blur-sm border border-border/30 overflow-hidden"
+                    exit={{ opacity: 0, filter: "blur(2px)" }}
+                    transition={{ delay: i * 0.05, duration: 0.35 }}
+                    className="skeleton-grain rounded-2xl sm:rounded-3xl bg-muted/40 border border-border/30 overflow-hidden"
                   >
                     <Skeleton className="aspect-16/10 w-full bg-muted/50" />
                     <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
@@ -743,12 +797,41 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 ))}
               </div>
             )}
+            {/* Pro-mode loading: render the pro view with its own
+                table-shaped skeleton so tab switches don't reveal cards. */}
+            {currentData.isLoading && !currentData.error && isProLayout && (
+              <div className="hidden lg:block">
+                <MarketsProView
+                  events={[]}
+                  viewMode={viewMode}
+                  onViewChange={handleQuickCategoryClick}
+                  advancedFilters={<DesktopFilterChips />}
+                  search={<MarketSearch className="w-56 xl:w-64" />}
+                  isTransitioning
+                />
+              </div>
+            )}
 
-            {/* Events Grid */}
+            {/* Events Grid. When `?layout=pro` is set we render the
+                trading-terminal view at lg+, and fall back to the card
+                grid below lg where tables don't fit. Without the param,
+                the card grid renders at every breakpoint as before. */}
             {!currentData.isLoading && currentData.events.length > 0 && (
               <>
+                {isProLayout && (
+                  <div className="hidden lg:block">
+                    <MarketsProView
+                      events={currentData.events}
+                      viewMode={viewMode}
+                      onViewChange={handleQuickCategoryClick}
+                      advancedFilters={<DesktopFilterChips />}
+                      search={<MarketSearch className="w-56 xl:w-64" />}
+                      isTransitioning={isPending}
+                    />
+                  </div>
+                )}
                 <div
-                  className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
+                  className={`${isProLayout ? "lg:hidden" : ""} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
                     isPending ? "opacity-70" : "opacity-100"
                   }`}
                 >
@@ -762,22 +845,34 @@ export function HomeContent({ initialData }: HomeContentProps) {
                   ))}
                 </div>
 
-                {/* Loading More */}
+                {/* Loading More — card-grain skeletons in card view,
+                    table-row skeletons in pro view at lg+. Split so the
+                    two layouts stay visually consistent during infinite
+                    scroll. */}
                 {currentData.isFetchingMore && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
-                    {[...Array(20)].map((_, i) => (
-                      <div
-                        key={`loading-${i}`}
-                        className="rounded-2xl sm:rounded-3xl bg-card/30 backdrop-blur-sm border border-border/30 overflow-hidden animate-pulse"
-                      >
-                        <div className="aspect-16/10 w-full bg-muted/30" />
-                        <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
-                          <div className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/30" />
-                          <div className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/20" />
+                  <>
+                    <div
+                      className={`${isProLayout ? "lg:hidden" : ""} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5`}
+                    >
+                      {[...Array(20)].map((_, i) => (
+                        <div
+                          key={`loading-${i}`}
+                          className="skeleton-grain rounded-2xl sm:rounded-3xl bg-muted/40 border border-border/30 overflow-hidden animate-pulse"
+                        >
+                          <div className="aspect-16/10 w-full bg-muted/30" />
+                          <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
+                            <div className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/30" />
+                            <div className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/20" />
+                          </div>
                         </div>
+                      ))}
+                    </div>
+                    {isProLayout && (
+                      <div className="hidden lg:block border-x border-b border-border rounded-b-sm -mt-px">
+                        <ProTableSkeleton rows={5} />
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
 
                 {/* Universal Infinite Scroll Trigger - Placed inside content to ensure re-detection on tab change */}
@@ -788,9 +883,9 @@ export function HomeContent({ initialData }: HomeContentProps) {
                   >
                     {currentData.isFetchingMore && (
                       <div className="flex gap-2">
-                        <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
-                        <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
-                        <div className="w-2 h-2 rounded-full bg-primary animate-bounce" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce [animation-delay:-0.3s]" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce [animation-delay:-0.15s]" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce" />
                       </div>
                     )}
                   </div>
@@ -800,11 +895,11 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 {!currentData.hasMore &&
                   !currentData.isFetchingMore &&
                   currentData.events.length > 0 && (
-                    <div className="flex justify-center py-10 border-t border-border/10 mt-10">
-                      <p className="text-sm text-muted-foreground bg-muted/30 px-4 py-2 rounded-full border border-border/20">
+                    <div className="flex justify-center py-10 border-t border-border/30 mt-10">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                         {hasActiveFilters
-                          ? `Found ${currentData.events.length} markets matching your filters`
-                          : `Showing all ${currentData.events.length} markets`}
+                          ? `${currentData.events.length} markets match your filters`
+                          : `End of book — ${currentData.events.length} markets`}
                       </p>
                     </div>
                   )}
@@ -816,78 +911,75 @@ export function HomeContent({ initialData }: HomeContentProps) {
               currentData.events.length === 0 &&
               !currentData.error && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="text-center py-20"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-center py-24 border-t border-b border-border/40"
                 >
-                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-muted/50 mb-6">
-                    <Star className="h-10 w-10 text-muted-foreground" />
+                  <div className="inline-flex items-center justify-center w-14 h-14 border border-border/60 mb-6">
+                    <Star className="h-6 w-6 text-muted-foreground/70" />
                   </div>
-                  <h3 className="text-2xl font-black mb-2">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground mb-3">
+                    § No Results
+                  </p>
+                  <h3 className="font-editorial italic font-medium text-2xl sm:text-3xl mb-3">
                     {hasActiveFilters
-                      ? "No Matching Markets"
-                      : "No Markets Found"}
+                      ? "Nothing matches your filters."
+                      : "The book is empty right now."}
                   </h3>
-                  <p className="text-muted-foreground max-w-md mx-auto">
+                  <p className="text-muted-foreground max-w-md mx-auto text-sm">
                     {hasActiveFilters
-                      ? "No markets match your current filters. Try adjusting or clearing your filters."
+                      ? "Try widening your filters — or clear them entirely."
                       : viewMode === "categories"
-                        ? "No markets available right now. Check back soon!"
-                        : `Looks like there are no ${viewMode} markets right now. Check back soon or explore other categories!`}
+                        ? "Check back shortly as new markets come online."
+                        : `No ${viewMode} markets right now. Try another category.`}
                   </p>
                   {hasActiveFilters && (
-                    <Button
-                      variant="outline"
+                    <button
+                      type="button"
                       onClick={clearAllFilters}
-                      className="mt-4 rounded-xl"
+                      className="mt-6 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold underline underline-offset-4 decoration-foreground/40 hover:decoration-foreground transition-colors"
                     >
-                      Clear All Filters
-                    </Button>
+                      Clear all filters
+                    </button>
                   )}
                 </motion.div>
               )}
           </motion.div>
         </AnimatePresence>
 
-        {/* Bottom CTA Section - Hidden on mobile to reduce clutter */}
+        {/* Bottom CTA — editorial colophon */}
         <motion.section
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           viewport={{ once: true, margin: "-100px" }}
-          className="mt-12 sm:mt-20 mb-8 hidden sm:block"
+          className="mt-16 sm:mt-24 mb-8 hidden sm:block border-t border-b border-border/40"
         >
-          <div className="relative overflow-hidden rounded-3xl sm:rounded-4xl bg-linear-to-br from-purple-500/10 via-blue-500/5 to-emerald-500/10 border border-white/10 p-6 sm:p-8 md:p-12">
-            {/* Background Glow */}
-            <div className="absolute top-0 right-0 w-64 sm:w-96 h-64 sm:h-96 bg-purple-500/20 rounded-full blur-[80px] sm:blur-[100px] -translate-y-1/2 translate-x-1/2" />
-            <div className="absolute bottom-0 left-0 w-48 sm:w-64 h-48 sm:h-64 bg-blue-500/20 rounded-full blur-[60px] sm:blur-[80px] translate-y-1/2 -translate-x-1/2" />
-
-            <div className="relative z-10 text-center max-w-2xl mx-auto">
-              <h2 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight mb-3 sm:mb-4">
-                Ready to make your{" "}
-                <span className="bg-clip-text text-transparent bg-linear-to-r from-purple-500 to-blue-500">
-                  predictions
-                </span>
-                ?
-              </h2>
-              <p className="text-muted-foreground text-sm sm:text-lg mb-6 sm:mb-8">
-                Connect your wallet and start trading on real-world events.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-                <Button
-                  size="lg"
-                  className="rounded-xl sm:rounded-2xl px-6 sm:px-8 font-bold shadow-lg shadow-primary/25 active:scale-95 transition-transform"
-                >
-                  <Zap className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                  Start Trading
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="rounded-xl sm:rounded-2xl px-6 sm:px-8 font-bold active:scale-95 transition-transform"
-                >
-                  Learn More
-                </Button>
-              </div>
+          <div className="py-14 sm:py-20 text-center max-w-2xl mx-auto">
+            <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground mb-5">
+              § Colophon
+            </p>
+            <h2 className="font-editorial italic font-medium text-3xl sm:text-4xl md:text-5xl leading-[1.05] tracking-tight mb-5">
+              Every opinion is a position.
+            </h2>
+            <p className="text-muted-foreground text-sm sm:text-base max-w-md mx-auto mb-8">
+              Connect your wallet and start trading real-world events — no
+              onboarding, no spectator sport.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5">
+              <Button
+                size="lg"
+                className="h-11 px-6 sm:px-8 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold bg-foreground text-background hover:bg-foreground/90 active:scale-[0.98] transition-transform"
+              >
+                <Zap className="mr-2 h-4 w-4" />
+                Start Trading
+              </Button>
+              <Button
+                size="lg"
+                variant="ghost"
+                className="h-11 px-4 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold text-foreground hover:bg-foreground/5 underline underline-offset-4 decoration-foreground/40 hover:decoration-foreground transition-colors"
+              >
+                Learn More
+              </Button>
             </div>
           </div>
         </motion.section>

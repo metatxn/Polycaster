@@ -68,13 +68,14 @@ flowchart LR
 | Module | Key paths | Responsibility | Talks to |
 | --- | --- | --- | --- |
 | Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, preconnects to upstream APIs, and serves the main pages | Hooks, contexts, server-cache, API routes |
-| Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*` | Houses reusable UI primitives plus feature-level views for comments, deposits, portfolio, notifications, price alerts, and trading flows | App shell, hooks, contexts, wallet state |
+| Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/leaderboard/*`, `apps/web/src/components/notifications/*`, `apps/web/src/components/portfolio/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*` | Houses reusable UI primitives plus feature-level views for comments, deposits, leaderboard, portfolio, notifications, price alerts, and trading flows | App shell, hooks, contexts, wallet state |
 | Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
 | Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
 | Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/notifications/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*` | Powers live sports markets, CLOB notifications, and browser-side price alerting around trading activity | Web data hooks, websocket managers, Polymarket CLOB |
 | API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI | Polymarket APIs, OpenRouter, relayer proxy, Polygon RPC |
 | Web infra helpers | `apps/web/src/lib/*` | Caching, origin checks, auth helpers, websocket managers, server-side fetch memoization, RPC utilities, PostHog server capture | Cloudflare Worker runtime, browser, upstream APIs, PostHog |
+| Insider detection and backtesting | `apps/web/src/lib/insider/*`, `apps/web/src/app/api/whales/backtest/route.ts` | Scores suspicious trading with archetype-based detectors, replays the same logic against resolved markets, and exposes the heavyweight backtest API used by the whales backtest UI | Polymarket Gamma/Data/CLOB APIs, trader-history cache, whales pages |
 | Web constants and types | `apps/web/src/constants/*`, `apps/web/src/types/*` | Shared Polymarket constants, API enums, cache durations, and typed response shapes used across routes, hooks, and components | Web app shell, API routes, hooks |
 | Web platform guards | `apps/web/src/middleware.ts`, `apps/web/instrumentation-client.ts` | Applies security headers/CSP and bootstraps browser-side telemetry | Browser, Next.js runtime, PostHog |
 | Extension content runtime | `apps/extension/src/content/index.ts`, `apps/extension/src/content/*` | Bundles the content-script pipeline, detects supported sites, extracts post/article text, ranks relevant markets, and injects inline UI and trading panels | Background service worker, page bridge, Knoww APIs, Polymarket APIs |
@@ -94,12 +95,14 @@ flowchart LR
 | Event listing by tag | `apps/web/src/app/events/[tag]/page.tsx` | Category/tag-driven event browsing |
 | Event detail | `apps/web/src/app/events/detail/[slug]/page.tsx` | Event-level market list and event metadata view |
 | Sports | `apps/web/src/app/events/sports/page.tsx` | Sports-specific event/market views |
+| Markets index | `apps/web/src/app/markets/page.tsx` | Top-level market browsing and discovery page |
 | Market detail | `apps/web/src/app/markets/[slug]/page.tsx` | Detailed market trading and order book UI |
 | Portfolio | `apps/web/src/app/portfolio/page.tsx` | Positions, orders, trades, P&L, deposit/withdraw |
 | Live | `apps/web/src/app/live/page.tsx` | Live and scheduled sports markets with websocket-backed game state |
 | Notifications | `apps/web/src/app/notifications/page.tsx` | CLOB account notifications and dismissal UX |
 | Search | `apps/web/src/app/search/page.tsx` | Client-side market discovery with recent-search persistence |
 | Whales | `apps/web/src/app/whales/page.tsx` | Whale activity and suspicious/insider activity analysis |
+| Whale backtest | `apps/web/src/app/whales/backtest/page.tsx` | Runs the insider-detector backtest UI against recently resolved markets |
 | Leaderboard | `apps/web/src/app/leaderboard/page.tsx` | Trader leaderboard |
 | Profile | `apps/web/src/app/profile/[address]/page.tsx` | Public trader profile views |
 | Privacy | `apps/web/src/app/privacy/page.tsx` | User-facing privacy and data-retention disclosures |
@@ -334,9 +337,9 @@ Behavior:
 
 | Dependency | Where used | Why it exists |
 | --- | --- | --- |
-| Polymarket Gamma API | `apps/web/src/app/api/events/*`, `apps/web/src/app/api/tags/*`, `apps/web/src/app/api/comments/route.ts`, `apps/extension/src/content/api.ts` | Market/event/tag/comment discovery |
-| Polymarket CLOB API | `apps/web/src/app/api/auth/derive-api-key/route.ts`, `apps/web/src/app/api/markets/*`, `apps/extension/src/background/trading-handler.ts` | Order books, prices, API-key auth, order placement support |
-| Polymarket Data API | `apps/web/src/app/api/user/*`, `apps/web/src/app/api/leaderboard/route.ts`, `apps/web/src/app/api/profile/[address]/route.ts`, `apps/web/src/app/api/whales/*` | Portfolio, trader stats, leaderboard, composite profile data, whale activity |
+| Polymarket Gamma API | `apps/web/src/app/api/events/*`, `apps/web/src/app/api/tags/*`, `apps/web/src/app/api/comments/route.ts`, `apps/web/src/lib/insider/resolved-markets.ts`, `apps/extension/src/content/api.ts` | Market/event/tag/comment discovery plus resolved-market selection for insider backtesting |
+| Polymarket CLOB API | `apps/web/src/app/api/auth/derive-api-key/route.ts`, `apps/web/src/app/api/markets/*`, `apps/web/src/lib/insider/price-history.ts`, `apps/extension/src/background/trading-handler.ts` | Order books, prices, price-history lookups for timing clusters, API-key auth, order placement support |
+| Polymarket Data API | `apps/web/src/app/api/user/*`, `apps/web/src/app/api/leaderboard/route.ts`, `apps/web/src/app/api/profile/[address]/route.ts`, `apps/web/src/app/api/whales/*`, `apps/web/src/lib/insider/backtest.ts` | Portfolio, trader stats, leaderboard, composite profile data, whale activity, and historical trade scans for insider backtesting |
 | Polymarket User PnL API | `apps/web/src/app/api/user/pnl/route.ts`, `apps/web/src/app/api/user/pnl-history/route.ts`, `apps/web/src/app/api/profile/[address]/route.ts` | Time-series and aggregate P&L |
 | Polymarket Relayer | `apps/extension/src/background/relayer-client.ts` | Safe transaction execution for extension trading |
 | Polymarket Bridge API | `apps/web/src/hooks/use-bridge.ts`, `apps/extension/src/content/trading/bridge-api.ts` | Deposit/withdraw and supported asset quoting |

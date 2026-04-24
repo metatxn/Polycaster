@@ -116,7 +116,7 @@ export function SellPositionModal({
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <TrendingDown className="h-5 w-5 text-red-500" />
+            <TrendingDown className="h-5 w-5 text-red-600 dark:text-red-400" />
             Sell Position
           </DialogTitle>
         </DialogHeader>
@@ -147,8 +147,8 @@ export function SellPositionModal({
                 <span
                   className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                     position.outcome === "Yes"
-                      ? "bg-emerald-500/15 text-emerald-500"
-                      : "bg-red-500/15 text-red-500"
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                      : "bg-red-500/15 text-red-700 dark:text-red-300"
                   }`}
                 >
                   {position.outcome}
@@ -184,9 +184,9 @@ export function SellPositionModal({
                 <p
                   className={`font-semibold ${
                     position.currentPrice > position.avgPrice
-                      ? "text-emerald-500"
+                      ? "text-emerald-600 dark:text-emerald-400"
                       : position.currentPrice < position.avgPrice
-                        ? "text-red-500"
+                        ? "text-red-600 dark:text-red-400"
                         : ""
                   }`}
                 >
@@ -210,8 +210,8 @@ export function SellPositionModal({
                 <p
                   className={`font-semibold ${
                     position.unrealizedPnl >= 0
-                      ? "text-emerald-500"
-                      : "text-red-500"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400"
                   }`}
                 >
                   {formatCurrency(position.unrealizedPnl, true)} (
@@ -295,12 +295,12 @@ export function SellPositionModal({
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm text-muted-foreground">You Receive</span>
-              <span className="text-lg font-semibold text-emerald-500">
+              <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
                 {formatCurrency(sellEstimate.estimatedProceeds)}
               </span>
             </div>
             {sellEstimate.slippagePercent > 1 && (
-              <div className="flex justify-between items-center text-amber-500">
+              <div className="flex justify-between items-center text-amber-600 dark:text-amber-400">
                 <span className="text-sm">Slippage</span>
                 <span className="text-sm font-medium">
                   {sellEstimate.slippagePercent.toFixed(2)}%
@@ -308,7 +308,7 @@ export function SellPositionModal({
               </div>
             )}
             {!sellEstimate.canFill && shares > 0 && (
-              <div className="flex items-center gap-2 text-amber-500 text-xs">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 text-xs">
                 <AlertCircle className="h-3 w-3" />
                 <span>Order may not fully fill at current liquidity</span>
               </div>

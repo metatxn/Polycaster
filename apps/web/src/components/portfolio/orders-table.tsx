@@ -1,17 +1,7 @@
 import { motion } from "framer-motion";
-import { Coins, ListOrdered, RefreshCw, Trash2 } from "lucide-react";
+import { Coins, Loader2, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Tooltip,
   TooltipContent,
@@ -19,39 +9,133 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatCurrency, formatPrice } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import { EmptyState } from "./empty-state";
 import type { Order } from "./types";
 
-/**
- * Format expiration time as relative time remaining
- */
+const DESKTOP_GRID =
+  "grid grid-cols-[minmax(0,1fr)_72px_80px_168px_96px_88px] items-center gap-3";
+
+/** Format expiration as relative time remaining. */
 function formatExpirationRelative(
   expiration: string | null | undefined
 ): string {
   if (!expiration) return "GTC";
 
-  const expirationDate = new Date(expiration);
-  const now = new Date();
-  const diffMs = expirationDate.getTime() - now.getTime();
-
-  // If already expired
+  const diffMs = new Date(expiration).getTime() - Date.now();
   if (diffMs <= 0) return "Expired";
 
-  const diffSeconds = Math.floor(diffMs / 1000);
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  const diffHours = Math.floor(diffMinutes / 60);
-  const diffDays = Math.floor(diffHours / 24);
+  const s = Math.floor(diffMs / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
 
-  if (diffDays > 0) {
-    return `${diffDays} day${diffDays !== 1 ? "s" : ""} left`;
+  if (d > 0) return `${d}d left`;
+  if (h > 0) return `${h}h left`;
+  if (m > 0) return `${m}m left`;
+  return `${s}s left`;
+}
+
+function orderHref(order: Order): string | null {
+  if (!order.market?.eventSlug) return null;
+  const base = `/events/detail/${order.market.eventSlug}`;
+  return order.market.conditionId
+    ? `${base}?conditionId=${order.market.conditionId}`
+    : base;
+}
+
+function OrderIcon({ order, size }: { order: Order; size: number }) {
+  if (!order.market?.icon) {
+    return (
+      <div
+        className="rounded-sm bg-muted border border-border/50 shrink-0"
+        style={{ width: size, height: size }}
+      />
+    );
   }
-  if (diffHours > 0) {
-    return `${diffHours} hour${diffHours !== 1 ? "s" : ""} left`;
-  }
-  if (diffMinutes > 0) {
-    return `${diffMinutes} min${diffMinutes !== 1 ? "s" : ""} left`;
-  }
-  return `${diffSeconds} sec${diffSeconds !== 1 ? "s" : ""} left`;
+  return (
+    <div
+      className="relative rounded-sm overflow-hidden bg-muted border border-border/50 shrink-0"
+      style={{ width: size, height: size }}
+    >
+      <Image
+        src={order.market.icon}
+        alt={order.market?.question || "Market"}
+        fill
+        sizes={`${size}px`}
+        className="object-cover"
+      />
+    </div>
+  );
+}
+
+function FilledMeter({
+  filled,
+  total,
+  side,
+  showExpiration,
+  expiration,
+}: {
+  filled: number;
+  total: number;
+  side: string;
+  showExpiration: boolean;
+  expiration: string | null | undefined;
+}) {
+  const pct = total > 0 ? (filled / total) * 100 : 0;
+  const trackColor = side === "BUY" ? "bg-emerald-500" : "bg-red-500";
+  return (
+    <div className="flex flex-col gap-1 items-end font-mono text-[11px] tabular-nums">
+      <div className="flex items-center gap-2 w-full justify-end">
+        <div className="relative h-[3px] w-20 bg-muted overflow-hidden">
+          <div
+            className={cn("absolute inset-y-0 left-0", trackColor)}
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+          />
+        </div>
+        <span className="text-foreground whitespace-nowrap">
+          {filled.toFixed(1)} / {total.toFixed(1)}
+        </span>
+      </div>
+      {showExpiration && (
+        <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80">
+          {formatExpirationRelative(expiration)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ScoringBadge() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-amber-600 dark:text-amber-400 border-b border-amber-500/40 pb-px cursor-help">
+          <Coins className="h-3 w-3" />
+          Scoring
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p className="text-xs">This order is eligible for liquidity rewards.</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SideLabel({ side }: { side: string }) {
+  const isBuy = side === "BUY";
+  return (
+    <span
+      className={cn(
+        "font-mono text-[11px] uppercase tracking-[0.14em] font-semibold",
+        isBuy
+          ? "text-emerald-600 dark:text-emerald-400"
+          : "text-red-600 dark:text-red-400"
+      )}
+    >
+      {side}
+    </span>
+  );
 }
 
 export function OrdersTable({
@@ -75,9 +159,19 @@ export function OrdersTable({
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 space-y-2">
+      <div className="border-t border-border/40">
         {[1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+          <div
+            key={i}
+            className="flex items-center gap-3 px-3 py-4 border-b border-border/40"
+          >
+            <div className="h-9 w-9 rounded-sm bg-muted-foreground/10 animate-pulse shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-2/3 rounded bg-muted-foreground/10 animate-pulse" />
+              <div className="h-3 w-1/3 rounded bg-muted-foreground/10 animate-pulse" />
+            </div>
+            <div className="h-4 w-20 rounded bg-muted-foreground/10 animate-pulse" />
+          </div>
         ))}
       </div>
     );
@@ -86,309 +180,249 @@ export function OrdersTable({
   if (filteredOrders.length === 0) {
     return (
       <EmptyState
-        icon={ListOrdered}
         title="No open orders"
         description={
           searchQuery
-            ? "Try a different search term"
-            : "Place limit orders on any market to see them here. Limit orders let you set your own price."
+            ? "Try a different search term."
+            : "No limit orders working. Set a price on any market and it'll land here."
         }
         action={
-          !searchQuery ? { label: "Browse Markets", href: "/" } : undefined
+          !searchQuery
+            ? { label: "Browse markets", href: "/markets" }
+            : undefined
         }
       />
     );
   }
 
   return (
-    <>
-      {/* Mobile Card View */}
-      <div className="md:hidden space-y-3 p-4">
-        {filteredOrders.map((order) => (
-          <motion.div
-            key={order.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-background border border-border rounded-xl p-4 space-y-3"
-          >
-            <div className="flex items-start gap-3">
-              {/* Avatar */}
-              {order.market?.icon && (
-                <Link
-                  href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
-                  className="relative w-10 h-10 shrink-0 rounded-full overflow-hidden bg-muted"
-                >
-                  <Image
-                    src={order.market.icon}
-                    alt={order.market?.question || "Market"}
-                    fill
-                    sizes="40px"
-                    className="object-cover"
-                  />
-                </Link>
+    <TooltipProvider>
+      {/* Desktop — hairline grid */}
+      <div className="hidden md:block">
+        <div
+          className={cn(
+            DESKTOP_GRID,
+            "px-3 py-2.5 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+          )}
+        >
+          <span>Market</span>
+          <span className="text-center">Side</span>
+          <span className="text-right tabular-nums">Price</span>
+          <span className="text-right">Filled · Expires</span>
+          <span className="text-right tabular-nums">Total</span>
+          <span className="text-right">Action</span>
+        </div>
+
+        {filteredOrders.map((order, index) => {
+          const href = orderHref(order);
+          const isCancelling = cancellingOrderId === order.id;
+          const title =
+            order.market?.question || `Token ${order.tokenId.slice(0, 8)}…`;
+
+          return (
+            <motion.div
+              key={order.id}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(index * 0.015, 0.3) }}
+              className={cn(
+                DESKTOP_GRID,
+                "px-3 py-3.5 border-b border-border/40 hover:bg-muted/30 transition-colors"
               )}
-              <div className="flex-1 min-w-0">
-                {order.market?.eventSlug ? (
-                  <Link
-                    href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
-                    className="font-medium text-sm leading-tight hover:text-primary transition-colors line-clamp-2"
-                  >
-                    {order.market?.question ||
-                      `Token ${order.tokenId.slice(0, 8)}...`}
+            >
+              {href ? (
+                <Link
+                  href={href}
+                  className="flex items-center gap-3 min-w-0 group"
+                >
+                  <OrderIcon order={order} size={32} />
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate text-foreground">
+                      {title}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      {order.market?.outcome && (
+                        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                          {order.market.outcome}
+                        </span>
+                      )}
+                      {order.scoring && <ScoringBadge />}
+                    </div>
+                  </div>
+                </Link>
+              ) : (
+                <div className="flex items-center gap-3 min-w-0">
+                  <OrderIcon order={order} size={32} />
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate text-foreground">
+                      {title}
+                    </p>
+                    {order.scoring && (
+                      <div className="mt-0.5">
+                        <ScoringBadge />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="text-center">
+                <SideLabel side={order.side} />
+              </div>
+
+              <div className="text-right font-mono tabular-nums text-sm text-foreground">
+                {formatPrice(order.price)}
+              </div>
+
+              <FilledMeter
+                filled={order.filledSize}
+                total={order.size}
+                side={order.side}
+                showExpiration
+                expiration={order.expiration}
+              />
+
+              <div className="text-right font-mono tabular-nums text-sm text-foreground">
+                {formatCurrency(order.size * order.price)}
+              </div>
+
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => onCancel(order.id)}
+                  disabled={isCancelling}
+                  className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60 disabled:opacity-50"
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Cancelling</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="h-3 w-3" />
+                      <span>Cancel</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {/* Mobile — hairline stacked rows */}
+      <div className="md:hidden border-t border-border/40">
+        {filteredOrders.map((order, index) => {
+          const href = orderHref(order);
+          const isCancelling = cancellingOrderId === order.id;
+          const pct =
+            order.size > 0 ? (order.filledSize / order.size) * 100 : 0;
+          const title =
+            order.market?.question || `Token ${order.tokenId.slice(0, 8)}…`;
+
+          return (
+            <motion.div
+              key={order.id}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: Math.min(index * 0.015, 0.3) }}
+              className="border-b border-border/40 py-4 space-y-3"
+            >
+              <div className="flex items-start gap-3">
+                {href ? (
+                  <Link href={href} className="shrink-0">
+                    <OrderIcon order={order} size={40} />
                   </Link>
                 ) : (
-                  <p className="font-medium text-sm leading-tight line-clamp-2">
-                    {order.market?.question ||
-                      `Token ${order.tokenId.slice(0, 8)}...`}
-                  </p>
+                  <OrderIcon order={order} size={40} />
                 )}
-                <div className="flex items-center gap-2 mt-2">
-                  <span
-                    className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      order.side === "BUY"
-                        ? "bg-emerald-500/15 text-emerald-500"
-                        : "bg-red-500/15 text-red-500"
-                    }`}
-                  >
-                    {order.side}
-                  </span>
-                  {order.market?.outcome && (
-                    <span className="text-xs text-muted-foreground">
-                      {order.market.outcome}
-                    </span>
+                <div className="flex-1 min-w-0">
+                  {href ? (
+                    <Link
+                      href={href}
+                      className="font-medium text-sm leading-tight line-clamp-2 block text-foreground"
+                    >
+                      {title}
+                    </Link>
+                  ) : (
+                    <p className="font-medium text-sm leading-tight line-clamp-2 text-foreground">
+                      {title}
+                    </p>
                   )}
-                  {order.scoring && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                            <Coins className="h-3 w-3" />
-                            <span className="text-[10px] font-bold uppercase">
-                              Scoring
-                            </span>
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p className="text-xs">
-                            This order is eligible for liquidity rewards.
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
+                  <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                    <SideLabel side={order.side} />
+                    {order.market?.outcome && (
+                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                        {order.market.outcome}
+                      </span>
+                    )}
+                    {order.scoring && <ScoringBadge />}
+                  </div>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onCancel(order.id)}
-                disabled={cancellingOrderId === order.id}
-                className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 shrink-0"
-              >
-                {cancellingOrderId === order.id ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
 
-            <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                  Price
-                </p>
-                <p className="text-sm font-medium">
-                  {formatPrice(order.price)}
-                </p>
+              <div className="grid grid-cols-3 gap-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <div>
+                  Price{" "}
+                  <span className="tabular-nums normal-case text-foreground ml-1">
+                    {formatPrice(order.price)}
+                  </span>
+                </div>
+                <div className="text-center">
+                  Filled{" "}
+                  <span className="tabular-nums normal-case text-foreground ml-1">
+                    {order.filledSize.toFixed(1)}/{order.size.toFixed(1)}
+                  </span>
+                </div>
+                <div className="text-right">
+                  Total{" "}
+                  <span className="tabular-nums normal-case text-foreground font-semibold ml-1">
+                    {formatCurrency(order.size * order.price)}
+                  </span>
+                </div>
               </div>
-              <div className="text-center">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                  Filled
-                </p>
-                <p className="text-sm">
-                  {order.filledSize.toFixed(1)} / {order.size.toFixed(1)}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                  Total
-                </p>
-                <p className="text-sm font-medium">
-                  {formatCurrency(order.size * order.price)}
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border">
-              <span>{formatExpirationRelative(order.expiration)}</span>
-              {/* Progress indicator */}
-              <div className="flex items-center gap-1.5">
-                <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div className="flex items-center gap-3">
+                <div className="relative h-[3px] flex-1 bg-muted overflow-hidden">
                   <div
-                    className={`h-full rounded-full ${
+                    className={cn(
+                      "absolute inset-y-0 left-0",
                       order.side === "BUY" ? "bg-emerald-500" : "bg-red-500"
-                    }`}
-                    style={{
-                      width: `${(order.filledSize / order.size) * 100}%`,
-                    }}
+                    )}
+                    style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
                   />
                 </div>
-                <span>
-                  {((order.filledSize / order.size) * 100).toFixed(0)}%
+                <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                  {pct.toFixed(0)}%
                 </span>
               </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
 
-      {/* Desktop Table View */}
-      <div className="hidden md:block overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent border-b">
-              <TableHead className="w-[35%] min-w-[220px]">Market</TableHead>
-              <TableHead className="text-center min-w-[60px]">Side</TableHead>
-              <TableHead className="text-center min-w-[80px]">
-                Outcome
-              </TableHead>
-              <TableHead className="text-right min-w-[70px]">Price</TableHead>
-              <TableHead className="text-right min-w-[90px]">Filled</TableHead>
-              <TableHead className="text-right min-w-[70px]">Total</TableHead>
-              <TableHead className="text-center min-w-[100px]">
-                Expiration
-              </TableHead>
-              <TableHead className="text-center min-w-[80px]">
-                Rewards
-              </TableHead>
-              <TableHead className="w-[50px]"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredOrders.map((order) => (
-              <TableRow
-                key={order.id}
-                className="hover:bg-muted/50 transition-colors"
-              >
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    {/* Avatar */}
-                    {order.market?.icon && (
-                      <Link
-                        href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
-                        className="relative w-8 h-8 shrink-0 rounded-full overflow-hidden bg-muted"
-                      >
-                        <Image
-                          src={order.market.icon}
-                          alt={order.market?.question || "Market"}
-                          fill
-                          sizes="32px"
-                          className="object-cover"
-                        />
-                      </Link>
-                    )}
-                    {order.market?.eventSlug ? (
-                      <Link
-                        href={`/events/detail/${order.market.eventSlug}${order.market.conditionId ? `?conditionId=${order.market.conditionId}` : ""}`}
-                        className="font-medium text-sm hover:text-primary transition-colors line-clamp-2"
-                      >
-                        {order.market?.question ||
-                          `Token ${order.tokenId.slice(0, 8)}...`}
-                      </Link>
-                    ) : (
-                      <p className="font-medium text-sm line-clamp-2">
-                        {order.market?.question ||
-                          `Token ${order.tokenId.slice(0, 8)}...`}
-                      </p>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell className="text-center">
-                  <span
-                    className={`inline-flex text-xs font-medium px-2 py-1 rounded ${
-                      order.side === "BUY"
-                        ? "bg-emerald-500/15 text-emerald-500"
-                        : "bg-red-500/15 text-red-500"
-                    }`}
-                  >
-                    {order.side}
-                  </span>
-                </TableCell>
-                <TableCell className="text-center text-sm">
-                  {order.market?.outcome || "-"}
-                </TableCell>
-                <TableCell className="text-right">
-                  {formatPrice(order.price)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          order.side === "BUY" ? "bg-emerald-500" : "bg-red-500"
-                        }`}
-                        style={{
-                          width: `${(order.filledSize / order.size) * 100}%`,
-                        }}
-                      />
-                    </div>
-                    <span className="text-sm text-muted-foreground">
-                      {order.filledSize.toFixed(1)} / {order.size.toFixed(1)}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">
-                  {formatCurrency(order.size * order.price)}
-                </TableCell>
-                <TableCell className="text-center text-sm text-muted-foreground">
-                  {formatExpirationRelative(order.expiration)}
-                </TableCell>
-                <TableCell className="text-center">
-                  {order.scoring ? (
-                    <div className="flex justify-center">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                              <Coins className="h-3 w-3" />
-                              <span className="text-[10px] font-bold uppercase">
-                                Scoring
-                              </span>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p className="text-xs">
-                              This order is eligible for liquidity rewards.
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
+              <div className="flex items-center justify-between pt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span>{formatExpirationRelative(order.expiration)}</span>
+                <button
+                  type="button"
+                  onClick={() => onCancel(order.id)}
+                  disabled={isCancelling}
+                  className="inline-flex items-center gap-1 text-[11px] tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60 disabled:opacity-50"
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Cancelling</span>
+                    </>
                   ) : (
-                    <span className="text-muted-foreground/30">—</span>
+                    <>
+                      <X className="h-3 w-3" />
+                      <span>Cancel</span>
+                    </>
                   )}
-                </TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => onCancel(order.id)}
-                    disabled={cancellingOrderId === order.id}
-                    className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
-                  >
-                    {cancellingOrderId === order.id ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                </button>
+              </div>
+            </motion.div>
+          );
+        })}
       </div>
-    </>
+    </TooltipProvider>
   );
 }

@@ -9,13 +9,15 @@ import {
   type ISeriesApi,
   LineSeries,
   type LineStyle,
+  type LineType,
   TickMarkType,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
  * Price history data point from Polymarket API
@@ -26,21 +28,33 @@ interface PriceHistoryPoint {
   p: number; // Price (0-1)
 }
 
-interface PriceHistoryResponse {
-  success: boolean;
-  history?: PriceHistoryPoint[];
-  error?: string;
-}
-
 interface TokenInfo {
   tokenId: string;
   name: string;
   color: string;
 }
 
+// Stable empty-array references for unset props. Using `= []` inline in
+// the parameter destructuring re-allocates on every render, which makes
+// downstream useMemo/useEffect deps unstable and can chain into an
+// infinite render loop (most visible on the Graph tab + ALL time range
+// where the downstream effect calls `chart.timeScale().fitContent()`).
+const EMPTY_TOKENS: TokenInfo[] = [];
+const EMPTY_STRINGS: string[] = [];
+
 interface MarketPriceChartProps {
-  /** Array of token IDs with their names for fetching price history */
+  /** Primary series — always rendered. For multi-outcome events this is
+   *  the YES token for each candidate. */
   tokens?: TokenInfo[];
+  /** Secondary series — rendered only when the "Both" toggle is on. For
+   *  multi-outcome events this is the NO token for each candidate, paired
+   *  with `tokens` by index. */
+  secondaryTokens?: TokenInfo[];
+  /** Token ID of the currently-selected candidate. When provided, that
+   *  series renders with a thicker line and is the only one to show a
+   *  dashed current-price marker on the right edge. Other series still
+   *  render in their configured colors but stay visually subordinate. */
+  activeTokenId?: string;
   /** Fallback: outcome names (used if tokens not provided) */
   outcomes?: string[];
   /** Fallback: current outcome prices (used if tokens not provided) */
@@ -65,15 +79,38 @@ const timeRangeToStartTsOffset: Record<TimeRange, number> = {
   ALL: 365 * 24 * 60 * 60,
 };
 
-// Map time range to fidelity (resolution in minutes)
-const timeRangeToFidelity: Record<TimeRange, number> = {
+// Map time range to fidelity (resolution in minutes). Tightened from the
+// original set — fewer minutes per bucket means more data points, which
+// is the single biggest factor in how smooth a line looks. With the
+// monotonic-curve interpolation on, dense data + curved interpolation
+// reads as a proper time-series chart; sparse data reads as "hand-drawn".
+// ALL is handled separately by `computeFidelityFromSpan`: we don't want
+// a year of 1-minute data for mature markets, but we DO want minute-level
+// data for a market that's only been live for a day.
+const timeRangeToFidelity: Record<Exclude<TimeRange, "ALL">, number> = {
   "1H": 1,
-  "6H": 5,
-  "1D": 15,
-  "1W": 60,
-  "1M": 360,
-  ALL: 720,
+  "6H": 1,
+  "1D": 5,
+  "1W": 30,
+  "1M": 120,
 };
+
+/**
+ * Choose a fidelity for the "ALL" range that gives ~300-500 points no
+ * matter how old or young the market is. `spanSeconds` is the actual
+ * elapsed span we're fetching (startDate → now, or a 1-year fallback).
+ */
+function computeFidelityFromSpan(spanSeconds: number): number {
+  const spanMinutes = spanSeconds / 60;
+  // Target ~400 points. Fidelity has to land on a whole minute.
+  const raw = Math.max(1, Math.round(spanMinutes / 400));
+  // Snap to common buckets so the API cache has a chance to hit.
+  const buckets = [1, 5, 15, 30, 60, 120, 240, 360, 720, 1440];
+  for (const b of buckets) {
+    if (raw <= b) return b;
+  }
+  return 1440;
+}
 
 const DEFAULT_COLORS = [
   "hsl(25, 95%, 53%)", // Orange
@@ -82,44 +119,45 @@ const DEFAULT_COLORS = [
   "hsl(142, 76%, 36%)", // Green
 ];
 
+interface BatchPriceHistoryResponse {
+  success: boolean;
+  histories?: Array<{ tokenId: string; history: PriceHistoryPoint[] }>;
+  error?: string;
+}
+
 /**
- * Fetch price history for a token using startTs and fidelity
- * @see https://docs.polymarket.com/api-reference/pricing/get-price-history-for-a-traded-token
+ * Fetch price history for many tokens in a single round trip.
+ * The server fans out to Polymarket in parallel and each upstream call is
+ * individually cached (60s), so repeated batches reuse the cache.
  */
-async function fetchPriceHistory(
-  tokenId: string,
+async function fetchPriceHistoryBatch(
+  tokenIds: string[],
   startTs: number,
   fidelity: number
-): Promise<PriceHistoryPoint[]> {
-  if (!tokenId || tokenId.length < 10) {
-    return [];
-  }
+): Promise<Map<string, PriceHistoryPoint[]>> {
+  const valid = tokenIds.filter((id) => id && id.length > 10);
+  const result = new Map<string, PriceHistoryPoint[]>();
+  if (valid.length === 0) return result;
 
   try {
-    const params = new URLSearchParams({
-      startTs: startTs.toString(),
-      fidelity: fidelity.toString(),
+    const response = await fetch("/api/markets/price-history/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokenIds: valid, startTs, fidelity }),
     });
-
-    const response = await fetch(
-      `/api/markets/price-history/${tokenId}?${params.toString()}`
-    );
-
     if (!response.ok) {
-      console.warn(`Failed to fetch price history for ${tokenId}`);
-      return [];
+      console.warn("Batch price history fetch failed", response.status);
+      return result;
     }
-
-    const data: PriceHistoryResponse = await response.json();
-
-    if (!data.success || !data.history) {
-      return [];
+    const data = (await response.json()) as BatchPriceHistoryResponse;
+    if (!data.success || !data.histories) return result;
+    for (const entry of data.histories) {
+      result.set(entry.tokenId, entry.history);
     }
-
-    return data.history;
+    return result;
   } catch (error) {
-    console.error("Error fetching price history:", error);
-    return [];
+    console.error("Error fetching batch price history:", error);
+    return result;
   }
 }
 
@@ -162,15 +200,40 @@ function toLineData(
 }
 
 export function MarketPriceChart({
-  tokens = [],
-  outcomes = [],
-  outcomePrices = [],
+  tokens = EMPTY_TOKENS,
+  secondaryTokens = EMPTY_TOKENS,
+  activeTokenId,
+  outcomes = EMPTY_STRINGS,
+  outcomePrices = EMPTY_STRINGS,
+  startDate,
   defaultTimeRange = "ALL",
   onOutcomeRangeChanges,
 }: MarketPriceChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>(defaultTimeRange);
-  // Polymarket shows a single outcome by default; both-outcomes is opt-in.
-  // A single line reads as calm/focused; two lines read as busy.
+  // Hover-only flag labels, Polymarket-style. Each pill is positioned at
+  // the crosshair X (horizontal) and its own series' Y at the hovered time
+  // (vertical). Only populated while the cursor is inside the plot;
+  // cleared on crosshair leave. The persistent top-left text legend (see
+  // `legendItems`) carries the at-rest identity.
+  const [hoverLabels, setHoverLabels] = useState<{
+    x: number;
+    // When true the pill is anchored to the RIGHT of its `x` (grows
+    // leftward) — used when the cursor is near the right edge so labels
+    // don't spill into the price-scale gutter or the trading panel next
+    // to the chart.
+    flipped: boolean;
+    items: Array<{
+      key: string;
+      name: string;
+      color: string;
+      pct: string;
+      y: number;
+    }>;
+  } | null>(null);
+  // `showBothOutcomes` controls whether the secondary series (NO tokens for
+  // multi-outcome, NO token for single-market) are layered in alongside the
+  // primary YES series. Off by default: a cleaner view that only shows YES
+  // trajectories. Toggling on adds matching NO lines for each market.
   const [showBothOutcomes, setShowBothOutcomes] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -180,15 +243,54 @@ export function MarketPriceChart({
   // (from `outcomePrices`) rather than the last history-endpoint trade,
   // which can be days stale or a dust-trade outlier.
   const currentPriceLineRef = useRef<Map<string, IPriceLine>>(new Map());
+  // Latest props kept in refs so `updateLabels` can stay a stable callback
+  // across renders. Avoids re-subscribing to visible-range / resize events.
+  const outcomePricesRef = useRef<string[]>(outcomePrices);
+  outcomePricesRef.current = outcomePrices;
 
-  // Calculate startTs based on time range (seconds since epoch)
-  const startTs =
-    Math.floor(Date.now() / 1000) - timeRangeToStartTsOffset[timeRange];
-  const fidelity = timeRangeToFidelity[timeRange];
+  // Crosshair hover state kept in refs so the update callback can stay
+  // stable. Null when the cursor is outside the plot — `updateHoverLabels`
+  // clears the label state in that case. When set, `hoverValuesRef` holds
+  // the per-series value at the hovered time and `crosshairXRef` holds
+  // the cursor x (in container pixels) so labels can follow horizontally.
+  const hoverValuesRef = useRef<Map<string, number> | null>(null);
+  const crosshairXRef = useRef<number | null>(null);
+
+  // Calculate startTs + fidelity per time range. For "ALL" we prefer the
+  // market's own start date (so a 2-day-old market doesn't ask for a year
+  // of data with 12-hour buckets — that's what produced the "hand-drawn"
+  // look with ~4 visible points). Fidelity is then chosen to target ~400
+  // data points across that span, which reads as a smooth curve once the
+  // monotonic Curved interpolation is applied.
+  const nowSec = Math.floor(Date.now() / 1000);
+  let startTs: number;
+  let fidelity: number;
+  if (timeRange === "ALL") {
+    const parsedStart = startDate
+      ? Math.floor(new Date(startDate).getTime() / 1000)
+      : Number.NaN;
+    const fallback = nowSec - timeRangeToStartTsOffset.ALL;
+    startTs = Number.isFinite(parsedStart)
+      ? Math.min(parsedStart, nowSec)
+      : fallback;
+    fidelity = computeFidelityFromSpan(Math.max(60, nowSec - startTs));
+  } else {
+    startTs = nowSec - timeRangeToStartTsOffset[timeRange];
+    fidelity = timeRangeToFidelity[timeRange];
+  }
+
+  // Combine primary + secondary tokens into the fetch set. When "Both" is
+  // off, the series builder hides the secondary rows; the fetch still runs
+  // so toggling on is instant (no new network round-trip).
+  const allFetchTokens = useMemo(
+    () => [...tokens, ...secondaryTokens],
+    [tokens, secondaryTokens]
+  );
 
   // Check if we have valid token IDs
   const hasValidTokens =
-    tokens.length > 0 && tokens.some((t) => t.tokenId?.length > 10);
+    allFetchTokens.length > 0 &&
+    allFetchTokens.some((t) => t.tokenId?.length > 10);
 
   // Fetch price history for all tokens
   const {
@@ -199,20 +301,22 @@ export function MarketPriceChart({
   } = useQuery({
     queryKey: [
       "priceHistory",
-      tokens.map((t) => t.tokenId),
+      allFetchTokens.map((t) => t.tokenId),
       timeRange,
       fidelity,
     ],
     queryFn: async () => {
-      const histories = await Promise.all(
-        tokens.map(async (token) => ({
-          tokenId: token.tokenId,
-          name: token.name,
-          color: token.color,
-          history: await fetchPriceHistory(token.tokenId, startTs, fidelity),
-        }))
+      const byToken = await fetchPriceHistoryBatch(
+        allFetchTokens.map((t) => t.tokenId),
+        startTs,
+        fidelity
       );
-      return histories;
+      return allFetchTokens.map((token) => ({
+        tokenId: token.tokenId,
+        name: token.name,
+        color: token.color,
+        history: byToken.get(token.tokenId) ?? [],
+      }));
     },
     enabled: hasValidTokens,
     staleTime: 60 * 1000,
@@ -244,12 +348,15 @@ export function MarketPriceChart({
     }>;
 
     if (hasRealData) {
+      // Use live `allFetchTokens` colors/names first so selection-driven
+      // recoloring (e.g. highlighting the selected candidate) takes effect
+      // even when the React Query cache still holds the old values.
       resolved = priceHistories.map((ph, idx) => ({
         key: ph.tokenId,
-        name: ph.name,
+        name: allFetchTokens[idx]?.name || ph.name,
         color:
+          allFetchTokens[idx]?.color ||
           ph.color ||
-          tokens[idx]?.color ||
           DEFAULT_COLORS[idx % DEFAULT_COLORS.length],
         data: toLineData(ph.history),
       }));
@@ -274,17 +381,146 @@ export function MarketPriceChart({
       resolved = [];
     }
 
-    return showBothOutcomes ? resolved : resolved.slice(0, 1);
+    // `resolved` is keyed 1:1 with `allFetchTokens`: first N entries are the
+    // primary (YES) series, next M entries are the secondary (NO) series.
+    // Without "Both", slice off the secondary block.
+    if (!showBothOutcomes && secondaryTokens.length > 0) {
+      return resolved.slice(0, tokens.length);
+    }
+    return resolved;
   }, [
     priceHistories,
     isLoading,
     isFetching,
+    allFetchTokens,
     tokens,
+    secondaryTokens,
     outcomes,
     outcomePrices,
     timeRange,
     showBothOutcomes,
   ]);
+
+  // Keep the latest `series` reachable from stable callbacks (visible-range,
+  // resize). Direct closure capture would require re-subscribing to those
+  // events every render.
+  const seriesForLabelsRef = useRef(series);
+  seriesForLabelsRef.current = series;
+
+  // Hover-only label refresh. Reads the latest crosshair state from refs,
+  // emits flag labels positioned at the cursor X + each series' Y at that
+  // hovered time, or clears the state when the cursor is off the plot.
+  // Stable (empty deps) so crosshair/resize/visible-range subscriptions
+  // don't need to rewire on each render.
+  const updateHoverLabels = useCallback(() => {
+    const x = crosshairXRef.current;
+    const hoverMap = hoverValuesRef.current;
+    if (x === null || !hoverMap || !chartRef.current) {
+      setHoverLabels((prev) => (prev === null ? prev : null));
+      return;
+    }
+
+    const currentSeries = seriesForLabelsRef.current;
+    const items: Array<{
+      key: string;
+      name: string;
+      color: string;
+      pct: string;
+      y: number;
+    }> = [];
+
+    for (const s of currentSeries) {
+      const lineApi = seriesRef.current.get(s.key);
+      if (!lineApi || s.data.length === 0) continue;
+      const price = hoverMap.get(s.key);
+      if (price === undefined) continue;
+
+      const y = lineApi.priceToCoordinate(price);
+      if (y === null || !Number.isFinite(y)) continue;
+
+      items.push({
+        key: s.key,
+        name: s.name,
+        color: s.color,
+        pct: `${price.toFixed(1)}%`,
+        y,
+      });
+    }
+
+    // Collision-dodge + viewport clamping. Pills are sorted by Y, then
+    // pushed downward so they don't stack. A second pass pulls them back
+    // up if the lowest one would fall below the plot area — otherwise the
+    // bottom cluster (3 markets at 2-3%) would sit on top of the time-
+    // axis labels.
+    const MIN_GAP = 22;
+    const HALF = 11; // roughly the pill's half-height for center offset
+    items.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < items.length; i++) {
+      if (items[i].y - items[i - 1].y < MIN_GAP) {
+        items[i].y = items[i - 1].y + MIN_GAP;
+      }
+    }
+
+    // Ask lightweight-charts for the actual plot area dimensions. The
+    // container's clientHeight/clientWidth include the time-axis strip
+    // at the bottom and the price-scale gutter on the right, so using
+    // them directly was letting pills overflow into those regions.
+    const container = containerRef.current;
+    const containerW = container?.clientWidth ?? 800;
+    const containerH = container?.clientHeight ?? 400;
+    const chart = chartRef.current;
+    const timeAxisH = chart ? chart.timeScale().height() : 28;
+    const priceAxisW = chart ? chart.priceScale("right").width() : 56;
+    const plotBottom = containerH - timeAxisH;
+    const plotRight = containerW - priceAxisW;
+
+    const bottomBound = plotBottom - HALF - 4;
+    const topBound = HALF + 4;
+    if (items.length > 0) {
+      const overflow = items[items.length - 1].y - bottomBound;
+      if (overflow > 0) {
+        for (const it of items) it.y = Math.max(topBound, it.y - overflow);
+        // Re-resolve collisions after the shift.
+        for (let i = 1; i < items.length; i++) {
+          if (items[i].y - items[i - 1].y < MIN_GAP) {
+            items[i].y = items[i - 1].y + MIN_GAP;
+          }
+        }
+      }
+    }
+
+    // Horizontal flip: if there isn't room for ~200px of label between
+    // the cursor and the start of the price-scale gutter, anchor pills
+    // to the LEFT of the cursor so they grow inward.
+    const LABEL_RESERVE = 200;
+    const flipped = x + LABEL_RESERVE > plotRight;
+
+    setHoverLabels({ x, flipped, items });
+  }, []);
+
+  // Persistent top-left legend — at-rest identity (name + live %) for
+  // every series. Mirrors Polymarket's resting state. Hover values live in
+  // the flag labels, not here, so this renders the live prices only.
+  const legendItems = useMemo(
+    () =>
+      series.map((s, idx) => {
+        const rawLive = outcomePrices[idx];
+        const liveNum =
+          rawLive !== undefined ? Number.parseFloat(rawLive) : Number.NaN;
+        const pct = Number.isFinite(liveNum)
+          ? liveNum * 100
+          : s.data.length > 0
+            ? s.data[s.data.length - 1].value
+            : null;
+        return {
+          key: s.key,
+          name: s.name,
+          color: s.color,
+          pct: pct !== null ? `${Math.round(pct)}%` : "—",
+        };
+      }),
+    [series, outcomePrices]
+  );
 
   // Initialize / teardown the chart once. All per-render updates go through
   // setData / applyOptions below, not recreation, so switching time ranges
@@ -315,7 +551,10 @@ export function MarketPriceChart({
         // line. With top:0.02 a high current price like 73% mapped to the
         // very top of the canvas and the horizontal price-line cut
         // through the legend text.
-        scaleMargins: { top: 0.1, bottom: 0.02 },
+        // Extra top headroom so the highest axis label (e.g. 70%) has
+        // room to render without clipping against the top edge of the
+        // plot. Bottom stays tight — 0% sits at the baseline anyway.
+        scaleMargins: { top: 0.16, bottom: 0.04 },
       },
       timeScale: {
         borderVisible: false,
@@ -382,8 +621,15 @@ export function MarketPriceChart({
       if (!entry) return;
       const { width, height } = entry.contentRect;
       chart.applyOptions({ width, height });
+      // Price-to-coordinate mapping shifts with canvas height; re-emit
+      // labels if the user is mid-hover.
+      updateHoverLabels();
     });
     ro.observe(container);
+
+    // Visible-range changes (pan/zoom, time-range switch) also move the
+    // price auto-fit, so re-emit labels if hovering.
+    chart.timeScale().subscribeVisibleLogicalRangeChange(updateHoverLabels);
 
     // React to Tailwind dark-class flips so colors stay correct across themes.
     const themeObserver = new MutationObserver(() => {
@@ -411,20 +657,63 @@ export function MarketPriceChart({
       attributeFilter: ["class"],
     });
 
-    // Tooltip driven by crosshair moves — DOM overlay, not part of the canvas.
+    // Crosshair handler: updates the end-of-line flag labels to show the
+    // hovered-time values (so they track the cursor vertically, like
+    // Polymarket) and renders a minimal date-only tooltip. The per-series
+    // name + value was moved out of the tooltip into the flag labels
+    // themselves, so the tooltip is now a single timestamp badge.
     const tooltip = tooltipRef.current;
     const crosshairHandler: Parameters<typeof chart.subscribeCrosshairMove>[0] =
       (param) => {
-        if (!tooltip) return;
-        if (
-          !param.point ||
-          param.point.x < 0 ||
-          param.point.y < 0 ||
-          !param.time
-        ) {
-          tooltip.style.display = "none";
+        const point = param.point;
+        if (!point || point.x < 0 || point.y < 0 || !param.time) {
+          if (tooltip) tooltip.style.display = "none";
+          if (
+            hoverValuesRef.current !== null ||
+            crosshairXRef.current !== null
+          ) {
+            hoverValuesRef.current = null;
+            crosshairXRef.current = null;
+            updateHoverLabels();
+          }
           return;
         }
+
+        // Collect each series' value at the hovered time so every flag
+        // label can snap to its own y. `param.seriesData` only contains
+        // the crosshair-tracked series, so we look up the nearest data
+        // point in each series' own array using the hovered timestamp.
+        const hoverTime = param.time as number;
+        const hoverMap = new Map<string, number>();
+        for (const s of seriesForLabelsRef.current) {
+          if (s.data.length === 0) continue;
+          const data = s.data;
+          // Binary search for the first point >= hoverTime; data is
+          // time-sorted by construction.
+          let lo = 0;
+          let hi = data.length - 1;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if ((data[mid].time as number) < hoverTime) lo = mid + 1;
+            else hi = mid;
+          }
+          let idx = lo;
+          // Pick the nearer of idx and idx-1.
+          if (
+            idx > 0 &&
+            Math.abs((data[idx - 1].time as number) - hoverTime) <
+              Math.abs((data[idx].time as number) - hoverTime)
+          ) {
+            idx = idx - 1;
+          }
+          const pt = data[idx];
+          if (pt) hoverMap.set(s.key, pt.value);
+        }
+        hoverValuesRef.current = hoverMap.size > 0 ? hoverMap : null;
+        crosshairXRef.current = hoverMap.size > 0 ? point.x : null;
+        updateHoverLabels();
+
+        if (!tooltip) return;
 
         const timeSeconds = param.time as UTCTimestamp;
         const d = new Date((timeSeconds as number) * 1000);
@@ -437,55 +726,18 @@ export function MarketPriceChart({
           hour12: true,
         });
 
-        type Row = { label: string; value: number; color: string };
-        const rows: Row[] = [];
-        for (const [key, s] of seriesRef.current.entries()) {
-          const pointData = param.seriesData.get(s) as
-            | { value?: number }
-            | undefined;
-          if (!pointData || typeof pointData.value !== "number") continue;
-          const conf = seriesConfigRef.current.get(key);
-          if (!conf) continue;
-          rows.push({
-            label: conf.name,
-            value: pointData.value,
-            color: conf.color,
-          });
-        }
-        rows.sort((a, b) => b.value - a.value);
+        tooltip.innerHTML = `<div style="font-size:11px;color:${colors.text};font-weight:500;white-space:nowrap;">${dateLabel}</div>`;
 
-        if (rows.length === 0) {
-          tooltip.style.display = "none";
-          return;
-        }
-
-        tooltip.innerHTML = `
-        <div style="font-size:11px;color:${colors.text};margin-bottom:6px;font-weight:500;">${dateLabel}</div>
-        <div style="display:flex;flex-direction:column;gap:4px;">
-          ${rows
-            .map(
-              (r) => `
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;color:white;background:${r.color};">${r.label}</span>
-                  <span style="font-size:13px;font-weight:700;">${r.value.toFixed(1)}%</span>
-                </div>`
-            )
-            .join("")}
-        </div>
-      `;
-
-        // Position tooltip near the cursor, clamped to container bounds.
+        // Position the badge near the cursor, clamped to container.
         const containerRect = container.getBoundingClientRect();
-        const tipWidth = tooltip.offsetWidth || 160;
-        const tipHeight = tooltip.offsetHeight || 60;
-        let left = param.point.x + 16;
-        let top = param.point.y + 16;
+        const tipWidth = tooltip.offsetWidth || 120;
+        const tipHeight = tooltip.offsetHeight || 24;
+        let left = point.x + 12;
+        let top = point.y - tipHeight - 8;
         if (left + tipWidth > containerRect.width) {
-          left = param.point.x - tipWidth - 16;
+          left = point.x - tipWidth - 12;
         }
-        if (top + tipHeight > containerRect.height) {
-          top = param.point.y - tipHeight - 16;
-        }
+        if (top < 0) top = point.y + 12;
         tooltip.style.display = "block";
         tooltip.style.left = `${Math.max(0, left)}px`;
         tooltip.style.top = `${Math.max(0, top)}px`;
@@ -494,6 +746,7 @@ export function MarketPriceChart({
 
     return () => {
       chart.unsubscribeCrosshairMove(crosshairHandler);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(updateHoverLabels);
       themeObserver.disconnect();
       ro.disconnect();
       chart.remove();
@@ -502,7 +755,7 @@ export function MarketPriceChart({
       seriesConfigRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [updateHoverLabels]);
 
   // Keep a ref to the current series config so the crosshair handler can
   // read the latest names / colors without retriggering the chart-init effect.
@@ -526,31 +779,30 @@ export function MarketPriceChart({
       }
     }
 
-    // Upsert each current series.
+    // Upsert each current series. When `activeTokenId` is provided, that
+    // series gets a thicker line and is the ONLY one with a right-axis
+    // current-price marker. All other series still render in their own
+    // colors but drop the axis labels to keep the right gutter clean.
     for (const s of series) {
       let line = seriesRef.current.get(s.key);
       const isFirst = s.key === series[0]?.key;
+      const isActive = activeTokenId ? s.key === activeTokenId : isFirst; // fallback: no explicit active → first series wins
       if (!line) {
         line = chart.addSeries(LineSeries, {
           color: s.color,
-          lineWidth: 2,
-          // We manage the current-price marker ourselves (see below) using
-          // the parent-supplied live on-chain price — disable the built-in
-          // dashed line + right-axis badge that otherwise latches onto the
-          // last data point, which can be days stale or an outlier trade.
+          lineWidth: isActive ? 3 : 2,
+          // Monotonic curved interpolation between points — mirrors the
+          // polished Recharts/Polymarket look. Straight-segment default
+          // (LineType.Simple) reads as "hand-drawn" when points are sparse.
+          lineType: 2 satisfies LineType, // Curved
           priceLineVisible: false,
           lastValueVisible: false,
-          // No title on the series itself — the managed price line below
-          // already renders "Yes 73%" on the right axis. Setting `title`
-          // here would duplicate the outcome name next to it.
           crosshairMarkerRadius: 4,
         });
         seriesRef.current.set(s.key, line);
 
         // "Tipping point" reference line at 50% — anchored to the first
-        // series so there's exactly one across the whole chart regardless
-        // of single/both-outcomes mode. Used as a visual anchor for "which
-        // side of the coin flip is the market currently leaning to".
+        // series so there's exactly one across the whole chart.
         if (isFirst) {
           line.createPriceLine({
             price: 50,
@@ -562,15 +814,22 @@ export function MarketPriceChart({
           });
         }
       } else {
-        line.applyOptions({ color: s.color });
+        // Re-apply lineType too: when this effect re-runs on an existing
+        // series, `applyOptions` is the only path to update curve style.
+        // Skipping it here meant series created before the Curved default
+        // stayed as straight segments across HMR / time-range switches.
+        line.applyOptions({
+          color: s.color,
+          lineWidth: isActive ? 3 : 2,
+          lineType: 2 satisfies LineType, // Curved
+        });
       }
       line.setData(s.data);
       seriesConfigRef.current.set(s.key, { name: s.name, color: s.color });
 
-      // Current-price marker — prefer the parent's `outcomePrices` (live
-      // on-chain) over the last historical data point. Always in sync
-      // across outcomes (Yes + No always sum to 100), unlike last-trade
-      // values which can come from different moments per token.
+      // Current-price marker — only for the active series. Drawing a
+      // dashed line + label per candidate in a 10-way chart made the
+      // right axis unreadable with overlapping labels.
       const idx = series.findIndex((x) => x.key === s.key);
       const currentRaw = outcomePrices[idx];
       const currentNum =
@@ -586,14 +845,17 @@ export function MarketPriceChart({
         line.removePriceLine(previousPriceLine);
         currentPriceLineRef.current.delete(s.key);
       }
-      if (currentPct !== null) {
+      if (isActive && currentPct !== null) {
         const newPriceLine = line.createPriceLine({
           price: currentPct,
           color: s.color,
           lineWidth: 1,
           lineStyle: 2 satisfies LineStyle, // dashed
-          axisLabelVisible: true,
-          title: s.name,
+          // Right-axis name label suppressed — the top-left legend already
+          // carries the active series' name + %, so duplicating it on the
+          // axis would clip against the top grid line.
+          axisLabelVisible: false,
+          title: "",
         });
         currentPriceLineRef.current.set(s.key, newPriceLine);
       }
@@ -610,7 +872,13 @@ export function MarketPriceChart({
     if (series.some((s) => s.data.length > 0)) {
       chart.timeScale().fitContent();
     }
-  }, [series, outcomePrices]);
+
+    // If the user is mid-hover when data/series changes, re-emit labels
+    // so their Y positions track the new auto-fit. rAF so
+    // `priceToCoordinate` reads the committed layout.
+    const rafId = requestAnimationFrame(() => updateHoverLabels());
+    return () => cancelAnimationFrame(rafId);
+  }, [series, outcomePrices, activeTokenId, updateHoverLabels]);
 
   // Report per-outcome price-change deltas to the parent. Unchanged from the
   // recharts implementation.
@@ -650,39 +918,28 @@ export function MarketPriceChart({
 
   const timeRanges: TimeRange[] = ["1H", "6H", "1D", "1W", "1M", "ALL"];
 
-  // Legend rendered as an overlay inside the chart area (Polymarket-style).
-  // Previously the parent page rendered its own legend in a CardHeader,
-  // adding ~48px of vertical chrome above the plot. Embedding it here lets
-  // the parent drop that header and the chart sits flush at the top of
-  // the card. We still show each series' name + current price.
-  const legendItems = useMemo(
-    () =>
-      series.map((s, idx) => {
-        // Mirror the current-price-marker logic: prefer the parent's live
-        // `outcomePrices[idx]` (always in sync across outcomes) over the
-        // last historical data point, which can be days stale or an
-        // outlier trade. Fall back to the last data point only if no
-        // live price is available.
-        const currentRaw = outcomePrices[idx];
-        const currentNum =
-          currentRaw !== undefined ? Number.parseFloat(currentRaw) : Number.NaN;
-        const pct = Number.isFinite(currentNum)
-          ? currentNum * 100
-          : s.data.length > 0
-            ? s.data[s.data.length - 1].value
-            : null;
-        return {
-          key: s.key,
-          name: s.name,
-          color: s.color,
-          pct: pct !== null ? `${Math.round(pct)}%` : "—",
-        };
-      }),
-    [series, outcomePrices]
-  );
-
   return (
     <div className="space-y-2">
+      {/* Persistent top-left legend — rendered ABOVE the plot as a sibling
+          (not an overlay) so it can't collide with grid lines or axis
+          labels at the top of the chart. Mirrors Polymarket's resting-
+          state identity row. */}
+      {legendItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs font-medium">
+          {legendItems.map((item) => (
+            <div key={item.key} className="flex items-center gap-1.5">
+              <span
+                className="h-2 w-2 rounded-full shrink-0"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="text-foreground">{item.name}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {item.pct}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="w-full min-h-[200px] h-[220px] sm:h-[300px] md:h-[360px] lg:h-[400px] max-h-[60vh] relative">
         {isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -697,26 +954,37 @@ export function MarketPriceChart({
           ref={containerRef}
           role="img"
           aria-label="Price history chart"
-          className="absolute inset-0"
+          className={cn(
+            "absolute inset-0 transition-opacity duration-500 ease-out",
+            isLoading ? "opacity-0" : "opacity-100"
+          )}
         />
-        {/* Floating legend overlay — top-left corner of the plot. Each
-            item has its own pill with a translucent background + blur so
-            the chart line underneath doesn't pass through the text. Pointer
-            events disabled so hover still hits the canvas beneath. */}
-        {legendItems.length > 0 && (
-          <div className="pointer-events-none absolute left-3 top-2 z-10 flex flex-wrap items-center gap-2 text-xs font-medium">
-            {legendItems.map((item) => (
+        {/* Hover-only flag labels, Polymarket-style. Positioned at the
+            crosshair X (so they follow the cursor horizontally) and each
+            series' value-Y for the hovered time (so they track vertically
+            as the cursor moves). Collision-dodged by `updateHoverLabels`. */}
+        {hoverLabels && hoverLabels.items.length > 0 && (
+          <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+            {hoverLabels.items.map((item) => (
               <div
                 key={item.key}
-                className="flex items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-2 py-0.5 shadow-sm backdrop-blur-sm"
+                className="absolute flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm tabular-nums"
+                style={{
+                  left: `${
+                    hoverLabels.flipped
+                      ? hoverLabels.x - 10
+                      : hoverLabels.x + 10
+                  }px`,
+                  top: `${item.y}px`,
+                  transform: hoverLabels.flipped
+                    ? "translate(-100%, -50%)"
+                    : "translateY(-50%)",
+                  backgroundColor: item.color,
+                  textShadow: "0 1px 2px rgba(0,0,0,0.35)",
+                }}
               >
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: item.color }}
-                />
-                <span className="text-foreground">
-                  {item.name} {item.pct}
-                </span>
+                <span className="truncate max-w-[180px]">{item.name}</span>
+                <span className="opacity-90">{item.pct}</span>
               </div>
             ))}
           </div>

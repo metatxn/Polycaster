@@ -1,5 +1,4 @@
 import { AlertCircle, Info } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -22,23 +21,22 @@ export function NegRiskBadge({
         {iconOnly ? (
           <span
             className={cn(
-              "inline-flex items-center justify-center h-8 w-8 rounded-md border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground cursor-help text-rose-500",
+              "inline-flex items-center justify-center h-8 w-8 border border-border/60 hover:bg-foreground/5 cursor-help text-foreground",
               className
             )}
           >
             <AlertCircle className="h-4 w-4" />
           </span>
         ) : (
-          <Badge
-            variant="destructive"
+          <span
             className={cn(
-              "text-xs cursor-help flex items-center gap-1",
+              "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-muted-foreground border border-border/60 cursor-help",
               className
             )}
           >
             Neg Risk
             <Info className="h-3 w-3" />
-          </Badge>
+          </span>
         )}
       </TooltipTrigger>
       <TooltipContent className="max-w-xs" side="top">

@@ -1,19 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  Activity,
-  Droplets,
-  Loader2,
-  Search,
-  Tag,
-  TrendingUp,
-  X,
-} from "lucide-react";
+import { Loader2, Search, X } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Input } from "@/components/ui/input";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type SearchEvent, useSearch } from "@/hooks/use-search";
 import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -66,11 +57,20 @@ function addLastSearchedMarket(market: LastSearchedMarket) {
 interface MarketSearchProps {
   className?: string;
   placeholder?: string;
+  /** Restrict results to events tagged with this slug. When set, the
+   *  dropdown only surfaces matches inside the current category and
+   *  the empty / footer state reflects the scope. */
+  tagSlug?: string;
+  /** Display label for the scope (e.g. "Politics", "Sports"). Used in
+   *  the placeholder, empty state, and result footer. */
+  tagLabel?: string;
 }
 
 export function MarketSearch({
   className,
-  placeholder = "Search markets...",
+  placeholder,
+  tagSlug,
+  tagLabel,
 }: MarketSearchProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -81,11 +81,30 @@ export function MarketSearch({
   // Debounce the search query by 300ms
   const debouncedQuery = useDebouncedValue(query, 300);
 
-  // Use debounced query for API calls
-  const { data, isLoading } = useSearch(debouncedQuery, 8);
+  // When scoped by tag, ask upstream for more results so post-filter
+  // still yields enough matches — most queries return a few on-topic
+  // hits per page.
+  const fetchLimit = tagSlug ? 30 : 8;
+  const { data, isLoading } = useSearch(debouncedQuery, fetchLimit);
 
   // Show loading state while typing (before debounce completes)
   const isTyping = query !== debouncedQuery && query.length >= 2;
+
+  // Scope filter: when a tagSlug is provided, only surface events
+  // whose tag list includes that slug. Keeps /events/politics from
+  // returning crypto hits and vice-versa. Upstream doesn't support a
+  // tag filter on the search endpoint, so this is client-side.
+  const scopedEvents = useMemo(() => {
+    if (!data?.events) return [];
+    if (!tagSlug) return data.events.slice(0, 8);
+    return data.events
+      .filter((e) => e.tags?.some((t) => t.slug === tagSlug))
+      .slice(0, 8);
+  }, [data?.events, tagSlug]);
+
+  const effectivePlaceholder =
+    placeholder ??
+    (tagLabel ? `Search ${tagLabel.toLowerCase()}…` : "Search markets…");
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -158,189 +177,185 @@ export function MarketSearch({
     [router]
   );
 
+  // Tags section is scope-dependent: on a scoped page (/events/politics)
+  // showing a "Categories" row is redundant — the user is already in one.
   const hasResults =
-    (data?.events && data.events.length > 0) ||
-    (data?.tags && data.tags.length > 0);
+    scopedEvents.length > 0 || (!tagSlug && data?.tags && data.tags.length > 0);
 
   const showDropdown = isOpen && query.length >= 2;
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>
-      {/* Search Input */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
+      {/* Editorial underline input — no box, just a hairline that deepens
+          on focus. Matches the hero's magazine-index aesthetic. */}
+      <div className="relative group">
+        <Search className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70 transition-colors group-focus-within:text-foreground" />
+        <input
           ref={inputRef}
           type="text"
-          placeholder={placeholder}
+          placeholder={effectivePlaceholder}
           value={query}
           onChange={handleInputChange}
           onFocus={() => query.length >= 2 && setIsOpen(true)}
-          className="pl-9 pr-8 w-full h-9 bg-background border-border/50 rounded-lg"
+          className="w-full h-9 pl-6 pr-6 bg-transparent border-0 border-b border-border/70 focus:border-foreground focus:outline-none text-sm placeholder:text-muted-foreground/60 placeholder:font-editorial placeholder:italic transition-colors"
         />
         {query && (
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded"
+            className="absolute right-0 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
+            aria-label="Clear search"
           >
-            <X className="h-3 w-3 text-muted-foreground" />
+            <X className="h-3 w-3" />
           </button>
         )}
       </div>
 
-      {/* Results Dropdown */}
+      {/* Results Dropdown — flat panel sitting flush below the input's
+          hairline. No rounded top, no drop shadow; just a clean border
+          that reads as an extension of the input rather than a floating
+          card. */}
       <AnimatePresence>
         {showDropdown && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.15 }}
-            className="absolute top-full left-0 right-0 mt-2 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden max-h-[70vh] overflow-y-auto"
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute top-full right-0 w-[clamp(320px,24rem,90vw)] bg-background border border-border/70 shadow-[0_12px_32px_-16px_rgb(0_0_0/0.18)] z-50 overflow-hidden max-h-[70vh] overflow-y-auto"
           >
             {/* Loading State - show when typing or fetching */}
             {(isLoading || isTyping) && (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/70" />
               </div>
             )}
 
             {/* No Results */}
             {!isLoading && !isTyping && !hasResults && (
-              <div className="text-center py-8 px-4">
-                <Search className="h-8 w-8 text-muted-foreground/50 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">
-                  No markets found for "{query}"
+              <div className="py-6 px-4">
+                <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted-foreground text-center">
+                  {tagLabel
+                    ? `No ${tagLabel.toLowerCase()} markets for "${query}"`
+                    : `No markets for "${query}"`}
                 </p>
               </div>
             )}
 
             {/* Results */}
             {!isLoading && !isTyping && hasResults && (
-              <div className="divide-y divide-border/50">
+              <div>
                 {/* Events Section */}
-                {data?.events && data.events.length > 0 && (
-                  <div className="py-2">
-                    <div className="px-3 py-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <TrendingUp className="h-3 w-3" />
-                      Markets
+                {scopedEvents.length > 0 && (
+                  <div>
+                    <div className="px-3 pt-3 pb-1.5 text-[10px] font-mono font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      {tagLabel ? `${tagLabel} Markets` : "Markets"}
                     </div>
-                    {data.events.map((event) => (
-                      <button
-                        type="button"
-                        key={event.id}
-                        onClick={() => handleEventClick(event)}
-                        className="relative w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted/50 transition-colors text-left overflow-hidden group"
-                      >
-                        {/* Top Outcome Progress Bar Background */}
-                        {event.topOutcome && (
-                          <div
-                            className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent dark:from-primary/10"
-                            style={{
-                              width: `${Math.round(event.topOutcome.price * 100)}%`,
-                            }}
-                          />
-                        )}
-
-                        {/* Event Image */}
-                        <div className="relative z-10">
+                    <div className="divide-y divide-border/40">
+                      {scopedEvents.map((event) => (
+                        <button
+                          type="button"
+                          key={event.id}
+                          onClick={() => handleEventClick(event)}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted/40 transition-colors text-left group"
+                        >
                           {event.image ? (
-                            <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-muted ring-1 ring-border/50">
+                            <div className="relative w-9 h-9 rounded-md overflow-hidden shrink-0 bg-muted ring-1 ring-border/50">
                               <Image
                                 src={event.image}
                                 alt={event.title}
                                 fill
-                                sizes="40px"
+                                sizes="36px"
                                 className="object-cover"
                               />
                             </div>
                           ) : (
-                            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0 ring-1 ring-border/50">
-                              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                            <div className="w-9 h-9 rounded-md bg-muted flex items-center justify-center shrink-0 ring-1 ring-border/50">
+                              <span className="font-editorial italic text-base text-foreground/30 leading-none">
+                                {(event.title || "M")
+                                  .trim()
+                                  .charAt(0)
+                                  .toUpperCase()}
+                              </span>
                             </div>
                           )}
-                        </div>
 
-                        {/* Event Details */}
-                        <div className="relative z-10 flex-1 min-w-0">
-                          <p className="font-medium text-sm line-clamp-1 leading-tight group-hover:text-primary transition-colors">
-                            {event.title}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm line-clamp-1 leading-tight tracking-[-0.01em] group-hover:text-foreground transition-colors">
+                              {event.title}
+                            </p>
 
-                          {/* Top Outcome + Stats Row */}
-                          <div className="flex items-center gap-2 mt-1">
-                            {/* Top Outcome */}
-                            {event.topOutcome && (
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <span className="text-sm font-bold text-primary">
-                                  {Math.round(event.topOutcome.price * 100)}%
+                            <div className="flex items-center gap-2 mt-1 text-[10px] font-mono tabular-nums text-muted-foreground">
+                              {event.topOutcome && (
+                                <span className="inline-flex items-baseline gap-1 shrink-0">
+                                  <span className="text-foreground font-semibold">
+                                    {Math.round(event.topOutcome.price * 100)}%
+                                  </span>
+                                  <span className="truncate max-w-[100px]">
+                                    {event.topOutcome.name}
+                                  </span>
                                 </span>
-                                <span className="text-[10px] text-muted-foreground truncate max-w-[80px]">
-                                  {event.topOutcome.name}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* Divider */}
-                            {event.topOutcome &&
-                              (event.volume24hr || event.liquidity) && (
-                                <span className="text-border">•</span>
                               )}
-
-                            {/* Stats */}
-                            <div className="flex items-center gap-1.5 flex-wrap">
                               {event.volume24hr !== undefined &&
                                 event.volume24hr > 0 && (
-                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5">
-                                    <Activity className="h-2.5 w-2.5" />
-                                    {formatVolume(event.volume24hr)}
+                                  <span className="inline-flex items-baseline gap-1 shrink-0">
+                                    <span className="text-foreground/80">
+                                      {formatVolume(event.volume24hr)}
+                                    </span>
+                                    <span className="uppercase tracking-[0.12em] text-[9px]">
+                                      vol
+                                    </span>
                                   </span>
                                 )}
                               {event.liquidity !== undefined &&
                                 event.liquidity > 0 && (
-                                  <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium flex items-center gap-0.5">
-                                    <Droplets className="h-2.5 w-2.5" />
-                                    {formatVolume(event.liquidity)}
+                                  <span className="inline-flex items-baseline gap-1 shrink-0">
+                                    <span className="text-foreground/80">
+                                      {formatVolume(event.liquidity)}
+                                    </span>
+                                    <span className="uppercase tracking-[0.12em] text-[9px]">
+                                      liq
+                                    </span>
                                   </span>
                                 )}
                               {event.live && (
-                                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-0.5">
-                                  <span className="relative flex h-1.5 w-1.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                                <span className="inline-flex items-center gap-1 shrink-0 uppercase tracking-[0.14em] text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                  <span className="relative flex h-1 w-1">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/75" />
+                                    <span className="relative inline-flex rounded-full h-1 w-1 bg-emerald-500" />
                                   </span>
-                                  LIVE
+                                  Live
                                 </span>
                               )}
                             </div>
                           </div>
-                        </div>
-                      </button>
-                    ))}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
-                {/* Tags Section */}
-                {data?.tags && data.tags.length > 0 && (
-                  <div className="py-2">
-                    <div className="px-3 py-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <Tag className="h-3 w-3" />
+                {/* Tags Section — only when we're NOT already inside a
+                    tag scope. On /events/politics a "Categories" row
+                    would suggest navigating sideways when the user
+                    wants to search deeper. */}
+                {!tagSlug && data?.tags && data.tags.length > 0 && (
+                  <div className="border-t border-border/40">
+                    <div className="px-3 pt-3 pb-1.5 text-[10px] font-mono font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                       Categories
                     </div>
-                    <div className="px-3 py-1 flex flex-wrap gap-2">
+                    <div className="px-3 pb-3 flex flex-wrap gap-x-3 gap-y-1.5">
                       {data.tags.slice(0, 5).map((tag) => (
                         <button
                           type="button"
                           key={tag.id}
                           onClick={() => handleTagClick(tag.slug)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-muted/50 hover:bg-muted text-xs font-medium transition-colors"
+                          className="inline-flex items-baseline gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                         >
-                          <Tag className="h-3 w-3" />
-                          {tag.label}
+                          <span className="font-medium">{tag.label}</span>
                           {tag.event_count && (
-                            <span className="text-muted-foreground">
-                              ({tag.event_count})
+                            <span className="font-mono tabular-nums text-[10px] text-muted-foreground/70">
+                              {tag.event_count}
                             </span>
                           )}
                         </button>
@@ -349,15 +364,18 @@ export function MarketSearch({
                   </div>
                 )}
 
-                {/* View All Results */}
-                {data?.pagination && data.pagination.totalResults > 8 && (
-                  <div className="px-3 py-3 bg-muted/30">
-                    <p className="text-xs text-center text-muted-foreground">
-                      Showing top results of {data.pagination.totalResults}{" "}
-                      total
-                    </p>
-                  </div>
-                )}
+                {/* View All Results — on scoped pages the upstream
+                    total counts all markets, not just the current
+                    category, so we hide the footer to avoid lying. */}
+                {!tagSlug &&
+                  data?.pagination &&
+                  data.pagination.totalResults > 8 && (
+                    <div className="px-3 py-2 border-t border-border/40 bg-muted/20">
+                      <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-center text-muted-foreground">
+                        Top 8 of {data.pagination.totalResults}
+                      </p>
+                    </div>
+                  )}
               </div>
             )}
           </motion.div>

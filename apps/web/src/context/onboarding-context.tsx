@@ -15,6 +15,7 @@ import { TradingOnboarding } from "@/components/trading-onboarding";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -84,7 +85,7 @@ interface OnboardingProviderProps {
 }
 
 export function OnboardingProvider({ children }: OnboardingProviderProps) {
-  const { address, isConnected } = useConnection();
+  const { address, isConnected, status } = useConnection();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const pathname = usePathname();
   const isPrivacyPage =
@@ -94,8 +95,12 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   // This prevents showing it multiple times if user dismisses it
   const hasAutoShownRef = useRef(false);
 
-  // Track previous connection state to detect new connections
-  const wasConnectedRef = useRef(false);
+  // Track previous wagmi status so we can distinguish a user-initiated
+  // connection (`connecting` → `connected`) from a rehydrated session on
+  // page load (`reconnecting` → `connected`). We only auto-open for the
+  // former — landing on a page with a persisted wallet should NOT pop up
+  // a modal over the content.
+  const prevStatusRef = useRef<typeof status | null>(null);
 
   // Check if this wallet has already completed onboarding (from localStorage)
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<
@@ -209,33 +214,30 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     !isFullySetUp &&
     !isSetupCompleteFromStorage;
 
-  // Auto-show onboarding when:
-  // 1. User just connected (wasConnected was false, now isConnected is true)
-  // 2. Loading has completed
-  // 3. User needs trading setup
-  // 4. We haven't auto-shown this session yet
+  // Auto-show onboarding only on a *fresh* wallet connection this session
+  // (`connecting` → `connected`). Page loads that rehydrate a persisted
+  // wallet go through `reconnecting` → `connected` and must NOT auto-open
+  // — the inline "Setup Trading Account" CTA in the trading panel carries
+  // the same action without hijacking the viewport.
   useEffect(() => {
-    const justConnected = !wasConnectedRef.current && isConnected;
+    const prevStatus = prevStatusRef.current;
+    prevStatusRef.current = status;
 
-    // Update the ref for next render
-    wasConnectedRef.current = isConnected;
-
-    // If user disconnected, reset the auto-shown flag so it can show again on reconnect
-    if (!isConnected) {
+    if (status === "disconnected") {
       hasAutoShownRef.current = false;
       return;
     }
 
-    // Check if we should auto-show
+    const justConnectedFresh =
+      prevStatus === "connecting" && status === "connected";
+
     if (
-      isConnected &&
+      justConnectedFresh &&
       !isCheckingSetup &&
       needsTradingSetup &&
       !hasAutoShownRef.current &&
-      !isPrivacyPage &&
-      justConnected
+      !isPrivacyPage
     ) {
-      // Small delay to ensure UI has settled after wallet connection
       const timer = setTimeout(() => {
         setShowOnboarding(true);
         hasAutoShownRef.current = true;
@@ -243,37 +245,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
 
       return () => clearTimeout(timer);
     }
-  }, [isConnected, isCheckingSetup, needsTradingSetup, isPrivacyPage]);
-
-  // Also auto-show if user connects and we detect they need setup after loading completes
-  // This handles the case where loading takes time after connection
-  useEffect(() => {
-    if (
-      isConnected &&
-      !isCheckingSetup &&
-      needsTradingSetup &&
-      !hasAutoShownRef.current &&
-      !isPrivacyPage &&
-      !showOnboarding
-    ) {
-      // Small delay to ensure UI has settled, matching the delay in the primary effect
-      const timer = setTimeout(() => {
-        // Double-check conditions haven't changed during the delay
-        if (!hasAutoShownRef.current) {
-          setShowOnboarding(true);
-          hasAutoShownRef.current = true;
-        }
-      }, 500);
-
-      return () => clearTimeout(timer);
-    }
-  }, [
-    isConnected,
-    isCheckingSetup,
-    needsTradingSetup,
-    showOnboarding,
-    isPrivacyPage,
-  ]);
+  }, [status, isCheckingSetup, needsTradingSetup, isPrivacyPage]);
 
   // Never show onboarding on the Privacy Policy page (auto-close if open).
   useEffect(() => {
@@ -324,6 +296,10 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
         <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
           <DialogHeader className="sr-only">
             <DialogTitle>Setup Trading Account</DialogTitle>
+            <DialogDescription>
+              Complete a few one-time steps — wallet connection, trading wallet
+              deployment, and approvals — to start placing orders on Polymarket.
+            </DialogDescription>
           </DialogHeader>
           <TradingOnboarding onComplete={handleComplete} onSkip={handleSkip} />
         </DialogContent>

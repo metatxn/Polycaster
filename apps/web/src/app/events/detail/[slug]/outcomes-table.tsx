@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
   ChevronUp,
   History,
@@ -8,11 +10,10 @@ import {
   LineChart,
   User,
   Users,
-  Wifi,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { OrderBookInline } from "@/components/order-book-summary";
 import { SellPositionModal } from "@/components/portfolio/sell-position-modal";
 import type { Position as PortfolioPosition } from "@/components/portfolio/types";
@@ -62,7 +63,6 @@ interface MarketData {
   noPrice: string;
   conditionId: string;
   groupItemTitle: string;
-  image?: string;
   volume: string | number;
   yesProbability: number;
   change: number;
@@ -104,7 +104,6 @@ interface MarketExpandedContentProps {
     noPrice: string;
     conditionId: string;
     groupItemTitle: string;
-    image?: string;
   };
   marketOutcomes: { name: string; tokenId: string; price: number }[];
   selectedOutcomeIndex: number;
@@ -151,11 +150,28 @@ function MarketExpandedContent({
     }
   }, [userPosition, hadPosition]);
 
+  // Skip rendering heavy children (OrderBook × 2, chart, holders table) until
+  // the row is expanded — otherwise every market mounts its fetch chain on
+  // page load, saturating the CLOB /book endpoint and delaying the FIRST
+  // expansion's first paint.
+  if (!isExpanded) {
+    return (
+      <div className="grid grid-rows-[0fr] opacity-0 border-b border-border/50" />
+    );
+  }
+
+  // Shared TabsTrigger styling — suppresses shadcn's default focus-visible
+  // rectangle (which reads as an ugly selection outline on click) and lets
+  // the bottom-border accent carry the active signal. Hover/focus get a
+  // subtle bg tint instead.
+  const tabTriggerClass =
+    "h-auto flex-none px-4 py-3 rounded-none border border-transparent border-b-2 data-[state=active]:border-b-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium whitespace-nowrap hover:bg-muted/20 focus-visible:bg-muted/20 focus-visible:ring-0 focus-visible:outline-none focus-visible:border-transparent data-[state=active]:focus-visible:border-b-primary";
+
   return (
     <div
       className={cn(
         "grid transition-[grid-template-rows,opacity,background-color] duration-300 ease-in-out border-b border-border/50 bg-muted/5",
-        isExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        "grid-rows-[1fr] opacity-100"
       )}
     >
       <div className="overflow-hidden">
@@ -164,43 +180,28 @@ function MarketExpandedContent({
             <TabsList className="h-auto p-0 bg-transparent gap-0 shrink-0 flex">
               {/* Position tab - only show if user has a position */}
               {userPosition && (
-                <TabsTrigger
-                  value="position"
-                  className="h-auto flex-none px-4 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium"
-                >
+                <TabsTrigger value="position" className={tabTriggerClass}>
                   <User className="h-3.5 w-3.5 mr-2 inline-block" />
                   Position
                 </TabsTrigger>
               )}
-              <TabsTrigger
-                value="orderbook"
-                className="h-auto flex-none px-4 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium whitespace-nowrap"
-              >
+              <TabsTrigger value="orderbook" className={tabTriggerClass}>
                 <History className="h-3.5 w-3.5 mr-2 inline-block" />
                 Order Book
               </TabsTrigger>
               {/* Only show Graph tab for multi-market events */}
               {!isSingleMarketEvent && (
-                <TabsTrigger
-                  value="graph"
-                  className="h-auto flex-none px-4 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium"
-                >
+                <TabsTrigger value="graph" className={tabTriggerClass}>
                   <LineChart className="h-3.5 w-3.5 mr-2 inline-block" />
                   Graph
                 </TabsTrigger>
               )}
               {/* Top Holders Tab */}
-              <TabsTrigger
-                value="holders"
-                className="h-auto flex-none px-4 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium"
-              >
+              <TabsTrigger value="holders" className={tabTriggerClass}>
                 <Users className="h-3.5 w-3.5 mr-2 inline-block" />
                 Top Holders
               </TabsTrigger>
-              <TabsTrigger
-                value="resolution"
-                className="h-auto flex-none px-4 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium"
-              >
+              <TabsTrigger value="resolution" className={tabTriggerClass}>
                 <Info className="h-3.5 w-3.5 mr-2 inline-block" />
                 Resolution
               </TabsTrigger>
@@ -296,21 +297,57 @@ function MarketExpandedContent({
             </TabsContent>
           )}
 
-          {/* Order Book Tab Content */}
+          {/* Order Book Tab Content. Single-market events keep the
+              toggle (one side at a time); multi-outcome renders YES and
+              NO order books side-by-side so users can see the full depth
+              picture without hunting for the less-liquid side. */}
           <TabsContent
             value="orderbook"
             className="m-0 data-[state=inactive]:hidden"
             forceMount
           >
-            <OrderBook
-              outcomes={marketOutcomes}
-              defaultOutcomeIndex={selectedOutcomeIndex}
-              maxLevels={4}
-              onPriceClick={handlePriceClick}
-              onOutcomeChange={setSelectedOutcomeIndex}
-              useWebSocket={false}
-              embedded
-            />
+            {isSingleMarketEvent ? (
+              <OrderBook
+                outcomes={marketOutcomes}
+                defaultOutcomeIndex={selectedOutcomeIndex}
+                onPriceClick={handlePriceClick}
+                onOutcomeChange={setSelectedOutcomeIndex}
+                useWebSocket={false}
+                embedded
+                scrollable
+              />
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 lg:divide-x divide-border/50">
+                <div>
+                  <div className="px-4 py-2 border-y border-border/50 bg-muted/20 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-400">
+                    Yes book
+                  </div>
+                  <OrderBook
+                    outcomes={marketOutcomes}
+                    defaultOutcomeIndex={0}
+                    onPriceClick={handlePriceClick}
+                    useWebSocket={false}
+                    embedded
+                    hideOutcomeTabs
+                    scrollable
+                  />
+                </div>
+                <div>
+                  <div className="px-4 py-2 border-y border-border/50 bg-muted/20 text-[10px] font-bold uppercase tracking-[0.14em] text-rose-600 dark:text-rose-400">
+                    No book
+                  </div>
+                  <OrderBook
+                    outcomes={marketOutcomes}
+                    defaultOutcomeIndex={1}
+                    onPriceClick={handlePriceClick}
+                    useWebSocket={false}
+                    embedded
+                    hideOutcomeTabs
+                    scrollable
+                  />
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           {/* Graph Tab Content */}
@@ -342,13 +379,15 @@ function MarketExpandedContent({
 
           {/* Resolution Tab Content */}
           <TabsContent value="resolution" className="m-0 p-6">
-            <div className="space-y-4 text-sm max-w-2xl">
+            <div className="space-y-5 text-sm max-w-2xl">
               <div className="flex gap-3">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Info className="h-4 w-4 text-primary" />
+                <div className="h-8 w-8 border border-border/60 flex items-center justify-center shrink-0">
+                  <Info className="h-4 w-4 text-foreground" />
                 </div>
                 <div>
-                  <h4 className="font-bold mb-1">Resolution Source</h4>
+                  <h4 className="font-mono text-[11px] uppercase tracking-[0.16em] font-semibold mb-1">
+                    Resolution Source
+                  </h4>
                   <p className="text-muted-foreground leading-relaxed">
                     Official announcement or verified news reports from
                     established media organizations will be used to resolve this
@@ -357,11 +396,13 @@ function MarketExpandedContent({
                 </div>
               </div>
               <div className="flex gap-3">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <History className="h-4 w-4 text-primary" />
+                <div className="h-8 w-8 border border-border/60 flex items-center justify-center shrink-0">
+                  <History className="h-4 w-4 text-foreground" />
                 </div>
                 <div>
-                  <h4 className="font-bold mb-1">Resolution Rules</h4>
+                  <h4 className="font-mono text-[11px] uppercase tracking-[0.16em] font-semibold mb-1">
+                    Resolution Rules
+                  </h4>
                   <p className="text-muted-foreground leading-relaxed">
                     This market will resolve based on the first official
                     reporting of the outcome. If no official outcome is reached
@@ -464,7 +505,7 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
                           />
                         </div>
                       ) : (
-                        <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-full bg-primary/10 flex items-center justify-center text-[8px] sm:text-[10px] font-bold text-primary border border-primary/20 shrink-0">
+                        <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-sm bg-foreground/5 flex items-center justify-center font-mono text-[8px] sm:text-[10px] font-semibold text-foreground border border-border/60 shrink-0">
                           {(holder.pseudonym || "0x").slice(0, 2).toUpperCase()}
                         </div>
                       )}
@@ -480,10 +521,10 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
                   <td className="px-2 sm:px-4 py-3">
                     <span
                       className={cn(
-                        "px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold uppercase",
+                        "inline-flex items-center px-1.5 sm:px-2 py-0.5 font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-semibold border",
                         holder.outcomeIndex === 0
-                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-                          : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                          ? "text-emerald-700 dark:text-emerald-300 border-emerald-600/40"
+                          : "text-red-700 dark:text-red-300 border-red-600/40"
                       )}
                     >
                       {holder.outcomeIndex === 0 ? "Yes" : "No"}
@@ -501,6 +542,44 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function SortButton({
+  label,
+  active,
+  dir,
+  onClick,
+  className,
+}: {
+  label: string;
+  active: boolean;
+  dir: "asc" | "desc";
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-foreground transition-colors",
+        active && "text-foreground",
+        className
+      )}
+      aria-label={`Sort by ${label}${
+        active ? (dir === "asc" ? " ascending" : " descending") : ""
+      }`}
+    >
+      {label}
+      {active ? (
+        dir === "asc" ? (
+          <ArrowUp className="h-2.5 w-2.5" aria-hidden="true" />
+        ) : (
+          <ArrowDown className="h-2.5 w-2.5" aria-hidden="true" />
+        )
+      ) : null}
+    </button>
   );
 }
 
@@ -524,6 +603,31 @@ export function OutcomesTable({
   onSellSuccess,
 }: OutcomesTableProps) {
   const [showClosedMarkets, setShowClosedMarkets] = useState(false);
+
+  // Sort state (local — doesn't touch the parent's sort order).
+  // sortKey = null means "preserve the server/parent order" (prob desc).
+  type SortKey = "prob" | "change";
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
+  const displayMarkets = useMemo(() => {
+    if (!sortKey) return sortedMarketData;
+    const getVal = (m: MarketData) =>
+      sortKey === "prob" ? m.yesProbability : m.change;
+    return [...sortedMarketData].sort((a, b) => {
+      const cmp = getVal(a) - getVal(b);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [sortedMarketData, sortKey, sortDir]);
 
   // Sell position modal state
   const [sellPosition, setSellPosition] = useState<Position | null>(null);
@@ -577,70 +681,89 @@ export function OutcomesTable({
       open={isOutcomeTableExpanded}
       onOpenChange={setIsOutcomeTableExpanded}
     >
-      <Card className="py-0 gap-0 border-border/50 shadow-sm overflow-hidden">
+      <Card className="py-0 gap-0 border-border/50 shadow-sm overflow-visible *:data-[slot=card-header]:rounded-t-xl">
         <CollapsibleTrigger asChild>
-          <CardHeader className="py-3 px-6 bg-muted/20 border-b border-border/50 cursor-pointer hover:bg-muted/30 transition-colors">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <CardTitle className="text-lg">OUTCOME</CardTitle>
-                <span className="text-xs text-muted-foreground">
-                  {sortedMarketData.length} market
-                  {sortedMarketData.length !== 1 ? "s" : ""}
+          <CardHeader className="py-2.5 px-4 bg-muted/20 border-b border-border/50 cursor-pointer hover:bg-muted/30 transition-colors">
+            <div className="flex items-center gap-2">
+              {isConnected && (
+                <span
+                  className="relative flex h-1.5 w-1.5"
+                  role="status"
+                  title="Live"
+                >
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                 </span>
-              </div>
-              <div className="flex items-center gap-3">
-                {/* WebSocket connection indicator */}
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-background/50 border border-border/50 shadow-xs transition-colors duration-500">
-                  <Wifi
-                    className={cn(
-                      "h-3 w-3",
-                      isConnected
-                        ? "text-emerald-500"
-                        : connectionState === "connecting" ||
-                            connectionState === "reconnecting"
-                          ? "text-amber-500 animate-pulse"
-                          : "text-muted-foreground"
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      "text-[10px] font-medium uppercase tracking-wider",
-                      isConnected
-                        ? "text-emerald-500"
-                        : connectionState === "connecting" ||
-                            connectionState === "reconnecting"
-                          ? "text-amber-500"
-                          : "text-muted-foreground"
-                    )}
-                  >
-                    {isConnected
-                      ? "Live"
-                      : connectionState === "connecting"
-                        ? "Connecting..."
-                        : connectionState === "reconnecting"
-                          ? "Reconnecting..."
-                          : "Offline"}
-                  </span>
-                </div>
-                {/* Collapse/Expand toggle icon */}
-                <div className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent/50 transition-colors">
-                  {isOutcomeTableExpanded ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
+              )}
+              {!isConnected && (
+                <span
+                  className={cn(
+                    "relative inline-flex rounded-full h-1.5 w-1.5",
+                    connectionState === "connecting" ||
+                      connectionState === "reconnecting"
+                      ? "bg-amber-500 animate-pulse"
+                      : "bg-muted-foreground/50"
                   )}
-                  <span className="sr-only">
-                    {isOutcomeTableExpanded ? "Collapse" : "Expand"} outcomes
-                  </span>
-                </div>
+                  role="status"
+                  title={
+                    connectionState === "connecting"
+                      ? "Connecting"
+                      : connectionState === "reconnecting"
+                        ? "Reconnecting"
+                        : "Offline"
+                  }
+                />
+              )}
+              <CardTitle className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                Outcome
+              </CardTitle>
+              <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground">
+                {sortedMarketData.length}
+              </span>
+              <div className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-accent/50 transition-colors">
+                {isOutcomeTableExpanded ? (
+                  <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+                <span className="sr-only">
+                  {isOutcomeTableExpanded ? "Collapse" : "Expand"} outcomes
+                </span>
               </div>
             </div>
           </CardHeader>
         </CollapsibleTrigger>
         <CollapsibleContent>
           <CardContent className="p-0">
+            {/* Desktop column headers — aligned with row data columns so
+                PROB sits directly above the % values and 24H above the
+                change chip. Mirrors the row's inner grid + min-widths. */}
+            {!isSingleMarketEvent && sortedMarketData.length > 1 && (
+              <div className="hidden lg:grid lg:grid-cols-[1fr_auto] items-center gap-4 pl-[11px] pr-4 py-1.5 border-b border-border/50 bg-muted/10 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-4">
+                  <span className="pl-[44px]">Market</span>
+                  <div className="flex items-center justify-end gap-3 pr-4 border-r border-border/50 h-6">
+                    <SortButton
+                      label="Prob"
+                      active={sortKey === "prob"}
+                      dir={sortDir}
+                      onClick={() => toggleSort("prob")}
+                      className="min-w-[50px] xl:min-w-[55px] justify-end"
+                    />
+                    <SortButton
+                      label="24h"
+                      active={sortKey === "change"}
+                      dir={sortDir}
+                      onClick={() => toggleSort("change")}
+                      className="min-w-[60px] xl:min-w-[70px] justify-center"
+                    />
+                  </div>
+                </div>
+                <span className="w-[160px] text-center">Trade</span>
+              </div>
+            )}
             <div className="divide-y divide-border/50">
-              {sortedMarketData.map((market) => {
+              {displayMarkets.map((market) => {
                 const isMarketClosed = false;
                 const isExpanded = expandedOrderBookMarketId === market.id;
 
@@ -670,17 +793,18 @@ export function OutcomesTable({
                     {/* Market Row Container - Using a div to avoid nested buttons */}
                     <div
                       className={cn(
-                        "w-full flex flex-col lg:grid lg:grid-cols-[1fr_auto] transition-[background-color,border-color] duration-150 border-l-2",
+                        "relative w-full flex flex-col lg:grid lg:grid-cols-[1fr_auto] transition-[background-color,border-color] duration-150 border-l-[3px]",
                         selectedMarketId === market.id
-                          ? "bg-primary/5 border-l-primary"
-                          : "hover:bg-accent/30 border-l-transparent",
-                        isExpanded && "bg-muted/30"
+                          ? "bg-foreground/3 border-l-foreground"
+                          : "hover:bg-foreground/2 border-l-transparent",
+                        isExpanded &&
+                          "sticky top-0 z-20 bg-card/95 supports-backdrop-filter:bg-card/80 backdrop-blur shadow-sm"
                       )}
                     >
                       {/* Left Side: Market Info (Clickable to expand) */}
                       <button
                         type="button"
-                        className="flex-1 text-left px-6 py-4 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 group"
+                        className="flex-1 text-left px-4 py-3 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 group"
                         onClick={() => {
                           if (isExpanded) {
                             setExpandedOrderBookMarketId(null);
@@ -702,32 +826,24 @@ export function OutcomesTable({
                         <div className="lg:hidden flex flex-col gap-4">
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-start gap-3 min-w-0">
-                              {market.image && (
-                                <div className="relative w-10 h-10 shrink-0 mt-0.5">
-                                  <Image
-                                    src={market.image}
-                                    alt={market.groupItemTitle || "Market"}
-                                    fill
-                                    sizes="40px"
-                                    className="rounded object-cover ring-1 ring-border/20 shadow-xs"
-                                  />
-                                </div>
-                              )}
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="font-bold text-sm leading-tight text-foreground group-hover:text-primary transition-colors">
+                                  <h3 className="font-semibold text-[13px] leading-tight text-foreground group-hover:underline decoration-foreground/40 underline-offset-4 transition-colors">
                                     {market.groupItemTitle}
                                   </h3>
                                   {userPosition && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 shrink-0">
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground border border-border/60 tabular-nums shrink-0">
                                       <User className="h-2.5 w-2.5" />
                                       {userPosition.size.toFixed(1)}
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <span className="text-[10px] font-bold text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded">
-                                    {formatVolume(market.volume)} VOL
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] tabular-nums text-muted-foreground">
+                                    <span className="text-muted-foreground/60">
+                                      Vol
+                                    </span>{" "}
+                                    {formatVolume(market.volume)}
                                   </span>
                                   {market.yesTokenId && (
                                     <OrderBookInline
@@ -740,54 +856,54 @@ export function OutcomesTable({
                             </div>
 
                             <div className="flex flex-col items-end shrink-0">
-                              <span className="text-xl font-black tabular-nums leading-none">
+                              <span className="font-mono text-xl font-bold tabular-nums leading-none">
                                 {market.yesProbability}%
                               </span>
-                              <div
-                                className={cn(
-                                  "text-[10px] font-bold mt-1.5 px-1.5 py-0.5 rounded tabular-nums",
-                                  market.change >= 0
-                                    ? "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400"
-                                    : "text-rose-600 bg-rose-500/10 dark:text-rose-400"
-                                )}
-                              >
-                                {market.change >= 0 ? "+" : ""}
-                                {market.change}%
-                              </div>
+                              {market.change === 0 ? (
+                                <span className="font-mono text-[10px] font-bold mt-1.5 text-muted-foreground/60 tabular-nums">
+                                  —
+                                </span>
+                              ) : (
+                                <div
+                                  className={cn(
+                                    "font-mono text-[10px] font-bold mt-1.5 px-1.5 py-0.5 rounded tabular-nums inline-flex items-center gap-0.5",
+                                    market.change > 0
+                                      ? "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400"
+                                      : "text-rose-600 bg-rose-500/10 dark:text-rose-400"
+                                  )}
+                                >
+                                  <span aria-hidden="true">
+                                    {market.change > 0 ? "▲" : "▼"}
+                                  </span>
+                                  {Math.abs(market.change)}%
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
 
                         {/* Desktop Layout Section (lg+) */}
                         <div className="hidden lg:grid lg:grid-cols-[1fr_auto] lg:items-center lg:gap-4">
-                          {/* Column 1: Image + Title + Volume */}
+                          {/* Column 1: Title + Volume */}
                           <div className="flex items-center gap-3 min-w-0">
-                            {market.image && (
-                              <div className="relative w-10 h-10 shrink-0">
-                                <Image
-                                  src={market.image}
-                                  alt={market.groupItemTitle || "Market"}
-                                  fill
-                                  sizes="40px"
-                                  className="rounded object-cover ring-1 ring-border/20 shadow-xs"
-                                />
-                              </div>
-                            )}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <h3 className="font-semibold text-sm xl:text-base leading-tight line-clamp-2 group-hover:text-primary transition-colors">
+                                <h3 className="font-semibold text-[13px] xl:text-sm leading-tight line-clamp-2 group-hover:underline decoration-foreground/40 underline-offset-4 transition-colors">
                                   {market.groupItemTitle}
                                 </h3>
                                 {userPosition && (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 shrink-0">
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground border border-border/60 tabular-nums shrink-0">
                                     <User className="h-2.5 w-2.5" />
                                     {userPosition.size.toFixed(1)}
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 text-xs xl:text-sm text-muted-foreground mt-0.5">
-                                <span className="font-medium">
-                                  {formatVolume(market.volume)} Vol.
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] tabular-nums text-muted-foreground">
+                                  <span className="text-muted-foreground/60">
+                                    Vol
+                                  </span>{" "}
+                                  {formatVolume(market.volume)}
                                 </span>
                                 {market.yesTokenId && (
                                   <OrderBookInline
@@ -801,37 +917,44 @@ export function OutcomesTable({
 
                           {/* Column 2: Percentage + Change */}
                           <div className="flex items-center justify-end gap-3 pr-4 border-r border-border/50 h-8">
-                            <span className="text-xl xl:text-2xl font-black tabular-nums min-w-[50px] xl:min-w-[55px] text-right">
+                            <span className="font-mono text-xl xl:text-2xl font-bold tabular-nums min-w-[50px] xl:min-w-[55px] text-right">
                               {market.yesProbability}%
                             </span>
-                            <div
-                              className={cn(
-                                "flex items-center justify-center text-xs xl:text-sm font-bold min-w-[60px] xl:min-w-[70px] px-2 py-0.5 rounded shrink-0",
-                                market.change >= 0
-                                  ? "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400"
-                                  : "text-rose-600 bg-rose-500/10 dark:text-rose-400"
-                              )}
-                            >
-                              <span className="tabular-nums whitespace-nowrap">
-                                {market.change >= 0 ? "+" : ""}
-                                {market.change}%
+                            {market.change === 0 ? (
+                              <span className="font-mono text-xs xl:text-sm font-bold min-w-[60px] xl:min-w-[70px] text-center text-muted-foreground/60 tabular-nums shrink-0">
+                                —
                               </span>
-                            </div>
+                            ) : (
+                              <div
+                                className={cn(
+                                  "flex items-center justify-center gap-0.5 font-mono text-xs xl:text-sm font-bold min-w-[60px] xl:min-w-[70px] px-2 py-0.5 rounded shrink-0",
+                                  market.change > 0
+                                    ? "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400"
+                                    : "text-rose-600 bg-rose-500/10 dark:text-rose-400"
+                                )}
+                              >
+                                <span aria-hidden="true">
+                                  {market.change > 0 ? "▲" : "▼"}
+                                </span>
+                                <span className="tabular-nums whitespace-nowrap">
+                                  {Math.abs(market.change)}%
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </button>
 
-                      {/* Right Side: Trading Buttons (Not nested in expansion button) */}
-                      <div className="px-6 pb-4 lg:pb-0 lg:pr-6 lg:pl-0 flex items-center justify-center">
+                      {/* Right Side: Trading Buttons — editorial outline CTAs */}
+                      <div className="px-4 pb-3 lg:pb-0 lg:pr-4 lg:pl-0 flex items-center justify-center">
                         <div className="grid grid-cols-2 lg:flex items-center gap-2 w-full lg:w-auto">
-                          <Button
+                          <button
                             type="button"
-                            size="sm"
                             className={cn(
-                              "h-9 px-3 text-xs lg:w-[88px] lg:h-10 lg:text-sm bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-lg shadow-emerald-500/20 transition-[background-color,transform] duration-150 active:scale-95",
-                              isExpanded &&
-                                selectedOutcomeIndex === 0 &&
-                                "ring-2 ring-emerald-400 ring-offset-2"
+                              "h-8 px-3 lg:w-[82px] border font-mono text-[11px] font-semibold uppercase tracking-[0.12em] tabular-nums transition-colors active:scale-[0.98]",
+                              isExpanded && selectedOutcomeIndex === 0
+                                ? "border-emerald-600 dark:border-emerald-400 text-emerald-700 dark:text-emerald-300 bg-emerald-500/5"
+                                : "border-border/60 text-foreground hover:border-emerald-600/60 hover:text-emerald-700 dark:hover:text-emerald-300"
                             )}
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
@@ -841,16 +964,14 @@ export function OutcomesTable({
                             }}
                           >
                             Yes {formatPrice(market.yesPrice)}
-                          </Button>
-                          <Button
+                          </button>
+                          <button
                             type="button"
-                            size="sm"
-                            variant="destructive"
                             className={cn(
-                              "h-9 px-3 text-xs lg:w-[88px] lg:h-10 lg:text-sm font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95",
-                              isExpanded &&
-                                selectedOutcomeIndex === 1 &&
-                                "ring-2 ring-rose-400 ring-offset-2"
+                              "h-8 px-3 lg:w-[82px] border font-mono text-[11px] font-semibold uppercase tracking-[0.12em] tabular-nums transition-colors active:scale-[0.98]",
+                              isExpanded && selectedOutcomeIndex === 1
+                                ? "border-red-600 dark:border-red-400 text-red-700 dark:text-red-300 bg-red-500/5"
+                                : "border-border/60 text-foreground hover:border-red-600/60 hover:text-red-700 dark:hover:text-red-300"
                             )}
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
@@ -860,8 +981,25 @@ export function OutcomesTable({
                             }}
                           >
                             No {formatPrice(market.noPrice)}
-                          </Button>
+                          </button>
                         </div>
+                      </div>
+
+                      {/* Probability bar — emerald fill = YES probability,
+                          rose fill = remainder. Absolute at row bottom so it
+                          doesn't perturb the grid layout. Turns the table
+                          into a scannable heatmap. */}
+                      <div
+                        className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[2px]"
+                        aria-hidden="true"
+                      >
+                        <span
+                          className="bg-emerald-500/80 transition-[width] duration-300"
+                          style={{
+                            width: `${Math.max(0, Math.min(100, market.yesProbability))}%`,
+                          }}
+                        />
+                        <span className="flex-1 bg-rose-500/40" />
                       </div>
                     </div>
 
@@ -893,7 +1031,7 @@ export function OutcomesTable({
                       <span className="text-sm font-medium text-muted-foreground">
                         Closed Markets
                       </span>
-                      <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-muted text-muted-foreground">
+                      <span className="px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground border border-border/60 tabular-nums">
                         {closedMarkets.length}
                       </span>
                     </div>
@@ -921,17 +1059,6 @@ export function OutcomesTable({
                             <div className="flex items-center justify-between gap-4">
                               {/* Market Info */}
                               <div className="flex items-center gap-3 min-w-0 flex-1">
-                                {market.image && (
-                                  <div className="relative w-8 h-8 shrink-0">
-                                    <Image
-                                      src={market.image}
-                                      alt={market.groupItemTitle || "Market"}
-                                      fill
-                                      sizes="32px"
-                                      className="rounded object-cover ring-1 ring-border/20 grayscale"
-                                    />
-                                  </div>
-                                )}
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
                                     <h3 className="font-medium text-sm truncate text-muted-foreground">
@@ -941,7 +1068,7 @@ export function OutcomesTable({
                                       Closed
                                     </span>
                                     {userPosition && (
-                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 shrink-0">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground border border-border/60 tabular-nums shrink-0">
                                         <User className="h-2.5 w-2.5" />
                                         {userPosition.size.toFixed(1)}
                                       </span>

@@ -23,8 +23,11 @@ interface TrendingEvent {
   ended?: boolean;
   markets?: Array<{
     id: string;
-    question: string;
+    question?: string;
     slug?: string;
+    outcomes?: string;
+    outcomePrices?: string;
+    groupItemTitle?: string;
   }>;
   tags?: Array<string | { id?: string; slug?: string; label?: string }>;
   negRisk?: boolean;
@@ -46,10 +49,11 @@ interface TrendingEventsResponse {
 export function useTrendingEvents(
   limit = 15,
   filters?: EventFilterParams,
-  enabled = true
+  enabled = true,
+  fullMarkets = false
 ) {
   return useInfiniteQuery({
-    queryKey: ["trending-events", limit, filters],
+    queryKey: ["trending-events", limit, fullMarkets, filters],
     queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: limit.toString(),
@@ -57,6 +61,10 @@ export function useTrendingEvents(
 
       if (pageParam) {
         params.set("after_cursor", pageParam);
+      }
+
+      if (fullMarkets) {
+        params.set("markets", "full");
       }
 
       if (filters) {

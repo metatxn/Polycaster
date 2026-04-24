@@ -1,0 +1,176 @@
+"use client";
+
+import { useAppKit } from "@reown/appkit/react";
+import { Wallet } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useConnection } from "wagmi";
+import { NotificationBellMobile } from "@/components/notifications";
+import { ThemeToggle } from "@/components/theme-toggle";
+
+/**
+ * Pro top nav — the two-row bar that replaces the app sidebar when pro
+ * chrome is active. Row 1: wordmark + primary links + wallet + theme.
+ * Row 2: category strip (horizontal, overflow-scroll at narrow widths).
+ *
+ * This is the single source of truth for top-level navigation in the
+ * pro experience. Used by both /markets (via MarketsProView) and the
+ * sibling app pages (via AppProLayout).
+ *
+ * Active-link detection uses `usePathname` + `startsWith` so that
+ * category pages (/events/politics) correctly highlight the Politics
+ * chip, and /markets highlights the Markets primary link.
+ */
+
+/** Primary-nav links. Sourced from the sidebar's main section so every
+ *  top-level destination stays reachable in pro mode. */
+const PRO_PRIMARY_LINKS: Array<{ label: string; href: string }> = [
+  { label: "Markets", href: "/markets" },
+  { label: "Live", href: "/live" },
+  { label: "Whales", href: "/whales" },
+  { label: "Leaderboard", href: "/leaderboard" },
+  { label: "Portfolio", href: "/portfolio" },
+  { label: "Search", href: "/search" },
+];
+
+/** Category taxonomy — mirrors the list in [sidebar.tsx:67-78]. Each
+ *  item maps to the `/events/{slug}` browse page. */
+const PRO_CATEGORIES: Array<{ label: string; href: string }> = [
+  { label: "Politics", href: "/events/politics" },
+  { label: "Sports", href: "/events/sports" },
+  { label: "Crypto", href: "/events/crypto" },
+  { label: "Finance", href: "/events/finance" },
+  { label: "Geopolitics", href: "/events/geopolitics" },
+  { label: "Earnings", href: "/events/earnings" },
+  { label: "Tech", href: "/events/tech" },
+  { label: "Culture", href: "/events/pop-culture" },
+  { label: "World", href: "/events/world" },
+  { label: "Economy", href: "/events/economy" },
+  { label: "Elections", href: "/events/elections" },
+  { label: "Mentions", href: "/events/mention-markets" },
+];
+
+/** Truncate a 0x… address to `0x1234…abcd` for the wallet badge. */
+function formatAddress(addr: string): string {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+export function ProTopNav() {
+  const pathname = usePathname();
+  const { address, isConnected } = useConnection();
+  const { open } = useAppKit();
+
+  return (
+    <div className="border-b border-border/60">
+      {/* Row 1 — primary nav + wallet + theme */}
+      <div className="flex items-center justify-between gap-6 px-1 py-3">
+        {/* Left — wordmark + primary links */}
+        <div className="flex items-center gap-6">
+          <Link
+            href="/"
+            className="flex items-center gap-2 font-bold text-[14px] tracking-tight hover:opacity-80 transition-opacity"
+          >
+            <span className="inline-flex h-6 w-6 items-center justify-center bg-foreground text-background text-[11px] font-bold leading-none">
+              K
+            </span>
+            Knoww
+          </Link>
+
+          <span aria-hidden="true" className="h-4 w-px bg-border/60" />
+
+          <nav aria-label="Primary" className="flex items-center gap-1">
+            {PRO_PRIMARY_LINKS.map((link) => {
+              const isActive =
+                pathname === link.href ||
+                (link.href !== "/" && pathname?.startsWith(link.href));
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.15em] transition-colors ${
+                    isActive
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Right — notifications + wallet + theme */}
+        <div className="flex items-center gap-2">
+          {/* Bell renders only when wallet is connected; dropdown opens
+              below the nav with `align="end"`. When disconnected the
+              component returns null, so the cluster stays stable. */}
+          <NotificationBellMobile />
+          {isConnected && address ? (
+            <button
+              type="button"
+              onClick={() => open()}
+              className="flex items-center gap-2 px-3 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[11px] uppercase tracking-[0.12em]"
+            >
+              <Wallet className="h-3.5 w-3.5" />
+              <span className="tabular-nums normal-case tracking-normal text-[12px]">
+                {formatAddress(address)}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => open()}
+              className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] hover:bg-foreground/90 transition-colors"
+            >
+              <Wallet className="h-3.5 w-3.5" />
+              Connect
+            </button>
+          )}
+          {/* ThemeToggle renders its theme label inside the button,
+              which varies in width ("Dark" → "Midnight" → "Lavender").
+              With `justify-between` on the parent row, that expansion
+              pushes Connect leftward on every theme switch. Force
+              icon-only dimensions here so the right-side cluster has a
+              stable width. */}
+          <div className="[&_button]:h-9 [&_button]:w-9 [&_button]:px-0 [&_button]:justify-center [&_button>span:not(.sr-only)]:hidden">
+            <ThemeToggle />
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2 — category strip. Horizontal scroll on narrow widths so
+          all 12 categories remain reachable without dropdowns. */}
+      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide border-t border-border/40 px-1 py-2">
+        <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 pr-2">
+          §
+        </span>
+        {PRO_CATEGORIES.map((cat, i) => {
+          const isActive = pathname === cat.href;
+          return (
+            <div key={cat.href} className="flex items-center">
+              <Link
+                href={cat.href}
+                className={`shrink-0 px-2 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] transition-colors rounded-sm ${
+                  isActive
+                    ? "text-foreground bg-accent/40"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                }`}
+              >
+                {cat.label}
+              </Link>
+              {i < PRO_CATEGORIES.length - 1 && (
+                <span
+                  aria-hidden="true"
+                  className="text-muted-foreground/40 px-0.5 select-none"
+                >
+                  ·
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

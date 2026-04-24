@@ -1,46 +1,29 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { ChevronLeft, Radio, Sparkles, Star } from "lucide-react";
+import { ChevronLeft, Sparkles, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EventCard } from "@/components/event-card";
+import { ProChromeHeader } from "@/components/app-pro-layout";
+import {
+  EventCard,
+  EventCardSkeleton,
+  skeletonVisibilityClass,
+} from "@/components/event-card";
 import { EventFilterBar } from "@/components/event-filter-bar";
+import { MarketSearch } from "@/components/market-search";
 import { Navbar } from "@/components/navbar";
-import { PageBackground } from "@/components/page-background";
 import {
   Card,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useEventFilters } from "@/context/event-filter-context";
 import { usePaginatedEvents } from "@/hooks/use-paginated-events";
 import { PRIORITY_EVENT_CARD_COUNT } from "@/lib/lcp-images";
 import type { InitialHomeData } from "@/lib/server-cache";
+import { SPORT_CATEGORIES } from "@/lib/sport-categories";
 import { cn } from "@/lib/utils";
-
-const SPORT_CATEGORIES = [
-  { label: "All Sports", value: "", tagSlug: "sports" },
-  { label: "NBA", value: "nba", tagSlug: "nba" },
-  { label: "NCAAB", value: "ncaab", tagSlug: "ncaab" },
-  { label: "NHL", value: "nhl", tagSlug: "nhl" },
-  { label: "Soccer", value: "soccer", tagSlug: "soccer" },
-  { label: "Esports", value: "esports", tagSlug: "esports" },
-  { label: "Tennis", value: "tennis", tagSlug: "tennis" },
-  { label: "Cricket", value: "cricket", tagSlug: "cricket" },
-  { label: "UFC", value: "ufc", tagSlug: "ufc" },
-  { label: "Football", value: "nfl", tagSlug: "nfl" },
-  { label: "Baseball", value: "baseball", tagSlug: "baseball" },
-  { label: "Rugby", value: "rugby", tagSlug: "rugby" },
-  { label: "Lacrosse", value: "lacrosse", tagSlug: "lacrosse" },
-  { label: "Boxing", value: "boxing", tagSlug: "boxing" },
-  { label: "Golf", value: "golf", tagSlug: "golf" },
-  { label: "Formula 1", value: "f1", tagSlug: "f1" },
-  { label: "Table Tennis", value: "table-tennis", tagSlug: "table-tennis" },
-  { label: "Chess", value: "chess", tagSlug: "chess" },
-] as const;
 
 interface EventWithDates {
   id: string;
@@ -52,14 +35,19 @@ interface EventWithDates {
 
 interface SportsContentProps {
   initialData?: InitialHomeData | null;
+  /** Sport sub-slug from the URL (`/events/sports/{slug}`). Empty string
+   *  means the "All Sports" overview at `/events/sports`. */
+  selectedSport?: string;
 }
 
-export function SportsContent({ initialData }: SportsContentProps) {
+export function SportsContent({
+  initialData,
+  selectedSport = "",
+}: SportsContentProps) {
   const router = useRouter();
   const [loadMoreElement, setLoadMoreElement] = useState<HTMLDivElement | null>(
     null
   );
-  const [selectedSport, setSelectedSport] = useState("");
 
   const { filters, serverFilterParams, apiQueryParams, hasActiveFilters } =
     useEventFilters();
@@ -120,6 +108,7 @@ export function SportsContent({ initialData }: SportsContentProps) {
     closed: apiQueryParams.closed,
     tagSlug: effectiveTagSlug,
     filters: serverFilterParams,
+    fullMarkets: true,
   });
 
   const canUseInitialData =
@@ -160,55 +149,79 @@ export function SportsContent({ initialData }: SportsContentProps) {
   }, [fetchNextPage, hasMore, isFetchingNextPage, loadMoreElement]);
 
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-purple-500/30">
-      <PageBackground />
+    <div className="min-h-screen relative overflow-x-hidden">
       <Navbar />
+      <ProChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground mb-6 animate-in fade-in duration-500">
           <button
             type="button"
             onClick={() => router.push("/markets")}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
-            <ChevronLeft className="h-4 w-4" />
-            <span>Explore Markets</span>
+            <ChevronLeft className="h-3.5 w-3.5" />
+            <span>Markets</span>
           </button>
-          <span>/</span>
-          <span className="text-foreground font-medium">Sports</span>
+          <span className="text-border/80">&rsaquo;</span>
+          <span className="text-foreground">Sports</span>
+          {selectedSport && (
+            <>
+              <span className="text-border/80">&rsaquo;</span>
+              <span className="text-foreground">{sport.label}</span>
+            </>
+          )}
         </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="flex items-center justify-between mb-5"
-        >
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="absolute inset-0 bg-emerald-500/20 rounded-full blur-xl animate-pulse" />
-              <div className="relative flex items-center justify-center w-11 h-11 rounded-full bg-emerald-500/10 border border-emerald-500/30">
-                <Radio className="h-5 w-5 text-emerald-500" />
-              </div>
-            </div>
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                Sports Markets
+        <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-700">
+          <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between md:gap-6">
+            <div className="min-w-0 md:flex-1 md:max-w-3xl">
+              <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[1.02] tracking-tight text-foreground wrap-break-word">
+                {sport.label === "All Sports" ? "Sports" : sport.label}
               </h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Explore active sports prediction markets
+              <p className="mt-4 text-base sm:text-lg text-muted-foreground font-editorial leading-snug max-w-2xl">
+                Live prediction markets across{" "}
+                {sport.label === "All Sports"
+                  ? "every major league"
+                  : sport.label}
+                .
               </p>
             </div>
-          </div>
-        </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.05 }}
-          className="mb-1"
-        >
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-3">
+            <div className="flex items-center gap-3 flex-wrap md:flex-nowrap md:shrink-0 md:pb-1">
+              <MarketSearch
+                className="hidden md:block w-56"
+                tagSlug={sport.tagSlug}
+                tagLabel={sport.label === "All Sports" ? "Sports" : sport.label}
+              />
+              <div className="flex items-baseline gap-2 font-mono tabular-nums">
+                <span className="text-2xl font-semibold text-foreground">
+                  {events.length}
+                </span>
+                <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground max-w-[140px] truncate">
+                  {sport.label === "All Sports"
+                    ? "sports markets"
+                    : `${sport.label} markets`}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 h-px bg-linear-to-r from-border/80 via-border/40 to-transparent" />
+        </div>
+
+        {/* Two-level navigation bar: sub-category pills on top, filter
+            chips below, bound by a shared hairline so the pair reads as
+            one navigation surface with two levels rather than two
+            separate rows. */}
+        <div className="border-y border-border/50">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide py-2">
+            <span
+              aria-hidden
+              className="shrink-0 pl-0.5 pr-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 self-center"
+            >
+              Sport
+            </span>
             {SPORT_CATEGORIES.map((category) => {
               const isActive = selectedSport === category.value;
 
@@ -216,34 +229,36 @@ export function SportsContent({ initialData }: SportsContentProps) {
                 <button
                   type="button"
                   key={category.value}
-                  onClick={() => setSelectedSport(category.value)}
+                  onClick={() =>
+                    router.push(
+                      category.value
+                        ? `/events/sports/${category.value}`
+                        : "/events/sports"
+                    )
+                  }
                   className={cn(
-                    "inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium rounded-full border whitespace-nowrap transition-all active:scale-[0.97] shrink-0",
+                    "relative inline-flex items-center px-3 py-1.5 text-[13px] whitespace-nowrap transition-colors active:scale-[0.97] shrink-0",
                     isActive
-                      ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15"
-                      : "border-border/60 bg-background text-muted-foreground hover:border-border hover:bg-muted/50"
+                      ? "text-foreground font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <span
-                    className={cn("font-semibold", isActive && "text-primary")}
-                  >
-                    {category.label}
-                  </span>
+                  {category.label}
+                  {isActive && (
+                    <span className="absolute inset-x-2 -bottom-px h-px bg-foreground" />
+                  )}
                 </button>
               );
             })}
           </div>
-        </motion.div>
+          <div className="border-t border-border/30">
+            <EventFilterBar showStatus />
+          </div>
+        </div>
 
-        <EventFilterBar />
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
+        <div className="animate-in fade-in duration-500">
           {error && (
-            <Card className="border-destructive/50 bg-destructive/5 backdrop-blur-sm mb-6">
+            <Card className="border-destructive/50 bg-destructive/5 mb-6">
               <CardHeader>
                 <CardTitle className="text-destructive flex items-center gap-2">
                   <Sparkles className="h-5 w-5" />
@@ -259,20 +274,10 @@ export function SportsContent({ initialData }: SportsContentProps) {
           {showLoadingState && !error && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
               {[...Array(10)].map((_, i) => (
-                <motion.div
+                <EventCardSkeleton
                   key={`skeleton-${i}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className="rounded-2xl sm:rounded-3xl bg-card/30 backdrop-blur-sm border border-border/30 overflow-hidden"
-                >
-                  <Skeleton className="aspect-16/10 w-full bg-muted/50" />
-                  <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
-                    <Skeleton className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/50" />
-                    <Skeleton className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/30" />
-                    <Skeleton className="h-3 sm:h-4 w-2/3 rounded-md sm:rounded-lg bg-muted/30" />
-                  </div>
-                </motion.div>
+                  className={skeletonVisibilityClass(i)}
+                />
               ))}
             </div>
           )}
@@ -292,17 +297,11 @@ export function SportsContent({ initialData }: SportsContentProps) {
 
               {isFetchingNextPage && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
-                  {[...Array(5)].map((_, i) => (
-                    <div
+                  {[...Array(10)].map((_, i) => (
+                    <EventCardSkeleton
                       key={`loading-${i}`}
-                      className="rounded-2xl sm:rounded-3xl bg-card/30 backdrop-blur-sm border border-border/30 overflow-hidden animate-pulse"
-                    >
-                      <div className="aspect-16/10 w-full bg-muted/30" />
-                      <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
-                        <div className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/30" />
-                        <div className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/20" />
-                      </div>
-                    </div>
+                      className={skeletonVisibilityClass(i)}
+                    />
                   ))}
                 </div>
               )}
@@ -310,23 +309,16 @@ export function SportsContent({ initialData }: SportsContentProps) {
               {hasMore && (
                 <div
                   ref={setLoadMoreElement}
-                  className="h-20 w-full flex items-center justify-center"
-                >
-                  {isFetchingNextPage && (
-                    <div className="flex gap-2">
-                      <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
-                      <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
-                      <div className="w-2 h-2 rounded-full bg-primary animate-bounce" />
-                    </div>
-                  )}
-                </div>
+                  aria-hidden
+                  className="h-8 w-full"
+                />
               )}
 
               {!hasMore && !isFetchingNextPage && events.length > 0 && (
-                <div className="flex justify-center py-10 border-t border-border/10 mt-10">
-                  <p className="text-sm text-muted-foreground bg-muted/30 px-4 py-2 rounded-full border border-border/20">
-                    Showing all {events.length} {sport.label.toLowerCase()}{" "}
-                    markets
+                <div className="flex justify-center py-10">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                    All {events.length} {sport.label.toLowerCase()} markets
+                    shown
                   </p>
                 </div>
               )}
@@ -334,22 +326,20 @@ export function SportsContent({ initialData }: SportsContentProps) {
           )}
 
           {!showLoadingState && !error && events.length === 0 && (
-            <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-              <CardHeader className="text-center py-12">
-                <div className="mx-auto w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-                  <Star className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <CardTitle className="text-xl">
-                  No {sport.label} Markets
-                </CardTitle>
-                <CardDescription className="max-w-sm mx-auto">
-                  No active markets found for {sport.label}. Try a different
-                  sport or check back later.
-                </CardDescription>
-              </CardHeader>
-            </Card>
+            <div className="text-center py-24">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-muted/50 mb-6">
+                <Star className="h-7 w-7 text-muted-foreground" />
+              </div>
+              <h3 className="font-editorial italic text-2xl font-medium mb-2">
+                No {sport.label.toLowerCase()} markets
+              </h3>
+              <p className="text-muted-foreground max-w-sm mx-auto">
+                No active markets found. Try a different sport or check back
+                later.
+              </p>
+            </div>
           )}
-        </motion.div>
+        </div>
       </main>
     </div>
   );

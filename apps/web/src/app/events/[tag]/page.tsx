@@ -5,6 +5,7 @@ import {
   PRIORITY_EVENT_CARD_COUNT,
 } from "@/lib/lcp-images";
 import { getInitialEventsByTag, getTagDetails } from "@/lib/server-cache";
+import { isSportSubSlug } from "@/lib/sport-categories";
 import { normalizeTagSlug } from "@/lib/tag-slugs";
 import { TagEventsContent } from "./tag-events-content";
 
@@ -18,6 +19,13 @@ export default async function TagEventsPage({ params }: TagEventsPageProps) {
 
   if (canonicalTagSlug !== tag) {
     permanentRedirect(`/events/${canonicalTagSlug}`);
+  }
+
+  // Sport sub-categories live under /events/sports/{slug}. Redirect any
+  // legacy /events/{sport} hits so inbound links, bookmarks, and the
+  // rest of the app converge on the canonical URL.
+  if (isSportSubSlug(canonicalTagSlug)) {
+    permanentRedirect(`/events/sports/${canonicalTagSlug}`);
   }
 
   const [initialData, initialTag] = await Promise.all([

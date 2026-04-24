@@ -13,6 +13,7 @@ import {
   PROXY_WALLET_QUERY_KEY,
   useProxyWallet,
 } from "@/hooks/use-proxy-wallet";
+import { useUserPositions } from "@/hooks/use-user-positions";
 import { calculatePotentialPnL, OrderSide } from "@/lib/polymarket";
 import { clearBalanceCache } from "@/lib/rpc";
 import {
@@ -73,28 +74,11 @@ export function useTradingFormState({
     };
   }, []);
 
-  // Type for user positions response
-  interface UserPositionsResponse {
-    positions?: Array<{
-      asset?: string;
-      size?: number;
-    }>;
-  }
-
-  // Fetch user's position for the current token (for SELL max shares)
-  const { data: userPositionData } = useQuery<UserPositionsResponse | null>({
-    queryKey: ["userPositions", proxyAddress],
-    queryFn: async (): Promise<UserPositionsResponse | null> => {
-      if (!proxyAddress) return null;
-      const response = await fetch(
-        `/api/user/positions?user=${proxyAddress}&active=true`
-      );
-      if (!response.ok) return null;
-      return response.json() as Promise<UserPositionsResponse>;
-    },
+  // Shares the React Query cache with other callers of `useUserPositions`
+  // (e.g. the outcomes table), so we only pay for one network round trip.
+  const { data: userPositionData } = useUserPositions({
+    userAddress: proxyAddress ?? undefined,
     enabled: !!proxyAddress && hasProxyWallet,
-    staleTime: 10_000,
-    refetchInterval: 30_000,
   });
 
   const [side, setSide] = useState<TradingSide>(initialSide ?? "BUY");

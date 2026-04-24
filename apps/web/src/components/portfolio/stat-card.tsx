@@ -68,8 +68,8 @@ export function StatCard({
                 <span
                   className={`text-[10px] font-bold flex items-center gap-0.5 px-1.5 py-0.5 rounded-md ${
                     trend.isPositive
-                      ? "text-emerald-500 bg-emerald-500/10"
-                      : "text-red-500 bg-red-500/10"
+                      ? "text-emerald-700 dark:text-emerald-300 bg-emerald-500/10"
+                      : "text-red-700 dark:text-red-300 bg-red-500/10"
                   }`}
                 >
                   {trend.isPositive ? (

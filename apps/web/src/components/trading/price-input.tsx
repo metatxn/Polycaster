@@ -90,8 +90,8 @@ export function PriceInput({
       if (bestBid !== undefined && price > bestBid) {
         return {
           label: "Above best bid - near top of book",
-          color: "text-blue-500",
-          bgColor: "bg-blue-500/10",
+          color: "text-foreground",
+          bgColor: "bg-foreground/5",
         };
       }
       if (bestBid !== undefined && price === bestBid) {
@@ -118,8 +118,8 @@ export function PriceInput({
     if (bestAsk !== undefined && price < bestAsk) {
       return {
         label: "Below best ask - near top of book",
-        color: "text-blue-500",
-        bgColor: "bg-blue-500/10",
+        color: "text-foreground",
+        bgColor: "bg-foreground/5",
       };
     }
     if (bestAsk !== undefined && price === bestAsk) {
@@ -173,7 +173,7 @@ export function PriceInput({
       <div className="flex items-stretch gap-1.5">
         <button
           type="button"
-          className="px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg border border-border hover:bg-secondary/50 hover:text-foreground transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-3 py-2 text-sm font-medium text-muted-foreground border border-border/60 hover:bg-secondary/50 hover:text-foreground transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={() => handleIncrement(-1)}
           disabled={price <= 0.01}
         >
@@ -191,7 +191,7 @@ export function PriceInput({
             step={tickSize * 100}
             min={1}
             max={99}
-            className="w-full bg-secondary/30 border border-border rounded-xl px-2 py-2.5 text-center text-base font-semibold font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 pr-8"
+            className="w-full bg-secondary/30 border border-border/60 px-2 py-2.5 text-center text-base font-semibold font-mono tabular-nums text-foreground focus:outline-none focus:border-foreground transition-colors pr-8"
           />
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
             ¢
@@ -200,7 +200,7 @@ export function PriceInput({
 
         <button
           type="button"
-          className="px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg border border-border hover:bg-secondary/50 hover:text-foreground transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-3 py-2 text-sm font-medium text-muted-foreground border border-border/60 hover:bg-secondary/50 hover:text-foreground transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={() => handleIncrement(1)}
           disabled={price >= 0.99}
         >
@@ -211,7 +211,7 @@ export function PriceInput({
       {/* Order Position Indicator */}
       {(bestBid !== undefined || bestAsk !== undefined) && (
         <div
-          className={`px-2 py-1.5 rounded-lg text-[11px] ${orderPositionInfo.bgColor} ${orderPositionInfo.color}`}
+          className={`px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] ${orderPositionInfo.bgColor} ${orderPositionInfo.color}`}
         >
           {orderPositionInfo.label}
         </div>

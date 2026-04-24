@@ -4,6 +4,7 @@ import { SportsContent } from "@/app/events/sports/sports-content";
 import {
   buildOptimizedImageUrl,
   PRIORITY_EVENT_CARD_COUNT,
+  PRIORITY_EVENT_CARD_IMAGE_WIDTH,
 } from "@/lib/lcp-images";
 import { getInitialEventsByTag } from "@/lib/server-cache";
 import { isSportSubSlug } from "@/lib/sport-categories";
@@ -34,10 +35,13 @@ export default async function SportSubPage({ params }: SportSubPageProps) {
 
   initialData?.events?.slice(0, PRIORITY_EVENT_CARD_COUNT).forEach((event) => {
     if (event.image) {
-      preload(buildOptimizedImageUrl(event.image), {
-        as: "image",
-        fetchPriority: "high",
-      });
+      preload(
+        buildOptimizedImageUrl(event.image, PRIORITY_EVENT_CARD_IMAGE_WIDTH),
+        {
+          as: "image",
+          fetchPriority: "high",
+        }
+      );
     }
   });
 

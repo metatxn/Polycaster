@@ -21,6 +21,7 @@
     "@knoww/logger": "workspace:*",
     "@knoww/shared-types": "workspace:*",
     "@metamask/sdk": "0.34.0",
+    "@noble/hashes": "^2.2.0",
     "@opennextjs/cloudflare": "1.19.2",
     "@openrouter/ai-sdk-provider": "2.8.0",
     "@polymarket/clob-client-v2": "1.0.0",

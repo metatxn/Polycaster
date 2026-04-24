@@ -33,39 +33,17 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  async headers() {
-    // OpenNext on Cloudflare Workers does not propagate images.minimumCacheTTL
-    // to the optimized image response, so the browser refetches every visit.
-    // Emitting Cache-Control here makes repeat visits hit the HTTP cache.
-    return [
-      {
-        source: "/_next/image",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-        ],
-      },
-    ];
-  },
   // Required to support PostHog trailing slash API requests
   skipTrailingSlashRedirect: true,
+  // Image optimization is delegated to the shared optimizer at
+  // `NEXT_PUBLIC_IMAGE_OPTIMIZER_URL` (default: https://images.knoww.app).
+  // With a custom loader, Next's built-in `/_next/image` isn't used — so
+  // `formats`, `minimumCacheTTL`, and `remotePatterns` would all be no-ops
+  // and are intentionally omitted. Format negotiation + long-lived caching
+  // are handled by the optimizer itself.
   images: {
-    formats: ["image/avif", "image/webp"],
-    minimumCacheTTL: 31_536_000,
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "polymarket-upload.s3.us-east-2.amazonaws.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "*.polymarket.com",
-        pathname: "/**",
-      },
-    ],
+    loader: "custom",
+    loaderFile: "./src/lib/image-loader.ts",
   },
 };
 

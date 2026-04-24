@@ -1,5 +1,3 @@
-"use client";
-
 import { buildOptimizedImageUrl } from "./image-optimizer";
 
 type ImageLoaderProps = {

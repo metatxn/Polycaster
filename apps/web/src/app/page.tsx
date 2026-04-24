@@ -23,6 +23,17 @@ const TICKER = [
   { label: "US-RECESSION-2026", side: "NO", price: "71¢", delta: "-4" },
 ];
 
+// The detected claim that drives the main readout. Every matched market
+// below should connect back to something stated here — that pairing is the
+// product's core demo.
+const CLAIM = {
+  source: "x.com/@themacrotake",
+  handle: "@themacrotake",
+  meta: "2.3K reposts · 2m ago",
+  quote:
+    "BTC above $120K, Fed pivot in Q1, SPX prints a new all-time high before year-end. Risk-on macro is back.",
+};
+
 const MARKET_PREVIEW = [
   {
     q: "Will Bitcoin close above $120K in 2025?",
@@ -32,35 +43,93 @@ const MARKET_PREVIEW = [
   },
   { q: "Will the Fed cut rates in Q1 2026?", yes: "82", no: "18", vol: "890K" },
   {
-    q: "Will SpaceX launch Starship to Mars by 2028?",
-    yes: "14",
-    no: "86",
-    vol: "412K",
+    q: "Will the S&P hit a new all-time high this quarter?",
+    yes: "71",
+    no: "29",
+    vol: "610K",
   },
   {
-    q: "Will AGI be declared before end of 2027?",
-    yes: "23",
-    no: "77",
-    vol: "1.1M",
+    q: "Will the US enter recession in 2026?",
+    yes: "29",
+    no: "71",
+    vol: "1.8M",
   },
 ];
 
-// Dimmer "peek" cards flanking the main terminal on wide screens. Different
-// market mixes signal to visitors that Knoww handles diverse topics — not
-// just the three on the hero card.
+// Dimmer "peek" cards flanking the main terminal on wide screens. Mixed
+// finance sources — a retail feed on the left, a terminal-style feed on
+// the right — to signal coverage across the whole finance surface.
 const PEEK_LEFT_MARKETS = [
-  { q: "Will OpenAI IPO before 2028?", yes: "37", no: "63" },
-  { q: "Will Tesla deliver 2.5M cars in 2025?", yes: "44", no: "56" },
-  { q: "Will the S&P hit a new ATH this quarter?", yes: "71", no: "29" },
+  { q: "Will NVDA close above $200 this quarter?", yes: "52", no: "48" },
+  { q: "Will the 10Y yield drop below 4% by June?", yes: "44", no: "56" },
+  { q: "Will gold print a new ATH in 2026?", yes: "63", no: "37" },
 ];
 const PEEK_RIGHT_MARKETS = [
-  { q: "Will Apple ship a foldable by 2027?", yes: "29", no: "71" },
-  { q: "Will Ukraine join NATO by 2030?", yes: "18", no: "82" },
-  { q: "Will Taylor Swift tour in 2026?", yes: "58", no: "42" },
+  { q: "Will WTI crude exceed $90 this year?", yes: "29", no: "71" },
+  { q: "Will the DXY close below 100 by Q3?", yes: "41", no: "59" },
+  { q: "Will oil majors beat earnings this quarter?", yes: "58", no: "42" },
 ];
+
+// Short archive of recent detections shown below the live readout. Signals
+// "this has been running" without any dishonest animation — rows are static
+// after mount; only the hero timestamp above ticks in real time. Each entry
+// carries a minutes-ago offset; the HH:MM:SS stamp is computed once on mount
+// so it stays consistent with the user's actual clock.
+const ARCHIVE_PREVIEW = [
+  {
+    offsetMin: 6,
+    src: "bloomberg.com · Markets",
+    headline: "$90 oil thesis back on table — OPEC supply cuts tightening",
+    matched: 4,
+  },
+  {
+    offsetMin: 24,
+    src: "reddit.com · r/wallstreetbets",
+    headline: "NVDA earnings Wed — everyone is long the same trade",
+    matched: 4,
+  },
+  {
+    offsetMin: 42,
+    src: "x.com/@yardeni",
+    headline: "Fed pivot by Q1, 10Y below 4%, SPX hitting new ATHs",
+    matched: 3,
+  },
+];
+
+function formatClock(totalSec: number) {
+  const sec = ((totalSec % 86400) + 86400) % 86400;
+  const hh = Math.floor(sec / 3600);
+  const mm = Math.floor((sec % 3600) / 60);
+  const ss = sec % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+}
 
 export default function LandingPage() {
   const { theme, toggleTheme } = useKwTheme();
+
+  // Real-time clock for the Live Readout header. Server renders the static
+  // fallback ("21:04:31") to keep SSR deterministic; the client replaces it
+  // on first mount and ticks every second.
+  const [clockTime, setClockTime] = useState("21:04:31");
+  // Archive timestamps derived from mount time so they stay consistent with
+  // the user's actual clock. Computed once on mount, then static.
+  const [archiveTimes, setArchiveTimes] = useState<string[]>(() =>
+    ARCHIVE_PREVIEW.map((_, i) => ["20:58:04", "20:41:17", "20:22:39"][i])
+  );
+  useEffect(() => {
+    const compute = () => {
+      const d = new Date();
+      return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    };
+    const base = compute();
+    setArchiveTimes(
+      ARCHIVE_PREVIEW.map((a) => formatClock(base - a.offsetMin * 60))
+    );
+    const tick = () => setClockTime(formatClock(compute()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <div
@@ -204,7 +273,7 @@ export default function LandingPage() {
                 <div className="px-3 py-2 border-b border-(--kw-fg)/10 flex items-center gap-1.5">
                   <span className="w-1 h-1 rounded-full bg-(--kw-accent)" />
                   <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-                    Reddit · r/investing
+                    Reddit · r/wallstreetbets
                   </span>
                 </div>
                 <div className="divide-y divide-(--kw-fg)/10">
@@ -235,18 +304,42 @@ export default function LandingPage() {
                       Knoww — Live Readout
                     </span>
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] font-mono text-(--kw-fg)/60">
-                    <span>21:04:31</span>
+                  <div className="flex items-center gap-3 text-[11px] font-mono text-(--kw-fg)/60 tabular-nums">
+                    <span suppressHydrationWarning>{clockTime}</span>
                     <span className="hidden sm:inline text-(--kw-fg)/30">
                       ·
                     </span>
-                    <span className="hidden sm:inline">x.com/elonmusk</span>
+                    <span className="hidden sm:inline uppercase tracking-[0.18em]">
+                      Live
+                    </span>
+                  </div>
+                </div>
+
+                {/* Claim block — the tweet that triggered the match. This is
+                    the "reading the internet" half of the value prop; the
+                    table below is the "see the matching market" half. */}
+                <div className="px-5 py-4 border-b border-(--kw-fg)/10 bg-(--kw-fg)/1.5">
+                  <div className="flex items-center gap-2 mb-3 text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/55">
+                    <span className="w-1 h-1 rounded-full bg-(--kw-accent)" />
+                    <span>Claim detected</span>
+                    <span className="text-(--kw-fg)/25">·</span>
+                    <span className="normal-case tracking-widest">
+                      {CLAIM.source}
+                    </span>
+                  </div>
+                  <p className="kw-editorial italic text-[17px] sm:text-[18px] leading-[1.45] text-(--kw-fg)/92 max-w-[580px]">
+                    &ldquo;{CLAIM.quote}&rdquo;
+                  </p>
+                  <div className="mt-3 flex items-center gap-2 text-[11px] font-mono text-(--kw-fg)/55">
+                    <span className="text-(--kw-fg)/75">{CLAIM.handle}</span>
+                    <span className="text-(--kw-fg)/25">·</span>
+                    <span>{CLAIM.meta}</span>
                   </div>
                 </div>
 
                 <div className="divide-y divide-(--kw-fg)/10">
                   <div className="px-5 py-3 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.12em] text-(--kw-fg)/60">
-                    <span>Matched Market</span>
+                    <span>Matched Markets</span>
                     <span className="flex gap-6 sm:gap-10">
                       <span className="w-10 text-right">YES</span>
                       <span className="w-10 text-right">NO</span>
@@ -287,6 +380,47 @@ export default function LandingPage() {
                     <ArrowUpRight className="w-3.5 h-3.5" />
                   </div>
                 </div>
+
+                {/* Prior detections — a short static archive of recent claims.
+                    Honest: only the hero clock above ticks; these rows just
+                    stagger-fade in on first mount to feel like logs landing. */}
+                <div className="px-5 py-3 border-t border-(--kw-fg)/10 flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/55">
+                  <span className="w-1 h-1 rounded-full bg-(--kw-fg)/35 animate-pulse" />
+                  <span>Prior detections</span>
+                  <span className="text-(--kw-fg)/20">·</span>
+                  <span>past 45 min</span>
+                </div>
+                <div className="divide-y divide-(--kw-fg)/10">
+                  {ARCHIVE_PREVIEW.map((a, i) => (
+                    <div
+                      key={a.headline}
+                      className="px-5 py-2.5 grid grid-cols-[auto_1fr_auto] items-baseline gap-4 hover:bg-(--kw-fg)/2 transition-colors"
+                      style={{
+                        opacity: 0,
+                        transform: "translateY(8px)",
+                        animation: `kwStaggerIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) ${400 + i * 140}ms forwards`,
+                      }}
+                    >
+                      <span
+                        suppressHydrationWarning
+                        className="font-mono text-[11px] tabular-nums text-(--kw-fg)/55"
+                      >
+                        {archiveTimes[i]}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] leading-[1.4] text-(--kw-fg)/85">
+                          {a.headline}
+                        </p>
+                        <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-(--kw-fg)/45">
+                          {a.src}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kw-fg)/55 tabular-nums">
+                        {a.matched} matched
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -299,7 +433,7 @@ export default function LandingPage() {
                 <div className="px-3 py-2 border-b border-(--kw-fg)/10 flex items-center gap-1.5">
                   <span className="w-1 h-1 rounded-full bg-(--kw-accent)" />
                   <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-                    Bloomberg · article
+                    Bloomberg · Markets
                   </span>
                 </div>
                 <div className="divide-y divide-(--kw-fg)/10">
@@ -520,7 +654,7 @@ export default function LandingPage() {
           </div>
 
           <h3 className="kw-reveal text-5xl md:text-6xl font-bold tracking-[-0.035em] leading-[0.98] mb-16 max-w-[900px]">
-            Three steps. No account. No onboarding. No spectator sport.
+            Three steps. Claim to position, without leaving the page.
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
@@ -580,7 +714,7 @@ export default function LandingPage() {
             </p>
             <a
               href={CHROME_STORE_URL}
-              className="inline-flex items-center gap-2.5 bg-(--kw-bg) text-(--kw-fg) px-6 py-3.5 text-[14px] font-semibold hover:bg-white transition-colors group w-fit"
+              className="inline-flex items-center gap-2.5 bg-(--kw-bg) text-(--kw-fg) px-6 py-3.5 text-[14px] font-semibold hover:bg-(--kw-bg)/85 transition-colors group w-fit"
             >
               <Download className="w-4 h-4" />
               Install Knoww
@@ -595,7 +729,7 @@ export default function LandingPage() {
         <div className="max-w-[1200px] mx-auto px-6 py-28">
           <div className="max-w-[860px]">
             <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60 mb-6 block">
-              Colophon
+              § IV — Install
             </span>
             <h2 className="text-[56px] sm:text-[80px] md:text-[96px] font-bold tracking-[-0.035em] leading-[0.92] mb-10">
               Start reading

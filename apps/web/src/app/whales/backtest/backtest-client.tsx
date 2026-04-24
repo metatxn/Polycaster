@@ -405,7 +405,7 @@ function Results({ result }: { result: BacktestResult }) {
                 <span className="font-editorial italic text-lg text-foreground tabular-nums min-w-[3.5rem]">
                   {(row.precision * 100).toFixed(1)}%
                 </span>
-                <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden max-w-xs">
+                <div className="flex-1 h-px bg-border/60 overflow-hidden max-w-xs">
                   <div
                     className="h-full bg-foreground"
                     style={{ width: `${row.precision * 100}%` }}
@@ -586,16 +586,16 @@ function ArchetypeChip({ id }: { id: string }) {
       : id === "size_hider"
         ? "bg-foreground text-background"
         : id === "category_specialist"
-          ? "bg-amber-500 text-background shadow-sm"
+          ? "bg-amber-500 text-background"
           : id === "funding_cluster"
-            ? "bg-rose-600 text-background shadow-sm"
+            ? "bg-rose-600 text-background"
             : id === "owner_cluster"
-              ? "bg-violet-600 text-background shadow-sm"
+              ? "bg-violet-600 text-background"
               : "bg-background border border-foreground/60 text-foreground";
   return (
     <span
       className={cn(
-        "inline-flex items-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] rounded-sm",
+        "inline-flex items-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em]",
         tone
       )}
     >

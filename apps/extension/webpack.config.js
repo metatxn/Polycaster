@@ -170,6 +170,9 @@ module.exports = (_env, argv) => {
           __dirname,
           "../../packages/shared-types/src"
         ),
+        // ProvidePlugin injects `process`; resolve from this package so
+        // workspace sources (e.g. @knoww/logger) don't look under packages/*.
+        "process/browser": require.resolve("process/browser"),
       },
       fallback: {
         stream: false,

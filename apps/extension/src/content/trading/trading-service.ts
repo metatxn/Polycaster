@@ -3,7 +3,7 @@
  *
  * Manages wallet connection, credential derivation, proxy wallet derivation,
  * balance queries, order book fetching, and order placement (limit + market).
- * Also supports split (USDC→YES+NO) and merge (YES+NO→USDC) operations.
+ * Also supports split (pUSD→YES+NO) and merge (YES+NO→pUSD) operations.
  */
 
 import { createLogger } from "@knoww/logger";
@@ -472,7 +472,7 @@ export const TradingService = {
    * Resolves with the tx hash (or empty string if the Safe was already
    * deployed on-chain). On success, flips `ctx.isDeployed` and refreshes the
    * balance — so the trading panel can transition from "Deploy Wallet" to
-   * "Approve USDC" without manual refresh.
+   * "Approve pUSD" without manual refresh.
    */
   async deployWallet(): Promise<{ txHash: string; alreadyDeployed: boolean }> {
     if (!ctx.address) throw new Error("Wallet not connected");
@@ -513,7 +513,10 @@ export const TradingService = {
 
   // ── USDC & Token Approvals (gasless via Relayer) ──
 
-  async approveUsdc(_negRisk = false): Promise<string> {
+  async approveUsdc(
+    _negRisk = false,
+    approvalAmount?: number
+  ): Promise<string> {
     if (!ctx.address) throw new Error("Wallet not connected");
 
     update({ state: "approving", error: null });
@@ -524,7 +527,14 @@ export const TradingService = {
           txHash: string;
           alreadyApproved?: boolean;
         }>(
-          { type: "trading:relayer-approve", address: ctx.address },
+          {
+            type: "trading:relayer-approve",
+            address: ctx.address,
+            approvalAmount:
+              approvalAmount && approvalAmount > 0
+                ? String(approvalAmount)
+                : undefined,
+          },
           "Approval failed"
         )
       );
@@ -540,7 +550,7 @@ export const TradingService = {
     }
   },
 
-  // ── Split (USDC → YES + NO) ──
+  // ── Split (pUSD → YES + NO) ──
 
   async splitPosition(
     conditionId: string,
@@ -580,7 +590,7 @@ export const TradingService = {
     }
   },
 
-  // ── Merge (YES + NO → USDC) ──
+  // ── Merge (YES + NO → pUSD) ──
 
   async mergePositions(
     conditionId: string,

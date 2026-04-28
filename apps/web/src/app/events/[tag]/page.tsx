@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { permanentRedirect } from "next/navigation";
 import { preload } from "react-dom";
 import {
@@ -5,6 +6,7 @@ import {
   PRIORITY_EVENT_CARD_COUNT,
   PRIORITY_EVENT_CARD_IMAGE_WIDTH,
 } from "@/lib/lcp-images";
+import { buildPageMetadata } from "@/lib/seo";
 import { getInitialEventsByTag, getTagDetails } from "@/lib/server-cache";
 import { isSportSubSlug } from "@/lib/sport-categories";
 import { normalizeTagSlug } from "@/lib/tag-slugs";
@@ -12,6 +14,23 @@ import { TagEventsContent } from "./tag-events-content";
 
 interface TagEventsPageProps {
   params: Promise<{ tag: string }>;
+}
+
+export async function generateMetadata({
+  params,
+}: TagEventsPageProps): Promise<Metadata> {
+  const { tag } = await params;
+  const canonicalTagSlug = normalizeTagSlug(tag);
+  const tagDetails = await getTagDetails(canonicalTagSlug);
+  const label = tagDetails?.label || formatTagTitle(canonicalTagSlug);
+
+  return buildPageMetadata({
+    title: `${label} Prediction Markets`,
+    description:
+      tagDetails?.description ||
+      `Browse live ${label.toLowerCase()} prediction markets, compare odds, and track active outcomes on Knoww.`,
+    path: `/events/${canonicalTagSlug}`,
+  });
 }
 
 export default async function TagEventsPage({ params }: TagEventsPageProps) {
@@ -53,4 +72,12 @@ export default async function TagEventsPage({ params }: TagEventsPageProps) {
       initialTag={initialTag}
     />
   );
+}
+
+function formatTagTitle(slug: string) {
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }

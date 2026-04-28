@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Decimal from "decimal.js";
 import type {
   ArchetypeId,
   ArchetypeScore,
@@ -236,10 +237,9 @@ export function getInsiderActivityStats(activities: SuspiciousActivity[]) {
   );
   const repeatOffenders = activities.filter((a) => a.analysis.repeatOffender);
 
-  const totalVolume = activities.reduce(
-    (sum, a) => sum + a.trade.usdcAmount,
-    0
-  );
+  const totalVolume = activities
+    .reduce((sum, a) => sum.add(a.trade.usdcAmount), new Decimal(0))
+    .toNumber();
 
   const uniqueAccounts = new Set(activities.map((a) => a.account.address)).size;
   const uniqueMarkets = new Set(activities.map((a) => a.market.conditionId))
@@ -291,7 +291,9 @@ export function sortInsiderActivities(
         (a, b) => b.analysis.suspicionScore - a.analysis.suspicionScore
       );
     case "amount":
-      return sorted.sort((a, b) => b.trade.usdcAmount - a.trade.usdcAmount);
+      return sorted.sort((a, b) =>
+        new Decimal(b.trade.usdcAmount).cmp(a.trade.usdcAmount)
+      );
     case "newest_account":
       return sorted.sort(
         (a, b) => a.account.accountAgeHours - b.account.accountAgeHours

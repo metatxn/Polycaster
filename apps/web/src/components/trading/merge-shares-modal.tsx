@@ -13,7 +13,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { USDC_E_DECIMALS } from "@/constants/contracts";
+import { PUSD_DECIMALS } from "@/constants/contracts";
 import { useCtfOperations } from "@/hooks/use-ctf-operations";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 
@@ -62,9 +62,9 @@ export function MergeSharesModal({
       setIsLoadingBalances(true);
       getOutcomeBalances(yesTokenId, noTokenId, proxyAddress)
         .then((balances) => {
-          // Convert from wei to display units (6 decimals for USDC-backed tokens)
+          // Outcome token balances use the same 6-decimal scale as pUSD.
           const minBalanceDisplay =
-            Number(balances.minBalance) / 10 ** USDC_E_DECIMALS;
+            Number(balances.minBalance) / 10 ** PUSD_DECIMALS;
           setAvailableShares(minBalanceDisplay);
         })
         .catch((err) => {
@@ -193,7 +193,7 @@ export function MergeSharesModal({
         {/* Content */}
         <div className="p-4 space-y-4">
           <DialogDescription className="text-sm text-muted-foreground">
-            Merge a share of Yes and No to get 1 USDC. You can do this to save
+            Merge a share of Yes and No to get 1 pUSD. You can do this to save
             cost when trying to get rid of a position.
           </DialogDescription>
 
@@ -263,7 +263,7 @@ export function MergeSharesModal({
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">You receive</span>
                     <span className="text-foreground font-medium">
-                      ${numericAmount.toFixed(2)} USDC
+                      ${numericAmount.toFixed(2)} pUSD
                     </span>
                   </div>
                 </div>
@@ -307,7 +307,7 @@ export function MergeSharesModal({
                 className="flex items-center gap-2 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg"
               >
                 <span className="text-sm text-emerald-500">
-                  ✓ Merge successful! USDC added to your balance.
+                  ✓ Merge successful! pUSD added to your balance.
                 </span>
               </motion.div>
             )}
@@ -341,7 +341,7 @@ export function MergeSharesModal({
 
           {/* Info Text */}
           <p className="text-xs text-muted-foreground text-center">
-            Merging converts equal amounts of YES and NO shares back into USDC.
+            Merging converts equal amounts of YES and NO shares back into pUSD.
             This is useful when you want to exit a position without selling on
             the market.
           </p>

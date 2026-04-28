@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Decimal from "decimal.js";
 
 export interface WhaleTrader {
   address: string;
@@ -160,14 +161,15 @@ export function getWhaleActivityStats(activities: WhaleActivity[]) {
   const buyActivities = activities.filter((a) => a.trade.side === "BUY");
   const sellActivities = activities.filter((a) => a.trade.side === "SELL");
 
-  const totalBuyVolume = buyActivities.reduce(
-    (sum, a) => sum + a.trade.usdcAmount,
-    0
+  const totalBuyVolumeDecimal = buyActivities.reduce(
+    (sum, a) => sum.add(a.trade.usdcAmount),
+    new Decimal(0)
   );
-  const totalSellVolume = sellActivities.reduce(
-    (sum, a) => sum + a.trade.usdcAmount,
-    0
+  const totalSellVolumeDecimal = sellActivities.reduce(
+    (sum, a) => sum.add(a.trade.usdcAmount),
+    new Decimal(0)
   );
+  const totalVolumeDecimal = totalBuyVolumeDecimal.add(totalSellVolumeDecimal);
 
   const uniqueTraders = new Set(activities.map((a) => a.trader.address)).size;
   const uniqueMarkets = new Set(activities.map((a) => a.market.conditionId))
@@ -180,10 +182,11 @@ export function getWhaleActivityStats(activities: WhaleActivity[]) {
     (a) => a.source === "global_scan"
   ).length;
 
-  const buyRatio =
-    totalBuyVolume + totalSellVolume > 0
-      ? totalBuyVolume / (totalBuyVolume + totalSellVolume)
-      : 0.5;
+  const buyRatio = totalVolumeDecimal.gt(0)
+    ? totalBuyVolumeDecimal.div(totalVolumeDecimal).toNumber()
+    : 0.5;
+  const totalBuyVolume = totalBuyVolumeDecimal.toNumber();
+  const totalSellVolume = totalSellVolumeDecimal.toNumber();
 
   return {
     totalTrades: activities.length,
@@ -191,7 +194,7 @@ export function getWhaleActivityStats(activities: WhaleActivity[]) {
     sellCount: sellActivities.length,
     totalBuyVolume,
     totalSellVolume,
-    totalVolume: totalBuyVolume + totalSellVolume,
+    totalVolume: totalVolumeDecimal.toNumber(),
     uniqueTraders,
     uniqueMarkets,
     buyRatio,

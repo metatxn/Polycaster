@@ -86,3 +86,14 @@ test("nlpContextGate ignores generic lemmas like country and people", () => {
   assert.equal(gate.pass, false);
   assert.equal(gate.meaningfulNouns, 0, gate.details);
 });
+
+test("nlpContextGate does not pass green-card text to sports card markets", () => {
+  const gate = nlpContextGate(
+    "Our co-founders were Green Card holders who built MapmyIndia in India and now hire Indian engineers",
+    "UFC 328: Jeremy Stephens vs. King Green (Lightweight, Main Card)"
+  );
+
+  assert.equal(gate.pass, false, gate.details);
+  assert.equal(gate.meaningfulNouns, 0, gate.details);
+  assert.ok(/meaningful=\[\]/.test(gate.details), gate.details);
+});

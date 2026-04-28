@@ -17,13 +17,10 @@ const log = createLogger("api.relayer");
  *   Browser    → POST /api/relayer/{path} → this route → relayer-v2.polymarket.com/{path}
  *   Extension  → POST /api/relayer/{path} → this route → relayer-v2.polymarket.com/{path}
  *
- * Auth strategy (picked per request type):
- *   - `type: "SAFE-CREATE"` or `type: "SAFE"` on POST /submit → builder signing
- *     server produces POLY_BUILDER_* HMAC headers for the upstream request.
- *     The v2 relayer rejects these with an opaque 400 "bad request" when only
- *     RELAYER_API_KEY is sent (verified for SAFE-CREATE on the wire; SAFE batch
- *     submits match the same failure mode as of Apr 2026).
- *   - Other submits (e.g. PROXY) and all GETs → RELAYER_API_KEY +
+ * Auth strategy:
+ *   - SAFE-CREATE deploy requests use builder-HMAC headers, matching the
+ *     published Polymarket builder SDK's deploy path.
+ *   - All other upstream relayer calls use RELAYER_API_KEY +
  *     RELAYER_API_KEY_ADDRESS headers.
  *
  * Security layers (mirror /api/sign):
@@ -36,7 +33,7 @@ const log = createLogger("api.relayer");
  * Environment variables (server-only, NO NEXT_PUBLIC_ prefix):
  *   POLY_RELAYER_API_KEY         – Polymarket V2 relayer API key
  *   POLY_RELAYER_API_KEY_ADDRESS – Address that owns the relayer key
- *   BUILDER_SIGNING_SERVER_URL   – upstream signing server (signing.knoww.app/sign)
+ *   BUILDER_SIGNING_SERVER_URL   – signing server for SAFE-CREATE
  *   INTERNAL_AUTH_TOKEN          – bearer token for the signing server
  *   EXTENSION_SESSION_SECRET     – extension session signing secret
  */
@@ -50,7 +47,7 @@ const ALLOWED_PATHS = new Set(["submit", "nonce", "transaction", "deployed"]);
 
 /**
  * Headers returned by the builder signing server. Keys match Polymarket's
- * upstream expectations exactly — don't lowercase or rename them.
+ * upstream expectations exactly.
  */
 interface BuilderHmacHeaders {
   POLY_BUILDER_API_KEY: string;
@@ -59,14 +56,6 @@ interface BuilderHmacHeaders {
   POLY_BUILDER_SIGNATURE: string;
 }
 
-/**
- * Fetch HMAC headers from the signing server for a specific (method, path, body)
- * triple. Returns `null` if the signing server is misconfigured or rejects us,
- * so callers can surface a clean 503 instead of a blind 500.
- *
- * The signing server computes: HMAC-SHA256(secret, timestamp + method + path + body)
- * and returns the full POLY_BUILDER_* header quad.
- */
 async function getBuilderHmacHeaders(
   method: string,
   path: string,
@@ -77,7 +66,7 @@ async function getBuilderHmacHeaders(
   if (!signUrl || !token) {
     log.error("signing.config.missing", {
       reason:
-        "BUILDER_SIGNING_SERVER_URL / INTERNAL_AUTH_TOKEN not configured — cannot sign SAFE / SAFE-CREATE",
+        "BUILDER_SIGNING_SERVER_URL / INTERNAL_AUTH_TOKEN not configured for SAFE-CREATE",
     });
     return null;
   }
@@ -189,19 +178,6 @@ async function proxy(
     );
   }
 
-  // Server config check
-  const apiKey = process.env.POLY_RELAYER_API_KEY;
-  const apiKeyAddress = process.env.POLY_RELAYER_API_KEY_ADDRESS;
-  if (!apiKey || !apiKeyAddress) {
-    log.error("config.missing", {
-      reason: "POLY_RELAYER_API_KEY(_ADDRESS) not configured",
-    });
-    return NextResponse.json(
-      { error: "Relayer not configured" },
-      { status: 503 }
-    );
-  }
-
   // Layer 3c: streamed body with hard byte cap
   let body: string | undefined;
   let parsedBody: Record<string, unknown> | undefined;
@@ -214,7 +190,7 @@ async function proxy(
       );
     }
     // Validate JSON shape so we don't forward garbage, and keep the parsed
-    // form for the builder-HMAC submit detection below.
+    // form for selecting the correct upstream auth scheme below.
     try {
       parsedBody = JSON.parse(rawBody) as Record<string, unknown>;
     } catch {
@@ -227,13 +203,6 @@ async function proxy(
   }
 
   const upstreamUrl = `${UPSTREAM_BASE}/${pathSegments.join("/")}${request.nextUrl.search}`;
-  const upstreamHeaders: Record<string, string> = {};
-  if (method === "POST") {
-    upstreamHeaders["Content-Type"] = "application/json";
-  }
-
-  // Auth strategy: SAFE and SAFE-CREATE submits require builder HMAC auth.
-  // RELAYER_API_KEY alone returns opaque 400 "bad request" (see proxy logs).
   const submitType =
     method === "POST" &&
     pathSegments[0] === "submit" &&
@@ -241,26 +210,51 @@ async function proxy(
     typeof parsedBody.type === "string"
       ? parsedBody.type
       : null;
-  const needsBuilderHmac =
+  const safeCreateBody =
     method === "POST" &&
     pathSegments[0] === "submit" &&
-    typeof body === "string" &&
-    (submitType === "SAFE-CREATE" || submitType === "SAFE");
+    submitType === "SAFE-CREATE" &&
+    typeof body === "string"
+      ? body
+      : null;
+  const safeSubmitBody =
+    method === "POST" &&
+    pathSegments[0] === "submit" &&
+    submitType === "SAFE" &&
+    typeof body === "string"
+      ? body
+      : null;
 
-  if (needsBuilderHmac) {
+  const upstreamHeaders: Record<string, string> = {};
+  if (method === "POST") {
+    upstreamHeaders["Content-Type"] = "application/json";
+  }
+
+  if (safeCreateBody !== null) {
     const hmacHeaders = await getBuilderHmacHeaders(
       "POST",
       `/${pathSegments.join("/")}`,
-      body as string
+      safeCreateBody
     );
     if (!hmacHeaders) {
       return NextResponse.json(
-        { error: "Signing service unavailable for relayer submit" },
+        { error: "Relayer not configured" },
         { status: 503 }
       );
     }
     Object.assign(upstreamHeaders, hmacHeaders);
   } else {
+    const apiKey = process.env.POLY_RELAYER_API_KEY;
+    const apiKeyAddress = process.env.POLY_RELAYER_API_KEY_ADDRESS;
+    if (!apiKey || !apiKeyAddress) {
+      log.error("config.missing", {
+        reason: "POLY_RELAYER_API_KEY(_ADDRESS) not configured",
+      });
+      return NextResponse.json(
+        { error: "Relayer not configured" },
+        { status: 503 }
+      );
+    }
     upstreamHeaders.RELAYER_API_KEY = apiKey;
     upstreamHeaders.RELAYER_API_KEY_ADDRESS = apiKeyAddress;
   }
@@ -270,6 +264,7 @@ async function proxy(
 
   try {
     let upstream: Response;
+    let upstreamBody: string;
     try {
       upstream = await fetch(upstreamUrl, {
         method,
@@ -291,7 +286,32 @@ async function proxy(
       throw fetchError;
     }
 
-    const upstreamBody = await upstream.text();
+    upstreamBody = await upstream.text();
+
+    if (upstream.status === 400 && safeSubmitBody !== null) {
+      log.warn("safe.relayerKey.rejected.retryingHmac", {
+        path: pathSegments.join("/"),
+        status: upstream.status,
+        body: upstreamBody.slice(0, 500),
+      });
+      const hmacHeaders = await getBuilderHmacHeaders(
+        "POST",
+        `/${pathSegments.join("/")}`,
+        safeSubmitBody
+      );
+      if (hmacHeaders) {
+        upstream = await fetch(upstreamUrl, {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            ...hmacHeaders,
+          },
+          body: safeSubmitBody,
+          signal: controller.signal,
+        });
+        upstreamBody = await upstream.text();
+      }
+    }
 
     if (upstream.status < 200 || upstream.status >= 300) {
       log.error("upstream.non2xx", {

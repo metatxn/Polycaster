@@ -18,11 +18,13 @@
     "typecheck:ext": "pnpm --filter @knoww/extension typecheck",
     "typecheck:web": "pnpm --filter @knoww/web typecheck",
     "audit:security": "pnpm audit --audit-level=high",
+    "brand:render": "node tooling/brand/render-k-mark.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.12",
+    "@biomejs/biome": "2.4.13",
     "husky": "9.1.7",
+    "sharp": "^0.34.5",
     "typescript": "6.0.3"
   },
   "pnpm": {

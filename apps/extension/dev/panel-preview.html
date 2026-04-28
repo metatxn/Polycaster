@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Knoww panel — design preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="stylesheet" href="../src/content/knoww-inline.css" />
+
+    <!-- Override the @font-face URLs from knoww-inline.css to point at the
+         exact same @fontsource bytes via JSDelivr's CDN. In production the
+         CSS resolves `fonts/...` against `chrome-extension://<id>/`; under
+         file:// that path doesn't exist, so this redeclaration takes over.
+         The byte-identical source means the preview matches the shipped
+         extension visually. -->
+    <style>
+      @font-face {
+        font-family: "KnowwEditorial";
+        font-style: italic;
+        font-weight: 500;
+        font-display: swap;
+        src: url("https://cdn.jsdelivr.net/npm/@fontsource/fraunces@5.2.9/files/fraunces-latin-500-italic.woff2")
+          format("woff2");
+      }
+      @font-face {
+        font-family: "KnowwMono";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.2.8/files/jetbrains-mono-latin-500-normal.woff2")
+          format("woff2");
+      }
+    </style>
+
+    <style>
+      /* ---------- preview chrome ---------- */
+      :root {
+        --pv-bg: #0b0d10;
+        --pv-bg-elev: #15181d;
+        --pv-border: rgba(255, 255, 255, 0.08);
+        --pv-text: rgba(231, 233, 234, 0.92);
+        --pv-text-dim: rgba(231, 233, 234, 0.55);
+        --pv-accent: #1d9bf0;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--pv-bg);
+        color: var(--pv-text);
+        font-family:
+          "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        min-height: 100vh;
+      }
+
+      .pv-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 22px;
+        align-items: center;
+        padding: 14px 20px;
+        background: rgba(11, 13, 16, 0.86);
+        backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--pv-border);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--pv-text-dim);
+      }
+
+      .pv-brand {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
+        color: var(--pv-text);
+        margin-right: 6px;
+      }
+      .pv-brand strong {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 16px;
+        letter-spacing: -0.01em;
+        text-transform: none;
+      }
+      .pv-brand small {
+        opacity: 0.55;
+      }
+
+      .pv-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .pv-group > span {
+        opacity: 0.55;
+      }
+      .pv-group > div {
+        display: inline-flex;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--pv-border);
+        border-radius: 999px;
+      }
+      .pv-group button {
+        appearance: none;
+        background: transparent;
+        border: none;
+        color: var(--pv-text-dim);
+        padding: 5px 10px;
+        border-radius: 999px;
+        cursor: pointer;
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+        transition:
+          color 0.15s ease,
+          background 0.15s ease;
+      }
+      .pv-group button:hover {
+        color: var(--pv-text);
+      }
+      .pv-group button[aria-pressed="true"] {
+        background: rgba(231, 233, 234, 0.08);
+        color: var(--pv-text);
+      }
+
+      /* ---------- mock host page ---------- */
+      .pv-stage {
+        display: grid;
+        grid-template-columns: minmax(0, 600px);
+        justify-content: center;
+        padding: 48px 24px 120px;
+        gap: 14px;
+      }
+      .pv-card {
+        border: 1px solid var(--pv-border);
+        background: var(--pv-bg-elev);
+        border-radius: 16px;
+        padding: 18px 20px 22px;
+      }
+      .pv-card header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .pv-card header .av {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: linear-gradient(
+          135deg,
+          rgba(255, 255, 255, 0.18),
+          rgba(255, 255, 255, 0.04)
+        );
+      }
+      .pv-card header .who {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 13px;
+      }
+      .pv-card header .who .h {
+        color: var(--pv-text);
+        font-weight: 600;
+      }
+      .pv-card header .who .s {
+        color: var(--pv-text-dim);
+      }
+      .pv-card p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.55;
+        color: rgba(231, 233, 234, 0.78);
+      }
+      .pv-stage-hint {
+        text-align: center;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--pv-text-dim);
+        opacity: 0.6;
+        margin-bottom: 6px;
+      }
+
+      /* When the panel is meant to sit at the top, push the host page down so
+         we don't visually collide with the floating notification stack. */
+      body.pv-twitter .pv-stage {
+        padding-top: 72px;
+      }
+
+      /* The editorial typography rules now live in knoww-inline.css and
+         ship with the extension — this file no longer needs overrides. Add
+         experimental tweaks below this line when iterating on a new design. */
+    </style>
+  </head>
+
+  <body class="pv-twitter" data-state="welcome">
+    <header class="pv-toolbar">
+      <span class="pv-brand">
+        <strong>Knoww</strong>
+        <small>panel preview</small>
+      </span>
+
+      <span class="pv-group">
+        <span>state</span>
+        <div role="radiogroup" aria-label="Empty state">
+          <button type="button" data-state="welcome" aria-pressed="true">welcome</button>
+          <button type="button" data-state="scanning">scanning</button>
+          <button type="button" data-state="both" title="bug regression check">both</button>
+          <button type="button" data-state="items">items</button>
+          <button type="button" data-state="minimized">minimized</button>
+        </div>
+      </span>
+
+      <span class="pv-group">
+        <span>theme</span>
+        <div role="radiogroup" aria-label="Theme">
+          <button type="button" data-theme="dark" aria-pressed="true">dark</button>
+          <button type="button" data-theme="dim">dim</button>
+          <button type="button" data-theme="light">light</button>
+        </div>
+      </span>
+
+      <span class="pv-group">
+        <span>platform</span>
+        <div role="radiogroup" aria-label="Platform">
+          <button type="button" data-platform="twitter" aria-pressed="true">twitter</button>
+          <button type="button" data-platform="reddit">reddit</button>
+          <button type="button" data-platform="quora">quora</button>
+          <button type="button" data-platform="linkedin">linkedin</button>
+        </div>
+      </span>
+
+    </header>
+
+    <main class="pv-stage" id="pv-stage">
+      <div class="pv-stage-hint">mock host feed — panel is the floating widget on the right</div>
+      <article class="pv-card">
+        <header>
+          <div class="av"></div>
+          <div class="who">
+            <span class="h">Casey Newton</span>
+            <span class="s">@CaseyNewton · 2h</span>
+          </div>
+        </header>
+        <p>
+          Will an AI startup hit a $1T valuation before 2027? The market thinks
+          we&rsquo;re closer than the headlines suggest.
+        </p>
+      </article>
+      <article class="pv-card">
+        <header>
+          <div class="av"></div>
+          <div class="who">
+            <span class="h">Polymarket</span>
+            <span class="s">@Polymarket · 4h</span>
+          </div>
+        </header>
+        <p>
+          Fed rate decision next month — odds of a cut moved 14 points after
+          today&rsquo;s CPI print.
+        </p>
+      </article>
+
+      <!-- Sample injected market card. Mirrors the DOM produced by
+           createInlineMarketCard() so the editorial typography pass and
+           the per-row probability bars render exactly as they will in
+           production. -->
+      <div
+        class="knoww-market-card knoww-source-polymarket"
+        data-knoww-source="polymarket"
+        style="margin: 0 !important"
+      >
+        <div class="knoww-card-header">
+          <div class="knoww-card-icon">
+            <span style="font-size: 24px">🤖</span>
+          </div>
+          <div class="knoww-card-title-section">
+            <div
+              class="knoww-card-title-row"
+              style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px"
+            >
+              <div class="knoww-card-title">
+                Which company has the best AI model end of April?
+              </div>
+              <button
+                type="button"
+                class="knoww-card-dismiss-btn"
+                title="Dismiss this market"
+                aria-label="Dismiss this market"
+              >
+                ✕
+              </button>
+            </div>
+            <div class="knoww-card-volume">$1.3M · 24h vol</div>
+            <div class="knoww-card-context">83% match · ai</div>
+          </div>
+        </div>
+
+        <div class="knoww-card-outcomes">
+          <button type="button" class="knoww-outcome-btn option-1">
+            <span class="knoww-outcome-label">Anthropic</span>
+            <span class="knoww-outcome-price">87%</span>
+          </button>
+          <button type="button" class="knoww-outcome-btn option-2">
+            <span class="knoww-outcome-label">OpenAI</span>
+            <span class="knoww-outcome-price">12%</span>
+          </button>
+        </div>
+
+        <button type="button" class="knoww-toggle-options expanded">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline points="18 15 12 9 6 15" />
+          </svg>
+          <span>Hide options</span>
+        </button>
+
+        <div class="knoww-options-list visible">
+          <div class="knoww-option-row" style="--knoww-pct: 87%">
+            <div class="knoww-option-color" style="background-color: #60a5fa"></div>
+            <span class="knoww-option-name">Anthropic</span>
+            <span class="knoww-option-percent">87%</span>
+            <div class="knoww-option-bar option-1" aria-hidden="true"></div>
+          </div>
+          <div class="knoww-option-row" style="--knoww-pct: 12%">
+            <div class="knoww-option-color" style="background-color: #c084fc"></div>
+            <span class="knoww-option-name">OpenAI</span>
+            <span class="knoww-option-percent">12%</span>
+            <div class="knoww-option-bar option-2" aria-hidden="true"></div>
+          </div>
+          <div class="knoww-option-row" style="--knoww-pct: 0.5%">
+            <div class="knoww-option-color" style="background-color: #fbbf24"></div>
+            <span class="knoww-option-name">Google</span>
+            <span class="knoww-option-percent">1%</span>
+            <div class="knoww-option-bar option-3" aria-hidden="true"></div>
+          </div>
+          <div class="knoww-option-row" style="--knoww-pct: 0.3%">
+            <div class="knoww-option-color" style="background-color: #22d3ee"></div>
+            <span class="knoww-option-name">Meta</span>
+            <span class="knoww-option-percent">&lt;1%</span>
+            <div class="knoww-option-bar option-4" aria-hidden="true"></div>
+          </div>
+        </div>
+
+        <div class="knoww-card-footer">
+          <div class="knoww-source-badge knoww-source-polymarket">
+            <div class="knoww-source-icon" style="background-color: #7c3aed">P</div>
+            <span>Polymarket</span>
+          </div>
+          <button type="button" class="knoww-view-market">
+            View market
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M7 17L17 7M17 7H7M17 7V17" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <article class="pv-card">
+        <header>
+          <div class="av"></div>
+          <div class="who">
+            <span class="h">Knoww</span>
+            <span class="s">@knoww · 1d</span>
+          </div>
+        </header>
+        <p>
+          Every opinion is a position. Scroll a feed. We&rsquo;ll surface the
+          markets that match.
+        </p>
+      </article>
+    </main>
+
+    <!-- The notification panel — exactly mirrors the DOM produced by ui.ts.
+         Inline `style="display:none !important"` on the welcome matches the
+         post-fix template so the JS toggle drives visibility, not the CSS. -->
+    <div
+      id="knoww-notification-stack"
+      class="knoww-notification-stack knoww-notification-stack-twitter knoww-theme-dark"
+    >
+      <div class="knoww-stack-header">
+        <div class="knoww-stack-title">
+          <div class="knoww-stack-icon">
+            <img src="../icons/icon-48.png" alt="" width="20" height="20" />
+          </div>
+          <span>Markets</span>
+        </div>
+        <div class="knoww-stack-header-right">
+          <button
+            type="button"
+            class="knoww-search-toggle"
+            id="knoww-search-toggle"
+            title="Search markets"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="M21 21l-4.35-4.35"></path>
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="knoww-stack-minimize"
+            id="knoww-stack-minimize"
+            title="Minimize"
+            aria-label="Minimize"
+            aria-expanded="true"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="knoww-search-container" id="knoww-search-container">
+        <div class="knoww-search-input-wrapper">
+          <input
+            type="text"
+            class="knoww-search-input"
+            id="knoww-search-input"
+            placeholder="Search markets..."
+          />
+          <button type="button" class="knoww-search-clear" id="knoww-search-clear" title="Clear search" aria-label="Clear search" style="display:none">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="knoww-search-results" id="knoww-search-results"></div>
+      </div>
+
+      <div class="knoww-stack-content" id="knoww-stack-content">
+        <div
+          class="knoww-stack-items"
+          id="knoww-stack-items"
+          style="display: none !important"
+        >
+          <!-- Sample items to preview the items state. Markup mirrors what
+               renderOutcomePrices() emits in production: each row carries a
+               `--knoww-pct` custom property and a trailing .knoww-outcome-bar
+               element so the probability bar treatment can be verified
+               without running the extension. -->
+          <div
+            class="knoww-notification-item knoww-source-polymarket knoww-notification-active"
+          >
+            <div class="knoww-notification-icon">
+              <span style="font-size: 22px">🤖</span>
+            </div>
+            <div class="knoww-notification-content">
+              <div class="knoww-notification-title">
+                Which company has the best AI model end of April?
+              </div>
+              <div class="knoww-notification-prices knoww-multi-outcome">
+                <div class="knoww-outcome-row" style="--knoww-pct: 87%">
+                  <div class="knoww-outcome-indicator option-1"></div>
+                  <span class="knoww-outcome-name">Anthropic</span>
+                  <span class="knoww-outcome-percent option-1">87%</span>
+                  <div class="knoww-outcome-bar option-1" aria-hidden="true"></div>
+                </div>
+                <div class="knoww-outcome-row" style="--knoww-pct: 12%">
+                  <div class="knoww-outcome-indicator option-2"></div>
+                  <span class="knoww-outcome-name">OpenAI</span>
+                  <span class="knoww-outcome-percent option-2">12%</span>
+                  <div class="knoww-outcome-bar option-2" aria-hidden="true"></div>
+                </div>
+              </div>
+            </div>
+            <div class="knoww-notification-arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+          </div>
+
+          <div
+            class="knoww-notification-item knoww-source-polymarket knoww-notification-active"
+          >
+            <div class="knoww-notification-icon">
+              <span style="font-size: 22px">₿</span>
+            </div>
+            <div class="knoww-notification-content">
+              <div class="knoww-notification-title">
+                When will Bitcoin hit $150k?
+              </div>
+              <div class="knoww-notification-prices knoww-multi-outcome">
+                <div class="knoww-outcome-row" style="--knoww-pct: 43%">
+                  <div class="knoww-outcome-indicator option-1"></div>
+                  <span class="knoww-outcome-name">Before Jan 2027</span>
+                  <span class="knoww-outcome-percent option-1">43%</span>
+                  <div class="knoww-outcome-bar option-1" aria-hidden="true"></div>
+                </div>
+                <div class="knoww-outcome-row" style="--knoww-pct: 23%">
+                  <div class="knoww-outcome-indicator option-2"></div>
+                  <span class="knoww-outcome-name">Before Oct 2026</span>
+                  <span class="knoww-outcome-percent option-2">23%</span>
+                  <div class="knoww-outcome-bar option-2" aria-hidden="true"></div>
+                </div>
+              </div>
+            </div>
+            <div class="knoww-notification-arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+          </div>
+
+          <div
+            class="knoww-notification-item knoww-source-polymarket knoww-notification-active"
+          >
+            <div class="knoww-notification-icon">
+              <span style="font-size: 22px">🏛️</span>
+            </div>
+            <div class="knoww-notification-content">
+              <div class="knoww-notification-title">
+                Which party will win the House in 2026?
+              </div>
+              <div class="knoww-notification-prices knoww-multi-outcome">
+                <div class="knoww-outcome-row" style="--knoww-pct: 86%">
+                  <div class="knoww-outcome-indicator option-1"></div>
+                  <span class="knoww-outcome-name">Democratic</span>
+                  <span class="knoww-outcome-percent option-1">86%</span>
+                  <div class="knoww-outcome-bar option-1" aria-hidden="true"></div>
+                </div>
+                <div class="knoww-outcome-row" style="--knoww-pct: 14%">
+                  <div class="knoww-outcome-indicator option-2"></div>
+                  <span class="knoww-outcome-name">Republican</span>
+                  <span class="knoww-outcome-percent option-2">14%</span>
+                  <div class="knoww-outcome-bar option-2" aria-hidden="true"></div>
+                </div>
+              </div>
+            </div>
+            <div class="knoww-notification-arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+          </div>
+
+          <div
+            class="knoww-notification-item knoww-source-polymarket knoww-notification-active"
+          >
+            <div class="knoww-notification-icon">
+              <span style="font-size: 22px">📉</span>
+            </div>
+            <div class="knoww-notification-content">
+              <div class="knoww-notification-title">
+                How high will US unemployment go in 2026?
+              </div>
+              <div class="knoww-notification-prices knoww-multi-outcome">
+                <div class="knoww-outcome-row" style="--knoww-pct: 43%">
+                  <div class="knoww-outcome-indicator option-1"></div>
+                  <span class="knoww-outcome-name">5.0%</span>
+                  <span class="knoww-outcome-percent option-1">43%</span>
+                  <div class="knoww-outcome-bar option-1" aria-hidden="true"></div>
+                </div>
+                <div class="knoww-outcome-row" style="--knoww-pct: 23%">
+                  <div class="knoww-outcome-indicator option-2"></div>
+                  <span class="knoww-outcome-name">5.5%</span>
+                  <span class="knoww-outcome-percent option-2">23%</span>
+                  <div class="knoww-outcome-bar option-2" aria-hidden="true"></div>
+                </div>
+              </div>
+            </div>
+            <div class="knoww-notification-arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="knoww-stack-empty" id="knoww-stack-empty">
+          <div
+            class="knoww-stack-welcome"
+            data-knoww-welcome
+            style="display:none !important"
+          >
+            <div class="knoww-stack-welcome-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M12 3v3M12 18v3M3 12h3M18 12h3M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M5.64 18.36l2.12-2.12M16.24 7.76l2.12-2.12"
+                />
+              </svg>
+            </div>
+            <div class="knoww-stack-welcome-title">Knoww is listening</div>
+            <p class="knoww-stack-welcome-body">
+              As you browse, we surface Polymarket positions matching predictive
+              claims on this page. Nothing here yet? Keep scrolling &mdash;
+              markets appear the moment we find one.
+            </p>
+            <button
+              type="button"
+              class="knoww-stack-welcome-cta"
+              data-knoww-welcome-dismiss
+            >
+              Got it
+            </button>
+          </div>
+          <div class="knoww-stack-scanning" data-knoww-scanning>
+            <div class="knoww-stack-empty-title-row">
+              <span class="knoww-stack-empty-pulse" aria-hidden="true"></span>
+              <span class="knoww-stack-empty-title">Searching for markets</span>
+              <span class="knoww-stack-empty-dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </span>
+            </div>
+            <span class="knoww-stack-empty-sub"
+              >Scroll your feed to discover markets</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (() => {
+        const body = document.body;
+        const stack = document.getElementById("knoww-notification-stack");
+        const itemsEl = document.getElementById("knoww-stack-items");
+        const emptyEl = document.getElementById("knoww-stack-empty");
+        const welcomeEl = stack.querySelector("[data-knoww-welcome]");
+        const scanningEl = stack.querySelector("[data-knoww-scanning]");
+        const dismissBtn = stack.querySelector(
+          "[data-knoww-welcome-dismiss]"
+        );
+
+        // Force-display helpers (mirrors the post-fix logic in ui.ts).
+        const show = (el) => el && el.style.removeProperty("display");
+        const hide = (el) =>
+          el && el.style.setProperty("display", "none", "important");
+        const showItems = (yes) => {
+          if (yes) {
+            emptyEl.style.setProperty("display", "none", "important");
+            itemsEl.style.removeProperty("display");
+          } else {
+            itemsEl.style.setProperty("display", "none", "important");
+            emptyEl.style.removeProperty("display");
+          }
+        };
+
+        function applyState(state) {
+          stack.classList.remove("knoww-stack-minimized");
+          switch (state) {
+            case "welcome":
+              showItems(false);
+              show(welcomeEl);
+              hide(scanningEl);
+              break;
+            case "scanning":
+              showItems(false);
+              hide(welcomeEl);
+              show(scanningEl);
+              break;
+            case "both":
+              // Reproduces the pre-fix bug: welcome visible AND scanning visible.
+              showItems(false);
+              show(welcomeEl);
+              show(scanningEl);
+              break;
+            case "items":
+              showItems(true);
+              break;
+            case "minimized":
+              showItems(false);
+              hide(welcomeEl);
+              show(scanningEl);
+              stack.classList.add("knoww-stack-minimized");
+              break;
+          }
+          body.dataset.state = state;
+        }
+
+        function applyTheme(theme) {
+          stack.classList.remove(
+            "knoww-theme-dark",
+            "knoww-theme-dim",
+            "knoww-theme-light"
+          );
+          stack.classList.add("knoww-theme-" + theme);
+        }
+
+        function applyPlatform(platform) {
+          stack.classList.remove(
+            "knoww-notification-stack-twitter",
+            "knoww-notification-stack-reddit",
+            "knoww-notification-stack-quora",
+            "knoww-notification-stack-linkedin",
+            "knoww-notification-stack-slashdot",
+            "knoww-notification-stack-stackoverflow",
+            "knoww-notification-stack-stackexchange",
+            "knoww-notification-stack-threads"
+          );
+          stack.classList.add("knoww-notification-stack-" + platform);
+          body.classList.remove(
+            "pv-twitter",
+            "pv-reddit",
+            "pv-quora",
+            "pv-linkedin"
+          );
+          body.classList.add("pv-" + platform);
+        }
+
+        function pressGroup(buttons, key, value) {
+          for (const b of buttons) {
+            b.setAttribute(
+              "aria-pressed",
+              b.dataset[key] === value ? "true" : "false"
+            );
+          }
+        }
+
+        // Wire up all toolbar groups generically.
+        for (const key of ["state", "theme", "platform"]) {
+          const buttons = document.querySelectorAll(`[data-${key}]`);
+          // Filter to only the toolbar buttons (skip body / stack ancestors).
+          const toolbarButtons = Array.from(buttons).filter(
+            (el) => el.tagName === "BUTTON"
+          );
+          for (const btn of toolbarButtons) {
+            btn.addEventListener("click", () => {
+              const value = btn.dataset[key];
+              pressGroup(toolbarButtons, key, value);
+              if (key === "state") applyState(value);
+              if (key === "theme") applyTheme(value);
+              if (key === "platform") applyPlatform(value);
+            });
+          }
+        }
+
+        // Make the dismiss button work in the preview too — useful for verifying
+        // the post-fix click behavior end-to-end.
+        dismissBtn?.addEventListener("click", () => {
+          // Mirrors the post-fix dismissWelcome handler.
+          welcomeEl.style.setProperty("display", "none", "important");
+          scanningEl.style.removeProperty("display");
+          // Reflect new state in the toolbar so the toggle stays in sync.
+          const stateBtns = document.querySelectorAll("[data-state]");
+          pressGroup(
+            Array.from(stateBtns).filter((el) => el.tagName === "BUTTON"),
+            "state",
+            "scanning"
+          );
+          body.dataset.state = "scanning";
+        });
+
+        // Initial state.
+        applyState("welcome");
+      })();
+    </script>
+  </body>
+</html>

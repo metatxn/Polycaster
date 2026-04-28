@@ -9,6 +9,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CONTRACTS, PUSD_DECIMALS } from "@/constants/contracts";
 import { useCtfOperations } from "@/hooks/use-ctf-operations";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 
@@ -29,16 +30,52 @@ export function SplitSharesModal({
   conditionId,
   onSuccess,
 }: SplitSharesModalProps) {
-  const {
-    proxyAddress,
-    usdcBalance,
-    refresh: refreshWallet,
-  } = useProxyWallet();
+  const { proxyAddress, refresh: refreshWallet } = useProxyWallet();
   const { splitPosition, isLoading, error, txHash, reset } = useCtfOperations();
 
   const [amount, setAmount] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [pusdBalance, setPusdBalance] = useState(0);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+
+  useEffect(() => {
+    if (!open || !proxyAddress) return;
+
+    let cancelled = false;
+    setIsLoadingBalance(true);
+
+    const fetchPusdBalance = async () => {
+      const [{ createPublicClient, erc20Abi, formatUnits, http }, { polygon }] =
+        await Promise.all([import("viem"), import("viem/chains")]);
+      const { getRpcUrl } = await import("@/lib/rpc");
+      const publicClient = createPublicClient({
+        chain: polygon,
+        transport: http(getRpcUrl()),
+      });
+      const balance = await publicClient.readContract({
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [proxyAddress as `0x${string}`],
+      });
+      if (!cancelled) {
+        setPusdBalance(Number(formatUnits(balance, PUSD_DECIMALS)));
+      }
+    };
+
+    fetchPusdBalance()
+      .catch(() => {
+        if (!cancelled) setPusdBalance(0);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingBalance(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, proxyAddress]);
 
   // Reset state when modal opens/closes
   useEffect(() => {
@@ -46,6 +83,7 @@ export function SplitSharesModal({
       setAmount("");
       setLocalError(null);
       setIsSuccess(false);
+      setPusdBalance(0);
       reset();
     }
   }, [open, reset]);
@@ -70,8 +108,8 @@ export function SplitSharesModal({
   }, [amount]);
 
   const isValidAmount = useMemo(() => {
-    return numericAmount > 0 && numericAmount <= usdcBalance;
-  }, [numericAmount, usdcBalance]);
+    return numericAmount > 0 && numericAmount <= pusdBalance;
+  }, [numericAmount, pusdBalance]);
 
   const handleAmountChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,9 +124,9 @@ export function SplitSharesModal({
   );
 
   const handleMaxClick = useCallback(() => {
-    setAmount(usdcBalance.toFixed(2));
+    setAmount(pusdBalance.toFixed(2));
     setLocalError(null);
-  }, [usdcBalance]);
+  }, [pusdBalance]);
 
   const handleSplit = useCallback(async () => {
     if (!proxyAddress || !conditionId) {
@@ -155,8 +193,8 @@ export function SplitSharesModal({
         {/* Content */}
         <div className="p-4 space-y-4">
           <DialogDescription className="text-sm text-muted-foreground">
-            Split a USDC into a share of Yes and No. You can do this to save
-            cost by getting both and just selling the other side.
+            Split pUSD into Yes and No shares. You can do this to save cost by
+            getting both and just selling the other side.
           </DialogDescription>
 
           {/* Amount Input */}
@@ -181,12 +219,15 @@ export function SplitSharesModal({
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">
-                Available: ${usdcBalance.toFixed(2)} USDC
+                Available:{" "}
+                {isLoadingBalance
+                  ? "Loading..."
+                  : `$${pusdBalance.toFixed(2)} pUSD`}
               </span>
               <button
                 type="button"
                 onClick={handleMaxClick}
-                disabled={isLoading || isSuccess}
+                disabled={isLoading || isSuccess || isLoadingBalance}
                 className="text-primary hover:text-primary/80 font-medium disabled:opacity-50"
               >
                 Max
@@ -207,7 +248,7 @@ export function SplitSharesModal({
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">You spend</span>
                     <span className="text-foreground font-medium">
-                      ${numericAmount.toFixed(2)} USDC
+                      ${numericAmount.toFixed(2)} pUSD
                     </span>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -261,7 +302,13 @@ export function SplitSharesModal({
           <button
             type="button"
             onClick={handleSplit}
-            disabled={isLoading || !isValidAmount || isSuccess || !proxyAddress}
+            disabled={
+              isLoading ||
+              isLoadingBalance ||
+              !isValidAmount ||
+              isSuccess ||
+              !proxyAddress
+            }
             className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading ? (
@@ -278,7 +325,7 @@ export function SplitSharesModal({
 
           {/* Info Text */}
           <p className="text-xs text-muted-foreground text-center">
-            Splitting converts USDC into equal YES and NO shares. You can then
+            Splitting converts pUSD into equal YES and NO shares. You can then
             sell one side to take a position.
           </p>
         </div>

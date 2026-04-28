@@ -267,9 +267,8 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         return; // Response sent synchronously, no need to return true
       }
 
-      // For unhandled message types, respond with success: false
-      sendResponse({ success: false });
-      // Do not return true since sendResponse is called synchronously
+      // Let other content-script modules answer their own message types.
+      return false;
     }
   );
 }

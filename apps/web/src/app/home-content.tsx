@@ -13,7 +13,6 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -30,6 +29,7 @@ import {
   FilterChip,
   useFilterBarState,
 } from "@/components/event-filter-bar";
+import { KnowwMark } from "@/components/knoww-mark";
 import { MarketSearch } from "@/components/market-search";
 import {
   MarketsView,
@@ -896,13 +896,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
       <footer className="relative z-10 border-t border-border/30 py-6 sm:py-8 bg-background/50 backdrop-blur-xl hidden xl:block">
         <div className="px-3 sm:px-4 md:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
-            <Image
-              src="/logo-256x256.png"
-              alt="Knoww Logo"
-              width={24}
-              height={24}
-              className="rounded-md"
-            />
+            <KnowwMark />
             <span className="font-bold text-foreground">Knoww</span>
             <span>•</span>
             <span>Powered by Polymarket</span>

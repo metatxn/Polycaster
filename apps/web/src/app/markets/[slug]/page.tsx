@@ -1,6 +1,7 @@
 import { createLogger } from "@knoww/logger";
 import type { Metadata } from "next";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { buildPageMetadata, buildPredictionMarketDescription } from "@/lib/seo";
 import MarketDetailClient from "./market-detail-client";
 
 const log = createLogger("market-page");
@@ -11,6 +12,7 @@ type Props = {
 
 interface GammaMarket {
   question: string;
+  description?: string;
   volume?: string;
   image?: string;
 }
@@ -45,30 +47,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     };
   }
 
-  const title = market.question;
-  const description = `Trade on this prediction market. Current volume: ${
-    market.volume || "N/A"
-  }. Explore odds and make your prediction on Knoww.`;
-
-  return {
-    title,
-    description,
-    alternates: {
-      canonical: `https://knoww.app/markets/${slug}`,
-    },
-    openGraph: {
-      title,
-      description,
-      images: market.image ? [market.image] : [],
-      type: "website",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: market.image ? [market.image] : [],
-    },
-  };
+  return buildPageMetadata({
+    title: market.question,
+    description: buildPredictionMarketDescription({
+      title: market.question,
+      fallback: market.description,
+    }),
+    path: `/markets/${slug}`,
+    image: market.image,
+    // Event detail pages are the canonical public market surface. Keep this
+    // legacy/detail route crawlable for discovery, but out of the index to
+    // avoid duplicate Polymarket event/market URLs competing with each other.
+    index: false,
+  });
 }
 
 export default async function MarketDetailPage({ params }: Props) {

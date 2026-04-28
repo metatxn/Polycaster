@@ -34,6 +34,8 @@ const STOP_POS = new Set([
 const GENERIC_LEMMAS = new Set([
   "price",
   "market",
+  "card",
+  "green",
   "new",
   "year",
   "day",

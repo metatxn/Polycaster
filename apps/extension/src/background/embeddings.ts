@@ -1,7 +1,11 @@
 import {
+  AutoModelForSequenceClassification,
+  AutoTokenizer,
   env,
   type FeatureExtractionPipeline,
   LogLevel,
+  type PreTrainedModel,
+  type PreTrainedTokenizer,
   type ProgressInfo,
   pipeline,
 } from "@huggingface/transformers";
@@ -51,31 +55,60 @@ async function preloadOnnxWasm(): Promise<void> {
   onnxEnv.wasm.wasmPaths = { mjs: mjsUrl, wasm: wasmUrl };
 }
 
-const EMBEDDING_MODEL_ID = "onnx-community/bge-small-en-v1.5-ONNX";
+const EMBEDDING_MODEL_ID = "Snowflake/snowflake-arctic-embed-s";
+const EMBEDDING_DTYPE = "int8";
+const RERANK_LOG_PREFIX = "[XENCODER-AB]";
+const RERANK_MODEL_ID = "Xenova/ms-marco-MiniLM-L-6-v2";
+const RERANK_DTYPE = "q8";
+const RERANK_BATCH_SIZE = 8;
 
 let pipelineInstance: Promise<FeatureExtractionPipeline> | null = null;
+let rerankerInstance: Promise<{
+  tokenizer: PreTrainedTokenizer;
+  model: PreTrainedModel;
+  device: "webgpu" | "wasm";
+}> | null = null;
+let rerankQueue: Promise<void> = Promise.resolve();
 
 function buildPipelineOptions(): {
-  dtype: "q4";
+  dtype: typeof EMBEDDING_DTYPE;
   progress_callback: (progress: ProgressInfo) => void;
 } {
+  // Transformers.js fires progress events on every fetched chunk, which
+  // produces hundreds of log lines per model download. Bucket to 25%
+  // increments per channel so we get a handful of useful checkpoints
+  // without flooding the console.
+  const PROGRESS_BUCKET_PCT = 25;
+  let lastTotalBucket = -1;
+  const lastFileBucket = new Map<string, number>();
+
   return {
-    dtype: "q4",
+    dtype: EMBEDDING_DTYPE,
     progress_callback: (progress: ProgressInfo) => {
       switch (progress.status) {
-        case "progress_total":
+        case "progress_total": {
+          const pct = Math.round(progress.progress);
+          const bucket = Math.floor(pct / PROGRESS_BUCKET_PCT);
+          if (bucket === lastTotalBucket) break;
+          lastTotalBucket = bucket;
           logDebug("embeddings.progress", {
             status: progress.status,
-            percentage: Math.round(progress.progress),
+            percentage: pct,
           });
           break;
-        case "progress":
+        }
+        case "progress": {
+          const pct = Math.round(progress.progress);
+          const bucket = Math.floor(pct / PROGRESS_BUCKET_PCT);
+          if (lastFileBucket.get(progress.file) === bucket) break;
+          lastFileBucket.set(progress.file, bucket);
           logDebug("embeddings.progress", {
             status: progress.status,
             file: progress.file,
-            percentage: Math.round(progress.progress),
+            percentage: pct,
           });
           break;
+        }
         case "download":
           logInfo("embeddings.download", { file: progress.file });
           break;
@@ -125,18 +158,115 @@ function getInstance() {
   if (pipelineInstance === null) {
     logInfo("embeddings.load-start", { model: EMBEDDING_MODEL_ID });
     const start = Date.now();
-    pipelineInstance = createPipelineInstance().then((p) => {
-      logInfo("embeddings.loaded", { elapsedMs: Date.now() - start });
-      return p;
-    });
+    pipelineInstance = createPipelineInstance()
+      .then((p) => {
+        logInfo("embeddings.loaded", { elapsedMs: Date.now() - start });
+        return p;
+      })
+      .catch((error) => {
+        pipelineInstance = null;
+        throw error;
+      });
   }
   return pipelineInstance;
 }
 
+function disposeTensors(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  if ("dispose" in value && typeof value.dispose === "function") {
+    value.dispose();
+    return;
+  }
+  for (const item of Object.values(value)) disposeTensors(item);
+}
+
+async function createRerankerInstance(): Promise<{
+  tokenizer: PreTrainedTokenizer;
+  model: PreTrainedModel;
+  device: "webgpu" | "wasm";
+}> {
+  await preloadOnnxWasm();
+  const tokenizer = await AutoTokenizer.from_pretrained(RERANK_MODEL_ID);
+  const baseOptions = {
+    dtype: RERANK_DTYPE,
+    progress_callback: (progress: ProgressInfo) => {
+      if (progress.status === "download") {
+        logInfo("rerank.download", {
+          prefix: RERANK_LOG_PREFIX,
+          file: progress.file,
+        });
+      } else if (progress.status === "ready") {
+        logInfo("rerank.ready", { prefix: RERANK_LOG_PREFIX });
+      }
+    },
+  } as const;
+  const webgpuAvailable =
+    Boolean((env as { IS_WEBGPU_AVAILABLE?: boolean }).IS_WEBGPU_AVAILABLE) ||
+    (typeof navigator !== "undefined" && "gpu" in navigator);
+
+  if (webgpuAvailable) {
+    try {
+      const model = await AutoModelForSequenceClassification.from_pretrained(
+        RERANK_MODEL_ID,
+        {
+          ...baseOptions,
+          device: "webgpu",
+        }
+      );
+      return { tokenizer, model, device: "webgpu" };
+    } catch (error) {
+      logWarn("rerank.webgpu-fallback", {
+        prefix: RERANK_LOG_PREFIX,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const model = await AutoModelForSequenceClassification.from_pretrained(
+    RERANK_MODEL_ID,
+    {
+      ...baseOptions,
+      device: "wasm",
+    }
+  );
+  return { tokenizer, model, device: "wasm" };
+}
+
+function getRerankerInstance() {
+  if (rerankerInstance === null) {
+    const start = Date.now();
+    logInfo("rerank.load-start", {
+      prefix: RERANK_LOG_PREFIX,
+      model: RERANK_MODEL_ID,
+      dtype: RERANK_DTYPE,
+    });
+    rerankerInstance = createRerankerInstance()
+      .then((instance) => {
+        logInfo("rerank.loaded", {
+          prefix: RERANK_LOG_PREFIX,
+          elapsedMs: Date.now() - start,
+          device: instance.device,
+        });
+        return instance;
+      })
+      .catch((error) => {
+        rerankerInstance = null;
+        throw error;
+      });
+  }
+  return rerankerInstance;
+}
+
 // ── IndexedDB persistence layer ──────────────────────────────────────
 
-const IDB_NAME = "knoww-embeddings";
-const IDB_VERSION = 2;
+function sanitizeCachePart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9.-]+/g, "-").replace(/^-|-$/g, "");
+}
+
+const IDB_NAME = `knoww-embeddings-${sanitizeCachePart(
+  EMBEDDING_MODEL_ID
+)}-${EMBEDDING_DTYPE}`;
+const IDB_VERSION = 3;
 const IDB_STORE = "vectors";
 const IDB_MAX_ENTRIES = 2000;
 const IDB_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -324,13 +454,17 @@ async function getEmbeddings(texts: string[]): Promise<Float32Array[]> {
   for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
     const batch = texts.slice(i, i + EMBEDDING_BATCH_SIZE);
     const output = await extractor(batch, {
-      pooling: "mean",
+      pooling: "cls",
       normalize: true,
     });
-    const data = output.data as Float32Array;
-    const dim = output.dims[1];
-    for (let j = 0; j < batch.length; j++) {
-      results.push(data.slice(j * dim, (j + 1) * dim));
+    try {
+      const data = output.data as Float32Array;
+      const dim = output.dims[1];
+      for (let j = 0; j < batch.length; j++) {
+        results.push(data.slice(j * dim, (j + 1) * dim));
+      }
+    } finally {
+      output.dispose();
     }
   }
 
@@ -343,7 +477,7 @@ export async function computeSimilarities(
 ): Promise<number[]> {
   const start = Date.now();
 
-  const queryText = `Represent this sentence for searching relevant prediction markets: ${postText}`;
+  const queryText = `Represent this sentence for searching relevant passages: ${postText}`;
 
   const allTexts = [queryText, ...marketTexts];
   const uniqueTexts = Array.from(new Set(allTexts));
@@ -414,6 +548,107 @@ export async function computeSimilarities(
     computed: textsToEmbed.length,
   });
   return similarities;
+}
+
+export interface RerankResult {
+  scores: number[];
+  metrics: {
+    count: number;
+    elapsedMs: number;
+    queueWaitMs: number;
+    model: string;
+    dtype: string;
+    device: "webgpu" | "wasm";
+  };
+}
+
+async function runRerankMarketPairs(
+  postText: string,
+  marketTexts: string[],
+  queueWaitMs: number
+): Promise<RerankResult> {
+  const start = Date.now();
+  if (!postText || marketTexts.length === 0) {
+    return {
+      scores: [],
+      metrics: {
+        count: marketTexts.length,
+        elapsedMs: 0,
+        queueWaitMs,
+        model: RERANK_MODEL_ID,
+        dtype: RERANK_DTYPE,
+        device: "wasm",
+      },
+    };
+  }
+
+  const { tokenizer, model, device } = await getRerankerInstance();
+  const scores: number[] = [];
+
+  for (let i = 0; i < marketTexts.length; i += RERANK_BATCH_SIZE) {
+    const batch = marketTexts.slice(i, i + RERANK_BATCH_SIZE);
+    const inputs = tokenizer(new Array<string>(batch.length).fill(postText), {
+      text_pair: batch,
+      padding: true,
+      truncation: true,
+    });
+
+    try {
+      const output = await model(inputs);
+      const logits = output.logits;
+      const width = logits.dims[logits.dims.length - 1] ?? 1;
+      for (let j = 0; j < batch.length; j++) {
+        const offset = j * width;
+        const score =
+          width === 1 ? logits.data[offset] : logits.data[offset + 1];
+        scores.push(Number(score));
+      }
+      disposeTensors(output);
+    } finally {
+      disposeTensors(inputs);
+    }
+  }
+
+  const elapsedMs = Date.now() - start;
+  logInfo("rerank.scored", {
+    prefix: RERANK_LOG_PREFIX,
+    count: marketTexts.length,
+    elapsedMs,
+    queueWaitMs,
+    device,
+  });
+
+  return {
+    scores,
+    metrics: {
+      count: marketTexts.length,
+      elapsedMs,
+      queueWaitMs,
+      model: RERANK_MODEL_ID,
+      dtype: RERANK_DTYPE,
+      device,
+    },
+  };
+}
+
+export async function rerankMarketPairs(
+  postText: string,
+  marketTexts: string[]
+): Promise<RerankResult> {
+  const queuedAt = Date.now();
+  let releaseNext: () => void = () => {};
+  const previous = rerankQueue;
+  rerankQueue = new Promise<void>((resolve) => {
+    releaseNext = resolve;
+  });
+
+  await previous;
+  const queueWaitMs = Date.now() - queuedAt;
+  try {
+    return await runRerankMarketPairs(postText, marketTexts, queueWaitMs);
+  } finally {
+    releaseNext();
+  }
 }
 
 /**

@@ -1,16 +1,64 @@
-import type { UserSettings } from "./settings";
+import type { BackgroundResponse } from "./chrome-messages";
 import type {
-  Market,
-  PolymarketTagsCache,
+  InjectedMarketEntry,
   KalshiCategoriesCache,
   KalshiKeywordMatcher,
   KeywordExtractionResult,
+  Market,
   MarketSearchResult,
-  InjectedMarketEntry,
+  PolymarketTagsCache,
 } from "./market";
-import type { BackgroundResponse } from "./chrome-messages";
-import type { PlatformAdapter, InjectionPoint } from "./platform";
+import type { InjectionPoint, PlatformAdapter } from "./platform";
 import type { UserPreferences } from "./preferences";
+import type { UserSettings } from "./settings";
+
+interface RelevanceTelemetryCandidate {
+  id: string;
+  title: string;
+  source: "polymarket" | "kalshi" | string;
+  hybridScore: number;
+  gatePassed: boolean;
+  gateReason?: string;
+  xencoderScore?: number;
+  finalRank?: number;
+  shown: boolean;
+  validator?: "passed" | "rejected" | "unavailable" | "error";
+  feedback?: "good" | "bad";
+  feedbackAt?: number;
+}
+
+interface RelevanceTelemetryEvent {
+  id: string;
+  timestamp: number;
+  pageUrl: string;
+  postKey?: string;
+  platform: string;
+  sourceTextPreview: string;
+  searchQuery: string;
+  matchedTags: string[];
+  scoringMode: "hybrid" | "lexical" | "heuristic";
+  candidates: RelevanceTelemetryCandidate[];
+}
+
+interface RelevanceTelemetryFeedback {
+  id: string;
+  timestamp: number;
+  pageUrl: string;
+  platform: string;
+  postKey?: string;
+  marketId: string;
+  marketTitle: string;
+  source: string;
+  feedback: "good" | "bad";
+}
+
+interface RelevanceTelemetryExport {
+  exportedAt: number;
+  pageUrl: string;
+  platform: string;
+  events: RelevanceTelemetryEvent[];
+  feedback: RelevanceTelemetryFeedback[];
+}
 
 /**
  * Ethereum provider interface (EIP-1193)
@@ -98,6 +146,23 @@ declare global {
           string | number | boolean | null | undefined
         >
       ) => Promise<void>;
+    };
+
+    KNOWW_RELEVANCE_TELEMETRY: {
+      record: (
+        event: Omit<RelevanceTelemetryEvent, "id" | "timestamp" | "pageUrl">
+      ) => void;
+      recordFeedback: (input: {
+        postKey?: string;
+        marketId: string;
+        marketTitle: string;
+        source: string;
+        feedback: "good" | "bad";
+      }) => void;
+      get: () => RelevanceTelemetryEvent[];
+      getFeedback: () => RelevanceTelemetryFeedback[];
+      clear: () => void;
+      export: () => RelevanceTelemetryExport;
     };
 
     KNOWW_UTILS: {

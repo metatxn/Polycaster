@@ -296,7 +296,7 @@ export function useTradingFormState({
   const handleSetAllowance = useCallback(async () => {
     setIsUpdatingAllowance(true);
     try {
-      await updateAllowance();
+      await updateAllowance(new Decimal(calculations.total).toString());
       await Promise.all([refetchBalance(), refetchAllowance()]);
     } catch (err) {
       const error =
@@ -305,7 +305,13 @@ export function useTradingFormState({
     } finally {
       setIsUpdatingAllowance(false);
     }
-  }, [updateAllowance, refetchBalance, refetchAllowance, onOrderError]);
+  }, [
+    updateAllowance,
+    calculations.total,
+    refetchBalance,
+    refetchAllowance,
+    onOrderError,
+  ]);
 
   const handleSharesChange = useCallback(
     (delta: number) => {

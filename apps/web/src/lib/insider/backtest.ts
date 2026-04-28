@@ -20,6 +20,7 @@
  * run, not running at scale.
  */
 
+import Decimal from "decimal.js";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { getTraderHistoriesBatch } from "@/lib/trader-history-cache";
 import { scoreFundingCluster } from "./archetypes/funding-cluster";
@@ -89,6 +90,27 @@ const PRICE_HISTORY_FIDELITY_MINUTES = 5;
  *  bets live) we jump to deeper offsets rather than paginating from
  *  the top. */
 const SAMPLE_OFFSETS = [0, 500, 1000, 1500, 2500];
+
+function tradeUsdValue(trade: Pick<RawTrade, "size" | "price">): number {
+  return new Decimal(trade.size).mul(trade.price).toNumber();
+}
+
+function sumDecimal(values: Iterable<number>): Decimal {
+  let total = new Decimal(0);
+  for (const value of values) total = total.add(value);
+  return total;
+}
+
+function volumeWeightedAveragePrice(rows: AccumulatedTrade[]): number {
+  const totalSize = sumDecimal(rows.map((row) => row.size));
+  if (totalSize.lte(0)) return 0;
+
+  let weighted = new Decimal(0);
+  for (const row of rows) {
+    weighted = weighted.add(new Decimal(row.price).mul(row.size));
+  }
+  return weighted.div(totalSize).toNumber();
+}
 
 async function fetchMarketTradesAtOffset(
   conditionId: string,
@@ -307,16 +329,12 @@ function buildMarketContext(
     const sorted = [...arr].sort((a, b) => a.timestamp - b.timestamp);
     const rows: AccumulatedTrade[] = sorted.map((t) => ({
       timestamp: t.timestamp,
-      usdValue: t.size * t.price,
+      usdValue: tradeUsdValue(t),
       price: t.price,
       size: t.size,
     }));
-    const totalUsd = rows.reduce((s, r) => s + r.usdValue, 0);
-    const totalSize = rows.reduce((s, r) => s + r.size, 0);
-    const vwap =
-      totalSize > 0
-        ? rows.reduce((s, r) => s + r.price * r.size, 0) / totalSize
-        : 0;
+    const totalUsd = sumDecimal(rows.map((r) => r.usdValue)).toNumber();
+    const vwap = volumeWeightedAveragePrice(rows);
     accumulators.set(k, {
       tradeCount: rows.length,
       totalUsdValue: totalUsd,
@@ -343,7 +361,7 @@ function buildMarketContext(
     const clusterTrades: ClusterTrade[] = arr.map((t) => ({
       wallet: t.proxyWallet,
       timestamp: t.timestamp,
-      usdValue: t.size * t.price,
+      usdValue: tradeUsdValue(t),
       price: t.price,
       size: t.size,
     }));
@@ -525,7 +543,7 @@ export async function runBacktest(
 
     for (const trade of trades) {
       totalTrades++;
-      const usdValue = trade.size * trade.price;
+      const usdValue = tradeUsdValue(trade);
       if (usdValue < options.minTradeUsd) continue;
       // Exclude trades where the fill price equals (or near-equals)
       // the eventual payout — these are mechanical closing fills, not

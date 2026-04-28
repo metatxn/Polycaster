@@ -36,6 +36,7 @@
         "icons/icon-256.png",
         "knoww-inline.css",
         "page-bridge.js",
+        "fonts/*.woff2",
         "*.wasm",
         "*.mjs"
       ],

@@ -22,6 +22,9 @@ import "./utils";
 // 4. Analytics helpers
 import "./analytics";
 
+// 4.5. Local diagnostics (debug-mode only, no production console output)
+import "./relevance-telemetry";
+
 // 5. Platform registry (must be before platform adapters)
 import "./platform-registry";
 

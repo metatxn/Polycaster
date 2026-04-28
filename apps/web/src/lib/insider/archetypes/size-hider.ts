@@ -17,6 +17,7 @@
  * precisely why account-loader misses them.
  */
 
+import Decimal from "decimal.js";
 import type { ArchetypeScore, SuspicionFactor } from "./types";
 
 export type TradeSide = "BUY" | "SELL";
@@ -66,6 +67,7 @@ const FAST_ACCUMULATION_WINDOW_HOURS = 24;
 export function scoreSizeHider(ctx: AccumulatorContext): ArchetypeScore {
   const factors: SuspicionFactor[] = [];
   let score = 0;
+  const totalUsd = new Decimal(ctx.totalUsdValue);
 
   if (ctx.tradeCount < MIN_TRADE_COUNT) {
     return {
@@ -75,7 +77,7 @@ export function scoreSizeHider(ctx: AccumulatorContext): ArchetypeScore {
       factors: [],
     };
   }
-  if (ctx.totalUsdValue < MIN_AGGREGATE_USD) {
+  if (totalUsd.lt(MIN_AGGREGATE_USD)) {
     return {
       archetype: "size_hider",
       score: 0,
@@ -121,37 +123,37 @@ export function scoreSizeHider(ctx: AccumulatorContext): ArchetypeScore {
   }
 
   // Factor 2: Aggregate size (max 30 points) — bigger position = more conviction
-  if (ctx.totalUsdValue >= 100_000) {
+  if (totalUsd.gte(100_000)) {
     const pts = 30;
     score += pts;
     factors.push({
       name: "Aggregate Size",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} accumulated on one side`,
+      description: `$${formatK(totalUsd)} accumulated on one side`,
     });
-  } else if (ctx.totalUsdValue >= 50_000) {
+  } else if (totalUsd.gte(50_000)) {
     const pts = 22;
     score += pts;
     factors.push({
       name: "Aggregate Size",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} accumulated on one side`,
+      description: `$${formatK(totalUsd)} accumulated on one side`,
     });
-  } else if (ctx.totalUsdValue >= 20_000) {
+  } else if (totalUsd.gte(20_000)) {
     const pts = 15;
     score += pts;
     factors.push({
       name: "Aggregate Size",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} accumulated on one side`,
+      description: `$${formatK(totalUsd)} accumulated on one side`,
     });
-  } else if (ctx.totalUsdValue >= 10_000) {
+  } else if (totalUsd.gte(10_000)) {
     const pts = 10;
     score += pts;
     factors.push({
       name: "Aggregate Size",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} accumulated on one side`,
+      description: `$${formatK(totalUsd)} accumulated on one side`,
     });
   } else {
     const pts = 5;
@@ -159,7 +161,7 @@ export function scoreSizeHider(ctx: AccumulatorContext): ArchetypeScore {
     factors.push({
       name: "Aggregate Size",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} accumulated on one side`,
+      description: `$${formatK(totalUsd)} accumulated on one side`,
     });
   }
 
@@ -205,28 +207,31 @@ export function scoreSizeHider(ctx: AccumulatorContext): ArchetypeScore {
   // single one trips a whale filter. Detect by coefficient-of-variation
   // of USD values: low CV ⇒ suspiciously uniform.
   if (ctx.trades.length >= 4) {
-    const mean = ctx.totalUsdValue / ctx.trades.length;
-    const variance =
-      ctx.trades.reduce((s, t) => s + (t.usdValue - mean) ** 2, 0) /
-      ctx.trades.length;
-    const stdev = Math.sqrt(variance);
-    const cv = mean > 0 ? stdev / mean : 0;
+    const mean = totalUsd.div(ctx.trades.length);
+    const variance = ctx.trades
+      .reduce(
+        (sum, trade) => sum.add(new Decimal(trade.usdValue).minus(mean).pow(2)),
+        new Decimal(0)
+      )
+      .div(ctx.trades.length);
+    const stdev = variance.sqrt();
+    const cv = mean.gt(0) ? stdev.div(mean) : new Decimal(0);
 
-    if (cv < 0.1) {
+    if (cv.lt(0.1)) {
       const pts = 15;
       score += pts;
       factors.push({
         name: "Uniform Sizing",
         points: pts,
-        description: `Trades were near-identical in size (CV ${(cv * 100).toFixed(0)}%)`,
+        description: `Trades were near-identical in size (CV ${cv.mul(100).toFixed(0)}%)`,
       });
-    } else if (cv < 0.25) {
+    } else if (cv.lt(0.25)) {
       const pts = 8;
       score += pts;
       factors.push({
         name: "Uniform Sizing",
         points: pts,
-        description: `Trades were similarly sized (CV ${(cv * 100).toFixed(0)}%)`,
+        description: `Trades were similarly sized (CV ${cv.mul(100).toFixed(0)}%)`,
       });
     }
   }
@@ -266,10 +271,10 @@ export function scoreSizeHider(ctx: AccumulatorContext): ArchetypeScore {
   };
 }
 
-function formatK(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(0);
+function formatK(value: Decimal): string {
+  if (value.gte(1_000_000)) return `${value.div(1_000_000).toFixed(1)}M`;
+  if (value.gte(1_000)) return `${value.div(1_000).toFixed(1)}K`;
+  return value.toFixed(0);
 }
 
 function formatDuration(hours: number): string {

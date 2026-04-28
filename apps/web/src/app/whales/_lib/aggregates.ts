@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import type { WhaleActivity } from "@/hooks/use-whale-activity";
 
 /**
@@ -47,13 +48,29 @@ export const DIRECTIONAL_MIN_NET = 2_000;
 /** Minimum conviction ratio for the "DIRECTIONAL" tag. */
 export const DIRECTIONAL_MIN_CONVICTION = 0.6;
 
+function addMoney(left: number, right: number): number {
+  return new Decimal(left).add(right).toNumber();
+}
+
+function compareMoneyDesc(left: number, right: number): number {
+  return new Decimal(right).cmp(left);
+}
+
+function ratio(
+  numerator: Decimal,
+  denominator: Decimal,
+  fallback: number
+): number {
+  return denominator.gt(0) ? numerator.div(denominator).toNumber() : fallback;
+}
+
 export function isBigBetWhale(row: WhaleRow): boolean {
-  return row.biggestTrade >= BIG_BET_THRESHOLD;
+  return new Decimal(row.biggestTrade).gte(BIG_BET_THRESHOLD);
 }
 
 export function isDirectionalWhale(row: WhaleRow): boolean {
   return (
-    row.netVolume >= DIRECTIONAL_MIN_NET &&
+    new Decimal(row.netVolume).gte(DIRECTIONAL_MIN_NET) &&
     row.convictionRatio >= DIRECTIONAL_MIN_CONVICTION
   );
 }
@@ -78,11 +95,14 @@ export function aggregateWhales(activities: WhaleActivity[]): WhaleRow[] {
   for (const a of activities) {
     const existing = map.get(a.trader.address);
     if (existing) {
-      if (a.trade.side === "BUY") existing.buyVolume += a.trade.usdcAmount;
-      else existing.sellVolume += a.trade.usdcAmount;
+      if (a.trade.side === "BUY") {
+        existing.buyVolume = addMoney(existing.buyVolume, a.trade.usdcAmount);
+      } else {
+        existing.sellVolume = addMoney(existing.sellVolume, a.trade.usdcAmount);
+      }
       existing.tradeCount += 1;
       existing.markets.add(a.market.conditionId);
-      if (a.trade.usdcAmount > existing.biggestTrade) {
+      if (new Decimal(a.trade.usdcAmount).gt(existing.biggestTrade)) {
         existing.biggestTrade = a.trade.usdcAmount;
       }
       if (
@@ -111,12 +131,14 @@ export function aggregateWhales(activities: WhaleActivity[]): WhaleRow[] {
   }
 
   return Array.from(map.values()).map((v) => {
-    const totalVolume = v.buyVolume + v.sellVolume;
-    const signedNet = v.buyVolume - v.sellVolume;
-    const netVolume = Math.abs(signedNet);
-    const convictionRatio = totalVolume > 0 ? netVolume / totalVolume : 0;
+    const buyVolume = new Decimal(v.buyVolume);
+    const sellVolume = new Decimal(v.sellVolume);
+    const totalVolume = buyVolume.add(sellVolume);
+    const signedNet = buyVolume.minus(sellVolume);
+    const netVolume = signedNet.abs();
+    const convictionRatio = ratio(netVolume, totalVolume, 0);
     const netDirection: WhaleRow["netDirection"] =
-      convictionRatio < 0.2 ? "neutral" : signedNet > 0 ? "buy" : "sell";
+      convictionRatio < 0.2 ? "neutral" : signedNet.gt(0) ? "buy" : "sell";
     return {
       address: v.address,
       name: v.name,
@@ -125,12 +147,12 @@ export function aggregateWhales(activities: WhaleActivity[]): WhaleRow[] {
       totalPnl: v.totalPnl,
       buyVolume: v.buyVolume,
       sellVolume: v.sellVolume,
-      totalVolume,
-      buyRatio: totalVolume > 0 ? v.buyVolume / totalVolume : 0.5,
+      totalVolume: totalVolume.toNumber(),
+      buyRatio: ratio(buyVolume, totalVolume, 0.5),
       tradeCount: v.tradeCount,
       marketCount: v.markets.size,
       lastActiveTimestamp: v.lastActiveTimestamp,
-      netVolume,
+      netVolume: netVolume.toNumber(),
       netDirection,
       biggestTrade: v.biggestTrade,
       convictionRatio,
@@ -172,8 +194,11 @@ export function aggregateHotMarkets(
     if (!key) continue;
     const existing = map.get(key);
     if (existing) {
-      if (a.trade.side === "BUY") existing.buyVolume += a.trade.usdcAmount;
-      else existing.sellVolume += a.trade.usdcAmount;
+      if (a.trade.side === "BUY") {
+        existing.buyVolume = addMoney(existing.buyVolume, a.trade.usdcAmount);
+      } else {
+        existing.sellVolume = addMoney(existing.sellVolume, a.trade.usdcAmount);
+      }
       existing.tradeCount += 1;
       existing.whales.add(a.trader.address);
     } else {
@@ -195,7 +220,9 @@ export function aggregateHotMarkets(
 
   return Array.from(map.values())
     .map((v) => {
-      const totalVolume = v.buyVolume + v.sellVolume;
+      const buyVolume = new Decimal(v.buyVolume);
+      const sellVolume = new Decimal(v.sellVolume);
+      const totalVolume = buyVolume.add(sellVolume);
       return {
         conditionId: v.conditionId,
         title: v.title,
@@ -204,13 +231,13 @@ export function aggregateHotMarkets(
         image: v.image,
         buyVolume: v.buyVolume,
         sellVolume: v.sellVolume,
-        totalVolume,
-        buyRatio: totalVolume > 0 ? v.buyVolume / totalVolume : 0.5,
+        totalVolume: totalVolume.toNumber(),
+        buyRatio: ratio(buyVolume, totalVolume, 0.5),
         tradeCount: v.tradeCount,
         whaleCount: v.whales.size,
       };
     })
-    .sort((a, b) => b.totalVolume - a.totalVolume)
+    .sort((a, b) => compareMoneyDesc(a.totalVolume, b.totalVolume))
     .slice(0, limit);
 }
 
@@ -251,18 +278,21 @@ export function buildPressureSeries(
   for (const a of activities) {
     const t = new Date(a.timestamp).getTime();
     const idx = Math.min(buckets - 1, Math.floor(((t - min) / span) * buckets));
-    if (a.trade.side === "BUY") bins[idx].buy += a.trade.usdcAmount;
-    else bins[idx].sell += a.trade.usdcAmount;
+    if (a.trade.side === "BUY") {
+      bins[idx].buy = addMoney(bins[idx].buy, a.trade.usdcAmount);
+    } else {
+      bins[idx].sell = addMoney(bins[idx].sell, a.trade.usdcAmount);
+    }
   }
 
-  let net = 0;
+  let net = new Decimal(0);
   return bins.map((bin, i) => {
-    net += bin.buy - bin.sell;
+    net = net.add(bin.buy).sub(bin.sell);
     return {
       t: i / Math.max(1, buckets - 1),
       bucketBuy: bin.buy,
       bucketSell: bin.sell,
-      net,
+      net: net.toNumber(),
     };
   });
 }

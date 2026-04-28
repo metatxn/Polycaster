@@ -2,6 +2,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { useAppKit } from "@reown/appkit/react";
+import Decimal from "decimal.js";
 import { AnimatePresence, motion } from "framer-motion";
 
 const log = createLogger("trading-onboarding");
@@ -61,6 +62,7 @@ export function TradingOnboarding({
     isDeployed: hasProxyWalletFromHook,
     refresh: refreshProxyWallet,
     proxyAddress: computedProxyAddress,
+    usdcBalance,
   } = useProxyWallet();
 
   // Use relayer state as primary source (most reliable after deployment)
@@ -70,6 +72,7 @@ export function TradingOnboarding({
   // Track if USDC is already approved (for returning users)
   const [hasUsdcApproval, setHasUsdcApproval] = useState<boolean | null>(null);
   const [isCheckingApproval, setIsCheckingApproval] = useState(false);
+  const [approvalAmount, setApprovalAmount] = useState("100");
 
   // Celebration state - only show when user actively completes the final step
   const [showCelebration, setShowCelebration] = useState(false);
@@ -96,7 +99,7 @@ export function TradingOnboarding({
       id: "approve",
       title: "Approve Trading Permissions",
       description:
-        "One-time approvals for pUSD, USDC.e (auto-wrap), and outcome tokens • Free & gasless",
+        "Set limited pUSD/USDC.e allowances and outcome-token permissions • Free & gasless",
       icon: <Zap className="h-5 w-5" />,
       status: "pending",
     },
@@ -108,6 +111,21 @@ export function TradingOnboarding({
       status: "pending",
     },
   ]);
+
+  useEffect(() => {
+    if (usdcBalance > 0) {
+      setApprovalAmount(new Decimal(usdcBalance).toDecimalPlaces(2).toString());
+    }
+  }, [usdcBalance]);
+
+  const isApprovalAmountValid = (() => {
+    try {
+      const decimal = new Decimal(approvalAmount || "0");
+      return decimal.isFinite() && decimal.gt(0);
+    } catch {
+      return false;
+    }
+  })();
 
   const updateStepStatus = useCallback(
     (
@@ -127,7 +145,8 @@ export function TradingOnboarding({
   /**
    * Check if ALL V2 trading approvals are already set on the Safe.
    *
-   * V2 requires 7 approvals (see `checkAllApprovals` in `@/lib/approvals`):
+   * V2 trading requires 7 approvals (see `checkAllApprovals` in
+   * `@/lib/approvals`):
    *   pUSD → CTF Exchange V2, Neg Risk Exchange V2, Neg Risk Adapter
    *   USDC.e → Collateral Onramp (for on-demand wrap on BUY)
    *   CTF setApprovalForAll → those same three operators (needed for SELL)
@@ -185,9 +204,18 @@ export function TradingOnboarding({
   }, [deploySafe, updateStepStatus, refreshProxyWallet]);
 
   const handleApproveUsdc = useCallback(async () => {
+    if (!isApprovalAmountValid) {
+      updateStepStatus(
+        "approve",
+        "error",
+        "Enter an approval amount greater than 0"
+      );
+      return;
+    }
+
     updateStepStatus("approve", "in_progress");
     try {
-      const result = await approveUsdcForTrading();
+      const result = await approveUsdcForTrading(approvalAmount);
       if (result.success) {
         updateStepStatus("approve", "completed");
         setHasUsdcApproval(true); // Mark as approved after successful transaction
@@ -202,7 +230,12 @@ export function TradingOnboarding({
         err instanceof Error ? err.message : "Failed to submit approval batch"
       );
     }
-  }, [approveUsdcForTrading, updateStepStatus]);
+  }, [
+    approveUsdcForTrading,
+    approvalAmount,
+    isApprovalAmountValid,
+    updateStepStatus,
+  ]);
 
   const handleDeriveCredentials = useCallback(async () => {
     // Ensure previous steps are completed
@@ -385,7 +418,7 @@ export function TradingOnboarding({
           <button
             type="button"
             onClick={handleApproveUsdc}
-            disabled={isLoading}
+            disabled={isLoading || !isApprovalAmountValid}
             className={ctaClass}
           >
             Approve
@@ -412,7 +445,7 @@ export function TradingOnboarding({
     if (currentStep === 1)
       return "Your trading wallet is a Gnosis Safe — the most trusted smart-contract wallet in crypto.";
     if (currentStep === 2)
-      return "One gasless batch grants seven allowances so the V2 exchange can settle your trades: pUSD → CTF Exchange (buy), USDC.e → Onramp (auto-wrap), and outcome tokens → Exchange (sell). Funds never leave your Safe until you trade.";
+      return "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals.";
     if (currentStep === 3)
       return "Sign a message to create your unique trading credentials. No private keys are shared.";
     return "All setup transactions are gasless — Polymarket covers the gas fees through their relayer.";
@@ -603,6 +636,40 @@ export function TradingOnboarding({
                   {step.errorMessage ||
                     (isInProgress ? progressCopy : step.description)}
                 </p>
+                {step.id === "approve" && isCurrent && !isCompleted && (
+                  <div className="mt-3 space-y-1.5">
+                    <label
+                      htmlFor="approval-amount"
+                      className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground"
+                    >
+                      Approval limit
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="approval-amount"
+                        type="text"
+                        inputMode="decimal"
+                        value={approvalAmount}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                            setApprovalAmount(value);
+                          }
+                        }}
+                        disabled={isLoading}
+                        className="h-9 w-28 border border-border bg-background px-2 text-sm tabular-nums text-foreground outline-none focus:border-foreground disabled:opacity-50"
+                        aria-invalid={!isApprovalAmountValid}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        pUSD / USDC.e
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      ERC-20 allowances use this limit. Outcome-token sell
+                      permissions are binary and cannot be amount-limited.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="shrink-0">{getStepAction(step, index)}</div>

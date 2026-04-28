@@ -10,6 +10,7 @@ interface NormalizedScoreMarketsMessage {
   includeEmbeddings: boolean;
   includeBm25: boolean;
   includeContextGate: boolean;
+  includeRerank: boolean;
 }
 
 export interface ScoreMarketsResult {
@@ -17,6 +18,16 @@ export interface ScoreMarketsResult {
   bm25Scores: number[];
   contextGateResults: ContextGateResult[];
   usedEmbeddings: boolean;
+  rerankScores?: number[];
+  rerankMetrics?: {
+    count: number;
+    elapsedMs: number;
+    queueWaitMs: number;
+    model: string;
+    dtype: string;
+    device: "webgpu" | "wasm";
+  };
+  usedRerank?: boolean;
 }
 
 export interface ScoreMarketsDeps {
@@ -29,6 +40,20 @@ export interface ScoreMarketsDeps {
     postText: string,
     gateTexts: string[]
   ) => ContextGateResult[];
+  rerankMarketPairs?: (
+    postText: string,
+    marketTexts: string[]
+  ) => Promise<{
+    scores: number[];
+    metrics: {
+      count: number;
+      elapsedMs: number;
+      queueWaitMs: number;
+      model: string;
+      dtype: string;
+      device: "webgpu" | "wasm";
+    };
+  }>;
   logWarn: (event: string, payload?: unknown) => void;
 }
 
@@ -52,6 +77,7 @@ function normalizeRequest(
   const includeEmbeddings = message.includeEmbeddings ?? true;
   const includeBm25 = message.includeBm25 ?? true;
   const includeContextGate = message.includeContextGate ?? false;
+  const includeRerank = message.includeRerank ?? false;
   const marketTexts = message.marketTexts || [];
   const gateTexts =
     message.gateTexts && message.gateTexts.length === marketTexts.length
@@ -65,6 +91,7 @@ function normalizeRequest(
     includeEmbeddings,
     includeBm25,
     includeContextGate,
+    includeRerank,
   };
 }
 
@@ -72,6 +99,7 @@ export function createScoreMarkets({
   computeSimilarities,
   bm25Score,
   nlpContextGateBatch,
+  rerankMarketPairs,
   logWarn,
 }: ScoreMarketsDeps) {
   return async function scoreMarkets(
@@ -84,6 +112,7 @@ export function createScoreMarkets({
       includeEmbeddings,
       includeBm25,
       includeContextGate,
+      includeRerank,
     } = normalizeRequest(message);
 
     if (!postText || marketTexts.length === 0) {
@@ -93,6 +122,8 @@ export function createScoreMarkets({
         bm25Scores: includeBm25 ? empty : [],
         contextGateResults: [],
         usedEmbeddings: false,
+        rerankScores: includeRerank ? empty : undefined,
+        usedRerank: false,
       };
     }
 
@@ -101,6 +132,9 @@ export function createScoreMarkets({
     let usedEmbeddings = false;
     let similarities = includeEmbeddings ? createZeroScores() : [];
     let bm25Scores = includeBm25 ? createZeroScores() : [];
+    let rerankScores = includeRerank ? createZeroScores() : undefined;
+    let rerankMetrics: ScoreMarketsResult["rerankMetrics"];
+    let usedRerank = false;
 
     if (includeEmbeddings) {
       try {
@@ -126,6 +160,21 @@ export function createScoreMarkets({
           message: error instanceof Error ? error.message : String(error),
         });
         bm25Scores = createZeroScores();
+      }
+    }
+
+    if (includeRerank && rerankMarketPairs) {
+      try {
+        const rerank = await rerankMarketPairs(postText, marketTexts);
+        rerankScores = padArray(rerank.scores, count, () => 0);
+        rerankMetrics = rerank.metrics;
+        usedRerank = true;
+      } catch (error) {
+        logWarn("scoring.rerank-failed", {
+          prefix: "[XENCODER-AB]",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        rerankScores = createZeroScores();
       }
     }
 
@@ -159,6 +208,9 @@ export function createScoreMarkets({
       bm25Scores,
       contextGateResults,
       usedEmbeddings,
+      rerankScores,
+      rerankMetrics,
+      usedRerank,
     };
   };
 }

@@ -215,7 +215,7 @@ export async function POST(request: NextRequest) {
       deriveResult.error?.includes("not enabled")
     ) {
       errorMessage =
-        "Your wallet is not enabled for trading. Please complete the wallet setup steps first (Deploy wallet & Approve USDC).";
+        "Your wallet is not enabled for trading. Please complete the wallet setup steps first (Deploy wallet & Approve trading tokens).";
     } else if (
       createResult.error?.includes("signature") ||
       deriveResult.error?.includes("signature")

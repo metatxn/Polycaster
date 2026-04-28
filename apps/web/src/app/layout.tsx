@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { MainContent } from "@/components/main-content";
 import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import ContextProvider from "@/context";
+import { DEFAULT_SEO_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -37,12 +38,12 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Knoww — Every opinion is a position",
+    default: "Knoww — Prediction markets for every opinion",
     template: "%s | Knoww",
   },
-  description: "A prediction market layer for the open internet.",
+  description: DEFAULT_SEO_DESCRIPTION,
   keywords: ["prediction markets", "polymarket", "trading", "crypto", "odds"],
-  metadataBase: new URL("https://knoww.app"),
+  metadataBase: new URL(SITE_URL),
   icons: {
     icon: [
       // Small screens (mobile) - 16x16
@@ -62,22 +63,22 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    siteName: "Knoww",
-    title: "Knoww — Every opinion is a position",
-    description: "A prediction market layer for the open internet.",
+    siteName: SITE_NAME,
+    title: "Knoww — Prediction markets for every opinion",
+    description: DEFAULT_SEO_DESCRIPTION,
     images: [
       {
         url: "/logo-512x512.png",
         width: 512,
         height: 512,
-        alt: "Knoww — A prediction market layer for the open internet",
+        alt: "Knoww prediction markets",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Knoww — Every opinion is a position",
-    description: "A prediction market layer for the open internet.",
+    title: "Knoww — Prediction markets for every opinion",
+    description: DEFAULT_SEO_DESCRIPTION,
     images: ["/logo-512x512.png"],
   },
   robots: {
@@ -97,8 +98,13 @@ export default async function RootLayout({
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "WebSite",
-    name: "Knoww",
-    url: "https://knoww.app",
+    name: SITE_NAME,
+    url: SITE_URL,
+    potentialAction: {
+      "@type": "SearchAction",
+      target: `${SITE_URL}/search?q={search_term_string}`,
+      "query-input": "required name=search_term_string",
+    },
   };
 
   return (

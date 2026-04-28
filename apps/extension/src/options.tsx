@@ -335,6 +335,88 @@ function isSupportedSocialHost(url: string | undefined): boolean {
   }
 }
 
+function canInspectTabForDiagnostics(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+interface RelevanceTelemetryExport {
+  exportedAt: number;
+  pageUrl: string;
+  platform: string;
+  events: unknown[];
+  feedback: unknown[];
+}
+
+interface RelevanceTelemetryResponse {
+  ok: boolean;
+  data?: RelevanceTelemetryExport;
+}
+
+function normalizeTelemetryExport(
+  data: RelevanceTelemetryExport
+): RelevanceTelemetryExport {
+  return {
+    ...data,
+    events: Array.isArray(data.events) ? data.events : [],
+    feedback: Array.isArray(data.feedback) ? data.feedback : [],
+  };
+}
+
+function downloadJson(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function sendTelemetryMessage<T>(
+  tabId: number,
+  message: { type: string }
+): Promise<T | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, (response: T | undefined) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      resolve(response ?? null);
+    });
+  });
+}
+
+function broadcastSettingsToSupportedTabs(settings: UserSettings): void {
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id && isSupportedSocialHost(tab.url)) {
+        chrome.tabs.sendMessage(
+          tab.id,
+          {
+            type: "KNOWW_SETTINGS_UPDATED",
+            settings,
+          },
+          () => {
+            // Expected when a matching tab has not loaded the content script yet.
+            if (chrome.runtime.lastError) {
+              // no-op
+            }
+          }
+        );
+      }
+    }
+  });
+}
+
 // Toggle Switch Component
 interface ToggleProps {
   id: string;
@@ -486,28 +568,29 @@ function OptionsApp() {
         });
       }
 
-      // Notify content scripts
-      chrome.tabs.query({}, (tabs) => {
-        for (const tab of tabs) {
-          if (tab.id && isSupportedSocialHost(tab.url)) {
-            chrome.tabs.sendMessage(
-              tab.id,
-              {
-                type: "KNOWW_SETTINGS_UPDATED",
-                settings,
-              },
-              () => {
-                // Check for errors but don't throw - tab might not have content script loaded
-                if (chrome.runtime.lastError) {
-                  // Silently ignore - this is expected when tab doesn't have content script
-                }
-              }
-            );
-          }
-        }
-      });
+      broadcastSettingsToSupportedTabs(settings);
     });
   }, [settings, showStatus]);
+
+  const updateDebugMode = useCallback(
+    (debugMode: boolean) => {
+      const nextSettings = { ...settings, debugMode };
+      setSettings(nextSettings);
+      chrome.storage.sync.set({ knowwSettings: nextSettings }, () => {
+        if (chrome.runtime.lastError) {
+          log.error("settings.debug_mode_save_failed", {
+            error: chrome.runtime.lastError.message,
+          });
+          showStatus("Could not save Debug Mode.");
+          return;
+        }
+
+        broadcastSettingsToSupportedTabs(nextSettings);
+        showStatus(debugMode ? "Debug Mode enabled." : "Debug Mode disabled.");
+      });
+    },
+    [settings, showStatus]
+  );
 
   // Reset settings
   const resetSettings = useCallback(() => {
@@ -572,13 +655,101 @@ function OptionsApp() {
     }
   }, [settings.usageAnalyticsEnabled, showStatus]);
 
+  const handleExportDiagnostics = useCallback(() => {
+    chrome.tabs.query({}, async (tabs) => {
+      const inspectableTabs = tabs.filter(
+        (tab): tab is chrome.tabs.Tab & { id: number } =>
+          typeof tab.id === "number" && canInspectTabForDiagnostics(tab.url)
+      );
+
+      const tabExports = await Promise.all(
+        inspectableTabs.map(async (tab) => {
+          const response =
+            await sendTelemetryMessage<RelevanceTelemetryResponse>(tab.id, {
+              type: "KNOWW_EXPORT_RELEVANCE_TELEMETRY",
+            });
+          if (!response?.ok || !response.data) return null;
+          const diagnostics = normalizeTelemetryExport(response.data);
+          return {
+            tabId: tab.id,
+            tabTitle: tab.title ?? "",
+            tabUrl: tab.url ?? "",
+            ...diagnostics,
+          };
+        })
+      );
+
+      const tabsWithDiagnostics = tabExports.filter(
+        (entry): entry is NonNullable<(typeof tabExports)[number]> =>
+          !!entry && (entry.events.length > 0 || entry.feedback.length > 0)
+      );
+      const eventCount = tabsWithDiagnostics.reduce(
+        (total, entry) => total + entry.events.length,
+        0
+      );
+      const feedbackCount = tabsWithDiagnostics.reduce(
+        (total, entry) => total + entry.feedback.length,
+        0
+      );
+      const diagnosticCount = eventCount + feedbackCount;
+      const respondingTabCount = tabExports.filter(Boolean).length;
+
+      if (diagnosticCount === 0) {
+        showStatus(
+          respondingTabCount === 0
+            ? "No content-script diagnostics found. Reload Kalshi and try again."
+            : "No diagnostics found. Rate a card after Debug Mode is enabled."
+        );
+        return;
+      }
+
+      const exportedAt = new Date();
+      downloadJson(
+        `knoww-relevance-diagnostics-${exportedAt
+          .toISOString()
+          .replace(/[:.]/g, "-")}.json`,
+        {
+          exportedAt: exportedAt.toISOString(),
+          extensionVersion: version,
+          diagnosticCount,
+          eventCount,
+          feedbackCount,
+          inspectedTabCount: inspectableTabs.length,
+          respondingTabCount,
+          tabs: tabsWithDiagnostics,
+        }
+      );
+      showStatus(
+        `Exported ${eventCount} events and ${feedbackCount} feedback entries.`
+      );
+    });
+  }, [showStatus, version]);
+
+  const handleClearDiagnostics = useCallback(() => {
+    chrome.tabs.query({}, async (tabs) => {
+      const inspectableTabs = tabs.filter(
+        (tab): tab is chrome.tabs.Tab & { id: number } =>
+          typeof tab.id === "number" && canInspectTabForDiagnostics(tab.url)
+      );
+
+      await Promise.all(
+        inspectableTabs.map((tab) =>
+          sendTelemetryMessage(tab.id, {
+            type: "KNOWW_CLEAR_RELEVANCE_TELEMETRY",
+          })
+        )
+      );
+      showStatus("Diagnostics cleared.");
+    });
+  }, [showStatus]);
+
   return (
     <div className="container">
       {/* Header */}
       <div className="header">
         <div className="logo">
           {/* biome-ignore lint/performance/noImgElement: Not a Next.js app */}
-          <img src="icons/icon-256.png" alt="Knoww Logo" />
+          <img src="icons/icon-256.png" alt="Knoww" width={40} height={40} />
         </div>
         <h1>Knoww Settings</h1>
         <span className="version">v{version}</span>
@@ -807,13 +978,39 @@ function OptionsApp() {
 
         <SettingRow
           label="Debug Mode"
-          description="Enable console logging for troubleshooting"
+          description="Capture local relevance diagnostics for export. Production console logs stay off."
         >
           <Toggle
             id="debug-mode"
             checked={settings.debugMode}
-            onChange={(v) => setSettings((prev) => ({ ...prev, debugMode: v }))}
+            onChange={updateDebugMode}
           />
+        </SettingRow>
+
+        <Divider />
+
+        <SettingRow
+          label="Relevance Diagnostics"
+          description="Export recent local matching decisions from tabs with the content script"
+        >
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button
+              type="button"
+              className="reset-link"
+              style={{ marginTop: 0, fontSize: "13px" }}
+              onClick={handleExportDiagnostics}
+            >
+              Export
+            </button>
+            <button
+              type="button"
+              className="reset-link"
+              style={{ marginTop: 0, fontSize: "13px" }}
+              onClick={handleClearDiagnostics}
+            >
+              Clear
+            </button>
+          </div>
         </SettingRow>
 
         <Divider />

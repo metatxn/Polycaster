@@ -43,7 +43,10 @@ export async function handleScoringMessage(
     ok: true,
     similarities: result.similarities,
     bm25Scores: result.bm25Scores,
+    rerankScores: result.rerankScores,
+    rerankMetrics: result.rerankMetrics,
     contextGateResults: result.contextGateResults,
     usedEmbeddings: result.usedEmbeddings,
+    usedRerank: result.usedRerank,
   };
 }

@@ -245,21 +245,15 @@ function scheduleIdle(cb: () => void, timeout = 2000): void {
 
 /**
  * Logger with prefix
- * Logs are shown ONLY when:
- * 1. Debug mode is enabled in settings, OR
- * 2. DEV_MODE is true in config
+ * Logs are shown only in development builds. Production builds stay quiet even
+ * when debug-mode settings are enabled, so user browsers are not polluted with
+ * extension diagnostics.
  *
- * Performance note: All logging is gated behind debugMode check.
+ * Performance note: All logging is gated behind the build-mode check.
  * No string operations or console output occur in production.
  */
 function log(...args: unknown[]): void {
-  // Early exit for production - no string operations at all
-  const isDebug =
-    window.KNOWW_CONFIG?.isDebugMode?.() ??
-    window.KNOWW_CONFIG?.DEV_MODE ??
-    false;
-
-  if (!isDebug) return;
+  if (!window.KNOWW_CONFIG?.DEV_MODE) return;
 
   contentLog.debug("log", { args });
 }

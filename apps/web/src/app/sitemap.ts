@@ -2,14 +2,14 @@ import type { MetadataRoute } from "next";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
+import { SITE_URL } from "@/lib/seo";
 
 const SITEMAP_REVALIDATE_SECONDS = 3600;
-const SITEMAP_PAGE_LIMIT = "100";
-// Cap the sitemap to avoid exhausting the build timeout (Polymarket's catalog
-// has grown large enough that paginating it fully exceeds the 60s Next.js
-// export limit). 2000 per type keeps us well under sitemap protocol's 50k cap
-// while bounding build time to ~20 pages of keyset fetches.
-const SITEMAP_MAX_ITEMS_PER_TYPE = 2000;
+const SITEMAP_PAGE_LIMIT = "10";
+// Keep the sitemap focused on canonical, high-value URLs. The app can browse
+// the full catalog, but SEO should not ask crawlers to revisit thousands of
+// low-volume or duplicate market detail URLs every hour.
+const SITEMAP_MAX_EVENTS = 300;
 
 async function fetchAllKeysetItems<T>(
   endpoint: string,
@@ -54,63 +54,63 @@ async function fetchAllKeysetItems<T>(
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = "https://knoww.app";
+  const generatedAt = new Date();
 
   // Static routes
-  const staticRoutes = ["", "/leaderboard"].map((route) => ({
-    url: `${baseUrl}${route}`,
-    lastModified: new Date(),
-    changeFrequency: "hourly" as const,
-    priority: route === "" ? 1 : 0.8,
-  }));
-
-  // Fetch active markets for dynamic routes
-  let marketRoutes: MetadataRoute.Sitemap = [];
-  try {
-    const markets = await fetchAllKeysetItems<{ slug?: string }>(
-      POLYMARKET_API.GAMMA.MARKETS_KEYSET,
-      new URLSearchParams({
-        closed: "false",
-        limit: SITEMAP_PAGE_LIMIT,
-      }),
-      ["markets", "data"],
-      SITEMAP_MAX_ITEMS_PER_TYPE
-    );
-
-    marketRoutes = markets
-      .filter((m) => m.slug)
-      .map((m) => ({
-        url: `${baseUrl}/markets/${m.slug}`,
-        lastModified: new Date(),
-        changeFrequency: "hourly" as const,
-        priority: 0.7,
-      }));
-  } catch (e) {
-    logger.error("sitemap.markets.fetch_failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+  const staticRoutes: MetadataRoute.Sitemap = [
+    {
+      url: SITE_URL,
+      lastModified: generatedAt,
+      changeFrequency: "weekly",
+      priority: 1,
+    },
+    {
+      url: `${SITE_URL}/markets`,
+      lastModified: generatedAt,
+      changeFrequency: "daily",
+      priority: 0.9,
+    },
+    {
+      url: `${SITE_URL}/leaderboard`,
+      lastModified: generatedAt,
+      changeFrequency: "daily",
+      priority: 0.7,
+    },
+  ];
 
   // Fetch active events for dynamic routes
   let eventRoutes: MetadataRoute.Sitemap = [];
   try {
-    const events = await fetchAllKeysetItems<{ slug?: string }>(
+    const events = await fetchAllKeysetItems<{
+      slug?: string;
+      updatedAt?: string;
+      startDate?: string;
+      endDate?: string;
+    }>(
       POLYMARKET_API.GAMMA.EVENTS_KEYSET,
       new URLSearchParams({
+        active: "true",
         closed: "false",
+        archived: "false",
+        order: "volume24hr",
+        ascending: "false",
         limit: SITEMAP_PAGE_LIMIT,
       }),
       ["events", "data"],
-      SITEMAP_MAX_ITEMS_PER_TYPE
+      SITEMAP_MAX_EVENTS
     );
 
     eventRoutes = events
       .filter((e) => e.slug)
       .map((e) => ({
-        url: `${baseUrl}/events/detail/${e.slug}`,
-        lastModified: new Date(),
-        changeFrequency: "hourly" as const,
-        priority: 0.6,
+        url: `${SITE_URL}/events/detail/${e.slug}`,
+        lastModified:
+          parseSitemapDate(e.updatedAt) ??
+          parseSitemapDate(e.endDate) ??
+          parseSitemapDate(e.startDate) ??
+          generatedAt,
+        changeFrequency: "daily" as const,
+        priority: 0.8,
       }));
   } catch (e) {
     logger.error("sitemap.events.fetch_failed", {
@@ -118,5 +118,29 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     });
   }
 
-  return [...staticRoutes, ...marketRoutes, ...eventRoutes];
+  return dedupeSitemapRoutes([...staticRoutes, ...eventRoutes]);
+}
+
+function parseSitemapDate(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dedupeSitemapRoutes(
+  routes: MetadataRoute.Sitemap
+): MetadataRoute.Sitemap {
+  const seenUrls = new Set<string>();
+
+  return routes.filter((route) => {
+    if (seenUrls.has(route.url)) {
+      return false;
+    }
+
+    seenUrls.add(route.url);
+    return true;
+  });
 }

@@ -24,11 +24,28 @@ A prediction markets platform to **Know your Odds**, powered by Polymarket.
 # Install dependencies
 pnpm install
 
-# Configure the web app environment
+# Seed the web app environment file
+cp apps/web/.env.local.example apps/web/.env.local
+
+# Add required local variables
 $EDITOR apps/web/.env.local
-# Required: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-# Optional client analytics: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN and NEXT_PUBLIC_POSTHOG_HOST
-# Optional server analytics: POSTHOG_PROJECT_API_KEY and POSTHOG_HOST
+# Required beyond the example file:
+# NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+#
+# The example file already includes:
+# NEXT_PUBLIC_POLY_BUILDER_CODE
+# NEXT_PUBLIC_POLYMARKET_HOST
+# NEXT_PUBLIC_POLYMARKET_WS_HOST
+# NEXT_PUBLIC_POLYMARKET_CHAIN_ID
+# POLY_RELAYER_API_KEY
+# POLY_RELAYER_API_KEY_ADDRESS
+#
+# Common optional vars for local parity:
+# NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN,
+# NEXT_PUBLIC_POSTHOG_HOST, POSTHOG_PROJECT_API_KEY, POSTHOG_HOST,
+# OPENROUTER_API_KEY, EXTENSION_SESSION_SECRET,
+# BUILDER_SIGNING_SERVER_URL, INTERNAL_AUTH_TOKEN,
+# ALCHEMY_API_KEY, POLYGON_RPC_URL, COINMARKET_API_KEY
 
 # Run the web app
 pnpm dev:web
@@ -41,8 +58,12 @@ For full local parity with production-only features, the web app also reads serv
 ### Extension Development
 
 ```bash
-# Configure the extension environment if needed
+# Configure the extension environment
 cp apps/extension/.env.example apps/extension/.env
+
+# Optional overrides:
+# DEV_MODE=false        # point the built extension at production
+# POLY_BUILDER_CODE=... # builder attribution code for extension orders
 
 # Run the web app locally for extension API calls
 pnpm dev:web
@@ -84,6 +105,11 @@ pnpm audit:security # Run a high-severity dependency audit
 pnpm deploy         # Deploy the web app to Cloudflare
 pnpm release:ext    # Bump, build, and zip the extension release
 ```
+
+Additional package-level scripts live in the workspace packages:
+
+- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`
+- `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `version:bump`, `zip`, `release`
 
 ## Documentation
 

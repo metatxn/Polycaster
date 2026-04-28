@@ -421,11 +421,15 @@ function renderOutcomePrices(
   for (let i = 0; i < displayOutcomes.length; i++) {
     const cls = OPTION_INDICATOR_CLASSES[i % OPTION_INDICATOR_CLASSES.length];
     const pct = Math.round((displayPrices[i] ?? 0.5) * 100);
+    // The probability bar's width is driven by `--knoww-pct` so the value
+    // travels via a typed CSS custom property instead of a raw inline width
+    // string — keeps the visual treatment owned by the stylesheet.
     rows.push(`
-      <div class="knoww-outcome-row">
+      <div class="knoww-outcome-row" style="--knoww-pct: ${pct}%">
         <div class="knoww-outcome-indicator ${cls}"></div>
         <span class="knoww-outcome-name">${escapeHtml(displayOutcomes[i])}</span>
         <span class="knoww-outcome-percent ${cls}">${pct}%</span>
+        <div class="knoww-outcome-bar ${cls}" aria-hidden="true"></div>
       </div>
     `);
   }
@@ -714,20 +718,11 @@ function createInlineMarketCard(
   title.textContent = market.title || "Untitled Market";
 
   const dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
   dismissBtn.className = "knoww-card-dismiss-btn";
   dismissBtn.innerHTML = "✕";
   dismissBtn.title = "Dismiss this market";
-  dismissBtn.style.background = "none";
-  dismissBtn.style.border = "none";
-  dismissBtn.style.color = "var(--knoww-text-muted, #888)";
-  dismissBtn.style.cursor = "pointer";
-  dismissBtn.style.padding = "2px 4px";
-  dismissBtn.style.fontSize = "14px";
-  dismissBtn.style.lineHeight = "1";
-  dismissBtn.style.opacity = "0.5";
-  dismissBtn.style.transition = "opacity 0.2s";
-  dismissBtn.onmouseenter = () => (dismissBtn.style.opacity = "1");
-  dismissBtn.onmouseleave = () => (dismissBtn.style.opacity = "0.5");
+  dismissBtn.setAttribute("aria-label", "Dismiss this market");
   dismissBtn.onclick = (e) => {
     e.stopPropagation();
     e.preventDefault();
@@ -767,7 +762,9 @@ function createInlineMarketCard(
         : market.volume24hr >= 1000
           ? `${(market.volume24hr / 1000).toFixed(1)}K`
           : `${market.volume24hr.toFixed(0)}`;
-    volume.innerHTML = `<span>$</span> ${volumeFormatted} 24h vol`;
+    // Format reads as "$1.3M · 24h vol" — the · separator gives the mono
+    // uppercase line a clean break between the figure and the qualifier.
+    volume.textContent = `$${volumeFormatted} · 24h vol`;
   }
 
   titleSection.appendChild(titleRow);
@@ -875,6 +872,13 @@ function createInlineMarketCard(
       optionRow.className = "knoww-option-row";
       optionRow.style.cursor = "pointer";
 
+      const optionPct = Math.round(option.price * 100);
+      // Drive the row's probability bar via a CSS custom property so the
+      // visual treatment stays owned by the stylesheet.
+      optionRow.style.setProperty("--knoww-pct", `${optionPct}%`);
+
+      const optionClass = `option-${(i % OPTION_COLORS.length) + 1}`;
+
       const colorBar = document.createElement("div");
       colorBar.className = "knoww-option-color";
       colorBar.style.backgroundColor = OPTION_COLORS[i % OPTION_COLORS.length];
@@ -885,7 +889,11 @@ function createInlineMarketCard(
 
       const percentSpan = document.createElement("span");
       percentSpan.className = "knoww-option-percent";
-      percentSpan.textContent = `${Math.round(option.price * 100)}%`;
+      percentSpan.textContent = `${optionPct}%`;
+
+      const probBar = document.createElement("div");
+      probBar.className = `knoww-option-bar ${optionClass}`;
+      probBar.setAttribute("aria-hidden", "true");
 
       optionRow.onclick = (e) => {
         e.stopPropagation();
@@ -916,6 +924,7 @@ function createInlineMarketCard(
       optionRow.appendChild(colorBar);
       optionRow.appendChild(nameSpan);
       optionRow.appendChild(percentSpan);
+      optionRow.appendChild(probBar);
       optionsList.appendChild(optionRow);
     }
 
@@ -979,6 +988,9 @@ function createInlineMarketCard(
       const optionRow = document.createElement("div");
       optionRow.className = "knoww-option-row";
       optionRow.style.cursor = "pointer";
+      optionRow.style.setProperty("--knoww-pct", `${option.percent}%`);
+
+      const optionClass = `option-${(option.index % OPTION_COLORS.length) + 1}`;
 
       const colorBar = document.createElement("div");
       colorBar.className = "knoww-option-color";
@@ -991,6 +1003,10 @@ function createInlineMarketCard(
       const percentSpan = document.createElement("span");
       percentSpan.className = "knoww-option-percent";
       percentSpan.textContent = `${option.percent}%`;
+
+      const probBar = document.createElement("div");
+      probBar.className = `knoww-option-bar ${optionClass}`;
+      probBar.setAttribute("aria-hidden", "true");
 
       optionRow.onclick = (e) => {
         e.stopPropagation();
@@ -1020,6 +1036,7 @@ function createInlineMarketCard(
       optionRow.appendChild(colorBar);
       optionRow.appendChild(nameSpan);
       optionRow.appendChild(percentSpan);
+      optionRow.appendChild(probBar);
       optionsList.appendChild(optionRow);
     }
 
@@ -1097,6 +1114,72 @@ function createInlineMarketCard(
   };
 
   footer.appendChild(sourceBadge);
+
+  if (window.KNOWW_CONFIG?.isDebugMode?.() === true) {
+    const feedbackGroup = document.createElement("div");
+    feedbackGroup.className = "knoww-feedback-actions";
+    feedbackGroup.setAttribute("aria-label", "Relevance feedback");
+
+    const setFeedbackState = (
+      selectedButton: HTMLButtonElement,
+      otherButton: HTMLButtonElement
+    ) => {
+      selectedButton.classList.add("selected");
+      selectedButton.setAttribute("aria-pressed", "true");
+      otherButton.classList.remove("selected");
+      otherButton.setAttribute("aria-pressed", "false");
+    };
+
+    const createFeedbackButton = (
+      feedback: "good" | "bad",
+      label: string
+    ): HTMLButtonElement => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `knoww-feedback-btn ${feedback}`;
+      button.textContent = label;
+      button.title =
+        feedback === "good" ? "Mark as a good match" : "Mark as a bad match";
+      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-pressed", "false");
+      return button;
+    };
+
+    const goodButton = createFeedbackButton("good", "Good");
+    const badButton = createFeedbackButton("bad", "Bad");
+
+    const recordFeedback = (
+      feedback: "good" | "bad",
+      selectedButton: HTMLButtonElement,
+      otherButton: HTMLButtonElement
+    ) => {
+      setFeedbackState(selectedButton, otherButton);
+      window.KNOWW_RELEVANCE_TELEMETRY?.recordFeedback?.({
+        postKey: card.getAttribute("data-knoww-post-key") ?? undefined,
+        marketId: market.id,
+        marketTitle: market.title || "",
+        source: marketSource,
+        feedback,
+      });
+    };
+
+    goodButton.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      recordFeedback("good", goodButton, badButton);
+    };
+
+    badButton.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      recordFeedback("bad", badButton, goodButton);
+    };
+
+    feedbackGroup.appendChild(goodButton);
+    feedbackGroup.appendChild(badButton);
+    footer.appendChild(feedbackGroup);
+  }
+
   footer.appendChild(viewMarket);
 
   // Assemble card
@@ -1399,10 +1482,15 @@ function createNotificationStack(): HTMLElement {
   const headerTitle = document.createElement("div");
   headerTitle.className = "knoww-stack-title";
 
-  const logoUrl = getSafeRuntimeUrl("icons/icon-48.png") || "icons/icon-48.png";
-
+  // Brand mark — the diamond-cutout K logo, served from the extension's
+  // bundled `icons/` folder so it matches the toolbar icon, the web's
+  // <KnowwMark />, and the favicons exactly.
+  const brandIconUrl =
+    getSafeRuntimeUrl("icons/icon-48.png") || "icons/icon-48.png";
   headerTitle.innerHTML = `
-    <div class="knoww-stack-icon"><img src="${logoUrl}" alt="Knoww" /></div>
+    <div class="knoww-stack-icon">
+      <img src="${brandIconUrl}" alt="" width="20" height="20" />
+    </div>
     <span>Markets</span>
   `;
 
@@ -1485,7 +1573,7 @@ function createNotificationStack(): HTMLElement {
   emptyState.className = "knoww-stack-empty";
   emptyState.id = "knoww-stack-empty";
   emptyState.innerHTML = `
-    <div class="knoww-stack-welcome" data-knoww-welcome style="display:none">
+    <div class="knoww-stack-welcome" data-knoww-welcome style="display:none !important">
       <div class="knoww-stack-welcome-icon">${WELCOME_SPARKLE_ICON_HTML}</div>
       <div class="knoww-stack-welcome-title">Knoww is listening</div>
       <p class="knoww-stack-welcome-body">
@@ -1526,7 +1614,9 @@ function createNotificationStack(): HTMLElement {
   );
 
   const dismissWelcome = () => {
-    if (welcomeEl) welcomeEl.style.display = "none";
+    // setProperty with "important" because .knoww-stack-welcome has
+    // `display: flex !important` — a plain inline style would lose to it.
+    if (welcomeEl) welcomeEl.style.setProperty("display", "none", "important");
     if (scanningEl) scanningEl.style.display = "";
     persistWelcomeSeen();
     void window.KNOWW_ANALYTICS?.track("welcome_dismissed", {});
@@ -1536,7 +1626,7 @@ function createNotificationStack(): HTMLElement {
 
   void readPersistedWelcomeSeen().then((seen) => {
     if (!seen && welcomeEl && scanningEl) {
-      welcomeEl.style.display = "";
+      welcomeEl.style.removeProperty("display");
       scanningEl.style.display = "none";
       void window.KNOWW_ANALYTICS?.track("welcome_shown", {});
     }

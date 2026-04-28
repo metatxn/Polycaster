@@ -31,6 +31,7 @@ export interface ScoreMarketsMessage {
   includeEmbeddings?: boolean;
   includeBm25?: boolean;
   includeContextGate?: boolean;
+  includeRerank?: boolean;
 }
 
 export interface ScoringPrewarmMessage {
@@ -130,6 +131,7 @@ export interface TradingGetOutcomeBalancesMessage {
 export interface TradingRelayerApproveMessage {
   type: "trading:relayer-approve";
   address: string;
+  approvalAmount?: string;
 }
 
 export interface TradingDeploySafeMessage {
@@ -222,8 +224,18 @@ export interface ScoreMarketsSuccessResponse {
   ok: true;
   similarities: number[];
   bm25Scores: number[];
+  rerankScores?: number[];
+  rerankMetrics?: {
+    count: number;
+    elapsedMs: number;
+    queueWaitMs: number;
+    model: string;
+    dtype: string;
+    device: "webgpu" | "wasm";
+  };
   contextGateResults: ContextGateResult[];
   usedEmbeddings: boolean;
+  usedRerank?: boolean;
 }
 
 export type BackgroundResponse =

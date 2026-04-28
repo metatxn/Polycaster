@@ -43,6 +43,17 @@ test("naiveContextGate ignores generic overlap", () => {
   assert.equal(gate.sharedEntities, 0);
 });
 
+test("naiveContextGate ignores green-card versus fight-card token overlap", () => {
+  const gate = naiveContextGate(
+    "Green Card holders returned to India to build MapmyIndia and hire Indian engineers",
+    "UFC 328: Jeremy Stephens vs. King Green (Lightweight, Main Card)"
+  );
+
+  assert.equal(gate.pass, false, gate.details);
+  assert.equal(gate.sharedNouns, 0, gate.details);
+  assert.equal(gate.sharedEntities, 0, gate.details);
+});
+
 test("naiveContextGate normalizes hashtags and contractions", () => {
   const gate = naiveContextGate(
     "Japan's #Uranium policy isn't changing",
@@ -233,6 +244,78 @@ test("evaluateCandidateGate rejects location-only overlap across unrelated topic
 
   assert.equal(decision.pass, false);
   assert.equal(decision.usedRecoveryGate, false);
+});
+
+test("evaluateCandidateGate rejects sports markets for immigration business posts", () => {
+  const decision = evaluateCandidateGate({
+    postText:
+      "MapmyIndia founders were Green Card holders who built a company in India and now hire Indian engineers",
+    market: createMarket({
+      title: "UFC 328: Jeremy Stephens vs. King Green (Lightweight, Main Card)",
+      category: "Sports",
+      tags: [{ slug: "sports", label: "Sports" }],
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.82,
+    gate: createGate({
+      pass: true,
+      meaningfulNouns: 2,
+      sharedEntities: 0,
+      details: "nouns=[green,card,india] meaningful=[green,card] distinct=2",
+    }),
+  });
+
+  assert.equal(decision.pass, false);
+  assert.ok(/domain-gate=reject/.test(decision.gate.details));
+  assert.ok(/market=\[sports\]/.test(decision.gate.details));
+  assert.equal(decision.retryEligible, false);
+});
+
+test("evaluateCandidateGate keeps sports markets for sports posts", () => {
+  const decision = evaluateCandidateGate({
+    postText:
+      "UFC lightweight fight card is stacked and King Green looks ready for the main event",
+    market: createMarket({
+      title: "UFC 328: Jeremy Stephens vs. King Green (Lightweight, Main Card)",
+      category: "Sports",
+      tags: [{ slug: "sports", label: "Sports" }],
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.82,
+    gate: createGate({
+      pass: true,
+      meaningfulNouns: 2,
+      sharedEntities: 1,
+      details: "nouns=[ufc,lightweight,fight] distinct=3",
+    }),
+  });
+
+  assert.equal(decision.pass, true);
+});
+
+test("evaluateCandidateGate keeps compatible business and tech domains", () => {
+  const decision = evaluateCandidateGate({
+    postText:
+      "OpenAI and Microsoft updated their cloud partnership for enterprise AI customers",
+    market: createMarket({
+      title: "Will Microsoft AI revenue beat expectations this quarter?",
+      category: "Companies",
+      tags: [{ slug: "technology", label: "Technology" }],
+    }),
+    matchedTags: ["technology"],
+    scoringMode: "hybrid",
+    score: 0.78,
+    gate: createGate({
+      pass: true,
+      meaningfulNouns: 2,
+      sharedEntities: 1,
+      details: "nouns=[microsoft,ai] distinct=2",
+    }),
+  });
+
+  assert.equal(decision.pass, true);
 });
 
 test("shouldFailOpen keeps the shared score floor behavior", () => {

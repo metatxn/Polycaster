@@ -288,6 +288,7 @@ export interface Market {
 export interface MarketSearchResult {
   market: Market;
   score: number;
+  rerankScore?: number;
   source: "polymarket" | "kalshi";
 }
 

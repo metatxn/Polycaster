@@ -62,6 +62,7 @@ CHROME_WEB_STORE_PRIVACY_PRACTICES.md
 ranking-engine.md
 polymarket-us-support-report.md
 .cache/
+apps/extension/.embedding-benchmark-cache/
 .claude/
 .env.local
 .test-dist/

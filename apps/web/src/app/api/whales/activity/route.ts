@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
@@ -248,8 +249,8 @@ export async function GET(request: NextRequest) {
         for (const activity of activities) {
           if (activity.type !== "TRADE") continue;
 
-          const usdcAmount = activity.usdcSize || 0;
-          if (usdcAmount < minTradeSize) continue;
+          const usdcAmount = new Decimal(activity.usdcSize || 0);
+          if (usdcAmount.lt(minTradeSize)) continue;
 
           const txHash =
             activity.transactionHash ||
@@ -277,7 +278,7 @@ export async function GET(request: NextRequest) {
               side: activity.side,
               size: activity.size || 0,
               price: activity.price || 0,
-              usdcAmount,
+              usdcAmount: usdcAmount.toNumber(),
               outcome: activity.outcome,
               outcomeIndex: activity.outcomeIndex,
             },
@@ -300,8 +301,8 @@ export async function GET(request: NextRequest) {
     for (const trade of globalTrades) {
       if (leaderboardWallets.has(trade.proxyWallet.toLowerCase())) continue;
 
-      const usdValue = trade.size * trade.price;
-      if (usdValue < globalMinTradeSize) continue;
+      const usdValue = new Decimal(trade.size).mul(trade.price);
+      if (usdValue.lt(globalMinTradeSize)) continue;
 
       const txHash =
         trade.transactionHash ||
@@ -324,7 +325,7 @@ export async function GET(request: NextRequest) {
           side: trade.side,
           size: trade.size,
           price: trade.price,
-          usdcAmount: usdValue,
+          usdcAmount: usdValue.toNumber(),
           outcome: trade.outcome,
           outcomeIndex: trade.outcomeIndex,
         },
@@ -389,7 +390,7 @@ export async function GET(request: NextRequest) {
         totalTrades: 0,
         lastUpdated: new Date().toISOString(),
         dataAge: Date.now() - fetchStartTime,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to fetch whale activity",
       } satisfies WhaleActivityResponse,
       { status: 500 }
     );

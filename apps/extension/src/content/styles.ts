@@ -587,6 +587,47 @@ function injectInlineStyles(): void {
         justify-content: space-between !important;
         padding: 12px 16px !important;
         border-top: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+        gap: 10px !important;
+      }
+
+      .knoww-feedback-actions {
+        display: flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        margin-left: auto !important;
+      }
+
+      .knoww-feedback-btn {
+        appearance: none !important;
+        border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+        background: transparent !important;
+        color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+        border-radius: 6px !important;
+        padding: 4px 7px !important;
+        font-family: "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+        font-size: 9px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0 !important;
+        line-height: 1 !important;
+        cursor: pointer !important;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
+      }
+
+      .knoww-feedback-btn:hover {
+        background: color-mix(in srgb, var(--knoww-text, rgb(231, 233, 234)) 8%, transparent) !important;
+        color: var(--knoww-text, rgb(231, 233, 234)) !important;
+      }
+
+      .knoww-feedback-btn.good.selected {
+        border-color: rgba(0, 186, 124, 0.45) !important;
+        background: rgba(0, 186, 124, 0.12) !important;
+        color: rgb(0, 186, 124) !important;
+      }
+
+      .knoww-feedback-btn.bad.selected {
+        border-color: rgba(244, 63, 94, 0.45) !important;
+        background: rgba(244, 63, 94, 0.12) !important;
+        color: rgb(244, 63, 94) !important;
       }
 
       /* Source badge (Polymarket / Kalshi) */

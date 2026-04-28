@@ -1207,7 +1207,7 @@ function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
       const splitBtn = elHtml(
         "button",
         "knoww-tp-more-item",
-        `${I.split} Split <span class="knoww-tp-tooltip-icon" title="Convert 1 USDC into 1 Yes and 1 No share">(?)</span>`
+        `${I.split} Split <span class="knoww-tp-tooltip-icon" title="Convert 1 pUSD into 1 Yes and 1 No share">(?)</span>`
       );
       splitBtn.onclick = (e) => {
         e.stopPropagation();
@@ -1950,7 +1950,7 @@ function addSubmitButton(
     btn.textContent = "Insufficient Balance";
     btn.disabled = true;
   } else if (needsApproval) {
-    btn.innerHTML = `${I.shield} Approve USDC`;
+    btn.innerHTML = `${I.shield} Approve pUSD`;
     btn.classList.add("approve");
   } else {
     const icon = activeSide === "buy" ? I.up : I.down;
@@ -1990,11 +1990,11 @@ function addSubmitButton(
         marketId: opts.market.id,
       });
       try {
-        await TradingService.approveUsdc(!!opts.negRisk);
+        await TradingService.approveUsdc(!!opts.negRisk, cost);
         trackPanelAnalytics("trading_usdc_approve_succeeded", {
           marketId: opts.market.id,
         });
-        showToast(panel, "USDC approved!", "success");
+        showToast(panel, "Approval updated!", "success");
         TradingService.refreshBalance().catch(() => {});
       } catch (err) {
         trackPanelAnalytics("trading_usdc_approve_failed", {
@@ -2276,11 +2276,11 @@ function renderSplitForm(
   form.appendChild(back);
 
   const info = el("div", "knoww-tp-info-box");
-  info.innerHTML = `<strong>Split:</strong> Convert USDC into equal YES + NO shares.<br>1 USDC → 1 YES + 1 NO`;
+  info.innerHTML = `<strong>Split:</strong> Convert pUSD into equal YES + NO shares.<br>1 pUSD → 1 YES + 1 NO`;
   form.appendChild(info);
 
   const header = el("div", "knoww-tp-section-header");
-  header.appendChild(el("span", "knoww-tp-section-label", "Amount (USDC)"));
+  header.appendChild(el("span", "knoww-tp-section-label", "Amount (pUSD)"));
   form.appendChild(header);
 
   const inputRow = el("div", "knoww-tp-input-row");
@@ -2314,7 +2314,7 @@ function renderSplitForm(
       el(
         "span",
         "knoww-tp-summary-value",
-        `${splitMergeAmount.toFixed(2)} USDC`
+        `${splitMergeAmount.toFixed(2)} pUSD`
       )
     );
     summary.appendChild(r1);
@@ -2337,7 +2337,7 @@ function renderSplitForm(
     const left = el("div", "knoww-tp-warn-left");
     left.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
     left.appendChild(
-      el("span", "knoww-tp-warn-text", "Insufficient USDC balance")
+      el("span", "knoww-tp-warn-text", "Insufficient pUSD balance")
     );
     top.appendChild(left);
     w.appendChild(top);
@@ -2356,7 +2356,7 @@ function renderSplitForm(
     btn.textContent = "Insufficient Balance";
     btn.disabled = true;
   } else {
-    btn.textContent = `Split ${splitMergeAmount.toFixed(2)} USDC`;
+    btn.textContent = `Split ${splitMergeAmount.toFixed(2)} pUSD`;
   }
   btn.onclick = async (e) => {
     e.stopPropagation();
@@ -2434,7 +2434,7 @@ function renderMergeForm(
   form.appendChild(back);
 
   const info = el("div", "knoww-tp-info-box");
-  info.innerHTML = `<strong>Merge:</strong> Convert equal YES + NO shares back into USDC.<br>1 YES + 1 NO → 1 USDC`;
+  info.innerHTML = `<strong>Merge:</strong> Convert equal YES + NO shares back into pUSD.<br>1 YES + 1 NO → 1 pUSD`;
   form.appendChild(info);
 
   if (outcomeBalances) {
@@ -2517,7 +2517,7 @@ function renderMergeForm(
       el(
         "span",
         "knoww-tp-summary-value positive",
-        `${splitMergeAmount.toFixed(2)} USDC`
+        `${splitMergeAmount.toFixed(2)} pUSD`
       )
     );
     preview.appendChild(r2);

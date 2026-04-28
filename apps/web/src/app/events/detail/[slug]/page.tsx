@@ -1,5 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import {
+  buildPageMetadata,
+  buildPredictionMarketDescription,
+  canonicalUrl,
+  cleanMetaText,
+  truncateMetaDescription,
+} from "@/lib/seo";
 import { getEvent } from "@/lib/server-cache";
 import EventDetailClient from "./event-detail-client";
 
@@ -18,30 +25,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     };
   }
 
-  const title = event.title;
-  const description =
-    event.description ||
-    `Trade on this prediction event: ${event.title}. Explore odds and make your prediction on Knoww.`;
-
-  return {
-    title,
-    description,
-    alternates: {
-      canonical: `https://knoww.app/events/detail/${slug}`,
-    },
-    openGraph: {
-      title,
-      description,
-      images: event.image ? [event.image] : [],
-      type: "website",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: event.image ? [event.image] : [],
-    },
-  };
+  return buildPageMetadata({
+    title: event.title,
+    description: buildPredictionMarketDescription({
+      title: event.title,
+      fallback: event.description,
+    }),
+    path: `/events/detail/${slug}`,
+    image: event.image,
+  });
 }
 
 /**
@@ -62,5 +54,33 @@ export default async function EventDetailPage({ params }: Props) {
     notFound();
   }
 
-  return <EventDetailClient slug={slug} initialEvent={initialEvent} />;
+  const description = truncateMetaDescription(
+    buildPredictionMarketDescription({
+      title: initialEvent.title,
+      fallback: initialEvent.description,
+    })
+  );
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    name: initialEvent.title,
+    description,
+    url: canonicalUrl(`/events/detail/${slug}`),
+    image: initialEvent.image,
+    mainEntity: {
+      "@type": "Question",
+      name: initialEvent.title,
+      text: cleanMetaText(initialEvent.description) || initialEvent.title,
+    },
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <EventDetailClient slug={slug} initialEvent={initialEvent} />
+    </>
+  );
 }

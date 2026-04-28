@@ -5,8 +5,10 @@ import { Wallet } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConnection } from "wagmi";
+import { KnowwMark } from "@/components/knoww-mark";
 import { NotificationBellMobile } from "@/components/notifications";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { WalletMenu } from "@/components/wallet-menu";
 
 /**
  * Top nav — the two-row bar above every app page at xl+. Row 1: wordmark
@@ -69,9 +71,7 @@ export function TopNav() {
             href="/"
             className="flex items-center gap-2 font-bold text-[14px] tracking-tight hover:opacity-80 transition-opacity"
           >
-            <span className="inline-flex h-6 w-6 items-center justify-center bg-foreground text-background text-[11px] font-bold leading-none">
-              K
-            </span>
+            <KnowwMark />
             Knoww
           </Link>
 
@@ -106,16 +106,17 @@ export function TopNav() {
               component returns null, so the cluster stays stable. */}
           <NotificationBellMobile />
           {isConnected && address ? (
-            <button
-              type="button"
-              onClick={() => open()}
-              className="flex items-center gap-2 px-3 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[11px] uppercase tracking-[0.12em]"
-            >
-              <Wallet className="h-3.5 w-3.5" />
-              <span className="tabular-nums normal-case tracking-normal text-[12px]">
-                {formatAddress(address)}
-              </span>
-            </button>
+            <WalletMenu>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-3 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[11px] uppercase tracking-[0.12em]"
+              >
+                <Wallet className="h-3.5 w-3.5" />
+                <span className="tabular-nums normal-case tracking-normal text-[12px]">
+                  {formatAddress(address)}
+                </span>
+              </button>
+            </WalletMenu>
           ) : (
             <button
               type="button"

@@ -3,7 +3,7 @@
  *
  * Uses Polymarket's relayer infrastructure for gasless transactions:
  * - Deploy Safe wallets for users
- * - Set token approvals (USDC for CTF)
+ * - Set token approvals (pUSD for CTF/CLOB V2, USDC.e for Onramp)
  * - Execute CTF operations (split, merge, redeem)
  *
  * Reference: https://docs.polymarket.com/developers/builders/relayer-client
@@ -12,6 +12,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import Decimal from "decimal.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 
@@ -39,6 +40,8 @@ import {
 
 const POLYMARKET_RELAYER_URL = RELAYER_API_URL;
 const CHAIN_ID = POLYGON_CHAIN_ID;
+const DEFAULT_APPROVAL_AMOUNT = "100";
+const APPROVAL_DECIMALS = 6;
 
 // Transaction states from the relayer (kept for documentation purposes)
 // type TransactionState =
@@ -59,6 +62,16 @@ interface RelayerClientState {
 
 // Debounce time for deployment checks
 const CHECK_DEPLOYMENT_DEBOUNCE_MS = 2000;
+
+function normalizeApprovalAmount(amount?: string): string {
+  const decimal = new Decimal(amount || DEFAULT_APPROVAL_AMOUNT);
+  if (!decimal.isFinite() || decimal.lte(0)) {
+    throw new Error("Approval amount must be greater than 0");
+  }
+  return decimal
+    .toDecimalPlaces(APPROVAL_DECIMALS, Decimal.ROUND_DOWN)
+    .toFixed();
+}
 
 export function useRelayerClient() {
   const { address, isConnected } = useConnection();
@@ -181,180 +194,193 @@ export function useRelayerClient() {
    * target there without adding it here leaves users stuck in a loop where
    * the check fails after a "successful" batch.
    */
-  const approveUsdcForTrading = useCallback(async () => {
-    if (!walletClient || !address) {
-      return { success: false, error: "Wallet not connected" };
-    }
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+  const approveUsdcForTrading = useCallback(
+    async (approvalAmount?: string) => {
+      if (!walletClient || !address) {
+        return { success: false, error: "Wallet not connected" };
+      }
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
-    try {
-      const { encodeFunctionData, maxUint256 } = await import("viem");
-      const { checkAllApprovals } = await import("@/lib/approvals");
-
-      // First, verify the Safe is deployed
-      const expectedSafe = await deriveSafeAddress();
-      if (!expectedSafe) {
-        throw new Error(
-          "Could not derive Safe address. Please ensure your wallet is connected."
+      try {
+        const { encodeFunctionData, parseUnits } = await import("viem");
+        const { checkAllApprovals } = await import("@/lib/approvals");
+        const normalizedApprovalAmount =
+          normalizeApprovalAmount(approvalAmount);
+        const approvalAmountRaw = parseUnits(
+          normalizedApprovalAmount,
+          APPROVAL_DECIMALS
         );
-      }
 
-      const isDeployed = await getDeployed(expectedSafe as `0x${string}`);
-      log.debug("approvals.safe_check", { expectedSafe, isDeployed });
-
-      // Check if approvals are already set
-      log.debug("approvals.checking");
-      const approvalStatus = await checkAllApprovals(expectedSafe);
-      log.debug("approvals.status", approvalStatus);
-
-      if (approvalStatus.allApproved) {
-        log.debug("approvals.already_set");
-        setState((prev) => ({ ...prev, isLoading: false }));
-        return {
-          success: true,
-          transactionHash: "",
-          message: "All approvals already set",
-          alreadyApproved: true,
-        };
-      }
-
-      if (!isDeployed) {
-        throw new Error(
-          "Your trading wallet is not deployed yet. Please complete the 'Create Trading Wallet' step first."
-        );
-      }
-
-      // ERC20 approve ABI
-      const erc20ApproveAbi = [
-        {
-          name: "approve",
-          type: "function",
-          inputs: [
-            { name: "spender", type: "address" },
-            { name: "amount", type: "uint256" },
-          ],
-          outputs: [{ name: "", type: "bool" }],
-        },
-      ] as const;
-
-      // ERC1155 setApprovalForAll ABI (for outcome tokens)
-      const erc1155ApprovalAbi = [
-        {
-          name: "setApprovalForAll",
-          type: "function",
-          inputs: [
-            { name: "operator", type: "address" },
-            { name: "approved", type: "bool" },
-          ],
-          outputs: [],
-        },
-      ] as const;
-
-      // Create ALL approval transactions.
-      // The SDK's execute() method expects Transaction objects with: to, data,
-      // value. It internally converts these to SafeTransactions (operation: Call).
-      const erc20Approve = (token: `0x${string}`, spender: `0x${string}`) => ({
-        to: token,
-        data: encodeFunctionData({
-          abi: erc20ApproveAbi,
-          functionName: "approve",
-          args: [spender, maxUint256],
-        }),
-        value: "0",
-      });
-      const erc1155ApproveAll = (operator: `0x${string}`) => ({
-        to: CONTRACTS.CTF,
-        data: encodeFunctionData({
-          abi: erc1155ApprovalAbi,
-          functionName: "setApprovalForAll",
-          args: [operator, true],
-        }),
-        value: "0",
-      });
-
-      const approvalTxs = [
-        // pUSD → V2 exchanges (settles BUY orders)
-        ...PUSD_APPROVAL_TARGETS.map((spender) =>
-          erc20Approve(CONTRACTS.PUSD, spender)
-        ),
-        // USDC.e → Onramp (lets wrap() pull USDC.e and mint pUSD)
-        erc20Approve(CONTRACTS.USDC_E, CONTRACTS.COLLATERAL_ONRAMP),
-        // CTF outcome tokens → operators (needed to SELL positions)
-        ...CTF_APPROVAL_OPERATORS.map((operator) =>
-          erc1155ApproveAll(operator)
-        ),
-      ];
-
-      log.debug("approvals.submitting", {
-        pusdTargets: PUSD_APPROVAL_TARGETS,
-        usdcEOnramp: CONTRACTS.COLLATERAL_ONRAMP,
-        ctfOperators: CTF_APPROVAL_OPERATORS,
-      });
-
-      // Execute the approval transactions with retry logic.
-      // The new relayer client throws on failure states, so wrap in try/catch.
-      const maxRetries = 3;
-      let lastError: Error | null = null;
-      let result: { transactionID: string; transactionHash: string } | null =
-        null;
-
-      for (let retry = 0; retry < maxRetries; retry++) {
-        try {
-          if (retry > 0) {
-            log.debug("approvals.retry", { attempt: retry + 1, maxRetries });
-            // Wait before retrying (exponential backoff: 1s, 2s, 4s)
-            await new Promise((resolve) =>
-              setTimeout(resolve, 1000 * 2 ** (retry - 1))
-            );
-          }
-
-          result = await executeViaRelayer(
-            walletClient,
-            address as `0x${string}`,
-            approvalTxs.map((t) => ({
-              to: t.to as `0x${string}`,
-              data: t.data as `0x${string}`,
-              value: t.value,
-            }))
+        // First, verify the Safe is deployed
+        const expectedSafe = await deriveSafeAddress();
+        if (!expectedSafe) {
+          throw new Error(
+            "Could not derive Safe address. Please ensure your wallet is connected."
           );
-
-          log.info("approvals.result", {
-            transactionID: result.transactionID,
-            hash: result.transactionHash,
-            retry,
-          });
-          break; // success
-        } catch (executeErr) {
-          log.error("approvals.execute_failed", {
-            attempt: retry + 1,
-            error: executeErr,
-          });
-          lastError =
-            executeErr instanceof Error
-              ? executeErr
-              : new Error(String(executeErr));
-          // Continue to next retry
         }
-      }
 
-      if (!result) {
-        throw lastError ?? new Error("Approval failed after all retries");
-      }
+        const isDeployed = await getDeployed(expectedSafe as `0x${string}`);
+        log.debug("approvals.safe_check", { expectedSafe, isDeployed });
 
-      setState((prev) => ({ ...prev, isLoading: false }));
-      return { success: true, transactionHash: result.transactionHash };
-    } catch (err) {
-      log.error("approvals.error", err);
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to approve USDC";
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: errorMessage,
-      }));
-      return { success: false, error: errorMessage };
-    }
-  }, [walletClient, address, deriveSafeAddress]);
+        // Check if approvals are already set
+        log.debug("approvals.checking");
+        const approvalStatus = await checkAllApprovals(expectedSafe);
+        log.debug("approvals.status", approvalStatus);
+
+        if (approvalStatus.allApproved) {
+          log.debug("approvals.already_set");
+          setState((prev) => ({ ...prev, isLoading: false }));
+          return {
+            success: true,
+            transactionHash: "",
+            message: "All approvals already set",
+            alreadyApproved: true,
+          };
+        }
+
+        if (!isDeployed) {
+          throw new Error(
+            "Your trading wallet is not deployed yet. Please complete the 'Create Trading Wallet' step first."
+          );
+        }
+
+        // ERC20 approve ABI
+        const erc20ApproveAbi = [
+          {
+            name: "approve",
+            type: "function",
+            inputs: [
+              { name: "spender", type: "address" },
+              { name: "amount", type: "uint256" },
+            ],
+            outputs: [{ name: "", type: "bool" }],
+          },
+        ] as const;
+
+        // ERC1155 setApprovalForAll ABI (for outcome tokens)
+        const erc1155ApprovalAbi = [
+          {
+            name: "setApprovalForAll",
+            type: "function",
+            inputs: [
+              { name: "operator", type: "address" },
+              { name: "approved", type: "bool" },
+            ],
+            outputs: [],
+          },
+        ] as const;
+
+        // Create ALL approval transactions.
+        // The SDK's execute() method expects Transaction objects with: to, data,
+        // value. It internally converts these to SafeTransactions (operation: Call).
+        const erc20Approve = (
+          token: `0x${string}`,
+          spender: `0x${string}`
+        ) => ({
+          to: token,
+          data: encodeFunctionData({
+            abi: erc20ApproveAbi,
+            functionName: "approve",
+            args: [spender, approvalAmountRaw],
+          }),
+          value: "0",
+        });
+        const erc1155ApproveAll = (operator: `0x${string}`) => ({
+          to: CONTRACTS.CTF,
+          data: encodeFunctionData({
+            abi: erc1155ApprovalAbi,
+            functionName: "setApprovalForAll",
+            args: [operator, true],
+          }),
+          value: "0",
+        });
+
+        const approvalTxs = [
+          // pUSD → V2 exchanges (BUY settlement)
+          ...PUSD_APPROVAL_TARGETS.map((spender) =>
+            erc20Approve(CONTRACTS.PUSD, spender)
+          ),
+          // USDC.e → Onramp (lets wrap() pull USDC.e and mint pUSD)
+          erc20Approve(CONTRACTS.USDC_E, CONTRACTS.COLLATERAL_ONRAMP),
+          // CTF outcome tokens → operators (needed to SELL positions)
+          ...CTF_APPROVAL_OPERATORS.map((operator) =>
+            erc1155ApproveAll(operator)
+          ),
+        ];
+
+        log.debug("approvals.submitting", {
+          pusdTargets: PUSD_APPROVAL_TARGETS,
+          amount: normalizedApprovalAmount,
+          usdcEOnramp: CONTRACTS.COLLATERAL_ONRAMP,
+          ctfOperators: CTF_APPROVAL_OPERATORS,
+        });
+
+        // Execute the approval transactions with retry logic.
+        // The new relayer client throws on failure states, so wrap in try/catch.
+        const maxRetries = 3;
+        let lastError: Error | null = null;
+        let result: { transactionID: string; transactionHash: string } | null =
+          null;
+
+        for (let retry = 0; retry < maxRetries; retry++) {
+          try {
+            if (retry > 0) {
+              log.debug("approvals.retry", { attempt: retry + 1, maxRetries });
+              // Wait before retrying (exponential backoff: 1s, 2s, 4s)
+              await new Promise((resolve) =>
+                setTimeout(resolve, 1000 * 2 ** (retry - 1))
+              );
+            }
+
+            result = await executeViaRelayer(
+              walletClient,
+              address as `0x${string}`,
+              approvalTxs.map((t) => ({
+                to: t.to as `0x${string}`,
+                data: t.data as `0x${string}`,
+                value: t.value,
+              }))
+            );
+
+            log.info("approvals.result", {
+              transactionID: result.transactionID,
+              hash: result.transactionHash,
+              retry,
+            });
+            break; // success
+          } catch (executeErr) {
+            log.error("approvals.execute_failed", {
+              attempt: retry + 1,
+              error: executeErr,
+            });
+            lastError =
+              executeErr instanceof Error
+                ? executeErr
+                : new Error(String(executeErr));
+            // Continue to next retry
+          }
+        }
+
+        if (!result) {
+          throw lastError ?? new Error("Approval failed after all retries");
+        }
+
+        setState((prev) => ({ ...prev, isLoading: false }));
+        return { success: true, transactionHash: result.transactionHash };
+      } catch (err) {
+        log.error("approvals.error", err);
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to set approvals";
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: errorMessage,
+        }));
+        return { success: false, error: errorMessage };
+      }
+    },
+    [walletClient, address, deriveSafeAddress]
+  );
 
   /**
    * Check if an address has deployed code (is a contract)
@@ -464,7 +490,7 @@ export function useRelayerClient() {
   /**
    * Full onboarding flow:
    * 1. Deploy Safe wallet (if not exists)
-   * 2. Approve USDC for trading
+   * 2. Approve pUSD/USDC.e/CTF for trading
    * 3. Return the proxy address
    */
   const onboardUser = useCallback(async () => {
@@ -477,7 +503,7 @@ export function useRelayerClient() {
         return deployResult;
       }
 
-      // Step 2: Approve USDC
+      // Step 2: Approve V2 trading and CTF-operation allowances
       const approveResult = await approveUsdcForTrading();
       if (!approveResult.success) {
         return {

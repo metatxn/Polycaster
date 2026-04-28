@@ -21,7 +21,7 @@ export function AllowanceWarning({
         <AlertCircle className="h-4 w-4 text-foreground shrink-0" />
         <span className="text-sm text-foreground">
           {hasNoAllowance
-            ? "Approve USDC.e spending to trade"
+            ? "Approve pUSD spending to trade"
             : `Increase allowance to $${totalCost.toFixed(2)}`}
         </span>
       </div>
@@ -37,7 +37,7 @@ export function AllowanceWarning({
             Approving…
           </>
         ) : (
-          "Approve USDC.e"
+          "Approve pUSD"
         )}
       </button>
     </div>

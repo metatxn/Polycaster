@@ -8,6 +8,21 @@ export const FAIL_OPEN_FLOOR = 0.5;
 export const AI_GATE_RETRY_FLOOR = 0.6;
 export const HEURISTIC_STRICT_SHARED_NOUNS = 3;
 
+type MarketDomain =
+  | "business"
+  | "crypto"
+  | "entertainment"
+  | "finance"
+  | "health"
+  | "immigration"
+  | "legal"
+  | "military"
+  | "politics"
+  | "science-tech"
+  | "sports"
+  | "transport"
+  | "weather";
+
 const SMART_QUOTE_RE = /[\u2018\u2019\u201A\u201B\u2032\u0060\u02BC]/g;
 const NAIVE_GATE_TOKEN_RE = /[\s,.!?;:()[\]{}"'/\-@#\u2018\u2019\u201C\u201D]+/;
 const NAIVE_GATE_MIN_WORD_LEN = 3;
@@ -152,6 +167,8 @@ const NAIVE_STOP_WORDS = new Set([
   "then",
   "all",
   "out",
+  "card",
+  "green",
   "price",
   "market",
   "year",
@@ -255,6 +272,110 @@ const CONTRACTION_SUFFIX_RE = /n't$|'[a-z]{1,2}$/i;
 const NAIVE_ENTITY_RE = /[A-Z][a-zA-Z]{4,}/g;
 const SHORT_ENTITY_RE = /\b[A-Z][A-Z0-9]{1,5}\b/g;
 
+const DOMAIN_PATTERNS: Record<MarketDomain, RegExp[]> = {
+  business: [
+    /\b(company|companies|startup|founder|co-?founder|revenue|employees?|hiring|jobs?|roles?|leadership|product|customer|enterprise)\b/i,
+  ],
+  crypto: [
+    /\b(bitcoin|btc|ethereum|eth|solana|sol|crypto|defi|token|airdrop|blockchain|coinbase|polymarket|usdc|usdt|stablecoin)\b/i,
+  ],
+  entertainment: [
+    /\b(movie|film|trailer|premiere|season|episode|hbo|max|netflix|disney|oscars?|grammys?|emmys?|actor|actress|box office)\b/i,
+  ],
+  finance: [
+    /\b(stocks?|shares?|earnings|revenue|inflation|cpi|fed|federal reserve|rates?|treasury|nasdaq|s&p|sp500|dow|market cap)\b/i,
+  ],
+  health: [
+    /\b(fda|vaccine|virus|disease|hospital|doctor|medical|health|drug|trial|urologist|body|cancer)\b/i,
+  ],
+  immigration: [
+    /\b(green card|visa|citizenship|immigration|immigrant|h-?1b|passport|residency)\b/i,
+  ],
+  legal: [
+    /\b(trial|lawsuit|court|judge|legal|charges?|indictment|settlement|case|sues?|sued)\b/i,
+  ],
+  military: [
+    /\b(army|military|war|attack|missile|drone|defence|defense|soldier|combat|battle|air force|navy|terror|terrorist)\b/i,
+  ],
+  politics: [
+    /\b(election|government|minister|president|congress|senate|parliament|bjp|democrat|republican|trump|biden|modi|policy|vote|voters?)\b/i,
+  ],
+  "science-tech": [
+    /\b(ai|openai|anthropic|gpt|claude|software|engineer|engineering|developer|evm|ethereum|cloud|microsoft|google|apple|nvidia|spacex|nasa|robot|gpu)\b/i,
+  ],
+  sports: [
+    /\b(ufc|mma|fight|fighter|lightweight|heavyweight|boxing|nfl|nba|mlb|nhl|cricket|football|soccer|tennis|golf|match|playoffs?|super bowl|world cup)\b/i,
+  ],
+  transport: [
+    /\b(flight|airport|airline|train|railway|irctc|road|traffic|vehicle|bike|car|delivery)\b/i,
+  ],
+  weather: [
+    /\b(weather|rain|rainy|storm|hurricane|temperature|flood|monsoon|snow|wildfire|earthquake)\b/i,
+  ],
+};
+
+const DOMAIN_TAG_ALIASES: Record<string, MarketDomain> = {
+  ai: "science-tech",
+  business: "business",
+  companies: "business",
+  company: "business",
+  crypto: "crypto",
+  cryptocurrency: "crypto",
+  economics: "finance",
+  economy: "finance",
+  entertainment: "entertainment",
+  financials: "finance",
+  finance: "finance",
+  health: "health",
+  legal: "legal",
+  politics: "politics",
+  science: "science-tech",
+  "science and technology": "science-tech",
+  sports: "sports",
+  technology: "science-tech",
+  tech: "science-tech",
+  weather: "weather",
+};
+
+const DOMAIN_COMPATIBILITY: Record<MarketDomain, Set<MarketDomain>> = {
+  business: new Set(["business", "finance", "science-tech", "legal"]),
+  crypto: new Set(["crypto", "finance", "science-tech", "legal"]),
+  entertainment: new Set(["entertainment"]),
+  finance: new Set(["finance", "business", "crypto", "politics"]),
+  health: new Set(["health", "science-tech", "legal", "politics"]),
+  immigration: new Set(["immigration", "business", "legal", "politics"]),
+  legal: new Set([
+    "legal",
+    "business",
+    "crypto",
+    "finance",
+    "health",
+    "immigration",
+    "politics",
+    "science-tech",
+  ]),
+  military: new Set(["military", "politics", "transport"]),
+  politics: new Set([
+    "politics",
+    "finance",
+    "immigration",
+    "legal",
+    "military",
+    "weather",
+  ]),
+  "science-tech": new Set([
+    "science-tech",
+    "business",
+    "crypto",
+    "finance",
+    "health",
+    "legal",
+  ]),
+  sports: new Set(["sports"]),
+  transport: new Set(["transport", "business", "military", "weather"]),
+  weather: new Set(["weather", "politics", "transport"]),
+};
+
 export interface DetermineScoringModeInput {
   usedEmbeddings: boolean;
   bm25Scores: number[];
@@ -263,7 +384,7 @@ export interface DetermineScoringModeInput {
 
 export interface GateDecisionInput {
   postText: string;
-  market: Pick<Market, "title" | "description" | "tags">;
+  market: Pick<Market, "title" | "description" | "tags" | "category">;
   matchedTags: string[];
   scoringMode: ScoringMode;
   score: number;
@@ -284,6 +405,82 @@ export interface GateDecisionResult {
   retryEligible: boolean;
   usedFallbackGate: boolean;
   usedRecoveryGate: boolean;
+}
+
+function normalizeDomainToken(value: string | undefined): string {
+  return (value || "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function addDomainFromLabel(
+  domains: Set<MarketDomain>,
+  label: string | undefined
+): void {
+  const direct = DOMAIN_TAG_ALIASES[normalizeDomainToken(label)];
+  if (direct) domains.add(direct);
+}
+
+function addDomainsFromText(domains: Set<MarketDomain>, text: string): void {
+  for (const [domain, patterns] of Object.entries(DOMAIN_PATTERNS) as Array<
+    [MarketDomain, RegExp[]]
+  >) {
+    if (patterns.some((pattern) => pattern.test(text))) {
+      domains.add(domain);
+    }
+  }
+}
+
+function inferPostDomains(
+  postText: string,
+  matchedTags: string[]
+): Set<MarketDomain> {
+  const domains = new Set<MarketDomain>();
+  for (const tag of matchedTags) addDomainFromLabel(domains, tag);
+  addDomainsFromText(domains, postText);
+  return domains;
+}
+
+function inferMarketDomains(
+  market: Pick<Market, "title" | "description" | "tags" | "category">
+): Set<MarketDomain> {
+  const domains = new Set<MarketDomain>();
+  addDomainFromLabel(domains, market.category);
+  for (const tag of market.tags || []) {
+    addDomainFromLabel(domains, tag.label);
+    addDomainFromLabel(domains, tag.slug);
+  }
+  addDomainsFromText(domains, buildMarketGateText(market));
+  return domains;
+}
+
+function hasCompatibleDomain(
+  postDomains: Set<MarketDomain>,
+  marketDomains: Set<MarketDomain>
+): boolean {
+  if (marketDomains.size === 0) return true;
+  if (postDomains.size === 0) return false;
+
+  for (const marketDomain of marketDomains) {
+    const compatible = DOMAIN_COMPATIBILITY[marketDomain];
+    for (const postDomain of postDomains) {
+      if (compatible.has(postDomain)) return true;
+    }
+  }
+  return false;
+}
+
+function withDomainGateDetails(
+  gate: ContextGateResult,
+  postDomains: Set<MarketDomain>,
+  marketDomains: Set<MarketDomain>
+): ContextGateResult {
+  return {
+    ...gate,
+    details: `${gate.details}; domain-gate=reject post=[${[...postDomains].join(",")}] market=[${[...marketDomains].join(",")}]`,
+  };
 }
 
 function normalizeText(text: string): string {
@@ -457,7 +654,7 @@ export function evaluateCandidateGate({
   relaxed,
 }: GateDecisionInput): GateDecisionResult {
   const fallbackGate = naiveContextGate(postText, buildMarketGateText(market));
-  const resolvedGate = gate ?? fallbackGate;
+  let resolvedGate = gate ?? fallbackGate;
   let gatePass = resolvedGate.pass;
   const usedRecoveryGate = false;
   let recoveryGate: ContextGateResult | undefined;
@@ -480,12 +677,25 @@ export function evaluateCandidateGate({
     }
   }
 
+  const postDomains = inferPostDomains(postText, matchedTags);
+  const marketDomains = inferMarketDomains(market);
+  const domainCompatible = hasCompatibleDomain(postDomains, marketDomains);
+  if (gatePass && !domainCompatible) {
+    gatePass = false;
+    resolvedGate = withDomainGateDetails(
+      resolvedGate,
+      postDomains,
+      marketDomains
+    );
+  }
+
   return {
     gate: resolvedGate,
     recoveryGate,
     pass: gatePass,
     retryEligible:
       !gatePass &&
+      domainCompatible &&
       scoringMode === "hybrid" &&
       score >= AI_GATE_RETRY_FLOOR &&
       (resolvedGate.meaningfulNouns >= 1 || resolvedGate.sharedEntities >= 1),

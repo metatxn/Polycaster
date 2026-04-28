@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useConnection } from "wagmi";
 import { DepositModal } from "@/components/deposit-modal";
+import { KnowwMark } from "@/components/knoww-mark";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -92,9 +93,7 @@ export function SidebarMobile() {
 
           {/* Header — editorial K-block wordmark, matches TopNav */}
           <div className="flex items-center gap-2 px-4 h-14 border-b border-border/60">
-            <span className="inline-flex h-6 w-6 items-center justify-center bg-foreground text-background text-[11px] font-bold leading-none">
-              K
-            </span>
+            <KnowwMark />
             <SheetTitle className="font-bold text-[14px] tracking-tight">
               Knoww
             </SheetTitle>

@@ -1,10 +1,19 @@
 import { createLogger } from "@knoww/logger";
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { buildPageMetadata } from "@/lib/seo";
 import { getInitialLeaderboard } from "@/lib/server-cache";
 import { LeaderboardContent } from "./leaderboard-content";
 
 const log = createLogger("leaderboard-page");
+
+export const metadata: Metadata = buildPageMetadata({
+  title: "Prediction Market Leaderboard",
+  description:
+    "Track top prediction market traders by P&L, volume, and performance on Knoww.",
+  path: "/leaderboard",
+});
 
 /**
  * Leaderboard Page - Server Component

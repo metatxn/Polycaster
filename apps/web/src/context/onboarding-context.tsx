@@ -99,13 +99,6 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   // This prevents showing it multiple times if user dismisses it
   const hasAutoShownRef = useRef(false);
 
-  // Track previous wagmi status so we can distinguish a user-initiated
-  // connection (`connecting` → `connected`) from a rehydrated session on
-  // page load (`reconnecting` → `connected`). We only auto-open for the
-  // former — landing on a page with a persisted wallet should NOT pop up
-  // a modal over the content.
-  const prevStatusRef = useRef<typeof status | null>(null);
-
   // Check if this wallet has already completed onboarding (from localStorage)
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<
     boolean | null
@@ -139,7 +132,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
 
   // Track V2 approval status. The name `hasUsdcApproval` is retained for
   // backwards compatibility with downstream derived state, but semantically
-  // this now means "all V2 approvals set" (pUSD → 3 exchanges, USDC.e →
+  // this now means "all V2 trading approvals set" (pUSD → 3 exchanges, USDC.e →
   // Onramp, CTF → 3 operators).
   const [hasUsdcApproval, setHasUsdcApproval] = useState<boolean | null>(null);
   const [isCheckingUsdcApproval, setIsCheckingUsdcApproval] = useState(false);
@@ -191,9 +184,13 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   // sessionStorage (where credentials are stored) is cleared when browser closes,
   // but localStorage persists. So user may have "completed" onboarding before,
   // but lost their credentials when they closed the browser.
-  // Only trust localStorage if credentials actually exist, OR if we're still loading credentials.
+  // Only trust localStorage if credentials actually exist, OR if we're still
+  // loading credentials, and the current V2 approval set is still valid.
+  // This invalidates older V1 completion records that predate pUSD approvals.
   const isSetupCompleteFromStorage =
-    hasCompletedOnboarding === true && (hasCredentials || isCredentialsLoading);
+    hasCompletedOnboarding === true &&
+    hasUsdcApproval === true &&
+    (hasCredentials || isCredentialsLoading);
 
   const isCheckingSetup =
     isCredentialsLoading ||
@@ -210,25 +207,20 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     !isFullySetUp &&
     !isSetupCompleteFromStorage;
 
-  // Auto-show onboarding only on a *fresh* wallet connection this session
-  // (`connecting` → `connected`). Page loads that rehydrate a persisted
-  // wallet go through `reconnecting` → `connected` and must NOT auto-open
-  // — the inline "Setup Trading Account" CTA in the trading panel carries
-  // the same action without hijacking the viewport.
+  // Auto-show onboarding whenever a connected wallet still needs setup.
+  // We don't gate on a `connecting`/`reconnecting` → `connected` transition
+  // because Reown AppKit's cookie hydration can deliver `status === "connected"`
+  // on the very first render, with no intermediate state to observe. The
+  // `hasAutoShownRef` guard (reset on disconnect) ensures we only auto-open
+  // once per session — dismissals stick until the next reconnect.
   useEffect(() => {
-    const prevStatus = prevStatusRef.current;
-    prevStatusRef.current = status;
-
     if (status === "disconnected") {
       hasAutoShownRef.current = false;
       return;
     }
 
-    const justConnectedFresh =
-      prevStatus === "connecting" && status === "connected";
-
     if (
-      justConnectedFresh &&
+      status === "connected" &&
       !isCheckingSetup &&
       needsTradingSetup &&
       !hasAutoShownRef.current &&

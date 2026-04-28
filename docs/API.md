@@ -1612,9 +1612,9 @@ Request body
 
 | Field      | Type               | Required | Validation                                                                              |
 | ---------- | ------------------ | -------- | --------------------------------------------------------------------------------------- |
-| `tokenIds` | `string[]`         | Yes      | Must include at least one string token ID with length `>= 10`; duplicates are removed. |
-| `startTs`  | `number \| string` | No       | Passed upstream as a string. Defaults to 30 days ago in Unix seconds.                   |
-| `fidelity` | `number \| string` | No       | Passed upstream as a string. Default `"60"`.                                            |
+| `tokenIds` | `string[]`         | Yes      | Must include `1..40` numeric string token IDs with length `>= 10`; duplicates are removed. |
+| `startTs`  | `number \| string` | No       | Coerced to an integer in `0..4102444800`. Defaults to 30 days ago in Unix seconds.      |
+| `fidelity` | `number \| string` | No       | Coerced to an integer in `1..1440`. Default `60`.                                       |
 
 Success `200`
 
@@ -1626,10 +1626,10 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "tokenIds is required" }` or `{ success: false, error: "Too many tokenIds (max 40)" }`
+- `400`: `{ success: false, error: "Invalid JSON body", histories: [] }` or `{ success: false, error: "Invalid request body", histories: [] }`
 - `401`: Not used.
 - `404`: Not used.
-- `500`: `{ success: false, error: string, histories: [] }`
+- `500`: `{ success: false, error: "Failed to fetch price history", histories: [] }`
 
 Rate limiting
 
@@ -1978,7 +1978,7 @@ GET /api/search?q=bitcoin&limit=2 HTTP/1.1
 
 ## Relayer And RPC
 
-### GET `/api/relayer/:path`
+### GET `/api/relayer/:path*`
 
 Description: Server-side proxy for a small allow-listed subset of Polymarket relayer endpoints. Used by web and extension trading flows so relayer credentials stay server-side.
 
@@ -2026,7 +2026,7 @@ Sec-Fetch-Site: same-origin
 }
 ```
 
-### POST `/api/relayer/:path`
+### POST `/api/relayer/:path*`
 
 Description: Same relayer proxy for JSON POST requests such as transaction submission.
 
@@ -3231,11 +3231,12 @@ Errors
 - `400`: `{ error: "minDaysAgo must be less than maxDaysAgo" }`
 - `401`: Not used.
 - `404`: Not used.
-- `500`: `{ error: string }`
+- `429`: `{ success: false, error: "Too many requests. Please try again later.", rateLimit: object }`
+- `500`: `{ error: "Backtest failed" }`
 
 Rate limiting
 
-- No explicit rate limiter
+- `2` requests per `5` minutes/IP
 
 Example
 

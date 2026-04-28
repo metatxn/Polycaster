@@ -1,17 +1,33 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import Decimal from "decimal.js";
 import { useCallback, useMemo, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 
 const log = createLogger("clob-client");
+const DEFAULT_APPROVAL_AMOUNT = "100";
+const APPROVAL_DECIMALS = 6;
+
+function normalizeApprovalAmount(amount?: string): string {
+  const decimal = new Decimal(amount || DEFAULT_APPROVAL_AMOUNT);
+  if (!decimal.isFinite() || decimal.lte(0)) {
+    throw new Error("Approval amount must be greater than 0");
+  }
+  return decimal
+    .toDecimalPlaces(APPROVAL_DECIMALS, Decimal.ROUND_DOWN)
+    .toFixed();
+}
 
 import { COLLATERAL_ONRAMP_ABI } from "@/constants/abi";
 import {
   COLLATERAL_ONRAMP_ADDRESS,
+  CTF_ADDRESS,
+  CTF_APPROVAL_OPERATORS,
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
+  PUSD_APPROVAL_TARGETS,
   PUSD_DECIMALS,
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
@@ -326,19 +342,58 @@ export function useClobClient() {
    * one-time approval batch transparently rather than failing with a
    * cryptic "not enough balance / allowance" from the server.
    */
-  const ensureV2Approvals = useCallback(async () => {
-    if (!proxyAddress) throw new Error("Proxy wallet not found");
-    const status = await checkAllApprovals(proxyAddress);
-    if (status.allApproved) return;
+  const ensureV2Approvals = useCallback(
+    async (required?: { requiredPusdRaw: bigint; negRisk?: boolean }) => {
+      if (!proxyAddress) throw new Error("Proxy wallet not found");
+      const status = await checkAllApprovals(proxyAddress);
 
-    const result = await approveUsdcForTrading();
-    if (!result.success) {
-      throw new Error(
-        result.error ||
-          "Failed to grant V2 trading approvals. Please open trading setup and try again."
-      );
-    }
-  }, [proxyAddress, approveUsdcForTrading]);
+      let hasRequiredPusdAllowance = true;
+      if (required) {
+        const [
+          { createPublicClient, erc20Abi, formatUnits, http },
+          { polygon },
+        ] = await Promise.all([import("viem"), import("viem/chains")]);
+        const client = createPublicClient({
+          chain: polygon,
+          transport: http(getRpcUrl()),
+        });
+        const exchangeAddress = required.negRisk
+          ? NEG_RISK_CTF_EXCHANGE_ADDRESS
+          : CTF_EXCHANGE_ADDRESS;
+        const allowance = await client.readContract({
+          address: PUSD_ADDRESS,
+          abi: erc20Abi,
+          functionName: "allowance",
+          args: [proxyAddress as `0x${string}`, exchangeAddress],
+        });
+        hasRequiredPusdAllowance = allowance >= required.requiredPusdRaw;
+
+        if (!(status.allApproved && hasRequiredPusdAllowance)) {
+          const result = await approveUsdcForTrading(
+            formatUnits(required.requiredPusdRaw, PUSD_DECIMALS)
+          );
+          if (!result.success) {
+            throw new Error(
+              result.error ||
+                "Failed to update V2 trading approvals for this order."
+            );
+          }
+          return;
+        }
+      }
+
+      if (status.allApproved) return;
+
+      const result = await approveUsdcForTrading();
+      if (!result.success) {
+        throw new Error(
+          result.error ||
+            "Failed to grant V2 trading approvals. Please open trading setup and try again."
+        );
+      }
+    },
+    [proxyAddress, approveUsdcForTrading]
+  );
 
   /**
    * Create and post an order
@@ -359,17 +414,9 @@ export function useClobClient() {
           params.orderType === OrderType.FAK ||
           params.orderType === OrderType.FOK;
 
-        // Approvals pre-flight: if any V2 allowance is missing, submit the
-        // full approval batch before continuing. Covers both BUY and SELL —
-        // SELL needs CTF.setApprovalForAll → exchanges to transfer outcome
-        // tokens, BUY needs pUSD → exchange allowance for settlement.
-        await ensureV2Approvals();
-
-        // Wrap-on-trade pre-flight (BUY only). SELL receives pUSD and does
-        // not need collateral wrapped beforehand.
+        let requiredPusdRaw: bigint | null = null;
         if (params.side === Side.BUY) {
           const { parseUnits } = await import("viem");
-          let requiredPusdRaw: bigint;
           if (isMarket) {
             const notional = params.amount;
             if (notional == null) {
@@ -380,8 +427,26 @@ export function useClobClient() {
             requiredPusdRaw = parseUnits(notional.toString(), PUSD_DECIMALS);
           } else {
             // Limit BUY: price (dollars) * size (shares) = notional dollars.
-            const notional = params.price * params.size;
+            const notional = new Decimal(params.price).mul(params.size);
             requiredPusdRaw = parseUnits(notional.toString(), PUSD_DECIMALS);
+          }
+        }
+
+        // Approvals pre-flight: if any V2 allowance is missing, or if a finite
+        // pUSD allowance is below this BUY's notional, update it before posting.
+        // SELL needs CTF.setApprovalForAll → exchanges to transfer outcome
+        // tokens; BUY needs sufficient pUSD → exchange allowance for settlement.
+        await ensureV2Approvals(
+          requiredPusdRaw !== null
+            ? { requiredPusdRaw, negRisk: params.negRisk }
+            : undefined
+        );
+
+        // Wrap-on-trade pre-flight (BUY only). SELL receives pUSD and does
+        // not need collateral wrapped beforehand.
+        if (params.side === Side.BUY) {
+          if (requiredPusdRaw === null) {
+            throw new Error("Failed to determine required pUSD amount");
           }
 
           // The CLOB reserves pUSD against the user's existing open BUY
@@ -579,91 +644,138 @@ export function useClobClient() {
    * V2 moves collateral through pUSD, so the manual approve flow must:
    *   - Approve USDC.e → CollateralOnramp (so the Onramp can pull USDC.e
    *     when wrapping to pUSD)
-   *   - Approve pUSD → standard CTF Exchange V2
-   *   - Approve pUSD → Neg Risk CTF Exchange V2
+   *   - Approve pUSD → CTF, standard CTF Exchange V2, Neg Risk Exchange V2,
+   *     and Neg Risk Adapter
+   *   - Approve CTF outcome-token operators for sells/conversions
    *
    * Note: The gasless onboarding path in `use-relayer-client.ts` already
    * sets approvals on the user's Safe. This callback is the fallback for
    * manual EOA approvals.
    */
-  const updateAllowance = useCallback(async () => {
-    if (!address) throw new Error("Wallet not connected");
+  const updateAllowance = useCallback(
+    async (approvalAmount?: string) => {
+      if (!address) throw new Error("Wallet not connected");
 
-    setIsLoading(true);
-    setError(null);
+      setIsLoading(true);
+      setError(null);
 
-    try {
-      const [{ createWalletClient, custom, maxUint256 }, { polygon }] =
-        await Promise.all([import("viem"), import("viem/chains")]);
+      try {
+        const [{ createWalletClient, custom, parseUnits }, { polygon }] =
+          await Promise.all([import("viem"), import("viem/chains")]);
+        const approvalAmountRaw = parseUnits(
+          normalizeApprovalAmount(approvalAmount),
+          APPROVAL_DECIMALS
+        );
 
-      const ERC20_APPROVE_ABI = [
-        {
-          inputs: [
-            { name: "spender", type: "address" },
-            { name: "amount", type: "uint256" },
-          ],
-          name: "approve",
-          outputs: [{ name: "", type: "bool" }],
-          stateMutability: "nonpayable",
-          type: "function",
-        },
-      ] as const;
+        const ERC20_APPROVE_ABI = [
+          {
+            inputs: [
+              { name: "spender", type: "address" },
+              { name: "amount", type: "uint256" },
+            ],
+            name: "approve",
+            outputs: [{ name: "", type: "bool" }],
+            stateMutability: "nonpayable",
+            type: "function",
+          },
+        ] as const;
+        const ERC1155_APPROVAL_ABI = [
+          {
+            inputs: [
+              { name: "operator", type: "address" },
+              { name: "approved", type: "bool" },
+            ],
+            name: "setApprovalForAll",
+            outputs: [],
+            stateMutability: "nonpayable",
+            type: "function",
+          },
+        ] as const;
 
-      const walletClient = createWalletClient({
-        chain: polygon,
-        // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-        transport: custom(window.ethereum as any),
-        account: address,
-      });
-
-      const { createPublicClient, http } = await import("viem");
-      const publicClient = createPublicClient({
-        chain: polygon,
-        transport: http(getRpcUrl()),
-      });
-
-      await walletClient.requestAddresses();
-
-      const approve = async (token: `0x${string}`, spender: `0x${string}`) => {
-        const hash = await walletClient.writeContract({
+        const walletClient = createWalletClient({
+          chain: polygon,
+          // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
+          transport: custom(window.ethereum as any),
           account: address,
-          address: token,
-          abi: ERC20_APPROVE_ABI,
-          functionName: "approve",
-          args: [spender, maxUint256],
         });
-        const receipt = await publicClient.waitForTransactionReceipt({
-          hash,
-          pollingInterval: 5_000, // Poll every 5 seconds to avoid rate limiting
-          timeout: 120_000, // 2 minute timeout
-          confirmations: 1, // Wait for 1 confirmation
+
+        const { createPublicClient, http } = await import("viem");
+        const publicClient = createPublicClient({
+          chain: polygon,
+          transport: http(getRpcUrl()),
         });
-        if (receipt.status !== "success") {
-          throw new Error(`Approval failed for ${spender}`);
-        }
-        return hash;
-      };
 
-      const hashes = await Promise.all([
-        approve(USDC_E_ADDRESS, COLLATERAL_ONRAMP_ADDRESS),
-        approve(PUSD_ADDRESS, CTF_EXCHANGE_ADDRESS),
-        approve(PUSD_ADDRESS, NEG_RISK_CTF_EXCHANGE_ADDRESS),
-      ]);
+        await walletClient.requestAddresses();
 
-      return {
-        success: true,
-        hashes,
-        message:
-          "Approved USDC.e → Onramp and pUSD → CTF Exchange V2 + Neg Risk Exchange V2",
-      };
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error("Failed to approve");
-      setError(error);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [address]);
+        const approve = async (
+          token: `0x${string}`,
+          spender: `0x${string}`
+        ) => {
+          const hash = await walletClient.writeContract({
+            account: address,
+            address: token,
+            abi: ERC20_APPROVE_ABI,
+            functionName: "approve",
+            args: [spender, approvalAmountRaw],
+          });
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash,
+            pollingInterval: 5_000, // Poll every 5 seconds to avoid rate limiting
+            timeout: 120_000, // 2 minute timeout
+            confirmations: 1, // Wait for 1 confirmation
+          });
+          if (receipt.status !== "success") {
+            throw new Error(`Approval failed for ${spender}`);
+          }
+          return hash;
+        };
+        const approveOperator = async (operator: `0x${string}`) => {
+          const hash = await walletClient.writeContract({
+            account: address,
+            address: CTF_ADDRESS,
+            abi: ERC1155_APPROVAL_ABI,
+            functionName: "setApprovalForAll",
+            args: [operator, true],
+          });
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash,
+            pollingInterval: 5_000,
+            timeout: 120_000,
+            confirmations: 1,
+          });
+          if (receipt.status !== "success") {
+            throw new Error(`Operator approval failed for ${operator}`);
+          }
+          return hash;
+        };
+
+        const hashes = await Promise.all([
+          approve(USDC_E_ADDRESS, COLLATERAL_ONRAMP_ADDRESS),
+          ...PUSD_APPROVAL_TARGETS.map((spender) =>
+            approve(PUSD_ADDRESS, spender)
+          ),
+          ...CTF_APPROVAL_OPERATORS.map((operator) =>
+            approveOperator(operator)
+          ),
+        ]);
+
+        return {
+          success: true,
+          hashes,
+          message:
+            "Approved V2 pUSD, USDC.e Onramp, and outcome-token operators",
+        };
+      } catch (err) {
+        const error =
+          err instanceof Error ? err : new Error("Failed to approve");
+        setError(error);
+        throw error;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [address]
+  );
 
   /**
    * Cancel an order
@@ -785,7 +897,7 @@ export function useClobClient() {
   );
 
   /**
-   * Get USDC.e allowance
+   * Get pUSD exchange allowance
    */
   const getUsdcAllowance = useCallback(
     async (walletAddress?: string, negRisk = false) => {
@@ -819,20 +931,20 @@ export function useClobClient() {
         });
 
         const allowance = await client.readContract({
-          address: USDC_E_ADDRESS,
+          address: PUSD_ADDRESS,
           abi: ERC20_ABI,
           functionName: "allowance",
           args: [targetAddress as `0x${string}`, exchangeAddress],
         });
 
         return {
-          allowance: Number(formatUnits(allowance, USDC_E_DECIMALS)),
+          allowance: Number(formatUnits(allowance, PUSD_DECIMALS)),
           allowanceRaw: allowance.toString(),
-          decimals: USDC_E_DECIMALS,
+          decimals: PUSD_DECIMALS,
           exchange: negRisk ? "NEG_RISK_CTF_EXCHANGE" : "CTF_EXCHANGE",
         };
       } catch (err) {
-        log.error("usdc_allowance.fetch_failed", { error: err });
+        log.error("pusd_allowance.fetch_failed", { error: err });
         throw err;
       }
     },

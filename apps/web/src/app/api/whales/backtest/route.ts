@@ -1,25 +1,9 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
+import { checkRateLimit } from "@/lib/api-rate-limit";
 import { runBacktest } from "@/lib/insider/backtest";
 
 const log = createLogger("api.whales.backtest");
-
-/**
- * One-shot insider-detector backtest runner.
- *
- * Heavier than a normal route — expect 30-120s to run since it
- * paginates trades for ~20 markets and resolves account ages for
- * thousands of wallets. Node-runtime + large maxDuration.
- *
- * Query params (all optional):
- *   maxDaysAgo       default 21   — oldest resolved market to include
- *   minDaysAgo       default 2    — freshness buffer for indexing
- *   minDurationHours default 24   — skip 5-minute crypto markets
- *   minVolumeUsd     default 5000 — skip dead markets
- *   maxMarkets       default 20   — cap scan size (capped at 40)
- *   minScore         default 30   — suspicion threshold (balanced)
- *   minTradeUsd      default 500  — minimum trade size to score
- */
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -47,7 +31,74 @@ function clampFloat(
   return Math.min(Math.max(n, min), max);
 }
 
+/**
+ * @openapi
+ * /api/whales/backtest:
+ *   get:
+ *     summary: Run insider-detector backtest
+ *     description: Runs a heavyweight one-shot backtest against recently resolved Polymarket markets.
+ *     tags:
+ *       - Whales
+ *     parameters:
+ *       - in: query
+ *         name: maxDaysAgo
+ *         schema:
+ *           type: integer
+ *           minimum: 2
+ *           maximum: 60
+ *       - in: query
+ *         name: minDaysAgo
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 30
+ *       - in: query
+ *         name: minDurationHours
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 720
+ *       - in: query
+ *         name: minVolumeUsd
+ *         schema:
+ *           type: number
+ *           minimum: 0
+ *           maximum: 10000000
+ *       - in: query
+ *         name: maxMarkets
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 40
+ *       - in: query
+ *         name: minScore
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *       - in: query
+ *         name: minTradeUsd
+ *         schema:
+ *           type: number
+ *           minimum: 0
+ *           maximum: 1000000
+ *     responses:
+ *       200:
+ *         description: Backtest result.
+ *       400:
+ *         description: Invalid query parameter combination.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Backtest failed.
+ */
 export async function GET(request: NextRequest) {
+  const rateLimitResponse = checkRateLimit(request, {
+    interval: 5 * 60 * 1000,
+    uniqueTokenPerInterval: 2,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
   try {
     const { searchParams } = new URL(request.url);
 
@@ -89,8 +140,7 @@ export async function GET(request: NextRequest) {
     log.error("run.failed", { error });
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Unknown backtest error",
+        error: "Backtest failed",
       },
       { status: 500 }
     );

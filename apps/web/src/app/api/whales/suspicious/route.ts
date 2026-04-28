@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
@@ -143,6 +144,33 @@ interface PriceResponse {
   price?: number;
 }
 
+function tradeUsdValueDecimal(
+  trade: Pick<TradeData, "size" | "price">
+): Decimal {
+  return new Decimal(trade.size).mul(trade.price);
+}
+
+function tradeUsdValue(trade: Pick<TradeData, "size" | "price">): number {
+  return tradeUsdValueDecimal(trade).toNumber();
+}
+
+function sumDecimal(values: Iterable<number>): Decimal {
+  let total = new Decimal(0);
+  for (const value of values) total = total.add(value);
+  return total;
+}
+
+function volumeWeightedAveragePrice(rows: AccumulatedTrade[]): number {
+  const totalSize = sumDecimal(rows.map((row) => row.size));
+  if (totalSize.lte(0)) return 0;
+
+  let weighted = new Decimal(0);
+  for (const row of rows) {
+    weighted = weighted.add(new Decimal(row.price).mul(row.size));
+  }
+  return weighted.div(totalSize).toNumber();
+}
+
 async function fetchRecentTrades(limit = 500): Promise<TradeData[]> {
   try {
     const response = await fetch(
@@ -232,8 +260,8 @@ export async function GET(request: NextRequest) {
 
     // Step 2: Filter by minimum USD value and shares
     const largeTrades = recentTrades.filter((trade) => {
-      const usdValue = trade.size * trade.price;
-      if (usdValue < minUsdValue) return false;
+      const usdValue = tradeUsdValueDecimal(trade);
+      if (usdValue.lt(minUsdValue)) return false;
       if (minShares > 0 && trade.size < minShares) return false;
       return true;
     });
@@ -293,16 +321,12 @@ export async function GET(request: NextRequest) {
       const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp);
       const rows: AccumulatedTrade[] = sorted.map((t) => ({
         timestamp: t.timestamp,
-        usdValue: t.size * t.price,
+        usdValue: tradeUsdValue(t),
         price: t.price,
         size: t.size,
       }));
-      const totalUsd = rows.reduce((s, r) => s + r.usdValue, 0);
-      const totalSize = rows.reduce((s, r) => s + r.size, 0);
-      const vwap =
-        totalSize > 0
-          ? rows.reduce((s, r) => s + r.price * r.size, 0) / totalSize
-          : 0;
+      const totalUsd = sumDecimal(rows.map((r) => r.usdValue)).toNumber();
+      const vwap = volumeWeightedAveragePrice(rows);
       accumulators.set(k, {
         tradeCount: rows.length,
         totalUsdValue: totalUsd,
@@ -337,7 +361,7 @@ export async function GET(request: NextRequest) {
       const clusterTrades: ClusterTrade[] = trades.map((t) => ({
         wallet: t.proxyWallet,
         timestamp: t.timestamp,
-        usdValue: t.size * t.price,
+        usdValue: tradeUsdValue(t),
         price: t.price,
         size: t.size,
       }));
@@ -376,7 +400,7 @@ export async function GET(request: NextRequest) {
       if (!history) continue;
 
       const currentPrice = priceCache.get(trade.asset);
-      const usdValue = trade.size * trade.price;
+      const usdValue = tradeUsdValue(trade);
       const referencePrice = currentPrice ?? trade.price;
 
       const walletMarkets = walletMarketMap.get(trade.proxyWallet);
@@ -686,7 +710,7 @@ export async function GET(request: NextRequest) {
           repeatOffenders: 0,
         },
         lastUpdated: new Date().toISOString(),
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to fetch suspicious activity",
       } satisfies SuspiciousActivityResponse,
       { status: 500 }
     );

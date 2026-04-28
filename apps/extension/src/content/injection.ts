@@ -12,6 +12,10 @@ import type {
   MarketSearchResult,
 } from "../types/market";
 import {
+  type RelevanceTelemetryCandidate,
+  recordRelevanceTelemetry,
+} from "./relevance-telemetry";
+import {
   buildMarketGateText,
   determineScoringMode,
   evaluateCandidateGate,
@@ -50,6 +54,59 @@ const MAX_CANDIDATES_PER_POST = 2; // Keep a small fallback pool per post withou
 // Default per-scan cap. Platforms can raise this by setting
 // `maxInjectionsPerBatch` on their adapter (see `resolveMaxInjectionsPerBatch`).
 const MAX_INJECTIONS_PER_BATCH = 5;
+const XENCODER_AB_PREFIX = "[XENCODER-AB]";
+const XENCODER_RERANK_TOP_K = 5;
+const XENCODER_STATS_INTERVAL = 20;
+
+const xencoderStats = {
+  calls: 0,
+  skippedSingleCandidate: 0,
+  totalCandidates: 0,
+  elapsedMs: [] as number[],
+  queueWaitMs: [] as number[],
+};
+
+function percentile(values: number[], pct: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1)
+  );
+  return sorted[index];
+}
+
+function recordXencoderResult(
+  candidateCount: number,
+  elapsedMs: number,
+  queueWaitMs: number
+): void {
+  xencoderStats.calls++;
+  xencoderStats.totalCandidates += candidateCount;
+  xencoderStats.elapsedMs.push(elapsedMs);
+  xencoderStats.queueWaitMs.push(queueWaitMs);
+}
+
+function maybeLogXencoderStats(log: (...args: unknown[]) => void): void {
+  const observed = xencoderStats.calls + xencoderStats.skippedSingleCandidate;
+  if (observed === 0 || observed % XENCODER_STATS_INTERVAL !== 0) return;
+
+  log(`${XENCODER_AB_PREFIX} stats`, {
+    calls: xencoderStats.calls,
+    skippedSingleCandidate: xencoderStats.skippedSingleCandidate,
+    avgCandidates:
+      xencoderStats.calls === 0
+        ? 0
+        : Number(
+            (xencoderStats.totalCandidates / xencoderStats.calls).toFixed(2)
+          ),
+    p50Ms: percentile(xencoderStats.elapsedMs, 50),
+    p95Ms: percentile(xencoderStats.elapsedMs, 95),
+    maxMs: Math.max(0, ...xencoderStats.elapsedMs),
+    p50QueueWaitMs: percentile(xencoderStats.queueWaitMs, 50),
+    p95QueueWaitMs: percentile(xencoderStats.queueWaitMs, 95),
+  });
+}
 
 function resolveMaxInjectionsPerBatch(): number {
   const override =
@@ -267,7 +324,15 @@ function selectTopCandidatesForPost(
 ): MarketSearchResult[] {
   if (candidates.length === 0) return [];
 
-  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  const sorted = [...candidates].sort((a, b) => {
+    if (
+      typeof a.rerankScore === "number" &&
+      typeof b.rerankScore === "number"
+    ) {
+      return b.rerankScore - a.rerankScore;
+    }
+    return b.score - a.score;
+  });
   const topScore = sorted[0].score;
   const minimumScore = Math.max(0, topScore - POST_CANDIDATE_SCORE_GAP);
 
@@ -438,18 +503,23 @@ async function scoreMarketsBatch(
     includeEmbeddings?: boolean;
     includeBm25?: boolean;
     includeContextGate?: boolean;
+    includeRerank?: boolean;
   } = {}
 ): Promise<{
   similarities: number[];
   bm25Scores: number[];
+  rerankScores: number[];
+  rerankMetrics?: ScoreMarketsSuccessResponse["rerankMetrics"];
   contextGateResults: ContextGateResult[];
   usedEmbeddings: boolean;
+  usedRerank: boolean;
   source: "offscreen" | "fallback";
 }> {
   const {
     includeEmbeddings = true,
     includeBm25 = true,
     includeContextGate = true,
+    includeRerank = false,
   } = features;
 
   try {
@@ -461,6 +531,7 @@ async function scoreMarketsBatch(
       includeEmbeddings,
       includeBm25,
       includeContextGate,
+      includeRerank,
     });
 
     if (isScoreMarketsSuccessResponse(response)) {
@@ -470,8 +541,11 @@ async function scoreMarketsBatch(
       return {
         similarities: response.similarities,
         bm25Scores: response.bm25Scores,
+        rerankScores: response.rerankScores ?? [],
+        rerankMetrics: response.rerankMetrics,
         contextGateResults,
         usedEmbeddings: response.usedEmbeddings ?? true,
+        usedRerank: response.usedRerank ?? false,
         source: "offscreen",
       };
     }
@@ -486,8 +560,10 @@ async function scoreMarketsBatch(
   return {
     similarities: fallbackScores,
     bm25Scores: fallbackScores,
+    rerankScores: [],
     contextGateResults: fallbackGateResults,
     usedEmbeddings: false,
+    usedRerank: false,
     source: "fallback",
   };
 }
@@ -852,6 +928,7 @@ async function analyzePostAndFindMarket(
     false;
 
   const text = extractPostText(post);
+  const postKey = getPostIdentityKey(post) ?? undefined;
 
   if (!text || text.length < 20) {
     log("Post text too short:", text?.slice(0, 30));
@@ -893,6 +970,8 @@ async function analyzePostAndFindMarket(
   let marketScores: number[] = [];
   let contextGateResults: ContextGateResult[] = [];
   let marketTexts: string[] = [];
+  let gateTexts: string[] = [];
+  const rerankScoresByIndex = new Map<number, number>();
   let scoringMode: ScoringMode = "heuristic";
   try {
     marketTexts = markets.map((m) => {
@@ -907,7 +986,7 @@ async function analyzePostAndFindMarket(
       return rich;
     });
 
-    const gateTexts = markets.map((market) => buildMarketGateText(market));
+    gateTexts = markets.map((market) => buildMarketGateText(market));
 
     const scoring = await scoreMarketsBatch(text, marketTexts, gateTexts);
     contextGateResults = scoring.contextGateResults;
@@ -967,12 +1046,115 @@ async function analyzePostAndFindMarket(
       );
       marketScores = markets.map((m) => calculateRelevanceScore([text], m));
     }
+
+    if (isDebug && scoringMode !== "heuristic" && marketScores.length > 0) {
+      const candidateIndexes = marketScores
+        .map((score, index) => ({ index, score }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, XENCODER_RERANK_TOP_K)
+        .map((entry) => entry.index);
+      if (candidateIndexes.length < 2) {
+        xencoderStats.skippedSingleCandidate++;
+        maybeLogXencoderStats(log);
+      } else {
+        const before = candidateIndexes.map((index) => ({
+          index,
+          score: Number((marketScores[index] ?? 0).toFixed(4)),
+          title: markets[index]?.title?.slice(0, 80) ?? "",
+        }));
+        log(`${XENCODER_AB_PREFIX} request`, {
+          post: text.slice(0, 120),
+          candidateCount: candidateIndexes.length,
+          before,
+        });
+
+        const rerank = await scoreMarketsBatch(
+          text,
+          candidateIndexes.map((index) => marketTexts[index] ?? ""),
+          candidateIndexes.map((index) => gateTexts[index] ?? ""),
+          {
+            includeEmbeddings: false,
+            includeBm25: false,
+            includeContextGate: false,
+            includeRerank: true,
+          }
+        );
+
+        if (rerank.usedRerank) {
+          candidateIndexes.forEach((marketIndex, rerankIndex) => {
+            const score = rerank.rerankScores[rerankIndex];
+            if (typeof score === "number") {
+              rerankScoresByIndex.set(marketIndex, score);
+            }
+          });
+          const after = candidateIndexes
+            .map((index) => ({
+              index,
+              baseScore: Number((marketScores[index] ?? 0).toFixed(4)),
+              rerankScore: Number(
+                (rerankScoresByIndex.get(index) ?? 0).toFixed(4)
+              ),
+              title: markets[index]?.title?.slice(0, 80) ?? "",
+            }))
+            .sort((a, b) => b.rerankScore - a.rerankScore);
+          const elapsedMs = rerank.rerankMetrics?.elapsedMs ?? 0;
+          const queueWaitMs = rerank.rerankMetrics?.queueWaitMs ?? 0;
+          recordXencoderResult(candidateIndexes.length, elapsedMs, queueWaitMs);
+          log(`${XENCODER_AB_PREFIX} result`, {
+            elapsedMs,
+            queueWaitMs,
+            model: rerank.rerankMetrics?.model,
+            dtype: rerank.rerankMetrics?.dtype,
+            device: rerank.rerankMetrics?.device,
+            after,
+          });
+          maybeLogXencoderStats(log);
+        } else {
+          log(`${XENCODER_AB_PREFIX} unavailable`, {
+            source: rerank.source,
+            candidateCount: candidateIndexes.length,
+          });
+        }
+      }
+    }
   } catch (e) {
     scoringMode = "heuristic";
     log("⚠️ Heuristic scoring — scoring error:", e);
     marketScores = markets.map((m) => calculateRelevanceScore([text], m));
   }
   // -----------------------------------------
+
+  const telemetryCandidates: RelevanceTelemetryCandidate[] = markets.map(
+    (market, index) => ({
+      id: market.id,
+      title: market.title || "",
+      source: market.source || "polymarket",
+      hybridScore: marketScores[index] ?? 0,
+      gatePassed: false,
+      gateReason: "not-evaluated",
+      xencoderScore: rerankScoresByIndex.get(index),
+      shown: false,
+    })
+  );
+
+  const telemetryByMarketId = new Map<string, RelevanceTelemetryCandidate>();
+  for (const candidate of telemetryCandidates) {
+    if (!telemetryByMarketId.has(candidate.id)) {
+      telemetryByMarketId.set(candidate.id, candidate);
+    }
+  }
+
+  const recordTelemetry = () => {
+    recordRelevanceTelemetry({
+      platform: currentPlatform?.name ?? "unknown",
+      postKey,
+      sourceTextPreview: text,
+      searchQuery: result.keywords,
+      matchedTags: result.matchedTags,
+      scoringMode,
+      candidates: telemetryCandidates,
+    });
+  };
 
   if (isDebug) {
     // Count markets by source for debugging
@@ -1041,8 +1223,12 @@ async function analyzePostAndFindMarket(
   for (let i = 0; i < markets.length; i++) {
     const market = markets[i];
     const source = market.source || "polymarket";
+    const telemetryCandidate = telemetryCandidates[i];
 
     if (!bestBySource[source]) {
+      if (telemetryCandidate) {
+        telemetryCandidate.gateReason = `disabled-source:${source}`;
+      }
       log(`⏭️ Skipping market from disabled source: ${source}`);
       continue;
     }
@@ -1059,6 +1245,13 @@ async function analyzePostAndFindMarket(
       relaxed: currentPlatform?.relaxContextGate === true,
     });
     const gate = gateDecision.gate;
+    const signals = (gate.meaningfulNouns || 0) + (gate.sharedEntities || 0);
+    const gateReason =
+      signals === 0
+        ? "gate-zero-signal"
+        : signals === 1
+          ? "gate-single-signal"
+          : "gate-low-overlap";
 
     if (gateDecision.usedRecoveryGate && gateDecision.recoveryGate) {
       metricsGateRecovered++;
@@ -1069,12 +1262,15 @@ async function analyzePostAndFindMarket(
 
     if (!gateDecision.pass) {
       metricsGateBlocked++;
-      const signals = (gate.meaningfulNouns || 0) + (gate.sharedEntities || 0);
       if (signals === 0) metricsGateZeroSignal++;
       else if (signals === 1) metricsGateSingleSignal++;
+      if (telemetryCandidate) {
+        telemetryCandidate.gatePassed = false;
+        telemetryCandidate.gateReason = `${gateReason}; ${gate.details}`;
+      }
 
       log(
-        `🛑 Context gate [${scoringMode}] dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, reason=${signals === 0 ? "gate-zero-signal" : signals === 1 ? "gate-single-signal" : "gate-low-overlap"}, ${gate.details})`
+        `🛑 Context gate [${scoringMode}] dropped "${market.title?.slice(0, 50)}..." (score=${score.toFixed(3)}, reason=${gateReason}, ${gate.details})`
       );
       if (gateDecision.retryEligible) {
         gateBlockedHighScorers.push({
@@ -1085,6 +1281,10 @@ async function analyzePostAndFindMarket(
         metricsRetryEligible++;
       }
       continue;
+    }
+    if (telemetryCandidate) {
+      telemetryCandidate.gatePassed = true;
+      telemetryCandidate.gateReason = gate.details;
     }
     if (isDebug) {
       log(
@@ -1120,6 +1320,9 @@ async function analyzePostAndFindMarket(
 
     if (!meetsThreshold) {
       metricsBelowThreshold++;
+      if (telemetryCandidate) {
+        telemetryCandidate.gateReason = `${telemetryCandidate.gateReason}; below-threshold:${score.toFixed(3)}<${effectiveThreshold.toFixed(3)}`;
+      }
       log(
         `⏭️ ${source} market below threshold (${score.toFixed(2)} < ${effectiveThreshold} [${scoringMode}]): "${market.title?.slice(0, 50)}"`
       );
@@ -1139,9 +1342,11 @@ async function analyzePostAndFindMarket(
 
     const existingCandidate = candidateMarketsById.get(market.id);
     if (!existingCandidate || score > existingCandidate.score) {
+      const rerankScore = rerankScoresByIndex.get(i);
       candidateMarketsById.set(market.id, {
         market,
         score,
+        rerankScore,
         source: source as "polymarket" | "kalshi",
       });
     }
@@ -1202,10 +1407,19 @@ async function analyzePostAndFindMarket(
           const source = market.source || "polymarket";
 
           if (!gate.pass) {
+            const telemetryCandidate = telemetryCandidates[index];
+            if (telemetryCandidate) {
+              telemetryCandidate.gateReason = `ai-retry-blocked; ${gate.details}`;
+            }
             log(
               `🤖 [AI Retry] Still blocked: "${market.title?.slice(0, 50)}..." (${gate.details})`
             );
             continue;
+          }
+          const telemetryCandidate = telemetryCandidates[index];
+          if (telemetryCandidate) {
+            telemetryCandidate.gatePassed = true;
+            telemetryCandidate.gateReason = `ai-retry-passed; ${gate.details}`;
           }
 
           log(
@@ -1225,9 +1439,11 @@ async function analyzePostAndFindMarket(
 
           const existingCandidate = candidateMarketsById.get(market.id);
           if (!existingCandidate || originalScore > existingCandidate.score) {
+            const rerankScore = rerankScoresByIndex.get(index);
             candidateMarketsById.set(market.id, {
               market,
               score: originalScore,
+              rerankScore,
               source,
             });
           }
@@ -1288,6 +1504,7 @@ async function analyzePostAndFindMarket(
     log(
       `❌ No market from any source met relevance threshold (${effectiveThreshold} [${scoringMode}]) for this post`
     );
+    recordTelemetry();
     return null;
   }
 
@@ -1306,7 +1523,11 @@ async function analyzePostAndFindMarket(
   for (let i = 0; i < validationResults.length; i++) {
     const candidate = candidateMarkets[i];
     const result = validationResults[i];
+    const telemetryCandidate = telemetryByMarketId.get(candidate.market.id);
     if (result.status === "rejected") {
+      if (telemetryCandidate) {
+        telemetryCandidate.validator = "error";
+      }
       if (!shouldFailOpen(candidate.score, FAIL_OPEN_FLOOR)) {
         log(
           `✗ reason=validator-error-low-score [${scoringMode}] (${candidate.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${candidate.market.title?.slice(0, 50)}"`
@@ -1320,33 +1541,77 @@ async function analyzePostAndFindMarket(
       continue;
     }
     const { entry, validation } = result.value;
+    const entryTelemetryCandidate = telemetryByMarketId.get(entry.market.id);
     if (validation) {
       if (!validation.relevant) {
+        if (entryTelemetryCandidate) {
+          entryTelemetryCandidate.validator = "rejected";
+        }
         log(
           `✗ reason=validator-rejected: "${entry.market.title?.slice(0, 50)}"`
         );
         continue;
       }
+      if (entryTelemetryCandidate) {
+        entryTelemetryCandidate.validator = "passed";
+      }
       if (validation.reason) {
         entry.market._contextReason = validation.reason;
       }
     } else if (!shouldFailOpen(entry.score, FAIL_OPEN_FLOOR)) {
+      if (entryTelemetryCandidate) {
+        entryTelemetryCandidate.validator = "unavailable";
+      }
       log(
         `✗ reason=validator-unavailable-low-score [${scoringMode}] (${entry.score.toFixed(2)} < ${FAIL_OPEN_FLOOR}): "${entry.market.title?.slice(0, 50)}"`
       );
       continue;
+    }
+    if (!validation && entryTelemetryCandidate) {
+      entryTelemetryCandidate.validator = "unavailable";
     }
     relevantMarkets.push(entry);
   }
 
   if (relevantMarkets.length === 0) {
     log("❌ All candidate markets rejected by AI validation");
+    recordTelemetry();
     return null;
   }
 
-  // Sort by score (highest first) for display order
-  relevantMarkets.sort((a, b) => b.score - a.score);
+  // Sort by rerank score when both candidates were in the debug top-K rerank
+  // set; otherwise keep the existing score semantics.
+  relevantMarkets.sort((a, b) => {
+    if (
+      typeof a.rerankScore === "number" &&
+      typeof b.rerankScore === "number"
+    ) {
+      return b.rerankScore - a.rerankScore;
+    }
+    return b.score - a.score;
+  });
+  if (isDebug && relevantMarkets.some((entry) => entry.rerankScore != null)) {
+    log(
+      `${XENCODER_AB_PREFIX} final-order`,
+      relevantMarkets.map((entry) => ({
+        title: entry.market.title?.slice(0, 80),
+        baseScore: Number(entry.score.toFixed(4)),
+        rerankScore:
+          typeof entry.rerankScore === "number"
+            ? Number(entry.rerankScore.toFixed(4))
+            : null,
+      }))
+    );
+  }
   const topRelevantMarkets = selectTopCandidatesForPost(relevantMarkets);
+  topRelevantMarkets.forEach((entry, index) => {
+    const telemetryCandidate = telemetryByMarketId.get(entry.market.id);
+    if (telemetryCandidate) {
+      telemetryCandidate.finalRank = index + 1;
+      telemetryCandidate.shown = true;
+    }
+  });
+  recordTelemetry();
 
   if (isDebug) {
     log(`✓ Found ${topRelevantMarkets.length} candidate markets for this post`);

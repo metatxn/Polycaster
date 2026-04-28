@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { KnowwMark } from "@/components/knoww-mark";
 import {
   KW_PAGE_CLASS,
   KwThemeToggle,
@@ -94,11 +95,7 @@ export default function PrivacyClient() {
         <div className="max-w-[1200px] mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-(--kw-fg) flex items-center justify-center">
-                <span className="text-(--kw-bg) font-bold text-sm leading-none">
-                  K
-                </span>
-              </div>
+              <KnowwMark />
               <span className="font-bold text-[15px] tracking-tight">
                 Knoww
               </span>
@@ -642,11 +639,7 @@ export default function PrivacyClient() {
         <div className="max-w-[1200px] mx-auto px-6 py-10 grid grid-cols-2 md:grid-cols-3 gap-8 text-[13px]">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 bg-(--kw-fg) flex items-center justify-center">
-                <span className="text-(--kw-bg) font-bold text-xs leading-none">
-                  K
-                </span>
-              </div>
+              <KnowwMark size="sm" />
               <span className="font-bold text-[14px]">Knoww</span>
             </div>
             <p className="text-[12px] text-(--kw-fg)/60 leading-[1.55] max-w-[220px]">

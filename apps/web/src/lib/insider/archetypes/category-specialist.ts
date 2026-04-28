@@ -15,6 +15,7 @@
  * an NBA expert on their one-off political bet.
  */
 
+import Decimal from "decimal.js";
 import type { Category } from "../category";
 import type { CategoryEdge, WalletEdge } from "../wallet-edge";
 import type { ArchetypeScore, SuspicionFactor } from "./types";
@@ -58,8 +59,9 @@ export function scoreCategorySpecialist(
   if (catEdge.resolvedTrades < MIN_RESOLVED_SAMPLE) return zero();
   if (catEdge.winRate < MIN_WIN_RATE) return zero();
 
-  const specialization =
-    edge.totalVolumeUsd > 0 ? catEdge.totalVolumeUsd / edge.totalVolumeUsd : 0;
+  const specialization = new Decimal(edge.totalVolumeUsd).gt(0)
+    ? new Decimal(catEdge.totalVolumeUsd).div(edge.totalVolumeUsd).toNumber()
+    : 0;
   if (specialization < MIN_SPECIALIZATION) return zero();
 
   // Factor 1: Specialization (max 20 points).

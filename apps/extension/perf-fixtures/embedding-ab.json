@@ -1,0 +1,316 @@
+{
+  "version": 1,
+  "description": "Internal benchmark cases for post-to-prediction-market retrieval. Do not bundle with production extension.",
+  "cases": [
+    {
+      "id": "geo-gujarat-election",
+      "postText": "Gujarat local election turnout is surging after the latest campaign rallies.",
+      "markets": [
+        {
+          "id": "gujarat-election-turnout",
+          "text": "Will Gujarat election turnout exceed 60 percent?",
+          "relevance": 2
+        },
+        {
+          "id": "gujarat-bjp-win",
+          "text": "Will the BJP win the next Gujarat state election?",
+          "relevance": 1
+        },
+        {
+          "id": "gujarat-titans-playoffs",
+          "text": "Will Gujarat Titans make the IPL playoffs?",
+          "relevance": 0
+        },
+        {
+          "id": "gujarat-rainfall",
+          "text": "Will Gujarat receive above average monsoon rainfall?",
+          "relevance": 0
+        },
+        {
+          "id": "india-cpi",
+          "text": "Will India CPI inflation fall below 4 percent?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "georgia-country-eu",
+      "postText": "Protests in Tbilisi continue after Georgia paused its European Union accession talks.",
+      "markets": [
+        {
+          "id": "georgia-eu-talks",
+          "text": "Will Georgia resume EU accession talks this year?",
+          "relevance": 2
+        },
+        {
+          "id": "tbilisi-protests",
+          "text": "Will protests in Tbilisi last through the weekend?",
+          "relevance": 1
+        },
+        {
+          "id": "georgia-us-senate",
+          "text": "Will Democrats win the next Georgia Senate race?",
+          "relevance": 0
+        },
+        {
+          "id": "georgia-bulldogs",
+          "text": "Will Georgia Bulldogs win the SEC championship?",
+          "relevance": 0
+        },
+        {
+          "id": "eu-rate-cut",
+          "text": "Will the ECB cut rates at its next meeting?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "jordan-politics",
+      "postText": "Jordan says it will host a new round of regional ceasefire talks next week.",
+      "markets": [
+        {
+          "id": "jordan-ceasefire-talks",
+          "text": "Will Jordan host Middle East ceasefire talks before month end?",
+          "relevance": 2
+        },
+        {
+          "id": "middle-east-ceasefire",
+          "text": "Will a Middle East ceasefire be announced this month?",
+          "relevance": 1
+        },
+        {
+          "id": "michael-jordan-auction",
+          "text": "Will Michael Jordan sneakers sell for over $2 million?",
+          "relevance": 0
+        },
+        {
+          "id": "jordan-love-touchdowns",
+          "text": "Will Jordan Love throw more than two touchdowns Sunday?",
+          "relevance": 0
+        },
+        {
+          "id": "oil-above-90",
+          "text": "Will Brent crude oil close above $90 this quarter?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "apple-earnings",
+      "postText": "Apple shares rose after stronger iPhone revenue and upbeat services guidance.",
+      "markets": [
+        {
+          "id": "apple-earnings-beat",
+          "text": "Will Apple beat revenue expectations in its next earnings report?",
+          "relevance": 2
+        },
+        {
+          "id": "aapl-stock-up",
+          "text": "Will AAPL close above $250 by Friday?",
+          "relevance": 1
+        },
+        {
+          "id": "apple-crop-prices",
+          "text": "Will apple crop prices rise this season?",
+          "relevance": 0
+        },
+        {
+          "id": "iphone-battery-recall",
+          "text": "Will Apple announce an iPhone battery recall?",
+          "relevance": 1
+        },
+        {
+          "id": "nasdaq-record",
+          "text": "Will Nasdaq hit a new all-time high this month?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "tesla-stock",
+      "postText": "Tesla stock fell after deliveries missed Wall Street estimates.",
+      "markets": [
+        {
+          "id": "tesla-deliveries",
+          "text": "Will Tesla report fewer than expected vehicle deliveries this quarter?",
+          "relevance": 2
+        },
+        {
+          "id": "tsla-close-red",
+          "text": "Will TSLA close lower this week?",
+          "relevance": 1
+        },
+        {
+          "id": "nikola-tesla-museum",
+          "text": "Will the Nikola Tesla museum reopen this year?",
+          "relevance": 0
+        },
+        {
+          "id": "ev-tax-credit",
+          "text": "Will the US change electric vehicle tax credits this year?",
+          "relevance": 1
+        },
+        {
+          "id": "spacex-launch",
+          "text": "Will SpaceX launch Starship before July?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "fed-rate-cut",
+      "postText": "Fed officials signaled they may delay the first rate cut after sticky inflation data.",
+      "markets": [
+        {
+          "id": "fed-rate-cut-next",
+          "text": "Will the Federal Reserve cut rates at its next meeting?",
+          "relevance": 2
+        },
+        {
+          "id": "no-fed-cut",
+          "text": "Will the Fed leave rates unchanged next month?",
+          "relevance": 2
+        },
+        {
+          "id": "fedex-earnings",
+          "text": "Will FedEx beat earnings estimates this quarter?",
+          "relevance": 0
+        },
+        {
+          "id": "us-cpi-hot",
+          "text": "Will US CPI come in above expectations?",
+          "relevance": 1
+        },
+        {
+          "id": "treasury-yields",
+          "text": "Will the 10-year Treasury yield close above 5 percent?",
+          "relevance": 1
+        }
+      ]
+    },
+    {
+      "id": "bitcoin-etf",
+      "postText": "Bitcoin rallied as spot ETF inflows accelerated for a fourth straight day.",
+      "markets": [
+        {
+          "id": "btc-etf-inflows",
+          "text": "Will US spot Bitcoin ETFs see net inflows this week?",
+          "relevance": 2
+        },
+        {
+          "id": "btc-100k",
+          "text": "Will Bitcoin trade above $100,000 this month?",
+          "relevance": 1
+        },
+        {
+          "id": "ethereum-etf",
+          "text": "Will spot Ethereum ETFs see net outflows this week?",
+          "relevance": 0
+        },
+        {
+          "id": "coinbase-stock",
+          "text": "Will Coinbase stock close higher Friday?",
+          "relevance": 1
+        },
+        {
+          "id": "gold-etf-inflows",
+          "text": "Will gold ETFs see net inflows this month?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "spacex-starship",
+      "postText": "SpaceX completed a static fire test before the next Starship launch attempt.",
+      "markets": [
+        {
+          "id": "starship-launch",
+          "text": "Will SpaceX launch Starship before the end of next month?",
+          "relevance": 2
+        },
+        {
+          "id": "starship-orbit",
+          "text": "Will Starship reach orbit on its next test flight?",
+          "relevance": 1
+        },
+        {
+          "id": "tesla-deliveries",
+          "text": "Will Tesla vehicle deliveries beat estimates?",
+          "relevance": 0
+        },
+        {
+          "id": "nasa-artemis",
+          "text": "Will NASA delay the Artemis moon mission?",
+          "relevance": 1
+        },
+        {
+          "id": "blue-origin-launch",
+          "text": "Will Blue Origin launch New Glenn this year?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "israel-gaza-ceasefire",
+      "postText": "Israel and Hamas negotiators are reviewing a new Gaza ceasefire proposal.",
+      "markets": [
+        {
+          "id": "gaza-ceasefire",
+          "text": "Will Israel and Hamas agree to a Gaza ceasefire this month?",
+          "relevance": 2
+        },
+        {
+          "id": "hostage-release",
+          "text": "Will a hostage release deal be announced this week?",
+          "relevance": 1
+        },
+        {
+          "id": "israel-soccer",
+          "text": "Will Israel qualify for the World Cup?",
+          "relevance": 0
+        },
+        {
+          "id": "oil-middle-east",
+          "text": "Will oil prices rise after Middle East tensions?",
+          "relevance": 1
+        },
+        {
+          "id": "iran-election",
+          "text": "Will Iran hold a presidential runoff?",
+          "relevance": 0
+        }
+      ]
+    },
+    {
+      "id": "nvidia-earnings",
+      "postText": "Nvidia guidance topped expectations as data center GPU demand stayed strong.",
+      "markets": [
+        {
+          "id": "nvda-earnings-beat",
+          "text": "Will Nvidia beat earnings expectations this quarter?",
+          "relevance": 2
+        },
+        {
+          "id": "nvda-market-cap",
+          "text": "Will Nvidia become the world's most valuable company this year?",
+          "relevance": 1
+        },
+        {
+          "id": "gpu-shortage",
+          "text": "Will AI GPU shortages continue through next quarter?",
+          "relevance": 1
+        },
+        {
+          "id": "amd-earnings",
+          "text": "Will AMD beat earnings estimates this quarter?",
+          "relevance": 0
+        },
+        {
+          "id": "gaming-console",
+          "text": "Will Nintendo announce a new console this year?",
+          "relevance": 0
+        }
+      ]
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import {
   NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
+  PUSD_CTF_APPROVAL_TARGET,
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
   USDC_E_ADDRESS,
@@ -29,6 +30,7 @@ import {
   POLYMARKET_API,
   SIGNATURE_TYPES,
 } from "@knoww/shared-types/polymarket";
+import Decimal from "decimal.js";
 import { ethers } from "ethers";
 import type {
   TradingDeploySafeMessage,
@@ -51,6 +53,8 @@ import { setActiveTab } from "./signing-state";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
+const DEFAULT_APPROVAL_AMOUNT = "100";
+const PUSD_DECIMALS = 6;
 
 type TradingResponse = TradingSuccessResponse | TradingErrorResponse;
 
@@ -60,6 +64,29 @@ function ok(data: unknown): TradingSuccessResponse {
 
 function fail(error: string): TradingErrorResponse {
   return { ok: false, error };
+}
+
+function parsePusdUnits(
+  amount: string | number | Decimal,
+  rounding: Decimal.Rounding = Decimal.ROUND_CEIL
+): ethers.BigNumber {
+  const decimal = new Decimal(amount);
+  if (!decimal.isFinite() || decimal.lt(0)) {
+    throw new Error("pUSD amount must be a finite non-negative value");
+  }
+  return ethers.utils.parseUnits(
+    decimal.toDecimalPlaces(PUSD_DECIMALS, rounding).toFixed(PUSD_DECIMALS),
+    PUSD_DECIMALS
+  );
+}
+
+function parseApprovalAmount(amount?: string): ethers.BigNumber {
+  const normalized = amount?.trim() || DEFAULT_APPROVAL_AMOUNT;
+  const decimal = new Decimal(normalized);
+  if (!decimal.isFinite() || decimal.lte(0)) {
+    throw new Error("Approval amount must be greater than 0");
+  }
+  return parsePusdUnits(decimal, Decimal.ROUND_DOWN);
 }
 
 export async function handleTradingMessage(
@@ -350,8 +377,8 @@ async function handlePlaceOrder(
     // Required pUSD = price * size for limit, or amount for market BUY
     const requiredPusd =
       orderType === "FAK" || orderType === "FOK"
-        ? ethers.utils.parseUnits(String(msg.amount ?? msg.size), 6)
-        : ethers.utils.parseUnits(String(msg.price * msg.size), 6);
+        ? parsePusdUnits(msg.amount ?? msg.size)
+        : parsePusdUnits(new Decimal(msg.price).mul(msg.size));
 
     // Subtract pUSD already reserved by the user's existing open BUY
     // orders. Without this the Safe looks funded on-chain but the server
@@ -370,18 +397,13 @@ async function handlePlaceOrder(
           size_matched?: string | number;
         };
         if (o?.side !== "BUY") continue;
-        const price = Number(o.price ?? 0);
-        const remaining =
-          Number(o.original_size ?? 0) - Number(o.size_matched ?? 0);
-        if (
-          !Number.isFinite(price) ||
-          !Number.isFinite(remaining) ||
-          remaining <= 0
-        )
-          continue;
-        reservedPusd = reservedPusd.add(
-          ethers.BigNumber.from(Math.round(price * remaining * 1_000_000))
+        const price = new Decimal(o.price ?? 0);
+        const remaining = new Decimal(o.original_size ?? 0).sub(
+          o.size_matched ?? 0
         );
+        if (!price.isFinite() || !remaining.isFinite() || remaining.lte(0))
+          continue;
+        reservedPusd = reservedPusd.add(parsePusdUnits(price.mul(remaining)));
       }
     } catch (err) {
       logWarn("trading.open-orders-fetch-failed", {
@@ -396,6 +418,24 @@ async function handlePlaceOrder(
       provider,
       reservedPusd
     );
+
+    const pusd = new ethers.Contract(
+      PUSD_ADDRESS,
+      ERC20_ALLOWANCE_ABI,
+      provider
+    );
+    const exchangeAddress = msg.negRisk
+      ? NEG_RISK_CTF_EXCHANGE_ADDRESS
+      : CTF_EXCHANGE_ADDRESS;
+    const allowance: ethers.BigNumber = await pusd.allowance(
+      msg.proxyAddress,
+      exchangeAddress
+    );
+    if (allowance.lt(requiredPusd)) {
+      return fail(
+        `Approval too low for this order. Approve at least ${ethers.utils.formatUnits(requiredPusd, 6)} pUSD and retry.`
+      );
+    }
   }
 
   try {
@@ -546,15 +586,11 @@ async function handleGetAllowance(
     POLYGON_RPC,
     POLYGON_CHAIN_ID
   );
-  const usdc = new ethers.Contract(
-    USDC_E_ADDRESS,
-    ERC20_ALLOWANCE_ABI,
-    provider
-  );
+  const pusd = new ethers.Contract(PUSD_ADDRESS, ERC20_ALLOWANCE_ABI, provider);
   const exchangeAddress = msg.negRisk
     ? NEG_RISK_CTF_EXCHANGE_ADDRESS
     : CTF_EXCHANGE_ADDRESS;
-  const allowance: ethers.BigNumber = await usdc.allowance(
+  const allowance: ethers.BigNumber = await pusd.allowance(
     msg.ownerAddress,
     exchangeAddress
   );
@@ -754,7 +790,31 @@ async function syncBalancesAfterCTF(msg: {
   });
 }
 
-// ── Split Position (USDC → YES + NO) via Relayer (gasless) ──
+async function ensureCtfCollateralApproval(
+  signer: BridgeSigner,
+  proxyAddress: string,
+  amountWei: ethers.BigNumber,
+  provider: ethers.providers.StaticJsonRpcProvider
+): Promise<void> {
+  const pusd = new ethers.Contract(PUSD_ADDRESS, ERC20_ALLOWANCE_ABI, provider);
+  const allowance: ethers.BigNumber = await pusd.allowance(
+    proxyAddress,
+    PUSD_CTF_APPROVAL_TARGET
+  );
+  if (allowance.gte(amountWei)) return;
+
+  const erc20Iface = new ethers.utils.Interface(ERC20_APPROVE_ABI);
+  const approveData = erc20Iface.encodeFunctionData("approve", [
+    PUSD_CTF_APPROVAL_TARGET,
+    amountWei,
+  ]);
+
+  await executeViaRelayer(signer, [
+    { to: PUSD_ADDRESS, data: approveData, value: "0" },
+  ]);
+}
+
+// ── Split Position (pUSD → YES + NO) via Relayer (gasless) ──
 
 async function handleSplitPosition(
   msg: TradingSplitPositionMessage,
@@ -771,8 +831,11 @@ async function handleSplitPosition(
 
   const ctfIface = new ethers.utils.Interface(CTF_SPLIT_ABI);
   const amountWei = ethers.utils.parseUnits(String(msg.amount), 6);
+  const proxyAddress = msg.proxyAddress ?? deriveProxyAddressSync(msg.address);
+  await ensureCtfCollateralApproval(signer, proxyAddress, amountWei, provider);
+
   const calldata = ctfIface.encodeFunctionData("splitPosition", [
-    USDC_E_ADDRESS,
+    PUSD_ADDRESS,
     PARENT_COLLECTION_ID,
     msg.conditionId,
     BINARY_PARTITION,
@@ -793,7 +856,7 @@ async function handleSplitPosition(
   return ok({ txHash: result.txHash, success: true });
 }
 
-// ── Merge Positions (YES + NO → USDC) via Relayer (gasless) ──
+// ── Merge Positions (YES + NO → pUSD) via Relayer (gasless) ──
 
 async function handleMergePositions(
   msg: TradingMergePositionsMessage,
@@ -811,7 +874,7 @@ async function handleMergePositions(
   const ctfIface = new ethers.utils.Interface(CTF_MERGE_ABI);
   const amountWei = ethers.utils.parseUnits(String(msg.amount), 6);
   const calldata = ctfIface.encodeFunctionData("mergePositions", [
-    USDC_E_ADDRESS,
+    PUSD_ADDRESS,
     PARENT_COLLECTION_ID,
     msg.conditionId,
     BINARY_PARTITION,
@@ -893,7 +956,7 @@ async function handleRelayerApprove(
 
   const erc20Iface = new ethers.utils.Interface(ERC20_APPROVE_ABI);
   const erc1155Iface = new ethers.utils.Interface(ERC1155_SET_APPROVAL_ABI);
-  const MAX_UINT256 = ethers.constants.MaxUint256;
+  const approvalAmount = parseApprovalAmount(msg.approvalAmount);
 
   // USDC.e gets approved to the Onramp only (for wrap()).
   const usdcSpender = COLLATERAL_ONRAMP_ADDRESS;
@@ -934,8 +997,6 @@ async function handleRelayerApprove(
       ERC1155_IS_APPROVED_ABI,
       provider
     );
-    const THRESHOLD = ethers.utils.parseUnits("1000000", 6);
-
     const [usdcAllowance, pusdAllowances, erc1155Results] = await Promise.all([
       usdc
         .allowance(proxyAddress, usdcSpender)
@@ -952,9 +1013,9 @@ async function handleRelayerApprove(
       ),
     ]);
 
-    if (usdcAllowance.lt(THRESHOLD)) needsUsdc = true;
+    if (usdcAllowance.lt(approvalAmount)) needsUsdc = true;
     for (let i = 0; i < pusdSpenders.length; i++) {
-      if (pusdAllowances[i].lt(THRESHOLD)) needsPusd.push(pusdSpenders[i]);
+      if (pusdAllowances[i].lt(approvalAmount)) needsPusd.push(pusdSpenders[i]);
     }
     for (let i = 0; i < erc1155Operators.length; i++) {
       if (!erc1155Results[i]) needsErc1155.push(erc1155Operators[i]);
@@ -976,7 +1037,7 @@ async function handleRelayerApprove(
       to: USDC_E_ADDRESS,
       data: erc20Iface.encodeFunctionData("approve", [
         usdcSpender,
-        MAX_UINT256,
+        approvalAmount,
       ]),
       value: "0",
     });
@@ -985,7 +1046,7 @@ async function handleRelayerApprove(
   for (const spender of needsPusd) {
     txns.push({
       to: PUSD_ADDRESS,
-      data: erc20Iface.encodeFunctionData("approve", [spender, MAX_UINT256]),
+      data: erc20Iface.encodeFunctionData("approve", [spender, approvalAmount]),
       value: "0",
     });
   }

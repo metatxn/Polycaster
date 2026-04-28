@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { preload } from "react-dom";
 import {
@@ -5,8 +6,16 @@ import {
   PRIORITY_EVENT_CARD_COUNT,
   PRIORITY_EVENT_CARD_IMAGE_WIDTH,
 } from "@/lib/lcp-images";
+import { buildPageMetadata } from "@/lib/seo";
 import { getInitialEvents } from "@/lib/server-cache";
 import { HomeContent } from "../home-content";
+
+export const metadata: Metadata = buildPageMetadata({
+  title: "Live Prediction Markets",
+  description:
+    "Browse active prediction markets, compare odds, and find trending opportunities across politics, crypto, sports, business, and culture.",
+  path: "/markets",
+});
 
 export default async function MarketsPage() {
   const initialData = await getInitialEvents();

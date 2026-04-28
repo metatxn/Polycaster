@@ -22,6 +22,9 @@ const IMAGE_OPTIMIZER_ORIGIN = (() => {
   }
 })();
 
+const CANONICAL_HOST = "knoww.app";
+const WWW_HOST = "www.knoww.app";
+
 /**
  * Security headers applied to all responses.
  */
@@ -82,15 +85,28 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 export function middleware(request: NextRequest) {
-  const response = NextResponse.next();
+  const requestId = request.headers.get("cf-ray") || crypto.randomUUID();
+  const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
 
+  if (host === WWW_HOST) {
+    const url = request.nextUrl.clone();
+    url.hostname = CANONICAL_HOST;
+    url.protocol = "https:";
+    url.port = "";
+
+    return applyGlobalHeaders(NextResponse.redirect(url, 301), requestId);
+  }
+
+  return applyGlobalHeaders(NextResponse.next(), requestId);
+}
+
+function applyGlobalHeaders(response: NextResponse, requestId: string) {
   // Apply security headers to all responses
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(key, value);
   }
 
-  // Add request ID for tracing (uses Cloudflare's ray ID if available)
-  const requestId = request.headers.get("cf-ray") || crypto.randomUUID();
+  // Add request ID for tracing
   response.headers.set("X-Request-Id", requestId);
 
   return response;
@@ -99,19 +115,9 @@ export function middleware(request: NextRequest) {
 /**
  * Matcher configuration.
  *
- * Apply middleware to all routes EXCEPT:
- * - Static files (_next/static)
- * - Favicon and other static assets
+ * Apply middleware to every route so host canonicalization also covers
+ * robots.txt, sitemap.xml, and static asset URLs.
  */
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (Next's image optimizer route — unused with custom loader)
-     * - favicon.ico, logo-*, manifest.json, robots.txt, sitemap.xml
-     * - Public assets (svg, png, jpg, etc.)
-     */
-    "/((?!_next/static|_next/image|favicon|logo-|manifest\\.json|robots\\.txt|sitemap\\.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
-  ],
+  matcher: ["/:path*"],
 };

@@ -59,6 +59,9 @@ export const CONTRACTS = {
 /** USDC.e approval target — needed for the Onramp `wrap()` call */
 export const USDC_E_ONRAMP_APPROVAL_TARGET = COLLATERAL_ONRAMP_ADDRESS;
 
+/** pUSD approval target — direct CTF split/merge/redeem collateral approval */
+export const PUSD_CTF_APPROVAL_TARGET = CTF_ADDRESS;
+
 /** pUSD approval targets — V2 trading collateral approvals */
 export const PUSD_APPROVAL_TARGETS = [
   CTF_EXCHANGE_ADDRESS,

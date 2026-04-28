@@ -28,6 +28,15 @@ function isDevMode(): boolean {
   }
 }
 
+function getExtensionDevMode(): boolean | null {
+  try {
+    if (typeof __DEV_MODE__ !== "undefined") return Boolean(__DEV_MODE__);
+  } catch {
+    // __DEV_MODE__ not defined in this runtime.
+  }
+  return null;
+}
+
 /**
  * Server/worker runtime = no `window` and `process` is defined. In these
  * environments log lines end up in a log drain (Cloudflare Workers, Node),
@@ -48,6 +57,9 @@ function isServerRuntime(): boolean {
 }
 
 function shouldLog(level: LogLevel): boolean {
+  const extensionDevMode = getExtensionDevMode();
+  if (extensionDevMode !== null) return extensionDevMode;
+
   if (isDevMode()) return true;
   return level === "warn" || level === "error";
 }
@@ -83,12 +95,41 @@ function emitServer(
   else console.error(serialized);
 }
 
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
+}
+
 function emitBrowser(
   level: LogLevel,
   event: string,
   payload?: LogPayload
 ): void {
   const prefix = `[Knoww:${event}]`;
+
+  // Pass Error instances natively so DevTools renders the stack trace.
+  if (payload instanceof Error) {
+    if (level === "warn") console.warn(prefix, payload);
+    else console.error(prefix, payload);
+    return;
+  }
+
+  // In dev, inline-stringify the payload so log rows are readable at a glance
+  // without expanding each one. Production path keeps the object form for
+  // richer inspection on the rare warn/error that surfaces.
+  if (isDevMode()) {
+    const tail = payload === undefined ? "" : ` ${safeStringify(payload)}`;
+    const line = `${prefix}${tail}`;
+    if (level === "debug") console.debug(line);
+    else if (level === "info") console.info(line);
+    else if (level === "warn") console.warn(line);
+    else console.error(line);
+    return;
+  }
+
   const data = payload === undefined ? undefined : serializeError(payload);
   if (level === "debug") console.debug(prefix, data);
   else if (level === "info") console.info(prefix, data);

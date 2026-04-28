@@ -8,6 +8,7 @@
  * wallets and robust enough for a backtest signal.
  */
 
+import Decimal from "decimal.js";
 import type { Category } from "./category";
 import type { ResolutionKnowledgeBase } from "./market-resolutions";
 import { computeTradePnl } from "./pnl";
@@ -72,26 +73,28 @@ export function computeWalletEdge(
   kb: ResolutionKnowledgeBase
 ): WalletEdge {
   const byCategory = new Map<Category, CategoryEdge>();
-  let totalVolumeUsd = 0;
-  let resolvedVolumeUsd = 0;
+  let totalVolumeUsd = new Decimal(0);
+  let resolvedVolumeUsd = new Decimal(0);
   let scoredTrades = 0;
 
   // Running profit-per-share sums per category, folded into mean at the end.
-  const ppsSum = new Map<Category, number>();
+  const ppsSum = new Map<Category, Decimal>();
 
   for (const trade of trades) {
-    const usd = trade.size * trade.price;
-    totalVolumeUsd += usd;
+    const usd = new Decimal(trade.size).mul(trade.price);
+    totalVolumeUsd = totalVolumeUsd.add(usd);
 
     const known = kb.byConditionId.get(trade.conditionId);
     if (!known) {
       // Still count toward totalVolume in the trade's category so
       // specialization denominators are honest.
       const cat = empty("Other");
-      cat.totalVolumeUsd = usd;
+      cat.totalVolumeUsd = usd.toNumber();
       const existing = byCategory.get(cat.category);
       if (existing) {
-        existing.totalVolumeUsd += usd;
+        existing.totalVolumeUsd = new Decimal(existing.totalVolumeUsd)
+          .add(usd)
+          .toNumber();
       } else {
         byCategory.set(cat.category, cat);
       }
@@ -111,7 +114,9 @@ export function computeWalletEdge(
       byCategory.set(category, entry);
     }
 
-    entry.totalVolumeUsd += usd;
+    entry.totalVolumeUsd = new Decimal(entry.totalVolumeUsd)
+      .add(usd)
+      .toNumber();
 
     const pnl = computeTradePnl(
       {
@@ -125,13 +130,18 @@ export function computeWalletEdge(
     if (!pnl) continue;
 
     scoredTrades++;
-    resolvedVolumeUsd += usd;
+    resolvedVolumeUsd = resolvedVolumeUsd.add(usd);
     entry.resolvedTrades++;
-    entry.resolvedVolumeUsd += usd;
+    entry.resolvedVolumeUsd = new Decimal(entry.resolvedVolumeUsd)
+      .add(usd)
+      .toNumber();
     if (pnl.isWin) entry.wins++;
     else if (pnl.isLoss) entry.losses++;
     else entry.pushes++;
-    ppsSum.set(category, (ppsSum.get(category) ?? 0) + pnl.profitPerShare);
+    ppsSum.set(
+      category,
+      (ppsSum.get(category) ?? new Decimal(0)).add(pnl.profitPerShare)
+    );
   }
 
   // Finalize: win rate + mean pps per category
@@ -139,7 +149,9 @@ export function computeWalletEdge(
     const decisive = e.wins + e.losses;
     e.winRate = decisive > 0 ? e.wins / decisive : 0;
     e.meanProfitPerShare =
-      e.resolvedTrades > 0 ? (ppsSum.get(cat) ?? 0) / e.resolvedTrades : 0;
+      e.resolvedTrades > 0
+        ? (ppsSum.get(cat) ?? new Decimal(0)).div(e.resolvedTrades).toNumber()
+        : 0;
   }
 
   const sorted = [...byCategory.values()].sort(
@@ -149,8 +161,8 @@ export function computeWalletEdge(
   return {
     address,
     scoredTrades,
-    totalVolumeUsd,
-    resolvedVolumeUsd,
+    totalVolumeUsd: totalVolumeUsd.toNumber(),
+    resolvedVolumeUsd: resolvedVolumeUsd.toNumber(),
     byCategory: sorted,
   };
 }

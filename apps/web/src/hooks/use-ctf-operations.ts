@@ -2,8 +2,8 @@
  * CTF Operations Hook
  *
  * Handles Conditional Token Framework operations:
- * - Split: Convert USDC into YES + NO outcome tokens
- * - Merge: Convert YES + NO outcome tokens back to USDC
+ * - Split: Convert pUSD into YES + NO outcome tokens
+ * - Merge: Convert YES + NO outcome tokens back to pUSD
  * - Redeem: Claim winnings after market resolution
  *
  * Reference: https://docs.polymarket.com/developers/CTF/overview
@@ -22,7 +22,12 @@ const log = createLogger("ctf-operations");
 
 import { useCallback, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
-import { CONTRACTS, CTF_ADDRESS, USDC_E_DECIMALS } from "@/constants/contracts";
+import {
+  CONTRACTS,
+  CTF_ADDRESS,
+  PUSD_CTF_APPROVAL_TARGET,
+  PUSD_DECIMALS,
+} from "@/constants/contracts";
 import { executeViaRelayer } from "@/lib/relayer-client";
 
 // ============================================================================
@@ -98,6 +103,50 @@ export function useCtfOperations() {
     error: null,
     txHash: null,
   });
+
+  const ensureCtfCollateralApproval = useCallback(
+    async (proxyAddress: string, requiredAmount: bigint) => {
+      if (!walletClient || !address) {
+        throw new Error("Wallet not connected");
+      }
+
+      const { createPublicClient, encodeFunctionData, erc20Abi, http } =
+        await import("viem");
+      const { polygon } = await import("viem/chains");
+      const { getRpcUrl } = await import("@/lib/rpc");
+      const publicClient = createPublicClient({
+        chain: polygon,
+        transport: http(getRpcUrl()),
+      });
+
+      const allowance = await publicClient.readContract({
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [
+          proxyAddress as `0x${string}`,
+          PUSD_CTF_APPROVAL_TARGET as `0x${string}`,
+        ],
+      });
+
+      if (allowance >= requiredAmount) return;
+
+      const data = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [PUSD_CTF_APPROVAL_TARGET as `0x${string}`, requiredAmount],
+      });
+
+      await executeViaRelayer(walletClient, address as `0x${string}`, [
+        {
+          to: CONTRACTS.PUSD,
+          data,
+          value: "0",
+        },
+      ]);
+    },
+    [walletClient, address]
+  );
 
   /**
    * Execute a CTF operation via relayer with polling
@@ -183,24 +232,25 @@ export function useCtfOperations() {
   );
 
   /**
-   * Split USDC into YES + NO outcome tokens
-   * 1 USDC → 1 YES + 1 NO
+   * Split pUSD into YES + NO outcome tokens
+   * 1 pUSD → 1 YES + 1 NO
    */
   const splitPosition = useCallback(
     async (
       conditionId: string,
       amount: number,
-      _proxyAddress: string
+      proxyAddress: string
     ): Promise<OperationResult> => {
       const { encodeFunctionData, parseUnits } = await import("viem");
 
-      const amountInWei = parseUnits(amount.toString(), USDC_E_DECIMALS);
+      const amountInWei = parseUnits(amount.toString(), PUSD_DECIMALS);
+      await ensureCtfCollateralApproval(proxyAddress, amountInWei);
 
       const encodedData = encodeFunctionData({
         abi: CTF_ABI,
         functionName: "splitPosition",
         args: [
-          CONTRACTS.USDC_E as `0x${string}`,
+          CONTRACTS.PUSD as `0x${string}`,
           PARENT_COLLECTION_ID,
           conditionId as `0x${string}`,
           BINARY_PARTITION,
@@ -210,12 +260,12 @@ export function useCtfOperations() {
 
       return executeCTFOperation("splitPosition", encodedData);
     },
-    [executeCTFOperation]
+    [executeCTFOperation, ensureCtfCollateralApproval]
   );
 
   /**
-   * Merge YES + NO outcome tokens back to USDC
-   * 1 YES + 1 NO → 1 USDC
+   * Merge YES + NO outcome tokens back to pUSD
+   * 1 YES + 1 NO → 1 pUSD
    */
   const mergePositions = useCallback(
     async (
@@ -225,13 +275,13 @@ export function useCtfOperations() {
     ): Promise<OperationResult> => {
       const { encodeFunctionData, parseUnits } = await import("viem");
 
-      const amountInWei = parseUnits(amount.toString(), USDC_E_DECIMALS);
+      const amountInWei = parseUnits(amount.toString(), PUSD_DECIMALS);
 
       const encodedData = encodeFunctionData({
         abi: CTF_ABI,
         functionName: "mergePositions",
         args: [
-          CONTRACTS.USDC_E as `0x${string}`,
+          CONTRACTS.PUSD as `0x${string}`,
           PARENT_COLLECTION_ID,
           conditionId as `0x${string}`,
           BINARY_PARTITION,
@@ -258,7 +308,7 @@ export function useCtfOperations() {
         abi: CTF_ABI,
         functionName: "redeemPositions",
         args: [
-          CONTRACTS.USDC_E as `0x${string}`,
+          CONTRACTS.PUSD as `0x${string}`,
           PARENT_COLLECTION_ID,
           conditionId as `0x${string}`,
           BINARY_PARTITION,

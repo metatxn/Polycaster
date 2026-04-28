@@ -109,6 +109,38 @@ if (!fs.existsSync(onnxRuntimeDistPath)) {
   );
 }
 
+// Resolve a single .woff2 file out of an @fontsource package's `files/` dir.
+// We only ship the exact weights/styles referenced by knoww-inline.css to
+// keep the bundle under ~50KB; subsetting beyond `latin` isn't worth the
+// build complexity for the panel's vocabulary.
+function resolveFontsourceFile(pkg, fileName) {
+  const pkgJson = require.resolve(`${pkg}/package.json`);
+  const candidate = path.join(path.dirname(pkgJson), "files", fileName);
+  if (!fs.existsSync(candidate)) {
+    throw new Error(
+      `Expected font file not found: ${candidate}. Did the @fontsource package layout change?`
+    );
+  }
+  return candidate;
+}
+
+const bundledFonts = [
+  {
+    from: resolveFontsourceFile(
+      "@fontsource/fraunces",
+      "fraunces-latin-500-italic.woff2"
+    ),
+    to: "fonts/fraunces-italic-500.woff2",
+  },
+  {
+    from: resolveFontsourceFile(
+      "@fontsource/jetbrains-mono",
+      "jetbrains-mono-latin-500-normal.woff2"
+    ),
+    to: "fonts/jetbrains-mono-500.woff2",
+  },
+];
+
 module.exports = (_env, argv) => {
   const isProduction = argv.mode === "production";
   const devMode = isProduction ? false : process.env.DEV_MODE !== "false";
@@ -271,6 +303,7 @@ module.exports = (_env, argv) => {
             ),
             to: "ort/ort-wasm-simd-threaded.asyncify.mjs",
           },
+          ...bundledFonts,
         ],
       }),
     ],

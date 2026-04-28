@@ -14,6 +14,7 @@
  * value comes from the other archetypes compensating for its noise.
  */
 
+import Decimal from "decimal.js";
 import type { ArchetypeScore, SuspicionFactor } from "./types";
 
 export type TradeSide = "BUY" | "SELL";
@@ -52,6 +53,7 @@ export function scoreAccountLoader(input: AccountLoaderInput): ArchetypeScore {
 
   let score = 0;
   const factors: SuspicionFactor[] = [];
+  const tradeUsd = new Decimal(tradeUsdValue);
 
   // Factor 1: Account age (max 35 points)
   if (accountAgeHours < 6) {
@@ -150,29 +152,29 @@ export function scoreAccountLoader(input: AccountLoaderInput): ArchetypeScore {
   }
 
   // Factor 4: Trade size (max 10 points)
-  if (tradeUsdValue > 10000) {
+  if (tradeUsd.gt(10_000)) {
     const pts = 10;
     score += pts;
     factors.push({
       name: "Trade Size",
       points: pts,
-      description: `Very large trade ($${tradeUsdValue.toFixed(0)})`,
+      description: `Very large trade ($${tradeUsd.toFixed(0)})`,
     });
-  } else if (tradeUsdValue > 5000) {
+  } else if (tradeUsd.gt(5_000)) {
     const pts = 7;
     score += pts;
     factors.push({
       name: "Trade Size",
       points: pts,
-      description: `Large trade ($${tradeUsdValue.toFixed(0)})`,
+      description: `Large trade ($${tradeUsd.toFixed(0)})`,
     });
-  } else if (tradeUsdValue > 1000) {
+  } else if (tradeUsd.gt(1_000)) {
     const pts = 3;
     score += pts;
     factors.push({
       name: "Trade Size",
       points: pts,
-      description: `Significant trade ($${tradeUsdValue.toFixed(0)})`,
+      description: `Significant trade ($${tradeUsd.toFixed(0)})`,
     });
   }
 
@@ -188,13 +190,13 @@ export function scoreAccountLoader(input: AccountLoaderInput): ArchetypeScore {
   }
 
   // Factor 6: Size-to-age ratio (max 5 points) — large trade from very new account
-  if (accountAgeHours < 24 && tradeUsdValue > 5000) {
+  if (accountAgeHours < 24 && tradeUsd.gt(5_000)) {
     const pts = 5;
     score += pts;
     factors.push({
       name: "Size/Age Ratio",
       points: pts,
-      description: `$${tradeUsdValue.toFixed(0)} trade from an account less than 24h old`,
+      description: `$${tradeUsd.toFixed(0)} trade from an account less than 24h old`,
     });
   }
 

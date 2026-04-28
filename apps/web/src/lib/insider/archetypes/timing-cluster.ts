@@ -19,6 +19,7 @@
  * archetype score attributed to it.
  */
 
+import Decimal from "decimal.js";
 import type { PriceBucket } from "../price-history";
 import { priceAt } from "../price-history";
 import type { ArchetypeScore, SuspicionFactor } from "./types";
@@ -104,7 +105,9 @@ export function buildClusters(
     const memberTrades = members.map((m) => m.trade);
     const first = memberTrades[0].timestamp;
     const last = memberTrades[memberTrades.length - 1].timestamp;
-    const total = memberTrades.reduce((s, t) => s + t.usdValue, 0);
+    const total = memberTrades
+      .reduce((sum, trade) => sum.add(trade.usdValue), new Decimal(0))
+      .toNumber();
 
     clusters.push({
       trades: memberTrades,
@@ -129,6 +132,7 @@ export function scoreTimingCluster(
 ): ArchetypeScore {
   const factors: SuspicionFactor[] = [];
   let score = 0;
+  const totalUsd = new Decimal(ctx.totalUsdValue);
 
   if (ctx.uniqueWallets < MIN_UNIQUE_WALLETS) {
     return {
@@ -168,29 +172,29 @@ export function scoreTimingCluster(
   }
 
   // Factor 2: Aggregate cluster size (max 20 points).
-  if (ctx.totalUsdValue >= 50_000) {
+  if (totalUsd.gte(50_000)) {
     const pts = 20;
     score += pts;
     factors.push({
       name: "Cluster Volume",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} crossed the same side together`,
+      description: `$${formatK(totalUsd)} crossed the same side together`,
     });
-  } else if (ctx.totalUsdValue >= 20_000) {
+  } else if (totalUsd.gte(20_000)) {
     const pts = 14;
     score += pts;
     factors.push({
       name: "Cluster Volume",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} crossed the same side together`,
+      description: `$${formatK(totalUsd)} crossed the same side together`,
     });
-  } else if (ctx.totalUsdValue >= 5_000) {
+  } else if (totalUsd.gte(5_000)) {
     const pts = 8;
     score += pts;
     factors.push({
       name: "Cluster Volume",
       points: pts,
-      description: `$${formatK(ctx.totalUsdValue)} crossed the same side together`,
+      description: `$${formatK(totalUsd)} crossed the same side together`,
     });
   }
 
@@ -281,8 +285,8 @@ function zero(): ArchetypeScore {
   };
 }
 
-function formatK(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(0);
+function formatK(value: Decimal): string {
+  if (value.gte(1_000_000)) return `${value.div(1_000_000).toFixed(1)}M`;
+  if (value.gte(1_000)) return `${value.div(1_000).toFixed(1)}K`;
+  return value.toFixed(0);
 }

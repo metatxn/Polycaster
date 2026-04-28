@@ -614,17 +614,23 @@ export default function EventDetailClient({
     }
   }, [urlConditionId, openMarkets]);
 
-  // Set outcome index based on URL param (for "Modify Order" from sell modal)
+  // Set outcome index based on URL param (for "Modify Order" from sell modal).
+  // Apply ONCE after tradingOutcomes is populated — re-running this effect on
+  // every selectedOutcomeIndex change would fight the user, snapping their
+  // Yes/No clicks back to whatever the URL says.
+  const appliedUrlOutcomeRef = useRef(false);
   useEffect(() => {
-    if (initialOutcomeFromUrl && tradingOutcomes.length > 0) {
-      const outcomeIndex = tradingOutcomes.findIndex(
-        (o) => o.name.toLowerCase() === initialOutcomeFromUrl
-      );
-      if (outcomeIndex !== -1 && outcomeIndex !== selectedOutcomeIndex) {
-        setSelectedOutcomeIndex(outcomeIndex);
-      }
+    if (appliedUrlOutcomeRef.current) return;
+    if (!initialOutcomeFromUrl || tradingOutcomes.length === 0) return;
+
+    const outcomeIndex = tradingOutcomes.findIndex(
+      (o) => o.name.toLowerCase() === initialOutcomeFromUrl
+    );
+    if (outcomeIndex !== -1) {
+      setSelectedOutcomeIndex(outcomeIndex);
     }
-  }, [initialOutcomeFromUrl, tradingOutcomes, selectedOutcomeIndex]);
+    appliedUrlOutcomeRef.current = true;
+  }, [initialOutcomeFromUrl, tradingOutcomes]);
 
   // ARCHITECTURE: REST first, then WebSocket for real-time updates
   // This is how Binance, Coinbase, and Polymarket work

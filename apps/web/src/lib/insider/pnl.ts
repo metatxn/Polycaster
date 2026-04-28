@@ -11,6 +11,7 @@
  * Dollar profit = profit-per-share × size.
  */
 
+import Decimal from "decimal.js";
 import type { TradeSide } from "./detector";
 
 export interface ResolvedOutcomes {
@@ -88,20 +89,20 @@ export function computeTradePnl(
     return null;
   }
 
-  const finalPayout = outcomes.prices[trade.outcomeIndex];
+  const finalPayout = new Decimal(outcomes.prices[trade.outcomeIndex]);
+  const price = new Decimal(trade.price);
+  const size = new Decimal(trade.size);
   const profitPerShare =
-    trade.side === "BUY"
-      ? finalPayout - trade.price
-      : trade.price - finalPayout;
-  const profit = profitPerShare * trade.size;
+    trade.side === "BUY" ? finalPayout.minus(price) : price.minus(finalPayout);
+  const profit = profitPerShare.mul(size);
 
-  const EPS = 1e-6;
+  const EPS = new Decimal("0.000001");
   return {
-    profit,
-    profitPerShare,
-    isWin: profit > EPS,
-    isLoss: profit < -EPS,
-    isPush: Math.abs(profit) <= EPS,
+    profit: profit.toNumber(),
+    profitPerShare: profitPerShare.toNumber(),
+    isWin: profit.gt(EPS),
+    isLoss: profit.lt(EPS.neg()),
+    isPush: profit.abs().lte(EPS),
   };
 }
 
@@ -141,14 +142,14 @@ export function aggregatePnl(entries: TradePnl[]): PnlAggregate {
   let wins = 0;
   let losses = 0;
   let pushes = 0;
-  let totalProfit = 0;
-  let totalPps = 0;
+  let totalProfit = new Decimal(0);
+  let totalPps = new Decimal(0);
   for (const e of entries) {
     if (e.isWin) wins++;
     else if (e.isLoss) losses++;
     else pushes++;
-    totalProfit += e.profit;
-    totalPps += e.profitPerShare;
+    totalProfit = totalProfit.add(e.profit);
+    totalPps = totalPps.add(e.profitPerShare);
   }
 
   // Win rate excludes pushes from the denominator. A trade that
@@ -161,9 +162,9 @@ export function aggregatePnl(entries: TradePnl[]): PnlAggregate {
     losses,
     pushes,
     winRate: decisive > 0 ? wins / decisive : 0,
-    totalProfit,
-    meanProfit: totalProfit / entries.length,
-    meanProfitPerShare: totalPps / entries.length,
+    totalProfit: totalProfit.toNumber(),
+    meanProfit: totalProfit.div(entries.length).toNumber(),
+    meanProfitPerShare: totalPps.div(entries.length).toNumber(),
     totalVolume: 0, // caller fills in from the underlying trade volume
   };
 }

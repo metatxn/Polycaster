@@ -18,9 +18,11 @@ const ERC1155_ABI = [
   },
 ] as const;
 
-const APPROVAL_THRESHOLD = BigInt(1_000_000_000_000); // 1M tokens (6 decimals)
+const APPROVAL_THRESHOLD = BigInt(1); // User-selected finite allowances are valid.
 
 export interface ApprovalStatus {
+  // pUSD direct CTF approval (split/merge/redeem collateral)
+  pusdCtf: boolean;
   // pUSD approvals (V2 trading collateral)
   pusdCtfExchange: boolean;
   pusdNegRiskExchange: boolean;
@@ -40,13 +42,19 @@ export async function checkAllApprovals(
   const owner = safeAddress as `0x${string}`;
   const client = getPublicClient();
 
-  // Batches all 7 reads into a single Multicall3 aggregate3 call, so we make
-  // one RPC round-trip instead of seven. `allowFailure: true` ensures one
+  // Batches all 8 reads into a single Multicall3 aggregate3 call, so we make
+  // one RPC round-trip instead of eight. `allowFailure: true` ensures one
   // reverting sub-call can't take down the whole probe — failures show up as
   // `{ status: "failure" }` and we treat them as not-approved.
   const results = await client.multicall({
     allowFailure: true,
     contracts: [
+      {
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [owner, CONTRACTS.CTF],
+      },
       {
         address: CONTRACTS.PUSD,
         abi: erc20Abi,
@@ -110,13 +118,14 @@ export async function checkAllApprovals(
     return r.result as boolean;
   };
 
-  const pusdCtfExchange = allowanceOk(0);
-  const pusdNegRiskExchange = allowanceOk(1);
-  const pusdNegRiskAdapter = allowanceOk(2);
-  const usdcOnramp = allowanceOk(3);
-  const ctfExchangeApproval = approvalOk(4);
-  const ctfNegRiskExchangeApproval = approvalOk(5);
-  const ctfNegRiskAdapterApproval = approvalOk(6);
+  const pusdCtf = allowanceOk(0);
+  const pusdCtfExchange = allowanceOk(1);
+  const pusdNegRiskExchange = allowanceOk(2);
+  const pusdNegRiskAdapter = allowanceOk(3);
+  const usdcOnramp = allowanceOk(4);
+  const ctfExchangeApproval = approvalOk(5);
+  const ctfNegRiskExchangeApproval = approvalOk(6);
+  const ctfNegRiskAdapterApproval = approvalOk(7);
 
   const allApproved =
     pusdCtfExchange &&
@@ -128,6 +137,7 @@ export async function checkAllApprovals(
     ctfNegRiskAdapterApproval;
 
   return {
+    pusdCtf,
     pusdCtfExchange,
     pusdNegRiskExchange,
     pusdNegRiskAdapter,

@@ -424,6 +424,7 @@ export const TradingService = {
 
   async placeOrder(params: {
     tokenId: string;
+    conditionId?: string;
     outcomeIndex: number;
     side: "BUY" | "SELL";
     price: number;

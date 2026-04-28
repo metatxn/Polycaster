@@ -1,3 +1,5 @@
+import Decimal from "decimal.js";
+
 /**
  * Format volume numbers into human-readable strings (e.g., $1.2M, $500K)
  */
@@ -15,9 +17,13 @@ export function formatVolume(vol?: number | string) {
  * Uses one decimal place for sub-cent precision consistent with order book and trading UI.
  */
 export function formatPrice(price: string | number) {
-  const num = typeof price === "string" ? Number.parseFloat(price) : price;
-  if (Number.isNaN(num)) return "0.0¢";
-  return `${(num * 100).toFixed(1)}¢`;
+  try {
+    const value = new Decimal(price);
+    if (!value.isFinite()) return "0.0¢";
+    return `${value.mul(100).toDecimalPlaces(1, Decimal.ROUND_HALF_UP).toFixed(1)}¢`;
+  } catch {
+    return "0.0¢";
+  }
 }
 
 /**

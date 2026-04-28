@@ -8,10 +8,11 @@ import { logInfo, logWarn } from "@knoww/logger";
 import {
   COLLATERAL_ONRAMP_ADDRESS,
   CTF_ADDRESS,
+  CTF_APPROVAL_OPERATORS,
   CTF_EXCHANGE_ADDRESS,
-  NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
+  PUSD_APPROVAL_TARGETS,
   PUSD_CTF_APPROVAL_TARGET,
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
@@ -55,8 +56,26 @@ const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
 const DEFAULT_APPROVAL_AMOUNT = "100";
 const PUSD_DECIMALS = 6;
+const PROTOCOL_FEE_DECIMALS = 5;
+const CLOB_INITIAL_CURSOR = "MA==";
+const CLOB_END_CURSOR = "LTE=";
 
 type TradingResponse = TradingSuccessResponse | TradingErrorResponse;
+type ClobApiCredentials = {
+  apiKey: string;
+  apiSecret: string;
+  apiPassphrase: string;
+};
+type ClobOpenOrder = {
+  side?: string;
+  price?: string | number;
+  original_size?: string | number;
+  size_matched?: string | number;
+};
+type ProtocolFeeDetails = {
+  rate: Decimal;
+  exponent: Decimal;
+};
 
 function ok(data: unknown): TradingSuccessResponse {
   return { ok: true, data };
@@ -87,6 +106,100 @@ function parseApprovalAmount(amount?: string): ethers.BigNumber {
     throw new Error("Approval amount must be greater than 0");
   }
   return parsePusdUnits(decimal, Decimal.ROUND_DOWN);
+}
+
+function estimateFallbackFeeRaw(amount: ethers.BigNumber): ethers.BigNumber {
+  const FEE_BUFFER_BPS = ethers.BigNumber.from(300); // 3%
+  const BPS_DENOMINATOR = ethers.BigNumber.from(10_000);
+  return amount.mul(FEE_BUFFER_BPS).div(BPS_DENOMINATOR);
+}
+
+function getNestedValue(source: unknown, path: string[]): unknown {
+  let current = source;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function decimalFromUnknown(value: unknown): Decimal | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const decimal = new Decimal(value);
+  return decimal.isFinite() ? decimal : null;
+}
+
+function parseProtocolFeeDetails(info: unknown): ProtocolFeeDetails {
+  const rate =
+    decimalFromUnknown(getNestedValue(info, ["fd", "r"])) ??
+    decimalFromUnknown(getNestedValue(info, ["fee_details", "r"]));
+  const exponent =
+    decimalFromUnknown(getNestedValue(info, ["fd", "e"])) ??
+    decimalFromUnknown(getNestedValue(info, ["fee_details", "e"]));
+
+  return {
+    rate: rate ?? new Decimal(0),
+    exponent: exponent?.isFinite() ? exponent : new Decimal(1),
+  };
+}
+
+function parseBuilderTakerFeeRate(info: unknown): Decimal {
+  const rawBps =
+    decimalFromUnknown(getNestedValue(info, ["tbf"])) ??
+    decimalFromUnknown(getNestedValue(info, ["builderTakerFeeBps"])) ??
+    decimalFromUnknown(getNestedValue(info, ["builder_taker_fee_bps"]));
+  if (!rawBps) return new Decimal(0);
+  return rawBps.div(10_000);
+}
+
+async function estimateBuyTakerFeeRaw(
+  client: {
+    getClobMarketInfo?: (conditionId: string) => Promise<unknown>;
+  },
+  conditionId: string | undefined,
+  size: number,
+  price: number,
+  notional: Decimal
+): Promise<ethers.BigNumber | null> {
+  if (!conditionId || typeof client.getClobMarketInfo !== "function") {
+    return null;
+  }
+
+  try {
+    const info = await client.getClobMarketInfo(conditionId);
+    const shares = new Decimal(size);
+    const effectivePrice =
+      price > 0 ? new Decimal(price) : notional.div(shares);
+    if (
+      !shares.isFinite() ||
+      shares.lte(0) ||
+      !effectivePrice.isFinite() ||
+      effectivePrice.lte(0) ||
+      effectivePrice.gte(1)
+    ) {
+      return ethers.BigNumber.from(0);
+    }
+
+    const { rate: protocolRate, exponent: protocolExponent } =
+      parseProtocolFeeDetails(info);
+    const builderTakerRate = parseBuilderTakerFeeRate(info);
+    const priceCurve = effectivePrice
+      .mul(new Decimal(1).sub(effectivePrice))
+      .pow(protocolExponent);
+    const protocolFee = shares
+      .mul(protocolRate)
+      .mul(priceCurve)
+      .toDecimalPlaces(PROTOCOL_FEE_DECIMALS, Decimal.ROUND_HALF_UP);
+    const builderFee = notional.mul(builderTakerRate);
+    const fee = Decimal.max(0, protocolFee.plus(builderFee));
+    return parsePusdUnits(fee, Decimal.ROUND_CEIL);
+  } catch (err) {
+    logWarn("trading.fee-info-fetch-failed", {
+      conditionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 export async function handleTradingMessage(
@@ -350,7 +463,9 @@ async function handlePlaceOrder(
     POLYGON_CHAIN_ID
   );
   const signer = new BridgeSigner(msg.address, tabId, provider);
-  const { ClobClient } = await import("@polymarket/clob-client-v2");
+  const { ClobClient, isV2Order, orderToJsonV1, orderToJsonV2 } = await import(
+    "@polymarket/clob-client-v2"
+  );
 
   const creds = {
     key: msg.credentials.apiKey,
@@ -372,13 +487,20 @@ async function handlePlaceOrder(
 
   const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
   const orderType = msg.orderType || "GTC";
+  const postSignedOrder = async (order: unknown) => {
+    const orderPayload = isV2Order(order as any)
+      ? orderToJsonV2(order as any, creds.key, orderType as any, false, false)
+      : orderToJsonV1(order as any, creds.key, orderType as any, false, false);
+    return clobPostOrder(msg.address, msg.credentials, orderPayload);
+  };
 
   if (msg.side === "BUY") {
     // Required pUSD = price * size for limit, or amount for market BUY
-    const requiredPusd =
+    const requiredNotional =
       orderType === "FAK" || orderType === "FOK"
-        ? parsePusdUnits(msg.amount ?? msg.size)
-        : parsePusdUnits(new Decimal(msg.price).mul(msg.size));
+        ? new Decimal(msg.amount ?? msg.size)
+        : new Decimal(msg.price).mul(msg.size);
+    const requiredPusd = parsePusdUnits(requiredNotional);
 
     // Subtract pUSD already reserved by the user's existing open BUY
     // orders. Without this the Safe looks funded on-chain but the server
@@ -387,15 +509,8 @@ async function handlePlaceOrder(
     // apps/web/src/hooks/use-clob-client.ts:createOrder.
     let reservedPusd = ethers.BigNumber.from(0);
     try {
-      const openOrders = (await client.getOpenOrders()) as unknown;
-      const arr = Array.isArray(openOrders) ? openOrders : [];
-      for (const raw of arr) {
-        const o = raw as {
-          side?: string;
-          price?: string | number;
-          original_size?: string | number;
-          size_matched?: string | number;
-        };
+      const openOrders = await clobGetOpenOrders(msg.address, msg.credentials);
+      for (const o of openOrders) {
         if (o?.side !== "BUY") continue;
         const price = new Decimal(o.price ?? 0);
         const remaining = new Decimal(o.original_size ?? 0).sub(
@@ -411,12 +526,24 @@ async function handlePlaceOrder(
       });
     }
 
+    const estimatedFeeRaw = await estimateBuyTakerFeeRaw(
+      client,
+      msg.conditionId,
+      msg.size,
+      msg.price,
+      requiredNotional
+    );
+    const requiredCollateralPusd = requiredPusd.add(
+      estimatedFeeRaw ?? estimateFallbackFeeRaw(requiredPusd)
+    );
+
     await ensurePusdSufficient(
       signer,
       msg.proxyAddress,
       requiredPusd,
       provider,
-      reservedPusd
+      reservedPusd,
+      estimatedFeeRaw
     );
 
     const pusd = new ethers.Contract(
@@ -431,21 +558,25 @@ async function handlePlaceOrder(
       msg.proxyAddress,
       exchangeAddress
     );
-    if (allowance.lt(requiredPusd)) {
+    if (allowance.lt(requiredCollateralPusd)) {
       return fail(
-        `Approval too low for this order. Approve at least ${ethers.utils.formatUnits(requiredPusd, 6)} pUSD and retry.`
+        `Approval too low for this order. Approve at least ${ethers.utils.formatUnits(requiredCollateralPusd, 6)} pUSD and retry.`
       );
     }
   }
 
   try {
-    await client.updateBalanceAllowance({
-      asset_type: "COLLATERAL" as any,
-    });
-    await client.updateBalanceAllowance({
-      asset_type: "CONDITIONAL" as any,
-      token_id: msg.tokenId,
-    });
+    await clobUpdateBalanceAllowance(
+      msg.address,
+      msg.credentials,
+      "COLLATERAL"
+    );
+    await clobUpdateBalanceAllowance(
+      msg.address,
+      msg.credentials,
+      "CONDITIONAL",
+      msg.tokenId
+    );
     logInfo("trading.balance-updated", {
       tokenId: msg.tokenId,
       side: msg.side,
@@ -484,7 +615,7 @@ async function handlePlaceOrder(
       marketOrder as any,
       orderOptions
     );
-    const response = await client.postOrder(order, orderType as any);
+    const response = await postSignedOrder(order);
 
     // The V2 SDK's `postOrder` resolves with the server's error body on
     // non-2xx instead of throwing. Surface it as a real failure so the UI
@@ -533,7 +664,7 @@ async function handlePlaceOrder(
     price: order.price,
   });
 
-  const response = await client.postOrder(order, orderType as any);
+  const response = await postSignedOrder(order);
 
   logInfo("trading.place-order.clob-response", {
     txHash: (response as Record<string, unknown>)?.transactionHash,
@@ -625,20 +756,15 @@ async function handleGetAllAllowances(
     provider
   );
 
-  const pusdSpenders = [
-    CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_ADAPTER_ADDRESS,
-  ];
-  const erc1155Operators = [
-    CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_ADAPTER_ADDRESS,
-  ];
+  const pusdSpenders = [...PUSD_APPROVAL_TARGETS];
+  const erc1155Operators = [...CTF_APPROVAL_OPERATORS];
 
   const allowances: Record<string, number> = {};
 
-  const [usdcOnramp, pusdResults, erc1155Results] = await Promise.all([
+  const [pusdCtf, usdcOnramp, pusdResults, erc1155Results] = await Promise.all([
+    pusd
+      .allowance(msg.ownerAddress, PUSD_CTF_APPROVAL_TARGET)
+      .catch(() => ethers.BigNumber.from(0)),
     usdc
       .allowance(msg.ownerAddress, COLLATERAL_ONRAMP_ADDRESS)
       .catch(() => ethers.BigNumber.from(0)),
@@ -656,6 +782,9 @@ async function handleGetAllAllowances(
     ),
   ]);
 
+  allowances[`pusd:${PUSD_CTF_APPROVAL_TARGET}`] = Number(
+    ethers.utils.formatUnits(pusdCtf, 6)
+  );
   allowances[`usdce:${COLLATERAL_ONRAMP_ADDRESS}`] = Number(
     ethers.utils.formatUnits(usdcOnramp, 6)
   );
@@ -687,12 +816,15 @@ async function handleGetOrderBook(
 
 async function buildHmacHeaders(
   address: string,
-  creds: { apiKey: string; apiSecret: string; apiPassphrase: string },
+  creds: ClobApiCredentials,
   method: string,
-  requestPath: string
+  requestPath: string,
+  body?: string
 ): Promise<Record<string, string>> {
   const ts = Math.floor(Date.now() / 1000);
-  const message = `${ts}${method}${requestPath}`;
+  // Polymarket signs the canonical path and optional body only; query params
+  // are intentionally excluded from the HMAC message.
+  const message = `${ts}${method}${requestPath}${body ?? ""}`;
   const keyData = base64ToArrayBuffer(creds.apiSecret);
   const cryptoKey = await globalThis.crypto.subtle.importKey(
     "raw",
@@ -737,9 +869,94 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(binary);
 }
 
+async function clobGetOpenOrders(
+  address: string,
+  creds: ClobApiCredentials,
+  filters?: { market?: string; assetId?: string }
+): Promise<ClobOpenOrder[]> {
+  const endpoint = "/data/orders";
+  const headers = await buildHmacHeaders(address, creds, "GET", endpoint);
+  const results: ClobOpenOrder[] = [];
+  let nextCursor = CLOB_INITIAL_CURSOR;
+
+  while (nextCursor !== CLOB_END_CURSOR) {
+    const params = new URLSearchParams({ next_cursor: nextCursor });
+    if (filters?.market) params.set("market", filters.market);
+    if (filters?.assetId) params.set("asset_id", filters.assetId);
+    const res = await fetch(`${CLOB_HOST}${endpoint}?${params}`, {
+      method: "GET",
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch open orders: ${res.status}`);
+    }
+
+    const payload = (await res.json()) as {
+      data?: unknown;
+      error?: unknown;
+      next_cursor?: unknown;
+    };
+    if (payload.error) {
+      throw new Error(String(payload.error));
+    }
+    if (Array.isArray(payload.data)) {
+      results.push(...(payload.data as ClobOpenOrder[]));
+    }
+
+    const next =
+      typeof payload.next_cursor === "string"
+        ? payload.next_cursor
+        : CLOB_END_CURSOR;
+    if (next === nextCursor) break;
+    nextCursor = next;
+  }
+
+  return results;
+}
+
+async function clobPostOrder(
+  address: string,
+  creds: ClobApiCredentials,
+  orderPayload: unknown
+): Promise<unknown> {
+  const endpoint = "/order";
+  const body = JSON.stringify(orderPayload);
+  const headers = await buildHmacHeaders(
+    address,
+    creds,
+    "POST",
+    endpoint,
+    body
+  );
+  const res = await fetch(`${CLOB_HOST}${endpoint}`, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+    },
+    body,
+  });
+  const text = await res.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { error: text };
+    }
+  }
+  if (!res.ok) {
+    if (payload && typeof payload === "object") {
+      return { ...(payload as Record<string, unknown>), status: res.status };
+    }
+    return { error: text || res.statusText, status: res.status };
+  }
+  return payload;
+}
+
 async function clobUpdateBalanceAllowance(
   address: string,
-  creds: { apiKey: string; apiSecret: string; apiPassphrase: string },
+  creds: ClobApiCredentials,
   assetType: string,
   tokenId?: string
 ): Promise<void> {
@@ -750,7 +967,13 @@ async function clobUpdateBalanceAllowance(
     signature_type: String(SIGNATURE_TYPES.POLY_GNOSIS_SAFE),
   });
   if (tokenId) params.set("token_id", tokenId);
-  await fetch(`${CLOB_HOST}${endpoint}?${params}`, { method: "GET", headers });
+  const res = await fetch(`${CLOB_HOST}${endpoint}?${params}`, {
+    method: "GET",
+    headers,
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update balance allowance: ${res.status}`);
+  }
 }
 
 async function syncBalancesAfterCTF(msg: {
@@ -763,14 +986,10 @@ async function syncBalancesAfterCTF(msg: {
 }): Promise<void> {
   if (!msg.credentials || !msg.proxyAddress) return;
 
-  await clobUpdateBalanceAllowance(
-    msg.proxyAddress,
-    msg.credentials,
-    "COLLATERAL"
-  );
+  await clobUpdateBalanceAllowance(msg.address, msg.credentials, "COLLATERAL");
   if (msg.yesTokenId) {
     await clobUpdateBalanceAllowance(
-      msg.proxyAddress,
+      msg.address,
       msg.credentials,
       "CONDITIONAL",
       msg.yesTokenId
@@ -778,7 +997,7 @@ async function syncBalancesAfterCTF(msg: {
   }
   if (msg.noTokenId) {
     await clobUpdateBalanceAllowance(
-      msg.proxyAddress,
+      msg.address,
       msg.credentials,
       "CONDITIONAL",
       msg.noTokenId
@@ -962,18 +1181,10 @@ async function handleRelayerApprove(
   const usdcSpender = COLLATERAL_ONRAMP_ADDRESS;
 
   // pUSD gets approved to the V2 exchanges and adapter for trading.
-  const pusdSpenders = [
-    CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_ADAPTER_ADDRESS,
-  ];
+  const pusdSpenders = [...PUSD_APPROVAL_TARGETS];
 
   // ERC-1155 outcome tokens approve the same exchanges/adapter as operators.
-  const erc1155Operators = [
-    CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_CTF_EXCHANGE_ADDRESS,
-    NEG_RISK_ADAPTER_ADDRESS,
-  ];
+  const erc1155Operators = [...CTF_APPROVAL_OPERATORS];
 
   const proxyAddress = deriveProxyAddressSync(msg.address);
 
@@ -1076,7 +1287,8 @@ async function ensurePusdSufficient(
   proxyAddress: string,
   requiredPusd: ethers.BigNumber,
   provider: ethers.providers.StaticJsonRpcProvider,
-  reservedPusd: ethers.BigNumber = ethers.BigNumber.from(0)
+  reservedPusd: ethers.BigNumber = ethers.BigNumber.from(0),
+  estimatedFee: ethers.BigNumber | null = null
 ): Promise<void> {
   const pusd = new ethers.Contract(
     PUSD_ADDRESS,
@@ -1102,17 +1314,13 @@ async function ensurePusdSufficient(
     ? pusdBalanceOnChain.sub(reservedPusd)
     : ethers.BigNumber.from(0);
 
-  // V2 Exchange pulls makerAmount + fees from the Safe on BUY. Wrap a small
-  // buffer above the requested amount so the post-wrap pUSD balance covers
-  // both the order amount and the platform/builder fees the Exchange
-  // collects at match time. The SDK's `adjustBuyAmountForFees` can't be
-  // relied on during preprod (the /fees/builder-fees endpoint 404s → cached
-  // as NaN → adjustment disabled).
-  const FEE_BUFFER_BPS = ethers.BigNumber.from(300); // 3%
-  const BPS_DENOMINATOR = ethers.BigNumber.from(10_000);
-  const targetPusd = requiredPusd
-    .mul(BPS_DENOMINATOR.add(FEE_BUFFER_BPS))
-    .div(BPS_DENOMINATOR);
+  // V2 Exchange pulls makerAmount + fees from the Safe on BUY. Prefer the
+  // current market fee parameters from getClobMarketInfo(); fall back to the
+  // previous 3% buffer if metadata is unavailable so order placement remains
+  // resilient to transient CLOB metadata failures.
+  const fallbackFee = estimateFallbackFeeRaw(requiredPusd);
+  const feeRequirement = estimatedFee ?? fallbackFee;
+  const targetPusd = requiredPusd.add(feeRequirement);
 
   if (pusdBalance.gte(targetPusd)) return;
 

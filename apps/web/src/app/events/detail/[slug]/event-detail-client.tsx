@@ -2,6 +2,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+import Decimal from "decimal.js";
 
 const log = createLogger("event-detail");
 
@@ -13,9 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
 import { CommentsSection } from "@/components/comments";
 import { ErrorBoundary } from "@/components/error-boundary";
+import type { TimeRange } from "@/components/market-price-chart";
 import { Navbar } from "@/components/navbar";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
 import type { Event } from "@/hooks/use-event-detail";
@@ -72,15 +73,85 @@ interface EventDetailClientProps {
   initialEvent?: Event | null;
 }
 
-// Cap list-row live quotes to keep WS subscription bounded on large events.
-const MAX_MARKETS_WITH_LIVE_QUOTES = 20;
+// Cap list-row REST quote hydration so large events do not fan out hundreds of
+// CLOB /book requests on first paint.
+const MAX_MARKETS_WITH_REST_QUOTES = 20;
 
 type BookSnapshot = {
+  market?: string;
+  asset_id?: string;
   bids: Array<{ price: string; size: string }>;
   asks: Array<{ price: string; size: string }>;
   min_order_size?: string;
   tick_size?: string;
 };
+
+type PriceHistoryPoint = {
+  t: number;
+  p: number;
+};
+
+type PriceHistoryBatchResponse = {
+  success: boolean;
+  histories: Array<{
+    tokenId: string;
+    history: PriceHistoryPoint[];
+  }>;
+};
+
+const chartTimeRangeToStartTsOffset: Record<TimeRange, number> = {
+  "1H": 60 * 60,
+  "6H": 6 * 60 * 60,
+  "1D": 24 * 60 * 60,
+  "1W": 7 * 24 * 60 * 60,
+  "1M": 30 * 24 * 60 * 60,
+  ALL: 365 * 24 * 60 * 60,
+};
+
+const chartTimeRangeToFidelity: Record<Exclude<TimeRange, "ALL">, number> = {
+  "1H": 1,
+  "6H": 1,
+  "1D": 5,
+  "1W": 30,
+  "1M": 120,
+};
+
+function computeAllRangeFidelity(spanSeconds: number): number {
+  const spanMinutes = spanSeconds / 60;
+  const raw = Math.max(1, Math.round(spanMinutes / 400));
+  const buckets = [1, 5, 15, 30, 60, 120, 240, 360, 720, 1440];
+  for (const bucket of buckets) {
+    if (raw <= bucket) return bucket;
+  }
+  return 1440;
+}
+
+function getChartRangePriceHistoryRequest(
+  timeRange: TimeRange,
+  startDate: string | undefined
+): { startTs: number; fidelity: number } {
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  if (timeRange === "ALL") {
+    const parsedStart = startDate
+      ? Math.floor(new Date(startDate).getTime() / 1000)
+      : Number.NaN;
+    const fallback = nowSec - chartTimeRangeToStartTsOffset.ALL;
+    const startTs = Number.isFinite(parsedStart)
+      ? Math.min(parsedStart, nowSec)
+      : fallback;
+
+    return {
+      startTs,
+      fidelity: computeAllRangeFidelity(Math.max(60, nowSec - startTs)),
+    };
+  }
+
+  return {
+    startTs: nowSec - chartTimeRangeToStartTsOffset[timeRange],
+    fidelity: chartTimeRangeToFidelity[timeRange],
+  };
+}
 
 async function fetchBookSnapshot(
   tokenId: string
@@ -91,12 +162,16 @@ async function fetchBookSnapshot(
     });
     if (!res.ok) return null;
     const json = (await res.json()) as {
+      market?: string;
+      asset_id?: string;
       bids?: Array<{ price: string; size: string }>;
       asks?: Array<{ price: string; size: string }>;
       min_order_size?: string;
       tick_size?: string;
     };
     return {
+      market: json.market,
+      asset_id: json.asset_id,
       bids: json.bids || [],
       asks: json.asks || [],
       min_order_size: json.min_order_size,
@@ -105,6 +180,77 @@ async function fetchBookSnapshot(
   } catch {
     return null;
   }
+}
+
+async function fetchBookSnapshots(tokenIds: string[]): Promise<BookSnapshot[]> {
+  if (tokenIds.length === 0) return [];
+
+  try {
+    const res = await fetch(`${CLOB_BASE_URL}/books?token_ids`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(tokenIds.map((token_id) => ({ token_id }))),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as Array<{
+      market?: string;
+      asset_id?: string;
+      bids?: Array<{ price: string; size: string }>;
+      asks?: Array<{ price: string; size: string }>;
+      min_order_size?: string;
+      tick_size?: string;
+    }>;
+
+    if (!Array.isArray(json)) return [];
+    return json.map((book) => ({
+      market: book.market,
+      asset_id: book.asset_id,
+      bids: book.bids || [],
+      asks: book.asks || [],
+      min_order_size: book.min_order_size,
+      tick_size: book.tick_size,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchPriceHistoryBatch(
+  tokenIds: string[],
+  startTs: number,
+  fidelity: number
+): Promise<PriceHistoryBatchResponse["histories"]> {
+  if (tokenIds.length === 0) return [];
+
+  const response = await fetch("/api/markets/price-history/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tokenIds, startTs, fidelity }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch price history");
+  }
+
+  const data = (await response.json()) as PriceHistoryBatchResponse;
+  return data.success ? data.histories : [];
+}
+
+function toDisplayPercentagePointChange(changeFraction: number): number {
+  if (!Number.isFinite(changeFraction)) return 0;
+
+  const percentagePoints = new Decimal(changeFraction).mul(100);
+  const rounded = percentagePoints
+    .toDecimalPlaces(
+      percentagePoints.abs().lt(1) ? 1 : 0,
+      Decimal.ROUND_HALF_UP
+    )
+    .toNumber();
+
+  return Object.is(rounded, -0) ? 0 : rounded;
 }
 
 // Dedicated trading-panel order book snapshot shape.
@@ -140,6 +286,7 @@ export default function EventDetailClient({
 
   const [selectedMarketId, setSelectedMarketId] = useState<string>("");
   const [selectedOutcomeIndex, setSelectedOutcomeIndex] = useState(0);
+  const [chartTimeRange, setChartTimeRange] = useState<TimeRange>("ALL");
   // Track which market has its order book expanded (null = none)
   const [expandedOrderBookMarketId, setExpandedOrderBookMarketId] = useState<
     string | null
@@ -406,6 +553,7 @@ export default function EventDetailClient({
           negRisk: boolean;
           orderMinSize: number;
           change: number;
+          hasOneDayPriceChange: boolean;
           volume: string;
           color: string;
         }>,
@@ -449,8 +597,15 @@ export default function EventDetailClient({
       const yesProbability = yesPrice
         ? Number.parseFloat((Number.parseFloat(yesPrice) * 100).toFixed(0))
         : 0;
-      // TODO: Replace with real change data from API when available
-      const change = 0;
+      // Gamma's `oneDayPriceChange` is a fraction (0.05 = +5%). The outcome
+      // table renders percentage-point moves.
+      const hasOneDayPriceChange =
+        typeof market.oneDayPriceChange === "number" &&
+        Number.isFinite(market.oneDayPriceChange);
+      const rawChange = hasOneDayPriceChange
+        ? (market.oneDayPriceChange ?? 0)
+        : 0;
+      const change = toDisplayPercentagePointChange(rawChange);
       const colors = ["orange", "blue", "purple", "green"];
 
       const rawMinSize = market.orderMinSize ?? market.order_min_size;
@@ -472,6 +627,7 @@ export default function EventDetailClient({
         negRisk: resolveNegRisk(market),
         orderMinSize,
         change,
+        hasOneDayPriceChange,
         volume: market.volume || "0",
         color: colors[idx % colors.length],
       };
@@ -537,24 +693,22 @@ export default function EventDetailClient({
     };
   }, [event, openMarkets, selectedMarketId, selectedOutcomeIndex]);
 
-  // Bound WS scope for large events:
-  // 1) top rows for inline quotes, 2) selected market, 3) expanded market.
+  // Bound WS scope to the market the user is actively inspecting/trading.
+  // Table rows get their initial BID/ASK strip from REST hydration below; the
+  // websocket takes over only after a market is selected or expanded.
   const websocketTokenIds = useMemo(() => {
     const tokenIds = new Set<string>();
 
-    for (const market of sortedMarketData.slice(
-      0,
-      MAX_MARKETS_WITH_LIVE_QUOTES
-    )) {
-      if (market.yesTokenId) {
-        tokenIds.add(market.yesTokenId);
-      }
-    }
-
-    if (selectedMarket?.yesTokenId) {
+    if (
+      (selectedMarketId || isSingleMarketEvent) &&
+      selectedMarket?.yesTokenId
+    ) {
       tokenIds.add(selectedMarket.yesTokenId);
     }
-    if (selectedMarket?.noTokenId) {
+    if (
+      (selectedMarketId || isSingleMarketEvent) &&
+      selectedMarket?.noTokenId
+    ) {
       tokenIds.add(selectedMarket.noTokenId);
     }
 
@@ -571,7 +725,13 @@ export default function EventDetailClient({
     }
 
     return Array.from(tokenIds);
-  }, [sortedMarketData, selectedMarket, expandedOrderBookMarketId]);
+  }, [
+    sortedMarketData,
+    selectedMarket,
+    selectedMarketId,
+    expandedOrderBookMarketId,
+    isSingleMarketEvent,
+  ]);
 
   // Enable price alert detection only for actively subscribed tokens.
   usePriceAlertDetection(websocketTokenIds);
@@ -598,6 +758,148 @@ export default function EventDetailClient({
     if (selectedYesTokenId) void preloadOrderBook(selectedYesTokenId);
     if (selectedNoTokenId) void preloadOrderBook(selectedNoTokenId);
   }, [selectedYesTokenId, selectedNoTokenId, preloadOrderBook]);
+
+  // Seed the outcome-table inline quotes from REST before any row is clicked.
+  // The websocket subscription below is intentionally narrower; it switches on
+  // for the market the user selects or expands.
+  const restQuoteTokenIds = useMemo(
+    () => [
+      ...new Set(
+        sortedMarketData
+          .slice(0, MAX_MARKETS_WITH_REST_QUOTES)
+          .map((market) => market.yesTokenId)
+          .filter((tokenId): tokenId is string => Boolean(tokenId))
+      ),
+    ],
+    [sortedMarketData]
+  );
+
+  const earliestCreatedAt = useMemo(
+    () =>
+      openMarkets.reduce<string | undefined>((earliest, market) => {
+        if (!market.createdAt) return earliest;
+        if (!earliest) return market.createdAt;
+        return new Date(market.createdAt) < new Date(earliest)
+          ? market.createdAt
+          : earliest;
+      }, event?.createdAt),
+    [event?.createdAt, openMarkets]
+  );
+
+  const chartRangeHistoryRequest = useMemo(
+    () => getChartRangePriceHistoryRequest(chartTimeRange, earliestCreatedAt),
+    [chartTimeRange, earliestCreatedAt]
+  );
+
+  const { data: chartRangePriceHistories } = useQuery({
+    queryKey: [
+      "priceHistory",
+      "outcome-table",
+      chartTimeRange,
+      restQuoteTokenIds,
+      chartRangeHistoryRequest.startTs,
+      chartRangeHistoryRequest.fidelity,
+    ],
+    queryFn: () =>
+      fetchPriceHistoryBatch(
+        restQuoteTokenIds,
+        chartRangeHistoryRequest.startTs,
+        chartRangeHistoryRequest.fidelity
+      ),
+    enabled: restQuoteTokenIds.length > 0,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const chartRangeChangeByTokenId = useMemo(() => {
+    const map = new Map<string, number>();
+
+    if (!chartRangePriceHistories) return map;
+
+    const currentPriceByTokenId = new Map(
+      sortedMarketData.map((market) => [
+        market.yesTokenId,
+        Number.parseFloat(market.yesPrice),
+      ])
+    );
+
+    for (const entry of chartRangePriceHistories) {
+      const history = entry.history || [];
+      const reference = history.find((point) => Number.isFinite(point.p));
+      const current = currentPriceByTokenId.get(entry.tokenId);
+
+      if (!reference || !Number.isFinite(current)) continue;
+
+      const change = toDisplayPercentagePointChange(
+        (current ?? 0) - reference.p
+      );
+      map.set(entry.tokenId, change);
+    }
+
+    return map;
+  }, [chartRangePriceHistories, sortedMarketData]);
+
+  const sortedMarketDataWithChartRangeChange = useMemo(
+    () =>
+      sortedMarketData.map((market) => {
+        const rangeChange = chartRangeChangeByTokenId.get(market.yesTokenId);
+        return { ...market, change: rangeChange ?? 0 };
+      }),
+    [sortedMarketData, chartRangeChangeByTokenId]
+  );
+
+  useEffect(() => {
+    if (restQuoteTokenIds.length === 0) return;
+
+    let cancelled = false;
+
+    const seedBooks = async () => {
+      try {
+        const books = await queryClient.fetchQuery<BookSnapshot[]>({
+          queryKey: ["orderBooks", restQuoteTokenIds],
+          queryFn: () => fetchBookSnapshots(restQuoteTokenIds),
+          staleTime: 30_000,
+        });
+
+        if (cancelled) return;
+
+        if (books.length === 0) {
+          for (const tokenId of restQuoteTokenIds) {
+            void preloadOrderBook(tokenId);
+          }
+          return;
+        }
+
+        const seededTokenIds = new Set<string>();
+        for (const book of books) {
+          const tokenId = book.asset_id;
+          if (!tokenId) continue;
+          const bids = book.bids || [];
+          const asks = book.asks || [];
+          if (bids.length === 0 && asks.length === 0) continue;
+          seededTokenIds.add(tokenId);
+          setOrderBookFromRest(tokenId, bids, asks);
+        }
+
+        for (const tokenId of restQuoteTokenIds) {
+          if (!seededTokenIds.has(tokenId)) {
+            void preloadOrderBook(tokenId);
+          }
+        }
+      } catch (error) {
+        log.error("orderbook.batch_preload_failed", { error });
+        for (const tokenId of restQuoteTokenIds) {
+          void preloadOrderBook(tokenId);
+        }
+      }
+    };
+
+    void seedBooks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [restQuoteTokenIds, queryClient, preloadOrderBook, setOrderBookFromRest]);
 
   // Pre-select market based on conditionId from URL (for "Modify Order" from sell modal)
   useEffect(() => {
@@ -844,26 +1146,37 @@ export default function EventDetailClient({
       <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
         <Navbar />
         <ChromeHeader />
-        <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+        <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 space-y-8">
+          <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground flex-wrap">
             <button
               type="button"
               onClick={() => router.push("/markets")}
               className="flex items-center gap-1 hover:text-foreground transition-colors"
             >
-              <ChevronLeft className="h-4 w-4" />
-              <span>All Markets</span>
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>Markets</span>
             </button>
           </div>
-          <Card className="text-center py-12">
-            <CardHeader>
-              <CardTitle>Event Not Found</CardTitle>
-            </CardHeader>
-            <Button onClick={() => router.push("/markets")}>
-              <ChevronLeft className="mr-2 h-4 w-4" />
-              Back to Markets
-            </Button>
-          </Card>
+
+          <div className="py-16 border-y border-border/40">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-4">
+              §&nbsp;&nbsp;Not Found
+            </p>
+            <p className="kw-editorial italic text-2xl md:text-3xl leading-snug text-foreground max-w-xl mb-3">
+              This event couldn&apos;t be loaded.
+            </p>
+            <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80 mb-8">
+              {error?.message || "Unable to load event"}
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/markets")}
+              className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border hover:decoration-foreground/60"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>Back to Markets</span>
+            </button>
+          </div>
         </main>
       </div>
     );
@@ -936,18 +1249,6 @@ export default function EventDetailClient({
     ? chartMarket?.yesTokenId
     : chartMarket?.yesTokenId;
 
-  // Find the earliest createdAt from all markets or use event createdAt
-  const earliestCreatedAt = openMarkets.reduce<string | undefined>(
-    (earliest, market) => {
-      if (!market.createdAt) return earliest;
-      if (!earliest) return market.createdAt;
-      return new Date(market.createdAt) < new Date(earliest)
-        ? market.createdAt
-        : earliest;
-    },
-    event.createdAt
-  );
-
   return (
     <div className="min-h-screen bg-background relative selection:bg-foreground/15">
       <Navbar />
@@ -1009,6 +1310,8 @@ export default function EventDetailClient({
                     outcomes={marketTitles}
                     outcomePrices={yesProb}
                     startDate={earliestCreatedAt}
+                    timeRange={chartTimeRange}
+                    onTimeRangeChange={setChartTimeRange}
                   />
                 </ErrorBoundary>
               </CardContent>
@@ -1016,8 +1319,9 @@ export default function EventDetailClient({
 
             <ErrorBoundary name="Outcomes Table">
               <OutcomesTable
-                sortedMarketData={sortedMarketData}
+                sortedMarketData={sortedMarketDataWithChartRangeChange}
                 closedMarkets={closedMarketData}
+                changeLabel={chartTimeRange}
                 isOutcomeTableExpanded={isOutcomeTableExpanded}
                 setIsOutcomeTableExpanded={setIsOutcomeTableExpanded}
                 isConnected={isConnected}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, Sparkles, Star } from "lucide-react";
+import { ChevronLeft, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
@@ -12,12 +12,6 @@ import {
 import { EventFilterBar } from "@/components/event-filter-bar";
 import { MarketSearch } from "@/components/market-search";
 import { Navbar } from "@/components/navbar";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useEventFilters } from "@/context/event-filter-context";
 import { usePaginatedEvents } from "@/hooks/use-paginated-events";
 import { PRIORITY_EVENT_CARD_COUNT } from "@/lib/lcp-images";
@@ -258,17 +252,17 @@ export function SportsContent({
 
         <div className="animate-in fade-in duration-500">
           {error && (
-            <Card className="border-destructive/50 bg-destructive/5 mb-6">
-              <CardHeader>
-                <CardTitle className="text-destructive flex items-center gap-2">
-                  <Sparkles className="h-5 w-5" />
-                  Oops! Something went wrong
-                </CardTitle>
-                <CardDescription>
-                  {error?.message || "Unable to load sports markets"}
-                </CardDescription>
-              </CardHeader>
-            </Card>
+            <div className="py-10 border-y border-destructive/30 mb-6">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mb-3">
+                §&nbsp;&nbsp;Feed Error
+              </p>
+              <p className="kw-editorial italic text-xl md:text-2xl leading-snug text-foreground max-w-xl mb-3">
+                Sports markets couldn&apos;t be loaded.
+              </p>
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
+                {error?.message || "Unable to load sports markets"}
+              </p>
+            </div>
           )}
 
           {showLoadingState && !error && (

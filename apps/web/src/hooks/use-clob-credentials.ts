@@ -2,7 +2,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useConnection, useSignTypedData } from "wagmi";
+import { useConnection, useSignTypedData, useWalletClient } from "wagmi";
 import {
   CLOB_AUTH_DOMAIN,
   CLOB_AUTH_MESSAGE,
@@ -219,6 +219,7 @@ function clearStoredReadonlyKeys(address: string): void {
 export function useClobCredentials() {
   const { address, isConnected } = useConnection();
   const signTypedData = useSignTypedData();
+  const { data: walletClient } = useWalletClient();
 
   const [credentials, setCredentials] = useState<ApiKeyCreds | null>(null);
   const [readonlyKeys, setReadonlyKeys] = useState<string[]>([]);
@@ -333,7 +334,20 @@ export function useClobCredentials() {
       throw new Error("Wallet not connected");
     }
 
-    if (typeof window === "undefined" || !window.ethereum) {
+    if (typeof window === "undefined") {
+      throw new Error("No wallet provider found");
+    }
+
+    // Resolve an EIP-1193 provider that works for ALL connector types:
+    // - Injected (MetaMask, Coinbase Wallet extension): `window.ethereum`
+    // - WalletConnect / mobile EOAs scanned via QR: viem's
+    //   `walletClient.transport`, which is the EIP-1193 transport bound to
+    //   the active wagmi connector. `window.ethereum` is undefined for
+    //   these, which is why mobile users were hitting "No wallet provider
+    //   found" before this change.
+    // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
+    const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
+    if (!eip1193Provider) {
       throw new Error("No wallet provider found");
     }
 
@@ -347,11 +361,9 @@ export function useClobCredentials() {
         import("ethers"),
       ]);
 
-      // Create ethers signer from wallet provider
-      const provider = new ethersModule.providers.Web3Provider(
-        // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-        window.ethereum as any
-      );
+      // Wrap the EIP-1193 provider in ethers — works for both injected and
+      // WalletConnect transports.
+      const provider = new ethersModule.providers.Web3Provider(eip1193Provider);
       await provider.send("eth_requestAccounts", []);
       const signer = provider.getSigner();
 
@@ -400,7 +412,7 @@ export function useClobCredentials() {
     } finally {
       setIsLoading(false);
     }
-  }, [address, deriveCredentialsViaApi]);
+  }, [address, deriveCredentialsViaApi, walletClient?.transport]);
 
   /**
    * Clear stored credentials and reset state

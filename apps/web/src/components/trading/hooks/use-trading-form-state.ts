@@ -38,6 +38,7 @@ export function useTradingFormState({
   bestAsk,
   orderBook,
   maxSlippagePercent = DEFAULT_MAX_SLIPPAGE_PERCENT,
+  conditionId,
   onOrderSuccess,
   onOrderError,
   initialSide,
@@ -55,11 +56,15 @@ export function useTradingFormState({
     hasCredentials,
     canTrade,
     updateAllowance,
-    getUsdcBalance,
     getUsdcAllowance,
   } = useClobClient();
 
-  const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
+  const {
+    proxyAddress,
+    isDeployed: hasProxyWallet,
+    usdcBalance: proxyUsdcBalance,
+    refresh: refreshProxyWallet,
+  } = useProxyWallet();
 
   // Track pending refetch timers so we can clean them up on unmount
   const pendingTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -255,14 +260,6 @@ export function useTradingFormState({
     };
   }, [side, orderType, limitPrice, marketOrderPrice, shares, slippageResult]);
 
-  const { data: onChainBalance, refetch: refetchBalance } = useQuery({
-    queryKey: ["usdcBalance", proxyAddress, hasProxyWallet],
-    queryFn: () => getUsdcBalance(proxyAddress || undefined),
-    enabled: isConnected && hasProxyWallet && !!proxyAddress,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-  });
-
   const { data: onChainAllowance, refetch: refetchAllowance } = useQuery({
     queryKey: ["usdcAllowance", proxyAddress, hasProxyWallet],
     queryFn: () => getUsdcAllowance(proxyAddress || undefined),
@@ -271,9 +268,12 @@ export function useTradingFormState({
     refetchInterval: 30_000,
   });
 
-  const usdcBalance = onChainBalance?.balance;
+  // V2 settles in pUSD; legacy USDC.e is auto-wrapped on BUY. The proxy-wallet
+  // hook reports the combined spendable balance (pUSD + USDC.e), so the form
+  // and the chrome (navbar/portfolio) read the same number.
+  const effectiveBalance =
+    isConnected && hasProxyWallet ? proxyUsdcBalance : userBalance;
   const allowance = onChainAllowance?.allowance;
-  const effectiveBalance = usdcBalance ?? userBalance;
 
   const hasInsufficientBalance =
     effectiveBalance !== undefined && calculations.total > effectiveBalance;
@@ -297,7 +297,7 @@ export function useTradingFormState({
     setIsUpdatingAllowance(true);
     try {
       await updateAllowance(new Decimal(calculations.total).toString());
-      await Promise.all([refetchBalance(), refetchAllowance()]);
+      await Promise.all([refreshProxyWallet(), refetchAllowance()]);
     } catch (err) {
       const error =
         err instanceof Error ? err : new Error("Failed to set allowance");
@@ -308,7 +308,7 @@ export function useTradingFormState({
   }, [
     updateAllowance,
     calculations.total,
-    refetchBalance,
+    refreshProxyWallet,
     refetchAllowance,
     onOrderError,
   ]);
@@ -354,6 +354,7 @@ export function useTradingFormState({
 
       const result = await createOrder({
         tokenId: selectedOutcome.tokenId,
+        conditionId,
         price: orderPrice,
         size: shares,
         amount:
@@ -454,6 +455,7 @@ export function useTradingFormState({
     shares,
     side,
     negRisk,
+    conditionId,
     createOrder,
     onOrderSuccess,
     proxyAddress,

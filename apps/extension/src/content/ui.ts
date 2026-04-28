@@ -81,6 +81,8 @@ async function resolveTokenAndShowPanel(
   marketIndex?: number
 ): Promise<void> {
   const { log } = window.KNOWW_UTILS;
+  const panelAnchor =
+    anchorElement.closest<HTMLElement>(".knoww-market-card") ?? anchorElement;
 
   let tokenId = isMultiOutcome
     ? getTokenIdForMultiOutcome(market, marketIndex ?? outcomeIndex)
@@ -141,7 +143,7 @@ async function resolveTokenAndShowPanel(
       tokenId: tokenId as string,
       negRisk: resolveNegRisk(nestedMarket, market),
       isMultiOutcome,
-      anchorElement,
+      anchorElement: panelAnchor,
       conditionId,
       yesTokenId,
       noTokenId,

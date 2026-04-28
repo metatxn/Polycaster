@@ -8,17 +8,47 @@ const log = createLogger("api.rpc.polygon");
 /**
  * Server-side RPC Proxy for Polygon
  *
- * This proxies RPC requests to Alchemy without exposing the API key to the client.
- * The API key is only accessible server-side.
+ * This proxies RPC requests through public endpoints first, with private
+ * server-side endpoints as fallbacks so API keys are not exposed to the client.
  *
  * Supports both single and batch JSON-RPC requests.
  */
 
-// Timeout for RPC requests (30 seconds)
-const RPC_TIMEOUT_MS = 30000;
+// Per-endpoint timeout. Keep this low so failed public RPCs do not hold the
+// user request open for too long while the proxy tries fallbacks.
+const PER_ENDPOINT_TIMEOUT_MS = 4000;
 
 // Maximum request body size (100KB — well above any legitimate JSON-RPC payload)
 const MAX_BODY_SIZE = 100 * 1024;
+
+// How long an endpoint stays in the "unhealthy" set after a failure before
+// we re-probe it. Short enough that a transient blip doesn't sideline the
+// fastest endpoint for long.
+const UNHEALTHY_TTL_MS = 60_000;
+
+type RpcEndpoint = {
+  name: string;
+  url: string;
+  provider: "public" | "custom" | "alchemy";
+};
+
+const PUBLIC_RPC_ENDPOINTS: RpcEndpoint[] = [
+  { name: "drpc", url: "https://polygon.drpc.org", provider: "public" },
+  { name: "polygon-rpc", url: "https://polygon-rpc.com", provider: "public" },
+  { name: "1rpc", url: "https://1rpc.io/matic", provider: "public" },
+  {
+    name: "publicnode",
+    url: "https://polygon-bor-rpc.publicnode.com",
+    provider: "public",
+  },
+  {
+    name: "onfinality",
+    url: "https://polygon.api.onfinality.io/public",
+    provider: "public",
+  },
+];
+
+const unhealthyEndpoints = new Map<string, number>();
 
 /**
  * Blocked JSON-RPC methods (denylist approach).
@@ -78,23 +108,187 @@ function getCorsHeaders(requestOrigin: string | null): Record<string, string> {
   return headers;
 }
 
-// Get the RPC URL server-side (API key is not exposed to client)
-function getServerRpcUrl(): string {
-  // Priority 1: Alchemy (best for production)
-  const alchemyKey = process.env.ALCHEMY_API_KEY;
-  if (alchemyKey) {
-    log.debug("upstream.select", { provider: "alchemy" });
-    return `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`;
-  }
+function uniqueEndpoints(endpoints: RpcEndpoint[]): RpcEndpoint[] {
+  const seen = new Set<string>();
+  return endpoints.filter((endpoint) => {
+    if (seen.has(endpoint.url)) return false;
+    seen.add(endpoint.url);
+    return true;
+  });
+}
 
-  // Priority 2: Custom RPC URL (server-side)
+// Get server-side RPC URLs in fallback order. Public endpoints are tried first;
+// Alchemy is kept last so the paid/private quota is only used as a final fallback.
+function getServerRpcEndpoints(): RpcEndpoint[] {
+  const endpoints = [...PUBLIC_RPC_ENDPOINTS];
+
   const customRpcUrl = process.env.POLYGON_RPC_URL;
   if (customRpcUrl) {
-    return customRpcUrl;
+    endpoints.push({
+      name: "custom",
+      url: customRpcUrl,
+      provider: "custom",
+    });
   }
 
-  // Priority 3: Public Polygon RPC (has strict rate limits)
-  return "https://polygon-rpc.com";
+  const alchemyKey = process.env.ALCHEMY_API_KEY;
+  if (alchemyKey) {
+    endpoints.push({
+      name: "alchemy",
+      url: `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`,
+      provider: "alchemy",
+    });
+  }
+
+  return uniqueEndpoints(endpoints);
+}
+
+function getHealthyRpcEndpoints(): RpcEndpoint[] {
+  const now = Date.now();
+  const endpoints = getServerRpcEndpoints();
+  const healthy = endpoints.filter((endpoint) => {
+    const unhealthyUntil = unhealthyEndpoints.get(endpoint.url);
+    if (!unhealthyUntil) return true;
+    if (unhealthyUntil <= now) {
+      unhealthyEndpoints.delete(endpoint.url);
+      return true;
+    }
+    return false;
+  });
+
+  return healthy.length > 0 ? healthy : endpoints;
+}
+
+function markEndpointUnhealthy(endpoint: RpcEndpoint, reason: string) {
+  unhealthyEndpoints.set(endpoint.url, Date.now() + UNHEALTHY_TTL_MS);
+  log.warn("upstream.mark_unhealthy", {
+    provider: endpoint.provider,
+    endpoint: endpoint.name,
+    reason,
+    retryAfterMs: UNHEALTHY_TTL_MS,
+  });
+}
+
+function getRpcErrorPayload(data: unknown): unknown[] {
+  const responses = Array.isArray(data) ? data : [data];
+  return responses
+    .map((response) =>
+      typeof response === "object" && response !== null && "error" in response
+        ? (response as { error: unknown }).error
+        : null
+    )
+    .filter((error): error is unknown => error !== null);
+}
+
+function isRetryableRpcError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+
+  const code = "code" in error ? (error as { code: unknown }).code : undefined;
+  const message =
+    "message" in error ? (error as { message: unknown }).message : undefined;
+  const normalizedMessage =
+    typeof message === "string" ? message.toLowerCase() : "";
+
+  if (code === -32601) return true;
+
+  return [
+    "rate limit",
+    "too many",
+    "timeout",
+    "timed out",
+    "temporar",
+    "unavailable",
+    "overloaded",
+    "capacity",
+    "limit exceeded",
+    "missing trie node",
+    "not supported",
+    "not available",
+    "pruned",
+  ].some((needle) => normalizedMessage.includes(needle));
+}
+
+function isRetryableRpcResponse(data: unknown): boolean {
+  const responses = Array.isArray(data) ? data : [data];
+  if (responses.length === 0) return false;
+
+  const errors = getRpcErrorPayload(data);
+  return (
+    errors.length === responses.length && errors.every(isRetryableRpcError)
+  );
+}
+
+async function fetchFromEndpoint(
+  endpoint: RpcEndpoint,
+  body: unknown
+): Promise<{ data: unknown; status: number } | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    PER_ENDPOINT_TIMEOUT_MS
+  );
+
+  try {
+    const response = await fetch(endpoint.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      log.warn("upstream.non2xx", {
+        provider: endpoint.provider,
+        endpoint: endpoint.name,
+        status: response.status,
+        statusText: response.statusText,
+      });
+      markEndpointUnhealthy(endpoint, `http_${response.status}`);
+      return null;
+    }
+
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (error) {
+      log.warn("upstream.invalid_json", {
+        provider: endpoint.provider,
+        endpoint: endpoint.name,
+        error,
+      });
+      markEndpointUnhealthy(endpoint, "invalid_json");
+      return null;
+    }
+
+    if (isRetryableRpcResponse(data)) {
+      log.warn("upstream.retryable_rpc_error", {
+        provider: endpoint.provider,
+        endpoint: endpoint.name,
+      });
+      markEndpointUnhealthy(endpoint, "retryable_rpc_error");
+      return null;
+    }
+
+    log.debug("upstream.success", {
+      provider: endpoint.provider,
+      endpoint: endpoint.name,
+    });
+    return { data, status: response.status };
+  } catch (error) {
+    const isAbortError = error instanceof Error && error.name === "AbortError";
+    log.warn(isAbortError ? "upstream.timeout" : "upstream.fetch_failed", {
+      provider: endpoint.provider,
+      endpoint: endpoint.name,
+      timeoutMs: PER_ENDPOINT_TIMEOUT_MS,
+      error,
+    });
+    markEndpointUnhealthy(endpoint, isAbortError ? "timeout" : "fetch_failed");
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -108,13 +302,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const corsHeaders = getCorsHeaders(requestOrigin);
+
   // Rate limit: 30 requests per minute
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 30,
   });
-  if (rateLimitResponse) return rateLimitResponse;
-
-  const corsHeaders = getCorsHeaders(requestOrigin);
+  if (rateLimitResponse) {
+    for (const [key, value] of Object.entries(corsHeaders)) {
+      rateLimitResponse.headers.set(key, value);
+    }
+    return rateLimitResponse;
+  }
 
   // Check content-length to reject oversized payloads early
   const contentLength = request.headers.get("content-length");
@@ -179,50 +378,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const rpcUrl = getServerRpcUrl();
+    const endpoints = getHealthyRpcEndpoints();
+    log.debug("upstream.fallback_order", {
+      endpoints: endpoints.map((endpoint) => ({
+        provider: endpoint.provider,
+        endpoint: endpoint.name,
+      })),
+    });
 
-    // Set up AbortController with timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
-
-    let response: Response;
-    try {
-      // Forward the request to the actual RPC endpoint
-      response = await fetch(rpcUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (fetchError) {
-      // Handle abort/timeout errors
-      if (fetchError instanceof Error && fetchError.name === "AbortError") {
-        log.error("upstream.timeout", { timeoutMs: RPC_TIMEOUT_MS });
-        return NextResponse.json(
-          { error: "RPC request timed out" },
-          { status: 504, headers: corsHeaders }
-        );
+    for (const endpoint of endpoints) {
+      const result = await fetchFromEndpoint(endpoint, body);
+      if (result) {
+        return NextResponse.json(result.data, {
+          status: result.status,
+          headers: corsHeaders,
+        });
       }
-      throw fetchError; // Re-throw other errors to be caught by outer catch
-    } finally {
-      clearTimeout(timeoutId);
     }
 
-    if (!response.ok) {
-      log.error("upstream.non2xx", {
-        status: response.status,
-        statusText: response.statusText,
-      });
-      return NextResponse.json(
-        { error: `RPC request failed: ${response.statusText}` },
-        { status: response.status, headers: corsHeaders }
-      );
-    }
-
-    const data = await response.json();
-    return NextResponse.json(data, { headers: corsHeaders });
+    log.error("upstream.all_failed", {
+      attempted: endpoints.map((endpoint) => ({
+        provider: endpoint.provider,
+        endpoint: endpoint.name,
+      })),
+    });
+    return NextResponse.json(
+      { error: "RPC upstream unavailable" },
+      { status: 502, headers: corsHeaders }
+    );
   } catch (error) {
     log.error("proxy.failed", { error });
     return NextResponse.json(

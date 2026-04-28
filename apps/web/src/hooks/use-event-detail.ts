@@ -38,6 +38,8 @@ interface Market {
   createdAt?: string;
   /** Whether this is a negative risk market */
   negRisk?: boolean;
+  /** 24h price change as a fraction (Gamma `oneDayPriceChange`, e.g. 0.05 = +5%). */
+  oneDayPriceChange?: number;
 }
 
 export type Event = {
@@ -77,7 +79,10 @@ async function fetchEventDetail(
 ): Promise<Event | null> {
   if (!slugOrId) return null;
 
-  const response = await fetch(`/api/events/${slugOrId}`);
+  const response = await fetch(
+    `/api/events/${encodeURIComponent(slugOrId)}?fresh=1`,
+    { cache: "no-store" }
+  );
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -114,8 +119,9 @@ export function useEventDetail(
     refetchOnWindowFocus: false,
     // Use server-fetched data as initial data to eliminate loading state
     initialData: initialData ?? undefined,
-    // Tell TanStack Query when the initial data was fetched so staleTime is computed correctly
-    // Without this, initialData is treated as fetched at epoch (time 0), causing immediate refetch
-    initialDataUpdatedAt: initialData ? Date.now() : undefined,
+    // Server initial data is useful for instant paint, but event market fields
+    // like oneDayPriceChange move quickly. Mark it stale so the client refreshes
+    // volatile 24H/pricing fields immediately after hydration.
+    initialDataUpdatedAt: initialData ? 0 : undefined,
   });
 }

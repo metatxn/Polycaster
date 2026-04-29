@@ -264,8 +264,10 @@ export function useTradingFormState({
     queryKey: ["usdcAllowance", proxyAddress, hasProxyWallet],
     queryFn: () => getUsdcAllowance(proxyAddress || undefined),
     enabled: isConnected && hasProxyWallet && !!proxyAddress,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    // Allowance only changes when we explicitly update it. Polling every
+    // trading form mount creates steady Polygon RPC pressure for no benefit.
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   // V2 settles in pUSD; legacy USDC.e is auto-wrapped on BUY. The proxy-wallet

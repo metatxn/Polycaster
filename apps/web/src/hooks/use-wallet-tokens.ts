@@ -276,7 +276,7 @@ export interface UseWalletTokensOptions {
  * React Query handles:
  * - Request deduplication (multiple components calling this hook share one request)
  * - Automatic caching (data fetched once, used everywhere)
- * - Automatic refetch on window focus
+ * - Manual refresh when the user needs a fresh balance
  * - Built-in error retry logic
  * - No manual debouncing needed (React Query handles it)
  *
@@ -302,8 +302,8 @@ export function useWalletTokens(options?: UseWalletTokensOptions) {
       return fetchWalletTokens(address, getPrice);
     },
     enabled: enabled && !!address && isConnected,
-    staleTime: 30 * 1000, // 30 seconds - balances can change frequently
-    refetchInterval: 60 * 1000, // Refetch every minute
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
     // React Query automatically deduplicates requests, so no manual debouncing needed
   });
 

@@ -210,9 +210,12 @@ export async function GET(request: NextRequest) {
       .filter((t) => t.side === "SELL")
       .reduce((sum, t) => sum + (t.usdcSize || 0), 0);
 
-    // Transform trades for frontend
-    const transformedTrades = data.map((t) => ({
-      id: t.transactionHash,
+    // Transform trades for frontend.
+    // A single tx hash can produce multiple activity rows (e.g., a REDEEM
+    // emits one row per outcome side), so we compose a stable per-row id from
+    // the hash plus the differentiating fields.
+    const transformedTrades = data.map((t, index) => ({
+      id: `${t.transactionHash}-${t.asset ?? ""}-${t.outcomeIndex ?? ""}-${t.side ?? ""}-${t.type}-${index}`,
       timestamp: new Date(t.timestamp * 1000).toISOString(), // Convert Unix timestamp to ISO
       timestampUnix: t.timestamp,
       type: t.type,

@@ -70,10 +70,12 @@ export function useProxyWallet() {
       return fetchWalletData(address);
     },
     enabled: !!address && isConnected,
-    // Shorter stale time for more responsive balance updates after transactions
-    staleTime: 10000, // 10 seconds
-    // Refetch in background to keep balance fresh
-    refetchInterval: 15000, // 15 seconds
+    // Proxy wallet data is shared by navbar, trading forms, portfolio chrome,
+    // onboarding, etc. Polling here multiplies RPC traffic because each
+    // mounted observer schedules its own interval. Balance-changing actions
+    // already call `refresh()`, so keep this warm without background polling.
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   /**

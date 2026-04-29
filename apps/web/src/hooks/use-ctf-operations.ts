@@ -29,6 +29,7 @@ import {
   PUSD_DECIMALS,
 } from "@/constants/contracts";
 import { executeViaRelayer } from "@/lib/relayer-client";
+import { useTradingWalletMode } from "./use-trading-wallet-mode";
 
 // ============================================================================
 // Types
@@ -97,6 +98,7 @@ function parseUserFriendlyError(errorMessage: string): string {
 export function useCtfOperations() {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
+  const { isEoaMode } = useTradingWalletMode();
 
   const [state, setState] = useState<CTFOperationState>({
     isLoading: false,
@@ -137,6 +139,20 @@ export function useCtfOperations() {
         args: [PUSD_CTF_APPROVAL_TARGET as `0x${string}`, requiredAmount],
       });
 
+      if (isEoaMode) {
+        const { polygon } = await import("viem/chains");
+        const hash = await walletClient.writeContract({
+          account: address as `0x${string}`,
+          chain: polygon,
+          address: CONTRACTS.PUSD,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [PUSD_CTF_APPROVAL_TARGET as `0x${string}`, requiredAmount],
+        });
+        await publicClient.waitForTransactionReceipt({ hash });
+        return;
+      }
+
       await executeViaRelayer(walletClient, address as `0x${string}`, [
         {
           to: CONTRACTS.PUSD,
@@ -145,7 +161,7 @@ export function useCtfOperations() {
         },
       ]);
     },
-    [walletClient, address]
+    [walletClient, address, isEoaMode]
   );
 
   /**
@@ -161,6 +177,21 @@ export function useCtfOperations() {
       try {
         if (!walletClient || !address) {
           throw new Error("Wallet not connected");
+        }
+
+        if (isEoaMode) {
+          const { polygon } = await import("viem/chains");
+          const { getPublicClient } = await import("@/lib/rpc");
+          const hash = await walletClient.sendTransaction({
+            account: address as `0x${string}`,
+            chain: polygon,
+            to: CTF_ADDRESS as `0x${string}`,
+            data: encodedData,
+            value: BigInt(0),
+          });
+          await getPublicClient().waitForTransactionReceipt({ hash });
+          setState({ isLoading: false, error: null, txHash: hash });
+          return { success: true, txHash: hash };
         }
 
         const result = await executeViaRelayer(
@@ -187,7 +218,7 @@ export function useCtfOperations() {
         return { success: false, error: errorMessage };
       }
     },
-    [walletClient, address]
+    [walletClient, address, isEoaMode]
   );
 
   /**

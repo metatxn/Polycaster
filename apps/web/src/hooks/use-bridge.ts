@@ -10,6 +10,14 @@ import { useProxyWallet } from "./use-proxy-wallet";
  */
 const BRIDGE_API_URL = "https://bridge.polymarket.com";
 
+function getBridgeHeaders(extraHeaders?: HeadersInit): HeadersInit {
+  const builderCode = process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
+  return {
+    ...(extraHeaders ?? {}),
+    ...(builderCode ? { "X-Builder-Code": builderCode } : {}),
+  };
+}
+
 /**
  * Supported asset from the Bridge API
  */
@@ -204,7 +212,9 @@ export const BRIDGE_QUERY_KEYS = {
  * Fetch supported assets from Bridge API
  */
 async function fetchSupportedAssets(): Promise<SupportedAsset[]> {
-  const response = await fetch(`${BRIDGE_API_URL}/supported-assets`);
+  const response = await fetch(`${BRIDGE_API_URL}/supported-assets`, {
+    headers: getBridgeHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch supported assets: ${response.status}`);
@@ -221,9 +231,9 @@ async function fetchSupportedAssets(): Promise<SupportedAsset[]> {
 async function fetchQuote(params: QuoteRequest): Promise<QuoteResponse> {
   const response = await fetch(`${BRIDGE_API_URL}/quote`, {
     method: "POST",
-    headers: {
+    headers: getBridgeHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify(params),
   });
 
@@ -247,7 +257,10 @@ async function fetchDepositStatus(
   depositAddress: string
 ): Promise<DepositTransaction[]> {
   const response = await fetch(
-    `${BRIDGE_API_URL}/status/${encodeURIComponent(depositAddress)}`
+    `${BRIDGE_API_URL}/status/${encodeURIComponent(depositAddress)}`,
+    {
+      headers: getBridgeHeaders(),
+    }
   );
 
   if (!response.ok) {
@@ -274,9 +287,9 @@ async function fetchWithdrawalAddresses(
 ): Promise<WithdrawalAddressesResponse> {
   const response = await fetch(`${BRIDGE_API_URL}/withdraw`, {
     method: "POST",
-    headers: {
+    headers: getBridgeHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify(params),
   });
 
@@ -353,9 +366,9 @@ async function createDepositAddresses(
 ): Promise<DepositAddress[]> {
   const response = await fetch(`${BRIDGE_API_URL}/deposit`, {
     method: "POST",
-    headers: {
+    headers: getBridgeHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({
       address: walletAddress,
     }),

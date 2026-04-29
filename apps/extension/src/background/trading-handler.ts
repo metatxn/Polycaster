@@ -47,6 +47,7 @@ import type {
   TradingRelayerApproveMessage,
   TradingSplitPositionMessage,
   TradingSuccessResponse,
+  TradingWalletMode,
 } from "../types/chrome-messages";
 import { BridgeSigner } from "./bridge-signer";
 import { deployProxyWallet, executeViaRelayer } from "./relayer-client";
@@ -106,6 +107,34 @@ function parseApprovalAmount(amount?: string): ethers.BigNumber {
     throw new Error("Approval amount must be greater than 0");
   }
   return parsePusdUnits(decimal, Decimal.ROUND_DOWN);
+}
+
+function getWalletMode(mode?: TradingWalletMode): TradingWalletMode {
+  return mode === "eoa" ? "eoa" : "safe";
+}
+
+function getSignatureType(mode?: TradingWalletMode): number {
+  return getWalletMode(mode) === "eoa"
+    ? SIGNATURE_TYPES.EOA
+    : SIGNATURE_TYPES.POLY_GNOSIS_SAFE;
+}
+
+async function executeDirectTransactions(
+  signer: BridgeSigner,
+  transactions: Array<{ to: string; data: string; value?: string }>
+): Promise<{ txHash: string }> {
+  if (!signer.provider) throw new Error("No provider to confirm transaction");
+  let lastHash = "";
+  for (const tx of transactions) {
+    const response = await signer.sendTransaction({
+      to: tx.to,
+      data: tx.data,
+      value: tx.value ? ethers.BigNumber.from(tx.value) : undefined,
+    });
+    lastHash = response.hash;
+    await signer.provider.waitForTransaction(response.hash, 1, 180_000);
+  }
+  return { txHash: lastHash };
 }
 
 function estimateFallbackFeeRaw(amount: ethers.BigNumber): ethers.BigNumber {
@@ -474,14 +503,17 @@ async function handlePlaceOrder(
   };
 
   const builderCode = process.env.POLY_BUILDER_CODE;
+  const signatureType: number = getSignatureType(msg.walletMode);
+  const funderAddress =
+    getWalletMode(msg.walletMode) === "eoa" ? msg.address : msg.proxyAddress;
 
   const client = new ClobClient({
     host: CLOB_HOST,
     chain: POLYGON_CHAIN_ID,
     signer,
     creds,
-    signatureType: SIGNATURE_TYPES.POLY_GNOSIS_SAFE,
-    funderAddress: msg.proxyAddress,
+    signatureType,
+    funderAddress,
     ...(builderCode ? { builderConfig: { builderCode } } : {}),
   });
 
@@ -539,11 +571,12 @@ async function handlePlaceOrder(
 
     await ensurePusdSufficient(
       signer,
-      msg.proxyAddress,
+      funderAddress,
       requiredPusd,
       provider,
       reservedPusd,
-      estimatedFeeRaw
+      estimatedFeeRaw,
+      msg.walletMode
     );
 
     const pusd = new ethers.Contract(
@@ -555,7 +588,7 @@ async function handlePlaceOrder(
       ? NEG_RISK_CTF_EXCHANGE_ADDRESS
       : CTF_EXCHANGE_ADDRESS;
     const allowance: ethers.BigNumber = await pusd.allowance(
-      msg.proxyAddress,
+      funderAddress,
       exchangeAddress
     );
     if (allowance.lt(requiredCollateralPusd)) {
@@ -569,13 +602,16 @@ async function handlePlaceOrder(
     await clobUpdateBalanceAllowance(
       msg.address,
       msg.credentials,
-      "COLLATERAL"
+      "COLLATERAL",
+      undefined,
+      signatureType
     );
     await clobUpdateBalanceAllowance(
       msg.address,
       msg.credentials,
       "CONDITIONAL",
-      msg.tokenId
+      msg.tokenId,
+      signatureType
     );
     logInfo("trading.balance-updated", {
       tokenId: msg.tokenId,
@@ -958,13 +994,14 @@ async function clobUpdateBalanceAllowance(
   address: string,
   creds: ClobApiCredentials,
   assetType: string,
-  tokenId?: string
+  tokenId?: string,
+  signatureType: number = SIGNATURE_TYPES.POLY_GNOSIS_SAFE
 ): Promise<void> {
   const endpoint = "/balance-allowance/update";
   const headers = await buildHmacHeaders(address, creds, "GET", endpoint);
   const params = new URLSearchParams({
     asset_type: assetType,
-    signature_type: String(SIGNATURE_TYPES.POLY_GNOSIS_SAFE),
+    signature_type: String(signatureType),
   });
   if (tokenId) params.set("token_id", tokenId);
   const res = await fetch(`${CLOB_HOST}${endpoint}?${params}`, {
@@ -981,18 +1018,27 @@ async function syncBalancesAfterCTF(msg: {
   conditionId: string;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   proxyAddress?: string;
+  walletMode?: TradingWalletMode;
   yesTokenId?: string;
   noTokenId?: string;
 }): Promise<void> {
   if (!msg.credentials || !msg.proxyAddress) return;
 
-  await clobUpdateBalanceAllowance(msg.address, msg.credentials, "COLLATERAL");
+  const signatureType: number = getSignatureType(msg.walletMode);
+  await clobUpdateBalanceAllowance(
+    msg.address,
+    msg.credentials,
+    "COLLATERAL",
+    undefined,
+    signatureType
+  );
   if (msg.yesTokenId) {
     await clobUpdateBalanceAllowance(
       msg.address,
       msg.credentials,
       "CONDITIONAL",
-      msg.yesTokenId
+      msg.yesTokenId,
+      signatureType
     );
   }
   if (msg.noTokenId) {
@@ -1000,7 +1046,8 @@ async function syncBalancesAfterCTF(msg: {
       msg.address,
       msg.credentials,
       "CONDITIONAL",
-      msg.noTokenId
+      msg.noTokenId,
+      signatureType
     );
   }
   logInfo("trading.ctf-balance-synced", {
@@ -1013,7 +1060,8 @@ async function ensureCtfCollateralApproval(
   signer: BridgeSigner,
   proxyAddress: string,
   amountWei: ethers.BigNumber,
-  provider: ethers.providers.StaticJsonRpcProvider
+  provider: ethers.providers.StaticJsonRpcProvider,
+  walletMode?: TradingWalletMode
 ): Promise<void> {
   const pusd = new ethers.Contract(PUSD_ADDRESS, ERC20_ALLOWANCE_ABI, provider);
   const allowance: ethers.BigNumber = await pusd.allowance(
@@ -1028,9 +1076,12 @@ async function ensureCtfCollateralApproval(
     amountWei,
   ]);
 
-  await executeViaRelayer(signer, [
-    { to: PUSD_ADDRESS, data: approveData, value: "0" },
-  ]);
+  const txns = [{ to: PUSD_ADDRESS, data: approveData, value: "0" }];
+  if (getWalletMode(walletMode) === "eoa") {
+    await executeDirectTransactions(signer, txns);
+  } else {
+    await executeViaRelayer(signer, txns);
+  }
 }
 
 // ── Split Position (pUSD → YES + NO) via Relayer (gasless) ──
@@ -1050,8 +1101,17 @@ async function handleSplitPosition(
 
   const ctfIface = new ethers.utils.Interface(CTF_SPLIT_ABI);
   const amountWei = ethers.utils.parseUnits(String(msg.amount), 6);
-  const proxyAddress = msg.proxyAddress ?? deriveProxyAddressSync(msg.address);
-  await ensureCtfCollateralApproval(signer, proxyAddress, amountWei, provider);
+  const proxyAddress =
+    getWalletMode(msg.walletMode) === "eoa"
+      ? msg.address
+      : (msg.proxyAddress ?? deriveProxyAddressSync(msg.address));
+  await ensureCtfCollateralApproval(
+    signer,
+    proxyAddress,
+    amountWei,
+    provider,
+    msg.walletMode
+  );
 
   const calldata = ctfIface.encodeFunctionData("splitPosition", [
     PUSD_ADDRESS,
@@ -1061,9 +1121,11 @@ async function handleSplitPosition(
     amountWei,
   ]);
 
-  const result = await executeViaRelayer(signer, [
-    { to: CTF_ADDRESS, data: calldata, value: "0" },
-  ]);
+  const txns = [{ to: CTF_ADDRESS, data: calldata, value: "0" }];
+  const result =
+    getWalletMode(msg.walletMode) === "eoa"
+      ? await executeDirectTransactions(signer, txns)
+      : await executeViaRelayer(signer, txns);
 
   syncBalancesAfterCTF(msg).catch((e) =>
     logWarn("trading.ctf-post-sync-failed", {
@@ -1100,9 +1162,11 @@ async function handleMergePositions(
     amountWei,
   ]);
 
-  const result = await executeViaRelayer(signer, [
-    { to: CTF_ADDRESS, data: calldata, value: "0" },
-  ]);
+  const txns = [{ to: CTF_ADDRESS, data: calldata, value: "0" }];
+  const result =
+    getWalletMode(msg.walletMode) === "eoa"
+      ? await executeDirectTransactions(signer, txns)
+      : await executeViaRelayer(signer, txns);
 
   syncBalancesAfterCTF(msg).catch((e) =>
     logWarn("trading.ctf-post-sync-failed", {
@@ -1186,7 +1250,9 @@ async function handleRelayerApprove(
   // ERC-1155 outcome tokens approve the same exchanges/adapter as operators.
   const erc1155Operators = [...CTF_APPROVAL_OPERATORS];
 
-  const proxyAddress = deriveProxyAddressSync(msg.address);
+  const walletMode = getWalletMode(msg.walletMode);
+  const proxyAddress =
+    walletMode === "eoa" ? msg.address : deriveProxyAddressSync(msg.address);
 
   let needsUsdc = false;
   const needsPusd: string[] = [];
@@ -1273,8 +1339,11 @@ async function handleRelayerApprove(
     });
   }
 
-  logInfo("trading.relayer-approve.submit", { txnCount: txns.length });
-  const result = await executeViaRelayer(signer, txns);
+  logInfo("trading.approve.submit", { txnCount: txns.length, walletMode });
+  const result =
+    walletMode === "eoa"
+      ? await executeDirectTransactions(signer, txns)
+      : await executeViaRelayer(signer, txns);
   return ok({ txHash: result.txHash, success: true });
 }
 
@@ -1288,7 +1357,8 @@ async function ensurePusdSufficient(
   requiredPusd: ethers.BigNumber,
   provider: ethers.providers.StaticJsonRpcProvider,
   reservedPusd: ethers.BigNumber = ethers.BigNumber.from(0),
-  estimatedFee: ethers.BigNumber | null = null
+  estimatedFee: ethers.BigNumber | null = null,
+  walletMode?: TradingWalletMode
 ): Promise<void> {
   const pusd = new ethers.Contract(
     PUSD_ADDRESS,
@@ -1353,10 +1423,16 @@ async function ensurePusdSufficient(
     wrapAmount,
   ]);
 
-  await executeViaRelayer(signer, [
+  const txns = [
     { to: USDC_E_ADDRESS, data: approveCalldata, value: "0" },
     { to: COLLATERAL_ONRAMP_ADDRESS, data: wrapCalldata, value: "0" },
-  ]);
+  ];
+
+  if (getWalletMode(walletMode) === "eoa") {
+    await executeDirectTransactions(signer, txns);
+  } else {
+    await executeViaRelayer(signer, txns);
+  }
 
   logInfo("trading.auto-wrap", { wrapped: wrapAmount.toString() });
 }

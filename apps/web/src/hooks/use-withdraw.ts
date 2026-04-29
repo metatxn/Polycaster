@@ -339,6 +339,7 @@ export function useWithdraw() {
     proxyAddress,
     usdcBalance,
     refresh: refreshBalance,
+    isEoaMode,
   } = useProxyWallet();
   const {
     getWithdrawalAddresses,
@@ -550,6 +551,29 @@ export function useWithdraw() {
     }
 
     setState("submitting");
+
+    if (isEoaMode) {
+      const { polygon } = await import("viem/chains");
+      const { getPublicClient } = await import("@/lib/rpc");
+      let lastHash: `0x${string}` | null = null;
+      for (const tx of transactions) {
+        const hash = await walletClient.sendTransaction({
+          account: address as `0x${string}`,
+          chain: polygon,
+          to: tx.to as `0x${string}`,
+          data: tx.data as `0x${string}`,
+          value: BigInt(tx.value || "0"),
+        });
+        lastHash = hash;
+        await getPublicClient().waitForTransactionReceipt({ hash });
+      }
+
+      if (!lastHash) throw new Error("No withdrawal transaction submitted");
+      log.info("tx.confirmed", { transactionHash: lastHash });
+      setState("confirmed");
+      await refreshBalance();
+      return { success: true, transactionHash: lastHash };
+    }
 
     const result = await executeViaRelayer(
       walletClient,

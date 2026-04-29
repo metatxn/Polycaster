@@ -35,8 +35,10 @@ import {
 // Shared RPC utilities
 import {
   clearDeploymentCache,
+  getPublicClient,
   checkIsDeployed as rpcCheckIsDeployed,
 } from "@/lib/rpc";
+import { useTradingWalletMode } from "./use-trading-wallet-mode";
 
 const POLYMARKET_RELAYER_URL = RELAYER_API_URL;
 const CHAIN_ID = POLYGON_CHAIN_ID;
@@ -76,6 +78,7 @@ function normalizeApprovalAmount(amount?: string): string {
 export function useRelayerClient() {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
+  const { mode, isEoaMode } = useTradingWalletMode();
 
   const [state, setState] = useState<RelayerClientState>({
     isInitialized: false,
@@ -97,13 +100,14 @@ export function useRelayerClient() {
    */
   const deriveSafeAddress = useCallback(async (): Promise<string | null> => {
     if (!address) return null;
+    if (isEoaMode) return address;
     try {
       return derivePolymarketSafe(address as `0x${string}`);
     } catch (err) {
       log.warn("derive.failed", err);
       return null;
     }
-  }, [address]);
+  }, [address, isEoaMode]);
 
   /**
    * Deploy a Safe wallet for the user (gasless)
@@ -114,6 +118,24 @@ export function useRelayerClient() {
     if (!walletClient || !address) {
       return { success: false, error: "Wallet not connected" };
     }
+
+    if (isEoaMode) {
+      setState((prev) => ({
+        ...prev,
+        isInitialized: true,
+        isLoading: false,
+        error: null,
+        proxyAddress: address,
+        hasDeployedSafe: true,
+      }));
+      return {
+        success: true,
+        transactionHash: "",
+        proxyAddress: address,
+        alreadyDeployed: true,
+      };
+    }
+
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -170,7 +192,7 @@ export function useRelayerClient() {
       }));
       return { success: false, error: errorMessage };
     }
-  }, [walletClient, address]);
+  }, [walletClient, address, isEoaMode]);
 
   /**
    * Set all token approvals for V2 trading (gasless)
@@ -203,6 +225,7 @@ export function useRelayerClient() {
 
       try {
         const { encodeFunctionData, parseUnits } = await import("viem");
+        const { polygon } = await import("viem/chains");
         const { checkAllApprovals } = await import("@/lib/approvals");
         const normalizedApprovalAmount =
           normalizeApprovalAmount(approvalAmount);
@@ -219,7 +242,9 @@ export function useRelayerClient() {
           );
         }
 
-        const isDeployed = await getDeployed(expectedSafe as `0x${string}`);
+        const isDeployed = isEoaMode
+          ? true
+          : await getDeployed(expectedSafe as `0x${string}`);
         log.debug("approvals.safe_check", { expectedSafe, isDeployed });
 
         // Check if approvals are already set
@@ -235,6 +260,89 @@ export function useRelayerClient() {
             transactionHash: "",
             message: "All approvals already set",
             alreadyApproved: true,
+          };
+        }
+
+        if (isEoaMode) {
+          const publicClient = getPublicClient();
+          const { erc20Abi } = await import("viem");
+          const erc1155ApprovalAbi = [
+            {
+              name: "setApprovalForAll",
+              type: "function",
+              inputs: [
+                { name: "operator", type: "address" },
+                { name: "approved", type: "bool" },
+              ],
+              outputs: [],
+            },
+          ] as const;
+
+          const txHashes: `0x${string}`[] = [];
+          const writeErc20Approval = async (
+            token: `0x${string}`,
+            spender: `0x${string}`
+          ) => {
+            const hash = await walletClient.writeContract({
+              account: address as `0x${string}`,
+              chain: polygon,
+              address: token,
+              abi: erc20Abi,
+              functionName: "approve",
+              args: [spender, approvalAmountRaw],
+            });
+            txHashes.push(hash);
+            await publicClient.waitForTransactionReceipt({ hash });
+          };
+          const writeErc1155Approval = async (operator: `0x${string}`) => {
+            const hash = await walletClient.writeContract({
+              account: address as `0x${string}`,
+              chain: polygon,
+              address: CONTRACTS.CTF,
+              abi: erc1155ApprovalAbi,
+              functionName: "setApprovalForAll",
+              args: [operator, true],
+            });
+            txHashes.push(hash);
+            await publicClient.waitForTransactionReceipt({ hash });
+          };
+
+          if (!approvalStatus.pusdCtfExchange) {
+            await writeErc20Approval(CONTRACTS.PUSD, CONTRACTS.CTF_EXCHANGE);
+          }
+          if (!approvalStatus.pusdNegRiskExchange) {
+            await writeErc20Approval(
+              CONTRACTS.PUSD,
+              CONTRACTS.NEG_RISK_CTF_EXCHANGE
+            );
+          }
+          if (!approvalStatus.pusdNegRiskAdapter) {
+            await writeErc20Approval(
+              CONTRACTS.PUSD,
+              CONTRACTS.NEG_RISK_ADAPTER
+            );
+          }
+          if (!approvalStatus.usdcOnramp) {
+            await writeErc20Approval(
+              CONTRACTS.USDC_E,
+              CONTRACTS.COLLATERAL_ONRAMP
+            );
+          }
+          if (!approvalStatus.ctfExchangeApproval) {
+            await writeErc1155Approval(CONTRACTS.CTF_EXCHANGE);
+          }
+          if (!approvalStatus.ctfNegRiskExchangeApproval) {
+            await writeErc1155Approval(CONTRACTS.NEG_RISK_CTF_EXCHANGE);
+          }
+          if (!approvalStatus.ctfNegRiskAdapterApproval) {
+            await writeErc1155Approval(CONTRACTS.NEG_RISK_ADAPTER);
+          }
+
+          setState((prev) => ({ ...prev, isLoading: false }));
+          return {
+            success: true,
+            transactionHash: txHashes.at(-1) ?? "",
+            transactionHashes: txHashes,
           };
         }
 
@@ -379,7 +487,7 @@ export function useRelayerClient() {
         return { success: false, error: errorMessage };
       }
     },
-    [walletClient, address, deriveSafeAddress]
+    [walletClient, address, deriveSafeAddress, isEoaMode]
   );
 
   /**
@@ -427,6 +535,17 @@ export function useRelayerClient() {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       try {
+        if (isEoaMode) {
+          setState((prev) => ({
+            ...prev,
+            isLoading: false,
+            isInitialized: true,
+            hasDeployedSafe: true,
+            proxyAddress: address ?? null,
+          }));
+          return;
+        }
+
         // Derive the expected Safe address
         const derivedAddress = await deriveSafeAddress();
 
@@ -472,7 +591,7 @@ export function useRelayerClient() {
         }));
       }
     },
-    [address, deriveSafeAddress, checkIsDeployed]
+    [address, deriveSafeAddress, checkIsDeployed, isEoaMode]
   );
 
   /**
@@ -481,11 +600,11 @@ export function useRelayerClient() {
   const forceCheckSafeDeployment = useCallback(async () => {
     // Clear the deployment cache for this address
     const derivedAddress = await deriveSafeAddress();
-    if (derivedAddress) {
+    if (derivedAddress && mode === "safe") {
       clearDeploymentCache(derivedAddress);
     }
     return checkSafeDeployment({ force: true });
-  }, [deriveSafeAddress, checkSafeDeployment]);
+  }, [deriveSafeAddress, checkSafeDeployment, mode]);
 
   /**
    * Full onboarding flow:

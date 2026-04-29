@@ -1065,6 +1065,50 @@ function formatTradingPanelErrorMessage(
   return formatTradingErrorLine(message);
 }
 
+function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
+  const wrap = el("div", "knoww-tp-wallet-mode");
+  const title = el("div", "knoww-tp-wallet-mode-title", "Trading wallet");
+  wrap.appendChild(title);
+
+  const options = el("div", "knoww-tp-wallet-mode-options");
+  const modes: Array<{
+    mode: TradingContext["walletMode"];
+    label: string;
+    desc: string;
+  }> = [
+    {
+      mode: "safe",
+      label: "Safe",
+      desc: "Gasless setup through Polymarket relayer.",
+    },
+    {
+      mode: "eoa",
+      label: "EOA",
+      desc: "Trade directly from this wallet. Requires POL for gas.",
+    },
+  ];
+
+  for (const item of modes) {
+    const btn = el(
+      "button",
+      `knoww-tp-wallet-mode-option${
+        ctx.walletMode === item.mode ? " active" : ""
+      }`
+    );
+    btn.innerHTML = `<span>${item.label}</span><small>${item.desc}</small>`;
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (ctx.walletMode === item.mode) return;
+      btn.classList.add("loading");
+      void TradingService.setWalletMode(item.mode).catch(() => {});
+    };
+    options.appendChild(btn);
+  }
+
+  wrap.appendChild(options);
+  p.appendChild(wrap);
+}
+
 /**
  * Deploy Safe gate — rendered after wallet connect but before "Enable Trading".
  *
@@ -1076,6 +1120,7 @@ function formatTradingPanelErrorMessage(
  */
 function addDeploySafe(
   p: HTMLElement,
+  ctx: TradingContext,
   options?: { errorMessage?: string | null }
 ): void {
   const errorMessage = options?.errorMessage
@@ -1083,6 +1128,7 @@ function addDeploySafe(
     : null;
   const s = el("div", "knoww-tp-enable-section");
   s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
+  addWalletModeSelector(s, ctx);
   s.appendChild(
     el(
       "div",
@@ -1114,6 +1160,7 @@ function addDeploySafe(
 
 function addEnableTrading(
   p: HTMLElement,
+  ctx: TradingContext,
   options?: { errorMessage?: string | null }
 ): void {
   const errorMessage = options?.errorMessage
@@ -1121,6 +1168,7 @@ function addEnableTrading(
     : null;
   const s = el("div", "knoww-tp-enable-section");
   s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
+  addWalletModeSelector(s, ctx);
   s.appendChild(
     el(
       "div",
@@ -4162,6 +4210,7 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
     }
     notice.appendChild(noticeText);
     form.appendChild(notice);
+    addWalletModeSelector(form, ctx);
 
     const enableBtn = el("button", "knoww-tp-submit deposit");
     enableBtn.textContent = enableTradingError ? "Retry" : "Enable Trading";
@@ -4240,7 +4289,9 @@ function render(
     // Safe not deployed yet — takes precedence over "Enable Trading" because
     // credentials derived for the EOA are useless until the Safe exists
     // (CLOB orders sign against the Safe as funderAddress).
-    addDeploySafe(panel, { errorMessage: state === "error" ? error : null });
+    addDeploySafe(panel, ctx, {
+      errorMessage: state === "error" ? error : null,
+    });
     if (state !== "error") {
       return;
     }
@@ -4255,7 +4306,9 @@ function render(
     // Earlier branches already handled the transient states (connecting,
     // switching-chain, deploying, deriving-credentials), so reaching here
     // with no credentials means the user needs to Enable Trading.
-    addEnableTrading(panel, { errorMessage: state === "error" ? error : null });
+    addEnableTrading(panel, ctx, {
+      errorMessage: state === "error" ? error : null,
+    });
     if (state !== "error") {
       return;
     }

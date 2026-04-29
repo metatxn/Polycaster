@@ -442,9 +442,14 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
     setIsLoadingQuoteLocal(true);
 
+    const builderCode = process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
+
     fetch("https://bridge.polymarket.com/quote", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(builderCode ? { "X-Builder-Code": builderCode } : {}),
+      },
       body: JSON.stringify({
         fromAmountBaseUnit: amountBaseUnit,
         fromChainId: "137",

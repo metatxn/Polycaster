@@ -9,6 +9,14 @@
 
 const BRIDGE_API_URL = "https://bridge.polymarket.com";
 
+function getBridgeHeaders(extraHeaders?: HeadersInit): HeadersInit {
+  const builderCode = process.env.POLY_BUILDER_CODE;
+  return {
+    ...(extraHeaders ?? {}),
+    ...(builderCode ? { "X-Builder-Code": builderCode } : {}),
+  };
+}
+
 // ── Types (mirrors web's use-bridge.ts) ──
 
 export interface SupportedAsset {
@@ -187,7 +195,9 @@ export const CHAIN_METADATA: Record<
 // ── API helpers ──
 
 export async function fetchSupportedAssets(): Promise<SupportedAsset[]> {
-  const res = await fetch(`${BRIDGE_API_URL}/supported-assets`);
+  const res = await fetch(`${BRIDGE_API_URL}/supported-assets`, {
+    headers: getBridgeHeaders(),
+  });
   if (!res.ok)
     throw new Error(`Failed to fetch supported assets: ${res.status}`);
   const data: SupportedAssetsResponse = await res.json();
@@ -240,7 +250,7 @@ export async function createDepositAddresses(
 ): Promise<DepositAddress[]> {
   const res = await fetch(`${BRIDGE_API_URL}/deposit`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getBridgeHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ address: walletAddress }),
   });
   if (!res.ok) {
@@ -256,7 +266,7 @@ export async function createDepositAddresses(
 export async function fetchQuote(params: QuoteRequest): Promise<QuoteResponse> {
   const res = await fetch(`${BRIDGE_API_URL}/quote`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getBridgeHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(params),
   });
   if (!res.ok) {
@@ -270,7 +280,8 @@ export async function fetchDepositStatus(
   depositAddress: string
 ): Promise<DepositTransaction[]> {
   const res = await fetch(
-    `${BRIDGE_API_URL}/status/${encodeURIComponent(depositAddress)}`
+    `${BRIDGE_API_URL}/status/${encodeURIComponent(depositAddress)}`,
+    { headers: getBridgeHeaders() }
   );
   if (!res.ok) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };

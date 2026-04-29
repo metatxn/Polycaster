@@ -16,6 +16,7 @@ const log = createLogger("trading-service");
 import {
   EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
+  type TradingWalletMode,
 } from "../../types/chrome-messages";
 import { WalletBridge } from "./bridge";
 import { type ApiKeyCreds, CredentialManager } from "./credentials";
@@ -45,6 +46,7 @@ export interface TradingContext {
   state: TradingState;
   address: string | null;
   proxyAddress: string | null;
+  walletMode: TradingWalletMode;
   /**
    * On-chain Safe-deployment status.
    * `null` = not yet checked (initial state, or proxyAddress not derived yet).
@@ -77,6 +79,7 @@ function createDisconnectedContext(): TradingContext {
     state: "disconnected",
     address: null,
     proxyAddress: null,
+    walletMode: "safe",
     isDeployed: null,
     balance: 0,
     polBalance: 0,
@@ -92,6 +95,28 @@ function createDisconnectedContext(): TradingContext {
 }
 
 let ctx: TradingContext = createDisconnectedContext();
+
+async function resolveTradingWallet(
+  address: string,
+  walletMode: TradingWalletMode
+): Promise<{
+  proxyAddress: string;
+  balance: number;
+  polBalance: number;
+  tokenBalances: TokenBalanceEntry[];
+  isDeployed: boolean;
+}> {
+  const proxyAddress =
+    walletMode === "eoa" ? address : await ProxyWallet.deriveAddress(address);
+  const balData = await ProxyWallet.getBalance(proxyAddress);
+  return {
+    proxyAddress,
+    balance: balData.balance,
+    polBalance: balData.polBalance ?? 0,
+    tokenBalances: balData.tokenBalances ?? [],
+    isDeployed: walletMode === "eoa" ? true : (balData.isDeployed ?? false),
+  };
+}
 
 function trackTradingAnalytics(
   event: string,
@@ -256,24 +281,11 @@ export const TradingService = {
       update({ state: "connected" });
 
       try {
-        const proxyAddress = await ProxyWallet.deriveAddress(address);
-        update({ proxyAddress });
-        try {
-          const balData = await ProxyWallet.getBalance(proxyAddress);
-          update({
-            balance: balData.balance,
-            polBalance: balData.polBalance ?? 0,
-            tokenBalances: balData.tokenBalances ?? [],
-            // Resolves the null→boolean transition so the panel can render
-            // the Deploy Safe gate (or skip it) on first paint after connect.
-            isDeployed: balData.isDeployed ?? false,
-          });
-        } catch (balErr) {
-          log.warn("balance.fetch_failed", { proxyAddress, error: balErr });
-          update({ balance: 0, polBalance: 0, tokenBalances: [] });
-        }
+        const walletData = await resolveTradingWallet(address, ctx.walletMode);
+        update(walletData);
       } catch (err) {
-        log.warn("proxy.derive_failed", { error: err });
+        log.warn("trading_wallet.resolve_failed", { error: err });
+        update({ balance: 0, polBalance: 0, tokenBalances: [] });
       }
 
       const cached = await CredentialManager.getStored(address);
@@ -336,10 +348,44 @@ export const TradingService = {
     return ctx.state === "ready";
   },
 
+  async setWalletMode(walletMode: TradingWalletMode): Promise<void> {
+    if (ctx.walletMode === walletMode) return;
+
+    update({
+      walletMode,
+      proxyAddress: walletMode === "eoa" ? ctx.address : null,
+      isDeployed: walletMode === "eoa" ? true : null,
+      balance: 0,
+      polBalance: 0,
+      tokenBalances: [],
+      usdcAllowance: 0,
+      usdcAllowanceNegRisk: 0,
+      error: null,
+      state: ctx.address ? "connected" : ctx.state,
+    });
+
+    if (ctx.address) {
+      try {
+        const walletData = await resolveTradingWallet(ctx.address, walletMode);
+        update(walletData);
+        await this.refreshBalance();
+        if (ctx.credentials) update({ state: "ready" });
+      } catch (err) {
+        update({
+          state: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  },
+
   async refreshBalance(): Promise<void> {
     if (!ctx.proxyAddress && ctx.address) {
       try {
-        const proxyAddress = await ProxyWallet.deriveAddress(ctx.address);
+        const proxyAddress =
+          ctx.walletMode === "eoa"
+            ? ctx.address
+            : await ProxyWallet.deriveAddress(ctx.address);
         update({ proxyAddress });
       } catch (err) {
         log.warn("proxy.derive_failed_during_refresh", { error: err });
@@ -356,7 +402,10 @@ export const TradingService = {
         // Piggybacks on the balance fetch (background returns code presence
         // from the same provider). Keeps the UI in sync with on-chain Safe
         // deployment without an extra RPC round-trip.
-        isDeployed: balData.isDeployed ?? ctx.isDeployed,
+        isDeployed:
+          ctx.walletMode === "eoa"
+            ? true
+            : (balData.isDeployed ?? ctx.isDeployed),
       });
     } catch (err) {
       log.warn("balance.refresh_failed", { error: err });
@@ -448,6 +497,7 @@ export const TradingService = {
             ...params,
             address: ctx.address,
             proxyAddress: ctx.proxyAddress,
+            walletMode: ctx.walletMode,
             credentials: ctx.credentials,
           },
           "Order failed"
@@ -477,6 +527,14 @@ export const TradingService = {
    */
   async deployWallet(): Promise<{ txHash: string; alreadyDeployed: boolean }> {
     if (!ctx.address) throw new Error("Wallet not connected");
+    if (ctx.walletMode === "eoa") {
+      update({
+        state: ctx.credentials ? "ready" : "connected",
+        isDeployed: true,
+        proxyAddress: ctx.address,
+      });
+      return { txHash: "", alreadyDeployed: true };
+    }
 
     update({ state: "deploying", error: null });
 
@@ -531,6 +589,7 @@ export const TradingService = {
           {
             type: "trading:relayer-approve",
             address: ctx.address,
+            walletMode: ctx.walletMode,
             approvalAmount:
               approvalAmount && approvalAmount > 0
                 ? String(approvalAmount)
@@ -572,6 +631,7 @@ export const TradingService = {
             amount,
             address: ctx.address,
             proxyAddress: ctx.proxyAddress ?? undefined,
+            walletMode: ctx.walletMode,
             credentials: ctx.credentials ?? undefined,
             yesTokenId,
             noTokenId,
@@ -612,6 +672,7 @@ export const TradingService = {
             amount,
             address: ctx.address,
             proxyAddress: ctx.proxyAddress ?? undefined,
+            walletMode: ctx.walletMode,
             credentials: ctx.credentials ?? undefined,
             yesTokenId,
             noTokenId,

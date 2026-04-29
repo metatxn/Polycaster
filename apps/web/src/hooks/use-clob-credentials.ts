@@ -37,6 +37,12 @@ interface ClobClientWithReadonlyMethods {
   validateReadonlyApiKey(address: string, key: string): Promise<string>;
 }
 
+interface ClobClientWithL1Methods {
+  createOrDeriveApiKey?: (nonce?: number) => Promise<ApiKeyCredsLike>;
+  deriveApiKey: (nonce?: number) => Promise<ApiKeyCredsLike>;
+  createApiKey: (nonce?: number) => Promise<ApiKeyCredsLike>;
+}
+
 /**
  * Storage key prefix for credentials
  */
@@ -50,6 +56,33 @@ const READONLY_KEYS_STORAGE_KEY = "polymarket_readonly_keys";
  */
 const credentialsCache = new Map<string, ApiKeyCreds | null>();
 const readonlyKeysCache = new Map<string, string[]>();
+
+type ApiKeyCredsLike = Partial<ApiKeyCreds> & {
+  key?: string;
+  apiKey?: string;
+  secret?: string;
+  apiSecret?: string;
+  passphrase?: string;
+  apiPassphrase?: string;
+};
+
+function normalizeApiKeyCreds(raw: ApiKeyCredsLike | null | undefined) {
+  const apiKey = raw?.apiKey || raw?.key || "";
+  const apiSecret = raw?.apiSecret || raw?.secret || "";
+  const apiPassphrase = raw?.apiPassphrase || raw?.passphrase || "";
+
+  if (!apiKey || !apiSecret || !apiPassphrase) {
+    throw new Error("Polymarket returned incomplete API credentials");
+  }
+
+  return { apiKey, apiSecret, apiPassphrase };
+}
+
+function isCompleteApiKeyCreds(raw: unknown): raw is ApiKeyCreds {
+  if (!raw || typeof raw !== "object") return false;
+  const creds = raw as Partial<ApiKeyCreds>;
+  return Boolean(creds.apiKey && creds.apiSecret && creds.apiPassphrase);
+}
 
 /**
  * Get the storage key for a specific address
@@ -77,7 +110,12 @@ function getStoredCredentials(address: string): ApiKeyCreds | null {
   try {
     const stored = sessionStorage.getItem(getStorageKey(address));
     if (stored) {
-      const parsed = JSON.parse(stored) as ApiKeyCreds;
+      const parsed = JSON.parse(stored) as unknown;
+      if (!isCompleteApiKeyCreds(parsed)) {
+        sessionStorage.removeItem(getStorageKey(address));
+        credentialsCache.set(cacheKey, null);
+        return null;
+      }
       credentialsCache.set(cacheKey, parsed);
       // Return defensive copy to prevent cache corruption from caller mutations
       return { ...parsed };
@@ -296,11 +334,7 @@ export function useClobCredentials() {
         success?: boolean;
         error?: string;
         details?: string;
-        credentials?: {
-          apiKey?: string;
-          secret?: string;
-          passphrase?: string;
-        };
+        credentials?: ApiKeyCredsLike;
       };
 
       if (!response.ok || !data.success) {
@@ -309,11 +343,7 @@ export function useClobCredentials() {
         throw new Error(errorMessage);
       }
 
-      const creds: ApiKeyCreds = {
-        apiKey: data.credentials?.apiKey || "",
-        apiSecret: data.credentials?.secret || "",
-        apiPassphrase: data.credentials?.passphrase || "",
-      };
+      const creds = normalizeApiKeyCreds(data.credentials);
 
       storeCredentials(address, creds);
       setCredentials(creds);
@@ -324,8 +354,10 @@ export function useClobCredentials() {
   /**
    * Create or derive API credentials using the SDK
    *
-   * Uses the recommended createOrDeriveApiKey() method which automatically
-   * handles both returning users (derivation) and new users (creation).
+   * Uses our server API route first so expected Polymarket 400s do not show
+   * up as browser console errors from the SDK's internal Axios handler. The
+   * route implements the same create-or-derive L1 auth flow and the SDK stays
+   * as a fallback.
    *
    * Reference: https://docs.polymarket.com/developers/CLOB/clients/methods-l1#createorderiveapikey
    */
@@ -355,6 +387,12 @@ export function useClobCredentials() {
     setError(null);
 
     try {
+      try {
+        return await deriveCredentialsViaApi();
+      } catch (apiErr) {
+        log.warn("api_credentials_route.failed.fallback_to_sdk", apiErr);
+      }
+
       // Dynamic imports to avoid SSR issues
       const [{ ClobClient }, ethersModule] = await Promise.all([
         import("@polymarket/clob-client-v2"),
@@ -374,31 +412,38 @@ export function useClobCredentials() {
         signer,
       });
 
-      let creds: { key: string; secret: string; passphrase: string };
+      let creds: ApiKeyCredsLike;
+      const l1Client = clobClient as ClobClientWithL1Methods;
 
       try {
-        // Try deriveApiKey first — most users already have keys from a
-        // previous session, so this avoids the wasted createApiKey 400
-        // and the extra wallet signature that createOrDeriveApiKey causes.
-        log.debug("derive.attempt");
-        creds = await clobClient.deriveApiKey();
-        log.debug("derive.success");
-      } catch {
+        if (typeof l1Client.createOrDeriveApiKey === "function") {
+          log.debug("create_or_derive.attempt");
+          creds = await l1Client.createOrDeriveApiKey();
+          log.debug("create_or_derive.success");
+        } else {
+          throw new Error("createOrDeriveApiKey unavailable");
+        }
+      } catch (createOrDeriveErr) {
+        log.warn("create_or_derive.failed.fallback", createOrDeriveErr);
         try {
-          log.debug("create.attempt");
-          creds = await clobClient.createApiKey();
-          log.debug("create.success");
-        } catch (sdkErr) {
-          log.warn("sdk.failed.fallback_to_api", sdkErr);
-          return await deriveCredentialsViaApi();
+          log.debug("derive.attempt");
+          creds = await l1Client.deriveApiKey();
+          normalizeApiKeyCreds(creds);
+          log.debug("derive.success");
+        } catch (deriveErr) {
+          log.warn("derive.failed.try_create", deriveErr);
+          try {
+            log.debug("create.attempt");
+            creds = await l1Client.createApiKey();
+            log.debug("create.success");
+          } catch (sdkErr) {
+            log.warn("sdk.failed.fallback_to_api", sdkErr);
+            return await deriveCredentialsViaApi();
+          }
         }
       }
 
-      const apiCreds: ApiKeyCreds = {
-        apiKey: creds.key,
-        apiSecret: creds.secret,
-        apiPassphrase: creds.passphrase,
-      };
+      const apiCreds = normalizeApiKeyCreds(creds);
 
       storeCredentials(address, apiCreds);
       setCredentials(apiCreds);

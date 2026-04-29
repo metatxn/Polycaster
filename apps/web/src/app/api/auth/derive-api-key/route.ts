@@ -41,8 +41,13 @@ interface L1Headers {
 interface ApiKeyResponse {
   error?: string;
   apiKey?: string;
+  key?: string;
   secret?: string;
   passphrase?: string;
+}
+
+function hasApiKey(data: ApiKeyResponse): boolean {
+  return Boolean((data.apiKey || data.key) && data.secret && data.passphrase);
 }
 
 /**
@@ -65,7 +70,7 @@ async function createApiKey(
 
   try {
     const data = JSON.parse(responseText) as ApiKeyResponse;
-    if (response.ok && data.apiKey) {
+    if (response.ok && hasApiKey(data)) {
       return { success: true, data };
     }
     return { success: false, error: data.error || responseText };
@@ -94,7 +99,7 @@ async function deriveApiKey(
 
   try {
     const data = JSON.parse(responseText) as ApiKeyResponse;
-    if (response.ok && data.apiKey) {
+    if (response.ok && hasApiKey(data)) {
       return { success: true, data };
     }
     return { success: false, error: data.error || responseText };
@@ -128,8 +133,8 @@ function trackApiKeyEvent(
  * Create or derive API key credentials for a user using their L1 authentication.
  * This endpoint implements the "createOrDeriveApiKey" pattern:
  *
- * 1. First, try to CREATE a new API key (for first-time users)
- * 2. If creation fails (key already exists), DERIVE the existing key
+ * 1. First, try to DERIVE an existing API key (for returning users)
+ * 2. If derivation fails, CREATE a new API key (for first-time users)
  *
  * This ensures:
  * - New users get their API key created
@@ -138,8 +143,8 @@ function trackApiKeyEvent(
  * Flow:
  * 1. Frontend signs EIP-712 ClobAuth message
  * 2. Frontend sends signature + metadata to this endpoint
- * 3. Backend tries POST /auth/api-key (create)
- * 4. If fails, backend tries GET /auth/derive-api-key (derive)
+ * 3. Backend tries GET /auth/derive-api-key (derive)
+ * 4. If fails, backend tries POST /auth/api-key (create)
  * 5. Backend returns the API credentials to frontend
  * 6. Frontend stores credentials for future order submissions
  */
@@ -177,19 +182,8 @@ export async function POST(request: NextRequest) {
       POLY_NONCE: nonce,
     };
 
-    // Step 1: Try to CREATE a new API key (for first-time users)
-    const createResult = await createApiKey(clobHost, l1Headers);
-
-    if (createResult.success && createResult.data) {
-      trackApiKeyEvent(address, "trading_api_key_created", "create");
-      return NextResponse.json({
-        success: true,
-        credentials: createResult.data,
-        method: "create",
-      });
-    }
-
-    // Step 2: If create failed, try to DERIVE existing API key
+    // Step 1: Try to DERIVE an existing API key first. Most returning users
+    // already have credentials, and create can rotate keys unnecessarily.
     const deriveResult = await deriveApiKey(clobHost, l1Headers);
 
     if (deriveResult.success && deriveResult.data) {
@@ -198,6 +192,18 @@ export async function POST(request: NextRequest) {
         success: true,
         credentials: deriveResult.data,
         method: "derive",
+      });
+    }
+
+    // Step 2: If derive failed, CREATE a new API key for first-time users.
+    const createResult = await createApiKey(clobHost, l1Headers);
+
+    if (createResult.success && createResult.data) {
+      trackApiKeyEvent(address, "trading_api_key_created", "create");
+      return NextResponse.json({
+        success: true,
+        credentials: createResult.data,
+        method: "create",
       });
     }
 
@@ -227,10 +233,6 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: errorMessage,
-        details: {
-          createError: createResult.error,
-          deriveError: deriveResult.error,
-        },
       },
       { status: 400 }
     );
@@ -239,7 +241,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to create or retrieve API credentials.",
       },
       { status: 500 }
     );

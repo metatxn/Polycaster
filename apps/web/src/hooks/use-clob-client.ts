@@ -234,7 +234,11 @@ export function useClobClient() {
   const { data: walletClient } = useWalletClient();
   const { credentials, hasCredentials, deriveCredentials } =
     useClobCredentials();
-  const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
+  const {
+    proxyAddress,
+    isDeployed: hasProxyWallet,
+    isEoaMode,
+  } = useProxyWallet();
   const { approveUsdcForTrading } = useRelayerClient();
 
   const [isLoading, setIsLoading] = useState(false);
@@ -268,7 +272,8 @@ export function useClobClient() {
    */
   const getClient = useCallback(async () => {
     if (!credentials) throw new Error("API credentials not available");
-    if (!proxyAddress) throw new Error("Proxy wallet not found");
+    if (!proxyAddress) throw new Error("Trading wallet not found");
+    if (isEoaMode && !address) throw new Error("Wallet not connected");
 
     const [{ ClobClient }, signer] = await Promise.all([
       import("@polymarket/clob-client-v2"),
@@ -288,11 +293,13 @@ export function useClobClient() {
       chain: CHAIN_ID,
       signer,
       creds,
-      signatureType: SignatureType.POLY_GNOSIS_SAFE as unknown as number,
-      funderAddress: proxyAddress,
+      signatureType: (isEoaMode
+        ? SignatureType.EOA
+        : SignatureType.POLY_GNOSIS_SAFE) as unknown as number,
+      funderAddress: isEoaMode ? address : proxyAddress,
       ...(builderCode ? { builderConfig: { builderCode } } : {}),
     });
-  }, [credentials, proxyAddress, getEthersSigner]);
+  }, [credentials, proxyAddress, isEoaMode, address, getEthersSigner]);
 
   /**
    * Check if the client can be used. Either an injected provider
@@ -447,6 +454,33 @@ export function useClobClient() {
       if (!walletClient) throw new Error("Wallet not connected");
       if (!address) throw new Error("Wallet not connected");
 
+      if (isEoaMode) {
+        const { polygon } = await import("viem/chains");
+        const { getPublicClient } = await import("@/lib/rpc");
+        const publicClient = getPublicClient();
+
+        const approveHash = await walletClient.writeContract({
+          account: address as `0x${string}`,
+          chain: polygon,
+          address: USDC_E_ADDRESS as `0x${string}`,
+          abi: ERC20_READ_APPROVE_ABI,
+          functionName: "approve",
+          args: [COLLATERAL_ONRAMP_ADDRESS, wrapAmount],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+        const wrapHash = await walletClient.writeContract({
+          account: address as `0x${string}`,
+          chain: polygon,
+          address: COLLATERAL_ONRAMP_ADDRESS as `0x${string}`,
+          abi: COLLATERAL_ONRAMP_ABI,
+          functionName: "wrap",
+          args: [USDC_E_ADDRESS, proxyAddress as `0x${string}`, wrapAmount],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: wrapHash });
+        return;
+      }
+
       await executeViaRelayer(walletClient, address as `0x${string}`, [
         {
           to: USDC_E_ADDRESS as `0x${string}`,
@@ -460,7 +494,7 @@ export function useClobClient() {
         },
       ]);
     },
-    [proxyAddress, walletClient, address]
+    [proxyAddress, walletClient, address, isEoaMode]
   );
 
   /**

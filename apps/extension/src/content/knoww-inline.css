@@ -3343,6 +3343,64 @@
   line-height: 1.4 !important;
 }
 
+.knoww-tp-wallet-mode {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  width: 100% !important;
+  max-width: 300px !important;
+  margin: 2px 0 4px !important;
+}
+
+.knoww-tp-wallet-mode-title {
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  text-align: left !important;
+}
+
+.knoww-tp-wallet-mode-options {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 8px !important;
+}
+
+.knoww-tp-wallet-mode-option {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 4px !important;
+  min-height: 76px !important;
+  padding: 10px !important;
+  border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.12)) !important;
+  border-radius: 10px !important;
+  background: var(--knoww-card-bg, rgba(255, 255, 255, 0.04)) !important;
+  color: var(--knoww-text, #e7e9ea) !important;
+  cursor: pointer !important;
+  text-align: left !important;
+  font-family: inherit !important;
+}
+
+.knoww-tp-wallet-mode-option.active {
+  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+  background: rgba(29, 155, 240, 0.1) !important;
+}
+
+.knoww-tp-wallet-mode-option span {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+}
+
+.knoww-tp-wallet-mode-option small {
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  line-height: 1.3 !important;
+}
+
 .knoww-tp-btn-connect {
   display: flex !important;
   align-items: center !important;

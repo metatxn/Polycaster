@@ -51,6 +51,7 @@ export interface ContextGateResult {
 import type { ClobOrderType } from "@knoww/shared-types/polymarket";
 
 export type { ClobOrderType };
+export type TradingWalletMode = "safe" | "eoa";
 
 // ── Trading messages (content → background) ──
 
@@ -81,6 +82,7 @@ export interface TradingPlaceOrderMessage {
   negRisk?: boolean;
   address: string;
   proxyAddress: string;
+  walletMode?: TradingWalletMode;
   credentials: { apiKey: string; apiSecret: string; apiPassphrase: string };
 }
 
@@ -106,6 +108,7 @@ export interface TradingSplitPositionMessage {
   amount: number;
   address: string;
   proxyAddress?: string;
+  walletMode?: TradingWalletMode;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   yesTokenId?: string;
   noTokenId?: string;
@@ -117,6 +120,7 @@ export interface TradingMergePositionsMessage {
   amount: number;
   address: string;
   proxyAddress?: string;
+  walletMode?: TradingWalletMode;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   yesTokenId?: string;
   noTokenId?: string;
@@ -132,6 +136,7 @@ export interface TradingGetOutcomeBalancesMessage {
 export interface TradingRelayerApproveMessage {
   type: "trading:relayer-approve";
   address: string;
+  walletMode?: TradingWalletMode;
   approvalAmount?: string;
 }
 

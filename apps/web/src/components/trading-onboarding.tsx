@@ -23,6 +23,7 @@ import { useConnection } from "wagmi";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
+import { useTradingWalletMode } from "@/hooks/use-trading-wallet-mode";
 import { checkAllApprovals } from "@/lib/approvals";
 import { cn } from "@/lib/utils";
 
@@ -40,12 +41,38 @@ interface TradingOnboardingProps {
   onSkip?: () => void;
 }
 
+function getOnboardingErrorMessage(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message : String(err || "");
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes("user rejected") ||
+    lower.includes("user denied") ||
+    lower.includes("rejected the request") ||
+    lower.includes("transaction signature")
+  ) {
+    return "Request cancelled. No changes were made. You can try again when you're ready.";
+  }
+
+  if (lower.includes("insufficient funds") || lower.includes("gas")) {
+    return "Not enough POL for network fees. Add a small amount of POL to this wallet and try again.";
+  }
+
+  if (lower.includes("chain") || lower.includes("network")) {
+    return "Please switch your wallet to Polygon and try again.";
+  }
+
+  if (!message) return fallback;
+  return message.length > 180 ? fallback : message;
+}
+
 export function TradingOnboarding({
   onComplete,
   onSkip,
 }: TradingOnboardingProps) {
   const { isConnected } = useConnection();
   const { open } = useAppKit();
+  const { mode: walletMode, setMode: setWalletMode } = useTradingWalletMode();
   const {
     deploySafe,
     approveUsdcForTrading,
@@ -113,6 +140,26 @@ export function TradingOnboarding({
   ]);
 
   useEffect(() => {
+    setHasUsdcApproval(null);
+    setSteps((prev) =>
+      prev.map((step) => {
+        if (step.id === "connect") {
+          return { ...step, status: isConnected ? "completed" : "pending" };
+        }
+        if (step.id === "deploy") {
+          return {
+            ...step,
+            status:
+              walletMode === "eoa" && isConnected ? "completed" : "pending",
+          };
+        }
+        return { ...step, status: "pending", errorMessage: undefined };
+      })
+    );
+    setCurrentStep(isConnected ? (walletMode === "eoa" ? 2 : 1) : 0);
+  }, [walletMode, isConnected]);
+
+  useEffect(() => {
     if (usdcBalance > 0) {
       setApprovalAmount(new Decimal(usdcBalance).toDecimalPlaces(2).toString());
     }
@@ -177,12 +224,22 @@ export function TradingOnboarding({
       await open();
       // The wallet connection is handled by the modal
       // We'll check isConnected in the next render
-    } catch {
-      updateStepStatus("connect", "error", "Failed to connect wallet");
+    } catch (err) {
+      updateStepStatus(
+        "connect",
+        "error",
+        getOnboardingErrorMessage(err, "Failed to connect wallet")
+      );
     }
   }, [open, updateStepStatus]);
 
   const handleDeploySafe = useCallback(async () => {
+    if (walletMode === "eoa") {
+      updateStepStatus("deploy", "completed");
+      setCurrentStep(2);
+      return;
+    }
+
     updateStepStatus("deploy", "in_progress");
     try {
       const result = await deploySafe();
@@ -198,10 +255,10 @@ export function TradingOnboarding({
       updateStepStatus(
         "deploy",
         "error",
-        err instanceof Error ? err.message : "Failed to deploy wallet"
+        getOnboardingErrorMessage(err, "Failed to deploy wallet")
       );
     }
-  }, [deploySafe, updateStepStatus, refreshProxyWallet]);
+  }, [deploySafe, updateStepStatus, refreshProxyWallet, walletMode]);
 
   const handleApproveUsdc = useCallback(async () => {
     if (!isApprovalAmountValid) {
@@ -227,7 +284,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "approve",
         "error",
-        err instanceof Error ? err.message : "Failed to submit approval batch"
+        getOnboardingErrorMessage(err, "Failed to submit approval batch")
       );
     }
   }, [
@@ -266,7 +323,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "credentials",
         "error",
-        err instanceof Error ? err.message : "Failed to setup credentials"
+        getOnboardingErrorMessage(err, "Failed to setup credentials")
       );
     }
   }, [
@@ -421,7 +478,7 @@ export function TradingOnboarding({
             disabled={isLoading || !isApprovalAmountValid}
             className={ctaClass}
           >
-            Approve
+            {walletMode === "eoa" ? "Approve Caps" : "Approve"}
           </button>
         );
       case "credentials":
@@ -440,12 +497,37 @@ export function TradingOnboarding({
     }
   };
 
+  const getDisplayStep = (step: OnboardingStep): OnboardingStep => {
+    if (step.id === "deploy" && walletMode === "eoa") {
+      return {
+        ...step,
+        title: "Use Connected Wallet",
+        description: "Trade directly from your EOA. Requires POL for gas.",
+        icon: <Wallet className="h-5 w-5" />,
+      };
+    }
+
+    if (step.id === "approve" && walletMode === "eoa") {
+      return {
+        ...step,
+        description:
+          "Approve limited spending caps on-chain. MetaMask will show one prompt per token or operator.",
+      };
+    }
+
+    return step;
+  };
+
   const contextCopy = (): string | null => {
     if (allStepsComplete) return null;
     if (currentStep === 1)
-      return "Your trading wallet is a Gnosis Safe — the most trusted smart-contract wallet in crypto.";
+      return walletMode === "safe"
+        ? "Your trading wallet is a Gnosis Safe controlled by your connected wallet. Polymarket's relayer pays the gas for setup and trading operations."
+        : "Your connected wallet is the trading wallet. This is simpler, but approvals and on-chain operations require POL for gas.";
     if (currentStep === 2)
-      return "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals.";
+      return walletMode === "safe"
+        ? "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals."
+        : "EOA approvals are normal Polygon transactions. MetaMask describes ERC-20 allowances as permission to withdraw tokens; the spender should be a Polymarket contract such as CTFExchange, NegRisk, Adapter, or CollateralOnramp.";
     if (currentStep === 3)
       return "Sign a message to create your unique trading credentials. No private keys are shared.";
     return "All setup transactions are gasless — Polymarket covers the gas fees through their relayer.";
@@ -495,6 +577,47 @@ export function TradingOnboarding({
             ? "Your trading account is ready."
             : "Complete these once to start trading on Polymarket."}
         </p>
+
+        {!allStepsComplete && (
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setWalletMode("safe")}
+              className={cn(
+                "border px-3 py-3 text-left transition-colors",
+                walletMode === "safe"
+                  ? "border-foreground bg-foreground/5"
+                  : "border-border/60 hover:border-foreground/40"
+              )}
+            >
+              <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                <Shield className="h-3.5 w-3.5" />
+                Safe
+              </span>
+              <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                Gasless smart wallet. Best for most users.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setWalletMode("eoa")}
+              className={cn(
+                "border px-3 py-3 text-left transition-colors",
+                walletMode === "eoa"
+                  ? "border-foreground bg-foreground/5"
+                  : "border-border/60 hover:border-foreground/40"
+              )}
+            >
+              <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                <Wallet className="h-3.5 w-3.5" />
+                EOA
+              </span>
+              <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                Trade from this wallet. You pay Polygon gas.
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* Hairline progress track with checkpoints */}
         <div className="pt-6">
@@ -574,6 +697,7 @@ export function TradingOnboarding({
       {/* Step rows — hairline-divided */}
       <div className="divide-y divide-border/40">
         {steps.map((step, index) => {
+          const displayStep = getDisplayStep(step);
           const isCurrent = index === currentStep;
           const isCompleted = step.status === "completed";
           const isError = step.status === "error";
@@ -581,14 +705,18 @@ export function TradingOnboarding({
 
           const progressCopy =
             step.id === "deploy"
-              ? "Creating your secure wallet — 10–30 seconds"
+              ? walletMode === "eoa"
+                ? "Using your connected wallet"
+                : "Creating your secure wallet — 10–30 seconds"
               : step.id === "approve"
-                ? "Submitting approval batch — 10–30 seconds"
+                ? walletMode === "eoa"
+                  ? "Waiting for wallet approval transactions"
+                  : "Submitting approval batch — 10–30 seconds"
                 : step.id === "credentials"
                   ? "Generating your trading credentials…"
                   : step.id === "connect"
                     ? "Waiting for wallet connection…"
-                    : step.description;
+                    : displayStep.description;
 
           return (
             <motion.div
@@ -614,7 +742,7 @@ export function TradingOnboarding({
                         : "border-border/60 text-muted-foreground/60"
                 )}
               >
-                {step.icon}
+                {displayStep.icon}
               </div>
 
               <div className="flex-1 min-w-0">
@@ -630,11 +758,11 @@ export function TradingOnboarding({
                           : "text-muted-foreground"
                   )}
                 >
-                  {step.title}
+                  {displayStep.title}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                   {step.errorMessage ||
-                    (isInProgress ? progressCopy : step.description)}
+                    (isInProgress ? progressCopy : displayStep.description)}
                 </p>
                 {step.id === "approve" && isCurrent && !isCompleted && (
                   <div className="mt-3 space-y-1.5">
@@ -665,8 +793,9 @@ export function TradingOnboarding({
                       </span>
                     </div>
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      ERC-20 allowances use this limit. Outcome-token sell
-                      permissions are binary and cannot be amount-limited.
+                      {walletMode === "eoa"
+                        ? "MetaMask will call these spending cap requests. The cap is limited to the amount above; outcome-token sell permissions are binary and cannot be amount-limited."
+                        : "ERC-20 allowances use this limit. Outcome-token sell permissions are binary and cannot be amount-limited."}
                     </p>
                   </div>
                 )}

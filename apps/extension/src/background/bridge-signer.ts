@@ -85,8 +85,18 @@ export class BridgeSigner extends ethers.Signer {
       txParams,
     ])) as string;
 
-    if (!this.provider) throw new Error("No provider to fetch tx receipt");
-    return this.provider.getTransaction(hash);
+    const provider = this.provider;
+    if (!provider) throw new Error("No provider to fetch tx receipt");
+    const response = await provider.getTransaction(hash);
+    if (response) return response;
+
+    return {
+      hash,
+      from: this._address,
+      confirmations: 0,
+      wait: (confirmations?: number) =>
+        provider.waitForTransaction(hash, confirmations),
+    } as ethers.providers.TransactionResponse;
   }
 
   connect(provider: ethers.providers.Provider): BridgeSigner {

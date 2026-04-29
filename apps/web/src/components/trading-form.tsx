@@ -574,6 +574,7 @@ export function TradingForm(props: TradingFormProps) {
           onOpenChange={setShowSplitModal}
           conditionId={conditionId}
           marketTitle={marketTitle}
+          negRisk={props.negRisk}
         />
       )}
 
@@ -586,6 +587,7 @@ export function TradingForm(props: TradingFormProps) {
           yesTokenId={outcomes[0]?.tokenId || ""}
           noTokenId={outcomes[1]?.tokenId || ""}
           marketTitle={marketTitle}
+          negRisk={props.negRisk}
         />
       )}
     </div>

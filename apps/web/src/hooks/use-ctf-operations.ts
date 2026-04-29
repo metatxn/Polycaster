@@ -22,12 +22,7 @@ const log = createLogger("ctf-operations");
 
 import { useCallback, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
-import {
-  CONTRACTS,
-  CTF_ADDRESS,
-  PUSD_CTF_APPROVAL_TARGET,
-  PUSD_DECIMALS,
-} from "@/constants/contracts";
+import { CONTRACTS, CTF_ADDRESS, PUSD_DECIMALS } from "@/constants/contracts";
 import { executeViaRelayer } from "@/lib/relayer-client";
 import { useTradingWalletMode } from "./use-trading-wallet-mode";
 
@@ -50,6 +45,14 @@ export interface OutcomeTokenBalances {
 type OperationResult = { success: boolean; txHash?: string; error?: string };
 
 type CTFFunction = "splitPosition" | "mergePositions" | "redeemPositions";
+
+function getCtfOperationTarget(negRisk: boolean): `0x${string}` {
+  return (
+    negRisk
+      ? CONTRACTS.NEG_RISK_CTF_COLLATERAL_ADAPTER
+      : CONTRACTS.CTF_COLLATERAL_ADAPTER
+  ) as `0x${string}`;
+}
 
 // ============================================================================
 // Helper Functions
@@ -107,7 +110,11 @@ export function useCtfOperations() {
   });
 
   const ensureCtfCollateralApproval = useCallback(
-    async (proxyAddress: string, requiredAmount: bigint) => {
+    async (
+      proxyAddress: string,
+      requiredAmount: bigint,
+      spender: `0x${string}`
+    ) => {
       if (!walletClient || !address) {
         throw new Error("Wallet not connected");
       }
@@ -125,10 +132,7 @@ export function useCtfOperations() {
         address: CONTRACTS.PUSD,
         abi: erc20Abi,
         functionName: "allowance",
-        args: [
-          proxyAddress as `0x${string}`,
-          PUSD_CTF_APPROVAL_TARGET as `0x${string}`,
-        ],
+        args: [proxyAddress as `0x${string}`, spender],
       });
 
       if (allowance >= requiredAmount) return;
@@ -136,7 +140,7 @@ export function useCtfOperations() {
       const data = encodeFunctionData({
         abi: erc20Abi,
         functionName: "approve",
-        args: [PUSD_CTF_APPROVAL_TARGET as `0x${string}`, requiredAmount],
+        args: [spender, requiredAmount],
       });
 
       if (isEoaMode) {
@@ -147,7 +151,7 @@ export function useCtfOperations() {
           address: CONTRACTS.PUSD,
           abi: erc20Abi,
           functionName: "approve",
-          args: [PUSD_CTF_APPROVAL_TARGET as `0x${string}`, requiredAmount],
+          args: [spender, requiredAmount],
         });
         await publicClient.waitForTransactionReceipt({ hash });
         return;
@@ -170,7 +174,8 @@ export function useCtfOperations() {
   const executeCTFOperation = useCallback(
     async (
       operationName: CTFFunction,
-      encodedData: `0x${string}`
+      encodedData: `0x${string}`,
+      targetAddress: `0x${string}`
     ): Promise<OperationResult> => {
       setState({ isLoading: true, error: null, txHash: null });
 
@@ -185,7 +190,7 @@ export function useCtfOperations() {
           const hash = await walletClient.sendTransaction({
             account: address as `0x${string}`,
             chain: polygon,
-            to: CTF_ADDRESS as `0x${string}`,
+            to: targetAddress,
             data: encodedData,
             value: BigInt(0),
           });
@@ -199,7 +204,7 @@ export function useCtfOperations() {
           address as `0x${string}`,
           [
             {
-              to: CTF_ADDRESS as `0x${string}`,
+              to: targetAddress,
               data: encodedData,
               value: "0",
             },
@@ -270,12 +275,18 @@ export function useCtfOperations() {
     async (
       conditionId: string,
       amount: number,
-      proxyAddress: string
+      proxyAddress: string,
+      negRisk = false
     ): Promise<OperationResult> => {
       const { encodeFunctionData, parseUnits } = await import("viem");
 
       const amountInWei = parseUnits(amount.toString(), PUSD_DECIMALS);
-      await ensureCtfCollateralApproval(proxyAddress, amountInWei);
+      const targetAddress = getCtfOperationTarget(negRisk);
+      await ensureCtfCollateralApproval(
+        proxyAddress,
+        amountInWei,
+        targetAddress
+      );
 
       const encodedData = encodeFunctionData({
         abi: CTF_ABI,
@@ -289,7 +300,7 @@ export function useCtfOperations() {
         ],
       });
 
-      return executeCTFOperation("splitPosition", encodedData);
+      return executeCTFOperation("splitPosition", encodedData, targetAddress);
     },
     [executeCTFOperation, ensureCtfCollateralApproval]
   );
@@ -302,11 +313,13 @@ export function useCtfOperations() {
     async (
       conditionId: string,
       amount: number,
-      _proxyAddress: string
+      _proxyAddress: string,
+      negRisk = false
     ): Promise<OperationResult> => {
       const { encodeFunctionData, parseUnits } = await import("viem");
 
       const amountInWei = parseUnits(amount.toString(), PUSD_DECIMALS);
+      const targetAddress = getCtfOperationTarget(negRisk);
 
       const encodedData = encodeFunctionData({
         abi: CTF_ABI,
@@ -320,7 +333,7 @@ export function useCtfOperations() {
         ],
       });
 
-      return executeCTFOperation("mergePositions", encodedData);
+      return executeCTFOperation("mergePositions", encodedData, targetAddress);
     },
     [executeCTFOperation]
   );
@@ -331,9 +344,11 @@ export function useCtfOperations() {
   const redeemPositions = useCallback(
     async (
       conditionId: string,
-      _proxyAddress: string
+      _proxyAddress: string,
+      negRisk = false
     ): Promise<OperationResult> => {
       const { encodeFunctionData } = await import("viem");
+      const targetAddress = getCtfOperationTarget(negRisk);
 
       const encodedData = encodeFunctionData({
         abi: CTF_ABI,
@@ -346,7 +361,7 @@ export function useCtfOperations() {
         ],
       });
 
-      return executeCTFOperation("redeemPositions", encodedData);
+      return executeCTFOperation("redeemPositions", encodedData, targetAddress);
     },
     [executeCTFOperation]
   );

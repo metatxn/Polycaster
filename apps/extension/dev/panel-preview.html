@@ -662,9 +662,9 @@
         );
 
         // Force-display helpers (mirrors the post-fix logic in ui.ts).
-        const show = (el) => el && el.style.removeProperty("display");
+        const show = (el) => el?.style.removeProperty("display");
         const hide = (el) =>
-          el && el.style.setProperty("display", "none", "important");
+          el?.style.setProperty("display", "none", "important");
         const showItems = (yes) => {
           if (yes) {
             emptyEl.style.setProperty("display", "none", "important");
@@ -713,7 +713,7 @@
             "knoww-theme-dim",
             "knoww-theme-light"
           );
-          stack.classList.add("knoww-theme-" + theme);
+          stack.classList.add(`knoww-theme-${theme}`);
         }
 
         function applyPlatform(platform) {
@@ -727,14 +727,14 @@
             "knoww-notification-stack-stackexchange",
             "knoww-notification-stack-threads"
           );
-          stack.classList.add("knoww-notification-stack-" + platform);
+          stack.classList.add(`knoww-notification-stack-${platform}`);
           body.classList.remove(
             "pv-twitter",
             "pv-reddit",
             "pv-quora",
             "pv-linkedin"
           );
-          body.classList.add("pv-" + platform);
+          body.classList.add(`pv-${platform}`);
         }
 
         function pressGroup(buttons, key, value) {

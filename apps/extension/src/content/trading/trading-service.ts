@@ -616,7 +616,8 @@ export const TradingService = {
     conditionId: string,
     amount: number,
     yesTokenId?: string,
-    noTokenId?: string
+    noTokenId?: string,
+    negRisk = false
   ): Promise<unknown> {
     if (!ctx.address) throw new Error("Wallet not connected");
 
@@ -630,6 +631,7 @@ export const TradingService = {
             conditionId,
             amount,
             address: ctx.address,
+            negRisk,
             proxyAddress: ctx.proxyAddress ?? undefined,
             walletMode: ctx.walletMode,
             credentials: ctx.credentials ?? undefined,
@@ -657,7 +659,8 @@ export const TradingService = {
     conditionId: string,
     amount: number,
     yesTokenId?: string,
-    noTokenId?: string
+    noTokenId?: string,
+    negRisk = false
   ): Promise<unknown> {
     if (!ctx.address) throw new Error("Wallet not connected");
 
@@ -671,6 +674,7 @@ export const TradingService = {
             conditionId,
             amount,
             address: ctx.address,
+            negRisk,
             proxyAddress: ctx.proxyAddress ?? undefined,
             walletMode: ctx.walletMode,
             credentials: ctx.credentials ?? undefined,

@@ -9,32 +9,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatCurrency, formatPrice } from "@/lib/formatters";
+import { formatOrderExpiration } from "@/lib/order-expiration";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "./empty-state";
 import type { Order } from "./types";
 
 const DESKTOP_GRID =
-  "grid grid-cols-[minmax(0,1fr)_64px_72px_124px_124px_92px_80px] items-center gap-3";
-
-/** Format expiration as relative time remaining. */
-function formatExpirationRelative(
-  expiration: string | null | undefined
-): string {
-  if (!expiration) return "Until cancelled";
-
-  const diffMs = new Date(expiration).getTime() - Date.now();
-  if (diffMs <= 0) return "Expired";
-
-  const s = Math.floor(diffMs / 1000);
-  const m = Math.floor(s / 60);
-  const h = Math.floor(m / 60);
-  const d = Math.floor(h / 24);
-
-  if (d > 0) return `${d}d left`;
-  if (h > 0) return `${h}h left`;
-  if (m > 0) return `${m}m left`;
-  return `${s}s left`;
-}
+  "grid grid-cols-[minmax(0,1fr)_64px_72px_124px_150px_92px_80px] items-center gap-3";
 
 function orderHref(order: Order): string | null {
   if (!order.market?.eventSlug) return null;
@@ -270,8 +251,8 @@ export function OrdersTable({
                 side={order.side}
               />
 
-              <div className="text-right font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-                {formatExpirationRelative(order.expiration)}
+              <div className="text-right font-mono text-[11px] tracking-wide text-muted-foreground whitespace-nowrap">
+                {formatOrderExpiration(order.expiration)}
               </div>
 
               <div className="text-right font-mono tabular-nums text-sm text-foreground">
@@ -391,7 +372,9 @@ export function OrdersTable({
               </div>
 
               <div className="flex items-center justify-between pt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                <span>{formatExpirationRelative(order.expiration)}</span>
+                <span className="normal-case">
+                  {formatOrderExpiration(order.expiration)}
+                </span>
                 <button
                   type="button"
                   onClick={() => onCancel(order.id)}

@@ -56,6 +56,7 @@ const _modal = createAppKit({
   projectId,
   networks,
   defaultNetwork: polygon, // Set Polygon as default since Polymarket uses it
+  allowUnsupportedChain: true,
   metadata: metadata,
   features: {
     analytics: true, // Optional - defaults to your Cloud configuration

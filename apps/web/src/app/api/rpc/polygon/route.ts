@@ -8,15 +8,15 @@ const log = createLogger("api.rpc.polygon");
 /**
  * Server-side RPC Proxy for Polygon
  *
- * This proxies RPC requests through public endpoints first, with private
- * server-side endpoints as fallbacks so API keys are not exposed to the client.
+ * This proxies RPC requests to Alchemy without exposing the API key to the client.
+ * The API key is only accessible server-side.
  *
  * Supports both single and batch JSON-RPC requests.
  */
 
 // Per-endpoint timeout. Keep this low so failed public RPCs do not hold the
 // user request open for too long while the proxy tries fallbacks.
-const PER_ENDPOINT_TIMEOUT_MS = 4000;
+const PER_ENDPOINT_TIMEOUT_MS = 5000;
 
 // Maximum request body size (100KB — well above any legitimate JSON-RPC payload)
 const MAX_BODY_SIZE = 100 * 1024;
@@ -201,10 +201,8 @@ function isRetryableRpcError(error: unknown): boolean {
     "overloaded",
     "capacity",
     "limit exceeded",
-    "missing trie node",
     "not supported",
     "not available",
-    "pruned",
   ].some((needle) => normalizedMessage.includes(needle));
 }
 
@@ -302,18 +300,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const corsHeaders = getCorsHeaders(requestOrigin);
-
   // Rate limit: 30 requests per minute
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 30,
   });
-  if (rateLimitResponse) {
-    for (const [key, value] of Object.entries(corsHeaders)) {
-      rateLimitResponse.headers.set(key, value);
-    }
-    return rateLimitResponse;
-  }
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const corsHeaders = getCorsHeaders(requestOrigin);
 
   // Check content-length to reject oversized payloads early
   const contentLength = request.headers.get("content-length");

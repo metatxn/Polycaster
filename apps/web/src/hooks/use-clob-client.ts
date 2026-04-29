@@ -43,6 +43,10 @@ import { checkAllApprovals } from "@/lib/approvals";
 import { SignatureType } from "@/lib/polymarket";
 import { executeViaRelayer } from "@/lib/relayer-client";
 import { getRpcUrl } from "@/lib/rpc";
+import {
+  getViemWalletClient,
+  hasViemWalletProvider,
+} from "@/lib/viem-wallet-client";
 import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
 import { useRelayerClient } from "./use-relayer-client";
@@ -245,29 +249,6 @@ export function useClobClient() {
   const [error, setError] = useState<Error | null>(null);
 
   /**
-   * Internal helper to get an ethers signer that works for both injected
-   * wallets (MetaMask) and WalletConnect (mobile EOAs scanned via QR).
-   *
-   * For WalletConnect, `window.ethereum` is undefined; viem's
-   * `walletClient.transport` is the EIP-1193 transport bound to the active
-   * wagmi connector and is what we wrap into ethers.
-   */
-  const getEthersSigner = useCallback(async () => {
-    if (typeof window === "undefined") {
-      throw new Error("No wallet provider found.");
-    }
-    // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
-    const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
-    if (!eip1193Provider) {
-      throw new Error("No wallet provider found.");
-    }
-    const { providers } = await import("ethers");
-    const provider = new providers.Web3Provider(eip1193Provider);
-    await provider.send("eth_requestAccounts", []);
-    return provider.getSigner();
-  }, [walletClient?.transport]);
-
-  /**
    * Internal helper to initialize the ClobClient
    */
   const getClient = useCallback(async () => {
@@ -277,7 +258,7 @@ export function useClobClient() {
 
     const [{ ClobClient }, signer] = await Promise.all([
       import("@polymarket/clob-client-v2"),
-      getEthersSigner(),
+      getViemWalletClient(walletClient, address as `0x${string}` | undefined),
     ]);
 
     const creds = {
@@ -299,30 +280,22 @@ export function useClobClient() {
       funderAddress: isEoaMode ? address : proxyAddress,
       ...(builderCode ? { builderConfig: { builderCode } } : {}),
     });
-  }, [credentials, proxyAddress, isEoaMode, address, getEthersSigner]);
+  }, [credentials, proxyAddress, isEoaMode, address, walletClient]);
 
   /**
-   * Check if the client can be used. Either an injected provider
-   * (`window.ethereum`) or an active wagmi walletClient transport (used
-   * by WalletConnect / mobile EOAs) is sufficient.
+   * Check if the client can be used. Either an injected provider or an active
+   * wagmi viem wallet client is sufficient.
    */
   const canTrade = useMemo(() => {
     if (typeof window === "undefined") return false;
-    const hasProvider = !!walletClient?.transport || !!window.ethereum;
     return (
       isConnected &&
       hasCredentials &&
       hasProxyWallet &&
       !!proxyAddress &&
-      hasProvider
+      hasViemWalletProvider(walletClient)
     );
-  }, [
-    isConnected,
-    hasCredentials,
-    hasProxyWallet,
-    proxyAddress,
-    walletClient?.transport,
-  ]);
+  }, [isConnected, hasCredentials, hasProxyWallet, proxyAddress, walletClient]);
 
   /**
    * Ensure the proxy wallet has enough pUSD to cover a BUY order.
@@ -856,7 +829,7 @@ export function useClobClient() {
       setError(null);
 
       try {
-        const [{ createWalletClient, custom, parseUnits }, { polygon }] =
+        const [{ createPublicClient, http, parseUnits }, { polygon }] =
           await Promise.all([import("viem"), import("viem/chains")]);
         const approvalAmountRaw = parseUnits(
           normalizeApprovalAmount(approvalAmount),
@@ -888,26 +861,15 @@ export function useClobClient() {
           },
         ] as const;
 
-        // Same provider-resolution as `getEthersSigner` so this manual EOA
-        // allowance flow works for WalletConnect (mobile) too.
-        // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
-        const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
-        if (!eip1193Provider) {
-          throw new Error("No wallet provider found.");
-        }
-        const approveWalletClient = createWalletClient({
-          chain: polygon,
-          transport: custom(eip1193Provider),
-          account: address,
-        });
+        const approveWalletClient = await getViemWalletClient(
+          walletClient,
+          address as `0x${string}`
+        );
 
-        const { createPublicClient, http } = await import("viem");
         const publicClient = createPublicClient({
           chain: polygon,
           transport: http(getRpcUrl()),
         });
-
-        await approveWalletClient.requestAddresses();
 
         const approve = async (
           token: `0x${string}`,
@@ -976,7 +938,7 @@ export function useClobClient() {
         setIsLoading(false);
       }
     },
-    [address, walletClient?.transport]
+    [address, walletClient]
   );
 
   /**

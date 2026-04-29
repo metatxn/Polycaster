@@ -454,34 +454,37 @@ export default function EventDetailClient({
     return { positionsByConditionId: byConditionId, positionsByAsset: byAsset };
   }, [positionsData?.positions]);
 
-  // Helper to get user's position for a market
-  const getMarketPosition = useCallback(
+  // Helper to get all user positions for a market. Split positions can create
+  // both YES and NO rows for the same condition, so callers must not collapse
+  // by conditionId.
+  const getMarketPositions = useCallback(
     (market: {
       conditionId?: string;
       yesTokenId?: string;
       noTokenId?: string;
-    }): Position | null => {
+    }): Position[] => {
+      const seen = new Set<string>();
+      const results: Position[] = [];
+      const addPositions = (positions: Position[] | undefined) => {
+        for (const position of positions ?? []) {
+          if (seen.has(position.id)) continue;
+          seen.add(position.id);
+          results.push(position);
+        }
+      };
+
       // Try conditionId first (most reliable)
       if (market.conditionId) {
-        const positions = positionsByConditionId.get(market.conditionId);
-        if (positions && positions.length > 0) {
-          return positions[0];
-        }
+        addPositions(positionsByConditionId.get(market.conditionId));
       }
       // Fallback to asset/token ID matching
       if (market.yesTokenId) {
-        const positions = positionsByAsset.get(market.yesTokenId);
-        if (positions && positions.length > 0) {
-          return positions[0];
-        }
+        addPositions(positionsByAsset.get(market.yesTokenId));
       }
       if (market.noTokenId) {
-        const positions = positionsByAsset.get(market.noTokenId);
-        if (positions && positions.length > 0) {
-          return positions[0];
-        }
+        addPositions(positionsByAsset.get(market.noTokenId));
       }
-      return null;
+      return results;
     },
     [positionsByConditionId, positionsByAsset]
   );
@@ -1333,7 +1336,7 @@ export default function EventDetailClient({
                 selectedOutcomeIndex={selectedOutcomeIndex}
                 setSelectedOutcomeIndex={setSelectedOutcomeIndex}
                 preloadOrderBook={preloadOrderBook}
-                getMarketPosition={getMarketPosition}
+                getMarketPositions={getMarketPositions}
                 handlePriceClick={handlePriceClick}
                 isSingleMarketEvent={isSingleMarketEvent}
                 onSellSuccess={handleSellSuccess}

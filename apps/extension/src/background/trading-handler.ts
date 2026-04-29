@@ -9,7 +9,9 @@ import {
   COLLATERAL_ONRAMP_ADDRESS,
   CTF_ADDRESS,
   CTF_APPROVAL_OPERATORS,
+  CTF_COLLATERAL_ADAPTER_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
   PUSD_APPROVAL_TARGETS,
@@ -60,6 +62,12 @@ const PUSD_DECIMALS = 6;
 const PROTOCOL_FEE_DECIMALS = 5;
 const CLOB_INITIAL_CURSOR = "MA==";
 const CLOB_END_CURSOR = "LTE=";
+
+function getCtfOperationTarget(negRisk?: boolean): string {
+  return negRisk
+    ? NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS
+    : CTF_COLLATERAL_ADAPTER_ADDRESS;
+}
 
 type TradingResponse = TradingSuccessResponse | TradingErrorResponse;
 type ClobApiCredentials = {
@@ -1061,18 +1069,19 @@ async function ensureCtfCollateralApproval(
   proxyAddress: string,
   amountWei: ethers.BigNumber,
   provider: ethers.providers.StaticJsonRpcProvider,
-  walletMode?: TradingWalletMode
+  walletMode?: TradingWalletMode,
+  spender: string = PUSD_CTF_APPROVAL_TARGET
 ): Promise<void> {
   const pusd = new ethers.Contract(PUSD_ADDRESS, ERC20_ALLOWANCE_ABI, provider);
   const allowance: ethers.BigNumber = await pusd.allowance(
     proxyAddress,
-    PUSD_CTF_APPROVAL_TARGET
+    spender
   );
   if (allowance.gte(amountWei)) return;
 
   const erc20Iface = new ethers.utils.Interface(ERC20_APPROVE_ABI);
   const approveData = erc20Iface.encodeFunctionData("approve", [
-    PUSD_CTF_APPROVAL_TARGET,
+    spender,
     amountWei,
   ]);
 
@@ -1101,6 +1110,7 @@ async function handleSplitPosition(
 
   const ctfIface = new ethers.utils.Interface(CTF_SPLIT_ABI);
   const amountWei = ethers.utils.parseUnits(String(msg.amount), 6);
+  const targetAddress = getCtfOperationTarget(msg.negRisk);
   const proxyAddress =
     getWalletMode(msg.walletMode) === "eoa"
       ? msg.address
@@ -1110,7 +1120,8 @@ async function handleSplitPosition(
     proxyAddress,
     amountWei,
     provider,
-    msg.walletMode
+    msg.walletMode,
+    targetAddress
   );
 
   const calldata = ctfIface.encodeFunctionData("splitPosition", [
@@ -1121,7 +1132,7 @@ async function handleSplitPosition(
     amountWei,
   ]);
 
-  const txns = [{ to: CTF_ADDRESS, data: calldata, value: "0" }];
+  const txns = [{ to: targetAddress, data: calldata, value: "0" }];
   const result =
     getWalletMode(msg.walletMode) === "eoa"
       ? await executeDirectTransactions(signer, txns)
@@ -1154,6 +1165,7 @@ async function handleMergePositions(
 
   const ctfIface = new ethers.utils.Interface(CTF_MERGE_ABI);
   const amountWei = ethers.utils.parseUnits(String(msg.amount), 6);
+  const targetAddress = getCtfOperationTarget(msg.negRisk);
   const calldata = ctfIface.encodeFunctionData("mergePositions", [
     PUSD_ADDRESS,
     PARENT_COLLECTION_ID,
@@ -1162,7 +1174,7 @@ async function handleMergePositions(
     amountWei,
   ]);
 
-  const txns = [{ to: CTF_ADDRESS, data: calldata, value: "0" }];
+  const txns = [{ to: targetAddress, data: calldata, value: "0" }];
   const result =
     getWalletMode(msg.walletMode) === "eoa"
       ? await executeDirectTransactions(signer, txns)

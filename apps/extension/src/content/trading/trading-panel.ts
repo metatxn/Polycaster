@@ -2426,7 +2426,8 @@ function renderSplitForm(
         opts.conditionId,
         splitMergeAmount,
         opts.yesTokenId,
-        opts.noTokenId
+        opts.noTokenId,
+        !!opts.negRisk
       );
       trackPanelAnalytics("position_split_succeeded", {
         marketId: opts.market.id,
@@ -2619,7 +2620,8 @@ function renderMergeForm(
         opts.conditionId,
         splitMergeAmount,
         opts.yesTokenId,
-        opts.noTokenId
+        opts.noTokenId,
+        !!opts.negRisk
       );
       trackPanelAnalytics("position_merge_succeeded", {
         marketId: opts.market.id,

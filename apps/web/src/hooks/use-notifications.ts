@@ -2,7 +2,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConnection } from "wagmi";
+import { useConnection, useWalletClient } from "wagmi";
 
 const log = createLogger("notifications");
 
@@ -10,6 +10,7 @@ import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { SignatureType } from "@/lib/polymarket";
+import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import type {
   DropNotificationParams,
   Notification,
@@ -82,7 +83,8 @@ function isExpectedClobReadFailure(err: unknown): boolean {
  * Reference: https://docs.polymarket.com/developers/CLOB/clients/methods-l2#notifications
  */
 export function useNotifications() {
-  const { isConnected } = useConnection();
+  const { address, isConnected } = useConnection();
+  const { data: walletClient } = useWalletClient();
   const { credentials, hasCredentials } = useClobCredentials();
   const {
     proxyAddress,
@@ -116,21 +118,14 @@ export function useNotifications() {
       throw new Error("Trading wallet address required for notifications");
     }
 
-    if (typeof window === "undefined" || !window.ethereum) {
+    if (typeof window === "undefined") {
       throw new Error("No wallet provider found");
     }
 
-    const [{ ClobClient }, ethersModule] = await Promise.all([
+    const [{ ClobClient }, signer] = await Promise.all([
       import("@polymarket/clob-client-v2"),
-      import("ethers"),
+      getViemWalletClient(walletClient, address as `0x${string}` | undefined),
     ]);
-
-    const provider = new ethersModule.providers.Web3Provider(
-      // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-      window.ethereum as any
-    );
-    await provider.send("eth_requestAccounts", []);
-    const signer = provider.getSigner();
 
     const creds = {
       key: credentials.apiKey,
@@ -148,7 +143,7 @@ export function useNotifications() {
         : SignatureType.POLY_GNOSIS_SAFE) as unknown as number,
       funderAddress: proxyAddress,
     }) as InstanceType<typeof ClobClient> & ClobClientWithNotificationMethods;
-  }, [credentials, proxyAddress, isEoaMode]);
+  }, [address, credentials, proxyAddress, isEoaMode, walletClient]);
 
   /**
    * Fetch notifications from the CLOB API

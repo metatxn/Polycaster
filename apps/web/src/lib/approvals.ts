@@ -27,12 +27,16 @@ export interface ApprovalStatus {
   pusdCtfExchange: boolean;
   pusdNegRiskExchange: boolean;
   pusdNegRiskAdapter: boolean;
+  pusdCtfCollateralAdapter: boolean;
+  pusdNegRiskCtfCollateralAdapter: boolean;
   // USDC.e approval to Onramp (for wrap)
   usdcOnramp: boolean;
   // ERC-1155 outcome token approvals (unchanged)
   ctfExchangeApproval: boolean;
   ctfNegRiskExchangeApproval: boolean;
   ctfNegRiskAdapterApproval: boolean;
+  ctfCollateralAdapterApproval: boolean;
+  ctfNegRiskCollateralAdapterApproval: boolean;
   allApproved: boolean;
 }
 
@@ -74,6 +78,18 @@ export async function checkAllApprovals(
         args: [owner, CONTRACTS.NEG_RISK_ADAPTER],
       },
       {
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [owner, CONTRACTS.CTF_COLLATERAL_ADAPTER],
+      },
+      {
+        address: CONTRACTS.PUSD,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [owner, CONTRACTS.NEG_RISK_CTF_COLLATERAL_ADAPTER],
+      },
+      {
         address: CONTRACTS.USDC_E,
         abi: erc20Abi,
         functionName: "allowance",
@@ -96,6 +112,18 @@ export async function checkAllApprovals(
         abi: ERC1155_ABI,
         functionName: "isApprovedForAll",
         args: [owner, CONTRACTS.NEG_RISK_ADAPTER],
+      },
+      {
+        address: CONTRACTS.CTF,
+        abi: ERC1155_ABI,
+        functionName: "isApprovedForAll",
+        args: [owner, CONTRACTS.CTF_COLLATERAL_ADAPTER],
+      },
+      {
+        address: CONTRACTS.CTF,
+        abi: ERC1155_ABI,
+        functionName: "isApprovedForAll",
+        args: [owner, CONTRACTS.NEG_RISK_CTF_COLLATERAL_ADAPTER],
       },
     ],
   });
@@ -122,29 +150,41 @@ export async function checkAllApprovals(
   const pusdCtfExchange = allowanceOk(1);
   const pusdNegRiskExchange = allowanceOk(2);
   const pusdNegRiskAdapter = allowanceOk(3);
-  const usdcOnramp = allowanceOk(4);
-  const ctfExchangeApproval = approvalOk(5);
-  const ctfNegRiskExchangeApproval = approvalOk(6);
-  const ctfNegRiskAdapterApproval = approvalOk(7);
+  const pusdCtfCollateralAdapter = allowanceOk(4);
+  const pusdNegRiskCtfCollateralAdapter = allowanceOk(5);
+  const usdcOnramp = allowanceOk(6);
+  const ctfExchangeApproval = approvalOk(7);
+  const ctfNegRiskExchangeApproval = approvalOk(8);
+  const ctfNegRiskAdapterApproval = approvalOk(9);
+  const ctfCollateralAdapterApproval = approvalOk(10);
+  const ctfNegRiskCollateralAdapterApproval = approvalOk(11);
 
   const allApproved =
     pusdCtfExchange &&
     pusdNegRiskExchange &&
     pusdNegRiskAdapter &&
+    pusdCtfCollateralAdapter &&
+    pusdNegRiskCtfCollateralAdapter &&
     usdcOnramp &&
     ctfExchangeApproval &&
     ctfNegRiskExchangeApproval &&
-    ctfNegRiskAdapterApproval;
+    ctfNegRiskAdapterApproval &&
+    ctfCollateralAdapterApproval &&
+    ctfNegRiskCollateralAdapterApproval;
 
   return {
     pusdCtf,
     pusdCtfExchange,
     pusdNegRiskExchange,
     pusdNegRiskAdapter,
+    pusdCtfCollateralAdapter,
+    pusdNegRiskCtfCollateralAdapter,
     usdcOnramp,
     ctfExchangeApproval,
     ctfNegRiskExchangeApproval,
     ctfNegRiskAdapterApproval,
+    ctfCollateralAdapterApproval,
+    ctfNegRiskCollateralAdapterApproval,
     allApproved,
   };
 }

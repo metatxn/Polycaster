@@ -322,6 +322,18 @@ export function useRelayerClient() {
               CONTRACTS.NEG_RISK_ADAPTER
             );
           }
+          if (!approvalStatus.pusdCtfCollateralAdapter) {
+            await writeErc20Approval(
+              CONTRACTS.PUSD,
+              CONTRACTS.CTF_COLLATERAL_ADAPTER
+            );
+          }
+          if (!approvalStatus.pusdNegRiskCtfCollateralAdapter) {
+            await writeErc20Approval(
+              CONTRACTS.PUSD,
+              CONTRACTS.NEG_RISK_CTF_COLLATERAL_ADAPTER
+            );
+          }
           if (!approvalStatus.usdcOnramp) {
             await writeErc20Approval(
               CONTRACTS.USDC_E,
@@ -336,6 +348,14 @@ export function useRelayerClient() {
           }
           if (!approvalStatus.ctfNegRiskAdapterApproval) {
             await writeErc1155Approval(CONTRACTS.NEG_RISK_ADAPTER);
+          }
+          if (!approvalStatus.ctfCollateralAdapterApproval) {
+            await writeErc1155Approval(CONTRACTS.CTF_COLLATERAL_ADAPTER);
+          }
+          if (!approvalStatus.ctfNegRiskCollateralAdapterApproval) {
+            await writeErc1155Approval(
+              CONTRACTS.NEG_RISK_CTF_COLLATERAL_ADAPTER
+            );
           }
 
           setState((prev) => ({ ...prev, isLoading: false }));

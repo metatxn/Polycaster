@@ -2,7 +2,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useConnection, useSignTypedData, useWalletClient } from "wagmi";
+import { useConnection, useWalletClient } from "wagmi";
 import {
   CLOB_AUTH_DOMAIN,
   CLOB_AUTH_MESSAGE,
@@ -10,6 +10,7 @@ import {
   CLOB_BASE_URL,
   POLYMARKET_CHAIN_ID,
 } from "@/constants/polymarket";
+import { getViemWalletClient } from "@/lib/viem-wallet-client";
 
 const log = createLogger("clob-credentials");
 
@@ -256,7 +257,6 @@ function clearStoredReadonlyKeys(address: string): void {
  */
 export function useClobCredentials() {
   const { address, isConnected } = useConnection();
-  const signTypedData = useSignTypedData();
   const { data: walletClient } = useWalletClient();
 
   const [credentials, setCredentials] = useState<ApiKeyCreds | null>(null);
@@ -293,7 +293,12 @@ export function useClobCredentials() {
     const timestamp = Math.floor(Date.now() / 1000);
     const nonce = 0;
 
-    const signature = await signTypedData.mutateAsync({
+    const signer = await getViemWalletClient(
+      walletClient,
+      address as `0x${string}`
+    );
+    const signature = await signer.signTypedData({
+      account: address as `0x${string}`,
       domain: CLOB_AUTH_DOMAIN,
       types: CLOB_AUTH_TYPES,
       primaryType: "ClobAuth",
@@ -310,7 +315,7 @@ export function useClobCredentials() {
       timestamp: `${timestamp}`,
       nonce: `${nonce}`,
     };
-  }, [address, signTypedData]);
+  }, [address, walletClient]);
 
   /**
    * Fallback: Derive credentials via server-side API route
@@ -370,19 +375,6 @@ export function useClobCredentials() {
       throw new Error("No wallet provider found");
     }
 
-    // Resolve an EIP-1193 provider that works for ALL connector types:
-    // - Injected (MetaMask, Coinbase Wallet extension): `window.ethereum`
-    // - WalletConnect / mobile EOAs scanned via QR: viem's
-    //   `walletClient.transport`, which is the EIP-1193 transport bound to
-    //   the active wagmi connector. `window.ethereum` is undefined for
-    //   these, which is why mobile users were hitting "No wallet provider
-    //   found" before this change.
-    // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
-    const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
-    if (!eip1193Provider) {
-      throw new Error("No wallet provider found");
-    }
-
     setIsLoading(true);
     setError(null);
 
@@ -393,17 +385,11 @@ export function useClobCredentials() {
         log.warn("api_credentials_route.failed.fallback_to_sdk", apiErr);
       }
 
-      // Dynamic imports to avoid SSR issues
-      const [{ ClobClient }, ethersModule] = await Promise.all([
+      // Dynamic import to avoid SSR issues.
+      const [{ ClobClient }, signer] = await Promise.all([
         import("@polymarket/clob-client-v2"),
-        import("ethers"),
+        getViemWalletClient(walletClient, address as `0x${string}`),
       ]);
-
-      // Wrap the EIP-1193 provider in ethers — works for both injected and
-      // WalletConnect transports.
-      const provider = new ethersModule.providers.Web3Provider(eip1193Provider);
-      await provider.send("eth_requestAccounts", []);
-      const signer = provider.getSigner();
 
       // Create CLOB client for credential derivation
       const clobClient = new ClobClient({
@@ -457,7 +443,7 @@ export function useClobCredentials() {
     } finally {
       setIsLoading(false);
     }
-  }, [address, deriveCredentialsViaApi, walletClient?.transport]);
+  }, [address, deriveCredentialsViaApi, walletClient]);
 
   /**
    * Clear stored credentials and reset state
@@ -516,21 +502,14 @@ export function useClobCredentials() {
       );
     }
 
-    if (typeof window === "undefined" || !window.ethereum) {
+    if (typeof window === "undefined") {
       throw new Error("No wallet provider found");
     }
 
-    const [{ ClobClient }, ethersModule] = await Promise.all([
+    const [{ ClobClient }, signer] = await Promise.all([
       import("@polymarket/clob-client-v2"),
-      import("ethers"),
+      getViemWalletClient(walletClient, address as `0x${string}` | undefined),
     ]);
-
-    const provider = new ethersModule.providers.Web3Provider(
-      // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-      window.ethereum as any
-    );
-    await provider.send("eth_requestAccounts", []);
-    const signer = provider.getSigner();
 
     const creds = {
       key: credentials.apiKey,
@@ -544,7 +523,7 @@ export function useClobCredentials() {
       signer,
       creds,
     }) as InstanceType<typeof ClobClient> & ClobClientWithReadonlyMethods;
-  }, [credentials]);
+  }, [address, credentials, walletClient]);
 
   /**
    * Create a new read-only API key

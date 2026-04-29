@@ -107,6 +107,7 @@ export interface TradingSplitPositionMessage {
   conditionId: string;
   amount: number;
   address: string;
+  negRisk?: boolean;
   proxyAddress?: string;
   walletMode?: TradingWalletMode;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
@@ -119,6 +120,7 @@ export interface TradingMergePositionsMessage {
   conditionId: string;
   amount: number;
   address: string;
+  negRisk?: boolean;
   proxyAddress?: string;
   walletMode?: TradingWalletMode;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };

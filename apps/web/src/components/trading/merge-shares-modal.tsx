@@ -28,6 +28,8 @@ interface MergeSharesModalProps {
   noTokenId: string;
   /** Market question/title for display */
   marketTitle?: string;
+  /** Whether this market uses the negative-risk CTF adapter */
+  negRisk?: boolean;
   /** Callback after successful merge */
   onSuccess?: () => void;
 }
@@ -38,6 +40,7 @@ export function MergeSharesModal({
   conditionId,
   yesTokenId,
   noTokenId,
+  negRisk = false,
   onSuccess,
 }: MergeSharesModalProps) {
   const { proxyAddress, refresh: refreshWallet } = useProxyWallet();
@@ -143,7 +146,8 @@ export function MergeSharesModal({
     const result = await mergePositions(
       conditionId,
       numericAmount,
-      proxyAddress
+      proxyAddress,
+      negRisk
     );
 
     if (!result.success) {
@@ -159,7 +163,14 @@ export function MergeSharesModal({
         setLocalError(result.error || "Merge failed");
       }
     }
-  }, [proxyAddress, conditionId, isValidAmount, numericAmount, mergePositions]);
+  }, [
+    proxyAddress,
+    conditionId,
+    isValidAmount,
+    numericAmount,
+    mergePositions,
+    negRisk,
+  ]);
 
   const displayError = localError || error;
 

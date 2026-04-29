@@ -8,6 +8,12 @@ import { useConnection, useWalletClient } from "wagmi";
 const log = createLogger("clob-client");
 const DEFAULT_APPROVAL_AMOUNT = "100";
 const APPROVAL_DECIMALS = 6;
+const PROTOCOL_FEE_DECIMALS = 5;
+
+type ProtocolFeeDetails = {
+  rate: Decimal;
+  exponent: Decimal;
+};
 
 function normalizeApprovalAmount(amount?: string): string {
   const decimal = new Decimal(amount || DEFAULT_APPROVAL_AMOUNT);
@@ -41,6 +47,112 @@ import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
 import { useRelayerClient } from "./use-relayer-client";
 
+function getNestedValue(source: unknown, path: string[]): unknown {
+  let current = source;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function decimalFromUnknown(value: unknown): Decimal | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const decimal = new Decimal(value);
+  return decimal.isFinite() ? decimal : null;
+}
+
+function parseProtocolFeeDetails(info: unknown): ProtocolFeeDetails {
+  const rate =
+    decimalFromUnknown(getNestedValue(info, ["fd", "r"])) ??
+    decimalFromUnknown(getNestedValue(info, ["fee_details", "r"]));
+  const exponent =
+    decimalFromUnknown(getNestedValue(info, ["fd", "e"])) ??
+    decimalFromUnknown(getNestedValue(info, ["fee_details", "e"]));
+
+  return {
+    rate: rate ?? new Decimal(0),
+    exponent: exponent?.isFinite() ? exponent : new Decimal(1),
+  };
+}
+
+function parseBuilderTakerFeeRate(info: unknown): Decimal {
+  const rawBps =
+    decimalFromUnknown(getNestedValue(info, ["tbf"])) ??
+    decimalFromUnknown(getNestedValue(info, ["builderTakerFeeBps"])) ??
+    decimalFromUnknown(getNestedValue(info, ["builder_taker_fee_bps"]));
+  if (!rawBps) return new Decimal(0);
+  return rawBps.div(10_000);
+}
+
+function decimalToPusdRaw(
+  value: Decimal,
+  rounding: Decimal.Rounding = Decimal.ROUND_CEIL
+): bigint {
+  const fixed = value
+    .toDecimalPlaces(PUSD_DECIMALS, rounding)
+    .toFixed(PUSD_DECIMALS);
+  const [whole, fraction = ""] = fixed.split(".");
+  return (
+    BigInt(whole || "0") * BigInt(10 ** PUSD_DECIMALS) +
+    BigInt(fraction.padEnd(PUSD_DECIMALS, "0").slice(0, PUSD_DECIMALS))
+  );
+}
+
+function estimateFallbackFeeRaw(amount: bigint): bigint {
+  const FEE_BUFFER_BPS = BigInt(300); // 3%
+  const BPS_DENOMINATOR = BigInt(10_000);
+  return (amount * FEE_BUFFER_BPS) / BPS_DENOMINATOR;
+}
+
+async function estimateBuyTakerFeeRaw(
+  client: {
+    getClobMarketInfo?: (conditionId: string) => Promise<unknown>;
+  },
+  conditionId: string | undefined,
+  size: number,
+  price: number,
+  notional: Decimal
+): Promise<bigint | null> {
+  if (!conditionId || typeof client.getClobMarketInfo !== "function") {
+    return null;
+  }
+
+  try {
+    const info = await client.getClobMarketInfo(conditionId);
+    const shares = new Decimal(size);
+    const effectivePrice =
+      price > 0 ? new Decimal(price) : notional.div(shares);
+    if (
+      !shares.isFinite() ||
+      shares.lte(0) ||
+      !effectivePrice.isFinite() ||
+      effectivePrice.lte(0) ||
+      effectivePrice.gte(1)
+    ) {
+      return BigInt(0);
+    }
+
+    const { rate: protocolRate, exponent: protocolExponent } =
+      parseProtocolFeeDetails(info);
+    const priceCurve = effectivePrice
+      .mul(new Decimal(1).sub(effectivePrice))
+      .pow(protocolExponent);
+    const protocolFee = shares
+      .mul(protocolRate)
+      .mul(priceCurve)
+      .toDecimalPlaces(PROTOCOL_FEE_DECIMALS, Decimal.ROUND_HALF_UP);
+    const builderFee = notional.mul(parseBuilderTakerFeeRate(info));
+    return decimalToPusdRaw(Decimal.max(0, protocolFee.plus(builderFee)));
+  } catch (err) {
+    log.warn("fee_info.fetch_failed", {
+      conditionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 /**
  * Order side enum
  */
@@ -65,6 +177,7 @@ export enum OrderType {
  */
 export interface CreateOrderParams {
   tokenId: string;
+  conditionId?: string;
   price: number;
   size: number;
   amount?: number;
@@ -128,18 +241,27 @@ export function useClobClient() {
   const [error, setError] = useState<Error | null>(null);
 
   /**
-   * Internal helper to get ethers signer from window.ethereum
+   * Internal helper to get an ethers signer that works for both injected
+   * wallets (MetaMask) and WalletConnect (mobile EOAs scanned via QR).
+   *
+   * For WalletConnect, `window.ethereum` is undefined; viem's
+   * `walletClient.transport` is the EIP-1193 transport bound to the active
+   * wagmi connector and is what we wrap into ethers.
    */
   const getEthersSigner = useCallback(async () => {
-    if (typeof window === "undefined" || !window.ethereum) {
-      throw new Error("No wallet provider found. Please install MetaMask.");
+    if (typeof window === "undefined") {
+      throw new Error("No wallet provider found.");
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
+    const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
+    if (!eip1193Provider) {
+      throw new Error("No wallet provider found.");
     }
     const { providers } = await import("ethers");
-    // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-    const provider = new providers.Web3Provider(window.ethereum as any);
+    const provider = new providers.Web3Provider(eip1193Provider);
     await provider.send("eth_requestAccounts", []);
     return provider.getSigner();
-  }, []);
+  }, [walletClient?.transport]);
 
   /**
    * Internal helper to initialize the ClobClient
@@ -173,18 +295,27 @@ export function useClobClient() {
   }, [credentials, proxyAddress, getEthersSigner]);
 
   /**
-   * Check if the client can be used
+   * Check if the client can be used. Either an injected provider
+   * (`window.ethereum`) or an active wagmi walletClient transport (used
+   * by WalletConnect / mobile EOAs) is sufficient.
    */
   const canTrade = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const hasProvider = !!walletClient?.transport || !!window.ethereum;
     return (
       isConnected &&
       hasCredentials &&
       hasProxyWallet &&
       !!proxyAddress &&
-      typeof window !== "undefined" &&
-      !!window.ethereum
+      hasProvider
     );
-  }, [isConnected, hasCredentials, hasProxyWallet, proxyAddress]);
+  }, [
+    isConnected,
+    hasCredentials,
+    hasProxyWallet,
+    proxyAddress,
+    walletClient?.transport,
+  ]);
 
   /**
    * Ensure the proxy wallet has enough pUSD to cover a BUY order.
@@ -204,7 +335,11 @@ export function useClobClient() {
    * @param requiredPusdRaw - Required pUSD amount in base units (6 decimals).
    */
   const ensurePusdSufficient = useCallback(
-    async (requiredPusdRaw: bigint, reservedPusdRaw: bigint = BigInt(0)) => {
+    async (
+      requiredPusdRaw: bigint,
+      reservedPusdRaw: bigint = BigInt(0),
+      estimatedFeeRaw: bigint | null = null
+    ) => {
       if (!proxyAddress) throw new Error("Proxy wallet not found");
       if (requiredPusdRaw <= BigInt(0)) return;
 
@@ -253,17 +388,13 @@ export function useClobClient() {
           ? pusdBalanceOnChain - reservedPusdRaw
           : BigInt(0);
 
-      // V2 Exchange pulls `makerAmount + fees` from the Safe. The V2 SDK
-      // could shrink `amount` via `adjustBuyAmountForFees` when
-      // `userUSDCBalance` is passed, but that path depends on a valid
-      // `builderFeeRates` entry — which 404s in preprod and gets cached as
-      // NaN, disabling the adjustment. So we wrap a small buffer above the
-      // requested amount to cover fees directly on-chain.
-      const FEE_BUFFER_BPS = BigInt(300); // 3% — generous cap for V2 platform + builder fees
-      const BPS_DENOMINATOR = BigInt(10_000);
+      // V2 Exchange pulls `makerAmount + fees` from the Safe. Prefer the
+      // current market fee parameters from getClobMarketInfo(); fall back to
+      // the previous 3% buffer if metadata is unavailable so order placement
+      // remains resilient to transient CLOB metadata failures.
       const targetPusdRaw =
-        (requiredPusdRaw * (BPS_DENOMINATOR + FEE_BUFFER_BPS)) /
-        BPS_DENOMINATOR;
+        requiredPusdRaw +
+        (estimatedFeeRaw ?? estimateFallbackFeeRaw(requiredPusdRaw));
 
       if (pusdBalance >= targetPusdRaw) return;
 
@@ -415,6 +546,7 @@ export function useClobClient() {
           params.orderType === OrderType.FOK;
 
         let requiredPusdRaw: bigint | null = null;
+        let requiredNotional: Decimal | null = null;
         if (params.side === Side.BUY) {
           const { parseUnits } = await import("viem");
           if (isMarket) {
@@ -424,21 +556,47 @@ export function useClobClient() {
                 "BUY market orders require a notional amount (params.amount)"
               );
             }
-            requiredPusdRaw = parseUnits(notional.toString(), PUSD_DECIMALS);
+            requiredNotional = new Decimal(notional);
+            requiredPusdRaw = parseUnits(
+              requiredNotional.toString(),
+              PUSD_DECIMALS
+            );
           } else {
             // Limit BUY: price (dollars) * size (shares) = notional dollars.
-            const notional = new Decimal(params.price).mul(params.size);
-            requiredPusdRaw = parseUnits(notional.toString(), PUSD_DECIMALS);
+            requiredNotional = new Decimal(params.price).mul(params.size);
+            requiredPusdRaw = parseUnits(
+              requiredNotional.toString(),
+              PUSD_DECIMALS
+            );
           }
         }
+
+        const estimatedFeeRaw =
+          requiredPusdRaw !== null && requiredNotional
+            ? await estimateBuyTakerFeeRaw(
+                client,
+                params.conditionId,
+                params.size,
+                params.price,
+                requiredNotional
+              )
+            : null;
+        const requiredCollateralRaw =
+          requiredPusdRaw !== null
+            ? requiredPusdRaw +
+              (estimatedFeeRaw ?? estimateFallbackFeeRaw(requiredPusdRaw))
+            : null;
 
         // Approvals pre-flight: if any V2 allowance is missing, or if a finite
         // pUSD allowance is below this BUY's notional, update it before posting.
         // SELL needs CTF.setApprovalForAll → exchanges to transfer outcome
         // tokens; BUY needs sufficient pUSD → exchange allowance for settlement.
         await ensureV2Approvals(
-          requiredPusdRaw !== null
-            ? { requiredPusdRaw, negRisk: params.negRisk }
+          requiredCollateralRaw !== null
+            ? {
+                requiredPusdRaw: requiredCollateralRaw,
+                negRisk: params.negRisk,
+              }
             : undefined
         );
 
@@ -483,7 +641,11 @@ export function useClobClient() {
             // the server rejects with its own error message.
           }
 
-          await ensurePusdSufficient(requiredPusdRaw, reservedPusdRaw);
+          await ensurePusdSufficient(
+            requiredPusdRaw,
+            reservedPusdRaw,
+            estimatedFeeRaw
+          );
         }
 
         if (isMarket) {
@@ -692,10 +854,16 @@ export function useClobClient() {
           },
         ] as const;
 
-        const walletClient = createWalletClient({
+        // Same provider-resolution as `getEthersSigner` so this manual EOA
+        // allowance flow works for WalletConnect (mobile) too.
+        // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
+        const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
+        if (!eip1193Provider) {
+          throw new Error("No wallet provider found.");
+        }
+        const approveWalletClient = createWalletClient({
           chain: polygon,
-          // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-          transport: custom(window.ethereum as any),
+          transport: custom(eip1193Provider),
           account: address,
         });
 
@@ -705,13 +873,13 @@ export function useClobClient() {
           transport: http(getRpcUrl()),
         });
 
-        await walletClient.requestAddresses();
+        await approveWalletClient.requestAddresses();
 
         const approve = async (
           token: `0x${string}`,
           spender: `0x${string}`
         ) => {
-          const hash = await walletClient.writeContract({
+          const hash = await approveWalletClient.writeContract({
             account: address,
             address: token,
             abi: ERC20_APPROVE_ABI,
@@ -730,7 +898,7 @@ export function useClobClient() {
           return hash;
         };
         const approveOperator = async (operator: `0x${string}`) => {
-          const hash = await walletClient.writeContract({
+          const hash = await approveWalletClient.writeContract({
             account: address,
             address: CTF_ADDRESS,
             abi: ERC1155_APPROVAL_ABI,
@@ -774,7 +942,7 @@ export function useClobClient() {
         setIsLoading(false);
       }
     },
-    [address]
+    [address, walletClient?.transport]
   );
 
   /**

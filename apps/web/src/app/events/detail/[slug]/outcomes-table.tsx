@@ -8,8 +8,10 @@ import {
   History,
   Info,
   LineChart,
+  Loader2,
   User,
   Users,
+  X,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
@@ -26,9 +28,12 @@ import {
 } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCancelOrder, useOpenOrders } from "@/hooks/use-open-orders";
+import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import type { ConnectionState } from "@/hooks/use-shared-websocket";
 import { useTopHolders } from "@/hooks/use-top-holders";
 import type { Position } from "@/hooks/use-user-positions";
+import { useUserTrades } from "@/hooks/use-user-trades";
 import { formatPrice, formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +60,22 @@ const OrderBook = dynamic(
   }
 );
 
+/** Compact relative-time label (e.g. "8d ago", "2h ago") for trade history. */
+function formatRelativeTime(timestamp: string | number): string {
+  const t =
+    typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime();
+  const diffMs = Date.now() - t;
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "just now";
+  const s = Math.floor(diffMs / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d}d ago`;
+  if (h > 0) return `${h}h ago`;
+  if (m > 0) return `${m}m ago`;
+  return `${s}s ago`;
+}
+
 interface MarketData {
   id: string;
   yesTokenId: string;
@@ -72,6 +93,7 @@ interface MarketData {
 interface OutcomesTableProps {
   sortedMarketData: MarketData[];
   closedMarkets?: MarketData[];
+  changeLabel?: string;
   isOutcomeTableExpanded: boolean;
   setIsOutcomeTableExpanded: (val: boolean) => void;
   isConnected: boolean;
@@ -124,31 +146,63 @@ function MarketExpandedContent({
   isSingleMarketEvent,
   onSellPosition,
 }: MarketExpandedContentProps) {
+  // Pull the trading address (Safe proxy) so we can scope the activity panel
+  // to the user's own orders + trades for THIS market.
+  const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
+  const tradingAddress =
+    hasProxyWallet && proxyAddress ? proxyAddress : undefined;
+
+  // All open orders for this user — the SDK doesn't filter server-side,
+  // so we narrow client-side to the two tokenIds for this market.
+  const { data: openOrdersData } = useOpenOrders({
+    userAddress: tradingAddress,
+    enabled: isExpanded && !!tradingAddress,
+  });
+  const marketOpenOrders = useMemo(() => {
+    const orders = openOrdersData?.orders ?? [];
+    return orders.filter(
+      (o) => o.tokenId === market.yesTokenId || o.tokenId === market.noTokenId
+    );
+  }, [openOrdersData?.orders, market.yesTokenId, market.noTokenId]);
+
+  // Recent trades for this market only — server-side filter via conditionId.
+  // `type: TRADE` excludes redemptions/splits/merges (which carry price=0
+  // and would render as bogus "Sold X at 0.0¢" entries in the history list).
+  const { data: tradesData } = useUserTrades({
+    userAddress: tradingAddress,
+    market: market.conditionId || undefined,
+    type: "TRADE",
+    limit: 10,
+    enabled: isExpanded && !!tradingAddress && !!market.conditionId,
+  });
+  const marketTrades = tradesData?.trades ?? [];
+
+  const { mutate: cancelOrder, variables: cancellingOrderId } =
+    useCancelOrder();
+
+  const hasActivity =
+    !!userPosition || marketOpenOrders.length > 0 || marketTrades.length > 0;
+
   // Use controlled tab state to ensure proper default selection
   const [activeTab, setActiveTab] = useState<string>(
-    userPosition ? "position" : "orderbook"
+    hasActivity ? "position" : "orderbook"
   );
 
-  // Track previous userPosition to detect changes
-  const [hadPosition, setHadPosition] = useState<boolean>(!!userPosition);
+  // Track previous activity to detect changes
+  const [hadActivity, setHadActivity] = useState<boolean>(hasActivity);
 
-  // Update active tab ONLY when userPosition status changes (appears or disappears)
-  // This allows users to freely switch between tabs while they have a position
+  // Update active tab ONLY when activity status flips (appears or disappears).
+  // This lets users freely switch tabs while they have any market activity.
   useEffect(() => {
-    const hasPosition = !!userPosition;
-
-    if (hasPosition !== hadPosition) {
-      // Position status changed
-      if (hasPosition && !hadPosition) {
-        // User just got a position - switch to position tab
+    if (hasActivity !== hadActivity) {
+      if (hasActivity && !hadActivity) {
         setActiveTab("position");
-      } else if (!hasPosition && hadPosition) {
-        // User just lost their position - switch to orderbook tab
+      } else if (!hasActivity && hadActivity) {
         setActiveTab("orderbook");
       }
-      setHadPosition(hasPosition);
+      setHadActivity(hasActivity);
     }
-  }, [userPosition, hadPosition]);
+  }, [hasActivity, hadActivity]);
 
   // Skip rendering heavy children (OrderBook × 2, chart, holders table) until
   // the row is expanded — otherwise every market mounts its fetch chain on
@@ -178,8 +232,9 @@ function MarketExpandedContent({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="flex items-center justify-between px-2 sm:px-6 border-b border-border/50 overflow-x-auto no-scrollbar">
             <TabsList className="h-auto p-0 bg-transparent gap-0 shrink-0 flex">
-              {/* Position tab - only show if user has a position */}
-              {userPosition && (
+              {/* Position tab — shown when the user has a position, open
+                  orders, or trade history for this market. */}
+              {hasActivity && (
                 <TabsTrigger value="position" className={tabTriggerClass}>
                   <User className="h-3.5 w-3.5 mr-2 inline-block" />
                   Position
@@ -208,92 +263,220 @@ function MarketExpandedContent({
             </TabsList>
           </div>
 
-          {/* Position Tab Content */}
-          {userPosition && (
-            <TabsContent value="position" className="m-0 px-6 py-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-2 md:gap-x-4 lg:gap-x-8 gap-y-4 flex-1">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                      Outcome
-                    </span>
-                    <span
-                      className={cn(
-                        "font-bold text-sm",
-                        userPosition.outcome.toLowerCase() === "yes"
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-rose-600 dark:text-rose-400"
-                      )}
-                    >
-                      {userPosition.outcome}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                      Qty
-                    </span>
-                    <span className="font-bold text-sm tabular-nums">
-                      {userPosition.size.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                      Avg Price
-                    </span>
-                    <span className="font-bold text-sm tabular-nums">
-                      {(userPosition.avgPrice * 100).toFixed(1)}¢
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                      Value
-                    </span>
-                    <span className="font-bold text-sm tabular-nums">
-                      ${userPosition.currentValue.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                      Cost
-                    </span>
-                    <span className="font-bold text-sm tabular-nums">
-                      ${userPosition.initialValue.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                      Return
-                    </span>
-                    <span
-                      className={cn(
-                        "font-bold text-sm tabular-nums",
-                        userPosition.unrealizedPnl >= 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-rose-600 dark:text-rose-400"
-                      )}
-                    >
-                      ${Math.abs(userPosition.unrealizedPnl).toFixed(2)}
-                      <span className="text-xs ml-1 opacity-80">
-                        ({userPosition.unrealizedPnl >= 0 ? "+" : "-"}
-                        {Math.abs(userPosition.unrealizedPnlPercent).toFixed(1)}
-                        %)
+          {/* Position Tab Content — position card + open orders + recent
+              history, scoped to this market only. Mirrors Polymarket's
+              all-in-one panel so users don't have to leave the row. */}
+          {hasActivity && (
+            <TabsContent value="position" className="m-0 px-6 py-4 space-y-6">
+              {userPosition && (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-2 md:gap-x-4 lg:gap-x-8 gap-y-4 flex-1">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
+                        Outcome
                       </span>
-                    </span>
+                      <span
+                        className={cn(
+                          "font-bold text-sm",
+                          userPosition.outcome.toLowerCase() === "yes"
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-rose-600 dark:text-rose-400"
+                        )}
+                      >
+                        {userPosition.outcome}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
+                        Qty
+                      </span>
+                      <span className="font-bold text-sm tabular-nums">
+                        {userPosition.size.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
+                        Avg Price
+                      </span>
+                      <span className="font-bold text-sm tabular-nums">
+                        {(userPosition.avgPrice * 100).toFixed(1)}¢
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
+                        Value
+                      </span>
+                      <span className="font-bold text-sm tabular-nums">
+                        ${userPosition.currentValue.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
+                        Cost
+                      </span>
+                      <span className="font-bold text-sm tabular-nums">
+                        ${userPosition.initialValue.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
+                        Return
+                      </span>
+                      <span
+                        className={cn(
+                          "font-bold text-sm tabular-nums",
+                          userPosition.unrealizedPnl >= 0
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-rose-600 dark:text-rose-400"
+                        )}
+                      >
+                        ${Math.abs(userPosition.unrealizedPnl).toFixed(2)}
+                        <span className="text-xs ml-1 opacity-80">
+                          ({userPosition.unrealizedPnl >= 0 ? "+" : "-"}
+                          {Math.abs(userPosition.unrealizedPnlPercent).toFixed(
+                            1
+                          )}
+                          %)
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="shrink-0 w-full sm:w-auto font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSellPosition(userPosition);
+                    }}
+                  >
+                    <span className="hidden lg:inline">Sell Position</span>
+                    <span className="lg:hidden">Sell</span>
+                  </Button>
+                </div>
+              )}
+
+              {marketOpenOrders.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] uppercase font-bold tracking-wider text-muted-foreground">
+                      Open Orders
+                    </h4>
+                  </div>
+                  <div className="rounded-md border border-border/50 overflow-hidden">
+                    <div className="hidden md:grid md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_160px_92px] items-center gap-4 px-4 py-2 bg-muted/20 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      <span>Side</span>
+                      <span>Outcome</span>
+                      <span className="text-right">Price</span>
+                      <span className="text-right">Filled</span>
+                      <span className="text-right">Total</span>
+                      <span className="text-right">Expires</span>
+                      <span className="text-right">&nbsp;</span>
+                    </div>
+                    {marketOpenOrders.map((order) => {
+                      const outcomeName =
+                        order.tokenId === market.yesTokenId ? "Yes" : "No";
+                      const isCancelling = cancellingOrderId === order.id;
+                      return (
+                        <div
+                          key={order.id}
+                          className="grid grid-cols-[80px_minmax(80px,1fr)_92px] md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_160px_92px] items-center gap-4 px-4 py-2.5 border-t border-border/40 text-xs font-mono tabular-nums"
+                        >
+                          <span
+                            className={cn(
+                              "uppercase font-bold tracking-wider",
+                              order.side === "BUY"
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-rose-600 dark:text-rose-400"
+                            )}
+                          >
+                            {order.side}
+                          </span>
+                          <span
+                            className={cn(
+                              "font-semibold",
+                              outcomeName === "Yes"
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-rose-600 dark:text-rose-400"
+                            )}
+                          >
+                            {outcomeName}
+                          </span>
+                          <span className="hidden md:block text-right text-foreground">
+                            {(order.price * 100).toFixed(1)}¢
+                          </span>
+                          <span className="hidden md:block text-right text-foreground">
+                            {order.filledSize.toFixed(1)} /{" "}
+                            {order.size.toFixed(1)}
+                          </span>
+                          <span className="hidden md:block text-right text-foreground">
+                            ${(order.size * order.price).toFixed(2)}
+                          </span>
+                          <span className="hidden md:block text-right text-[10px] uppercase text-muted-foreground">
+                            {order.expiration ? "Limited" : "Until cancelled"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelOrder(order.id);
+                            }}
+                            disabled={isCancelling}
+                            className="ml-auto inline-flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-rose-500 transition-colors disabled:opacity-50"
+                          >
+                            {isCancelling ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <X className="h-3 w-3" />
+                            )}
+                            Cancel
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="shrink-0 w-full sm:w-auto font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSellPosition(userPosition);
-                  }}
-                >
-                  <span className="hidden lg:inline">Sell Position</span>
-                  <span className="lg:hidden">Sell</span>
-                </Button>
-              </div>
+              )}
+
+              {marketTrades.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-[11px] uppercase font-bold tracking-wider text-muted-foreground">
+                    History
+                  </h4>
+                  <div className="rounded-md border border-border/50 divide-y divide-border/40">
+                    {marketTrades.map((trade) => {
+                      const verb = trade.side === "BUY" ? "Bought" : "Sold";
+                      const outcomeColor =
+                        trade.outcome.toLowerCase() === "yes"
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-rose-600 dark:text-rose-400";
+                      return (
+                        <div
+                          key={trade.id}
+                          className="flex items-center justify-between px-3 py-2 text-xs"
+                        >
+                          <span className="font-mono tabular-nums">
+                            {verb}{" "}
+                            <span className={cn("font-semibold", outcomeColor)}>
+                              {trade.size.toFixed(2)} {trade.outcome}
+                            </span>{" "}
+                            <span className="text-muted-foreground">at</span>{" "}
+                            <span className="text-foreground">
+                              {(trade.price * 100).toFixed(1)}¢
+                            </span>{" "}
+                            <span className="text-muted-foreground">
+                              (${trade.usdcAmount.toFixed(2)})
+                            </span>
+                          </span>
+                          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {formatRelativeTime(trade.timestamp)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </TabsContent>
           )}
 
@@ -587,6 +770,7 @@ function SortButton({
 export function OutcomesTable({
   sortedMarketData,
   closedMarkets = [],
+  changeLabel = "24H",
   isOutcomeTableExpanded,
   setIsOutcomeTableExpanded,
   isConnected,
@@ -737,9 +921,9 @@ export function OutcomesTable({
         <CollapsibleContent>
           <CardContent className="p-0">
             {/* Desktop column headers — aligned with row data columns so
-                PROB sits directly above the % values and 24H above the
+                PROB sits directly above the % values and the range label above the
                 change chip. Mirrors the row's inner grid + min-widths. */}
-            {!isSingleMarketEvent && sortedMarketData.length > 1 && (
+            {sortedMarketData.length > 0 && (
               <div className="hidden lg:grid lg:grid-cols-[1fr_auto] items-center gap-4 pl-[11px] pr-4 py-1.5 border-b border-border/50 bg-muted/10 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
                 <div className="grid grid-cols-[1fr_auto] items-center gap-4">
                   <span className="pl-[44px]">Market</span>
@@ -752,7 +936,7 @@ export function OutcomesTable({
                       className="min-w-[50px] xl:min-w-[55px] justify-end"
                     />
                     <SortButton
-                      label="24h"
+                      label={changeLabel}
                       active={sortKey === "change"}
                       dir={sortDir}
                       onClick={() => toggleSort("change")}

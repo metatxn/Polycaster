@@ -1,6 +1,6 @@
 "use client";
 
-import type { TradingSide } from "@/types/market";
+import type { OrderTypeSelection, TradingSide } from "@/types/market";
 
 interface SharesInputProps {
   shares: number;
@@ -10,6 +10,7 @@ interface SharesInputProps {
   effectiveBalance?: number;
   price: number;
   side: TradingSide;
+  orderType: OrderTypeSelection;
   /** Maximum shares user can sell (their position size) */
   maxSellShares?: number;
 }
@@ -22,10 +23,14 @@ export function SharesInput({
   effectiveBalance,
   price,
   side,
+  orderType,
   maxSellShares,
 }: SharesInputProps) {
-  // For SELL, minimum is 1 (or 0.01 for fractional). For BUY, use minShares from market.
-  const effectiveMinShares = side === "SELL" ? 1 : minShares;
+  // LIMIT orders enforce the market's min_order_size on BOTH sides — the CLOB
+  // rejects sub-minimum sells with "Size (X) lower than the minimum: Y".
+  // MARKET sells can step down to 1 (a partial fill of an existing position).
+  const effectiveMinShares =
+    orderType === "LIMIT" ? minShares : side === "SELL" ? 1 : minShares;
 
   const handleMaxClick = () => {
     if (side === "SELL") {
@@ -99,7 +104,7 @@ export function SharesInput({
             }
           }}
           min={effectiveMinShares}
-          step={side === "SELL" ? 0.01 : 1}
+          step={side === "SELL" && orderType === "MARKET" ? 0.01 : 1}
           className="flex-1 min-w-0 bg-secondary/30 border border-border/60 px-2 py-2.5 text-center text-base font-semibold font-mono tabular-nums text-foreground focus:outline-none focus:border-foreground transition-colors"
         />
 

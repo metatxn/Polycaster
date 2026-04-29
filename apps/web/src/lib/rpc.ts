@@ -54,6 +54,9 @@ const balanceCache: BoundedCache<number> = {
   maxEntries: CACHE_MAX_ENTRIES,
 };
 
+const deploymentInflight = new Map<string, Promise<boolean>>();
+const balanceInflight = new Map<string, Promise<number>>();
+
 let lastRpcCall = 0;
 const MIN_RPC_INTERVAL = 100;
 
@@ -223,22 +226,35 @@ export async function checkIsDeployed(
     if (cached !== null) return cached;
   }
 
+  const inflight = deploymentInflight.get(cacheKey);
+  if (inflight) return inflight;
+
+  const request = (async () => {
+    try {
+      await throttleRpc();
+      const client = getPublicClient();
+      const code = await client.getCode({
+        address: address as `0x${string}`,
+      });
+
+      const isDeployed = code !== undefined && code !== "0x";
+
+      setCachedValue(deploymentCache, cacheKey, isDeployed);
+
+      return isDeployed;
+    } catch (err) {
+      log.error("deployment.check_failed", { error: err });
+      const stale = getCachedValue(deploymentCache, cacheKey, true);
+      return stale ?? false;
+    }
+  })();
+
+  deploymentInflight.set(cacheKey, request);
+
   try {
-    await throttleRpc();
-    const client = getPublicClient();
-    const code = await client.getCode({
-      address: address as `0x${string}`,
-    });
-
-    const isDeployed = code !== undefined && code !== "0x";
-
-    setCachedValue(deploymentCache, cacheKey, isDeployed);
-
-    return isDeployed;
-  } catch (err) {
-    log.error("deployment.check_failed", { error: err });
-    const stale = getCachedValue(deploymentCache, cacheKey, true);
-    return stale ?? false;
+    return await request;
+  } finally {
+    deploymentInflight.delete(cacheKey);
   }
 }
 
@@ -269,49 +285,63 @@ export async function fetchUsdcBalance(
     if (cached !== null) return cached;
   }
 
+  const inflightKey = options?.skipCache ? `${cacheKey}:fresh` : cacheKey;
+  const inflight = balanceInflight.get(inflightKey);
+  if (inflight) return inflight;
+
+  const request = (async () => {
+    try {
+      await throttleRpc();
+      const client = getPublicClient();
+      const { formatUnits } = await import("viem");
+
+      // One multicall round-trip instead of two parallel eth_calls.
+      const [pusdResult, usdcEResult] = await client.multicall({
+        allowFailure: true,
+        contracts: [
+          {
+            address: PUSD_ADDRESS as `0x${string}`,
+            abi: erc20Abi,
+            functionName: "balanceOf",
+            args: [address as `0x${string}`],
+          },
+          {
+            address: USDC_E_ADDRESS as `0x${string}`,
+            abi: erc20Abi,
+            functionName: "balanceOf",
+            args: [address as `0x${string}`],
+          },
+        ],
+      });
+
+      const rawPusd =
+        pusdResult.status === "success"
+          ? (pusdResult.result as bigint)
+          : BigInt(0);
+      const rawUsdcE =
+        usdcEResult.status === "success"
+          ? (usdcEResult.result as bigint)
+          : BigInt(0);
+      const pusd = Number(formatUnits(rawPusd, PUSD_DECIMALS));
+      const usdcE = Number(formatUnits(rawUsdcE, USDC_E_DECIMALS));
+      const balance = pusd + usdcE;
+
+      setCachedValue(balanceCache, cacheKey, balance);
+
+      return balance;
+    } catch (err) {
+      log.error("balance.fetch_failed", { error: err });
+      const stale = getCachedValue(balanceCache, cacheKey, true);
+      return stale ?? 0;
+    }
+  })();
+
+  balanceInflight.set(inflightKey, request);
+
   try {
-    await throttleRpc();
-    const client = getPublicClient();
-    const { formatUnits } = await import("viem");
-
-    // One multicall round-trip instead of two parallel eth_calls.
-    const [pusdResult, usdcEResult] = await client.multicall({
-      allowFailure: true,
-      contracts: [
-        {
-          address: PUSD_ADDRESS as `0x${string}`,
-          abi: erc20Abi,
-          functionName: "balanceOf",
-          args: [address as `0x${string}`],
-        },
-        {
-          address: USDC_E_ADDRESS as `0x${string}`,
-          abi: erc20Abi,
-          functionName: "balanceOf",
-          args: [address as `0x${string}`],
-        },
-      ],
-    });
-
-    const rawPusd =
-      pusdResult.status === "success"
-        ? (pusdResult.result as bigint)
-        : BigInt(0);
-    const rawUsdcE =
-      usdcEResult.status === "success"
-        ? (usdcEResult.result as bigint)
-        : BigInt(0);
-    const pusd = Number(formatUnits(rawPusd, PUSD_DECIMALS));
-    const usdcE = Number(formatUnits(rawUsdcE, USDC_E_DECIMALS));
-    const balance = pusd + usdcE;
-
-    setCachedValue(balanceCache, cacheKey, balance);
-
-    return balance;
-  } catch (err) {
-    log.error("balance.fetch_failed", { error: err });
-    const stale = getCachedValue(balanceCache, cacheKey, true);
-    return stale ?? 0;
+    return await request;
+  } finally {
+    balanceInflight.delete(inflightKey);
   }
 }
 
@@ -321,9 +351,12 @@ export async function fetchUsdcBalance(
  */
 export function clearDeploymentCache(address?: string): void {
   if (address) {
-    deploymentCache.map.delete(address.toLowerCase());
+    const cacheKey = address.toLowerCase();
+    deploymentCache.map.delete(cacheKey);
+    deploymentInflight.delete(cacheKey);
   } else {
     deploymentCache.map.clear();
+    deploymentInflight.clear();
   }
 }
 
@@ -333,9 +366,13 @@ export function clearDeploymentCache(address?: string): void {
  */
 export function clearBalanceCache(address?: string): void {
   if (address) {
-    balanceCache.map.delete(address.toLowerCase());
+    const cacheKey = address.toLowerCase();
+    balanceCache.map.delete(cacheKey);
+    balanceInflight.delete(cacheKey);
+    balanceInflight.delete(`${cacheKey}:fresh`);
   } else {
     balanceCache.map.clear();
+    balanceInflight.clear();
   }
 }
 
@@ -345,4 +382,6 @@ export function clearBalanceCache(address?: string): void {
 export function clearAllCaches(): void {
   deploymentCache.map.clear();
   balanceCache.map.clear();
+  deploymentInflight.clear();
+  balanceInflight.clear();
 }

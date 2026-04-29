@@ -38,12 +38,6 @@ import {
 import { Navbar } from "@/components/navbar";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuSeparator,
@@ -670,17 +664,17 @@ export function HomeContent({ initialData }: HomeContentProps) {
           >
             {/* Error State */}
             {currentData.error && (
-              <Card className="border-destructive/50 bg-destructive/5 backdrop-blur-sm mb-6">
-                <CardHeader>
-                  <CardTitle className="text-destructive flex items-center gap-2">
-                    <Sparkles className="h-5 w-5" />
-                    Oops! Something went wrong
-                  </CardTitle>
-                  <CardDescription>
-                    {currentData.error?.message || "Unable to load markets"}
-                  </CardDescription>
-                </CardHeader>
-              </Card>
+              <div className="py-10 border-y border-destructive/30 mb-6">
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mb-3">
+                  §&nbsp;&nbsp;Feed Error
+                </p>
+                <p className="kw-editorial italic text-xl md:text-2xl leading-snug text-foreground max-w-xl mb-3">
+                  Markets couldn&apos;t be loaded.
+                </p>
+                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
+                  {currentData.error?.message || "Unable to load markets"}
+                </p>
+              </div>
             )}
 
             {/* Loading State — skeleton cards sit on paper-grain backdrop so

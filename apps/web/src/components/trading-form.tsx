@@ -16,6 +16,7 @@ import {
 import Image from "next/image";
 import posthog from "posthog-js";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { DepositModal } from "@/components/deposit-modal";
 import { useOnboarding } from "@/context/onboarding-context";
 import { formatSlippageDisplay } from "@/lib/slippage";
@@ -127,6 +128,20 @@ export function TradingForm(props: TradingFormProps) {
     ? slippageResult.slippagePercent > maxSlippagePercent
     : false;
   const formatCents = (price: number) => `${(price * 100).toFixed(1)}¢`;
+
+  // LIMIT orders enforce min_order_size on both sides; MARKET sells can fill smaller.
+  const belowLimitMin = orderType === "LIMIT" && shares < minShares;
+
+  // CLOB error strings come back as `order 0x{hash}... is invalid. {reason}` —
+  // strip the order-id preamble and surface the human-readable reason.
+  const friendlyErrorMessage = (raw: string): string => {
+    const stripped = raw.replace(
+      /^order\s+0x[a-f0-9]+(\.\.\.)?\s+is invalid\.\s*/i,
+      ""
+    );
+    const reason = stripped || raw;
+    return reason.charAt(0).toUpperCase() + reason.slice(1);
+  };
 
   return (
     <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
@@ -285,6 +300,7 @@ export function TradingForm(props: TradingFormProps) {
             effectiveBalance={effectiveBalance}
             price={calculations.price}
             side={side}
+            orderType={orderType}
             maxSellShares={maxSellShares}
           />
 
@@ -338,10 +354,10 @@ export function TradingForm(props: TradingFormProps) {
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
               >
-                <div className="flex items-center gap-3 p-3 bg-destructive/10 border border-destructive/20">
-                  <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-                  <span className="text-sm text-destructive">
-                    {error.message}
+                <div className="flex items-start gap-2.5 p-3 bg-destructive/10 border border-destructive/20">
+                  <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                  <span className="text-sm text-destructive leading-snug wrap-break-word">
+                    {friendlyErrorMessage(error.message)}
                   </span>
                 </div>
               </motion.div>
@@ -358,6 +374,22 @@ export function TradingForm(props: TradingFormProps) {
                   <span className="text-sm text-amber-600 dark:text-amber-400">
                     You don't have any {selectedOutcome?.name || "shares"} to
                     sell
+                  </span>
+                </div>
+              </motion.div>
+            )}
+
+            {belowLimitMin && shares > 0 && !error && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <div className="flex items-start gap-2.5 p-3 bg-amber-500/10 border border-amber-500/20">
+                  <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                  <span className="text-sm text-amber-600 dark:text-amber-400 leading-snug">
+                    Limit orders require a minimum of {minShares} share
+                    {minShares === 1 ? "" : "s"}.
                   </span>
                 </div>
               </motion.div>
@@ -430,25 +462,48 @@ export function TradingForm(props: TradingFormProps) {
                 className={`w-full h-11 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                   (side === "BUY" && hasInsufficientBalance) ||
                   (side === "SELL" && maxSellShares <= 0) ||
-                  (side === "BUY" && shares < minShares)
+                  belowLimitMin
                     ? "bg-muted text-muted-foreground"
                     : side === "BUY"
                       ? "bg-emerald-600 hover:bg-emerald-700 text-white"
                       : "bg-red-600 hover:bg-red-700 text-white"
                 }`}
                 onClick={async () => {
+                  const submittedShares = shares;
+                  const submittedSide = side;
+                  const submittedOrderType = orderType;
+                  const submittedOutcome = selectedOutcome?.name;
+                  const submittedPrice =
+                    orderType === "LIMIT" ? limitPrice : calculations.price;
+
                   const success = await handleSubmit();
                   if (success) {
                     posthog.capture("order_submitted", {
                       market_title: marketTitle,
-                      side,
-                      order_type: orderType,
-                      shares,
-                      outcome_name: selectedOutcome?.name,
+                      side: submittedSide,
+                      order_type: submittedOrderType,
+                      shares: submittedShares,
+                      outcome_name: submittedOutcome,
                       total_cost: calculations.total,
                       potential_win: calculations.potentialWin,
                     });
+
+                    const outcomeLabel = submittedOutcome ?? "shares";
+                    if (submittedOrderType === "LIMIT") {
+                      const intent = submittedSide === "BUY" ? "buy" : "sell";
+                      toast.success("Limit order placed", {
+                        description: `Resting on the book to ${intent} ${submittedShares} ${outcomeLabel} at ${formatCents(submittedPrice)}.`,
+                      });
+                    } else {
+                      const verb = submittedSide === "BUY" ? "Bought" : "Sold";
+                      toast.success("Order filled", {
+                        description: `${verb} ${submittedShares} ${outcomeLabel} at market.`,
+                      });
+                    }
                   }
+                  // Failures: inline error banner (already friendly-formatted)
+                  // surfaces them; the clob `error` state is set asynchronously
+                  // inside the hook, so reading it here would be stale.
                 }}
                 disabled={
                   isLoading ||
@@ -458,7 +513,7 @@ export function TradingForm(props: TradingFormProps) {
                   (side === "SELL" && shares <= 0) ||
                   hasInsufficientAllowance ||
                   hasNoAllowance ||
-                  (side === "BUY" && shares < minShares) ||
+                  belowLimitMin ||
                   (side === "BUY" && isBelowMarketableBuyMinNotional) ||
                   !selectedOutcome ||
                   !hasValidTokenId ||
@@ -480,7 +535,7 @@ export function TradingForm(props: TradingFormProps) {
                   `Max ${maxSellShares.toFixed(1)} shares`
                 ) : side === "BUY" && hasInsufficientBalance ? (
                   "Insufficient Balance"
-                ) : side === "BUY" && shares < minShares ? (
+                ) : belowLimitMin ? (
                   `Minimum shares: ${minShares}`
                 ) : side === "BUY" && isBelowMarketableBuyMinNotional ? (
                   "Minimum order: $1"

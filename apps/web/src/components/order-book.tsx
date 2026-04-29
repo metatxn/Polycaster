@@ -10,7 +10,14 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -259,6 +266,16 @@ export function OrderBook({
   const [selectedOutcome, setSelectedOutcome] = useState(defaultOutcomeIndex);
   const [isOpen, setIsOpen] = useState(!defaultCollapsed);
 
+  // Refs for centering the scrollable ladder on the spread divider so the
+  // viewport opens with asks above / bids below in equal halves (Polymarket
+  // pattern). Without this, scrollTop=0 fills the visible area with the
+  // worst-priced asks and the spread is hidden below the fold.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const spreadDividerRef = useRef<HTMLDivElement | null>(null);
+  // Track which token we've already centered for, so subsequent WebSocket
+  // updates don't steal the user's scroll position.
+  const centeredForTokenRef = useRef<string | null>(null);
+
   // Sync internal state with parent's defaultOutcomeIndex when it changes
   // This allows parent to control which outcome (Yes/No) is displayed
   useEffect(() => {
@@ -387,6 +404,38 @@ export function OrderBook({
       bestAsk,
     };
   }, [orderBook, maxLevels, scrollable]);
+
+  // Center the scroll on the spread divider once data is available for a
+  // token. Re-runs only when the token changes (outcome switch) so live
+  // WebSocket updates don't yank the viewport away from the user.
+  // Uses viewport-relative geometry instead of `offsetTop` because the
+  // divider's offsetParent isn't guaranteed to be the scroll container —
+  // any `position: relative` ancestor (e.g. `<main>`) breaks the math.
+  useLayoutEffect(() => {
+    if (!scrollable || !processedData) return;
+    if (centeredForTokenRef.current === tokenId) return;
+    const container = scrollContainerRef.current;
+    const divider = spreadDividerRef.current;
+    if (!container || !divider) return;
+    const containerRect = container.getBoundingClientRect();
+    const dividerRect = divider.getBoundingClientRect();
+    const dividerOffsetInScroll =
+      dividerRect.top - containerRect.top + container.scrollTop;
+    const target =
+      dividerOffsetInScroll -
+      container.clientHeight / 2 +
+      dividerRect.height / 2;
+    container.scrollTop = Math.max(0, target);
+    centeredForTokenRef.current = tokenId;
+  }, [scrollable, processedData, tokenId]);
+
+  // Reset the centered marker when the token changes so we re-center for the
+  // next outcome's data when it arrives (fetch may lag a render).
+  useEffect(() => {
+    if (centeredForTokenRef.current !== tokenId) {
+      centeredForTokenRef.current = null;
+    }
+  }, [tokenId]);
 
   // Calculate last trade price display
   const displayLastPrice = useMemo(() => {
@@ -534,6 +583,7 @@ export function OrderBook({
               scrollable=false the wrapper is inert and the sections flow
               naturally. */}
           <div
+            ref={scrollContainerRef}
             className={cn(scrollable && "overflow-y-auto")}
             style={scrollable ? { maxHeight: scrollMaxHeight } : undefined}
           >
@@ -595,7 +645,10 @@ export function OrderBook({
             </div>
 
             {/* Spread Divider */}
-            <div className="flex items-center justify-between px-2 sm:px-4 py-1.5 bg-muted/30 border-y border-border">
+            <div
+              ref={spreadDividerRef}
+              className="flex items-center justify-between px-2 sm:px-4 py-1.5 bg-muted/30 border-y border-border"
+            >
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
                   Last

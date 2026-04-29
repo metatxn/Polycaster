@@ -67,6 +67,10 @@ interface MarketPriceChartProps {
   startDate?: string;
   /** Default time range selection (defaults to "ALL") */
   defaultTimeRange?: TimeRange;
+  /** Controlled time range selection. */
+  timeRange?: TimeRange;
+  /** Called when the user selects a different chart window. */
+  onTimeRangeChange?: (range: TimeRange) => void;
   /** Called when per-outcome price changes for the active time range are available */
   onOutcomeRangeChanges?: (changes: number[]) => void;
   /** Hide the "Both" outcomes toggle (primary-only view, no user toggle).
@@ -215,10 +219,21 @@ export function MarketPriceChart({
   outcomePrices = EMPTY_STRINGS,
   startDate,
   defaultTimeRange = "ALL",
+  timeRange: controlledTimeRange,
+  onTimeRangeChange,
   onOutcomeRangeChanges,
   hideBothToggle = false,
 }: MarketPriceChartProps) {
-  const [timeRange, setTimeRange] = useState<TimeRange>(defaultTimeRange);
+  const [internalTimeRange, setInternalTimeRange] =
+    useState<TimeRange>(defaultTimeRange);
+  const timeRange = controlledTimeRange ?? internalTimeRange;
+  const setTimeRange = useCallback(
+    (range: TimeRange) => {
+      setInternalTimeRange(range);
+      onTimeRangeChange?.(range);
+    },
+    [onTimeRangeChange]
+  );
   // `showBothOutcomes` controls whether the secondary series (NO tokens for
   // multi-outcome, NO token for single-market) are layered in alongside the
   // primary YES series. Off by default: a cleaner view that only shows YES

@@ -19,15 +19,8 @@ import posthog from "posthog-js";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Navbar } from "@/components/navbar";
-import { PageBackground } from "@/components/page-background";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { useMarketDetail } from "@/hooks/use-market-detail";
@@ -404,7 +397,6 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
   if (loading) {
     return (
       <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
-        <PageBackground />
         <Navbar />
         <main className="px-4 md:px-6 lg:px-8 py-8 space-y-8">
           <motion.div
@@ -523,33 +515,38 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
   if (error || !market) {
     return (
       <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
-        <PageBackground />
         <Navbar />
-        <main className="px-4 md:px-6 lg:px-8 py-6">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+        <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 space-y-8">
+          <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground flex-wrap">
             <button
               type="button"
               onClick={() => router.push("/markets")}
               className="flex items-center gap-1 hover:text-foreground transition-colors"
             >
-              <ChevronLeft className="h-4 w-4" />
-              <span>All Markets</span>
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>Markets</span>
             </button>
           </div>
-          <Card className="text-center py-12">
-            <CardHeader>
-              <CardTitle>Market Not Found</CardTitle>
-              <CardDescription>
-                {error?.message || "Unable to load market"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button onClick={() => router.push("/markets")}>
-                <ChevronLeft className="mr-2 h-4 w-4" />
-                Back to Markets
-              </Button>
-            </CardContent>
-          </Card>
+
+          <div className="py-16 border-y border-border/40">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-4">
+              §&nbsp;&nbsp;Not Found
+            </p>
+            <p className="kw-editorial italic text-2xl md:text-3xl leading-snug text-foreground max-w-xl mb-3">
+              This market couldn&apos;t be loaded.
+            </p>
+            <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80 mb-8">
+              {error?.message || "Unable to load market"}
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/markets")}
+              className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border hover:decoration-foreground/60"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>Back to Markets</span>
+            </button>
+          </div>
         </main>
       </div>
     );
@@ -557,7 +554,6 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   return (
     <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
-      <PageBackground />
       <Navbar />
       <motion.main
         initial={{ opacity: 0, y: 20 }}

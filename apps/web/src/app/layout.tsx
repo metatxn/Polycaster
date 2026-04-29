@@ -130,12 +130,7 @@ export default async function RootLayout({
       >
         <ContextProvider cookies={cookies}>
           <MainContent>{children}</MainContent>
-          <Toaster
-            position="bottom-right"
-            theme="dark"
-            richColors
-            closeButton
-          />
+          <Toaster position="top-right" theme="dark" richColors closeButton />
         </ContextProvider>
       </body>
     </html>

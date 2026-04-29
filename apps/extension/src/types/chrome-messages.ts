@@ -70,6 +70,7 @@ export interface TradingGetBalanceMessage {
 export interface TradingPlaceOrderMessage {
   type: "trading:place-order";
   tokenId: string;
+  conditionId?: string;
   outcomeIndex: number;
   side: "BUY" | "SELL";
   price: number;

@@ -14,13 +14,13 @@ import { EmptyState } from "./empty-state";
 import type { Order } from "./types";
 
 const DESKTOP_GRID =
-  "grid grid-cols-[minmax(0,1fr)_72px_80px_168px_96px_88px] items-center gap-3";
+  "grid grid-cols-[minmax(0,1fr)_64px_72px_124px_124px_92px_80px] items-center gap-3";
 
 /** Format expiration as relative time remaining. */
 function formatExpirationRelative(
   expiration: string | null | undefined
 ): string {
-  if (!expiration) return "GTC";
+  if (!expiration) return "Until cancelled";
 
   const diffMs = new Date(expiration).getTime() - Date.now();
   if (diffMs <= 0) return "Expired";
@@ -73,35 +73,24 @@ function FilledMeter({
   filled,
   total,
   side,
-  showExpiration,
-  expiration,
 }: {
   filled: number;
   total: number;
   side: string;
-  showExpiration: boolean;
-  expiration: string | null | undefined;
 }) {
   const pct = total > 0 ? (filled / total) * 100 : 0;
   const trackColor = side === "BUY" ? "bg-emerald-500" : "bg-red-500";
   return (
-    <div className="flex flex-col gap-1 items-end font-mono text-[11px] tabular-nums">
-      <div className="flex items-center gap-2 w-full justify-end">
-        <div className="relative h-[3px] w-20 bg-muted overflow-hidden">
-          <div
-            className={cn("absolute inset-y-0 left-0", trackColor)}
-            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-          />
-        </div>
-        <span className="text-foreground whitespace-nowrap">
-          {filled.toFixed(1)} / {total.toFixed(1)}
-        </span>
+    <div className="flex items-center gap-2 w-full justify-end font-mono text-[11px] tabular-nums">
+      <div className="relative h-[3px] w-16 bg-muted overflow-hidden">
+        <div
+          className={cn("absolute inset-y-0 left-0", trackColor)}
+          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+        />
       </div>
-      {showExpiration && (
-        <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80">
-          {formatExpirationRelative(expiration)}
-        </span>
-      )}
+      <span className="text-foreground whitespace-nowrap">
+        {filled.toFixed(1)} / {total.toFixed(1)}
+      </span>
     </div>
   );
 }
@@ -208,7 +197,8 @@ export function OrdersTable({
           <span>Market</span>
           <span className="text-center">Side</span>
           <span className="text-right tabular-nums">Price</span>
-          <span className="text-right">Filled · Expires</span>
+          <span className="text-right">Filled</span>
+          <span className="text-right">Expires</span>
           <span className="text-right tabular-nums">Total</span>
           <span className="text-right">Action</span>
         </div>
@@ -278,9 +268,11 @@ export function OrdersTable({
                 filled={order.filledSize}
                 total={order.size}
                 side={order.side}
-                showExpiration
-                expiration={order.expiration}
               />
+
+              <div className="text-right font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                {formatExpirationRelative(order.expiration)}
+              </div>
 
               <div className="text-right font-mono tabular-nums text-sm text-foreground">
                 {formatCurrency(order.size * order.price)}

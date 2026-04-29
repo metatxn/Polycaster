@@ -162,9 +162,13 @@ let noPriceValue = 0;
 
 let sessionRestoreAttempted = false;
 let lastRenderedErrorToast: string | null = null;
+let dismissedErrorToast: string | null = null;
 
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const LIVE_PANEL_REFRESH_INTERVAL = 10000;
+const DEPOSIT_POLL_INTERVAL = 2000;
+const DEPOSIT_BALANCE_SYNC_TIMEOUT = 8000;
+const DEPOSIT_BALANCE_SYNC_INTERVAL = 1500;
 let livePanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let livePanelRefreshEnabled = false;
 
@@ -422,11 +426,12 @@ async function refreshLivePanelData(): Promise<void> {
     : undefined;
 
   const [currentBook, siblingBook] = await Promise.all([
+    TradingService.refreshBalance().then(() => null),
     TradingService.fetchOrderBook(currentTokenId),
     siblingTokenId
       ? TradingService.fetchOrderBook(siblingTokenId, { syncContext: false })
       : Promise.resolve(null),
-  ]);
+  ]).then(([, current, sibling]) => [current, sibling] as const);
 
   // Re-check after async operation - panel may have been hidden
   if (!panelOpts || !activePanel) return;
@@ -2052,6 +2057,7 @@ function addSubmitButton(
       });
       await TradingService.placeOrder({
         tokenId: opts.tokenId,
+        conditionId: opts.conditionId,
         outcomeIndex: opts.outcomeIndex,
         side,
         price: price ?? 0,
@@ -2839,6 +2845,48 @@ function parseTokenAmount(input: string, decimals: number): bigint {
 
 let depositPollTimer: ReturnType<typeof setTimeout> | null = null;
 
+function hasBalanceIncreased(current: number, previous: number): boolean {
+  return new Decimal(current).gt(new Decimal(previous).plus(0.001));
+}
+
+async function refreshDepositBalanceUntilSynced(
+  previousBalance: number
+): Promise<boolean> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < DEPOSIT_BALANCE_SYNC_TIMEOUT) {
+    try {
+      await TradingService.refreshBalance();
+      if (
+        hasBalanceIncreased(
+          TradingService.getContext().balance,
+          previousBalance
+        )
+      ) {
+        rerender();
+        return true;
+      }
+    } catch {
+      /* retry until timeout */
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, DEPOSIT_BALANCE_SYNC_INTERVAL)
+    );
+  }
+
+  try {
+    await TradingService.refreshBalance();
+  } catch {
+    /* ignore final sync failure */
+  }
+  rerender();
+  return hasBalanceIncreased(
+    TradingService.getContext().balance,
+    previousBalance
+  );
+}
+
 function depositHandleBack(): void {
   if (depositStep === "token" || depositStep === "bridge-select") {
     depositStep = "method";
@@ -3063,7 +3111,6 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
     rerender();
 
     const prevBalance = ctx.balance;
-    const POLL_INTERVAL = 5000;
     const BRIDGE_TIMEOUT = 180_000;
     const bridgeStart = Date.now();
 
@@ -3092,7 +3139,7 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
       }
 
       const newCtx = TradingService.getContext();
-      const balanceChanged = newCtx.balance > prevBalance + 0.001;
+      const balanceChanged = hasBalanceIncreased(newCtx.balance, prevBalance);
       const timedOut = Date.now() - bridgeStart >= BRIDGE_TIMEOUT;
 
       if (bridgeFailed) {
@@ -3117,11 +3164,18 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
           clearTimeout(depositPollTimer);
           depositPollTimer = null;
         }
+        const balanceSynced =
+          balanceChanged ||
+          (await refreshDepositBalanceUntilSynced(prevBalance));
         depositIsConfirming = false;
         depositIsConfirmed = true;
         trackPanelAnalytics("deposit_completed", {
           ...getDepositEventProperties(),
-          statusSource: bridgeCompleted ? "bridge_status" : "balance_change",
+          statusSource: balanceSynced
+            ? "balance_change"
+            : bridgeCompleted
+              ? "bridge_status"
+              : "balance_pending",
         });
         rerender();
         setTimeout(() => {
@@ -3149,10 +3203,10 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         return;
       }
 
-      depositPollTimer = setTimeout(pollBridgeCredit, POLL_INTERVAL);
+      depositPollTimer = setTimeout(pollBridgeCredit, DEPOSIT_POLL_INTERVAL);
     };
 
-    depositPollTimer = setTimeout(pollBridgeCredit, POLL_INTERVAL);
+    void pollBridgeCredit();
   } catch (err) {
     depositIsPending = false;
     depositIsConfirming = false;
@@ -4224,12 +4278,13 @@ function render(
   if (error) {
     // Key on the raw error string so we don't re-render the rich toast on
     // each state tick when the underlying error hasn't changed.
-    if (lastRenderedErrorToast !== error) {
+    if (lastRenderedErrorToast !== error && dismissedErrorToast !== error) {
       showRichErrorToast(panel, error);
       lastRenderedErrorToast = error;
     }
   } else {
     lastRenderedErrorToast = null;
+    dismissedErrorToast = null;
   }
 }
 
@@ -4283,6 +4338,7 @@ function showRichErrorToast(panel: HTMLElement, rawError: string): void {
   `;
 
   const dismiss = () => {
+    dismissedErrorToast = rawError;
     toast?.remove();
     if (lastRenderedErrorToast === rawError) {
       lastRenderedErrorToast = null;
@@ -4358,12 +4414,18 @@ export const TradingPanel = {
     livePanelRefreshEnabled = true;
     applyOverflowOverrides(panel);
     scheduleLivePanelRefresh();
+    requestAnimationFrame(() => {
+      if (activePanel === panel && panel.isConnected) {
+        panel.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
   },
 
   hide(): void {
     livePanelRefreshEnabled = false;
     clearLivePanelRefreshTimer();
     lastRenderedErrorToast = null;
+    dismissedErrorToast = null;
     if (settleTimer) {
       clearTimeout(settleTimer);
       settleTimer = null;

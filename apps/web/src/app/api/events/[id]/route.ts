@@ -33,6 +33,7 @@ export async function GET(
   }
   try {
     const { id } = await params;
+    const fresh = request.nextUrl.searchParams.get("fresh") === "1";
 
     if (!id) {
       return NextResponse.json(
@@ -57,7 +58,9 @@ export async function GET(
       headers: {
         "Content-Type": "application/json",
       },
-      next: { revalidate: CACHE_DURATION.EVENTS },
+      ...(fresh
+        ? { cache: "no-store" as const }
+        : { next: { revalidate: CACHE_DURATION.EVENTS } }),
     });
 
     if (!eventResponse.ok) {
@@ -106,7 +109,9 @@ export async function GET(
           headers: {
             "Content-Type": "application/json",
           },
-          next: { revalidate: CACHE_DURATION.MARKETS },
+          ...(fresh
+            ? { cache: "no-store" as const }
+            : { next: { revalidate: CACHE_DURATION.MARKETS } }),
         });
 
         if (marketsResponse.ok) {

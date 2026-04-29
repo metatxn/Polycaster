@@ -46,7 +46,7 @@ export function BalanceWarning({
       </div>
 
       <p className="text-xs text-amber-600/80 dark:text-amber-400/80">
-        ${effectiveBalance.toFixed(2)} / ${totalCost.toFixed(2)} USDC.e
+        ${effectiveBalance.toFixed(2)} / ${totalCost.toFixed(2)} USDC
       </p>
     </div>
   );

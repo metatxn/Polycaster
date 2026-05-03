@@ -8,26 +8,33 @@
  * that need to make direct HTTP calls to the CLOB API.
  */
 
+import {
+  fetchClobJson,
+  fetchClobMarket,
+  fetchClobPrice,
+  fetchClobTrades,
+} from "@knoww/shared-types/clob";
+import {
+  CLOB_ORDER_SIDES,
+  type ClobOrderSide,
+  SIGNATURE_TYPES,
+  TRADING_SIDES,
+  type TradingSide,
+} from "@knoww/shared-types/polymarket";
 import Decimal from "decimal.js";
 
-export enum Side {
-  BUY = "BUY",
-  SELL = "SELL",
-}
+export const Side = TRADING_SIDES;
+export type Side = TradingSide;
 
 /**
  * Order side enum matching Polymarket's CLOB numeric values
  */
-export enum OrderSide {
-  BUY = 0,
-  SELL = 1,
-}
+export const OrderSide = CLOB_ORDER_SIDES;
+export type OrderSide = ClobOrderSide;
 
-export enum SignatureType {
-  EOA = 0,
-  POLY_PROXY = 1,
-  POLY_GNOSIS_SAFE = 2,
-}
+export const SignatureType = SIGNATURE_TYPES;
+export type SignatureType =
+  (typeof SIGNATURE_TYPES)[keyof typeof SIGNATURE_TYPES];
 
 /**
  * Calculate potential profit/loss for an order.
@@ -140,54 +147,26 @@ export function getAllowedOrigins(): string[] {
  * This is a read-only operation that doesn't require authentication
  */
 export async function fetchOrderBook(tokenId: string): Promise<unknown> {
-  const host = getClobHost();
-  const response = await fetch(`${host}/book?token_id=${tokenId}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch order book: ${response.statusText}`);
-  }
-
-  return response.json();
+  return fetchClobJson("book", { token_id: tokenId }, { host: getClobHost() });
 }
 
 /**
  * Fetch market info directly from CLOB API
  */
 export async function fetchMarket(conditionId: string): Promise<unknown> {
-  const host = getClobHost();
-  const response = await fetch(`${host}/markets/${conditionId}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch market: ${response.statusText}`);
-  }
-
-  return response.json();
+  return fetchClobMarket(conditionId, { host: getClobHost() });
 }
 
 /**
  * Fetch trades for a token directly from CLOB API
  */
 export async function fetchTrades(tokenId: string): Promise<unknown> {
-  const host = getClobHost();
-  const response = await fetch(`${host}/trades?token_id=${tokenId}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch trades: ${response.statusText}`);
-  }
-
-  return response.json();
+  return fetchClobTrades(tokenId, { host: getClobHost() });
 }
 
 /**
  * Fetch price for a token directly from CLOB API
  */
 export async function fetchPrice(tokenId: string): Promise<unknown> {
-  const host = getClobHost();
-  const response = await fetch(`${host}/price?token_id=${tokenId}`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch price: ${response.statusText}`);
-  }
-
-  return response.json();
+  return fetchClobPrice(tokenId, { host: getClobHost() });
 }

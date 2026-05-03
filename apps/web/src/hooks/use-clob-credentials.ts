@@ -1,22 +1,21 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import {
+  type ApiKeyCreds,
+  type ApiKeyCredsLike,
+  buildClobAuthViemTypedData,
+  isCompleteApiKeyCreds,
+  normalizeApiKeyCreds,
+} from "@knoww/shared-types/polymarket";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
-import {
-  CLOB_AUTH_DOMAIN,
-  CLOB_AUTH_MESSAGE,
-  CLOB_AUTH_TYPES,
-  CLOB_BASE_URL,
-  POLYMARKET_CHAIN_ID,
-} from "@/constants/polymarket";
+import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 
 const log = createLogger("clob-credentials");
 
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
-
-import type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
 
 /**
  * Read-only API key for viewing data without trading permissions
@@ -57,33 +56,6 @@ const READONLY_KEYS_STORAGE_KEY = "polymarket_readonly_keys";
  */
 const credentialsCache = new Map<string, ApiKeyCreds | null>();
 const readonlyKeysCache = new Map<string, string[]>();
-
-type ApiKeyCredsLike = Partial<ApiKeyCreds> & {
-  key?: string;
-  apiKey?: string;
-  secret?: string;
-  apiSecret?: string;
-  passphrase?: string;
-  apiPassphrase?: string;
-};
-
-function normalizeApiKeyCreds(raw: ApiKeyCredsLike | null | undefined) {
-  const apiKey = raw?.apiKey || raw?.key || "";
-  const apiSecret = raw?.apiSecret || raw?.secret || "";
-  const apiPassphrase = raw?.apiPassphrase || raw?.passphrase || "";
-
-  if (!apiKey || !apiSecret || !apiPassphrase) {
-    throw new Error("Polymarket returned incomplete API credentials");
-  }
-
-  return { apiKey, apiSecret, apiPassphrase };
-}
-
-function isCompleteApiKeyCreds(raw: unknown): raw is ApiKeyCreds {
-  if (!raw || typeof raw !== "object") return false;
-  const creds = raw as Partial<ApiKeyCreds>;
-  return Boolean(creds.apiKey && creds.apiSecret && creds.apiPassphrase);
-}
 
 /**
  * Get the storage key for a specific address
@@ -290,8 +262,9 @@ export function useClobCredentials() {
       throw new Error("Wallet not connected");
     }
 
-    const timestamp = Math.floor(Date.now() / 1000);
-    const nonce = 0;
+    const auth = buildClobAuthViemTypedData({
+      address: address as `0x${string}`,
+    });
 
     const signer = await getViemWalletClient(
       walletClient,
@@ -299,21 +272,13 @@ export function useClobCredentials() {
     );
     const signature = await signer.signTypedData({
       account: address as `0x${string}`,
-      domain: CLOB_AUTH_DOMAIN,
-      types: CLOB_AUTH_TYPES,
-      primaryType: "ClobAuth",
-      message: {
-        address: address as `0x${string}`,
-        timestamp: `${timestamp}`,
-        nonce: BigInt(nonce),
-        message: CLOB_AUTH_MESSAGE,
-      },
+      ...auth.typedData,
     });
 
     return {
       signature,
-      timestamp: `${timestamp}`,
-      nonce: `${nonce}`,
+      timestamp: auth.timestamp,
+      nonce: auth.nonce,
     };
   }, [address, walletClient]);
 

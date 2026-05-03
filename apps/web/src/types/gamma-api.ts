@@ -29,8 +29,26 @@ export interface GammaEvent {
   score?: string;
   startDate?: string;
   endDate?: string;
+  /** Kickoff/start time for sports events, ISO string */
+  startTime?: string;
   markets?: GammaMarket[];
   tags?: (GammaTag | string)[];
+  /** Sports event teams (length 2 for team-vs-team games) */
+  teams?: GammaTeam[];
+  /** Numeric parent event id when this event is a child (e.g. negRisk linked) */
+  parentEventId?: number | string;
+}
+
+/** Sports team metadata from Gamma `event.teams` */
+export interface GammaTeam {
+  id?: number | string;
+  name: string;
+  abbreviation?: string;
+  alias?: string;
+  logo?: string;
+  color?: string;
+  league?: string;
+  record?: string;
 }
 
 /**
@@ -48,6 +66,22 @@ export interface GammaMarket {
   clobTokenIds?: string;
   conditionId?: string;
   gameStartTime?: string;
+  sportsMarketType?: string;
+  negRisk?: boolean;
+  negRiskMarketID?: string;
+  /** Set when fanned out from a parent event so the UI can group/title rows. */
+  parentEventId?: number | string;
+  parentEventTitle?: string;
+  /** Long-form rules text shown in the per-market About panel. */
+  description?: string;
+  /** Resolution deadline for this specific market (ISO). */
+  endDate?: string;
+  /** ISO timestamp the market opened — labeled "Market Opened" on Polymarket. */
+  createdAt?: string;
+  /** Public URL of the canonical resolution source (e.g. ESPN cricinfo). */
+  resolutionSource?: string;
+  /** On-chain resolver address; rendered as a Polygonscan link. */
+  resolvedBy?: string;
 }
 
 /**

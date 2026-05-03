@@ -293,17 +293,34 @@
               <div class="knoww-card-title">
                 Which company has the best AI model end of April?
               </div>
-              <button
-                type="button"
-                class="knoww-card-dismiss-btn"
-                title="Dismiss this market"
-                aria-label="Dismiss this market"
-              >
-                ✕
-              </button>
+              <div class="knoww-card-header-actions">
+                <button
+                  type="button"
+                  class="knoww-card-minimize-btn"
+                  title="Minimize this market"
+                  aria-label="Minimize this market"
+                  aria-expanded="true"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M8 12h8" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="knoww-card-dismiss-btn"
+                  title="Dismiss this market"
+                  aria-label="Dismiss this market"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             <div class="knoww-card-volume">$1.3M · 24h vol</div>
             <div class="knoww-card-context">83% match · ai</div>
+            <div class="knoww-card-mini-summary">
+              <span class="knoww-card-mini-price primary">Anthropic 87%</span>
+              <span class="knoww-card-mini-price">OpenAI 12%</span>
+            </div>
           </div>
         </div>
 
@@ -778,6 +795,33 @@
             "scanning"
           );
           body.dataset.state = "scanning";
+        });
+
+        const inlineCard = document.querySelector(".knoww-market-card");
+        const cardMinimize = inlineCard?.querySelector(
+          ".knoww-card-minimize-btn"
+        );
+        cardMinimize?.addEventListener("click", () => {
+          const minimized =
+            !inlineCard.classList.contains("knoww-card-minimized");
+          inlineCard.classList.toggle("knoww-card-minimized", minimized);
+          cardMinimize.setAttribute("aria-expanded", String(!minimized));
+          cardMinimize.setAttribute(
+            "aria-label",
+            minimized ? "Expand this market" : "Minimize this market"
+          );
+          cardMinimize.setAttribute(
+            "title",
+            minimized ? "Expand this market" : "Minimize this market"
+          );
+          cardMinimize.innerHTML = minimized
+            ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M8 12h8" />
+                <path d="M12 8v8" />
+              </svg>`
+            : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M8 12h8" />
+              </svg>`;
         });
 
         // Initial state.

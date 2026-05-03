@@ -1,5 +1,6 @@
 "use client";
 
+import { parseGammaNumberArray } from "@knoww/shared-types/polymarket";
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -156,17 +157,6 @@ function FilterBar({
   );
 }
 
-/** Safe-parse a JSON-string field from the Polymarket gamma API. Returns
- *  `null` for empty / malformed input rather than throwing. */
-function parseJsonField<T>(raw: string | undefined): T | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
 /** Convert a 0-1 decimal price (e.g. "0.68") to a ¢-suffixed integer
  *  string ("68¢"). Used for YES/NO outcome prices. Returns "—" for
  *  missing or non-numeric input. */
@@ -200,10 +190,10 @@ function extractTopMarkets(event: MarketViewEvent, limit = 3): SubMarket[] {
   const markets = event.markets ?? [];
   const parsed: SubMarket[] = [];
   for (const m of markets) {
-    const prices = parseJsonField<string[]>(m.outcomePrices);
-    if (!prices || prices.length < 2) continue;
-    const yes = Number.parseFloat(prices[0]);
-    const no = Number.parseFloat(prices[1]);
+    const prices = parseGammaNumberArray(m.outcomePrices);
+    if (prices.length < 2) continue;
+    const yes = prices[0];
+    const no = prices[1];
     if (Number.isNaN(yes) || Number.isNaN(no)) continue;
     parsed.push({
       id: m.id,

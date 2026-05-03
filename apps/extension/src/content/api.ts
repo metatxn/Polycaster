@@ -3,6 +3,7 @@
 // ============================================
 
 import { createLogger } from "@knoww/logger";
+import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import type {
   KeywordExtractionResult,
   KeywordRegexEntry,
@@ -30,6 +31,23 @@ const AI_CACHE_MAX_ENTRIES = 120;
 const AI_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AI_CACHE_FAILURE_TTL_MS = 60 * 1000; // 1 minute
 const AI_REQUEST_TIMEOUT_MS = 8500; // Must exceed backend AI timeout (7s) + network overhead
+const POLYMARKET_SEARCH_CACHE_TTL_MS = 60 * 1000;
+const POLYMARKET_SEARCH_EMPTY_CACHE_TTL_MS = 30 * 1000;
+const POLYMARKET_SEARCH_FAILURE_CACHE_TTL_MS = 30 * 1000;
+const POLYMARKET_SEARCH_MIN_INTERVAL_MS = 900;
+const POLYMARKET_SEARCH_CACHE_MAX_ENTRIES = 120;
+
+interface PolymarketSearchCacheEntry {
+  markets: Market[];
+  cachedAt: number;
+  expiresAt: number;
+  degraded: boolean;
+}
+
+const polymarketSearchCache = new Map<string, PolymarketSearchCacheEntry>();
+const polymarketSearchInFlight = new Map<string, Promise<Market[]>>();
+let polymarketSearchQueue: Promise<void> = Promise.resolve();
+let lastPolymarketSearchStartedAt = 0;
 
 // Memory optimization: Track cache size for cleanup decisions
 const CACHE_CLEANUP_THRESHOLD = 30 * 60 * 1000; // 30 minutes of inactivity
@@ -1055,6 +1073,12 @@ interface RawPolymarketEvent {
   source?: "polymarket" | "kalshi";
 }
 
+interface KnowwSearchResponsePayload {
+  events?: RawPolymarketEvent[];
+  data?: RawPolymarketEvent[];
+  degraded?: boolean;
+}
+
 function parsePolymarketEventsPayload(payload: unknown): RawPolymarketEvent[] {
   if (Array.isArray(payload)) {
     return payload as RawPolymarketEvent[];
@@ -1080,6 +1104,244 @@ function parsePolymarketEventsPayload(payload: unknown): RawPolymarketEvent[] {
   return [];
 }
 
+function normalizePolymarketSearchQuery(query: string): string {
+  return query.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+}
+
+function normalizePolymarketTagSlugs(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const tag of tags) {
+    const slug = tag
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "");
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    normalized.push(slug);
+    if (normalized.length >= 2) break;
+  }
+
+  return normalized;
+}
+
+function buildPolymarketSearchCacheKey(
+  query: string,
+  matchedTags: string[]
+): string {
+  return JSON.stringify({
+    query: normalizePolymarketSearchQuery(query),
+    tags: normalizePolymarketTagSlugs(matchedTags),
+  });
+}
+
+function readPolymarketSearchCache(
+  key: string,
+  requireFresh: boolean
+): Market[] | null {
+  const entry = polymarketSearchCache.get(key);
+  if (!entry) return null;
+
+  if (requireFresh && entry.expiresAt <= Date.now()) {
+    return null;
+  }
+
+  return entry.markets;
+}
+
+function writePolymarketSearchCache(
+  key: string,
+  markets: Market[],
+  degraded = false
+): void {
+  const now = Date.now();
+  const ttl = degraded
+    ? POLYMARKET_SEARCH_FAILURE_CACHE_TTL_MS
+    : markets.length > 0
+      ? POLYMARKET_SEARCH_CACHE_TTL_MS
+      : POLYMARKET_SEARCH_EMPTY_CACHE_TTL_MS;
+
+  if (polymarketSearchCache.has(key)) {
+    polymarketSearchCache.delete(key);
+  }
+
+  polymarketSearchCache.set(key, {
+    markets,
+    cachedAt: now,
+    expiresAt: now + ttl,
+    degraded,
+  });
+
+  if (polymarketSearchCache.size > POLYMARKET_SEARCH_CACHE_MAX_ENTRIES) {
+    const oldestKey = polymarketSearchCache.keys().next().value;
+    if (oldestKey) polymarketSearchCache.delete(oldestKey);
+  }
+}
+
+function buildKnowwPolymarketSearchUrl(
+  query: string,
+  matchedTags: string[]
+): string {
+  const baseUrl = window.KNOWW_CONFIG.KNOWW_APP_URL || "https://knoww.app";
+  const url = new URL("/api/search", baseUrl);
+  const normalizedQuery = normalizePolymarketSearchQuery(query);
+  const normalizedTags = normalizePolymarketTagSlugs(matchedTags);
+
+  if (normalizedQuery) {
+    url.searchParams.set("q", normalizedQuery);
+  }
+  if (normalizedTags.length > 0) {
+    url.searchParams.set("tag_slugs", normalizedTags.join(","));
+  }
+
+  url.searchParams.set("limit", "8");
+  url.searchParams.set("source", "extension");
+
+  return url.toString();
+}
+
+function enqueuePolymarketSearch<T>(task: () => Promise<T>): Promise<T> {
+  const run = polymarketSearchQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const elapsed = Date.now() - lastPolymarketSearchStartedAt;
+      const delayMs = Math.max(0, POLYMARKET_SEARCH_MIN_INTERVAL_MS - elapsed);
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      lastPolymarketSearchStartedAt = Date.now();
+      return task();
+    });
+
+  polymarketSearchQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+
+  return run;
+}
+
+function mapRawPolymarketEvents(
+  events: RawPolymarketEvent[],
+  fallbackSource: "search" | "tag"
+): Market[] {
+  const allEvents: Market[] = [];
+  const seenIds = new Set<string>();
+
+  for (const event of events) {
+    if (event.closed === true || event.active === false) continue;
+    if (seenIds.has(event.id)) continue;
+
+    seenIds.add(event.id);
+    const eventSource =
+      event._source === "search" || event._source === "tag"
+        ? event._source
+        : fallbackSource;
+    allEvents.push({
+      ...event,
+      title: event.title || "",
+      source: "polymarket",
+      _source: eventSource,
+    });
+  }
+
+  return allEvents
+    .filter((event) => event.closed !== true && event.active !== false)
+    .sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0))
+    .slice(0, 8);
+}
+
+async function fetchKnowwPolymarketSearch(
+  query: string,
+  matchedTags: string[]
+): Promise<Market[]> {
+  const { log, safeSendMessage } = window.KNOWW_UTILS;
+  const searchUrl = buildKnowwPolymarketSearchUrl(query, matchedTags);
+
+  const searchResp = await safeSendMessage({
+    type: "fetch-json",
+    method: "GET",
+    url: searchUrl,
+  });
+
+  if (!searchResp?.ok || !("data" in searchResp)) {
+    throw new Error(
+      "error" in (searchResp || {})
+        ? (searchResp as { error?: string }).error || "Search request failed"
+        : "Search request failed"
+    );
+  }
+
+  const responseStatus =
+    "status" in searchResp && typeof searchResp.status === "number"
+      ? searchResp.status
+      : 200;
+
+  if (responseStatus >= 400) {
+    throw new Error(`Search request failed with ${responseStatus}`);
+  }
+
+  const payload = searchResp.data as KnowwSearchResponsePayload;
+  const rawEvents = parsePolymarketEventsPayload(payload);
+  const markets = mapRawPolymarketEvents(rawEvents, "search");
+
+  log(
+    "Polymarket Search API:",
+    rawEvents.length,
+    "raw events,",
+    markets.length,
+    "active for:",
+    query
+  );
+
+  if (payload.degraded) {
+    log("Polymarket Search API degraded response for:", query);
+  }
+
+  return markets;
+}
+
+async function searchPolymarketEventsViaKnoww(
+  query: string,
+  matchedTags: string[]
+): Promise<Market[]> {
+  const { log } = window.KNOWW_UTILS;
+  const cacheKey = buildPolymarketSearchCacheKey(query, matchedTags);
+
+  const cached = readPolymarketSearchCache(cacheKey, true);
+  if (cached) {
+    return cached;
+  }
+
+  const inFlight = polymarketSearchInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = enqueuePolymarketSearch(async () => {
+    try {
+      const markets = await fetchKnowwPolymarketSearch(query, matchedTags);
+      writePolymarketSearchCache(cacheKey, markets);
+      return markets;
+    } catch (error) {
+      log("Polymarket Search API error:", error);
+      const stale = readPolymarketSearchCache(cacheKey, false);
+      if (stale) {
+        return stale;
+      }
+      writePolymarketSearchCache(cacheKey, [], true);
+      return [];
+    } finally {
+      polymarketSearchInFlight.delete(cacheKey);
+    }
+  });
+
+  polymarketSearchInFlight.set(cacheKey, request);
+  return request;
+}
+
 /**
  * Search Polymarket events
  */
@@ -1087,12 +1349,8 @@ async function searchPolymarketEvents(
   query: string,
   matchedTags: string[] = []
 ): Promise<Market[]> {
-  const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;
-  const {
-    POLYMARKET_SEARCH_API_URL,
-    POLYMARKET_EVENTS_KEYSET_API_URL,
-    ENABLED_SOURCES,
-  } = window.KNOWW_CONFIG;
+  const { log, isExtensionContextValid } = window.KNOWW_UTILS;
+  const { ENABLED_SOURCES } = window.KNOWW_CONFIG;
 
   // Check if Polymarket is enabled
   if (!ENABLED_SOURCES?.polymarket) {
@@ -1107,118 +1365,7 @@ async function searchPolymarketEvents(
     return [];
   }
 
-  const allEvents: Market[] = [];
-  const seenIds = new Set<string>();
-
-  // Search by keywords
-  if (query.trim()) {
-    const searchUrl = `${POLYMARKET_SEARCH_API_URL}?q=${encodeURIComponent(
-      query
-    )}&cache=true&search_tags=true&optimized=true&limit_per_type=6&events_status=active&keep_closed_markets=0&closed=false`;
-
-    try {
-      const searchResp = await safeSendMessage({
-        type: "fetch-text",
-        url: searchUrl,
-      });
-
-      if (searchResp?.ok && "text" in searchResp && searchResp.text) {
-        const json = JSON.parse(searchResp.text) as {
-          events?: RawPolymarketEvent[];
-        };
-        const rawCount = json.events?.length || 0;
-        let added = 0;
-        for (const event of json.events || []) {
-          if (event.closed === true || event.active === false) continue;
-          if (!seenIds.has(event.id)) {
-            seenIds.add(event.id);
-            const market: Market = {
-              ...event,
-              title: event.title || "",
-              source: "polymarket",
-              _source: "search",
-            };
-            allEvents.push(market);
-            added++;
-          }
-        }
-        log(
-          `Polymarket Search API: ${rawCount} raw events, ${added} active for: ${query}`
-        );
-      } else {
-        log(
-          "Polymarket Search API: no valid response",
-          searchResp?.ok,
-          "error" in (searchResp || {})
-            ? (searchResp as { error?: string }).error
-            : ""
-        );
-      }
-    } catch (e) {
-      log("Polymarket Search API error:", e);
-    }
-  }
-
-  // Search by tags
-  if (matchedTags.length > 0 && isExtensionContextValid()) {
-    log("Fetching Polymarket events for tags:", matchedTags);
-
-    const tagPromises = matchedTags.slice(0, 2).map(async (tagSlug) => {
-      const tagUrl = `${POLYMARKET_EVENTS_KEYSET_API_URL}?tag_slug=${encodeURIComponent(
-        tagSlug
-      )}&closed=false&limit=5&order=volume24hr&ascending=false`;
-
-      try {
-        const tagResp = await safeSendMessage({
-          type: "fetch-text",
-          url: tagUrl,
-        });
-        if (tagResp?.ok && "text" in tagResp && tagResp.text) {
-          const list = parsePolymarketEventsPayload(JSON.parse(tagResp.text));
-          log(`Tag "${tagSlug}": ${list.length} events returned`);
-          return list;
-        }
-        log(
-          `Tag "${tagSlug}": no valid response`,
-          tagResp?.ok,
-          "error" in (tagResp || {})
-            ? (tagResp as { error?: string }).error
-            : ""
-        );
-      } catch (e) {
-        log("Tag fetch failed for slug:", tagSlug, e);
-      }
-      return [];
-    });
-
-    const tagResults = await Promise.all(tagPromises);
-    let tagAdded = 0;
-    for (const events of tagResults) {
-      for (const event of events) {
-        if (event.closed === true || event.active === false) continue;
-        if (!seenIds.has(event.id)) {
-          seenIds.add(event.id);
-          const market: Market = {
-            ...event,
-            title: event.title || "",
-            source: "polymarket",
-            _source: "tag",
-          };
-          allEvents.push(market);
-          tagAdded++;
-        }
-      }
-    }
-    log(
-      `Polymarket tag search: ${tagAdded} active events from ${matchedTags.length} tags`
-    );
-  }
-
-  // Final filter: ensure no closed or inactive events and sort by volume
-  return allEvents
-    .filter((event) => event.closed !== true && event.active !== false)
-    .sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0))
-    .slice(0, 8);
+  return searchPolymarketEventsViaKnoww(query, matchedTags);
 }
 
 /**
@@ -1920,13 +2067,10 @@ async function fetchClobTokenIds(
     const nestedMarket = fullEvent.markets[idx];
     if (!nestedMarket?.clobTokenIds) return null;
 
-    const tokenIds =
-      typeof nestedMarket.clobTokenIds === "string"
-        ? JSON.parse(nestedMarket.clobTokenIds)
-        : nestedMarket.clobTokenIds;
+    const tokenIds = parseGammaStringArray(nestedMarket.clobTokenIds);
 
     const tokenIndex = isMultiOutcome ? 0 : outcomeIndex;
-    if (Array.isArray(tokenIds) && tokenIds[tokenIndex]) {
+    if (tokenIds[tokenIndex]) {
       log("Resolved clobTokenId:", tokenIds[tokenIndex]);
       return tokenIds[tokenIndex];
     }

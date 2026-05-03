@@ -22,10 +22,10 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.13",
+    "@biomejs/biome": "catalog:",
     "husky": "9.1.7",
     "sharp": "^0.34.5",
-    "typescript": "6.0.3"
+    "typescript": "catalog:"
   },
   "pnpm": {
     "peerDependencyRules": {

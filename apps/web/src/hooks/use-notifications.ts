@@ -1,6 +1,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import { getPolymarketSignatureType } from "@knoww/shared-types/polymarket";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 
@@ -9,7 +10,6 @@ const log = createLogger("notifications");
 import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
-import { SignatureType } from "@/lib/polymarket";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import type {
   DropNotificationParams,
@@ -138,9 +138,9 @@ export function useNotifications() {
       chain: POLYMARKET_CHAIN_ID,
       signer,
       creds,
-      signatureType: (isEoaMode
-        ? SignatureType.EOA
-        : SignatureType.POLY_GNOSIS_SAFE) as unknown as number,
+      signatureType: getPolymarketSignatureType(
+        isEoaMode ? "eoa" : "safe"
+      ) as unknown as number,
       funderAddress: proxyAddress,
     }) as InstanceType<typeof ClobClient> & ClobClientWithNotificationMethods;
   }, [address, credentials, proxyAddress, isEoaMode, walletClient]);

@@ -2,7 +2,11 @@
 // UI COMPONENTS - Multi-Source Market Cards
 // ============================================
 
-import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+import {
+  parseGammaNumberArray,
+  parseGammaStringArray,
+  resolveNegRisk,
+} from "@knoww/shared-types/polymarket";
 import type {
   InjectedMarketEntry,
   Market,
@@ -10,6 +14,16 @@ import type {
 } from "../types/market";
 import { TradingPanel } from "./trading/trading-panel";
 import { escapeHtml, escapeSelectorValue } from "./utils";
+
+function clampGammaPrice(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function parseGammaPriceArray(
+  raw: string | readonly unknown[] | null | undefined
+): number[] {
+  return parseGammaNumberArray(raw).map(clampGammaPrice);
+}
 
 /**
  * Extract the CLOB token ID for a given outcome index from a market.
@@ -26,18 +40,7 @@ function getTokenIdForOutcome(
   const nestedMarket = market.markets[marketIndex] ?? market.markets[0];
   if (!nestedMarket?.clobTokenIds) return null;
 
-  try {
-    const tokenIds =
-      typeof nestedMarket.clobTokenIds === "string"
-        ? JSON.parse(nestedMarket.clobTokenIds)
-        : nestedMarket.clobTokenIds;
-    if (Array.isArray(tokenIds) && tokenIds[outcomeIndex]) {
-      return tokenIds[outcomeIndex];
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return null;
+  return parseGammaStringArray(nestedMarket.clobTokenIds)[outcomeIndex] ?? null;
 }
 
 /**
@@ -53,18 +56,7 @@ function getTokenIdForMultiOutcome(
   const nestedMarket = market.markets[marketIndex];
   if (!nestedMarket?.clobTokenIds) return null;
 
-  try {
-    const tokenIds =
-      typeof nestedMarket.clobTokenIds === "string"
-        ? JSON.parse(nestedMarket.clobTokenIds)
-        : nestedMarket.clobTokenIds;
-    if (Array.isArray(tokenIds) && tokenIds[0]) {
-      return tokenIds[0]; // For multi-outcome, the "Yes" token of each sub-market
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return null;
+  return parseGammaStringArray(nestedMarket.clobTokenIds)[0] ?? null;
 }
 
 /**
@@ -113,24 +105,17 @@ async function resolveTokenAndShowPanel(
 
     if (nestedMarket) {
       conditionId = nestedMarket.conditionId as string | undefined;
-      try {
-        const ids =
-          typeof nestedMarket.clobTokenIds === "string"
-            ? JSON.parse(nestedMarket.clobTokenIds)
-            : nestedMarket.clobTokenIds;
-        if (Array.isArray(ids) && ids.length >= 2) {
-          yesTokenId = ids[0];
-          noTokenId = ids[1];
-          // fetchClobTokenIds may have returned a token from a different
-          // sub-market ordering than market.markets. Re-derive tokenId from
-          // the now-consistent clobTokenIds to avoid a stale mismatch.
-          const corrected: string | undefined = isMultiOutcome
-            ? ids[0]
-            : ids[outcomeIndex];
-          if (corrected) tokenId = corrected;
-        }
-      } catch {
-        /* ignore */
+      const ids = parseGammaStringArray(nestedMarket.clobTokenIds);
+      if (ids.length >= 2) {
+        yesTokenId = ids[0];
+        noTokenId = ids[1];
+        // fetchClobTokenIds may have returned a token from a different
+        // sub-market ordering than market.markets. Re-derive tokenId from
+        // the now-consistent clobTokenIds to avoid a stale mismatch.
+        const corrected: string | undefined = isMultiOutcome
+          ? ids[0]
+          : ids[outcomeIndex];
+        if (corrected) tokenId = corrected;
       }
     }
 
@@ -338,19 +323,9 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
       let outcomePrice = 0.5;
 
       if (m.outcomePrices) {
-        try {
-          const parsedPrices =
-            typeof m.outcomePrices === "string"
-              ? JSON.parse(m.outcomePrices)
-              : m.outcomePrices;
-          if (Array.isArray(parsedPrices) && parsedPrices.length >= 1) {
-            const parsed = parseFloat(String(parsedPrices[0]));
-            if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 1) {
-              outcomePrice = parsed;
-            }
-          }
-        } catch {
-          // Parse error, keep default
+        const parsedPrices = parseGammaPriceArray(m.outcomePrices);
+        if (parsedPrices.length >= 1) {
+          outcomePrice = parsedPrices[0];
         }
       }
 
@@ -571,35 +546,12 @@ function createInlineMarketCard(
       market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
 
     if (firstMarket.outcomePrices) {
-      try {
-        const parsed =
-          typeof firstMarket.outcomePrices === "string"
-            ? JSON.parse(firstMarket.outcomePrices)
-            : firstMarket.outcomePrices;
-        if (Array.isArray(parsed)) {
-          prices = parsed.map((p) => {
-            const val = parseFloat(String(p));
-            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
-          });
-        }
-      } catch (e) {
-        log("Failed to parse outcomePrices:", e);
-      }
+      prices = parseGammaPriceArray(firstMarket.outcomePrices);
     }
 
     if (firstMarket.outcomes) {
-      try {
-        const parsedOutcomes =
-          typeof firstMarket.outcomes === "string"
-            ? JSON.parse(firstMarket.outcomes)
-            : firstMarket.outcomes;
-        if (Array.isArray(parsedOutcomes)) {
-          outcomes = parsedOutcomes;
-          hasMultipleOptions = outcomes.length > 2;
-        }
-      } catch (e) {
-        log("Failed to parse outcomes:", e);
-      }
+      outcomes = parseGammaStringArray(firstMarket.outcomes);
+      hasMultipleOptions = outcomes.length > 2;
     }
 
     if (prices.length >= 2 && outcomes.length === 0) {
@@ -610,20 +562,7 @@ function createInlineMarketCard(
       if (firstMarket.groupItemTitle) {
         outcomes = [firstMarket.groupItemTitle];
         if (firstMarket.outcomePrices) {
-          try {
-            const parsedPrices =
-              typeof firstMarket.outcomePrices === "string"
-                ? JSON.parse(firstMarket.outcomePrices)
-                : firstMarket.outcomePrices;
-            if (Array.isArray(parsedPrices) && parsedPrices.length >= 1) {
-              prices = parsedPrices.map((p) => {
-                const val = parseFloat(String(p));
-                return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
-              });
-            }
-          } catch {
-            // Keep default
-          }
+          prices = parseGammaPriceArray(firstMarket.outcomePrices);
         }
       } else {
         outcomes = ["Yes", "No"];
@@ -719,6 +658,30 @@ function createInlineMarketCard(
   title.className = "knoww-card-title";
   title.textContent = market.title || "Untitled Market";
 
+  const headerActions = document.createElement("div");
+  headerActions.className = "knoww-card-header-actions";
+
+  const setMinimizeButtonIcon = (
+    button: HTMLButtonElement,
+    minimized: boolean
+  ) => {
+    button.innerHTML = minimized
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="18 15 12 9 6 15"/>
+        </svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>`;
+  };
+
+  const minimizeBtn = document.createElement("button");
+  minimizeBtn.type = "button";
+  minimizeBtn.className = "knoww-card-minimize-btn";
+  minimizeBtn.title = "Minimize this market";
+  minimizeBtn.setAttribute("aria-label", "Minimize this market");
+  minimizeBtn.setAttribute("aria-expanded", "true");
+  setMinimizeButtonIcon(minimizeBtn, false);
+
   const dismissBtn = document.createElement("button");
   dismissBtn.type = "button";
   dismissBtn.className = "knoww-card-dismiss-btn";
@@ -752,8 +715,33 @@ function createInlineMarketCard(
     }, 300);
   };
 
+  const miniSummary = document.createElement("div");
+  miniSummary.className = "knoww-card-mini-summary";
+  const summaryCount = Math.min(outcomes.length, 2);
+  {
+    const isBinaryMiniMarket =
+      !isMultiOutcomeEvent &&
+      outcomes.length === 2 &&
+      outcomes[0].toLowerCase() === "yes" &&
+      outcomes[1].toLowerCase() === "no";
+    const binaryMiniClasses = ["yes", "no"];
+    const multiMiniClasses = ["option-1", "option-2"];
+    for (let i = 0; i < summaryCount; i++) {
+      const summaryItem = document.createElement("span");
+      const variant = isBinaryMiniMarket
+        ? binaryMiniClasses[i]
+        : multiMiniClasses[i] || `option-${i + 1}`;
+      summaryItem.className = `knoww-card-mini-price ${variant}`;
+      summaryItem.textContent = `${outcomes[i]} ${Math.round(prices[i] * 100)}%`;
+      miniSummary.appendChild(summaryItem);
+    }
+  }
+
   titleRow.appendChild(title);
-  titleRow.appendChild(dismissBtn);
+  titleRow.appendChild(miniSummary);
+  headerActions.appendChild(minimizeBtn);
+  headerActions.appendChild(dismissBtn);
+  titleRow.appendChild(headerActions);
 
   const volume = document.createElement("div");
   volume.className = "knoww-card-volume";
@@ -1190,6 +1178,43 @@ function createInlineMarketCard(
   if (toggleBtn) card.appendChild(toggleBtn);
   if (optionsList) card.appendChild(optionsList);
   card.appendChild(footer);
+
+  const setCardMinimized = (minimized: boolean) => {
+    card.classList.toggle("knoww-card-minimized", minimized);
+    card.setAttribute("data-knoww-card-minimized", String(minimized));
+    minimizeBtn.title = minimized
+      ? "Expand this market"
+      : "Minimize this market";
+    minimizeBtn.setAttribute(
+      "aria-label",
+      minimized ? "Expand this market" : "Minimize this market"
+    );
+    minimizeBtn.setAttribute("aria-expanded", String(!minimized));
+    setMinimizeButtonIcon(minimizeBtn, minimized);
+
+    if (minimized) {
+      TradingPanel.hide();
+    }
+  };
+
+  minimizeBtn.onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const minimized = !card.classList.contains("knoww-card-minimized");
+    setCardMinimized(minimized);
+    void window.KNOWW_ANALYTICS?.track("market_card_minimized_toggled", {
+      marketId: market.id,
+      source: marketSource,
+      minimized,
+    });
+  };
+
+  card.addEventListener("dblclick", (event) => {
+    if (!card.classList.contains("knoww-card-minimized")) return;
+    event.stopPropagation();
+    setCardMinimized(false);
+  });
 
   if (isKalshiPage) {
     const stopKalshiTilePropagation = (event: MouseEvent): void => {
@@ -1707,6 +1732,16 @@ function setupSearchFunctionality(
   let currentSearchQuery = ""; // Track current query to ignore stale results
 
   toggleBtn.onclick = () => {
+    const stack = container.closest<HTMLElement>(".knoww-notification-stack");
+    const minimizeToggle = stack?.querySelector<HTMLElement>(
+      "#knoww-stack-minimize"
+    );
+    if (stack?.classList.contains("knoww-stack-minimized") && minimizeToggle) {
+      cachedStackMinimized = false;
+      applyMinimizedState(stack, minimizeToggle, false);
+      persistStackMinimized(false);
+    }
+
     isSearchOpen = !isSearchOpen;
     container.classList.toggle("knoww-search-open", isSearchOpen);
     toggleBtn.classList.toggle("knoww-search-active", isSearchOpen);
@@ -1878,33 +1913,10 @@ function createSearchResultItem(market: Market): HTMLElement {
     const firstMarket =
       market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
     if (firstMarket.outcomePrices) {
-      try {
-        const parsedPrices =
-          typeof firstMarket.outcomePrices === "string"
-            ? JSON.parse(firstMarket.outcomePrices)
-            : firstMarket.outcomePrices;
-        if (Array.isArray(parsedPrices)) {
-          priceData = parsedPrices.map((p) => {
-            const val = parseFloat(String(p));
-            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
-          });
-        }
-      } catch {
-        // Keep default
-      }
+      priceData = parseGammaPriceArray(firstMarket.outcomePrices);
     }
     if (firstMarket.outcomes) {
-      try {
-        const parsedOutcomes =
-          typeof firstMarket.outcomes === "string"
-            ? JSON.parse(firstMarket.outcomes)
-            : firstMarket.outcomes;
-        if (Array.isArray(parsedOutcomes)) {
-          outcomes = parsedOutcomes;
-        }
-      } catch {
-        // Keep default
-      }
+      outcomes = parseGammaStringArray(firstMarket.outcomes);
     }
     if (outcomes.length === 0) outcomes = ["Yes", "No"];
     if (priceData.length === 0) {
@@ -2033,34 +2045,11 @@ function createNotificationItem(
       market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
 
     if (firstMarket.outcomePrices) {
-      try {
-        const parsedPrices =
-          typeof firstMarket.outcomePrices === "string"
-            ? JSON.parse(firstMarket.outcomePrices)
-            : firstMarket.outcomePrices;
-        if (Array.isArray(parsedPrices)) {
-          priceData = parsedPrices.map((p) => {
-            const val = parseFloat(String(p));
-            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
-          });
-        }
-      } catch {
-        // Keep default
-      }
+      priceData = parseGammaPriceArray(firstMarket.outcomePrices);
     }
 
     if (firstMarket.outcomes) {
-      try {
-        const parsedOutcomes =
-          typeof firstMarket.outcomes === "string"
-            ? JSON.parse(firstMarket.outcomes)
-            : firstMarket.outcomes;
-        if (Array.isArray(parsedOutcomes)) {
-          outcomes = parsedOutcomes;
-        }
-      } catch {
-        // Keep default
-      }
+      outcomes = parseGammaStringArray(firstMarket.outcomes);
     }
 
     if (outcomes.length === 0 || priceData.length === 0) {
@@ -2354,33 +2343,10 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
     const firstMarket =
       market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
     if (firstMarket.outcomePrices) {
-      try {
-        const parsedPrices =
-          typeof firstMarket.outcomePrices === "string"
-            ? JSON.parse(firstMarket.outcomePrices)
-            : firstMarket.outcomePrices;
-        if (Array.isArray(parsedPrices)) {
-          priceData = parsedPrices.map((p) => {
-            const val = parseFloat(String(p));
-            return Number.isNaN(val) ? 0 : Math.min(1, Math.max(0, val));
-          });
-        }
-      } catch {
-        // Keep default
-      }
+      priceData = parseGammaPriceArray(firstMarket.outcomePrices);
     }
     if (firstMarket.outcomes) {
-      try {
-        const parsedOutcomes =
-          typeof firstMarket.outcomes === "string"
-            ? JSON.parse(firstMarket.outcomes)
-            : firstMarket.outcomes;
-        if (Array.isArray(parsedOutcomes)) {
-          outcomes = parsedOutcomes;
-        }
-      } catch {
-        // Keep default
-      }
+      outcomes = parseGammaStringArray(firstMarket.outcomes);
     }
     if (outcomes.length === 0 || priceData.length === 0) {
       outcomes = ["Yes", "No"];

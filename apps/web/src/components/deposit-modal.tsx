@@ -1,6 +1,13 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import {
+  type DepositTransaction,
+  getDefaultMinDeposit as getSharedDefaultMinDeposit,
+  getMinDepositForToken as getSharedMinDepositForToken,
+  type QuoteResponse,
+  type SupportedAsset,
+} from "@knoww/shared-types/bridge";
 import { AnimatePresence } from "framer-motion";
 import { ArrowLeft, X } from "lucide-react";
 
@@ -18,12 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PUSD_ADDRESS as POLYGON_PUSD_ADDRESS } from "@/constants/contracts";
-import {
-  type DepositTransaction,
-  type QuoteResponse,
-  type SupportedAsset,
-  useBridge,
-} from "@/hooks/use-bridge";
+import { fetchBridgeQuote, useBridge } from "@/hooks/use-bridge";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { type TokenBalance, useWalletTokens } from "@/hooks/use-wallet-tokens";
 
@@ -164,23 +166,13 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
   const getMinDepositForToken = useCallback(
     (tokenSymbol: string): number => {
-      const matchingAssets = supportedAssets.filter(
-        (asset) =>
-          asset.token.symbol.toUpperCase() === tokenSymbol.toUpperCase() ||
-          (tokenSymbol.toUpperCase() === "USDC.E" &&
-            asset.token.symbol.toUpperCase() === "USDC") ||
-          (tokenSymbol.toUpperCase() === "USDC" &&
-            asset.token.symbol.toUpperCase() === "USDC")
-      );
-      if (matchingAssets.length === 0) return 45;
-      return Math.min(...matchingAssets.map((a) => a.minCheckoutUsd));
+      return getSharedMinDepositForToken(supportedAssets, tokenSymbol);
     },
     [supportedAssets]
   );
 
   const defaultMinDeposit = useMemo(() => {
-    if (supportedAssets.length === 0) return 45;
-    return Math.min(...supportedAssets.map((a) => a.minCheckoutUsd));
+    return getSharedDefaultMinDeposit(supportedAssets);
   }, [supportedAssets]);
 
   const filteredBridgeAssets = useMemo(() => {
@@ -410,10 +402,8 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     }
   }, [step, selectedMethod]);
 
-  // Fetch quote once when arriving at the confirm step.
-  // Uses a direct fetch + dedup ref to avoid re-render loops that occur when
-  // routing through useMutation (mutateAsync flips isPending which re-renders
-  // every useBridge consumer and can cascade back into this effect).
+  // Fetch quote once when arriving at the confirm step. This uses the shared
+  // bridge client directly to avoid useMutation re-render loops in this effect.
   const tokenAddress = selectedToken?.address;
   const tokenDecimals = selectedToken?.decimals;
 
@@ -438,32 +428,16 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     quoteFetchedRef.current = cacheKey;
 
     let cancelled = false;
-    const controller = new AbortController();
-
     setIsLoadingQuoteLocal(true);
 
-    const builderCode = process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
-
-    fetch("https://bridge.polymarket.com/quote", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(builderCode ? { "X-Builder-Code": builderCode } : {}),
-      },
-      body: JSON.stringify({
-        fromAmountBaseUnit: amountBaseUnit,
-        fromChainId: "137",
-        fromTokenAddress: tokenAddress,
-        recipientAddress: bridgeAddress,
-        toChainId: "137",
-        toTokenAddress: POLYGON_PUSD_ADDRESS,
-      }),
-      signal: controller.signal,
+    fetchBridgeQuote({
+      fromAmountBaseUnit: amountBaseUnit,
+      fromChainId: "137",
+      fromTokenAddress: tokenAddress,
+      recipientAddress: bridgeAddress,
+      toChainId: "137",
+      toTokenAddress: POLYGON_PUSD_ADDRESS,
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Quote request failed: ${res.status}`);
-        return res.json() as Promise<QuoteResponse>;
-      })
       .then((data) => {
         if (!cancelled) {
           setQuote(data);
@@ -472,9 +446,9 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       })
       .catch((err) => {
         if (!cancelled) {
-          if (err.name !== "AbortError") {
-            log.warn("quote.fetch_failed", { error: err });
-          }
+          log.warn("quote.fetch_failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
           setQuote(null);
           setIsLoadingQuoteLocal(false);
         }
@@ -482,7 +456,6 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
     return () => {
       cancelled = true;
-      controller.abort();
     };
   }, [step, amount, bridgeAddress, tokenAddress, tokenDecimals]);
 

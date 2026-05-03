@@ -1,4 +1,4 @@
-import { initBridgeSigner } from "../background/signing-state";
+import { initBridgeWallet } from "../background/signing-state";
 import { handleTradingMessage } from "../background/trading-handler";
 import type { BackgroundResponse } from "../types/chrome-messages";
 
@@ -6,7 +6,7 @@ let tradingReady = false;
 
 function ensureTradingReady(): void {
   if (tradingReady) return;
-  initBridgeSigner();
+  initBridgeWallet();
   tradingReady = true;
 }
 

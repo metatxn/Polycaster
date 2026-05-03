@@ -16,6 +16,7 @@ const log = createLogger("trading-service");
 import {
   EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
+  type TradingBalanceData,
   type TradingWalletMode,
 } from "../../types/chrome-messages";
 import { WalletBridge } from "./bridge";
@@ -58,6 +59,8 @@ export interface TradingContext {
    * while `refreshBalance()` performs its `eth_getCode` check.
    */
   isDeployed: boolean | null;
+  pusdBalance: number;
+  usdcEBalance: number;
   balance: number;
   polBalance: number;
   tokenBalances: TokenBalanceEntry[];
@@ -81,6 +84,8 @@ function createDisconnectedContext(): TradingContext {
     proxyAddress: null,
     walletMode: "safe",
     isDeployed: null,
+    pusdBalance: 0,
+    usdcEBalance: 0,
     balance: 0,
     polBalance: 0,
     tokenBalances: [],
@@ -96,22 +101,60 @@ function createDisconnectedContext(): TradingContext {
 
 let ctx: TradingContext = createDisconnectedContext();
 
+function tokenBalance(
+  tokenBalances: TokenBalanceEntry[] | undefined,
+  symbol: string
+): number {
+  const normalized = symbol.toLowerCase();
+  return (
+    tokenBalances?.find((token) => token.symbol.toLowerCase() === normalized)
+      ?.amount ?? 0
+  );
+}
+
+function normalizeBalanceData(
+  data: TradingBalanceData
+): TradingBalanceData & Required<Pick<TradingBalanceData, "polBalance">> {
+  const tokenBalances = data.tokenBalances ?? [];
+  const pusdBalance = data.pusdBalance ?? tokenBalance(tokenBalances, "pUSD");
+  const usdcEBalance =
+    data.usdcEBalance ?? tokenBalance(tokenBalances, "USDC.e");
+
+  return {
+    ...data,
+    balance: data.balance ?? pusdBalance + usdcEBalance,
+    balanceRaw: data.balanceRaw ?? data.pusdBalanceRaw ?? "0",
+    pusdBalance,
+    pusdBalanceRaw: data.pusdBalanceRaw ?? "0",
+    usdcEBalance,
+    usdcEBalanceRaw: data.usdcEBalanceRaw ?? "0",
+    polBalance: data.polBalance ?? 0,
+    tokenBalances,
+  };
+}
+
 async function resolveTradingWallet(
   address: string,
   walletMode: TradingWalletMode
 ): Promise<{
   proxyAddress: string;
   balance: number;
+  pusdBalance: number;
+  usdcEBalance: number;
   polBalance: number;
   tokenBalances: TokenBalanceEntry[];
   isDeployed: boolean;
 }> {
   const proxyAddress =
     walletMode === "eoa" ? address : await ProxyWallet.deriveAddress(address);
-  const balData = await ProxyWallet.getBalance(proxyAddress);
+  const balData = normalizeBalanceData(
+    await ProxyWallet.getBalance(proxyAddress)
+  );
   return {
     proxyAddress,
     balance: balData.balance,
+    pusdBalance: balData.pusdBalance,
+    usdcEBalance: balData.usdcEBalance,
     polBalance: balData.polBalance ?? 0,
     tokenBalances: balData.tokenBalances ?? [],
     isDeployed: walletMode === "eoa" ? true : (balData.isDeployed ?? false),
@@ -285,7 +328,13 @@ export const TradingService = {
         update(walletData);
       } catch (err) {
         log.warn("trading_wallet.resolve_failed", { error: err });
-        update({ balance: 0, polBalance: 0, tokenBalances: [] });
+        update({
+          balance: 0,
+          pusdBalance: 0,
+          usdcEBalance: 0,
+          polBalance: 0,
+          tokenBalances: [],
+        });
       }
 
       const cached = await CredentialManager.getStored(address);
@@ -329,6 +378,10 @@ export const TradingService = {
         },
         state: "ready",
       });
+
+      if (!ctx.proxyAddress || ctx.isDeployed === null) {
+        await this.refreshBalance();
+      }
     } catch (err) {
       trackTradingAnalytics("trading_api_key_failed", {
         errorMessage: err instanceof Error ? err.message : String(err),
@@ -356,6 +409,8 @@ export const TradingService = {
       proxyAddress: walletMode === "eoa" ? ctx.address : null,
       isDeployed: walletMode === "eoa" ? true : null,
       balance: 0,
+      pusdBalance: 0,
+      usdcEBalance: 0,
       polBalance: 0,
       tokenBalances: [],
       usdcAllowance: 0,
@@ -395,10 +450,13 @@ export const TradingService = {
     if (!ctx.proxyAddress) return;
     try {
       const balData = await ProxyWallet.getBalance(ctx.proxyAddress);
+      const nextBalance = normalizeBalanceData(balData);
       update({
-        balance: balData.balance,
-        polBalance: balData.polBalance ?? 0,
-        tokenBalances: balData.tokenBalances ?? [],
+        balance: nextBalance.balance,
+        pusdBalance: nextBalance.pusdBalance,
+        usdcEBalance: nextBalance.usdcEBalance,
+        polBalance: nextBalance.polBalance ?? 0,
+        tokenBalances: nextBalance.tokenBalances ?? [],
         // Piggybacks on the balance fetch (background returns code presence
         // from the same provider). Keeps the UI in sync with on-chain Safe
         // deployment without an extra RPC round-trip.

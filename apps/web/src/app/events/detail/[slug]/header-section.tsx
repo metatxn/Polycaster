@@ -17,6 +17,12 @@ interface HeaderSectionProps {
     endDate?: string;
     negRisk?: boolean;
   };
+  /**
+   * Kickoff timestamp for sports events. Used in place of `endDate` in the
+   * stats date pill so the header reads as "Apr 30" (kickoff) instead of the
+   * resolution deadline (which on Polymarket sits ~7 days after the game).
+   */
+  kickoffAt?: string;
   isScrolled: boolean;
   formatVolume: (vol?: number | string) => string;
   totalMarketsCount: number;
@@ -65,12 +71,17 @@ function StatItem({
 
 export function HeaderSection({
   event,
+  kickoffAt,
   isScrolled,
   formatVolume,
   totalMarketsCount,
   openMarkets,
   closedMarkets,
 }: HeaderSectionProps) {
+  // Sports events: prefer kickoff date over the resolution `endDate`.
+  // Non-sports events (no `kickoffAt`) keep showing their resolution
+  // deadline.
+  const displayDate = kickoffAt ?? event.endDate;
   return (
     <div
       className={cn(
@@ -176,16 +187,13 @@ export function HeaderSection({
                     value={formatVolume(event.volume)}
                     compact
                   />
-                  {event.endDate && (
+                  {displayDate && (
                     <StatItem
                       icon={Clock}
-                      value={new Date(event.endDate).toLocaleDateString(
-                        "en-US",
-                        {
-                          month: "short",
-                          day: "numeric",
-                        }
-                      )}
+                      value={new Date(displayDate).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}
                       compact
                     />
                   )}
@@ -216,10 +224,10 @@ export function HeaderSection({
                   label="Vol."
                   className="text-xs sm:text-sm"
                 />
-                {event.endDate && (
+                {displayDate && (
                   <StatItem
                     icon={Clock}
-                    value={new Date(event.endDate).toLocaleDateString("en-US", {
+                    value={new Date(displayDate).toLocaleDateString("en-US", {
                       month: "short",
                       day: "numeric",
                       year: "numeric",
@@ -258,10 +266,10 @@ export function HeaderSection({
               label="Vol."
               className="text-[11px] xs:text-xs sm:text-sm shrink-0"
             />
-            {event.endDate && (
+            {displayDate && (
               <StatItem
                 icon={Clock}
-                value={new Date(event.endDate).toLocaleDateString("en-US", {
+                value={new Date(displayDate).toLocaleDateString("en-US", {
                   month: "short",
                   day: "numeric",
                   year: "numeric",

@@ -1,35 +1,14 @@
-import type { Metadata } from "next";
-import { preload } from "react-dom";
-import {
-  buildOptimizedImageUrl,
-  PRIORITY_EVENT_CARD_COUNT,
-  PRIORITY_EVENT_CARD_IMAGE_WIDTH,
-} from "@/lib/lcp-images";
-import { buildPageMetadata } from "@/lib/seo";
-import { getInitialEventsByTag } from "@/lib/server-cache";
-import { SportsContent } from "./sports-content";
+import { permanentRedirect } from "next/navigation";
 
-export const metadata: Metadata = buildPageMetadata({
-  title: "Sports Prediction Markets",
-  description:
-    "Browse live sports prediction markets, schedules, odds, and game outcomes across football, basketball, baseball, hockey, soccer, and more.",
-  path: "/events/sports",
-});
-
-export default async function SportsPage() {
-  const initialData = await getInitialEventsByTag("sports");
-
-  initialData?.events?.slice(0, PRIORITY_EVENT_CARD_COUNT).forEach((event) => {
-    if (event.image) {
-      preload(
-        buildOptimizedImageUrl(event.image, PRIORITY_EVENT_CARD_IMAGE_WIDTH),
-        {
-          as: "image",
-          fetchPriority: "high",
-        }
-      );
-    }
-  });
-
-  return <SportsContent initialData={initialData} />;
+/**
+ * The Sports landing page IS the live sportsbook. Hitting `/events/sports`
+ * forwards to `/events/sports/live` — matching Polymarket's pattern where
+ * `polymarket.com/sports/live` is the default sports view, not a separate
+ * "all events" grid.
+ *
+ * Per-sport pages (`/events/sports/cricket`, `/events/sports/tennis`, …)
+ * still render via the dynamic `[sport]` route below this one.
+ */
+export default function SportsLandingRedirect(): never {
+  permanentRedirect("/events/sports/live");
 }

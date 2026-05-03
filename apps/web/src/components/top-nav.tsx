@@ -27,7 +27,7 @@ import { WalletMenu } from "@/components/wallet-menu";
 /** Primary-nav links — every top-level destination in the app. */
 const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Markets", href: "/markets" },
-  { label: "Live", href: "/live" },
+  { label: "Live", href: "/events/sports/live" },
   { label: "Whales", href: "/whales" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Portfolio", href: "/portfolio" },
@@ -38,7 +38,7 @@ const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
  *  page. Mirrored in [sidebar-mobile.tsx] for the mobile drawer. */
 const CATEGORIES: Array<{ label: string; href: string }> = [
   { label: "Politics", href: "/events/politics" },
-  { label: "Sports", href: "/events/sports" },
+  { label: "Sports", href: "/events/sports/live" },
   { label: "Crypto", href: "/events/crypto" },
   { label: "Finance", href: "/events/finance" },
   { label: "Geopolitics", href: "/events/geopolitics" },
@@ -86,10 +86,10 @@ export function TopNav() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.15em] transition-colors ${
+                  className={`px-2.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] transition-colors ${
                     isActive
                       ? "text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
+                      : "text-muted-foreground/90 hover:text-foreground"
                   }`}
                 >
                   {link.label}
@@ -109,7 +109,7 @@ export function TopNav() {
             <WalletMenu>
               <button
                 type="button"
-                className="flex items-center gap-2 px-3 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[11px] uppercase tracking-[0.12em]"
+                className="flex items-center gap-2 px-3 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[12px] uppercase tracking-[0.08em]"
               >
                 <Wallet className="h-3.5 w-3.5" />
                 <span className="tabular-nums normal-case tracking-normal text-[12px]">
@@ -121,7 +121,7 @@ export function TopNav() {
             <button
               type="button"
               onClick={() => open()}
-              className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] hover:bg-foreground/90 transition-colors"
+              className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-foreground/90 transition-colors"
             >
               <Wallet className="h-3.5 w-3.5" />
               Connect
@@ -142,7 +142,7 @@ export function TopNav() {
       {/* Row 2 — category strip. Horizontal scroll on narrow widths so
           all 12 categories remain reachable without dropdowns. */}
       <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide border-t border-border/40 px-1 py-2">
-        <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 pr-2">
+        <span className="shrink-0 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/80 pr-2">
           §
         </span>
         {CATEGORIES.map((cat, i) => {
@@ -151,10 +151,10 @@ export function TopNav() {
             <div key={cat.href} className="flex items-center">
               <Link
                 href={cat.href}
-                className={`shrink-0 px-2 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] transition-colors rounded-sm ${
+                className={`shrink-0 px-2 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] transition-colors rounded-sm ${
                   isActive
                     ? "text-foreground bg-accent/40"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                    : "text-muted-foreground/90 hover:text-foreground hover:bg-accent/30"
                 }`}
               >
                 {cat.label}

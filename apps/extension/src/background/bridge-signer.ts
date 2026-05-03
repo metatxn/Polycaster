@@ -1,105 +1,143 @@
 /**
- * BridgeSigner — an ethers v5 Signer that delegates signing to MetaMask
- * via the extension's content script -> page bridge message chain.
+ * Bridge wallet client — a viem WalletClient-compatible adapter that delegates
+ * signing and transaction submission to MetaMask through the content script.
  *
- * Flow: BridgeSigner -> chrome.tabs.sendMessage -> content script
- *       -> window.postMessage -> page-bridge.ts -> MetaMask -> back
- *
- * The pending-request state and response listener live in signing-state.ts
- * so the lightweight listener can be loaded eagerly while BridgeSigner
- * (which pulls in ethers) is lazy-loaded.
+ * Flow: BridgeWalletClient -> chrome.tabs.sendMessage -> content script
+ *       -> window.postMessage -> page-bridge.ts -> MetaMask -> back.
  */
-import { ethers } from "ethers";
+import { POLYGON_CHAIN } from "@knoww/shared-types/chains";
+import type {
+  Address,
+  Hex,
+  SignMessageParameters,
+  SignTypedDataParameters,
+} from "viem";
+import {
+  bytesToHex,
+  isHex,
+  numberToHex,
+  serializeTypedData,
+  stringToHex,
+} from "viem";
 import { sendSigningRequest } from "./signing-state";
 
-export class BridgeSigner extends ethers.Signer {
-  private _address: string;
-  private _tabId: number;
+type BridgeTransaction = {
+  to?: Address | null;
+  data?: Hex;
+  value?: bigint;
+  gas?: bigint;
+};
 
-  constructor(
-    address: string,
-    tabId: number,
-    provider?: ethers.providers.Provider
-  ) {
-    super();
-    this._address = address;
-    this._tabId = tabId;
-    ethers.utils.defineReadOnly(this, "provider", provider || undefined);
+type Eip712DomainField = { name: string; type: string };
+
+export type BridgeWalletClient = {
+  account: { address: Address; type: "json-rpc" };
+  chain: typeof POLYGON_CHAIN;
+  getAddresses: () => Promise<Address[]>;
+  requestAddresses: () => Promise<Address[]>;
+  signMessage: (params: SignMessageParameters) => Promise<Hex>;
+  signTypedData: (params: SignTypedDataParameters) => Promise<Hex>;
+  sendTransaction: (transaction: BridgeTransaction) => Promise<Hex>;
+};
+
+function rawMessageToHex(message: SignMessageParameters["message"]): Hex {
+  if (typeof message === "string") {
+    return stringToHex(message);
+  }
+  const raw = message.raw;
+  if (typeof raw === "string") {
+    return isHex(raw) ? raw : stringToHex(raw);
+  }
+  return bytesToHex(raw);
+}
+
+function valueToHex(value: bigint | undefined): Hex | undefined {
+  if (value === undefined) return undefined;
+  return numberToHex(value);
+}
+
+function getSerializableTypedDataTypes(
+  params: SignTypedDataParameters
+): SignTypedDataParameters["types"] & {
+  EIP712Domain?: Eip712DomainField[];
+} {
+  const types = { ...params.types } as SignTypedDataParameters["types"] & {
+    EIP712Domain?: Eip712DomainField[];
+  };
+  if (types.EIP712Domain) return types;
+
+  const domain = params.domain ?? {};
+  const domainFields: Eip712DomainField[] = [];
+  if (domain.name !== undefined) {
+    domainFields.push({ name: "name", type: "string" });
+  }
+  if (domain.version !== undefined) {
+    domainFields.push({ name: "version", type: "string" });
+  }
+  if (domain.chainId !== undefined) {
+    domainFields.push({ name: "chainId", type: "uint256" });
+  }
+  if (domain.verifyingContract !== undefined) {
+    domainFields.push({ name: "verifyingContract", type: "address" });
+  }
+  if (domain.salt !== undefined) {
+    domainFields.push({ name: "salt", type: "bytes32" });
   }
 
-  async getAddress(): Promise<string> {
-    return this._address;
+  if (domainFields.length > 0) {
+    types.EIP712Domain = domainFields;
   }
 
-  async signTransaction(
-    _transaction: ethers.utils.Deferrable<ethers.providers.TransactionRequest>
-  ): Promise<string> {
-    throw new Error(
-      "signTransaction is not supported by BridgeSigner; use sendTransaction instead"
-    );
-  }
+  return types;
+}
 
-  async signMessage(message: string | ethers.utils.Bytes): Promise<string> {
-    const msgHex =
-      typeof message === "string"
-        ? ethers.utils.hexlify(ethers.utils.toUtf8Bytes(message))
-        : ethers.utils.hexlify(message);
-    const result = await sendSigningRequest(this._tabId, "personal_sign", [
-      msgHex,
-      this._address,
-    ]);
-    return result as string;
-  }
+export function createBridgeWalletClient(
+  address: Address,
+  tabId: number
+): BridgeWalletClient {
+  const account = { address, type: "json-rpc" as const };
+  const walletClient = {
+    account,
+    chain: POLYGON_CHAIN,
+    async getAddresses() {
+      return [address];
+    },
+    async requestAddresses() {
+      return [address];
+    },
+    async signMessage(params: SignMessageParameters) {
+      return (await sendSigningRequest(tabId, "personal_sign", [
+        rawMessageToHex(params.message),
+        address,
+      ])) as Hex;
+    },
+    async signTypedData(params: SignTypedDataParameters) {
+      const payload = serializeTypedData({
+        domain: params.domain,
+        types: getSerializableTypedDataTypes(params),
+        primaryType: params.primaryType,
+        message: params.message,
+      } as Parameters<typeof serializeTypedData>[0]);
+      return (await sendSigningRequest(tabId, "eth_signTypedData_v4", [
+        address,
+        payload,
+      ])) as Hex;
+    },
+    async sendTransaction(params: BridgeTransaction) {
+      const txParams: Record<string, unknown> = {
+        from: address,
+        to: params.to,
+      };
+      const value = valueToHex(params.value);
+      if (value) txParams.value = value;
+      if (params.data) txParams.data = params.data;
+      if (params.gas) txParams.gas = numberToHex(params.gas);
 
-  async _signTypedData(
-    domain: ethers.TypedDataDomain,
-    types: Record<string, ethers.TypedDataField[]>,
-    value: Record<string, unknown>
-  ): Promise<string> {
-    const payload = JSON.stringify(
-      ethers.utils._TypedDataEncoder.getPayload(domain, types, value)
-    );
-    const result = await sendSigningRequest(
-      this._tabId,
-      "eth_signTypedData_v4",
-      [this._address, payload]
-    );
-    return result as string;
-  }
+      return (await sendSigningRequest(tabId, "eth_sendTransaction", [
+        txParams,
+      ])) as Hex;
+    },
+  };
 
-  async sendTransaction(
-    transaction: ethers.utils.Deferrable<ethers.providers.TransactionRequest>
-  ): Promise<ethers.providers.TransactionResponse> {
-    const tx = await ethers.utils.resolveProperties(transaction);
-    const txParams: Record<string, unknown> = {
-      from: this._address,
-      to: tx.to,
-    };
-    if (tx.value)
-      txParams.value = ethers.BigNumber.from(tx.value).toHexString();
-    if (tx.data) txParams.data = ethers.utils.hexlify(tx.data);
-    if (tx.gasLimit)
-      txParams.gas = ethers.BigNumber.from(tx.gasLimit).toHexString();
-
-    const hash = (await sendSigningRequest(this._tabId, "eth_sendTransaction", [
-      txParams,
-    ])) as string;
-
-    const provider = this.provider;
-    if (!provider) throw new Error("No provider to fetch tx receipt");
-    const response = await provider.getTransaction(hash);
-    if (response) return response;
-
-    return {
-      hash,
-      from: this._address,
-      confirmations: 0,
-      wait: (confirmations?: number) =>
-        provider.waitForTransaction(hash, confirmations),
-    } as ethers.providers.TransactionResponse;
-  }
-
-  connect(provider: ethers.providers.Provider): BridgeSigner {
-    return new BridgeSigner(this._address, this._tabId, provider);
-  }
+  return walletClient as BridgeWalletClient;
 }

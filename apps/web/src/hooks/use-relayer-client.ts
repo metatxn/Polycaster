@@ -12,18 +12,18 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import Decimal from "decimal.js";
+import { buildTradingApprovalTransactions } from "@knoww/shared-types/approvals";
+import {
+  normalizeApprovalAmount,
+  parseApprovalAmountRaw,
+} from "@knoww/shared-types/trading";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 
 const log = createLogger("relayer-client");
 
 // Contract addresses on Polygon Mainnet
-import {
-  CONTRACTS,
-  CTF_APPROVAL_OPERATORS,
-  PUSD_APPROVAL_TARGETS,
-} from "@/constants/contracts";
+import { CONTRACTS } from "@/constants/contracts";
 import { POLYGON_CHAIN_ID, RELAYER_API_URL } from "@/constants/polymarket";
 
 import {
@@ -42,8 +42,6 @@ import { useTradingWalletMode } from "./use-trading-wallet-mode";
 
 const POLYMARKET_RELAYER_URL = RELAYER_API_URL;
 const CHAIN_ID = POLYGON_CHAIN_ID;
-const DEFAULT_APPROVAL_AMOUNT = "100";
-const APPROVAL_DECIMALS = 6;
 
 // Transaction states from the relayer (kept for documentation purposes)
 // type TransactionState =
@@ -64,16 +62,6 @@ interface RelayerClientState {
 
 // Debounce time for deployment checks
 const CHECK_DEPLOYMENT_DEBOUNCE_MS = 2000;
-
-function normalizeApprovalAmount(amount?: string): string {
-  const decimal = new Decimal(amount || DEFAULT_APPROVAL_AMOUNT);
-  if (!decimal.isFinite() || decimal.lte(0)) {
-    throw new Error("Approval amount must be greater than 0");
-  }
-  return decimal
-    .toDecimalPlaces(APPROVAL_DECIMALS, Decimal.ROUND_DOWN)
-    .toFixed();
-}
 
 export function useRelayerClient() {
   const { address, isConnected } = useConnection();
@@ -195,22 +183,23 @@ export function useRelayerClient() {
   }, [walletClient, address, isEoaMode]);
 
   /**
-   * Set all token approvals for V2 trading (gasless)
+   * Set the default token approvals for app trading (gasless)
    *
-   * V2 settles BUY orders in pUSD, so the Safe must approve pUSD (not USDC.e)
-   * to the V2 Exchange contracts. USDC.e is only approved to the Collateral
-   * Onramp so that `wrap()` can convert USDC.e → pUSD on demand.
+   * Polymarket docs list pUSD → CTF plus CTF operator approval to both CLOB
+   * exchanges as the market-making setup. The app also grants pUSD allowance to
+   * both CLOB exchanges because BUY orders are rejected by the CLOB server when
+   * that allowance is missing. USDC.e is approved only to the CollateralOnramp
+   * so `wrap()` can convert USDC.e → pUSD on demand.
    *
    * ERC-20 Approvals:
+   * - pUSD → CTF:                        docs-required split/mint setup
    * - pUSD → CTF Exchange V2:            settle BUY on standard markets
    * - pUSD → Neg Risk CTF Exchange V2:   settle BUY on neg-risk markets
-   * - pUSD → Neg Risk Adapter:           convert between market types
-   * - USDC.e → Collateral Onramp:        allow wrap() to pull USDC.e → mint pUSD
+   * - USDC.e → CollateralOnramp:         allow wrap() to pull USDC.e → mint pUSD
    *
    * ERC-1155 (Outcome Token) Approvals:
    * - CTF → CTF Exchange V2:             sell positions on standard markets
    * - CTF → Neg Risk CTF Exchange V2:    sell positions on neg-risk markets
-   * - CTF → Neg Risk Adapter:            convert positions between market types
    *
    * This list must mirror `checkAllApprovals` in `@/lib/approvals` — adding a
    * target there without adding it here leaves users stuck in a loop where
@@ -224,15 +213,11 @@ export function useRelayerClient() {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       try {
-        const { encodeFunctionData, parseUnits } = await import("viem");
         const { polygon } = await import("viem/chains");
         const { checkAllApprovals } = await import("@/lib/approvals");
         const normalizedApprovalAmount =
           normalizeApprovalAmount(approvalAmount);
-        const approvalAmountRaw = parseUnits(
-          normalizedApprovalAmount,
-          APPROVAL_DECIMALS
-        );
+        const approvalAmountRaw = parseApprovalAmountRaw(approvalAmount);
 
         // First, verify the Safe is deployed
         const expectedSafe = await deriveSafeAddress();
@@ -249,10 +234,18 @@ export function useRelayerClient() {
 
         // Check if approvals are already set
         log.debug("approvals.checking");
-        const approvalStatus = await checkAllApprovals(expectedSafe);
+        const approvalStatus = await checkAllApprovals(
+          expectedSafe,
+          approvalAmountRaw
+        );
         log.debug("approvals.status", approvalStatus);
 
-        if (approvalStatus.allApproved) {
+        const approvalTxs = buildTradingApprovalTransactions(
+          approvalStatus,
+          approvalAmountRaw
+        );
+
+        if (approvalTxs.length === 0) {
           log.debug("approvals.already_set");
           setState((prev) => ({ ...prev, isLoading: false }));
           return {
@@ -265,97 +258,17 @@ export function useRelayerClient() {
 
         if (isEoaMode) {
           const publicClient = getPublicClient();
-          const { erc20Abi } = await import("viem");
-          const erc1155ApprovalAbi = [
-            {
-              name: "setApprovalForAll",
-              type: "function",
-              inputs: [
-                { name: "operator", type: "address" },
-                { name: "approved", type: "bool" },
-              ],
-              outputs: [],
-            },
-          ] as const;
-
           const txHashes: `0x${string}`[] = [];
-          const writeErc20Approval = async (
-            token: `0x${string}`,
-            spender: `0x${string}`
-          ) => {
-            const hash = await walletClient.writeContract({
+          for (const tx of approvalTxs) {
+            const hash = await walletClient.sendTransaction({
               account: address as `0x${string}`,
               chain: polygon,
-              address: token,
-              abi: erc20Abi,
-              functionName: "approve",
-              args: [spender, approvalAmountRaw],
+              to: tx.to,
+              data: tx.data,
+              value: BigInt(0),
             });
             txHashes.push(hash);
             await publicClient.waitForTransactionReceipt({ hash });
-          };
-          const writeErc1155Approval = async (operator: `0x${string}`) => {
-            const hash = await walletClient.writeContract({
-              account: address as `0x${string}`,
-              chain: polygon,
-              address: CONTRACTS.CTF,
-              abi: erc1155ApprovalAbi,
-              functionName: "setApprovalForAll",
-              args: [operator, true],
-            });
-            txHashes.push(hash);
-            await publicClient.waitForTransactionReceipt({ hash });
-          };
-
-          if (!approvalStatus.pusdCtfExchange) {
-            await writeErc20Approval(CONTRACTS.PUSD, CONTRACTS.CTF_EXCHANGE);
-          }
-          if (!approvalStatus.pusdNegRiskExchange) {
-            await writeErc20Approval(
-              CONTRACTS.PUSD,
-              CONTRACTS.NEG_RISK_CTF_EXCHANGE
-            );
-          }
-          if (!approvalStatus.pusdNegRiskAdapter) {
-            await writeErc20Approval(
-              CONTRACTS.PUSD,
-              CONTRACTS.NEG_RISK_ADAPTER
-            );
-          }
-          if (!approvalStatus.pusdCtfCollateralAdapter) {
-            await writeErc20Approval(
-              CONTRACTS.PUSD,
-              CONTRACTS.CTF_COLLATERAL_ADAPTER
-            );
-          }
-          if (!approvalStatus.pusdNegRiskCtfCollateralAdapter) {
-            await writeErc20Approval(
-              CONTRACTS.PUSD,
-              CONTRACTS.NEG_RISK_CTF_COLLATERAL_ADAPTER
-            );
-          }
-          if (!approvalStatus.usdcOnramp) {
-            await writeErc20Approval(
-              CONTRACTS.USDC_E,
-              CONTRACTS.COLLATERAL_ONRAMP
-            );
-          }
-          if (!approvalStatus.ctfExchangeApproval) {
-            await writeErc1155Approval(CONTRACTS.CTF_EXCHANGE);
-          }
-          if (!approvalStatus.ctfNegRiskExchangeApproval) {
-            await writeErc1155Approval(CONTRACTS.NEG_RISK_CTF_EXCHANGE);
-          }
-          if (!approvalStatus.ctfNegRiskAdapterApproval) {
-            await writeErc1155Approval(CONTRACTS.NEG_RISK_ADAPTER);
-          }
-          if (!approvalStatus.ctfCollateralAdapterApproval) {
-            await writeErc1155Approval(CONTRACTS.CTF_COLLATERAL_ADAPTER);
-          }
-          if (!approvalStatus.ctfNegRiskCollateralAdapterApproval) {
-            await writeErc1155Approval(
-              CONTRACTS.NEG_RISK_CTF_COLLATERAL_ADAPTER
-            );
           }
 
           setState((prev) => ({ ...prev, isLoading: false }));
@@ -372,75 +285,9 @@ export function useRelayerClient() {
           );
         }
 
-        // ERC20 approve ABI
-        const erc20ApproveAbi = [
-          {
-            name: "approve",
-            type: "function",
-            inputs: [
-              { name: "spender", type: "address" },
-              { name: "amount", type: "uint256" },
-            ],
-            outputs: [{ name: "", type: "bool" }],
-          },
-        ] as const;
-
-        // ERC1155 setApprovalForAll ABI (for outcome tokens)
-        const erc1155ApprovalAbi = [
-          {
-            name: "setApprovalForAll",
-            type: "function",
-            inputs: [
-              { name: "operator", type: "address" },
-              { name: "approved", type: "bool" },
-            ],
-            outputs: [],
-          },
-        ] as const;
-
-        // Create ALL approval transactions.
-        // The SDK's execute() method expects Transaction objects with: to, data,
-        // value. It internally converts these to SafeTransactions (operation: Call).
-        const erc20Approve = (
-          token: `0x${string}`,
-          spender: `0x${string}`
-        ) => ({
-          to: token,
-          data: encodeFunctionData({
-            abi: erc20ApproveAbi,
-            functionName: "approve",
-            args: [spender, approvalAmountRaw],
-          }),
-          value: "0",
-        });
-        const erc1155ApproveAll = (operator: `0x${string}`) => ({
-          to: CONTRACTS.CTF,
-          data: encodeFunctionData({
-            abi: erc1155ApprovalAbi,
-            functionName: "setApprovalForAll",
-            args: [operator, true],
-          }),
-          value: "0",
-        });
-
-        const approvalTxs = [
-          // pUSD → V2 exchanges (BUY settlement)
-          ...PUSD_APPROVAL_TARGETS.map((spender) =>
-            erc20Approve(CONTRACTS.PUSD, spender)
-          ),
-          // USDC.e → Onramp (lets wrap() pull USDC.e and mint pUSD)
-          erc20Approve(CONTRACTS.USDC_E, CONTRACTS.COLLATERAL_ONRAMP),
-          // CTF outcome tokens → operators (needed to SELL positions)
-          ...CTF_APPROVAL_OPERATORS.map((operator) =>
-            erc1155ApproveAll(operator)
-          ),
-        ];
-
         log.debug("approvals.submitting", {
-          pusdTargets: PUSD_APPROVAL_TARGETS,
           amount: normalizedApprovalAmount,
-          usdcEOnramp: CONTRACTS.COLLATERAL_ONRAMP,
-          ctfOperators: CTF_APPROVAL_OPERATORS,
+          txnCount: approvalTxs.length,
         });
 
         // Execute the approval transactions with retry logic.

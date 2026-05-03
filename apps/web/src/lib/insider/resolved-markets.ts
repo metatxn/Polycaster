@@ -6,6 +6,7 @@
  */
 
 import { createLogger } from "@knoww/logger";
+import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { parseOutcomes, type ResolvedOutcomes } from "./pnl";
 
@@ -133,21 +134,10 @@ function toResolvedMarket(raw: GammaClosedMarket): ResolvedMarket | null {
   const resolution = parseOutcomes(raw.outcomePrices);
   if (resolution.prices.length === 0) return null;
 
-  let outcomes: string[] = [];
-  try {
-    outcomes = JSON.parse(raw.outcomes) as string[];
-  } catch {
-    return null;
-  }
+  const outcomes = parseGammaStringArray(raw.outcomes);
+  if (outcomes.length === 0) return null;
 
-  let clobTokenIds: string[] = [];
-  if (raw.clobTokenIds) {
-    try {
-      clobTokenIds = JSON.parse(raw.clobTokenIds) as string[];
-    } catch {
-      clobTokenIds = [];
-    }
-  }
+  const clobTokenIds = parseGammaStringArray(raw.clobTokenIds);
 
   // Gamma returns closedTime like "2026-04-22 18:10:48+00" — a Postgres
   // timestamp with a bare `+00` offset. Replace the space with T and

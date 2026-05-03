@@ -1,9 +1,13 @@
 "use client";
 
+import {
+  normalizeTradingWalletMode,
+  type TradingWalletMode,
+} from "@knoww/shared-types/polymarket";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection } from "wagmi";
 
-export type TradingWalletMode = "safe" | "eoa";
+export type { TradingWalletMode };
 
 const STORAGE_KEY = "knoww_trading_wallet_mode";
 const MODE_CHANGE_EVENT = "knoww:trading-wallet-mode-change";
@@ -18,7 +22,7 @@ function readStoredMode(address?: string | null): TradingWalletMode {
   const key = getStorageKey(address);
   if (!key) return "safe";
   const stored = window.localStorage.getItem(key);
-  return stored === "eoa" ? "eoa" : "safe";
+  return normalizeTradingWalletMode(stored);
 }
 
 export function useTradingWalletMode() {
@@ -47,12 +51,12 @@ export function useTradingWalletMode() {
       ) {
         return;
       }
-      setModeState(detail.mode === "eoa" ? "eoa" : "safe");
+      setModeState(normalizeTradingWalletMode(detail.mode));
     };
 
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== getStorageKey(address)) return;
-      setModeState(event.newValue === "eoa" ? "eoa" : "safe");
+      setModeState(normalizeTradingWalletMode(event.newValue));
     };
 
     window.addEventListener(MODE_CHANGE_EVENT, handleModeChange);
@@ -65,14 +69,15 @@ export function useTradingWalletMode() {
 
   const setMode = useCallback(
     (nextMode: TradingWalletMode) => {
-      setModeState(nextMode);
+      const normalizedMode = normalizeTradingWalletMode(nextMode);
+      setModeState(normalizedMode);
       if (typeof window === "undefined") return;
       const key = getStorageKey(address);
       if (!key) return;
-      window.localStorage.setItem(key, nextMode);
+      window.localStorage.setItem(key, normalizedMode);
       window.dispatchEvent(
         new CustomEvent(MODE_CHANGE_EVENT, {
-          detail: { address, mode: nextMode },
+          detail: { address, mode: normalizedMode },
         })
       );
     },

@@ -1,3 +1,4 @@
+import { formatOrderExpiration } from "@knoww/shared-types/orders";
 import { motion } from "framer-motion";
 import { Coins, Loader2, X } from "lucide-react";
 import Image from "next/image";
@@ -9,7 +10,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatCurrency, formatPrice } from "@/lib/formatters";
-import { formatOrderExpiration } from "@/lib/order-expiration";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "./empty-state";
 import type { Order } from "./types";

@@ -1,7 +1,14 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+import {
+  fetchClobOrderBook,
+  fetchClobOrderBooks,
+} from "@knoww/shared-types/clob";
+import {
+  getGammaYesNoMarketFields,
+  resolveNegRisk,
+} from "@knoww/shared-types/polymarket";
 import Decimal from "decimal.js";
 
 const log = createLogger("event-detail");
@@ -14,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
 import { CommentsSection } from "@/components/comments";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { LeagueRail, LeagueRailMobile } from "@/components/league-rail";
 import type { TimeRange } from "@/components/market-price-chart";
 import { Navbar } from "@/components/navbar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,11 +38,15 @@ import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import { type Position, useUserPositions } from "@/hooks/use-user-positions";
 import { formatVolume } from "@/lib/formatters";
+import { getMarketShortLabel } from "@/lib/market-labels";
+import { SPORT_GROUPS } from "@/lib/sport-categories";
 import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
 import { CandidateTicker } from "./candidate-ticker";
 import { HeaderSection } from "./header-section";
+import { MatchupOutcomes } from "./matchup-outcomes";
 import { OutcomesTable } from "./outcomes-table";
+import { isTeamMatchupEvent, TeamMatchupHero } from "./team-matchup-hero";
 
 // Lazy load heavy components - they're code-split into separate chunks
 const MarketPriceChart = dynamic(
@@ -100,7 +112,10 @@ type PriceHistoryBatchResponse = {
 };
 
 const chartTimeRangeToStartTsOffset: Record<TimeRange, number> = {
+  "30M": 30 * 60,
   "1H": 60 * 60,
+  "2H": 2 * 60 * 60,
+  "3H": 3 * 60 * 60,
   "6H": 6 * 60 * 60,
   "1D": 24 * 60 * 60,
   "1W": 7 * 24 * 60 * 60,
@@ -109,7 +124,10 @@ const chartTimeRangeToStartTsOffset: Record<TimeRange, number> = {
 };
 
 const chartTimeRangeToFidelity: Record<Exclude<TimeRange, "ALL">, number> = {
+  "30M": 1,
   "1H": 1,
+  "2H": 1,
+  "3H": 1,
   "6H": 1,
   "1D": 5,
   "1W": 30,
@@ -153,30 +171,32 @@ function getChartRangePriceHistoryRequest(
   };
 }
 
+function isLiveSportsEventForChart(event: Event | null | undefined): boolean {
+  if (
+    !event ||
+    !isTeamMatchupEvent(event.teams) ||
+    event.closed === true ||
+    event.archived === true
+  ) {
+    return false;
+  }
+
+  if (event.live === true || event.score || event.period || event.elapsed) {
+    return true;
+  }
+
+  const kickoffMs = event.startTime ? new Date(event.startTime).getTime() : NaN;
+  if (!Number.isFinite(kickoffMs)) return false;
+
+  const elapsedMs = Date.now() - kickoffMs;
+  return elapsedMs >= 0 && elapsedMs < 8 * 60 * 60 * 1000;
+}
+
 async function fetchBookSnapshot(
   tokenId: string
 ): Promise<BookSnapshot | null> {
   try {
-    const res = await fetch(`${CLOB_BASE_URL}/book?token_id=${tokenId}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as {
-      market?: string;
-      asset_id?: string;
-      bids?: Array<{ price: string; size: string }>;
-      asks?: Array<{ price: string; size: string }>;
-      min_order_size?: string;
-      tick_size?: string;
-    };
-    return {
-      market: json.market,
-      asset_id: json.asset_id,
-      bids: json.bids || [],
-      asks: json.asks || [],
-      min_order_size: json.min_order_size,
-      tick_size: json.tick_size,
-    };
+    return await fetchClobOrderBook(tokenId, { host: CLOB_BASE_URL });
   } catch {
     return null;
   }
@@ -186,33 +206,7 @@ async function fetchBookSnapshots(tokenIds: string[]): Promise<BookSnapshot[]> {
   if (tokenIds.length === 0) return [];
 
   try {
-    const res = await fetch(`${CLOB_BASE_URL}/books?token_ids`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(tokenIds.map((token_id) => ({ token_id }))),
-    });
-    if (!res.ok) return [];
-    const json = (await res.json()) as Array<{
-      market?: string;
-      asset_id?: string;
-      bids?: Array<{ price: string; size: string }>;
-      asks?: Array<{ price: string; size: string }>;
-      min_order_size?: string;
-      tick_size?: string;
-    }>;
-
-    if (!Array.isArray(json)) return [];
-    return json.map((book) => ({
-      market: book.market,
-      asset_id: book.asset_id,
-      bids: book.bids || [],
-      asks: book.asks || [],
-      min_order_size: book.min_order_size,
-      tick_size: book.tick_size,
-    }));
+    return await fetchClobOrderBooks(tokenIds, { host: CLOB_BASE_URL });
   } catch {
     return [];
   }
@@ -253,6 +247,148 @@ function toDisplayPercentagePointChange(changeFraction: number): number {
   return Object.is(rounded, -0) ? 0 : rounded;
 }
 
+function normalizeOutcomeName(value: unknown): string {
+  if (value == null) return "";
+
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getSportsRailActiveSlug(event: Event | null | undefined): string {
+  if (!event) return "sports";
+
+  const searchableValues = [
+    event.slug,
+    event.title,
+    ...(event.tags ?? []),
+    ...(event.markets ?? []).flatMap((market) => [
+      market.slug,
+      market.question,
+      market.groupItemTitle,
+      market.parentEventTitle,
+      market.sportsMarketType,
+    ]),
+    ...(event.teams ?? []).flatMap((team) => [
+      team.name,
+      team.abbreviation,
+      team.alias,
+      team.league,
+    ]),
+  ]
+    .map(normalizeOutcomeName)
+    .filter(Boolean);
+
+  for (const group of SPORT_GROUPS) {
+    for (const league of group.leagues) {
+      const leagueCandidates = [league.slug, league.label, league.tagSlug].map(
+        normalizeOutcomeName
+      );
+
+      if (
+        leagueCandidates.some((candidate) =>
+          searchableValues.some((value) => value.includes(candidate))
+        )
+      ) {
+        return league.slug;
+      }
+    }
+
+    const groupCandidates = [group.slug, group.label, group.tagSlug].map(
+      normalizeOutcomeName
+    );
+    if (
+      groupCandidates.some((candidate) =>
+        searchableValues.some((value) => value.includes(candidate))
+      )
+    ) {
+      return group.slug;
+    }
+  }
+
+  return "sports";
+}
+
+function findOutcomeIndexFromUrl(
+  rawOutcome: string | undefined,
+  outcomes: OutcomeData[],
+  selectedMarket: { groupItemTitle?: string; question?: string } | null,
+  event: Event | null
+): number {
+  const target = normalizeOutcomeName(rawOutcome);
+  if (!target) return -1;
+
+  const directIndex = outcomes.findIndex(
+    (outcome) => normalizeOutcomeName(outcome.name) === target
+  );
+  if (directIndex !== -1) return directIndex;
+
+  if (
+    selectedMarket &&
+    normalizeOutcomeName(selectedMarket.groupItemTitle) === target
+  ) {
+    return 0;
+  }
+
+  if (event?.teams?.length) {
+    const teamIndex = event.teams.findIndex((team) => {
+      const names = [team.name, team.abbreviation, team.alias].map(
+        normalizeOutcomeName
+      );
+      return names.some((name) => name && name === target);
+    });
+    if (teamIndex !== -1) {
+      const marketText = normalizeOutcomeName(
+        `${selectedMarket?.groupItemTitle ?? ""} ${
+          selectedMarket?.question ?? ""
+        }`
+      );
+      const team = event.teams[teamIndex];
+      const teamNames = [team.name, team.abbreviation, team.alias]
+        .map(normalizeOutcomeName)
+        .filter(Boolean);
+      if (teamNames.some((name) => marketText.includes(name))) return 0;
+    }
+  }
+
+  return -1;
+}
+
+function matchupMoneylineRank(
+  rawLabel: string | undefined,
+  teams: NonNullable<Event["teams"]>
+): number {
+  const label = normalizeOutcomeName(rawLabel);
+  if (!label) return 3;
+  if (label.startsWith("draw")) return 1;
+
+  const teamIndex = teams.findIndex((team) => {
+    const names = [team.name, team.abbreviation, team.alias]
+      .map(normalizeOutcomeName)
+      .filter(Boolean);
+    return names.some(
+      (name) => label === name || label.includes(name) || name.includes(label)
+    );
+  });
+
+  if (teamIndex === 0) return 0;
+  if (teamIndex === 1) return 2;
+  return 3;
+}
+
+function matchupMoneylineLabel(
+  rawLabel: string | undefined,
+  teams: NonNullable<Event["teams"]>
+): string {
+  const rank = matchupMoneylineRank(rawLabel, teams);
+  if (rank === 0) return teams[0]?.name.trim() || "Team A";
+  if (rank === 1) return "Draw";
+  if (rank === 2) return teams[1]?.name.trim() || "Team B";
+  return (rawLabel || "Moneyline").replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
 // Dedicated trading-panel order book snapshot shape.
 // Keep this separate from other ["orderBook", tokenId] query consumers so the
 // trading form never reads an incompatible cached payload and waits for staleness.
@@ -286,7 +422,13 @@ export default function EventDetailClient({
 
   const [selectedMarketId, setSelectedMarketId] = useState<string>("");
   const [selectedOutcomeIndex, setSelectedOutcomeIndex] = useState(0);
-  const [chartTimeRange, setChartTimeRange] = useState<TimeRange>("ALL");
+  const [chartTimeRange, setChartTimeRange] = useState<TimeRange>(() =>
+    isLiveSportsEventForChart(initialEvent) ? "1H" : "ALL"
+  );
+  const chartTimeRangeTouchedRef = useRef(false);
+  const liveSportsChartDefaultAppliedRef = useRef(
+    isLiveSportsEventForChart(initialEvent)
+  );
   // Track which market has its order book expanded (null = none)
   const [expandedOrderBookMarketId, setExpandedOrderBookMarketId] = useState<
     string | null
@@ -383,6 +525,24 @@ export default function EventDetailClient({
     isLoading: loading,
     error,
   } = useEventDetail(eventSlugOrId, initialEvent);
+
+  const handleChartTimeRangeChange = useCallback((range: TimeRange) => {
+    chartTimeRangeTouchedRef.current = true;
+    setChartTimeRange(range);
+  }, []);
+
+  useEffect(() => {
+    if (
+      liveSportsChartDefaultAppliedRef.current ||
+      !isLiveSportsEventForChart(event) ||
+      chartTimeRangeTouchedRef.current
+    ) {
+      return;
+    }
+
+    liveSportsChartDefaultAppliedRef.current = true;
+    setChartTimeRange((current) => (current === "ALL" ? "1H" : current));
+  }, [event]);
 
   // Fetch user positions to show "You have a position" indicator
   const {
@@ -559,43 +719,32 @@ export default function EventDetailClient({
           hasOneDayPriceChange: boolean;
           volume: string;
           color: string;
+          sportsMarketType?: string;
+          /** Parent event linkage for negRisk children fanned-out in /api/events/[id]. */
+          parentEventId?: string;
+          parentEventTitle?: string;
+          /** Raw outcome labels (e.g. ["Mumbai Indians","Sunrisers Hyderabad"]). */
+          rawOutcomes?: string[];
+          /** Long-form rules text for the per-market About panel. */
+          description?: string;
+          /** Per-market resolution deadline (ISO). */
+          endDate?: string;
+          /** ISO timestamp the market opened. */
+          createdAt?: string;
+          /** Public canonical URL of the resolution source. */
+          resolutionSource?: string;
+          /** Resolver wallet address (Polygonscan-linkable). */
+          resolvedBy?: string;
         }>,
       };
     }
 
     // Build market data - shared transformation for both trading and display
     const marketData = openMarkets.map((market, idx) => {
-      const outcomes = market.outcomes ? JSON.parse(market.outcomes) : [];
-      const prices = market.outcomePrices
-        ? JSON.parse(market.outcomePrices)
-        : [];
-      const tokens = market.tokens || [];
-      const clobTokenIds = market.clobTokenIds
-        ? JSON.parse(market.clobTokenIds)
-        : [];
-
-      const yesIndex = outcomes.findIndex((o: string) =>
-        o.toLowerCase().includes("yes")
-      );
-      const noIndex = outcomes.findIndex((o: string) =>
-        o.toLowerCase().includes("no")
-      );
-
-      const yesPrice = yesIndex !== -1 ? prices[yesIndex] : prices[0];
-      const noPrice = noIndex !== -1 ? prices[noIndex] : prices[1];
-
-      let yesTokenId = "";
-      let noTokenId = "";
-
-      if (tokens.length > 0) {
-        const yesToken = tokens.find((t) => t.outcome?.toLowerCase() === "yes");
-        const noToken = tokens.find((t) => t.outcome?.toLowerCase() === "no");
-        yesTokenId = yesToken?.token_id || "";
-        noTokenId = noToken?.token_id || "";
-      } else if (clobTokenIds.length > 0) {
-        yesTokenId = yesIndex !== -1 ? clobTokenIds[yesIndex] : clobTokenIds[0];
-        noTokenId = noIndex !== -1 ? clobTokenIds[noIndex] : clobTokenIds[1];
-      }
+      const parsedMarket = getGammaYesNoMarketFields(market);
+      const outcomes = parsedMarket.outcomes;
+      const yesPrice = parsedMarket.yesPrice;
+      const noPrice = parsedMarket.noPrice;
 
       const yesProbability = yesPrice
         ? Number.parseFloat((Number.parseFloat(yesPrice) * 100).toFixed(0))
@@ -621,18 +770,30 @@ export default function EventDetailClient({
         id: market.id,
         conditionId: market.conditionId || "",
         question: market.question,
-        groupItemTitle: market.groupItemTitle || market.question,
+        groupItemTitle: getMarketShortLabel(market, event.title),
         yesProbability,
         yesPrice: yesPrice || "0",
         noPrice: noPrice || "0",
-        yesTokenId: yesTokenId || "",
-        noTokenId: noTokenId || "",
+        yesTokenId: parsedMarket.yesTokenId,
+        noTokenId: parsedMarket.noTokenId,
         negRisk: resolveNegRisk(market),
         orderMinSize,
         change,
         hasOneDayPriceChange,
         volume: market.volume || "0",
         color: colors[idx % colors.length],
+        sportsMarketType: market.sportsMarketType,
+        parentEventId:
+          market.parentEventId !== undefined && market.parentEventId !== null
+            ? String(market.parentEventId)
+            : undefined,
+        parentEventTitle: market.parentEventTitle,
+        rawOutcomes: outcomes.length > 0 ? outcomes : undefined,
+        description: market.description,
+        endDate: market.endDate,
+        createdAt: market.createdAt,
+        resolutionSource: market.resolutionSource,
+        resolvedBy: market.resolvedBy,
       };
     });
 
@@ -640,21 +801,29 @@ export default function EventDetailClient({
       (a, b) => b.yesProbability - a.yesProbability
     );
 
+    const defaultSelectedMarket = isTeamMatchupEvent(event.teams)
+      ? (sortedMarketData.find(
+          (m) => (m.sportsMarketType ?? "").toLowerCase() === "moneyline"
+        ) ??
+        sortedMarketData.find((m) => m.question === event.title) ??
+        sortedMarketData[0])
+      : sortedMarketData[0];
     const selected =
       sortedMarketData.find((m) => m.id === selectedMarketId) ||
-      sortedMarketData[0];
+      defaultSelectedMarket;
 
     // Build trading outcomes
+    const selectedOutcomeNames = selected?.rawOutcomes ?? [];
     const outcomes: OutcomeData[] = selected
       ? [
           {
-            name: "Yes",
+            name: selectedOutcomeNames[0] || "Yes",
             tokenId: selected.yesTokenId,
             price: Number.parseFloat(selected.yesPrice) || 0.5,
             probability: (Number.parseFloat(selected.yesPrice) || 0.5) * 100,
           },
           {
-            name: "No",
+            name: selectedOutcomeNames[1] || "No",
             tokenId: selected.noTokenId,
             price: Number.parseFloat(selected.noPrice) || 0.5,
             probability: (Number.parseFloat(selected.noPrice) || 0.5) * 100,
@@ -672,17 +841,19 @@ export default function EventDetailClient({
       const marketName = market.groupItemTitle || market.question || "Unknown";
 
       if (market.yesTokenId) {
+        const yesOutcome = market.rawOutcomes?.[0] || "Yes";
         tokenMap.set(market.yesTokenId, {
           tokenId: market.yesTokenId,
           marketName,
-          outcome: "Yes",
+          outcome: yesOutcome,
         });
       }
       if (market.noTokenId) {
+        const noOutcome = market.rawOutcomes?.[1] || "No";
         tokenMap.set(market.noTokenId, {
           tokenId: market.noTokenId,
           marketName,
-          outcome: "No",
+          outcome: noOutcome,
         });
       }
     }
@@ -749,6 +920,25 @@ export default function EventDetailClient({
     setExpandedOrderBookMarketId((prev) => prev ?? onlyMarketId);
   }, [isSingleMarketEvent, openMarkets]);
 
+  // Sports detail pages should open on Polymarket's primary market, not on
+  // whichever child has the highest YES price (for cricket that is often the
+  // "Completed Match" side). Seed the selection state so the highlighted row,
+  // websocket scope, and trading form all agree with the moneyline default.
+  useEffect(() => {
+    if (selectedMarketId || isSingleMarketEvent || !event) return;
+    if (!isTeamMatchupEvent(event.teams)) return;
+
+    const moneyline =
+      openMarkets.find(
+        (market) =>
+          (market.sportsMarketType ?? "").toLowerCase() === "moneyline"
+      ) ?? openMarkets.find((market) => market.question === event.title);
+
+    if (moneyline?.id) {
+      setSelectedMarketId(moneyline.id);
+    }
+  }, [event, isSingleMarketEvent, openMarkets, selectedMarketId]);
+
   // Preload Yes + No books whenever the selected market's tokens change —
   // this is what keeps the BID/ASK/SPREAD strip populated after a candidate
   // click. Without this preload, switching candidates made the strip flash
@@ -788,6 +978,27 @@ export default function EventDetailClient({
       }, event?.createdAt),
     [event?.createdAt, openMarkets]
   );
+
+  // Sports kickoff time. Each market on a sports event carries its own
+  // `gameStartTime` — the earliest of those (or the event-level `startTime`)
+  // is the actual game start. We surface this in the header instead of the
+  // resolution `endDate`, which on Polymarket sits ~7 days after kickoff and
+  // misled the UI into showing "MAY 6" for an Apr 29 game.
+  const kickoffAt = useMemo(() => {
+    let earliest: string | undefined = event?.startTime;
+    for (const market of allMarkets) {
+      const ts = market.gameStartTime;
+      if (!ts) continue;
+      const normalized =
+        ts.includes("T") || ts.endsWith("Z") ? ts : ts.replace(" ", "T");
+      const t = new Date(normalized).getTime();
+      if (!Number.isFinite(t)) continue;
+      if (!earliest || t < new Date(earliest).getTime()) {
+        earliest = normalized;
+      }
+    }
+    return earliest;
+  }, [allMarkets, event?.startTime]);
 
   const chartRangeHistoryRequest = useMemo(
     () => getChartRangePriceHistoryRequest(chartTimeRange, earliestCreatedAt),
@@ -849,6 +1060,51 @@ export default function EventDetailClient({
         return { ...market, change: rangeChange ?? 0 };
       }),
     [sortedMarketData, chartRangeChangeByTokenId]
+  );
+
+  const displayQuoteTokenIds = useMemo(
+    () =>
+      sortedMarketDataWithChartRangeChange
+        .filter((market) => market.negRisk && market.yesTokenId)
+        .map((market) => market.yesTokenId),
+    [sortedMarketDataWithChartRangeChange]
+  );
+  const displayQuoteBestAskKey = useOrderBookStore((state) =>
+    displayQuoteTokenIds
+      .map((tokenId) => `${tokenId}:${state.orderBooks.get(tokenId)?.bestAsk}`)
+      .join("|")
+  );
+  const displayQuoteBestAskByTokenId = useMemo(() => {
+    const quotes = new Map<string, number | null>();
+    if (!displayQuoteBestAskKey) return quotes;
+    for (const entry of displayQuoteBestAskKey.split("|")) {
+      const [tokenId, rawBestAsk] = entry.split(":");
+      if (!tokenId) continue;
+      const bestAsk = Number.parseFloat(rawBestAsk ?? "");
+      quotes.set(tokenId, Number.isFinite(bestAsk) ? bestAsk : null);
+    }
+    return quotes;
+  }, [displayQuoteBestAskKey]);
+  const matchupMarketDataWithDisplayQuotes = useMemo(
+    () =>
+      sortedMarketDataWithChartRangeChange.map((market) => {
+        if (!market.negRisk || !market.yesTokenId) return market;
+
+        const bestAsk = displayQuoteBestAskByTokenId.get(market.yesTokenId);
+        if (
+          bestAsk === null ||
+          bestAsk === undefined ||
+          !Number.isFinite(bestAsk)
+        ) {
+          return market;
+        }
+
+        return {
+          ...market,
+          displayYesPrice: String(bestAsk),
+        };
+      }),
+    [displayQuoteBestAskByTokenId, sortedMarketDataWithChartRangeChange]
   );
 
   useEffect(() => {
@@ -928,14 +1184,17 @@ export default function EventDetailClient({
     if (appliedUrlOutcomeRef.current) return;
     if (!initialOutcomeFromUrl || tradingOutcomes.length === 0) return;
 
-    const outcomeIndex = tradingOutcomes.findIndex(
-      (o) => o.name.toLowerCase() === initialOutcomeFromUrl
+    const outcomeIndex = findOutcomeIndexFromUrl(
+      initialOutcomeFromUrl,
+      tradingOutcomes,
+      selectedMarket,
+      event ?? null
     );
     if (outcomeIndex !== -1) {
       setSelectedOutcomeIndex(outcomeIndex);
     }
     appliedUrlOutcomeRef.current = true;
-  }, [initialOutcomeFromUrl, tradingOutcomes]);
+  }, [event, initialOutcomeFromUrl, selectedMarket, tradingOutcomes]);
 
   // ARCHITECTURE: REST first, then WebSocket for real-time updates
   // This is how Binance, Coinbase, and Polymarket work
@@ -1072,40 +1331,9 @@ export default function EventDetailClient({
   const closedMarketData = useMemo(
     () =>
       closedMarkets.map((market) => {
-        const outcomes = market.outcomes ? JSON.parse(market.outcomes) : [];
-        const prices = market.outcomePrices
-          ? JSON.parse(market.outcomePrices)
-          : [];
-        const tokens = market.tokens || [];
-        const clobTokenIds = market.clobTokenIds
-          ? JSON.parse(market.clobTokenIds)
-          : [];
-
-        const yesIndex = outcomes.findIndex((o: string) =>
-          o.toLowerCase().includes("yes")
-        );
-        const noIndex = outcomes.findIndex((o: string) =>
-          o.toLowerCase().includes("no")
-        );
-
-        const yesPrice = yesIndex !== -1 ? prices[yesIndex] : prices[0];
-        const noPrice = noIndex !== -1 ? prices[noIndex] : prices[1];
-
-        let yesTokenId = "";
-        let noTokenId = "";
-
-        if (tokens.length > 0) {
-          const yesToken = tokens.find(
-            (t) => t.outcome?.toLowerCase() === "yes"
-          );
-          const noToken = tokens.find((t) => t.outcome?.toLowerCase() === "no");
-          yesTokenId = yesToken?.token_id || "";
-          noTokenId = noToken?.token_id || "";
-        } else if (clobTokenIds.length > 0) {
-          yesTokenId =
-            yesIndex !== -1 ? clobTokenIds[yesIndex] : clobTokenIds[0];
-          noTokenId = noIndex !== -1 ? clobTokenIds[noIndex] : clobTokenIds[1];
-        }
+        const parsedMarket = getGammaYesNoMarketFields(market);
+        const yesPrice = parsedMarket.yesPrice;
+        const noPrice = parsedMarket.noPrice;
 
         const yesProbability = yesPrice
           ? Number.parseFloat((Number.parseFloat(yesPrice) * 100).toFixed(0))
@@ -1114,24 +1342,24 @@ export default function EventDetailClient({
         return {
           id: market.id,
           conditionId: market.conditionId || "",
-          groupItemTitle: market.groupItemTitle || market.question,
+          groupItemTitle: getMarketShortLabel(market, event?.title),
           yesProbability,
           yesPrice: yesPrice || "0",
           noPrice: noPrice || "0",
-          yesTokenId: yesTokenId || "",
-          noTokenId: noTokenId || "",
+          yesTokenId: parsedMarket.yesTokenId,
+          noTokenId: parsedMarket.noTokenId,
           change: 0,
           volume: market.volume || "0",
           closed: true,
         };
       }),
-    [closedMarkets]
+    [closedMarkets, event?.title]
   );
 
   // Loading state - AFTER all hooks
   if (loading) {
     return (
-      <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
+      <div className="min-h-screen bg-background relative overflow-x-clip selection:bg-foreground/15">
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-8 space-y-8">
@@ -1146,7 +1374,7 @@ export default function EventDetailClient({
   // Error state - AFTER all hooks
   if (error || !event) {
     return (
-      <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
+      <div className="min-h-screen bg-background relative overflow-x-clip selection:bg-foreground/15">
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 space-y-8">
@@ -1192,11 +1420,17 @@ export default function EventDetailClient({
   // Chart + ticker behavior:
   // - Single-market event: YES line (primary). NO is the secondary series
   //   that's revealed when the "Both" toggle is on.
-  // - Multi-outcome event: top-5 candidate YES lines (primary), each in
-  //   its own palette color so they're individually identifiable. Toggling
-  //   "Both" adds the corresponding NO lines. The currently-selected
-  //   candidate renders thicker than the rest so it stays findable.
-  //   Capping at 5 keeps the chart legend readable and matches the ticker —
+  // - Sports matchup event (event.teams.length === 2): chart is locked to
+  //   the moneyline market — two lines, one per team, colored with each
+  //   team's brand color. Other markets (Toss Winner, Most Sixes, …) are
+  //   reachable via the outcomes table below; they don't get plotted because
+  //   their negRisk children would crowd the chart with unrelated YES/NO
+  //   pairs.
+  // - Multi-outcome non-sports event: top-5 candidate YES lines (primary),
+  //   each in its own palette color so they're individually identifiable.
+  //   Toggling "Both" adds the corresponding NO lines. The currently-selected
+  //   candidate renders thicker than the rest so it stays findable. Capping
+  //   at 5 keeps the chart legend readable and matches the ticker —
   //   lower-ranked markets stay visible in the outcomes table below.
   const chartMarket = selectedMarket ?? sortedMarketData[0];
   const CANDIDATE_PALETTE = [
@@ -1208,49 +1442,138 @@ export default function EventDetailClient({
   ];
   const topChartMarkets = sortedMarketData.slice(0, 5);
 
-  const marketTitles = isSingleMarketEvent
-    ? ["Yes", "No"]
-    : topChartMarkets.map((m) => m.groupItemTitle);
+  // Sports matchup detection — gated strictly on `event.teams` so non-sports
+  // events fall through to the existing single/multi-candidate behavior.
+  const matchupTeams = isTeamMatchupEvent(event.teams) ? event.teams : null;
+  const isMatchup = !!matchupTeams;
+  const matchupMoneylineMarkets = isMatchup
+    ? sortedMarketData
+        .filter((m) => (m.sportsMarketType ?? "").toLowerCase() === "moneyline")
+        .sort(
+          (a, b) =>
+            matchupMoneylineRank(a.groupItemTitle, matchupTeams) -
+            matchupMoneylineRank(b.groupItemTitle, matchupTeams)
+        )
+    : [];
+  // Find the moneyline market for matchup events. Prefer the explicit
+  // `sportsMarketType === "moneyline"` signal; fall back to whichever market
+  // has the event title verbatim as its question (Polymarket's moneyline
+  // markets share the parent event title without a " - " suffix).
+  const moneylineMarket = isMatchup
+    ? (matchupMoneylineMarkets[0] ??
+      sortedMarketData.find((m) => m.sportsMarketType === "moneyline") ??
+      sortedMarketData.find((m) => m.question === event.title) ??
+      null)
+    : null;
+  const chartLockedToMoneyline = isMatchup && !!moneylineMarket;
+  const chartUsesGroupedMoneyline =
+    chartLockedToMoneyline && matchupMoneylineMarkets.length > 1;
 
-  const yesProb = isSingleMarketEvent
-    ? [chartMarket?.yesPrice || "0", chartMarket?.noPrice || "0"]
-    : topChartMarkets.map((m) => m.yesPrice);
+  const marketTitles = chartLockedToMoneyline
+    ? chartUsesGroupedMoneyline
+      ? matchupMoneylineMarkets.map((m) =>
+          matchupMoneylineLabel(m.groupItemTitle, matchupTeams)
+        )
+      : [
+          event.teams?.[0]?.name.trim() ?? "Yes",
+          event.teams?.[1]?.name.trim() ?? "No",
+        ]
+    : isSingleMarketEvent
+      ? ["Yes", "No"]
+      : topChartMarkets.map((m) => m.groupItemTitle);
 
-  const chartTokens = isSingleMarketEvent
-    ? [
-        {
-          tokenId: chartMarket?.yesTokenId || "",
-          name: "Yes",
-          color: "hsl(142, 76%, 36%)",
-        },
-      ]
-    : topChartMarkets.map((m, idx) => ({
-        tokenId: m.yesTokenId,
-        name: m.groupItemTitle,
-        color: CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length],
-      }));
+  const yesProb = chartLockedToMoneyline
+    ? chartUsesGroupedMoneyline
+      ? matchupMoneylineMarkets.map((m) => m.yesPrice || "0")
+      : [moneylineMarket?.yesPrice || "0", moneylineMarket?.noPrice || "0"]
+    : isSingleMarketEvent
+      ? [chartMarket?.yesPrice || "0", chartMarket?.noPrice || "0"]
+      : topChartMarkets.map((m) => m.yesPrice);
 
-  const chartSecondaryTokens = isSingleMarketEvent
-    ? [
-        {
-          tokenId: chartMarket?.noTokenId || "",
-          name: "No",
-          color: "hsl(0, 84%, 60%)",
-        },
-      ]
-    : topChartMarkets.map((m, idx) => ({
-        tokenId: m.noTokenId,
-        name: `${m.groupItemTitle} · No`,
-        // Dim the NO lines to a muted variant of the YES hue so they
-        // visually group with their YES counterpart without competing.
-        color: CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length]
-          .replace("hsl(", "hsla(")
-          .replace(/%\)$/, "%, 0.45)"),
-      }));
+  // Matchup events: both teams are PRIMARY lines (no secondary, no "Both"
+  // toggle). The chart's secondary slot is normally for the NO mirror of a
+  // YES line — but for moneyline the two outcomes already sum to ~100% so
+  // they're independently meaningful, not a YES/NO mirror.
+  const chartTokens = chartLockedToMoneyline
+    ? chartUsesGroupedMoneyline
+      ? matchupMoneylineMarkets.map((market, idx) => {
+          const rank = matchupMoneylineRank(
+            market.groupItemTitle,
+            matchupTeams
+          );
+          return {
+            tokenId: market.yesTokenId || "",
+            name: matchupMoneylineLabel(market.groupItemTitle, matchupTeams),
+            color:
+              rank === 0
+                ? event.teams?.[0]?.color || CANDIDATE_PALETTE[0]
+                : rank === 1
+                  ? "hsl(35, 92%, 50%)"
+                  : rank === 2
+                    ? event.teams?.[1]?.color || CANDIDATE_PALETTE[1]
+                    : CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length],
+          };
+        })
+      : [
+          {
+            tokenId: moneylineMarket?.yesTokenId || "",
+            name: event.teams?.[0]?.name.trim() ?? "Team A",
+            // Use team brand color when available; fall back to the palette so
+            // we never render a transparent line if upstream data is missing.
+            color: event.teams?.[0]?.color || CANDIDATE_PALETTE[0],
+          },
+          {
+            tokenId: moneylineMarket?.noTokenId || "",
+            name: event.teams?.[1]?.name.trim() ?? "Team B",
+            color: event.teams?.[1]?.color || CANDIDATE_PALETTE[1],
+          },
+        ]
+    : isSingleMarketEvent
+      ? [
+          {
+            tokenId: chartMarket?.yesTokenId || "",
+            name: "Yes",
+            color: "hsl(142, 76%, 36%)",
+          },
+        ]
+      : topChartMarkets.map((m, idx) => ({
+          tokenId: m.yesTokenId,
+          name: m.groupItemTitle,
+          color: CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length],
+        }));
 
-  const chartActiveTokenId = isSingleMarketEvent
-    ? chartMarket?.yesTokenId
-    : chartMarket?.yesTokenId;
+  const chartSecondaryTokens = chartLockedToMoneyline
+    ? []
+    : isSingleMarketEvent
+      ? [
+          {
+            tokenId: chartMarket?.noTokenId || "",
+            name: "No",
+            color: "hsl(0, 84%, 60%)",
+          },
+        ]
+      : topChartMarkets.map((m, idx) => ({
+          tokenId: m.noTokenId,
+          name: `${m.groupItemTitle} · No`,
+          // Dim the NO lines to a muted variant of the YES hue so they
+          // visually group with their YES counterpart without competing.
+          color: CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length]
+            .replace("hsl(", "hsla(")
+            .replace(/%\)$/, "%, 0.45)"),
+        }));
+
+  const chartActiveTokenId = chartLockedToMoneyline
+    ? chartUsesGroupedMoneyline
+      ? (matchupMoneylineMarkets.find((m) => m.id === selectedMarketId)
+          ?.yesTokenId ?? moneylineMarket?.yesTokenId)
+      : moneylineMarket?.yesTokenId
+    : isSingleMarketEvent
+      ? chartMarket?.yesTokenId
+      : chartMarket?.yesTokenId;
+  const sportsRailActiveSlug = isTeamMatchupEvent(event.teams)
+    ? getSportsRailActiveSlug(event)
+    : undefined;
+  const showSportsRail = Boolean(sportsRailActiveSlug);
 
   return (
     <div className="min-h-screen bg-background relative selection:bg-foreground/15">
@@ -1273,119 +1596,201 @@ export default function EventDetailClient({
           </span>
         </div>
 
-        {/* Header Section */}
-        <HeaderSection
-          event={event}
-          isScrolled={isScrolled}
-          formatVolume={formatVolume}
-          totalMarketsCount={totalMarketsCount}
-          openMarkets={openMarkets}
-          closedMarkets={closedMarkets}
-        />
+        {showSportsRail && (
+          <div className="mb-4 lg:hidden">
+            <LeagueRailMobile activeSlug={sportsRailActiveSlug} />
+          </div>
+        )}
 
-        {/* Main Content: Chart + Trading Panel */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-          {/* Left Column: Chart + Outcomes Table */}
-          <div className="lg:col-span-2 space-y-4 sm:space-y-6">
-            {/* Multi-outcome only: horizontal candidate ticker. Clicking a
+        <div
+          className={
+            showSportsRail
+              ? "grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]"
+              : undefined
+          }
+        >
+          {showSportsRail && (
+            <div className="hidden lg:block">
+              <div className="sticky top-4 self-start">
+                <LeagueRail activeSlug={sportsRailActiveSlug} />
+              </div>
+            </div>
+          )}
+
+          <div className={showSportsRail ? "min-w-0" : undefined}>
+            {/* Header Section */}
+            <HeaderSection
+              event={event}
+              kickoffAt={kickoffAt}
+              isScrolled={isScrolled}
+              formatVolume={formatVolume}
+              totalMarketsCount={totalMarketsCount}
+              openMarkets={openMarkets}
+              closedMarkets={closedMarkets}
+            />
+
+            {/* Main Content: Chart + Trading Panel */}
+            <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3 lg:items-start">
+              {/* Left Column: Chart + Outcomes Table */}
+              <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+                {/* Team-vs-team matchup hero — sports events only. Lives inside
+                the chart column (not the page-wide HeaderSection) so the
+                sticky trading panel on the right can rise to its
+                `lg:top-20` slot instead of being shoved down by a
+                full-width hero. */}
+                {isTeamMatchupEvent(event.teams) && (
+                  <TeamMatchupHero
+                    teams={event.teams}
+                    kickoffAt={kickoffAt}
+                    score={event.score}
+                    period={event.period}
+                    elapsed={event.elapsed}
+                  />
+                )}
+
+                {/* Multi-outcome only: horizontal candidate ticker. Clicking a
                 candidate selects that market and re-renders the chart /
-                trading panel / stats strip below. */}
-            {!isSingleMarketEvent && (
-              <CandidateTicker
-                markets={topChartMarkets}
-                selectedMarketId={selectedMarket?.id ?? ""}
-                onSelectMarket={setSelectedMarketId}
-              />
-            )}
+                trading panel / stats strip below.
+                Hidden for sports matchup events because the chart is locked
+                to the moneyline and a candidate-driven chart selector would
+                no longer match what the chart actually shows. The outcomes
+                table below still drives trading-panel selection. */}
+                {!isSingleMarketEvent && !chartLockedToMoneyline && (
+                  <CandidateTicker
+                    markets={topChartMarkets}
+                    selectedMarketId={selectedMarket?.id ?? ""}
+                    onSelectMarket={setSelectedMarketId}
+                  />
+                )}
 
-            {/* Chart */}
-            <Card>
-              {/* Legend is now rendered as a floating overlay inside the
+                {/* Chart */}
+                <Card>
+                  {/* Legend is now rendered as a floating overlay inside the
                   MarketPriceChart itself — dropping the CardHeader saves
                   the ~48px of vertical padding that used to sit above the
                   plot. */}
-              <CardContent className="py-3">
-                <ErrorBoundary name="Market Price Chart">
-                  <MarketPriceChart
-                    tokens={chartTokens}
-                    secondaryTokens={chartSecondaryTokens}
-                    activeTokenId={chartActiveTokenId}
-                    outcomes={marketTitles}
-                    outcomePrices={yesProb}
-                    startDate={earliestCreatedAt}
-                    timeRange={chartTimeRange}
-                    onTimeRangeChange={setChartTimeRange}
-                  />
+                  <CardContent className="py-3">
+                    <ErrorBoundary name="Market Price Chart">
+                      <MarketPriceChart
+                        tokens={chartTokens}
+                        secondaryTokens={chartSecondaryTokens}
+                        activeTokenId={chartActiveTokenId}
+                        outcomes={marketTitles}
+                        outcomePrices={yesProb}
+                        startDate={earliestCreatedAt}
+                        timeRange={chartTimeRange}
+                        onTimeRangeChange={handleChartTimeRangeChange}
+                        // Matchup events plot both team lines as primaries, so
+                        // the "Both" toggle has nothing to reveal.
+                        hideBothToggle={chartLockedToMoneyline}
+                      />
+                    </ErrorBoundary>
+                  </CardContent>
+                </Card>
+
+                <ErrorBoundary name="Outcomes Table">
+                  {isMatchup && event.teams ? (
+                    // Sports matchup events get the Polymarket-style grouped
+                    // outcomes layout. Other event shapes fall through to the
+                    // generic flat-row OutcomesTable below — gating on `isMatchup`
+                    // ensures non-sports markets are never rendered with team
+                    // assumptions baked in.
+                    <MatchupOutcomes
+                      markets={matchupMarketDataWithDisplayQuotes}
+                      teams={
+                        event.teams as [
+                          (typeof event.teams)[0],
+                          (typeof event.teams)[1],
+                        ]
+                      }
+                      eventTitle={event.title}
+                      selectedMarketId={selectedMarketId}
+                      selectedOutcomeIndex={selectedOutcomeIndex}
+                      onSelect={(marketId, outcomeIndex) => {
+                        setSelectedMarketId(marketId);
+                        setSelectedOutcomeIndex(outcomeIndex);
+                      }}
+                    />
+                  ) : (
+                    <OutcomesTable
+                      sortedMarketData={sortedMarketDataWithChartRangeChange}
+                      closedMarkets={closedMarketData}
+                      changeLabel={chartTimeRange}
+                      isOutcomeTableExpanded={isOutcomeTableExpanded}
+                      setIsOutcomeTableExpanded={setIsOutcomeTableExpanded}
+                      isConnected={isConnected}
+                      connectionState={connectionState}
+                      expandedOrderBookMarketId={expandedOrderBookMarketId}
+                      setExpandedOrderBookMarketId={
+                        setExpandedOrderBookMarketId
+                      }
+                      selectedMarketId={selectedMarketId}
+                      setSelectedMarketId={setSelectedMarketId}
+                      selectedOutcomeIndex={selectedOutcomeIndex}
+                      setSelectedOutcomeIndex={setSelectedOutcomeIndex}
+                      preloadOrderBook={preloadOrderBook}
+                      getMarketPositions={getMarketPositions}
+                      handlePriceClick={handlePriceClick}
+                      isSingleMarketEvent={isSingleMarketEvent}
+                      onSellSuccess={handleSellSuccess}
+                    />
+                  )}
                 </ErrorBoundary>
-              </CardContent>
-            </Card>
+              </div>
 
-            <ErrorBoundary name="Outcomes Table">
-              <OutcomesTable
-                sortedMarketData={sortedMarketDataWithChartRangeChange}
-                closedMarkets={closedMarketData}
-                changeLabel={chartTimeRange}
-                isOutcomeTableExpanded={isOutcomeTableExpanded}
-                setIsOutcomeTableExpanded={setIsOutcomeTableExpanded}
-                isConnected={isConnected}
-                connectionState={connectionState}
-                expandedOrderBookMarketId={expandedOrderBookMarketId}
-                setExpandedOrderBookMarketId={setExpandedOrderBookMarketId}
-                selectedMarketId={selectedMarketId}
-                setSelectedMarketId={setSelectedMarketId}
-                selectedOutcomeIndex={selectedOutcomeIndex}
-                setSelectedOutcomeIndex={setSelectedOutcomeIndex}
-                preloadOrderBook={preloadOrderBook}
-                getMarketPositions={getMarketPositions}
-                handlePriceClick={handlePriceClick}
-                isSingleMarketEvent={isSingleMarketEvent}
-                onSellSuccess={handleSellSuccess}
-              />
-            </ErrorBoundary>
-          </div>
+              {/* Trading Panel - Sticky on desktop, spans both rows so it sticks alongside comments too */}
+              <div className="lg:col-span-1 lg:row-span-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
+                {selectedMarket && tradingOutcomes.length > 0 && (
+                  <ErrorBoundary name="Trading Form">
+                    <TradingForm
+                      marketTitle={
+                        selectedMarket.sportsMarketType === "moneyline"
+                          ? event.title
+                          : selectedMarket.groupItemTitle || event.title
+                      }
+                      tokenId={
+                        tradingOutcomes[selectedOutcomeIndex]?.tokenId || ""
+                      }
+                      outcomes={tradingOutcomes}
+                      selectedOutcomeIndex={selectedOutcomeIndex}
+                      onOutcomeChange={setSelectedOutcomeIndex}
+                      negRisk={resolveNegRisk(selectedMarket, event)}
+                      tickSize={tickSize}
+                      minOrderSize={minOrderSize}
+                      bestBid={bestBid}
+                      bestAsk={bestAsk}
+                      orderBook={orderBook}
+                      maxSlippagePercent={2}
+                      onOrderSuccess={handleOrderSuccess}
+                      onOrderError={handleOrderError}
+                      marketImage={event?.image}
+                      yesProbability={
+                        isMatchup ? undefined : selectedMarket.yesProbability
+                      }
+                      isLiveData={isConnected}
+                      initialSide={initialSide}
+                      initialShares={initialShares}
+                      conditionId={selectedMarket.conditionId}
+                      disableSticky
+                    />
+                  </ErrorBoundary>
+                )}
+              </div>
 
-          {/* Trading Panel - Sticky on desktop, spans both rows so it sticks alongside comments too */}
-          <div className="lg:col-span-1 lg:row-span-2 lg:sticky lg:top-20 lg:self-start">
-            {selectedMarket && tradingOutcomes.length > 0 && (
-              <ErrorBoundary name="Trading Form">
-                <TradingForm
-                  marketTitle={selectedMarket.groupItemTitle || event.title}
-                  tokenId={tradingOutcomes[selectedOutcomeIndex]?.tokenId || ""}
-                  outcomes={tradingOutcomes}
-                  selectedOutcomeIndex={selectedOutcomeIndex}
-                  onOutcomeChange={setSelectedOutcomeIndex}
-                  negRisk={resolveNegRisk(selectedMarket, event)}
-                  tickSize={tickSize}
-                  minOrderSize={minOrderSize}
-                  bestBid={bestBid}
-                  bestAsk={bestAsk}
-                  orderBook={orderBook}
-                  maxSlippagePercent={2}
-                  onOrderSuccess={handleOrderSuccess}
-                  onOrderError={handleOrderError}
-                  marketImage={event?.image}
-                  yesProbability={selectedMarket.yesProbability}
-                  isLiveData={isConnected}
-                  initialSide={initialSide}
-                  initialShares={initialShares}
-                  conditionId={selectedMarket.conditionId}
-                />
-              </ErrorBoundary>
-            )}
-          </div>
-
-          {/* Comments Section - appears after trading form on mobile, below outcomes on desktop */}
-          {event?.id && (
-            <div className="lg:col-span-2">
-              <ErrorBoundary name="Comments Section">
-                <CommentsSection
-                  eventId={Number.parseInt(event.id, 10)}
-                  variant="card"
-                  tokenMarketMap={tokenMarketMap}
-                />
-              </ErrorBoundary>
+              {/* Comments Section - appears after trading form on mobile, below outcomes on desktop */}
+              {event?.id && (
+                <div className="lg:col-span-2">
+                  <ErrorBoundary name="Comments Section">
+                    <CommentsSection
+                      eventId={Number.parseInt(event.id, 10)}
+                      variant="card"
+                      tokenMarketMap={tokenMarketMap}
+                    />
+                  </ErrorBoundary>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </main>
     </div>

@@ -50,7 +50,7 @@ export function EditorialHero({
         className
       )}
     >
-      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground mb-6 flex-wrap">
+      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.08em] text-muted-foreground/90 mb-6 flex-wrap">
         {firstCrumb?.href ? (
           <Link
             href={firstCrumb.href}
@@ -107,7 +107,7 @@ export function EditorialHero({
         </div>
 
         {rightSlot && (
-          <div className="flex items-center gap-4 flex-wrap md:flex-nowrap md:shrink-0 md:pb-1 font-mono text-[10px] uppercase tracking-[0.14em]">
+          <div className="flex items-center gap-4 flex-wrap md:flex-nowrap md:shrink-0 md:pb-1 font-mono text-[12px] uppercase tracking-[0.08em]">
             {rightSlot}
           </div>
         )}

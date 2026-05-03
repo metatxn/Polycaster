@@ -1,11 +1,30 @@
 /**
  * Conditional Token Framework (CTF) constants and ABIs.
  *
- * Used by both the web app (via viem/wagmi) and the Chrome extension (via ethers).
- * ABIs are in human-readable format (ethers-compatible) and JSON ABI format (viem-compatible).
+ * Used by both the web app (via viem/wagmi) and the Chrome extension (via viem).
+ * ABIs are in human-readable and JSON formats for viem consumers.
  *
  * Reference: https://docs.polymarket.com/developers/CTF/overview
  */
+
+import {
+  type Address,
+  encodeFunctionData,
+  type Hex,
+  type PublicClient,
+} from "viem";
+import {
+  type ApprovalTransaction,
+  buildCtfCollateralApprovalTransaction,
+  readErc20Allowance,
+} from "./approvals";
+import {
+  CTF_ADDRESS,
+  CTF_COLLATERAL_ADAPTER_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
+  PUSD_ADDRESS,
+} from "./contracts";
+import { parsePusdUnits } from "./trading";
 
 /** Parent collection ID — always bytes32(0) for Polymarket */
 export const PARENT_COLLECTION_ID =
@@ -17,7 +36,7 @@ export const BINARY_PARTITION = [1, 2] as const;
 /** BigInt variant for viem/wagmi consumers */
 export const BINARY_PARTITION_BIGINT = [BigInt(1), BigInt(2)] as const;
 
-// ── Human-readable ABIs (ethers-compatible) ──
+// ── Human-readable ABIs ──
 
 export const ERC20_BALANCE_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
@@ -122,3 +141,298 @@ export const ERC20_JSON_ABI = [
     type: "function",
   },
 ] as const;
+
+export type CtfOperationName =
+  | "splitPosition"
+  | "mergePositions"
+  | "redeemPositions";
+export type CtfAmountOperationName = Extract<
+  CtfOperationName,
+  "splitPosition" | "mergePositions"
+>;
+
+type CtfPusdAmountInput = Parameters<typeof parsePusdUnits>[0];
+
+export type CtfOperationTransactionInput =
+  | {
+      operation: "splitPosition" | "mergePositions";
+      conditionId: Hex;
+      amountRaw: bigint;
+      negRisk?: boolean;
+    }
+  | {
+      operation: "redeemPositions";
+      conditionId: Hex;
+      negRisk?: boolean;
+    };
+
+export interface CtfOperationTransaction {
+  to: Address;
+  data: Hex;
+  value: "0";
+}
+
+export interface CtfOutcomeBalances {
+  yesBalance: bigint;
+  noBalance: bigint;
+  minBalance: bigint;
+}
+
+export type CtfOperationTransactionPlanInput =
+  | {
+      operation: CtfAmountOperationName;
+      conditionId: Hex | string;
+      amount?: CtfPusdAmountInput;
+      amountRaw?: bigint;
+      negRisk?: boolean;
+    }
+  | {
+      operation: "redeemPositions";
+      conditionId: Hex | string;
+      negRisk?: boolean;
+    };
+
+export interface CtfCollateralApprovalRequirement {
+  spender: Address;
+  amountRaw: bigint;
+}
+
+export interface CtfOperationTransactionPlan {
+  operation: CtfOperationName;
+  conditionId: Hex;
+  amountRaw?: bigint;
+  transaction: CtfOperationTransaction;
+  collateralApproval: CtfCollateralApprovalRequirement | null;
+}
+
+export type CtfOperationTransactionsPlanInput =
+  CtfOperationTransactionPlanInput & {
+    client?: PublicClient;
+    collateralOwner?: Address;
+    fallbackToApproval?: boolean;
+  };
+
+export interface CtfOperationTransactionsPlan
+  extends CtfOperationTransactionPlan {
+  approvalTransaction: ApprovalTransaction | null;
+  transactions: Array<CtfOperationTransaction | ApprovalTransaction>;
+}
+
+export function getCtfOperationTarget(negRisk?: boolean): Address {
+  return (
+    negRisk
+      ? NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS
+      : CTF_COLLATERAL_ADAPTER_ADDRESS
+  ) as Address;
+}
+
+export function encodeCtfSplitPositionCalldata(
+  conditionId: Hex,
+  amountRaw: bigint
+): Hex {
+  return encodeFunctionData({
+    abi: CTF_JSON_ABI,
+    functionName: "splitPosition",
+    args: [
+      PUSD_ADDRESS,
+      PARENT_COLLECTION_ID,
+      conditionId,
+      [...BINARY_PARTITION_BIGINT],
+      amountRaw,
+    ],
+  });
+}
+
+export function buildCtfOperationTransaction(
+  input: CtfOperationTransactionInput
+): CtfOperationTransaction {
+  const to = getCtfOperationTarget(input.negRisk);
+  switch (input.operation) {
+    case "splitPosition":
+      return {
+        to,
+        data: encodeCtfSplitPositionCalldata(
+          input.conditionId,
+          input.amountRaw
+        ),
+        value: "0",
+      };
+    case "mergePositions":
+      return {
+        to,
+        data: encodeCtfMergePositionsCalldata(
+          input.conditionId,
+          input.amountRaw
+        ),
+        value: "0",
+      };
+    case "redeemPositions":
+      return {
+        to,
+        data: encodeCtfRedeemPositionsCalldata(input.conditionId),
+        value: "0",
+      };
+  }
+}
+
+function normalizeCtfConditionId(conditionId: Hex | string): Hex {
+  return conditionId as Hex;
+}
+
+function resolveCtfAmountRaw(input: {
+  amount?: CtfPusdAmountInput;
+  amountRaw?: bigint;
+}): bigint {
+  if (input.amountRaw !== undefined) return input.amountRaw;
+  if (input.amount !== undefined) return parsePusdUnits(input.amount);
+  throw new Error("CTF operation amount is required");
+}
+
+export function planCtfOperationTransaction(
+  input: CtfOperationTransactionPlanInput
+): CtfOperationTransactionPlan {
+  const conditionId = normalizeCtfConditionId(input.conditionId);
+
+  if (input.operation === "redeemPositions") {
+    return {
+      operation: input.operation,
+      conditionId,
+      transaction: buildCtfOperationTransaction({
+        operation: input.operation,
+        conditionId,
+        negRisk: input.negRisk,
+      }),
+      collateralApproval: null,
+    };
+  }
+
+  const amountRaw = resolveCtfAmountRaw(input);
+  const transaction = buildCtfOperationTransaction({
+    operation: input.operation,
+    conditionId,
+    amountRaw,
+    negRisk: input.negRisk,
+  });
+
+  return {
+    operation: input.operation,
+    conditionId,
+    amountRaw,
+    transaction,
+    collateralApproval:
+      input.operation === "splitPosition"
+        ? { spender: transaction.to, amountRaw }
+        : null,
+  };
+}
+
+export async function planCtfOperationTransactions(
+  input: CtfOperationTransactionsPlanInput
+): Promise<CtfOperationTransactionsPlan> {
+  const plan = planCtfOperationTransaction(input);
+  let approvalTransaction: ApprovalTransaction | null = null;
+
+  if (plan.collateralApproval && (input.client || input.collateralOwner)) {
+    if (!input.client || !input.collateralOwner) {
+      throw new Error(
+        "CTF collateral approval planning requires both client and owner"
+      );
+    }
+    approvalTransaction = await buildCtfCollateralApprovalIfNeeded(
+      input.client,
+      input.collateralOwner,
+      plan.collateralApproval.spender,
+      plan.collateralApproval.amountRaw,
+      { fallbackToApproval: input.fallbackToApproval }
+    );
+  }
+
+  return {
+    ...plan,
+    approvalTransaction,
+    transactions: approvalTransaction
+      ? [approvalTransaction, plan.transaction]
+      : [plan.transaction],
+  };
+}
+
+export async function readCtfOutcomeBalances(
+  client: PublicClient,
+  owner: Address,
+  yesTokenId: string | bigint,
+  noTokenId: string | bigint
+): Promise<CtfOutcomeBalances> {
+  const balances = (await client.readContract({
+    address: CTF_ADDRESS as Address,
+    abi: CTF_JSON_ABI,
+    functionName: "balanceOfBatch",
+    args: [
+      [owner, owner],
+      [BigInt(yesTokenId), BigInt(noTokenId)],
+    ],
+  })) as [bigint, bigint];
+
+  const [yesBalance, noBalance] = balances;
+  return {
+    yesBalance,
+    noBalance,
+    minBalance: yesBalance < noBalance ? yesBalance : noBalance,
+  };
+}
+
+export async function readCtfCollateralAllowance(
+  client: PublicClient,
+  owner: Address,
+  spender: Address
+): Promise<bigint> {
+  return readErc20Allowance(client, owner, spender);
+}
+
+export async function buildCtfCollateralApprovalIfNeeded(
+  client: PublicClient,
+  owner: Address,
+  spender: Address,
+  amountRaw: bigint,
+  options: { fallbackToApproval?: boolean } = {}
+): Promise<ApprovalTransaction | null> {
+  let allowance: bigint;
+  try {
+    allowance = await readCtfCollateralAllowance(client, owner, spender);
+  } catch (err) {
+    if (!options.fallbackToApproval) throw err;
+    allowance = BigInt(0);
+  }
+
+  if (allowance >= amountRaw) return null;
+  return buildCtfCollateralApprovalTransaction(spender, amountRaw);
+}
+
+export function encodeCtfMergePositionsCalldata(
+  conditionId: Hex,
+  amountRaw: bigint
+): Hex {
+  return encodeFunctionData({
+    abi: CTF_JSON_ABI,
+    functionName: "mergePositions",
+    args: [
+      PUSD_ADDRESS,
+      PARENT_COLLECTION_ID,
+      conditionId,
+      [...BINARY_PARTITION_BIGINT],
+      amountRaw,
+    ],
+  });
+}
+
+export function encodeCtfRedeemPositionsCalldata(conditionId: Hex): Hex {
+  return encodeFunctionData({
+    abi: CTF_JSON_ABI,
+    functionName: "redeemPositions",
+    args: [
+      PUSD_ADDRESS,
+      PARENT_COLLECTION_ID,
+      conditionId,
+      [...BINARY_PARTITION_BIGINT],
+    ],
+  });
+}

@@ -1,6 +1,8 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import { fetchClobOrderBook } from "@knoww/shared-types/clob";
+import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -85,19 +87,23 @@ interface MarketDetailTradingOrderBookSnapshot {
 }
 
 /** Gamma API stores some fields as JSON strings; malformed data must not crash the page. */
-function safeParseStringArray(
+function parseGammaStringArrayWithLog(
   raw: string | undefined,
   field: string,
   marketLabel: string
 ): string[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((x) => String(x)) : [];
-  } catch {
-    log.warn("field.parse_failed", { field, marketLabel, raw });
-    return [];
-  }
+  return parseGammaStringArray(raw, {
+    field,
+    label: marketLabel,
+    onError: ({ field: failedField, label, raw: failedRaw, error }) => {
+      log.warn("field.parse_failed", {
+        field: failedField,
+        marketLabel: label,
+        raw: failedRaw,
+        error,
+      });
+    },
+  });
 }
 
 function numberArraysEqual(a: number[], b: number[]): boolean {
@@ -120,7 +126,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
     if (!market) return [];
     const tokens = market.tokens || [];
 
-    const clobTokenIds = safeParseStringArray(
+    const clobTokenIds = parseGammaStringArrayWithLog(
       market.clobTokenIds,
       "clobTokenIds",
       market.slug || market.id || "?"
@@ -158,7 +164,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   const outcomes = useMemo<string[]>(() => {
     if (!market?.outcomes) return [];
-    return safeParseStringArray(
+    return parseGammaStringArrayWithLog(
       market.outcomes,
       "outcomes",
       market.slug || market.id || "?"
@@ -167,7 +173,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   const prices = useMemo<string[]>(() => {
     if (!market?.outcomePrices) return [];
-    return safeParseStringArray(
+    return parseGammaStringArrayWithLog(
       market.outcomePrices,
       "outcomePrices",
       market.slug || market.id || "?"
@@ -211,7 +217,7 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
 
   const tradingOutcomes = useMemo<OutcomeData[]>(() => {
     const tokens = market?.tokens || [];
-    const clobTokenIds = safeParseStringArray(
+    const clobTokenIds = parseGammaStringArrayWithLog(
       market?.clobTokenIds,
       "clobTokenIds",
       market?.slug || market?.id || "?"
@@ -277,25 +283,20 @@ export default function MarketDetailClient({ slug }: { slug: string }) {
         async (): Promise<MarketDetailTradingOrderBookSnapshot | null> => {
           if (!currentTokenId) return null;
 
-          const response = await fetch(
-            `${CLOB_BASE_URL}/book?token_id=${currentTokenId}`,
-            { headers: { Accept: "application/json" } }
-          );
-          if (!response.ok) return null;
+          try {
+            const data = await fetchClobOrderBook(currentTokenId, {
+              host: CLOB_BASE_URL,
+            });
 
-          const data = (await response.json()) as {
-            bids?: Array<{ price: string; size: string }>;
-            asks?: Array<{ price: string; size: string }>;
-            min_order_size?: string;
-            tick_size?: string;
-          };
-
-          return {
-            bids: data.bids || [],
-            asks: data.asks || [],
-            min_order_size: data.min_order_size || "1",
-            tick_size: data.tick_size || "0.01",
-          };
+            return {
+              bids: data.bids,
+              asks: data.asks,
+              min_order_size: data.min_order_size || "1",
+              tick_size: data.tick_size || "0.01",
+            };
+          } catch {
+            return null;
+          }
         },
       enabled: !!currentTokenId,
       staleTime: 30000,

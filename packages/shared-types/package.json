@@ -6,10 +6,20 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./abi": "./src/abi.ts",
+    "./approvals": "./src/approvals.ts",
+    "./balances": "./src/balances.ts",
+    "./bridge": "./src/bridge.ts",
+    "./chains": "./src/chains.ts",
+    "./clob": "./src/clob.ts",
     "./contracts": "./src/contracts.ts",
     "./crypto": "./src/crypto.ts",
+    "./orders": "./src/orders.ts",
     "./polymarket": "./src/polymarket.ts",
+    "./relayer": "./src/relayer.ts",
     "./slippage": "./src/slippage.ts",
+    "./trading": "./src/trading.ts",
+    "./trading-errors": "./src/trading-errors.ts",
     "./ctf": "./src/ctf.ts"
   },
   "scripts": {
@@ -18,9 +28,10 @@
     "format": "biome format --write"
   },
   "devDependencies": {
-    "typescript": "6.0.2"
+    "typescript": "catalog:"
   },
   "dependencies": {
-    "decimal.js": "^10.6.0"
+    "decimal.js": "catalog:",
+    "viem": "catalog:"
   }
 }

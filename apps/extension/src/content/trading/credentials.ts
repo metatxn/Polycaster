@@ -9,9 +9,7 @@
 
 import {
   type ApiKeyCreds,
-  CLOB_AUTH_DOMAIN,
-  CLOB_AUTH_MESSAGE,
-  CLOB_AUTH_TYPES,
+  buildClobAuthRpcTypedData,
 } from "@knoww/shared-types/polymarket";
 
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
@@ -21,6 +19,7 @@ import { ExtensionSession } from "./extension-session";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
+const MESSAGE_TIMEOUT_MS = 20_000;
 
 function sendTradingMsg<T>(
   message: Record<string, unknown>,
@@ -30,9 +29,20 @@ function sendTradingMsg<T>(
 
   function trySend(): Promise<T> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`${errorLabel} timed out`));
+      }, MESSAGE_TIMEOUT_MS);
+
       chrome.runtime.sendMessage(
         message,
         (response: { ok: boolean; data?: T; error?: string }) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+
           if (chrome.runtime.lastError) {
             const err = chrome.runtime.lastError.message || "Unknown error";
             if (attempt < MAX_RETRIES && err.includes("message port closed")) {
@@ -122,28 +132,10 @@ export const CredentialManager = {
 
     await ExtensionSession.ensureAuthorized(address);
 
-    const timestamp = Math.floor(Date.now() / 1000);
-    const nonce = 0;
-
-    // Build EIP-712 typed data payload
-    const typedData = JSON.stringify({
-      types: {
-        EIP712Domain: [
-          { name: "name", type: "string" },
-          { name: "version", type: "string" },
-          { name: "chainId", type: "uint256" },
-        ],
-        ClobAuth: CLOB_AUTH_TYPES.ClobAuth,
-      },
-      primaryType: "ClobAuth",
-      domain: CLOB_AUTH_DOMAIN,
-      message: {
-        address,
-        timestamp: `${timestamp}`,
-        nonce: nonce,
-        message: CLOB_AUTH_MESSAGE,
-      },
+    const auth = buildClobAuthRpcTypedData({
+      address,
     });
+    const typedData = JSON.stringify(auth.typedData);
 
     const signature = await WalletBridge.signTypedData(address, typedData);
 
@@ -153,8 +145,8 @@ export const CredentialManager = {
         type: "trading:derive-credentials",
         address,
         signature,
-        timestamp: `${timestamp}`,
-        nonce,
+        timestamp: auth.timestamp,
+        nonce: auth.nonce,
       },
       "Failed to derive credentials"
     );

@@ -48,10 +48,13 @@ export interface ContextGateResult {
 
 // ── Order types (from shared package) ──
 
-import type { ClobOrderType } from "@knoww/shared-types/polymarket";
+import type { TradingWalletBalance } from "@knoww/shared-types/balances";
+import type {
+  ClobOrderType,
+  TradingWalletMode,
+} from "@knoww/shared-types/polymarket";
 
-export type { ClobOrderType };
-export type TradingWalletMode = "safe" | "eoa";
+export type { ClobOrderType, TradingWalletMode };
 
 // ── Trading messages (content → background) ──
 
@@ -67,6 +70,8 @@ export interface TradingGetBalanceMessage {
   type: "trading:get-balance";
   proxyAddress: string;
 }
+
+export type TradingBalanceData = TradingWalletBalance;
 
 export interface TradingPlaceOrderMessage {
   type: "trading:place-order";

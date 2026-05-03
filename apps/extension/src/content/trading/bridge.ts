@@ -94,7 +94,7 @@ function init(): void {
     }
   });
 
-  // Listen for signing requests from background (BridgeSigner delegation)
+  // Listen for signing requests from background (bridge wallet delegation)
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== "trading:signing-request") return false;
 

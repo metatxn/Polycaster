@@ -4,6 +4,33 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@biomejs/biome':
+      specifier: 2.4.13
+      version: 2.4.13
+    '@polymarket/clob-client-v2':
+      specifier: 1.0.2
+      version: 1.0.2
+    '@types/react':
+      specifier: 19.2.14
+      version: 19.2.14
+    '@types/react-dom':
+      specifier: 19.2.3
+      version: 19.2.3
+    decimal.js:
+      specifier: ^10.6.0
+      version: 10.6.0
+    react:
+      specifier: 19.2.5
+      version: 19.2.5
+    react-dom:
+      specifier: 19.2.5
+      version: 19.2.5
+    viem:
+      specifier: 2.48.4
+      version: 2.48.4
+
 overrides:
   typescript: 6.0.2
   axios: 1.15.0
@@ -27,7 +54,7 @@ importers:
   .:
     devDependencies:
       '@biomejs/biome':
-        specifier: 2.4.13
+        specifier: 'catalog:'
         version: 2.4.13
       husky:
         specifier: 9.1.7
@@ -51,23 +78,23 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared-types
       '@polymarket/clob-client-v2':
-        specifier: 1.0.2
-        version: 1.0.2(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)
+        specifier: 'catalog:'
+        version: 1.0.2(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@4.3.6)
       decimal.js:
-        specifier: ^10.6.0
+        specifier: 'catalog:'
         version: 10.6.0
-      ethers:
-        specifier: 5.8.0
-        version: 5.8.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       minisearch:
         specifier: 7.2.0
         version: 7.2.0
       react:
-        specifier: 19.2.5
+        specifier: 'catalog:'
         version: 19.2.5
       react-dom:
-        specifier: 19.2.5
+        specifier: 'catalog:'
         version: 19.2.5(react@19.2.5)
+      viem:
+        specifier: 'catalog:'
+        version: 2.48.4(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@4.3.6)
       wink-eng-lite-web-model:
         specifier: 1.8.1
         version: 1.8.1
@@ -85,10 +112,10 @@ importers:
         specifier: 0.1.40
         version: 0.1.40
       '@types/react':
-        specifier: 19.2.14
+        specifier: 'catalog:'
         version: 19.2.14
       '@types/react-dom':
-        specifier: 19.2.3
+        specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.14)
       buffer:
         specifier: 6.0.3
@@ -139,7 +166,7 @@ importers:
         specifier: 2.9.0
         version: 2.9.0(ai@6.0.169(zod@4.3.6))(zod@4.3.6)
       '@polymarket/clob-client-v2':
-        specifier: 1.0.2
+        specifier: 'catalog:'
         version: 1.0.2(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@4.3.6)
       '@radix-ui/react-avatar':
         specifier: 1.1.11
@@ -214,7 +241,7 @@ importers:
         specifier: 4.1.0
         version: 4.1.0
       decimal.js:
-        specifier: ^10.6.0
+        specifier: 'catalog:'
         version: 10.6.0
       framer-motion:
         specifier: 12.38.0
@@ -241,13 +268,13 @@ importers:
         specifier: 5.30.7
         version: 5.30.7
       react:
-        specifier: 19.2.5
+        specifier: 'catalog:'
         version: 19.2.5
       react-day-picker:
         specifier: 9.14.0
         version: 9.14.0(react@19.2.5)
       react-dom:
-        specifier: 19.2.5
+        specifier: 'catalog:'
         version: 19.2.5(react@19.2.5)
       react-qr-code:
         specifier: 2.0.18
@@ -259,7 +286,7 @@ importers:
         specifier: 3.5.0
         version: 3.5.0
       viem:
-        specifier: 2.48.4
+        specifier: 'catalog:'
         version: 2.48.4(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@4.3.6)
       virtua:
         specifier: 0.49.1
@@ -275,7 +302,7 @@ importers:
         version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.5)(use-sync-external-store@1.4.0(react@19.2.5))
     devDependencies:
       '@biomejs/biome':
-        specifier: 2.4.13
+        specifier: 'catalog:'
         version: 2.4.13
       '@tailwindcss/postcss':
         specifier: 4.2.4
@@ -287,10 +314,10 @@ importers:
         specifier: 20.19.39
         version: 20.19.39
       '@types/react':
-        specifier: 19.2.14
+        specifier: 'catalog:'
         version: 19.2.14
       '@types/react-dom':
-        specifier: 19.2.3
+        specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.14)
       babel-plugin-react-compiler:
         specifier: 1.0.0
@@ -323,8 +350,11 @@ importers:
   packages/shared-types:
     dependencies:
       decimal.js:
-        specifier: ^10.6.0
+        specifier: 'catalog:'
         version: 10.6.0
+      viem:
+        specifier: 'catalog:'
+        version: 2.48.4(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@4.3.6)
     devDependencies:
       typescript:
         specifier: 6.0.2
@@ -1213,9 +1243,6 @@ packages:
     resolution: {integrity: sha512-zQ0IqbdX8FZ9aw11vP+dZkKDkS+kgIvQPHnSAXzP9pLu+Rfu3D3XEeLbicvoXJTYnhZiPmsZUxgdzXwNKxRPbA==}
     engines: {node: '>=14'}
 
-  '@ethersproject/abi@5.8.0':
-    resolution: {integrity: sha512-b9YS/43ObplgyV6SlyQsG53/vkSal0MNA1fskSC4mbnCMi8R+NkcH8K9FPYNESf6jUefBUniE4SOKms0E/KK1Q==}
-
   '@ethersproject/abstract-provider@5.8.0':
     resolution: {integrity: sha512-wC9SFcmh4UK0oKuLJQItoQdzS/qZ51EJegK6EmAWlh+OptpQ/npECOR3QqECd8iGHC0RJb4WKbVdSfif4ammrg==}
 
@@ -1239,9 +1266,6 @@ packages:
 
   '@ethersproject/constants@5.8.0':
     resolution: {integrity: sha512-wigX4lrf5Vu+axVTIvNsuL6YrV4O5AXl5ubcURKMEME5TnWBouUh0CDTWxZ2GpnRn1kcCgE7l8O5+VbV9QTTcg==}
-
-  '@ethersproject/contracts@5.8.0':
-    resolution: {integrity: sha512-0eFjGz9GtuAi6MZwhb4uvUM216F38xiuR0yYCjKJpNfSEy4HUM8hvqqBj9Jmm0IUz8l0xKEhWwLIhPgxNY0yvQ==}
 
   '@ethersproject/hash@5.8.0':
     resolution: {integrity: sha512-ac/lBcTbEWW/VGJij0CNSw/wPcw9bSRgCB0AIBz8CvED/jfvDoV9hsIIiWfvWmFEi8RcXtlNwp2jv6ozWOsooA==}
@@ -1282,17 +1306,11 @@ packages:
   '@ethersproject/signing-key@5.8.0':
     resolution: {integrity: sha512-LrPW2ZxoigFi6U6aVkFN/fa9Yx/+4AtIUe4/HACTvKJdhm0eeb107EVCIQcrLZkxaSIgc/eCrX8Q1GtbH+9n3w==}
 
-  '@ethersproject/solidity@5.8.0':
-    resolution: {integrity: sha512-4CxFeCgmIWamOHwYN9d+QWGxye9qQLilpgTU0XhYs1OahkclF+ewO+3V1U0mvpiuQxm5EHHmv8f7ClVII8EHsA==}
-
   '@ethersproject/strings@5.8.0':
     resolution: {integrity: sha512-qWEAk0MAvl0LszjdfnZ2uC8xbR2wdv4cDabyHiBh3Cldq/T8dPH3V4BbBsAYJUeonwD+8afVXld274Ls+Y1xXg==}
 
   '@ethersproject/transactions@5.8.0':
     resolution: {integrity: sha512-UglxSDjByHG0TuU17bDfCemZ3AnKO2vYrL5/2n2oXvKzvb7Cz+W9gOWXKARjp2URVwcWlQlPOEQyAviKwT4AHg==}
-
-  '@ethersproject/units@5.8.0':
-    resolution: {integrity: sha512-lxq0CAnc5kMGIiWW4Mr041VT8IhNM+Pn5T3haO74XZWFulk7wH1Gv64HqE96hT4a7iiNMdOCFEBgaxWuk8ETKQ==}
 
   '@ethersproject/wallet@5.8.0':
     resolution: {integrity: sha512-G+jnzmgg6UxurVKRKvw27h0kvG75YKXZKdlLYmAHeF32TGUzHkOFd7Zn6QHOTYRFWnfjtSSFjBowKo7vfrXzPA==}
@@ -4325,9 +4343,6 @@ packages:
 
   ethereum-cryptography@2.2.1:
     resolution: {integrity: sha512-r/W8lkHSiTLxUxW8Rf3u4HGB0xQweG2RyETjywylKZSzLWoWAijRz8WCuOtJ6wah+avllXBqZuk29HCCvhEIRg==}
-
-  ethers@5.8.0:
-    resolution: {integrity: sha512-DUq+7fHrCg1aPDFCHx6UIPb3nmt2XMpM7Y/g2gLhsl3lIBqeAfOJIl1qEvRf2uq3BiKxmh6Fh5pfp2ieyek7Kg==}
 
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
@@ -7911,18 +7926,6 @@ snapshots:
       ethereum-cryptography: 2.2.1
       micro-ftch: 0.3.1
 
-  '@ethersproject/abi@5.8.0':
-    dependencies:
-      '@ethersproject/address': 5.8.0
-      '@ethersproject/bignumber': 5.8.0
-      '@ethersproject/bytes': 5.8.0
-      '@ethersproject/constants': 5.8.0
-      '@ethersproject/hash': 5.8.0
-      '@ethersproject/keccak256': 5.8.0
-      '@ethersproject/logger': 5.8.0
-      '@ethersproject/properties': 5.8.0
-      '@ethersproject/strings': 5.8.0
-
   '@ethersproject/abstract-provider@5.8.0':
     dependencies:
       '@ethersproject/bignumber': 5.8.0
@@ -7971,19 +7974,6 @@ snapshots:
   '@ethersproject/constants@5.8.0':
     dependencies:
       '@ethersproject/bignumber': 5.8.0
-
-  '@ethersproject/contracts@5.8.0':
-    dependencies:
-      '@ethersproject/abi': 5.8.0
-      '@ethersproject/abstract-provider': 5.8.0
-      '@ethersproject/abstract-signer': 5.8.0
-      '@ethersproject/address': 5.8.0
-      '@ethersproject/bignumber': 5.8.0
-      '@ethersproject/bytes': 5.8.0
-      '@ethersproject/constants': 5.8.0
-      '@ethersproject/logger': 5.8.0
-      '@ethersproject/properties': 5.8.0
-      '@ethersproject/transactions': 5.8.0
 
   '@ethersproject/hash@5.8.0':
     dependencies:
@@ -8099,15 +8089,6 @@ snapshots:
       elliptic: 6.6.1
       hash.js: 1.1.7
 
-  '@ethersproject/solidity@5.8.0':
-    dependencies:
-      '@ethersproject/bignumber': 5.8.0
-      '@ethersproject/bytes': 5.8.0
-      '@ethersproject/keccak256': 5.8.0
-      '@ethersproject/logger': 5.8.0
-      '@ethersproject/sha2': 5.8.0
-      '@ethersproject/strings': 5.8.0
-
   '@ethersproject/strings@5.8.0':
     dependencies:
       '@ethersproject/bytes': 5.8.0
@@ -8125,12 +8106,6 @@ snapshots:
       '@ethersproject/properties': 5.8.0
       '@ethersproject/rlp': 5.8.0
       '@ethersproject/signing-key': 5.8.0
-
-  '@ethersproject/units@5.8.0':
-    dependencies:
-      '@ethersproject/bignumber': 5.8.0
-      '@ethersproject/constants': 5.8.0
-      '@ethersproject/logger': 5.8.0
 
   '@ethersproject/wallet@5.8.0':
     dependencies:
@@ -8736,21 +8711,6 @@ snapshots:
   '@phosphor-icons/webcomponents@2.1.5':
     dependencies:
       lit: 3.3.0
-
-  '@polymarket/clob-client-v2@1.0.2(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)':
-    dependencies:
-      '@ethersproject/providers': 5.8.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      '@ethersproject/wallet': 5.8.0
-      axios: 1.15.0
-      browser-or-node: 3.0.0
-      tslib: 2.8.1
-      viem: 2.48.4(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)
-    transitivePeerDependencies:
-      - bufferutil
-      - debug
-      - typescript
-      - utf-8-validate
-      - zod
 
   '@polymarket/clob-client-v2@1.0.2(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@4.3.6)':
     dependencies:
@@ -10051,7 +10011,7 @@ snapshots:
 
   '@scure/bip32@1.7.0':
     dependencies:
-      '@noble/curves': 1.9.1
+      '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
 
@@ -12033,10 +11993,6 @@ snapshots:
       zod: 3.25.76
     optional: true
 
-  abitype@1.2.3(typescript@6.0.2):
-    optionalDependencies:
-      typescript: 6.0.2
-
   abitype@1.2.3(typescript@6.0.2)(zod@3.22.4):
     optionalDependencies:
       typescript: 6.0.2
@@ -12789,42 +12745,6 @@ snapshots:
       '@noble/hashes': 1.4.0
       '@scure/bip32': 1.4.0
       '@scure/bip39': 1.3.0
-
-  ethers@5.8.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
-    dependencies:
-      '@ethersproject/abi': 5.8.0
-      '@ethersproject/abstract-provider': 5.8.0
-      '@ethersproject/abstract-signer': 5.8.0
-      '@ethersproject/address': 5.8.0
-      '@ethersproject/base64': 5.8.0
-      '@ethersproject/basex': 5.8.0
-      '@ethersproject/bignumber': 5.8.0
-      '@ethersproject/bytes': 5.8.0
-      '@ethersproject/constants': 5.8.0
-      '@ethersproject/contracts': 5.8.0
-      '@ethersproject/hash': 5.8.0
-      '@ethersproject/hdnode': 5.8.0
-      '@ethersproject/json-wallets': 5.8.0
-      '@ethersproject/keccak256': 5.8.0
-      '@ethersproject/logger': 5.8.0
-      '@ethersproject/networks': 5.8.0
-      '@ethersproject/pbkdf2': 5.8.0
-      '@ethersproject/properties': 5.8.0
-      '@ethersproject/providers': 5.8.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      '@ethersproject/random': 5.8.0
-      '@ethersproject/rlp': 5.8.0
-      '@ethersproject/sha2': 5.8.0
-      '@ethersproject/signing-key': 5.8.0
-      '@ethersproject/solidity': 5.8.0
-      '@ethersproject/strings': 5.8.0
-      '@ethersproject/transactions': 5.8.0
-      '@ethersproject/units': 5.8.0
-      '@ethersproject/wallet': 5.8.0
-      '@ethersproject/web': 5.8.0
-      '@ethersproject/wordlists': 5.8.0
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
 
   event-target-shim@5.0.1: {}
 
@@ -13980,21 +13900,6 @@ snapshots:
 
   openapi-typescript-helpers@0.0.15: {}
 
-  ox@0.14.20(typescript@6.0.2):
-    dependencies:
-      '@adraffy/ens-normalize': 1.11.1
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.1
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@6.0.2)
-      eventemitter3: 5.0.1
-    optionalDependencies:
-      typescript: 6.0.2
-    transitivePeerDependencies:
-      - zod
-
   ox@0.14.20(typescript@6.0.2)(zod@3.22.4):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
@@ -15029,23 +14934,6 @@ snapshots:
       react: 19.2.5
 
   vary@1.1.2: {}
-
-  viem@2.48.4(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6):
-    dependencies:
-      '@noble/curves': 1.9.1
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@6.0.2)
-      isows: 1.0.7(ws@8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6))
-      ox: 0.14.20(typescript@6.0.2)
-      ws: 8.18.3(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-    optionalDependencies:
-      typescript: 6.0.2
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-      - zod
 
   viem@2.48.4(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6)(zod@3.22.4):
     dependencies:

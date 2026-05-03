@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 
@@ -78,7 +79,7 @@ export async function GET(
 
     // Use Gamma API with clob_token_ids parameter
     const gammaResponse = await fetch(
-      `${GAMMA_API}/markets?clob_token_ids=${tokenId}`,
+      `${GAMMA_API}/markets?clob_token_ids=${encodeURIComponent(tokenId)}`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 300 },
@@ -97,22 +98,14 @@ export async function GET(
         // `['["<id1>"', ' "<id2>"]']` and never matched the raw tokenId —
         // so the outcome defaulted to "Yes" for every row, which is why
         // portfolio's open-orders tab mislabelled NO orders as Yes.
-        const parseArrayField = (value: unknown): string[] => {
-          if (Array.isArray(value)) return value as string[];
-          if (typeof value !== "string") return [];
-          try {
-            const parsed = JSON.parse(value);
-            if (Array.isArray(parsed)) return parsed.map((v) => String(v));
-          } catch {
-            // Fall back to CSV for older/legacy rows just in case.
-          }
-          return value.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
-        };
-
         let outcome = "Yes";
         if (market.clobTokenIds && market.outcomes) {
-          const tokenIds = parseArrayField(market.clobTokenIds);
-          const outcomes = parseArrayField(market.outcomes);
+          const tokenIds = parseGammaStringArray(market.clobTokenIds, {
+            fallbackCsv: true,
+          });
+          const outcomes = parseGammaStringArray(market.outcomes, {
+            fallbackCsv: true,
+          });
           const tokenIndex = tokenIds.findIndex(
             (id: string) => id.trim() === tokenId
           );
@@ -148,7 +141,7 @@ export async function GET(
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Unable to load market for token ID",
       },
       { status: 500 }
     );

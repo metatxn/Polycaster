@@ -1,5 +1,6 @@
 "use client";
 
+import { formatOrderExpiration } from "@knoww/shared-types/orders";
 import {
   ArrowDown,
   ArrowUp,
@@ -36,7 +37,6 @@ import { useTopHolders } from "@/hooks/use-top-holders";
 import type { Position } from "@/hooks/use-user-positions";
 import { useUserTrades } from "@/hooks/use-user-trades";
 import { formatPrice, formatVolume } from "@/lib/formatters";
-import { formatOrderExpiration } from "@/lib/order-expiration";
 import { cn } from "@/lib/utils";
 
 // Lazy load heavy chart and order book components
@@ -767,6 +767,45 @@ function SortButton({
   );
 }
 
+function OutcomeTradeButton({
+  label,
+  price,
+  selected,
+  accentClassName,
+  onClick,
+}: {
+  label: "Yes" | "No";
+  price: string;
+  selected: boolean;
+  accentClassName: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left transition-colors active:scale-[0.98]",
+        selected
+          ? "border-foreground bg-foreground text-background"
+          : "border-border/60 bg-muted/20 hover:border-foreground/50 hover:bg-muted/40"
+      )}
+    >
+      <span
+        className={cn(
+          "shrink-0 border-l-[3px] pl-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] xl:text-[11px]",
+          selected ? "border-background/70" : accentClassName
+        )}
+      >
+        {label}
+      </span>
+      <span className="shrink-0 font-mono text-sm font-semibold tabular-nums xl:text-[15px]">
+        {formatPrice(price)}
+      </span>
+    </button>
+  );
+}
+
 export function OutcomesTable({
   sortedMarketData,
   closedMarkets = [],
@@ -944,7 +983,7 @@ export function OutcomesTable({
                     />
                   </div>
                 </div>
-                <span className="w-[160px] text-center">Trade</span>
+                <span className="w-[210px] text-center">Trade</span>
               </div>
             )}
             <div className="divide-y divide-border/50">
@@ -1136,41 +1175,37 @@ export function OutcomesTable({
 
                       {/* Right Side: Trading Buttons — editorial outline CTAs */}
                       <div className="px-4 pb-3 lg:pb-0 lg:pr-4 lg:pl-0 flex items-center justify-center">
-                        <div className="grid grid-cols-2 lg:flex items-center gap-2 w-full lg:w-auto">
-                          <button
-                            type="button"
-                            className={cn(
-                              "h-8 px-3 lg:w-[82px] border font-mono text-[11px] font-semibold uppercase tracking-[0.12em] tabular-nums transition-colors active:scale-[0.98]",
-                              isExpanded && selectedOutcomeIndex === 0
-                                ? "border-emerald-600 dark:border-emerald-400 text-emerald-700 dark:text-emerald-300 bg-emerald-500/5"
-                                : "border-border/60 text-foreground hover:border-emerald-600/60 hover:text-emerald-700 dark:hover:text-emerald-300"
-                            )}
+                        <div className="grid w-full grid-cols-2 items-center gap-2 lg:w-[210px]">
+                          <OutcomeTradeButton
+                            label="Yes"
+                            price={market.yesPrice}
+                            selected={
+                              selectedMarketId === market.id &&
+                              selectedOutcomeIndex === 0
+                            }
+                            accentClassName="border-emerald-600 dark:border-emerald-400"
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
                               setSelectedMarketId(market.id);
                               setSelectedOutcomeIndex(0);
                               void preloadOrderBook(market.yesTokenId);
                             }}
-                          >
-                            Yes {formatPrice(market.yesPrice)}
-                          </button>
-                          <button
-                            type="button"
-                            className={cn(
-                              "h-8 px-3 lg:w-[82px] border font-mono text-[11px] font-semibold uppercase tracking-[0.12em] tabular-nums transition-colors active:scale-[0.98]",
-                              isExpanded && selectedOutcomeIndex === 1
-                                ? "border-red-600 dark:border-red-400 text-red-700 dark:text-red-300 bg-red-500/5"
-                                : "border-border/60 text-foreground hover:border-red-600/60 hover:text-red-700 dark:hover:text-red-300"
-                            )}
+                          />
+                          <OutcomeTradeButton
+                            label="No"
+                            price={market.noPrice}
+                            selected={
+                              selectedMarketId === market.id &&
+                              selectedOutcomeIndex === 1
+                            }
+                            accentClassName="border-rose-600 dark:border-rose-400"
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
                               setSelectedMarketId(market.id);
                               setSelectedOutcomeIndex(1);
                               void preloadOrderBook(market.noTokenId);
                             }}
-                          >
-                            No {formatPrice(market.noPrice)}
-                          </button>
+                          />
                         </div>
                       </div>
 

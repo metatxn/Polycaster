@@ -50,6 +50,7 @@ const STATIC_EVENT_CHILDREN = new Set([
   "breaking",
   "new",
   "paginated",
+  "league-counts",
 ]);
 
 function normalizeRoutePath(pathname: string): string {

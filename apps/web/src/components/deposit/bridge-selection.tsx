@@ -1,6 +1,6 @@
+import type { SupportedAsset } from "@knoww/shared-types/bridge";
 import { motion } from "framer-motion";
 import { ChevronRight, Loader2, Search } from "lucide-react";
-import type { SupportedAsset } from "@/hooks/use-bridge";
 
 interface BridgeSelectionProps {
   isLoading: boolean;

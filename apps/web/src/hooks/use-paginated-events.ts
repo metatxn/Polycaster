@@ -63,6 +63,8 @@ export interface EventFilterParams {
 
 interface UsePaginatedEventsParams {
   tagSlug?: string;
+  /** Polymarket series ID — when set, takes precedence over tagSlug. */
+  seriesId?: number;
   limit?: number;
   closed?: boolean;
   order?: string;
@@ -75,6 +77,7 @@ interface UsePaginatedEventsParams {
 
 export function usePaginatedEvents({
   tagSlug,
+  seriesId,
   limit = 20,
   closed = false,
   order = "volume24hr",
@@ -88,7 +91,7 @@ export function usePaginatedEvents({
     queryKey: [
       "events",
       "paginated",
-      tagSlug || "all",
+      seriesId ? `series:${seriesId}` : tagSlug || "all",
       limit,
       closed,
       order,
@@ -115,7 +118,9 @@ export function usePaginatedEvents({
         params.set("after_cursor", pageParam);
       }
 
-      if (tagSlug) {
+      if (seriesId) {
+        params.set("series_id", String(seriesId));
+      } else if (tagSlug) {
         params.set("tag_slug", tagSlug);
       }
 

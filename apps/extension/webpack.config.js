@@ -76,6 +76,7 @@ function buildWarMatches(hostsSource) {
 }
 
 const transformersEntry = require.resolve("@huggingface/transformers");
+const cryptoShimPath = path.resolve(__dirname, "src/background/crypto-shim.ts");
 
 function findTransformersPackageRoot(startPath) {
   let current = path.dirname(startPath);
@@ -156,7 +157,7 @@ module.exports = (_env, argv) => {
     output: {
       path: path.resolve(__dirname, "dist"),
       filename: "[name].js",
-      chunkFilename: "chunks/[name].[contenthash:8].js",
+      chunkFilename: "chunks/[name].js",
       // Keep webpack's runtime URL detection explicit; this works for
       // extension pages, offscreen docs, and service workers.
       publicPath: "auto",
@@ -205,6 +206,7 @@ module.exports = (_env, argv) => {
         // ProvidePlugin injects `process`; resolve from this package so
         // workspace sources (e.g. @knoww/logger) don't look under packages/*.
         "process/browser": require.resolve("process/browser"),
+        crypto: cryptoShimPath,
       },
       fallback: {
         stream: false,
@@ -213,14 +215,14 @@ module.exports = (_env, argv) => {
         zlib: false,
         url: false,
         assert: false,
-        crypto: false,
+        crypto: cryptoShimPath,
       },
     },
     plugins: [
-      // @polymarket/clob-client-v2 imports `node:crypto` (createHash) for an
-      // optional orderbook-hash helper; rewrite the prefixed import to the
-      // bare specifier so the existing `crypto: false` fallback applies.
-      new webpack.NormalModuleReplacementPlugin(/^node:crypto$/, "crypto"),
+      new webpack.NormalModuleReplacementPlugin(
+        /^node:crypto$/,
+        cryptoShimPath
+      ),
       {
         apply(compiler) {
           const pluginName = "ReplaceImportMetaPlugin";
@@ -323,13 +325,7 @@ module.exports = (_env, argv) => {
     optimization: {
       minimize: true,
       usedExports: true,
-      splitChunks: {
-        chunks: "async",
-        minSize: 40 * 1024,
-        minChunks: 1,
-        maxAsyncRequests: 30,
-        maxInitialRequests: 10,
-      },
+      splitChunks: false,
     },
     performance: {
       hints: "warning",

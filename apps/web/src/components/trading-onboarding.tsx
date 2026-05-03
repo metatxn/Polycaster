@@ -1,6 +1,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import { formatTradingOnboardingError } from "@knoww/shared-types/trading-errors";
 import { useAppKit } from "@reown/appkit/react";
 import Decimal from "decimal.js";
 import { AnimatePresence, motion } from "framer-motion";
@@ -39,31 +40,6 @@ interface OnboardingStep {
 interface TradingOnboardingProps {
   onComplete?: () => void;
   onSkip?: () => void;
-}
-
-function getOnboardingErrorMessage(err: unknown, fallback: string): string {
-  const message = err instanceof Error ? err.message : String(err || "");
-  const lower = message.toLowerCase();
-
-  if (
-    lower.includes("user rejected") ||
-    lower.includes("user denied") ||
-    lower.includes("rejected the request") ||
-    lower.includes("transaction signature")
-  ) {
-    return "Request cancelled. No changes were made. You can try again when you're ready.";
-  }
-
-  if (lower.includes("insufficient funds") || lower.includes("gas")) {
-    return "Not enough POL for network fees. Add a small amount of POL to this wallet and try again.";
-  }
-
-  if (lower.includes("chain") || lower.includes("network")) {
-    return "Please switch your wallet to Polygon and try again.";
-  }
-
-  if (!message) return fallback;
-  return message.length > 180 ? fallback : message;
 }
 
 export function TradingOnboarding({
@@ -190,17 +166,17 @@ export function TradingOnboarding({
   );
 
   /**
-   * Check if ALL V2 trading approvals are already set on the Safe.
+   * Check if the default app trading approvals are already set on the Safe.
    *
-   * V2 trading requires 7 approvals (see `checkAllApprovals` in
+   * The default app trading setup requires 6 approvals (see `checkAllApprovals` in
    * `@/lib/approvals`):
-   *   pUSD → CTF Exchange V2, Neg Risk Exchange V2, Neg Risk Adapter
-   *   USDC.e → Collateral Onramp (for on-demand wrap on BUY)
-   *   CTF setApprovalForAll → those same three operators (needed for SELL)
+   *   pUSD → CTF, CTF Exchange V2, Neg Risk Exchange V2
+   *   USDC.e → CollateralOnramp (for on-demand wrap on BUY)
+   *   CTF setApprovalForAll → both CLOB exchanges (needed for SELL)
    *
    * Returning users with legacy V1 (USDC.e-only) approvals must re-run the
-   * batch to unlock V2 settlement — hence we check every target, not just
-   * one USDC allowance.
+   * batch to unlock V2 settlement — hence we check the trading target set, not
+   * just one USDC allowance.
    */
   const checkUsdcApproval = useCallback(async () => {
     if (!hasProxyWallet || !proxyAddress || isCheckingApproval) return;
@@ -228,7 +204,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "connect",
         "error",
-        getOnboardingErrorMessage(err, "Failed to connect wallet")
+        formatTradingOnboardingError(err, "Failed to connect wallet")
       );
     }
   }, [open, updateStepStatus]);
@@ -255,7 +231,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "deploy",
         "error",
-        getOnboardingErrorMessage(err, "Failed to deploy wallet")
+        formatTradingOnboardingError(err, "Failed to deploy wallet")
       );
     }
   }, [deploySafe, updateStepStatus, refreshProxyWallet, walletMode]);
@@ -284,7 +260,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "approve",
         "error",
-        getOnboardingErrorMessage(err, "Failed to submit approval batch")
+        formatTradingOnboardingError(err, "Failed to submit approval batch")
       );
     }
   }, [
@@ -323,7 +299,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "credentials",
         "error",
-        getOnboardingErrorMessage(err, "Failed to setup credentials")
+        formatTradingOnboardingError(err, "Failed to setup credentials")
       );
     }
   }, [
@@ -527,7 +503,7 @@ export function TradingOnboarding({
     if (currentStep === 2)
       return walletMode === "safe"
         ? "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals."
-        : "EOA approvals are normal Polygon transactions. MetaMask describes ERC-20 allowances as permission to withdraw tokens; the spender should be a Polymarket contract such as CTFExchange, NegRisk, Adapter, or CollateralOnramp.";
+        : "EOA approvals are normal Polygon transactions. MetaMask describes ERC-20 allowances as permission to withdraw tokens; the spender should be a Polymarket contract such as CTF, CTFExchange, NegRiskExchange, or CollateralOnramp.";
     if (currentStep === 3)
       return "Sign a message to create your unique trading credentials. No private keys are shared.";
     return "All setup transactions are gasless — Polymarket covers the gas fees through their relayer.";

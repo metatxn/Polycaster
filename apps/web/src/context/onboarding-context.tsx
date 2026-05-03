@@ -130,10 +130,10 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   const { hasCredentials, isLoading: isCredentialsLoading } =
     useClobCredentials();
 
-  // Track V2 approval status. The name `hasUsdcApproval` is retained for
+  // Track trading approval status. The name `hasUsdcApproval` is retained for
   // backwards compatibility with downstream derived state, but semantically
-  // this now means "all V2 trading approvals set" (pUSD → 3 exchanges, USDC.e →
-  // Onramp, CTF → 3 operators).
+  // this now means the default app trading approvals are set (pUSD → CTF and
+  // both exchanges, USDC.e → Onramp, CTF → both exchanges).
   const [hasUsdcApproval, setHasUsdcApproval] = useState<boolean | null>(null);
   const [isCheckingUsdcApproval, setIsCheckingUsdcApproval] = useState(false);
 
@@ -141,10 +141,10 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   const hasProxyWallet = hasDeployedSafeFromRelayer || hasProxyWalletFromHook;
   const proxyAddress = proxyAddressFromHook || null;
 
-  // Track if we've already checked V2 approvals for this proxy address
+  // Track if we've already checked trading approvals for this proxy address
   const checkedProxyAddressRef = useRef<string | null>(null);
 
-  // Check V2 approvals when proxy wallet is available. Uses the shared
+  // Check trading approvals when proxy wallet is available. Uses the shared
   // `checkAllApprovals` helper so this gate matches what TradingOnboarding
   // uses — previously this checked USDC.e→CTFExchange (a V1 allowance that
   // can be set without any V2 approval existing), which produced both false

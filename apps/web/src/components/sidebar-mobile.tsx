@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 /** Primary destinations — mirror of PRIMARY_LINKS in top-nav. */
 const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Markets", href: "/markets" },
-  { label: "Live", href: "/live" },
+  { label: "Live", href: "/events/sports/live" },
   { label: "Whales", href: "/whales" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Portfolio", href: "/portfolio" },
@@ -32,7 +32,7 @@ const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
 /** Category taxonomy — mirror of CATEGORIES in top-nav. */
 const CATEGORIES: Array<{ label: string; href: string }> = [
   { label: "Politics", href: "/events/politics" },
-  { label: "Sports", href: "/events/sports" },
+  { label: "Sports", href: "/events/sports/live" },
   { label: "Crypto", href: "/events/crypto" },
   { label: "Finance", href: "/events/finance" },
   { label: "Geopolitics", href: "/events/geopolitics" },

@@ -1,9 +1,10 @@
 "use client";
 
+import { derivePolymarketSafe } from "@knoww/shared-types/relayer";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
+import { type Address, getAddress } from "viem";
 import { useConnection } from "wagmi";
-import { deriveProxyAddress } from "@/lib/derive-proxy-address";
 import {
   clearBalanceCache,
   clearDeploymentCache,
@@ -54,7 +55,7 @@ async function fetchWalletData(
     };
   }
 
-  const proxyAddress = await deriveProxyAddress(eoaAddress);
+  const proxyAddress = derivePolymarketSafe(getAddress(eoaAddress) as Address);
 
   // Step 2: Check if the derived Safe is actually deployed on-chain
   const isDeployed = await rpcCheckIsDeployed(proxyAddress);

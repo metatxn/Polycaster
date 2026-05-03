@@ -79,11 +79,23 @@ interface MarketPriceChartProps {
   hideBothToggle?: boolean;
 }
 
-export type TimeRange = "1H" | "6H" | "1D" | "1W" | "1M" | "ALL";
+export type TimeRange =
+  | "30M"
+  | "1H"
+  | "2H"
+  | "3H"
+  | "6H"
+  | "1D"
+  | "1W"
+  | "1M"
+  | "ALL";
 
 // Map time range to startTs offset (seconds ago from now)
 const timeRangeToStartTsOffset: Record<TimeRange, number> = {
+  "30M": 30 * 60,
   "1H": 60 * 60,
+  "2H": 2 * 60 * 60,
+  "3H": 3 * 60 * 60,
   "6H": 6 * 60 * 60,
   "1D": 24 * 60 * 60,
   "1W": 7 * 24 * 60 * 60,
@@ -100,7 +112,10 @@ const timeRangeToStartTsOffset: Record<TimeRange, number> = {
 // a year of 1-minute data for mature markets, but we DO want minute-level
 // data for a market that's only been live for a day.
 const timeRangeToFidelity: Record<Exclude<TimeRange, "ALL">, number> = {
+  "30M": 1,
   "1H": 1,
+  "2H": 1,
+  "3H": 1,
   "6H": 1,
   "1D": 5,
   "1W": 30,
@@ -754,19 +769,25 @@ export function MarketPriceChart({
 
         tooltip.innerHTML = `<div style="font-size:11px;color:${colors.text};font-weight:500;white-space:nowrap;">${dateLabel}</div>`;
 
-        // Position the badge near the cursor, clamped to container.
+        // Pin the date badge to the top headroom of the plot, centered on the
+        // cursor X. The colored series flag pills (rendered separately above)
+        // track each series' Y value and flip horizontally when the cursor
+        // nears the right edge — if the date badge also followed the cursor
+        // Y, it would land on top of whichever flag pill happened to be
+        // closest. By living in the top strip (which is empty thanks to the
+        // 16% `scaleMargins.top` reserved for headroom), the badge can never
+        // collide with a flag pill regardless of cursor position.
         const containerRect = container.getBoundingClientRect();
         const tipWidth = tooltip.offsetWidth || 120;
-        const tipHeight = tooltip.offsetHeight || 24;
-        let left = point.x + 12;
-        let top = point.y - tipHeight - 8;
-        if (left + tipWidth > containerRect.width) {
-          left = point.x - tipWidth - 12;
+        const TOP_PADDING = 6;
+        let left = point.x - tipWidth / 2;
+        if (left < 4) left = 4;
+        if (left + tipWidth > containerRect.width - 4) {
+          left = containerRect.width - tipWidth - 4;
         }
-        if (top < 0) top = point.y + 12;
         tooltip.style.display = "block";
         tooltip.style.left = `${Math.max(0, left)}px`;
-        tooltip.style.top = `${Math.max(0, top)}px`;
+        tooltip.style.top = `${TOP_PADDING}px`;
       };
     chart.subscribeCrosshairMove(crosshairHandler);
 
@@ -942,7 +963,17 @@ export function MarketPriceChart({
     onOutcomeRangeChanges?.(outcomeRangeChanges);
   }, [onOutcomeRangeChanges, outcomeRangeChanges]);
 
-  const timeRanges: TimeRange[] = ["1H", "6H", "1D", "1W", "1M", "ALL"];
+  const timeRanges: TimeRange[] = [
+    "30M",
+    "1H",
+    "2H",
+    "3H",
+    "6H",
+    "1D",
+    "1W",
+    "1M",
+    "ALL",
+  ];
 
   return (
     <div className="space-y-2">
@@ -1086,9 +1117,21 @@ function generateMockSeries(
   let dataPoints: number;
   let intervalMs: number;
   switch (timeRange) {
+    case "30M":
+      dataPoints = 10;
+      intervalMs = 3 * 60 * 1000;
+      break;
     case "1H":
       dataPoints = 12;
       intervalMs = 5 * 60 * 1000;
+      break;
+    case "2H":
+      dataPoints = 16;
+      intervalMs = 7.5 * 60 * 1000;
+      break;
+    case "3H":
+      dataPoints = 18;
+      intervalMs = 10 * 60 * 1000;
       break;
     case "6H":
       dataPoints = 24;

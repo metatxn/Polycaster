@@ -1,6 +1,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, ArrowRight, Loader2, X } from "lucide-react";
 
@@ -151,13 +152,7 @@ export function MergeSharesModal({
     );
 
     if (!result.success) {
-      // Check for user rejection
-      const errorMsg = result.error?.toLowerCase() || "";
-      if (
-        errorMsg.includes("user rejected") ||
-        errorMsg.includes("user denied") ||
-        errorMsg.includes("rejected the request")
-      ) {
+      if (isWalletRejectionError(result.error)) {
         setLocalError("Transaction cancelled");
       } else {
         setLocalError(result.error || "Merge failed");

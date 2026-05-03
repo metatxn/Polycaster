@@ -65,7 +65,7 @@ export function Navbar() {
                     });
                     setShowOnboarding(true);
                   }}
-                  className="inline-flex items-center gap-1.5 bg-foreground text-background px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.15em] hover:bg-foreground/90 transition-colors"
+                  className="inline-flex items-center gap-1.5 bg-foreground text-background px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] hover:bg-foreground/90 transition-colors"
                 >
                   <Rocket className="h-3 w-3" />
                   <span className="hidden sm:inline">Setup Trading</span>
@@ -77,7 +77,7 @@ export function Navbar() {
                 <button
                   type="button"
                   onClick={() => setShowDepositModal(true)}
-                  className="hidden sm:inline-flex items-center gap-1.5 border border-border hover:border-foreground/40 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.15em] text-foreground transition-colors"
+                  className="hidden sm:inline-flex items-center gap-1.5 border border-border hover:border-foreground/40 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] text-foreground transition-colors"
                 >
                   <ArrowDownToLine className="h-3 w-3" />
                   Deposit
@@ -87,7 +87,7 @@ export function Navbar() {
               <WalletMenu>
                 <button
                   type="button"
-                  className="flex items-center gap-2 px-2.5 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[11px] uppercase tracking-[0.12em]"
+                  className="flex items-center gap-2 px-2.5 py-1.5 border border-border hover:border-foreground/40 transition-colors font-mono text-[12px] uppercase tracking-[0.08em]"
                 >
                   <Wallet className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline tabular-nums normal-case tracking-normal text-[12px]">
@@ -103,7 +103,7 @@ export function Navbar() {
                 posthog.capture("wallet_connect_clicked");
                 open();
               }}
-              className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] hover:bg-foreground/90 transition-colors"
+              className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-foreground/90 transition-colors"
             >
               <Wallet className="h-3.5 w-3.5" />
               Connect

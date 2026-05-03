@@ -1,4 +1,4 @@
-import type { SupportedAsset } from "@/hooks/use-bridge";
+import type { SupportedAsset } from "@knoww/shared-types/bridge";
 import type { TokenBalance } from "@/hooks/use-wallet-tokens";
 
 export type DepositStep =

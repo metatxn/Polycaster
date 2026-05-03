@@ -1,14 +1,23 @@
 "use client";
 
+import {
+  parseGammaNumberArray,
+  parseGammaStringArray,
+  resolveNegRisk,
+} from "@knoww/shared-types/polymarket";
+import Decimal from "decimal.js";
 import { Calendar, ChevronRight } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOrderBookStore } from "@/hooks/use-orderbook-store";
+import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import type { LiveGameState } from "@/hooks/use-sports-websocket";
+import { type Position, useUserPositions } from "@/hooks/use-user-positions";
+import { type Trade, useUserTrades } from "@/hooks/use-user-trades";
 import { formatPrice, formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +56,14 @@ interface EventMarket {
   clobTokenIds?: string[];
   conditionId?: string;
   gameStartTime?: string;
+  sportsMarketType?: string;
+  parentEventId?: string | number;
+  parentEventTitle?: string;
+  negRisk?: boolean;
+  enableNegRisk?: boolean;
+  negRiskAugmented?: boolean;
+  neg_risk?: boolean | string | number;
+  enable_neg_risk?: boolean | string | number;
 }
 
 export interface LiveEvent {
@@ -59,6 +76,12 @@ export interface LiveEvent {
   score?: string;
   live?: boolean;
   startDate?: string;
+  startTime?: string;
+  negRisk?: boolean;
+  enableNegRisk?: boolean;
+  negRiskAugmented?: boolean;
+  neg_risk?: boolean | string | number;
+  enable_neg_risk?: boolean | string | number;
   markets?: EventMarket[];
   tags?: Array<string | { id?: string; slug?: string; label?: string }>;
 }
@@ -175,6 +198,162 @@ const GENERIC_TAGS = new Set([
   "popular",
 ]);
 
+const COUNTRY_TIME_ZONE_HINTS: Record<string, string> = {
+  "Asia/Kolkata": "IN",
+  "Asia/Calcutta": "IN",
+  "America/New_York": "US",
+  "America/Chicago": "US",
+  "America/Denver": "US",
+  "America/Los_Angeles": "US",
+  "America/Phoenix": "US",
+  "America/Anchorage": "US",
+  "Pacific/Honolulu": "US",
+  "Europe/London": "GB",
+  "Europe/Dublin": "IE",
+  "Australia/Sydney": "AU",
+  "Australia/Melbourne": "AU",
+  "Australia/Brisbane": "AU",
+  "Australia/Perth": "AU",
+  "America/Toronto": "CA",
+  "America/Vancouver": "CA",
+  "America/Sao_Paulo": "BR",
+};
+
+const COUNTRY_LEAGUE_PRIORITIES: Record<string, string[]> = {
+  IN: [
+    "cricket",
+    "indian-premier-league",
+    "cricipl",
+    "international-cricket",
+    "tennis",
+    "soccer",
+    "football",
+    "basketball",
+    "esports",
+  ],
+  US: [
+    "nba",
+    "nfl",
+    "mlb",
+    "nhl",
+    "ncaab",
+    "ncaaf",
+    "ufc",
+    "soccer",
+    "tennis",
+    "esports",
+  ],
+  GB: [
+    "epl",
+    "premier-league",
+    "soccer",
+    "cricket",
+    "tennis",
+    "rugby",
+    "boxing",
+    "f1",
+  ],
+  IE: ["soccer", "rugby", "cricket", "boxing", "f1"],
+  AU: ["cricket", "rugby", "tennis", "f1", "soccer"],
+  CA: ["nhl", "nba", "mlb", "soccer", "tennis"],
+  BR: ["soccer", "copa-libertadores", "ufc", "f1", "esports"],
+};
+
+function extractCountryFromLocale(locale: string): string | null {
+  const match = locale.match(/[-_]([a-z]{2}|\d{3})\b/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
+function inferCountryCodeFromBrowser(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (timeZone && COUNTRY_TIME_ZONE_HINTS[timeZone]) {
+    return COUNTRY_TIME_ZONE_HINTS[timeZone];
+  }
+
+  const languages = navigator.languages?.length
+    ? navigator.languages
+    : [navigator.language];
+  for (const language of languages) {
+    const country = extractCountryFromLocale(language);
+    if (country) return country;
+  }
+
+  return null;
+}
+
+function useInferredCountryCode(): string | null {
+  const [countryCode, setCountryCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCountryCode(inferCountryCodeFromBrowser());
+  }, []);
+
+  return countryCode;
+}
+
+function eventTags(
+  event: LiveEvent
+): Array<string | { slug?: string; label?: string }> {
+  return event.tags ?? [];
+}
+
+function eventMatchesPriority(
+  event: LiveEvent,
+  league: string,
+  priority: string
+): boolean {
+  const normalizedPriority = priority.toLowerCase();
+  const priorityWords = normalizedPriority.replace(/-/g, " ");
+  const haystack = `${league} ${event.slug ?? ""} ${event.title}`.toLowerCase();
+
+  if (
+    league.toLowerCase() === normalizedPriority ||
+    haystack.includes(normalizedPriority) ||
+    haystack.includes(priorityWords)
+  ) {
+    return true;
+  }
+
+  return eventTags(event).some((tag) => {
+    const slug = typeof tag === "string" ? tag : tag.slug;
+    return slug?.toLowerCase() === normalizedPriority;
+  });
+}
+
+function getLeagueRegionRank(
+  league: string,
+  events: LiveEvent[],
+  countryCode: string | null
+): number {
+  if (!countryCode) return Number.MAX_SAFE_INTEGER;
+
+  const priorities = COUNTRY_LEAGUE_PRIORITIES[countryCode];
+  if (!priorities) return Number.MAX_SAFE_INTEGER;
+
+  const priorityIndex = priorities.findIndex((priority) =>
+    events.some((event) => eventMatchesPriority(event, league, priority))
+  );
+
+  return priorityIndex >= 0 ? priorityIndex : Number.MAX_SAFE_INTEGER;
+}
+
+function sortLeagueEntriesForRegion(
+  entries: Array<[string, LiveEvent[]]>,
+  countryCode: string | null
+): Array<[string, LiveEvent[]]> {
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => {
+      const aRank = getLeagueRegionRank(a.entry[0], a.entry[1], countryCode);
+      const bRank = getLeagueRegionRank(b.entry[0], b.entry[1], countryCode);
+      if (aRank !== bRank) return aRank - bRank;
+      return a.index - b.index;
+    })
+    .map(({ entry }) => entry);
+}
+
 function getLeagueFromTags(
   tags: Array<string | { slug?: string; label?: string }> | undefined,
   title: string
@@ -208,13 +387,12 @@ function leagueDisplayName(slug: string): string {
 
 // ── Market parsing helpers ─────────────────────────────────────────
 
-function safeParse<T>(json: string | undefined, fallback: T): T {
-  if (!json) return fallback;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return fallback;
-  }
+function parseMarketOutcomes(json: string | undefined): string[] {
+  return parseGammaStringArray(json);
+}
+
+function parseMarketPrices(json: string | undefined): number[] {
+  return parseGammaNumberArray(json);
 }
 
 function isResolvedPrice(prices: number[]): boolean {
@@ -264,8 +442,8 @@ function findDrawMarket(
 }
 
 function parseBettingLine(market: EventMarket): ParsedBettingLine | null {
-  const outcomes: string[] = safeParse(market.outcomes, []);
-  const prices: number[] = safeParse(market.outcomePrices, []).map(Number);
+  const outcomes = parseMarketOutcomes(market.outcomes);
+  const prices = parseMarketPrices(market.outcomePrices);
   if (outcomes.length < 2 || prices.length < 2 || isResolvedPrice(prices)) {
     return null;
   }
@@ -403,7 +581,9 @@ function buildMoneylineDisplayData(
     : null;
   const drawChoice: MoneylineChoice | null = drawLine
     ? (() => {
-        const idx = isYesNoOutcomes(safeParse(drawLine.market.outcomes, []))
+        const idx = isYesNoOutcomes(
+          parseMarketOutcomes(drawLine.market.outcomes)
+        )
           ? getOutcomeIndex(drawLine.outcomes, "yes")
           : 0;
         return {
@@ -459,8 +639,8 @@ function resolveOutcomeTokenIds(market: EventMarket): Array<{
 }> {
   if (!market.conditionId) return [];
 
-  const outcomes: string[] = safeParse(market.outcomes, []);
-  const prices: number[] = safeParse(market.outcomePrices, []).map(Number);
+  const outcomes = parseMarketOutcomes(market.outcomes);
+  const prices = parseMarketPrices(market.outcomePrices);
   const tokenIds = market.clobTokenIds || [];
 
   return outcomes
@@ -476,6 +656,49 @@ function resolveOutcomeTokenIds(market: EventMarket): Array<{
 function normalizePrice(price: number): number {
   if (!Number.isFinite(price)) return 0;
   return Math.max(0, Math.min(1, price));
+}
+
+function toDecimal(value: number | string | undefined): Decimal {
+  try {
+    return new Decimal(value ?? 0);
+  } catch {
+    return new Decimal(0);
+  }
+}
+
+function formatUsd(value: number | string | undefined): string {
+  return `$${toDecimal(value).toFixed(2)}`;
+}
+
+function formatSignedUsd(value: number | string | undefined): string {
+  const decimal = toDecimal(value);
+  const sign = decimal.gte(0) ? "+" : "-";
+  return `${sign}$${decimal.abs().toFixed(2)}`;
+}
+
+function formatPositionPercent(value: number | string | undefined): string {
+  const decimal = toDecimal(value);
+  const sign = decimal.gte(0) ? "+" : "-";
+  return `${sign}${decimal.abs().toDecimalPlaces(1, Decimal.ROUND_HALF_UP).toFixed(1)}%`;
+}
+
+function formatCents(value: number | string | undefined): string {
+  return `${toDecimal(value).mul(100).toDecimalPlaces(1, Decimal.ROUND_HALF_UP).toFixed(1)}¢`;
+}
+
+function formatActivityRelativeTime(timestamp: string | number): string {
+  const t =
+    typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime();
+  const diffMs = Date.now() - t;
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "just now";
+  const seconds = Math.floor(diffMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  if (minutes > 0) return `${minutes}m ago`;
+  return `${seconds}s ago`;
 }
 
 function resolveLivePrice(
@@ -509,6 +732,14 @@ function tokenIdForOutcome(
 export function findMoneyline(
   markets: EventMarket[]
 ): ParsedBettingLine | null {
+  const explicitMoneyline = markets.find(
+    (m) => m.sportsMarketType === "moneyline"
+  );
+  if (explicitMoneyline) {
+    const line = parseBettingLine(explicitMoneyline);
+    if (line) return line;
+  }
+
   for (const m of markets) {
     const git = (m.groupItemTitle || "").toLowerCase();
     const q = (m.question || "").toLowerCase();
@@ -519,6 +750,7 @@ export function findMoneyline(
         !q.includes("handicap") &&
         !q.includes("o/u") &&
         !q.includes("total") &&
+        !q.includes(" - ") &&
         !q.includes("points") &&
         !q.includes("rebounds") &&
         !q.includes("assists") &&
@@ -526,8 +758,8 @@ export function findMoneyline(
         !q.includes("1h ") &&
         q.includes(" vs"));
     if (!isMatch) continue;
-    const outcomes: string[] = safeParse(m.outcomes, []);
-    const prices: number[] = safeParse(m.outcomePrices, []).map(Number);
+    const outcomes = parseMarketOutcomes(m.outcomes);
+    const prices = parseMarketPrices(m.outcomePrices);
     if (
       outcomes.length >= 2 &&
       prices.length >= 2 &&
@@ -566,8 +798,8 @@ function findSpread(
     )
       continue;
 
-    const outcomes: string[] = safeParse(m.outcomes, []);
-    const prices: number[] = safeParse(m.outcomePrices, []).map(Number);
+    const outcomes = parseMarketOutcomes(m.outcomes);
+    const prices = parseMarketPrices(m.outcomePrices);
     if (outcomes.length < 2 || prices.length < 2 || isResolvedPrice(prices))
       continue;
 
@@ -633,8 +865,8 @@ function findSpread(
 }
 
 function tryParseTotal(m: EventMarket): ParsedBettingLine | null {
-  const outcomes: string[] = safeParse(m.outcomes, []);
-  const prices: number[] = safeParse(m.outcomePrices, []).map(Number);
+  const outcomes = parseMarketOutcomes(m.outcomes);
+  const prices = parseMarketPrices(m.outcomePrices);
   if (outcomes.length < 2 || prices.length < 2 || isResolvedPrice(prices))
     return null;
   const q = m.question || "";
@@ -718,14 +950,14 @@ function normalizeTotal(line: ParsedBettingLine): ParsedBettingLine {
 }
 
 function teamAbbr(name: string): string {
-  if (name.length <= 4) return name.toUpperCase();
+  if (name.length <= 3) return name.toUpperCase();
   const words = name.split(/\s+/);
   if (words.length >= 2)
     return words
       .map((w) => w[0])
       .join("")
       .toUpperCase()
-      .slice(0, 4);
+      .slice(0, 3);
   return name.slice(0, 3).toUpperCase();
 }
 
@@ -827,9 +1059,69 @@ export function buildSelectedMarket(
         probability: Math.round(o.price * 100),
       })),
       conditionId: market.conditionId,
+      negRisk: resolveNegRisk(market, event),
     },
     mapRawIndex: (raw: number) => rawToFiltered.get(raw) ?? 0,
   };
+}
+
+function useMarketPositionLookup(): {
+  tradingAddress: string | undefined;
+  getMarketPositions: (market: EventMarket) => Position[];
+} {
+  const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
+  const tradingAddress =
+    hasProxyWallet && proxyAddress ? proxyAddress : undefined;
+  const { data: positionsData } = useUserPositions({
+    userAddress: tradingAddress,
+    enabled: !!tradingAddress,
+  });
+
+  const { positionsByConditionId, positionsByAsset } = useMemo(() => {
+    const byConditionId = new Map<string, Position[]>();
+    const byAsset = new Map<string, Position[]>();
+
+    for (const position of positionsData?.positions ?? []) {
+      if (position.conditionId) {
+        const existing = byConditionId.get(position.conditionId) ?? [];
+        existing.push(position);
+        byConditionId.set(position.conditionId, existing);
+      }
+      if (position.asset) {
+        const existing = byAsset.get(position.asset) ?? [];
+        existing.push(position);
+        byAsset.set(position.asset, existing);
+      }
+    }
+
+    return { positionsByConditionId: byConditionId, positionsByAsset: byAsset };
+  }, [positionsData?.positions]);
+
+  const getMarketPositions = useCallback(
+    (market: EventMarket): Position[] => {
+      const seen = new Set<string>();
+      const results: Position[] = [];
+      const addPositions = (positions: Position[] | undefined) => {
+        for (const position of positions ?? []) {
+          if (seen.has(position.id)) continue;
+          seen.add(position.id);
+          results.push(position);
+        }
+      };
+
+      if (market.conditionId) {
+        addPositions(positionsByConditionId.get(market.conditionId));
+      }
+      for (const tokenId of market.clobTokenIds ?? []) {
+        if (tokenId) addPositions(positionsByAsset.get(tokenId));
+      }
+
+      return results;
+    },
+    [positionsByAsset, positionsByConditionId]
+  );
+
+  return { tradingAddress, getMarketPositions };
 }
 
 // ── Components ──────────────────────────────────────────────────────
@@ -864,10 +1156,11 @@ function TeamAvatar({
   imageSrc?: string;
   size?: "sm" | "md";
 }) {
-  const initial = name.charAt(0).toUpperCase();
+  const initials = teamAbbr(name);
   const colorClass = TEAM_COLORS[hashString(name) % TEAM_COLORS.length];
   const dim = size === "sm" ? 24 : 28;
-  const sizeClasses = size === "sm" ? "w-6 h-6 text-[10px]" : "w-7 h-7 text-xs";
+  const sizeClasses =
+    size === "sm" ? "w-6 h-6 text-[9px]" : "w-7 h-7 text-[10px]";
 
   if (imageSrc) {
     return (
@@ -890,7 +1183,7 @@ function TeamAvatar({
       )}
       title={name}
     >
-      {initial}
+      {initials}
     </span>
   );
 }
@@ -924,7 +1217,7 @@ function PriceButton({
         className
       )}
     >
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
         {abbr}
       </span>
       <span
@@ -963,7 +1256,7 @@ function SpreadCell({
           : "border-border/60 hover:border-foreground/60"
       )}
     >
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
         {abbr} {handicap}
       </span>
       <span className="font-mono text-sm font-medium tabular-nums text-foreground">
@@ -997,7 +1290,7 @@ function TotalCell({
           : "border-border/60 hover:border-foreground/60"
       )}
     >
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
         {label} {line}
       </span>
       <span className="font-mono text-sm font-medium tabular-nums text-foreground">
@@ -1027,13 +1320,119 @@ function DrawButton({
           : "border-border/60 hover:border-foreground/60"
       )}
     >
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-700">
+      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-amber-700">
         Draw
       </span>
       <span className="font-mono text-sm font-medium tabular-nums text-foreground">
         {formatPrice(price)}
       </span>
     </button>
+  );
+}
+
+function MarketPositionsTable({ positions }: { positions: Position[] }) {
+  return (
+    <div className="overflow-x-auto no-scrollbar">
+      <div className="min-w-[720px]">
+        <div className="grid grid-cols-[minmax(120px,1fr)_90px_110px_110px_110px_130px] items-center gap-4 border-b border-border/40 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          <span>Outcome</span>
+          <span className="text-right">Qty</span>
+          <span className="text-right">Avg Price</span>
+          <span className="text-right">Value</span>
+          <span className="text-right">Cost</span>
+          <span className="text-right">Return</span>
+        </div>
+        <div className="divide-y divide-border/40">
+          {positions.map((position) => {
+            const isPositive = toDecimal(position.unrealizedPnl).gte(0);
+            return (
+              <div
+                key={position.id}
+                className="grid grid-cols-[minmax(120px,1fr)_90px_110px_110px_110px_130px] items-center gap-4 px-4 py-3 text-xs"
+              >
+                <span
+                  className={cn(
+                    "min-w-0 truncate font-semibold",
+                    position.outcome.toLowerCase() === "yes"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : position.outcome.toLowerCase() === "no"
+                        ? "text-rose-600 dark:text-rose-400"
+                        : "text-foreground"
+                  )}
+                  title={position.outcome}
+                >
+                  {position.outcome}
+                </span>
+                <span className="text-right font-mono font-semibold tabular-nums">
+                  {toDecimal(position.size).toFixed(2)}
+                </span>
+                <span className="text-right font-mono tabular-nums">
+                  {formatCents(position.avgPrice)}
+                </span>
+                <span className="text-right font-mono tabular-nums">
+                  {formatUsd(position.currentValue)}
+                </span>
+                <span className="text-right font-mono tabular-nums">
+                  {formatUsd(position.initialValue)}
+                </span>
+                <span
+                  className={cn(
+                    "text-right font-mono font-semibold tabular-nums",
+                    isPositive
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  )}
+                >
+                  {formatSignedUsd(position.unrealizedPnl)}
+                  <span className="ml-1 text-[10px] opacity-80">
+                    ({formatPositionPercent(position.unrealizedPnlPercent)})
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MarketHistoryTable({ trades }: { trades: Trade[] }) {
+  return (
+    <div className="divide-y divide-border/40 overflow-hidden rounded-sm border border-border/50">
+      {trades.map((trade) => {
+        const verb = trade.side === "BUY" ? "Bought" : "Sold";
+        const outcomeColor =
+          trade.outcome.toLowerCase() === "yes"
+            ? "text-emerald-600 dark:text-emerald-400"
+            : trade.outcome.toLowerCase() === "no"
+              ? "text-rose-600 dark:text-rose-400"
+              : "text-foreground";
+        return (
+          <div
+            key={trade.id}
+            className="flex items-center justify-between gap-4 px-3 py-2 text-xs"
+          >
+            <span className="min-w-0 font-mono tabular-nums">
+              {verb}{" "}
+              <span className={cn("font-semibold", outcomeColor)}>
+                {toDecimal(trade.size).toFixed(2)} {trade.outcome}
+              </span>{" "}
+              <span className="text-muted-foreground">at</span>{" "}
+              <span className="text-foreground">
+                {formatCents(trade.price)}
+              </span>{" "}
+              <span className="text-muted-foreground">
+                ({formatUsd(trade.usdcAmount)})
+              </span>
+            </span>
+            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              {formatActivityRelativeTime(trade.timestamp)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1050,17 +1449,35 @@ function ExpandedMarketPanel({
   isExpanded,
   defaultOutcomeIndex = 0,
   moneylineChartTokens,
+  userPositions,
+  tradingAddress,
 }: {
   market: EventMarket;
   isExpanded: boolean;
   defaultOutcomeIndex?: number;
   moneylineChartTokens?: MoneylineChartToken[];
+  userPositions: Position[];
+  tradingAddress?: string;
 }) {
-  const [activeTab, setActiveTab] = useState<"orderbook" | "graph">(
-    "orderbook"
-  );
+  type ExpandedMarketTab = "position" | "history" | "orderbook" | "graph";
+  const [activeTab, setActiveTab] = useState<ExpandedMarketTab>("orderbook");
   const outcomeTokens = useMemo(() => resolveOutcomeTokenIds(market), [market]);
   const hasTokenIds = outcomeTokens.some((o) => o.tokenId);
+  const { data: tradesData } = useUserTrades({
+    userAddress: tradingAddress,
+    market: market.conditionId || undefined,
+    type: "TRADE",
+    limit: 10,
+    enabled: isExpanded && !!tradingAddress && !!market.conditionId,
+  });
+  const marketTrades = tradesData?.trades ?? [];
+  const hasPositions = userPositions.length > 0;
+  const hasHistory = marketTrades.length > 0;
+  const defaultTab: ExpandedMarketTab = hasPositions
+    ? "position"
+    : hasHistory
+      ? "history"
+      : "orderbook";
 
   const chartTokens = useMemo(() => {
     if (moneylineChartTokens && moneylineChartTokens.length > 0) {
@@ -1090,11 +1507,43 @@ function ExpandedMarketPanel({
     [chartTokens]
   );
 
+  useEffect(() => {
+    if (!isExpanded) return;
+    setActiveTab(defaultTab);
+  }, [defaultTab, isExpanded]);
+
+  useEffect(() => {
+    if (activeTab === "position" && !hasPositions) {
+      setActiveTab(defaultTab);
+    } else if (activeTab === "history" && !hasHistory) {
+      setActiveTab(defaultTab);
+    }
+  }, [activeTab, defaultTab, hasHistory, hasPositions]);
+
   if (!isExpanded) return null;
 
-  const tabs: Array<{ value: "orderbook" | "graph"; label: string }> = [
+  const tabs: Array<{
+    value: ExpandedMarketTab;
+    label: string;
+  }> = [
+    ...(hasPositions
+      ? [
+          {
+            value: "position" as const,
+            label: "Position",
+          },
+        ]
+      : []),
     { value: "orderbook", label: "Order Book" },
     { value: "graph", label: "Graph" },
+    ...(hasHistory
+      ? [
+          {
+            value: "history" as const,
+            label: "History",
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -1102,7 +1551,7 @@ function ExpandedMarketPanel({
       <div
         role="tablist"
         aria-label="Market details"
-        className="flex items-center gap-1 px-4 border-b border-border/40 overflow-x-auto no-scrollbar"
+        className="flex min-w-0 items-center border-b border-border/40 px-3"
       >
         {tabs.map((tab) => {
           const isActive = activeTab === tab.value;
@@ -1114,10 +1563,10 @@ function ExpandedMarketPanel({
               aria-selected={isActive}
               onClick={() => setActiveTab(tab.value)}
               className={cn(
-                "relative px-3 py-3 font-mono text-[10px] uppercase tracking-[0.18em] transition-colors shrink-0",
+                "relative inline-flex min-w-0 items-center gap-1 px-2 py-3 font-mono text-[11px] uppercase tracking-[0.06em] transition-colors shrink",
                 isActive
                   ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground/90 hover:text-foreground"
               )}
             >
               {tab.label}
@@ -1131,6 +1580,18 @@ function ExpandedMarketPanel({
           );
         })}
       </div>
+
+      {activeTab === "position" && hasPositions && (
+        <div className="p-4">
+          <MarketPositionsTable positions={userPositions} />
+        </div>
+      )}
+
+      {activeTab === "history" && hasHistory && (
+        <div className="p-4">
+          <MarketHistoryTable trades={marketTrades} />
+        </div>
+      )}
 
       {activeTab === "orderbook" && (
         <div className="p-4">
@@ -1169,7 +1630,7 @@ function ExpandedMarketPanel({
                         className="inline-block w-2 h-2 rounded-none"
                         style={{ backgroundColor: token.color }}
                       />
-                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
                         {token.name}
                       </span>
                     </div>
@@ -1180,7 +1641,7 @@ function ExpandedMarketPanel({
                 tokens={chartTokens}
                 outcomes={outcomeNames}
                 outcomePrices={outcomePriceStrs}
-                defaultTimeRange="1D"
+                defaultTimeRange="1H"
               />
             </div>
           ) : (
@@ -1207,6 +1668,8 @@ function SportEventRow({
   onOpenExpand,
   onMarketSelect,
   getLivePrice,
+  getMarketPositions,
+  tradingAddress,
   selectedOutcomeTokenId,
 }: {
   event: LiveEvent;
@@ -1221,6 +1684,8 @@ function SportEventRow({
     outcomeIndex: number,
     fallbackPrice: number
   ) => number;
+  getMarketPositions: (market: EventMarket) => Position[];
+  tradingAddress?: string;
   selectedOutcomeTokenId?: string;
 }) {
   const isLive = variant === "live";
@@ -1264,11 +1729,6 @@ function SportEventRow({
       ? moneylineDisplay.home.price >= moneylineDisplay.away.price
       : true;
   const isSingleTeamEvent = !teamNames[1];
-  const avatarSrc =
-    event.markets?.find((m) => m.image)?.image ??
-    event.markets?.find((m) => m.icon)?.icon ??
-    event.image;
-
   const homeMoneylinePrice = moneylineDisplay.home
     ? getLivePrice(
         moneylineDisplay.home.line.market,
@@ -1317,7 +1777,7 @@ function SportEventRow({
     if (!ml.primaryLine) return [];
 
     const primaryMarketObj = ml.primaryLine.market;
-    const primaryOutcomes: string[] = safeParse(primaryMarketObj.outcomes, []);
+    const primaryOutcomes = parseMarketOutcomes(primaryMarketObj.outcomes);
 
     if (
       !isYesNoOutcomes(primaryOutcomes) &&
@@ -1371,6 +1831,10 @@ function SportEventRow({
     return event.markets?.find((m) => m.id === expandedMarketId) ?? null;
   }, [event.markets, expandedMarketId]);
   const isExpanded = Boolean(expandedMarket);
+  const expandedMarketPositions = useMemo(
+    () => (expandedMarket ? getMarketPositions(expandedMarket) : []),
+    [expandedMarket, getMarketPositions]
+  );
   const [expandedOutcomeIndex, setExpandedOutcomeIndex] = useState(0);
 
   const handlePriceClick = (
@@ -1414,7 +1878,7 @@ function SportEventRow({
     >
       {/* Header bar — hairline, editorial */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
-        <div className="flex items-baseline gap-4 min-w-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="flex items-baseline gap-4 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
           {isLive ? (
             <span className="inline-flex items-center gap-1.5 text-red-700 shrink-0">
               <span className="relative flex h-1.5 w-1.5">
@@ -1423,7 +1887,7 @@ function SportEventRow({
               </span>
               <span>Live</span>
               {game?.period && (
-                <span className="text-muted-foreground ml-1">
+                <span className="text-muted-foreground/90 ml-1">
                   · {game.period}
                 </span>
               )}
@@ -1431,17 +1895,19 @@ function SportEventRow({
           ) : (
             <span className="inline-flex items-baseline gap-1.5 text-foreground shrink-0">
               <span className="tabular-nums">
-                {gameStart ? formatStartTime(gameStart) : "Scheduled"}
+                {gameStart
+                  ? formatStartTime(gameStart, { includeDay: false })
+                  : "Scheduled"}
               </span>
               {gameStart && (
-                <span className="text-muted-foreground">
+                <span className="text-muted-foreground/90">
                   · {formatRelativeTime(gameStart)}
                 </span>
               )}
             </span>
           )}
           {seriesInfo && (
-            <span className="shrink-0 normal-case tracking-normal text-[11px] text-muted-foreground">
+            <span className="shrink-0 normal-case tracking-normal text-[12px] text-muted-foreground/90">
               {seriesInfo}
             </span>
           )}
@@ -1451,7 +1917,7 @@ function SportEventRow({
             </span>
           )}
           {tournament && (
-            <span className="truncate hidden lg:inline normal-case tracking-normal text-[11px]">
+            <span className="truncate hidden lg:inline normal-case tracking-normal text-[12px]">
               · {tournament}
             </span>
           )}
@@ -1461,7 +1927,7 @@ function SportEventRow({
           <span role="presentation" onClick={(e) => e.stopPropagation()}>
             <Link
               href={href}
-              className="inline-flex items-baseline gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex items-baseline gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 hover:text-foreground transition-colors"
             >
               {marketCount > 0 && (
                 <span className="tabular-nums text-foreground">
@@ -1478,10 +1944,7 @@ function SportEventRow({
       <div>
         {isSingleTeamEvent ? (
           <div className="px-4 py-3.5 flex items-center gap-3">
-            <TeamAvatar
-              name={teamNames[0] || event.title}
-              imageSrc={avatarSrc}
-            />
+            <TeamAvatar name={teamNames[0] || event.title} />
             <span className="text-base font-semibold">{event.title}</span>
           </div>
         ) : (
@@ -1499,7 +1962,7 @@ function SportEventRow({
                   {homeScore}
                 </span>
               )}
-              <TeamAvatar name={teamNames[0]} imageSrc={avatarSrc} />
+              <TeamAvatar name={teamNames[0]} />
               <span className="text-base font-semibold text-foreground truncate">
                 {teamNames[0]}
               </span>
@@ -1600,7 +2063,7 @@ function SportEventRow({
                   {awayScore}
                 </span>
               )}
-              <TeamAvatar name={teamNames[1]} imageSrc={avatarSrc} />
+              <TeamAvatar name={teamNames[1]} />
               <span className="text-base font-semibold text-foreground truncate">
                 {teamNames[1]}
               </span>
@@ -1684,6 +2147,8 @@ function SportEventRow({
             isExpanded
             defaultOutcomeIndex={expandedOutcomeIndex}
             moneylineChartTokens={moneylineChartTokens}
+            userPositions={expandedMarketPositions}
+            tradingAddress={tradingAddress}
           />
         </div>
       )}
@@ -1699,6 +2164,8 @@ function CompactEventRow({
   expandedMarketId,
   onToggleExpand,
   onOpenExpand,
+  getMarketPositions,
+  tradingAddress,
   variant = "live",
 }: {
   event: LiveEvent;
@@ -1707,6 +2174,8 @@ function CompactEventRow({
   expandedMarketId: string | null;
   onToggleExpand: (marketId: string) => void;
   onOpenExpand: (marketId: string) => void;
+  getMarketPositions: (market: EventMarket) => Position[];
+  tradingAddress?: string;
   variant?: "live" | "scheduled";
 }) {
   const moneyline = useMemo(
@@ -1730,15 +2199,14 @@ function CompactEventRow({
     moneylineDisplay.home && moneylineDisplay.away
       ? moneylineDisplay.home.price >= moneylineDisplay.away.price
       : true;
-  const avatarSrc =
-    event.markets?.find((m) => m.image)?.image ??
-    event.markets?.find((m) => m.icon)?.icon ??
-    event.image;
-
   const expandedMarket = useMemo(() => {
     if (!expandedMarketId) return null;
     return event.markets?.find((m) => m.id === expandedMarketId) ?? null;
   }, [event.markets, expandedMarketId]);
+  const expandedMarketPositions = useMemo(
+    () => (expandedMarket ? getMarketPositions(expandedMarket) : []),
+    [expandedMarket, getMarketPositions]
+  );
   const [expandedOutcomeIndex, setExpandedOutcomeIndex] = useState(0);
 
   const moneylineChartTokens = useMemo((): MoneylineChartToken[] => {
@@ -1751,7 +2219,7 @@ function CompactEventRow({
     const ml = moneylineDisplay;
     if (!ml.primaryLine) return [];
     const primaryMarketObj = ml.primaryLine.market;
-    const primaryOutcomes: string[] = safeParse(primaryMarketObj.outcomes, []);
+    const primaryOutcomes = parseMarketOutcomes(primaryMarketObj.outcomes);
     if (
       !isYesNoOutcomes(primaryOutcomes) &&
       primaryMarketObj.clobTokenIds?.length
@@ -1834,7 +2302,7 @@ function CompactEventRow({
       )}
     >
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
-        <div className="flex items-baseline gap-3 min-w-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="flex items-baseline gap-3 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
           {variant === "live" ? (
             <span className="inline-flex items-center gap-1.5 text-red-700 shrink-0">
               <span className="relative flex h-1.5 w-1.5">
@@ -1843,7 +2311,7 @@ function CompactEventRow({
               </span>
               <span>Live</span>
               {game?.period && (
-                <span className="text-muted-foreground ml-1">
+                <span className="text-muted-foreground/90 ml-1">
                   · {game.period}
                 </span>
               )}
@@ -1853,7 +2321,9 @@ function CompactEventRow({
               const gameStart = getGameStartTime(event);
               return (
                 <span className="text-foreground tabular-nums shrink-0">
-                  {gameStart ? formatStartTime(gameStart) : "Scheduled"}
+                  {gameStart
+                    ? formatStartTime(gameStart, { includeDay: false })
+                    : "Scheduled"}
                 </span>
               );
             })()
@@ -1868,7 +2338,7 @@ function CompactEventRow({
         <span role="presentation" onClick={(e) => e.stopPropagation()}>
           <Link
             href={href}
-            className="inline-flex items-baseline gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-baseline gap-1 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 hover:text-foreground transition-colors"
           >
             <span>Game View</span>
             <ChevronRight className="h-3 w-3 translate-y-px" />
@@ -1886,7 +2356,7 @@ function CompactEventRow({
             <span className="w-5 text-center text-sm font-bold tabular-nums">
               {homeScore}
             </span>
-            <TeamAvatar name={teamNames[0]} imageSrc={avatarSrc} size="sm" />
+            <TeamAvatar name={teamNames[0]} size="sm" />
             <span className="text-sm font-semibold truncate max-w-[160px]">
               {teamNames[0]}
             </span>
@@ -1940,7 +2410,7 @@ function CompactEventRow({
               <span className="w-5 text-center text-sm font-bold tabular-nums">
                 {awayScore}
               </span>
-              <TeamAvatar name={teamNames[1]} imageSrc={avatarSrc} size="sm" />
+              <TeamAvatar name={teamNames[1]} size="sm" />
               <span className="text-sm font-semibold truncate max-w-[160px]">
                 {teamNames[1]}
               </span>
@@ -1976,6 +2446,8 @@ function CompactEventRow({
             isExpanded
             defaultOutcomeIndex={expandedOutcomeIndex}
             moneylineChartTokens={moneylineChartTokens}
+            userPositions={expandedMarketPositions}
+            tradingAddress={tradingAddress}
           />
         </div>
       )}
@@ -1992,6 +2464,8 @@ function LeagueSection({
   onOpenExpand,
   onMarketSelect,
   getLivePrice,
+  getMarketPositions,
+  tradingAddress,
   selectedOutcomeTokenId,
 }: {
   league: string;
@@ -2010,6 +2484,8 @@ function LeagueSection({
     outcomeIndex: number,
     fallbackPrice: number
   ) => number;
+  getMarketPositions: (market: EventMarket) => Position[];
+  tradingAddress?: string;
   selectedOutcomeTokenId?: string;
 }) {
   const leagueIcon = events[0]?.image;
@@ -2024,18 +2500,18 @@ function LeagueSection({
               alt={leagueDisplayName(league)}
               width={20}
               height={20}
-              className="rounded object-contain"
+              className="rounded-full object-cover bg-muted"
             />
           )}
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+          <h3 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
             {leagueDisplayName(league)}
           </h3>
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
             · {events.length}
           </span>
         </div>
       </div>
-      <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
         <span className="w-6 text-center">Score</span>
         <span className="w-7" />
         <span>Team</span>
@@ -2057,6 +2533,8 @@ function LeagueSection({
                   onToggleExpand={onToggleExpand}
                   onOpenExpand={onOpenExpand}
                   getLivePrice={getLivePrice}
+                  getMarketPositions={getMarketPositions}
+                  tradingAddress={tradingAddress}
                   selectedOutcomeTokenId={selectedOutcomeTokenId}
                   onMarketSelect={(market, idx) =>
                     onMarketSelect(event, market, idx)
@@ -2070,6 +2548,8 @@ function LeagueSection({
                   expandedMarketId={expandedMarketId}
                   onToggleExpand={onToggleExpand}
                   onOpenExpand={onOpenExpand}
+                  getMarketPositions={getMarketPositions}
+                  tradingAddress={tradingAddress}
                   onMarketSelect={(market, idx) =>
                     onMarketSelect(event, market, idx)
                   }
@@ -2085,29 +2565,40 @@ function LeagueSection({
 
 // ── Time formatting for scheduled events ────────────────────────────
 
+function parseGammaDate(input?: string): Date | null {
+  if (!input) return null;
+  const normalized =
+    input.includes("T") || input.endsWith("Z")
+      ? input
+      : input.replace(" ", "T");
+  const d = new Date(normalized);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function getGameStartTime(event: LiveEvent): Date | null {
-  // Prefer event-level startDate
-  if (event.startDate) {
-    const d = new Date(event.startDate);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
+  // Sports events expose kickoff separately from `startDate`; `startDate` is
+  // often the market creation/open timestamp and should only be a fallback.
+  const eventKickoff = parseGammaDate(event.startTime);
+  if (eventKickoff) return eventKickoff;
 
   // Scan all markets for the earliest valid gameStartTime
   if (event.markets) {
     let earliest: Date | null = null;
     for (const m of event.markets) {
-      if (!m.gameStartTime) continue;
-      const d = new Date(m.gameStartTime);
-      if (Number.isNaN(d.getTime())) continue;
+      const d = parseGammaDate(m.gameStartTime);
+      if (!d) continue;
       if (!earliest || d.getTime() < earliest.getTime()) earliest = d;
     }
     if (earliest) return earliest;
   }
 
-  return null;
+  return parseGammaDate(event.startDate);
 }
 
-function formatStartTime(date: Date): string {
+function formatStartTime(
+  date: Date,
+  { includeDay = true }: { includeDay?: boolean } = {}
+): string {
   const now = new Date();
   const diffMs = date.getTime() - now.getTime();
   const diffHours = diffMs / (1000 * 60 * 60);
@@ -2118,6 +2609,7 @@ function formatStartTime(date: Date): string {
     hour12: true,
   });
 
+  if (!includeDay) return timeStr;
   if (diffHours < 0) return timeStr;
   if (diffHours < 24) {
     const isToday = date.toDateString() === now.toDateString();
@@ -2129,6 +2621,21 @@ function formatStartTime(date: Date): string {
     day: "numeric",
   });
   return `${dateStr} ${timeStr}`;
+}
+
+function getLocalDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function formatDateHeading(date: Date): string {
+  return date.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function formatRelativeTime(date: Date): string {
@@ -2149,6 +2656,8 @@ function ScheduledLeagueSection({
   onOpenExpand,
   onMarketSelect,
   getLivePrice,
+  getMarketPositions,
+  tradingAddress,
   selectedOutcomeTokenId,
 }: {
   league: string;
@@ -2167,9 +2676,26 @@ function ScheduledLeagueSection({
     outcomeIndex: number,
     fallbackPrice: number
   ) => number;
+  getMarketPositions: (market: EventMarket) => Position[];
+  tradingAddress?: string;
   selectedOutcomeTokenId?: string;
 }) {
   const leagueIcon = events[0]?.image;
+  const groupedByDate = useMemo(() => {
+    const groups = new Map<string, { label: string; events: LiveEvent[] }>();
+    for (const event of events) {
+      const start = getGameStartTime(event);
+      const key = start ? getLocalDateKey(start) : "unscheduled";
+      const label = start ? formatDateHeading(start) : "Scheduled";
+      const group = groups.get(key) ?? { label, events: [] };
+      group.events.push(event);
+      groups.set(key, group);
+    }
+    return Array.from(groups.entries()).map(([key, group]) => ({
+      key,
+      ...group,
+    }));
+  }, [events]);
 
   return (
     <div className="space-y-2">
@@ -2181,60 +2707,71 @@ function ScheduledLeagueSection({
               alt={leagueDisplayName(league)}
               width={20}
               height={20}
-              className="rounded object-contain"
+              className="rounded-full object-cover bg-muted"
             />
           )}
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+          <h3 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
             {leagueDisplayName(league)}
           </h3>
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
             · {events.length}
           </span>
         </div>
       </div>
-      <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
         <span className="w-7" />
         <span>Team</span>
         <span className="w-[106px] text-center">Moneyline</span>
         <span className="hidden lg:inline w-[132px] text-center">Spread</span>
         <span className="hidden lg:inline w-[122px] text-center">Total</span>
       </div>
-      <div className="-mt-px">
-        {events.map((event) => {
-          const game = eventGameMap.get(event.id) ?? null;
-          return (
-            <div key={event.id} className="-mt-px">
-              <div className="hidden md:block">
-                <SportEventRow
-                  variant="scheduled"
-                  event={event}
-                  game={game}
-                  expandedMarketId={expandedMarketId}
-                  onToggleExpand={onToggleExpand}
-                  onOpenExpand={onOpenExpand}
-                  getLivePrice={getLivePrice}
-                  selectedOutcomeTokenId={selectedOutcomeTokenId}
-                  onMarketSelect={(market, idx) =>
-                    onMarketSelect(event, market, idx)
-                  }
-                />
-              </div>
-              <div className="md:hidden">
-                <CompactEventRow
-                  event={event}
-                  game={game}
-                  variant="scheduled"
-                  expandedMarketId={expandedMarketId}
-                  onToggleExpand={onToggleExpand}
-                  onOpenExpand={onOpenExpand}
-                  onMarketSelect={(market, idx) =>
-                    onMarketSelect(event, market, idx)
-                  }
-                />
-              </div>
+      <div className="-mt-px space-y-3">
+        {groupedByDate.map((group) => (
+          <div key={group.key} className="-mt-px">
+            <div className="px-4 py-2 border-y border-border/40 bg-muted/25 font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
+              {group.label}
             </div>
-          );
-        })}
+            {group.events.map((event) => {
+              const game = eventGameMap.get(event.id) ?? null;
+              return (
+                <div key={event.id} className="-mt-px">
+                  <div className="hidden md:block">
+                    <SportEventRow
+                      variant="scheduled"
+                      event={event}
+                      game={game}
+                      expandedMarketId={expandedMarketId}
+                      onToggleExpand={onToggleExpand}
+                      onOpenExpand={onOpenExpand}
+                      getLivePrice={getLivePrice}
+                      getMarketPositions={getMarketPositions}
+                      tradingAddress={tradingAddress}
+                      selectedOutcomeTokenId={selectedOutcomeTokenId}
+                      onMarketSelect={(market, idx) =>
+                        onMarketSelect(event, market, idx)
+                      }
+                    />
+                  </div>
+                  <div className="md:hidden">
+                    <CompactEventRow
+                      event={event}
+                      game={game}
+                      variant="scheduled"
+                      expandedMarketId={expandedMarketId}
+                      onToggleExpand={onToggleExpand}
+                      onOpenExpand={onOpenExpand}
+                      getMarketPositions={getMarketPositions}
+                      tradingAddress={tradingAddress}
+                      onMarketSelect={(market, idx) =>
+                        onMarketSelect(event, market, idx)
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2250,8 +2787,10 @@ export function LiveSportsbook({
   selectedOutcomeTokenId,
 }: LiveSportsbookProps) {
   const [expandedMarketId, setExpandedMarketId] = useState<string | null>(null);
+  const countryCode = useInferredCountryCode();
   const orderBooks = useOrderBookStore((s) => s.orderBooks);
   const lastTrades = useOrderBookStore((s) => s.lastTrades);
+  const { tradingAddress, getMarketPositions } = useMarketPositionLookup();
 
   const handleToggleExpand = useCallback((marketId: string) => {
     setExpandedMarketId((prev) => (prev === marketId ? null : marketId));
@@ -2279,6 +2818,11 @@ export function LiveSportsbook({
     }
     return groups;
   }, [events]);
+
+  const orderedLeagueEntries = useMemo(
+    () => sortLeagueEntriesForRegion(Array.from(groupedByLeague), countryCode),
+    [countryCode, groupedByLeague]
+  );
 
   const rowTokenIds = useMemo(() => {
     const ids = new Set<string>();
@@ -2317,17 +2861,17 @@ export function LiveSportsbook({
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500/70" />
             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
           </span>
-          <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+          <h2 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
             Live
           </h2>
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
             · {events.length} in progress
           </span>
         </div>
       </header>
 
       <div className="space-y-8">
-        {Array.from(groupedByLeague.entries()).map(([league, leagueEvents]) => (
+        {orderedLeagueEntries.map(([league, leagueEvents]) => (
           <LeagueSection
             key={league}
             league={league}
@@ -2338,6 +2882,8 @@ export function LiveSportsbook({
             onOpenExpand={handleOpenExpand}
             onMarketSelect={handleMarketSelect}
             getLivePrice={getLivePrice}
+            getMarketPositions={getMarketPositions}
+            tradingAddress={tradingAddress}
             selectedOutcomeTokenId={selectedOutcomeTokenId}
           />
         ))}
@@ -2354,8 +2900,10 @@ export function ScheduledSportsbook({
   selectedOutcomeTokenId,
 }: ScheduledSportsbookProps) {
   const [expandedMarketId, setExpandedMarketId] = useState<string | null>(null);
+  const countryCode = useInferredCountryCode();
   const orderBooks = useOrderBookStore((s) => s.orderBooks);
   const lastTrades = useOrderBookStore((s) => s.lastTrades);
+  const { tradingAddress, getMarketPositions } = useMarketPositionLookup();
 
   const handleToggleExpand = useCallback((marketId: string) => {
     setExpandedMarketId((prev) => (prev === marketId ? null : marketId));
@@ -2392,6 +2940,11 @@ export function ScheduledSportsbook({
     return groups;
   }, [sortedEvents]);
 
+  const orderedLeagueEntries = useMemo(
+    () => sortLeagueEntriesForRegion(Array.from(groupedByLeague), countryCode),
+    [countryCode, groupedByLeague]
+  );
+
   const getLivePrice = useCallback(
     (
       market: EventMarket | null,
@@ -2412,17 +2965,17 @@ export function ScheduledSportsbook({
       <header className="flex items-baseline justify-between gap-4 pb-3 border-b border-border/40">
         <div className="flex items-baseline gap-3">
           <Calendar className="h-3 w-3 text-muted-foreground translate-y-px" />
-          <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
+          <h2 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
             Upcoming
           </h2>
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
             · {events.length} scheduled
           </span>
         </div>
       </header>
 
       <div className="space-y-8">
-        {Array.from(groupedByLeague.entries()).map(([league, leagueEvents]) => (
+        {orderedLeagueEntries.map(([league, leagueEvents]) => (
           <ScheduledLeagueSection
             key={league}
             league={league}
@@ -2433,6 +2986,8 @@ export function ScheduledSportsbook({
             onOpenExpand={handleOpenExpand}
             onMarketSelect={handleMarketSelect}
             getLivePrice={getLivePrice}
+            getMarketPositions={getMarketPositions}
+            tradingAddress={tradingAddress}
             selectedOutcomeTokenId={selectedOutcomeTokenId}
           />
         ))}

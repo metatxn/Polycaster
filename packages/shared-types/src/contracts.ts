@@ -23,11 +23,11 @@ export const COLLATERAL_ONRAMP_ADDRESS =
 
 /** pUSD → legacy CTF adapter — standard binary markets */
 export const CTF_COLLATERAL_ADAPTER_ADDRESS =
-  "0xADa100874d00e3331D00F2007a9c336a65009718" as const;
+  "0xAdA100Db00Ca00073811820692005400218FcE1f" as const;
 
 /** pUSD → legacy NegRisk CTF adapter — negative-risk markets */
 export const NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS =
-  "0xAdA200001000ef00D07553cEE7006808F895c6F1" as const;
+  "0xadA2005600Dec949baf300f4C6120000bDB6eAab" as const;
 
 /** Conditional Tokens Framework (CTF) — ERC1155 outcome tokens (unchanged) */
 export const CTF_ADDRESS =
@@ -69,10 +69,10 @@ export const CONTRACTS = {
 /** USDC.e approval target — needed for the Onramp `wrap()` call */
 export const USDC_E_ONRAMP_APPROVAL_TARGET = COLLATERAL_ONRAMP_ADDRESS;
 
-/** pUSD approval target — direct CTF split/merge/redeem collateral approval */
+/** pUSD approval target listed by Polymarket docs for direct CTF split/mint flows */
 export const PUSD_CTF_APPROVAL_TARGET = CTF_ADDRESS;
 
-/** pUSD approval targets — V2 trading collateral approvals */
+/** pUSD approval targets tracked by the app, including CLOB and adapter flows */
 export const PUSD_APPROVAL_TARGETS = [
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
@@ -81,7 +81,7 @@ export const PUSD_APPROVAL_TARGETS = [
   NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
 ] as const;
 
-/** ERC-1155 outcome token approval targets (unchanged) */
+/** ERC-1155 outcome token operator targets tracked by the app */
 export const CTF_APPROVAL_OPERATORS = [
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,

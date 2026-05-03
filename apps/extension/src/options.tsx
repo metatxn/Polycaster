@@ -978,7 +978,7 @@ function OptionsApp() {
 
         <SettingRow
           label="Debug Mode"
-          description="Capture local relevance diagnostics for export. Production console logs stay off."
+          description="Show extension console logs and capture local relevance diagnostics for export."
         >
           <Toggle
             id="debug-mode"

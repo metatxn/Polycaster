@@ -1,16 +1,19 @@
 /**
- * Offscreen Document — lightweight dispatcher that lazy-loads either the
- * scoring runtime or the trading runtime on first use.
+ * Offscreen Document — lightweight dispatcher. Scoring stays lazy-loaded
+ * because it is large; trading is bundled directly to avoid stale/missing
+ * chunk failures while the extension is rebuilt in development.
  */
 
 import { logWarn } from "@knoww/logger";
 import type { ScoreMarketsMessage } from "../types/chrome-messages";
+import {
+  handleTradingOffscreenMessage,
+  prewarmTrading,
+} from "./trading-runtime";
 
 type ScoringRuntimeModule = typeof import("./scoring-runtime");
-type TradingRuntimeModule = typeof import("./trading-runtime");
 
 let scoringRuntimePromise: Promise<ScoringRuntimeModule> | null = null;
-let tradingRuntimePromise: Promise<TradingRuntimeModule> | null = null;
 
 function loadScoringRuntime(): Promise<ScoringRuntimeModule> {
   if (!scoringRuntimePromise) {
@@ -22,18 +25,6 @@ function loadScoringRuntime(): Promise<ScoringRuntimeModule> {
     });
   }
   return scoringRuntimePromise;
-}
-
-function loadTradingRuntime(): Promise<TradingRuntimeModule> {
-  if (!tradingRuntimePromise) {
-    tradingRuntimePromise = import(
-      /* webpackChunkName: "offscreen-trading-runtime" */ "./trading-runtime"
-    ).catch((error) => {
-      tradingRuntimePromise = null;
-      throw error;
-    });
-  }
-  return tradingRuntimePromise;
 }
 
 function isScoreMarketsMessage(
@@ -74,13 +65,10 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg.type === "offscreen:trading") {
-      loadTradingRuntime()
-        .then((runtime) =>
-          runtime.handleTradingOffscreenMessage(
-            payload as { type: string; [key: string]: unknown },
-            tabId
-          )
-        )
+      handleTradingOffscreenMessage(
+        payload as { type: string; [key: string]: unknown },
+        tabId
+      )
         .then((result) => {
           sendResponse(result);
         })
@@ -97,8 +85,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg.type === "offscreen:trading-prewarm") {
-      loadTradingRuntime()
-        .then((runtime) => runtime.prewarmTrading())
+      prewarmTrading()
         .then(() => {
           sendResponse({ ok: true, data: null });
         })

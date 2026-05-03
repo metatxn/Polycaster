@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  formatExpirationDuration,
+  LIMIT_EXPIRATION_PRESETS,
+  type LimitExpirationType,
+} from "@knoww/shared-types/orders";
 import { format } from "date-fns";
 import { CalendarIcon, Clock } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
@@ -12,23 +17,12 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-export type LimitExpirationType = "GTC" | "GTD";
-
 interface LimitExpirationProps {
   expirationType: LimitExpirationType;
   onExpirationTypeChange: (type: LimitExpirationType) => void;
   expirationTime: number; // in seconds
   onExpirationTimeChange: (seconds: number) => void;
 }
-
-// Preset expiration options in seconds
-const EXPIRATION_PRESETS = [
-  { label: "1h", value: 3600 },
-  { label: "4h", value: 14400 },
-  { label: "24h", value: 86400 },
-  { label: "7d", value: 604800 },
-  { label: "30d", value: 2592000 },
-];
 
 // Time options for the time picker
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -48,15 +42,11 @@ export function LimitExpiration({
 
   const isExpirationEnabled = expirationType === "GTD";
 
-  const formatExpirationDisplay = (seconds: number): string => {
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-    return `${Math.floor(seconds / 86400)}d`;
-  };
-
   // Check if current expiration matches a preset
   const isPresetSelected = useMemo(() => {
-    return EXPIRATION_PRESETS.some((preset) => preset.value === expirationTime);
+    return LIMIT_EXPIRATION_PRESETS.some(
+      (preset) => preset.value === expirationTime
+    );
   }, [expirationTime]);
 
   // Calculate custom expiration date from current expirationTime
@@ -195,7 +185,7 @@ export function LimitExpiration({
         <div className="space-y-2">
           {/* Preset buttons + Custom */}
           <div className="flex flex-wrap gap-1.5">
-            {EXPIRATION_PRESETS.map((preset) => (
+            {LIMIT_EXPIRATION_PRESETS.map((preset) => (
               <button
                 key={preset.value}
                 type="button"
@@ -310,7 +300,8 @@ export function LimitExpiration({
             </p>
           ) : (
             <p className="text-[10px] text-muted-foreground">
-              Expires in {formatExpirationDisplay(expirationTime)} if not filled
+              Expires in {formatExpirationDuration(expirationTime)} if not
+              filled
             </p>
           )}
         </div>

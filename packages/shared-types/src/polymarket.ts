@@ -9,14 +9,135 @@ export const POLYGON_CHAIN_ID_HEX = "0x89";
 
 // ── Trading Types ──
 
-export type ClobOrderType = "GTC" | "GTD" | "FOK" | "FAK";
-export type TradingSide = "BUY" | "SELL";
-export type OrderTypeSelection = "LIMIT" | "MARKET";
+export const CLOB_ORDER_TYPES = {
+  GTC: "GTC",
+  GTD: "GTD",
+  FOK: "FOK",
+  FAK: "FAK",
+} as const;
+
+export const TRADING_SIDES = {
+  BUY: "BUY",
+  SELL: "SELL",
+} as const;
+
+export const ORDER_TYPE_SELECTIONS = {
+  LIMIT: "LIMIT",
+  MARKET: "MARKET",
+} as const;
+
+/**
+ * Order side values matching Polymarket's numeric CLOB SDK constants.
+ */
+export const CLOB_ORDER_SIDES = {
+  BUY: 0,
+  SELL: 1,
+} as const;
+
+export const CLOB_ASSET_TYPES = {
+  COLLATERAL: "COLLATERAL",
+  CONDITIONAL: "CONDITIONAL",
+} as const;
+
+export const TRADING_WALLET_MODES = {
+  SAFE: "safe",
+  EOA: "eoa",
+} as const;
+
+export type ClobOrderType =
+  (typeof CLOB_ORDER_TYPES)[keyof typeof CLOB_ORDER_TYPES];
+export type TradingSide = (typeof TRADING_SIDES)[keyof typeof TRADING_SIDES];
+export type OrderTypeSelection =
+  (typeof ORDER_TYPE_SELECTIONS)[keyof typeof ORDER_TYPE_SELECTIONS];
+export type ClobOrderSide =
+  (typeof CLOB_ORDER_SIDES)[keyof typeof CLOB_ORDER_SIDES];
+export type ClobAssetType =
+  (typeof CLOB_ASSET_TYPES)[keyof typeof CLOB_ASSET_TYPES];
+export type TradingWalletMode =
+  (typeof TRADING_WALLET_MODES)[keyof typeof TRADING_WALLET_MODES];
+
+export interface ClobBalanceAllowanceTarget {
+  asset_type: ClobAssetType;
+  token_id?: string;
+}
+
+export interface ClobBalanceAllowanceClient {
+  updateBalanceAllowance(args: ClobBalanceAllowanceTarget): Promise<unknown>;
+}
+
+export interface ClobBalanceAllowanceSyncOptions {
+  tokenId?: string;
+  tokenIds?: ReadonlyArray<string | null | undefined>;
+  includeCollateral?: boolean;
+  includeConditional?: boolean;
+}
 
 export interface ApiKeyCreds {
   apiKey: string;
   apiSecret: string;
   apiPassphrase: string;
+}
+
+export type ApiKeyCredsLike = Partial<ApiKeyCreds> & {
+  key?: string;
+  apiKey?: string;
+  secret?: string;
+  apiSecret?: string;
+  passphrase?: string;
+  apiPassphrase?: string;
+  error?: string;
+};
+
+export type ClobApiKeyMethod = "create" | "derive";
+
+export interface ClobL1Headers {
+  POLY_ADDRESS: string;
+  POLY_SIGNATURE: string;
+  POLY_TIMESTAMP: string;
+  POLY_NONCE: string;
+}
+
+export interface ClobAuthInput {
+  address: string;
+  timestamp?: string | number;
+  nonce?: string | number | bigint;
+}
+
+export interface ClobApiKeyFetchInit {
+  method?: string;
+  headers?: Record<string, string>;
+}
+
+export interface ClobApiKeyFetchResponse {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+}
+
+export type ClobApiKeyFetch = (
+  input: string,
+  init?: ClobApiKeyFetchInit
+) => Promise<ClobApiKeyFetchResponse>;
+
+export interface ClobApiKeyRequestOptions {
+  fetchImpl?: ClobApiKeyFetch;
+}
+
+export interface ClobApiKeyAttemptResult {
+  success: boolean;
+  data?: ApiKeyCreds;
+  raw?: ApiKeyCredsLike;
+  error?: string;
+  status?: number;
+}
+
+export interface ClobCreateOrDeriveApiKeyResult {
+  success: boolean;
+  method?: ClobApiKeyMethod;
+  data?: ApiKeyCreds;
+  raw?: ApiKeyCredsLike;
+  createError?: string;
+  deriveError?: string;
 }
 
 export interface CreateOrderParams {
@@ -77,6 +198,307 @@ export function resolveNegRisk(
   }
 
   return false;
+}
+
+export type GammaArrayField = string | readonly unknown[] | null | undefined;
+
+export interface GammaArrayParseError {
+  field?: string;
+  label?: string;
+  raw: string;
+  error: unknown;
+}
+
+export interface ParseGammaArrayOptions {
+  field?: string;
+  label?: string;
+  fallbackCsv?: boolean;
+  onError?: (error: GammaArrayParseError) => void;
+}
+
+export interface GammaMarketTokenLike {
+  token_id?: string | number | null;
+  tokenId?: string | number | null;
+  outcome?: string | null;
+}
+
+export interface GammaMarketPayloadLike extends NegRiskLike {
+  outcomes?: GammaArrayField;
+  outcomePrices?: GammaArrayField;
+  clobTokenIds?: GammaArrayField;
+  tokens?: readonly GammaMarketTokenLike[] | null;
+}
+
+export interface ParsedGammaMarketPayload {
+  outcomes: string[];
+  outcomePrices: string[];
+  outcomePriceNumbers: number[];
+  clobTokenIds: string[];
+  tokens: GammaMarketTokenLike[];
+}
+
+export interface GammaYesNoMarketFields extends ParsedGammaMarketPayload {
+  yesIndex: number;
+  noIndex: number;
+  yesPrice?: string;
+  noPrice?: string;
+  yesTokenId: string;
+  noTokenId: string;
+}
+
+function optionsForGammaField(
+  options: ParseGammaArrayOptions | undefined,
+  field: string
+): ParseGammaArrayOptions {
+  return {
+    ...options,
+    field,
+  };
+}
+
+function stringifyGammaArrayValue(value: unknown): string {
+  return typeof value === "string" ? value : String(value);
+}
+
+export function parseGammaArrayField(
+  raw: GammaArrayField,
+  options: ParseGammaArrayOptions = {}
+): unknown[] {
+  if (Array.isArray(raw)) return [...raw];
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (error) {
+    options.onError?.({
+      field: options.field,
+      label: options.label,
+      raw,
+      error,
+    });
+
+    if (options.fallbackCsv) {
+      return raw
+        .split(",")
+        .map((value) => value.trim().replace(/^"|"$/g, ""))
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Gamma often returns market array fields as JSON strings. This helper accepts
+ * both already-expanded arrays and stringified arrays and fails closed to [].
+ */
+export function parseGammaStringArray(
+  raw: GammaArrayField,
+  options?: ParseGammaArrayOptions
+): string[] {
+  return parseGammaArrayField(raw, options).map(stringifyGammaArrayValue);
+}
+
+export function parseGammaNumberArray(
+  raw: GammaArrayField,
+  options?: ParseGammaArrayOptions
+): number[] {
+  return parseGammaArrayField(raw, options)
+    .map((value) =>
+      typeof value === "number"
+        ? value
+        : Number.parseFloat(stringifyGammaArrayValue(value))
+    )
+    .filter((value) => Number.isFinite(value));
+}
+
+export function parseGammaMarketPayload(
+  market: GammaMarketPayloadLike | null | undefined,
+  options?: ParseGammaArrayOptions
+): ParsedGammaMarketPayload {
+  return {
+    outcomes: parseGammaStringArray(
+      market?.outcomes,
+      optionsForGammaField(options, "outcomes")
+    ),
+    outcomePrices: parseGammaStringArray(
+      market?.outcomePrices,
+      optionsForGammaField(options, "outcomePrices")
+    ),
+    outcomePriceNumbers: parseGammaNumberArray(
+      market?.outcomePrices,
+      optionsForGammaField(options, "outcomePrices")
+    ),
+    clobTokenIds: parseGammaStringArray(
+      market?.clobTokenIds,
+      optionsForGammaField(options, "clobTokenIds")
+    ),
+    tokens: Array.isArray(market?.tokens) ? [...market.tokens] : [],
+  };
+}
+
+export function findGammaOutcomeIndex(
+  outcomes: readonly string[],
+  label: string
+): number {
+  const normalizedLabel = label.toLowerCase();
+  return outcomes.findIndex((outcome) =>
+    outcome.toLowerCase().includes(normalizedLabel)
+  );
+}
+
+function getGammaTokenIdFromToken(token: GammaMarketTokenLike | undefined) {
+  const tokenId = token?.token_id ?? token?.tokenId;
+  return tokenId === undefined || tokenId === null ? "" : String(tokenId);
+}
+
+export function getGammaTokenIdForOutcome(
+  market: GammaMarketPayloadLike | null | undefined,
+  outcomeIndex: number,
+  options?: ParseGammaArrayOptions
+): string {
+  const parsed = parseGammaMarketPayload(market, options);
+  const outcomeName = parsed.outcomes[outcomeIndex]?.toLowerCase();
+
+  if (outcomeName) {
+    const token = parsed.tokens.find(
+      (candidate) => candidate.outcome?.toLowerCase() === outcomeName
+    );
+    const tokenId = getGammaTokenIdFromToken(token);
+    if (tokenId) return tokenId;
+  }
+
+  return parsed.clobTokenIds[outcomeIndex] ?? "";
+}
+
+export function getGammaYesNoMarketFields(
+  market: GammaMarketPayloadLike | null | undefined,
+  options?: ParseGammaArrayOptions
+): GammaYesNoMarketFields {
+  const parsed = parseGammaMarketPayload(market, options);
+  const yesIndex = findGammaOutcomeIndex(parsed.outcomes, "yes");
+  const noIndex = findGammaOutcomeIndex(parsed.outcomes, "no");
+  const yesToken = parsed.tokens.find(
+    (token) => token.outcome?.toLowerCase() === "yes"
+  );
+  const noToken = parsed.tokens.find(
+    (token) => token.outcome?.toLowerCase() === "no"
+  );
+
+  return {
+    ...parsed,
+    yesIndex,
+    noIndex,
+    yesPrice:
+      yesIndex !== -1
+        ? parsed.outcomePrices[yesIndex]
+        : parsed.outcomePrices[0],
+    noPrice:
+      noIndex !== -1 ? parsed.outcomePrices[noIndex] : parsed.outcomePrices[1],
+    yesTokenId:
+      getGammaTokenIdFromToken(yesToken) ||
+      (yesIndex !== -1
+        ? parsed.clobTokenIds[yesIndex]
+        : parsed.clobTokenIds[0]) ||
+      "",
+    noTokenId:
+      getGammaTokenIdFromToken(noToken) ||
+      (noIndex !== -1
+        ? parsed.clobTokenIds[noIndex]
+        : parsed.clobTokenIds[1]) ||
+      "",
+  };
+}
+
+function stringifyClobPostOrderError(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (value == null) return null;
+
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized && serialized !== "{}") return serialized;
+  } catch {
+    // Fall through to String(value).
+  }
+
+  const fallback = String(value).trim();
+  return fallback || null;
+}
+
+export function getClobPostOrderError(response: unknown): string | null {
+  if (!response || typeof response !== "object") return null;
+
+  const record = response as {
+    success?: unknown;
+    error?: unknown;
+    errorMsg?: unknown;
+    message?: unknown;
+  };
+  const responseKeys = Object.keys(response);
+  const hasError = responseKeys.includes("error");
+  const errorMessage = stringifyClobPostOrderError(record.error);
+  const errorMsg = stringifyClobPostOrderError(record.errorMsg);
+
+  if (errorMessage) return errorMessage;
+  if (errorMsg) return errorMsg;
+
+  if (record.success === false || (hasError && record.error !== undefined)) {
+    return (
+      stringifyClobPostOrderError(record.message) ?? "Order rejected by CLOB"
+    );
+  }
+
+  return null;
+}
+
+export function assertClobPostOrderSuccess(response: unknown): void {
+  const errorMessage = getClobPostOrderError(response);
+  if (errorMessage) throw new Error(errorMessage);
+}
+
+export function buildClobBalanceAllowanceTargets(
+  options: ClobBalanceAllowanceSyncOptions = {}
+): ClobBalanceAllowanceTarget[] {
+  const targets: ClobBalanceAllowanceTarget[] = [];
+  const tokenIds = [options.tokenId, ...(options.tokenIds ?? [])].filter(
+    (tokenId): tokenId is string => Boolean(tokenId)
+  );
+  const uniqueTokenIds = Array.from(new Set(tokenIds));
+  const includeCollateral = options.includeCollateral ?? true;
+  const includeConditional =
+    options.includeConditional ?? uniqueTokenIds.length > 0;
+
+  if (includeCollateral) {
+    targets.push({ asset_type: CLOB_ASSET_TYPES.COLLATERAL });
+  }
+
+  if (includeConditional) {
+    if (uniqueTokenIds.length === 0) {
+      throw new Error("CLOB conditional balance sync requires a token ID");
+    }
+
+    for (const tokenId of uniqueTokenIds) {
+      targets.push({
+        asset_type: CLOB_ASSET_TYPES.CONDITIONAL,
+        token_id: tokenId,
+      });
+    }
+  }
+
+  return targets;
+}
+
+export async function syncClobBalanceAllowance(
+  client: ClobBalanceAllowanceClient,
+  options: ClobBalanceAllowanceSyncOptions = {}
+): Promise<void> {
+  for (const target of buildClobBalanceAllowanceTargets(options)) {
+    await client.updateBalanceAllowance(target);
+  }
 }
 
 export const POLYMARKET_API = {
@@ -166,4 +588,258 @@ export const SIGNATURE_TYPES = {
   POLY_GNOSIS_SAFE: 2,
 } as const;
 
+export type PolymarketSignatureType =
+  (typeof SIGNATURE_TYPES)[keyof typeof SIGNATURE_TYPES];
+
+export function normalizeTradingWalletMode(
+  mode?: string | null
+): TradingWalletMode {
+  return mode === TRADING_WALLET_MODES.EOA
+    ? TRADING_WALLET_MODES.EOA
+    : TRADING_WALLET_MODES.SAFE;
+}
+
+export function isEoaTradingWalletMode(mode?: string | null): boolean {
+  return normalizeTradingWalletMode(mode) === TRADING_WALLET_MODES.EOA;
+}
+
+export function isSafeTradingWalletMode(mode?: string | null): boolean {
+  return normalizeTradingWalletMode(mode) === TRADING_WALLET_MODES.SAFE;
+}
+
+export function getPolymarketSignatureType(
+  mode?: string | null
+): PolymarketSignatureType {
+  return isEoaTradingWalletMode(mode)
+    ? SIGNATURE_TYPES.EOA
+    : SIGNATURE_TYPES.POLY_GNOSIS_SAFE;
+}
+
 export const RELAYER_API_URL = POLYMARKET_API.RELAYER.BASE;
+
+export function normalizeApiKeyCreds(
+  raw: ApiKeyCredsLike | null | undefined
+): ApiKeyCreds {
+  const apiKey = raw?.apiKey || raw?.key || "";
+  const apiSecret = raw?.apiSecret || raw?.secret || "";
+  const apiPassphrase = raw?.apiPassphrase || raw?.passphrase || "";
+
+  if (!apiKey || !apiSecret || !apiPassphrase) {
+    throw new Error("Polymarket returned incomplete API credentials");
+  }
+
+  return { apiKey, apiSecret, apiPassphrase };
+}
+
+export function isCompleteApiKeyCreds(raw: unknown): raw is ApiKeyCreds {
+  if (!raw || typeof raw !== "object") return false;
+  const creds = raw as Partial<ApiKeyCreds>;
+  return Boolean(creds.apiKey && creds.apiSecret && creds.apiPassphrase);
+}
+
+function canNormalizeApiKeyCreds(raw: unknown): raw is ApiKeyCredsLike {
+  try {
+    normalizeApiKeyCreds(raw as ApiKeyCredsLike);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function buildClobL1Headers(params: {
+  address: string;
+  signature: string;
+  timestamp: string | number;
+  nonce?: string | number;
+}): ClobL1Headers {
+  return {
+    POLY_ADDRESS: params.address,
+    POLY_SIGNATURE: params.signature,
+    POLY_TIMESTAMP: String(params.timestamp),
+    POLY_NONCE: String(params.nonce ?? 0),
+  };
+}
+
+function resolveClobAuthInput(input: ClobAuthInput): {
+  address: string;
+  timestamp: string;
+  nonceString: string;
+  nonceNumber: number;
+  nonceBigInt: bigint;
+} {
+  const timestamp = String(input.timestamp ?? Math.floor(Date.now() / 1000));
+  const nonceString = String(input.nonce ?? 0);
+  const nonceBigInt = BigInt(nonceString);
+  const nonceNumber = Number(nonceBigInt);
+
+  if (!Number.isSafeInteger(nonceNumber)) {
+    throw new Error("CLOB auth nonce is outside the safe integer range");
+  }
+
+  return {
+    address: input.address,
+    timestamp,
+    nonceString,
+    nonceNumber,
+    nonceBigInt,
+  };
+}
+
+export function buildClobAuthViemTypedData<TAddress extends string>(
+  input: ClobAuthInput & { address: TAddress }
+) {
+  const auth = resolveClobAuthInput(input);
+
+  return {
+    timestamp: auth.timestamp,
+    nonce: auth.nonceString,
+    typedData: {
+      domain: CLOB_AUTH_DOMAIN,
+      types: CLOB_AUTH_TYPES,
+      primaryType: "ClobAuth" as const,
+      message: {
+        address: auth.address as TAddress,
+        timestamp: auth.timestamp,
+        nonce: auth.nonceBigInt,
+        message: CLOB_AUTH_MESSAGE,
+      },
+    },
+  };
+}
+
+export function buildClobAuthRpcTypedData(input: ClobAuthInput) {
+  const auth = resolveClobAuthInput(input);
+
+  return {
+    timestamp: auth.timestamp,
+    nonce: auth.nonceNumber,
+    typedData: {
+      types: {
+        EIP712Domain: [
+          { name: "name", type: "string" },
+          { name: "version", type: "string" },
+          { name: "chainId", type: "uint256" },
+        ],
+        ClobAuth: CLOB_AUTH_TYPES.ClobAuth,
+      },
+      primaryType: "ClobAuth" as const,
+      domain: CLOB_AUTH_DOMAIN,
+      message: {
+        address: auth.address,
+        timestamp: auth.timestamp,
+        nonce: auth.nonceNumber,
+        message: CLOB_AUTH_MESSAGE,
+      },
+    },
+  };
+}
+
+function getApiKeyFetch(options?: ClobApiKeyRequestOptions): ClobApiKeyFetch {
+  const fetchImpl =
+    options?.fetchImpl ?? (globalThis as { fetch?: ClobApiKeyFetch }).fetch;
+
+  if (!fetchImpl) {
+    throw new Error("CLOB API-key fetch implementation unavailable");
+  }
+
+  return fetchImpl;
+}
+
+function parseApiKeyResponseText(responseText: string): ApiKeyCredsLike {
+  try {
+    return JSON.parse(responseText) as ApiKeyCredsLike;
+  } catch {
+    return { error: responseText };
+  }
+}
+
+async function requestClobApiKey(
+  clobHost: string,
+  path: string,
+  method: "GET" | "POST",
+  headers: ClobL1Headers,
+  options?: ClobApiKeyRequestOptions
+): Promise<ClobApiKeyAttemptResult> {
+  const response = await getApiKeyFetch(options)(`${clobHost}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+    },
+  });
+
+  const responseText = await response.text();
+  const raw = parseApiKeyResponseText(responseText);
+
+  if (response.ok && canNormalizeApiKeyCreds(raw)) {
+    return {
+      success: true,
+      data: normalizeApiKeyCreds(raw),
+      raw,
+      status: response.status,
+    };
+  }
+
+  return {
+    success: false,
+    raw,
+    error: raw.error || responseText,
+    status: response.status,
+  };
+}
+
+export function deriveClobApiKey(
+  clobHost: string,
+  headers: ClobL1Headers,
+  options?: ClobApiKeyRequestOptions
+): Promise<ClobApiKeyAttemptResult> {
+  return requestClobApiKey(
+    clobHost,
+    "/auth/derive-api-key",
+    "GET",
+    headers,
+    options
+  );
+}
+
+export function createClobApiKey(
+  clobHost: string,
+  headers: ClobL1Headers,
+  options?: ClobApiKeyRequestOptions
+): Promise<ClobApiKeyAttemptResult> {
+  return requestClobApiKey(clobHost, "/auth/api-key", "POST", headers, options);
+}
+
+export async function createOrDeriveClobApiKey(
+  clobHost: string,
+  headers: ClobL1Headers,
+  options?: ClobApiKeyRequestOptions
+): Promise<ClobCreateOrDeriveApiKeyResult> {
+  const deriveResult = await deriveClobApiKey(clobHost, headers, options);
+
+  if (deriveResult.success && deriveResult.data) {
+    return {
+      success: true,
+      method: "derive",
+      data: deriveResult.data,
+      raw: deriveResult.raw,
+    };
+  }
+
+  const createResult = await createClobApiKey(clobHost, headers, options);
+
+  if (createResult.success && createResult.data) {
+    return {
+      success: true,
+      method: "create",
+      data: createResult.data,
+      raw: createResult.raw,
+    };
+  }
+
+  return {
+    success: false,
+    createError: createResult.error,
+    deriveError: deriveResult.error,
+  };
+}

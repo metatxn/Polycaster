@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import { fetchClobPrice } from "@knoww/shared-types/clob";
 import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
@@ -189,15 +190,9 @@ async function fetchRecentTrades(limit = 500): Promise<TradeData[]> {
 
 async function fetchCurrentPrice(tokenId: string): Promise<number | null> {
   try {
-    const response = await fetch(
-      `${POLYMARKET_API.CLOB.BASE}/price?token_id=${tokenId}`,
-      {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 30 },
-      }
-    );
-    if (!response.ok) return null;
-    const data: PriceResponse = await response.json();
+    const data = await fetchClobPrice<PriceResponse>(tokenId, {
+      requestInit: { next: { revalidate: 30 } },
+    });
     return data?.price ?? null;
   } catch {
     return null;

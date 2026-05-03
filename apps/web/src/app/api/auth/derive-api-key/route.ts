@@ -1,4 +1,8 @@
 import { createLogger } from "@knoww/logger";
+import {
+  buildClobL1Headers,
+  createOrDeriveClobApiKey,
+} from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
@@ -24,89 +28,6 @@ const l1AuthSchema = z.object({
   timestamp: z.string().describe("UNIX timestamp used in signature"),
   nonce: z.string().optional().default("0").describe("Nonce used in signature"),
 });
-
-/**
- * L1 Headers for Polymarket API authentication
- */
-interface L1Headers {
-  POLY_ADDRESS: string;
-  POLY_SIGNATURE: string;
-  POLY_TIMESTAMP: string;
-  POLY_NONCE: string;
-}
-
-/**
- * API Key response from Polymarket
- */
-interface ApiKeyResponse {
-  error?: string;
-  apiKey?: string;
-  key?: string;
-  secret?: string;
-  passphrase?: string;
-}
-
-function hasApiKey(data: ApiKeyResponse): boolean {
-  return Boolean((data.apiKey || data.key) && data.secret && data.passphrase);
-}
-
-/**
- * Create a new API key for a first-time user
- * POST /auth/api-key
- */
-async function createApiKey(
-  clobHost: string,
-  headers: L1Headers
-): Promise<{ success: boolean; data?: ApiKeyResponse; error?: string }> {
-  const response = await fetch(`${clobHost}/auth/api-key`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-  });
-
-  const responseText = await response.text();
-
-  try {
-    const data = JSON.parse(responseText) as ApiKeyResponse;
-    if (response.ok && hasApiKey(data)) {
-      return { success: true, data };
-    }
-    return { success: false, error: data.error || responseText };
-  } catch {
-    return { success: false, error: responseText };
-  }
-}
-
-/**
- * Derive (retrieve) an existing API key
- * GET /auth/derive-api-key
- */
-async function deriveApiKey(
-  clobHost: string,
-  headers: L1Headers
-): Promise<{ success: boolean; data?: ApiKeyResponse; error?: string }> {
-  const response = await fetch(`${clobHost}/auth/derive-api-key`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-  });
-
-  const responseText = await response.text();
-
-  try {
-    const data = JSON.parse(responseText) as ApiKeyResponse;
-    if (response.ok && hasApiKey(data)) {
-      return { success: true, data };
-    }
-    return { success: false, error: data.error || responseText };
-  } catch {
-    return { success: false, error: responseText };
-  }
-}
 
 function trackApiKeyEvent(
   address: string,
@@ -174,57 +95,44 @@ export async function POST(request: NextRequest) {
 
     const clobHost = CLOB_BASE_URL;
 
-    // Build L1 headers for Polymarket authentication
-    const l1Headers: L1Headers = {
-      POLY_ADDRESS: address,
-      POLY_SIGNATURE: signature,
-      POLY_TIMESTAMP: timestamp,
-      POLY_NONCE: nonce,
-    };
+    const result = await createOrDeriveClobApiKey(
+      clobHost,
+      buildClobL1Headers({ address, signature, timestamp, nonce })
+    );
 
-    // Step 1: Try to DERIVE an existing API key first. Most returning users
-    // already have credentials, and create can rotate keys unnecessarily.
-    const deriveResult = await deriveApiKey(clobHost, l1Headers);
-
-    if (deriveResult.success && deriveResult.data) {
-      trackApiKeyEvent(address, "trading_api_key_derived", "derive");
+    if (result.success && result.data && result.method) {
+      trackApiKeyEvent(
+        address,
+        result.method === "derive"
+          ? "trading_api_key_derived"
+          : "trading_api_key_created",
+        result.method
+      );
       return NextResponse.json({
         success: true,
-        credentials: deriveResult.data,
-        method: "derive",
-      });
-    }
-
-    // Step 2: If derive failed, CREATE a new API key for first-time users.
-    const createResult = await createApiKey(clobHost, l1Headers);
-
-    if (createResult.success && createResult.data) {
-      trackApiKeyEvent(address, "trading_api_key_created", "create");
-      return NextResponse.json({
-        success: true,
-        credentials: createResult.data,
-        method: "create",
+        credentials: result.data,
+        method: result.method,
       });
     }
 
     // Both create and derive failed
     log.error("auth.both_failed", {
-      createError: createResult.error,
-      deriveError: deriveResult.error,
+      createError: result.createError,
+      deriveError: result.deriveError,
     });
 
     // Provide helpful error message
     let errorMessage = "Failed to create or retrieve API credentials.";
 
     if (
-      createResult.error?.includes("not enabled") ||
-      deriveResult.error?.includes("not enabled")
+      result.createError?.includes("not enabled") ||
+      result.deriveError?.includes("not enabled")
     ) {
       errorMessage =
         "Your wallet is not enabled for trading. Please complete the wallet setup steps first (Deploy wallet & Approve trading tokens).";
     } else if (
-      createResult.error?.includes("signature") ||
-      deriveResult.error?.includes("signature")
+      result.createError?.includes("signature") ||
+      result.deriveError?.includes("signature")
     ) {
       errorMessage = "Signature verification failed. Please try signing again.";
     }

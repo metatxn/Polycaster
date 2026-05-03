@@ -9,7 +9,7 @@ import {
 } from "@/lib/lcp-images";
 import { buildPageMetadata } from "@/lib/seo";
 import { getInitialEventsByTag } from "@/lib/server-cache";
-import { isSportSubSlug, SPORT_CATEGORIES } from "@/lib/sport-categories";
+import { getSportEntry, isSportSubSlug } from "@/lib/sport-categories";
 
 interface SportSubPageProps {
   params: Promise<{ sport: string }>;
@@ -20,9 +20,7 @@ export async function generateMetadata({
 }: SportSubPageProps): Promise<Metadata> {
   const { sport } = await params;
   const normalized = sport.trim().toLowerCase();
-  const label =
-    SPORT_CATEGORIES.find((category) => category.value === normalized)?.label ||
-    normalized.toUpperCase();
+  const label = getSportEntry(normalized)?.label || normalized.toUpperCase();
 
   return buildPageMetadata({
     title: `${label} Prediction Markets`,
@@ -35,9 +33,9 @@ export default async function SportSubPage({ params }: SportSubPageProps) {
   const { sport } = await params;
   const normalized = sport.trim().toLowerCase();
 
-  // Empty slug slips us back to the overview route.
+  // Empty slug slips us back to the live sports landing.
   if (!normalized) {
-    permanentRedirect("/events/sports");
+    permanentRedirect("/events/sports/live");
   }
 
   // URL came in as a different case / stray slash — canonicalize.
@@ -49,7 +47,15 @@ export default async function SportSubPage({ params }: SportSubPageProps) {
     notFound();
   }
 
-  const initialData = await getInitialEventsByTag(normalized);
+  // URL slug is what the user types; tagSlug is what Polymarket Gamma
+  // indexes by. Most match, but a handful differ (e.g. /brasileirao-a → bra).
+  // When the entry has a Polymarket series ID, prefer that — it filters to
+  // exactly the events Polymarket's own UI shows for that league/season.
+  const entry = getSportEntry(normalized);
+  const initialData = await getInitialEventsByTag(
+    entry?.tagSlug || normalized,
+    entry?.seriesId
+  );
 
   initialData?.events?.slice(0, PRIORITY_EVENT_CARD_COUNT).forEach((event) => {
     if (event.image) {

@@ -218,7 +218,7 @@ export function SellPositionModal({
                       : "text-red-600 dark:text-red-400"
                   }`}
                 >
-                  {formatCurrency(position.unrealizedPnl, true)} (
+                  {formatCurrency(position.unrealizedPnl)} (
                   {formatPercent(position.unrealizedPnlPercent)})
                 </p>
               </div>

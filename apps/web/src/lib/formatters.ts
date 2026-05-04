@@ -58,8 +58,7 @@ export function formatCurrencyCompact(value: number, showSign = false): string {
  * Format percentage values (e.g., +12.34%)
  */
 export function formatPercent(value: number): string {
-  const sign = value >= 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 /**

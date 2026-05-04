@@ -34,6 +34,7 @@ import type { TradingFormProps } from "../types";
 
 const DEFAULT_MAX_SLIPPAGE_PERCENT = 2;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+const APPROVAL_CHECK_BUCKET_RAW = BigInt(10) ** BigInt(PUSD_DECIMALS);
 const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
   DEFAULT_APPROVAL_AMOUNT
 );
@@ -319,11 +320,34 @@ export function useTradingFormState({
       .toString();
   }, [approvalGrantAmountRaw]);
 
+  const bucketedRequiredApprovalAmountRaw = useMemo(() => {
+    if (requiredApprovalAmountRaw <= BigInt(0)) return BigInt(0);
+    return (
+      ((requiredApprovalAmountRaw + APPROVAL_CHECK_BUCKET_RAW - BigInt(1)) /
+        APPROVAL_CHECK_BUCKET_RAW) *
+      APPROVAL_CHECK_BUCKET_RAW
+    );
+  }, [requiredApprovalAmountRaw]);
+
+  // The market order notional can move on every order book tick. Keep approval
+  // checks close to the actual required amount, but debounce and bucket them so
+  // cent-level quote movement does not create distinct Polygon multicalls.
+  const [tradingApprovalCheckAmountRaw, setTradingApprovalCheckAmountRaw] =
+    useState(bucketedRequiredApprovalAmountRaw);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setTradingApprovalCheckAmountRaw(bucketedRequiredApprovalAmountRaw);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [bucketedRequiredApprovalAmountRaw]);
+
   const shouldCheckTradingApprovals =
     isConnected &&
     hasProxyWallet &&
     !!proxyAddress &&
-    requiredApprovalAmountRaw > BigInt(0);
+    tradingApprovalCheckAmountRaw > BigInt(0);
 
   const {
     data: tradingApprovalStatus,
@@ -334,15 +358,16 @@ export function useTradingFormState({
       "tradingApprovals",
       proxyAddress,
       hasProxyWallet,
-      requiredApprovalAmountRaw.toString(),
+      tradingApprovalCheckAmountRaw.toString(),
     ],
     queryFn: () =>
-      checkAllApprovals(proxyAddress || "", requiredApprovalAmountRaw),
+      checkAllApprovals(proxyAddress || "", tradingApprovalCheckAmountRaw),
     enabled: shouldCheckTradingApprovals,
     // This query is the ticket's approval gate. Keep it fresh enough that the
     // button matches the order pre-flight, without polling every keystroke.
     staleTime: 30_000,
     refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
   });
   const hasMissingTradingApprovals =
     shouldCheckTradingApprovals &&

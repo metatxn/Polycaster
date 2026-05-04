@@ -40,8 +40,7 @@ function formatCurrency(value: number): string {
  * Format percentage
  */
 function formatPercent(value: number): string {
-  const sign = value >= 0 ? "+" : "";
-  return `${sign}${value.toFixed(1)}%`;
+  return `${value.toFixed(1)}%`;
 }
 
 /**

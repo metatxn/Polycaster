@@ -2,21 +2,20 @@
 
 import { useAppKit } from "@reown/appkit/react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDownToLine, ArrowUpFromLine, Check, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConnection } from "wagmi";
 import { ChromeHeader } from "@/components/app-layout";
 import { DepositModal } from "@/components/deposit-modal";
-import { EditorialHero, HeroRefreshButton } from "@/components/editorial-hero";
+import { EditorialHero } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
-import { PnLChart } from "@/components/pnl-chart";
 import { HistoryTable } from "@/components/portfolio/history-table";
+import { PortfolioLedgerHeader } from "@/components/portfolio/ledger-header";
 import { OrdersTable } from "@/components/portfolio/orders-table";
+import { PortfolioPnlCard } from "@/components/portfolio/pnl-card";
 import { PositionsTable } from "@/components/portfolio/positions-table";
-import { SearchBar } from "@/components/portfolio/search-bar";
 import { SellPositionModal } from "@/components/portfolio/sell-position-modal";
-import { TabNav } from "@/components/portfolio/tab-nav";
+import { PortfolioStatsCard } from "@/components/portfolio/stats-card";
 import type {
   PnLFilter,
   Position,
@@ -25,7 +24,7 @@ import type {
   TabType,
   Trade,
 } from "@/components/portfolio/types";
-import { PullStat, PullStatGrid, TrendGlyph } from "@/components/pull-stat";
+import { PortfolioUtilityRow } from "@/components/portfolio/utility-row";
 import { WithdrawModal } from "@/components/withdraw-modal";
 import { useCtfOperations } from "@/hooks/use-ctf-operations";
 import { useCancelOrder, useOpenOrders } from "@/hooks/use-open-orders";
@@ -34,7 +33,6 @@ import { useUserDetails } from "@/hooks/use-user-details";
 import { useUserPnL } from "@/hooks/use-user-pnl";
 import { useUserPositions } from "@/hooks/use-user-positions";
 import { useUserTrades } from "@/hooks/use-user-trades";
-import { formatAddress, formatCurrency } from "@/lib/formatters";
 
 function areClosedTimesEqual(
   prev: Record<string, string>,
@@ -52,7 +50,6 @@ export default function PortfolioPage() {
   const { open } = useAppKit();
   const [activeTab, setActiveTab] = useState<TabType>("positions");
   const [searchQuery, setSearchQuery] = useState("");
-  const [copied, setCopied] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
 
@@ -117,15 +114,6 @@ export default function PortfolioPage() {
   // Sell position modal state
   const [sellPosition, setSellPosition] = useState<Position | null>(null);
   const [showSellModal, setShowSellModal] = useState(false);
-
-  // Handlers
-  const handleCopy = () => {
-    if (proxyAddress) {
-      navigator.clipboard.writeText(proxyAddress);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
 
   const handleRefresh = () => {
     refetchPositions();
@@ -218,7 +206,6 @@ export default function PortfolioPage() {
       positionsData?.positions?.reduce((sum, p) => sum + p.initialValue, 0) ?? 0
     );
   }, [positionsData?.positions]);
-  const pnlPercent = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
 
   // Resolve accurate closedTime timestamps for lost positions via same-origin API.
   const lostPositions = useMemo(
@@ -363,141 +350,44 @@ export default function PortfolioPage() {
         animate={{ opacity: 1 }}
         className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-8"
       >
-        <EditorialHero
-          breadcrumbs={[
-            { label: "Markets", href: "/markets" },
-            { label: "Portfolio" },
-          ]}
-          title={<span>Portfolio</span>}
-          subtitle="Every position, order and realised dollar — in one ledger. Refreshed on demand."
-          rightSlot={
-            <HeroRefreshButton
-              onRefresh={handleRefresh}
-              isFetching={
-                loadingPositions ||
-                loadingPnl ||
-                loadingOrders ||
-                loadingTrades ||
-                loadingUserDetails ||
-                isProxyLoading
-              }
-            />
-          }
-          belowSlot={
-            <div className="mt-6 flex items-center justify-between gap-3 flex-wrap">
-              {proxyAddress && (
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="group inline-flex items-center gap-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <span className="font-mono text-[11px] sm:text-xs uppercase tracking-[0.12em]">
-                    {formatAddress(proxyAddress)}
-                  </span>
-                  {copied ? (
-                    <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <Copy className="h-3 w-3 opacity-60 group-hover:opacity-100" />
-                  )}
-                </button>
-              )}
-              {hasProxyWallet && proxyAddress && (
-                <div className="flex items-center gap-5">
-                  <button
-                    type="button"
-                    onClick={() => setShowDepositModal(true)}
-                    className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition-colors"
-                  >
-                    <ArrowDownToLine className="h-3 w-3" />
-                    <span className="border-b-2 border-foreground pb-0.5 group-hover:border-foreground/60 transition-colors">
-                      Deposit
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowWithdrawModal(true)}
-                    className="group inline-flex items-center gap-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    <ArrowUpFromLine className="h-3 w-3" />
-                    <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
-                      Withdraw
-                    </span>
-                  </button>
-                </div>
-              )}
-            </div>
+        <PortfolioUtilityRow
+          proxyAddress={proxyAddress ?? undefined}
+          hasProxyWallet={hasProxyWallet}
+          onDeposit={() => setShowDepositModal(true)}
+          onWithdraw={() => setShowWithdrawModal(true)}
+          onRefresh={handleRefresh}
+          isRefreshing={
+            loadingPositions ||
+            loadingPnl ||
+            loadingOrders ||
+            loadingTrades ||
+            loadingUserDetails ||
+            isProxyLoading
           }
         />
 
-        {/* Pull-numbers */}
-        <div className="mb-6">
-          <PullStatGrid cols={4}>
-            <PullStat
-              label="Portfolio Value"
-              value={formatCurrency(portfolioValue)}
-              caption="Cash + positions"
-              isLoading={loadingPositions || isProxyLoading}
+        <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div>
+            <PortfolioStatsCard
+              portfolioValue={portfolioValue}
+              openPositionsValue={openPositionsValue}
+              positionCount={positionsData?.summary.positionCount}
+              cashBalance={cashBalance}
+              totalPnl={totalPnl}
+              totalInvested={totalInvested}
+              isPortfolioLoading={loadingPositions || isProxyLoading}
+              isPositionsLoading={loadingPositions}
+              isCashLoading={isProxyLoading}
+              isPnlLoading={loadingPnl || loadingUserDetails}
             />
-            <PullStat
-              label="Open Positions"
-              value={formatCurrency(openPositionsValue)}
-              caption={
-                positionsData?.summary.positionCount
-                  ? `${positionsData.summary.positionCount} markets`
-                  : "—"
-              }
-              isLoading={loadingPositions}
-            />
-            <PullStat
-              label="Cash Balance"
-              value={formatCurrency(cashBalance)}
-              caption="USDC available"
-              isLoading={isProxyLoading}
-            />
-            <PullStat
-              label="Total P&L"
-              value={formatCurrency(totalPnl, true)}
-              caption={
-                totalInvested > 0
-                  ? `${pnlPercent >= 0 ? "+" : ""}${pnlPercent.toFixed(2)}% on cost`
-                  : "No cost basis yet"
-              }
-              valueClassName={
-                totalPnl >= 0
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-red-600 dark:text-red-400"
-              }
-              mark={
-                totalInvested > 0 ? (
-                  <TrendGlyph direction={totalPnl >= 0 ? "up" : "down"} />
-                ) : undefined
-              }
-              isLoading={loadingPnl || loadingUserDetails}
-            />
-          </PullStatGrid>
+          </div>
+          <div>
+            <PortfolioPnlCard userAddress={tradingAddress || undefined} />
+          </div>
         </div>
 
-        {/* P&L Chart */}
-        <section className="mb-6">
-          <div className="flex items-baseline justify-between mb-3">
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
-              §&nbsp;&nbsp;Performance
-            </h2>
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-              All time
-            </span>
-          </div>
-          <div className="border-y border-border/40 py-2">
-            <PnLChart userAddress={tradingAddress || undefined} height={160} />
-          </div>
-        </section>
-
-        {/* Tabs Content */}
         <section>
-          <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-3">
-            §&nbsp;&nbsp;Ledger
-          </h2>
-          <TabNav
+          <PortfolioLedgerHeader
             activeTab={activeTab}
             onTabChange={(tab) => {
               setActiveTab(tab);
@@ -505,26 +395,12 @@ export default function PortfolioPage() {
             }}
             positionCount={positionsData?.summary.positionCount}
             orderCount={ordersData?.count}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            pnlFilter={pnlFilter}
+            onPnlFilterChange={setPnlFilter}
           />
 
-          <div className="py-4 border-b border-border/40">
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder={`Search ${
-                activeTab === "positions"
-                  ? "markets"
-                  : activeTab === "orders"
-                    ? "orders"
-                    : "history"
-              }...`}
-              pnlFilter={pnlFilter}
-              onPnlFilterChange={setPnlFilter}
-              showFilter={activeTab === "positions"}
-            />
-          </div>
-
-          {/* Tab Content */}
           <AnimatePresence mode="wait">
             {activeTab === "positions" && (
               <motion.div

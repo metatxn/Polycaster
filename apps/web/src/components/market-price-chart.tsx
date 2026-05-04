@@ -515,9 +515,19 @@ export function MarketPriceChart({
     const plotBottom = containerH - timeAxisH;
     const plotRight = containerW - priceAxisW;
 
+    const LABEL_RESERVE = 200;
+    const flipped = x + LABEL_RESERVE > plotRight;
     const bottomBound = plotBottom - HALF - 4;
-    const topBound = HALF + 4;
+    // When labels flip left near the right edge, they share horizontal space
+    // with the timestamp badge. Keep the timestamp in the top slot and push
+    // high-price market pills below it.
+    const topBound = flipped ? 64 : HALF + 4;
     if (items.length > 0) {
+      if (items[0].y < topBound) {
+        const shift = topBound - items[0].y;
+        for (const it of items) it.y += shift;
+      }
+
       const overflow = items[items.length - 1].y - bottomBound;
       if (overflow > 0) {
         for (const it of items) it.y = Math.max(topBound, it.y - overflow);
@@ -533,9 +543,6 @@ export function MarketPriceChart({
     // Horizontal flip: if there isn't room for ~200px of label between
     // the cursor and the start of the price-scale gutter, anchor pills
     // to the LEFT of the cursor so they grow inward.
-    const LABEL_RESERVE = 200;
-    const flipped = x + LABEL_RESERVE > plotRight;
-
     setHoverLabels({ x, flipped, items });
   }, []);
 
@@ -638,6 +645,11 @@ export function MarketPriceChart({
           color: colors.crosshair,
           width: 1,
           style: 2 satisfies LineStyle, // dashed
+          // The chart renders its own timestamp badge. Leaving the native
+          // time-axis crosshair label enabled creates a second, wider date
+          // badge that can overlap bottom-aligned market labels on short
+          // ranges like 30M and 1H.
+          labelVisible: false,
           labelBackgroundColor: colors.text,
         },
         horzLine: {
@@ -769,23 +781,21 @@ export function MarketPriceChart({
 
         tooltip.innerHTML = `<div style="font-size:11px;color:${colors.text};font-weight:500;white-space:nowrap;">${dateLabel}</div>`;
 
-        // Pin the date badge to the top headroom of the plot, centered on the
-        // cursor X. The colored series flag pills (rendered separately above)
-        // track each series' Y value and flip horizontally when the cursor
-        // nears the right edge — if the date badge also followed the cursor
-        // Y, it would land on top of whichever flag pill happened to be
-        // closest. By living in the top strip (which is empty thanks to the
-        // 16% `scaleMargins.top` reserved for headroom), the badge can never
-        // collide with a flag pill regardless of cursor position.
+        // Keep the date badge in the chart's top headroom; high-price market
+        // pills are pushed below it by `updateHoverLabels` when they share
+        // the same right-edge space.
         const containerRect = container.getBoundingClientRect();
-        const tipWidth = tooltip.offsetWidth || 120;
+        tooltip.style.display = "block";
+        tooltip.style.visibility = "hidden";
+        const tipWidth = tooltip.offsetWidth || 136;
         const TOP_PADDING = 6;
         let left = point.x - tipWidth / 2;
         if (left < 4) left = 4;
         if (left + tipWidth > containerRect.width - 4) {
           left = containerRect.width - tipWidth - 4;
         }
-        tooltip.style.display = "block";
+
+        tooltip.style.visibility = "visible";
         tooltip.style.left = `${Math.max(0, left)}px`;
         tooltip.style.top = `${TOP_PADDING}px`;
       };

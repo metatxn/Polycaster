@@ -57,11 +57,15 @@ const READONLY_KEYS_STORAGE_KEY = "polymarket_readonly_keys";
 const credentialsCache = new Map<string, ApiKeyCreds | null>();
 const readonlyKeysCache = new Map<string, string[]>();
 
+function getCacheKey(address: string): string {
+  return `${CLOB_BASE_URL}_${address.toLowerCase()}`;
+}
+
 /**
  * Get the storage key for a specific address
  */
 function getStorageKey(address: string): string {
-  return `${CREDS_STORAGE_KEY}_${address.toLowerCase()}`;
+  return `${CREDS_STORAGE_KEY}_${CLOB_BASE_URL}_${address.toLowerCase()}`;
 }
 
 /**
@@ -72,7 +76,7 @@ function getStorageKey(address: string): string {
 function getStoredCredentials(address: string): ApiKeyCreds | null {
   if (typeof window === "undefined") return null;
 
-  const cacheKey = address.toLowerCase();
+  const cacheKey = getCacheKey(address);
 
   // Return cached value if available (defensive copy to prevent cache corruption)
   if (credentialsCache.has(cacheKey)) {
@@ -114,7 +118,7 @@ function getStoredCredentials(address: string): ApiKeyCreds | null {
  */
 function storeCredentials(address: string, creds: ApiKeyCreds): void {
   if (typeof window === "undefined") return;
-  const cacheKey = address.toLowerCase();
+  const cacheKey = getCacheKey(address);
   try {
     // lgtm[js/clear-text-storage-of-sensitive-data]
     sessionStorage.setItem(getStorageKey(address), JSON.stringify(creds));
@@ -134,7 +138,7 @@ function storeCredentials(address: string, creds: ApiKeyCreds): void {
  */
 function clearStoredCredentials(address: string): void {
   if (typeof window === "undefined") return;
-  const cacheKey = address.toLowerCase();
+  const cacheKey = getCacheKey(address);
   sessionStorage.removeItem(getStorageKey(address));
   credentialsCache.delete(cacheKey);
 }
@@ -143,7 +147,7 @@ function clearStoredCredentials(address: string): void {
  * Get the storage key for read-only keys
  */
 function getReadonlyKeysStorageKey(address: string): string {
-  return `${READONLY_KEYS_STORAGE_KEY}_${address.toLowerCase()}`;
+  return `${READONLY_KEYS_STORAGE_KEY}_${CLOB_BASE_URL}_${address.toLowerCase()}`;
 }
 
 /**
@@ -153,7 +157,7 @@ function getReadonlyKeysStorageKey(address: string): string {
 function getStoredReadonlyKeys(address: string): string[] {
   if (typeof window === "undefined") return [];
 
-  const cacheKey = address.toLowerCase();
+  const cacheKey = getCacheKey(address);
 
   // Return cached value if available
   if (readonlyKeysCache.has(cacheKey)) {
@@ -186,7 +190,7 @@ function getStoredReadonlyKeys(address: string): string[] {
  */
 function storeReadonlyKeys(address: string, keys: string[]): void {
   if (typeof window === "undefined") return;
-  const cacheKey = address.toLowerCase();
+  const cacheKey = getCacheKey(address);
   try {
     // lgtm[js/clear-text-storage-of-sensitive-data]
     sessionStorage.setItem(
@@ -209,7 +213,7 @@ function storeReadonlyKeys(address: string, keys: string[]): void {
  */
 function clearStoredReadonlyKeys(address: string): void {
   if (typeof window === "undefined") return;
-  const cacheKey = address.toLowerCase();
+  const cacheKey = getCacheKey(address);
   sessionStorage.removeItem(getReadonlyKeysStorageKey(address));
   readonlyKeysCache.delete(cacheKey);
 }
@@ -441,7 +445,7 @@ export function useClobCredentials() {
   const refresh = useCallback(() => {
     if (address) {
       // Clear cache to force reading from sessionStorage
-      const cacheKey = address.toLowerCase();
+      const cacheKey = getCacheKey(address);
       credentialsCache.delete(cacheKey);
       readonlyKeysCache.delete(cacheKey);
       const stored = getStoredCredentials(address);

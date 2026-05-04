@@ -124,6 +124,7 @@ const liveInjectedCardRefs = new Map<string, LiveInjectedCardRef>();
 let postsSinceLastInjection = 0;
 let totalPostsProcessed = 0;
 let isAnalyzing = false;
+let invalidExtensionContextLogged = false;
 // PERFORMANCE: LRU Set replaces plain Set — O(1) eviction, no Array.from() copies
 const processedPostKeys = new LRUSet(150);
 const MAX_INJECTED_MARKETS = 20; // Keep bounded recent history for notification stack (active + scrolled-out)
@@ -180,6 +181,24 @@ interface AllocatedInjection {
 interface PendingPostEntry {
   post: Element;
   key: string | null;
+}
+
+function hasValidExtensionContextForProcessing(context: string): boolean {
+  const isValid = window.KNOWW_UTILS?.isExtensionContextValid?.() ?? true;
+  if (isValid) {
+    invalidExtensionContextLogged = false;
+    return true;
+  }
+
+  if (!invalidExtensionContextLogged) {
+    window.KNOWW_UTILS?.log(
+      `🛑 [${context}] Extension context invalidated. Reload this page after updating or reloading Knoww to reconnect market search.`
+    );
+    invalidExtensionContextLogged = true;
+  }
+
+  window.KNOWW_INJECTION_WATCHER?.stop?.();
+  return false;
 }
 
 function isScoreMarketsSuccessResponse(
@@ -2002,6 +2021,10 @@ async function processVisiblePosts(options: {
     false;
   const { itemSelector } = options;
 
+  if (!hasValidExtensionContextForProcessing("PostScanner")) {
+    return;
+  }
+
   // Debug: Log that we're scanning for posts
   if (isDebug) {
     log(`\n🔄 [PostScanner] ========== SCAN START ==========`);
@@ -2345,6 +2368,10 @@ async function processQueuedPosts(options: {
   const { log } = window.KNOWW_UTILS;
   const { CONFIG } = window.KNOWW_CONFIG;
   const { itemSelector } = options;
+
+  if (!hasValidExtensionContextForProcessing("QueueProcessor")) {
+    return;
+  }
 
   if (document.hidden || isAnalyzing || pendingPostsQueue.length === 0) {
     return;

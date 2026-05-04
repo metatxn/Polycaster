@@ -27,7 +27,10 @@ const log = createLogger("ctf-operations");
 
 import { useCallback, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
-import { executeViaRelayer } from "@/lib/relayer-client";
+import {
+  executeViaDepositWallet,
+  executeViaRelayer,
+} from "@/lib/relayer-client";
 import { useTradingWalletMode } from "./use-trading-wallet-mode";
 
 // ============================================================================
@@ -62,7 +65,7 @@ async function createCtfPublicClient() {
 export function useCtfOperations() {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
-  const { isEoaMode } = useTradingWalletMode();
+  const { isEoaMode, mode: walletMode } = useTradingWalletMode();
 
   const [state, setState] = useState<CTFOperationState>({
     isLoading: false,
@@ -93,11 +96,18 @@ export function useCtfOperations() {
         return;
       }
 
+      if (walletMode === "deposit") {
+        await executeViaDepositWallet(walletClient, address as `0x${string}`, [
+          approvalTx,
+        ]);
+        return;
+      }
+
       await executeViaRelayer(walletClient, address as `0x${string}`, [
         approvalTx,
       ]);
     },
-    [walletClient, address, isEoaMode]
+    [walletClient, address, isEoaMode, walletMode]
   );
 
   /**
@@ -130,11 +140,16 @@ export function useCtfOperations() {
           return { success: true, txHash: hash };
         }
 
-        const result = await executeViaRelayer(
-          walletClient,
-          address as `0x${string}`,
-          [transaction]
-        );
+        const result =
+          walletMode === "deposit"
+            ? await executeViaDepositWallet(
+                walletClient,
+                address as `0x${string}`,
+                [transaction]
+              )
+            : await executeViaRelayer(walletClient, address as `0x${string}`, [
+                transaction,
+              ]);
 
         const txHash = result.transactionHash;
         setState({ isLoading: false, error: null, txHash });
@@ -149,7 +164,7 @@ export function useCtfOperations() {
         return { success: false, error: errorMessage };
       }
     },
-    [walletClient, address, isEoaMode]
+    [walletClient, address, isEoaMode, walletMode]
   );
 
   /**

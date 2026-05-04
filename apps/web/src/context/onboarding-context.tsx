@@ -94,6 +94,13 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   const pathname = usePathname();
   const isPrivacyPage =
     pathname === "/privacy" || pathname.startsWith("/privacy/");
+  // The marketing landing page renders inside `fixed inset-0 z-60`, which
+  // sits above this dialog's z-50 portal. If the dialog auto-opens here it
+  // is hidden visually but still mounts a polygonscan `<a>` whose hit-box
+  // can capture pointer events meant for the hero CTAs — so suppress the
+  // auto-open on the landing page entirely. Dialog still opens normally
+  // once the user navigates into the app.
+  const isLandingPage = pathname === "/";
 
   // Track if we've already auto-shown the popup this session
   // This prevents showing it multiple times if user dismisses it
@@ -224,7 +231,8 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
       !isCheckingSetup &&
       needsTradingSetup &&
       !hasAutoShownRef.current &&
-      !isPrivacyPage
+      !isPrivacyPage &&
+      !isLandingPage
     ) {
       const timer = setTimeout(() => {
         setShowOnboarding(true);
@@ -233,14 +241,22 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
 
       return () => clearTimeout(timer);
     }
-  }, [status, isCheckingSetup, needsTradingSetup, isPrivacyPage]);
+  }, [
+    status,
+    isCheckingSetup,
+    needsTradingSetup,
+    isPrivacyPage,
+    isLandingPage,
+  ]);
 
-  // Never show onboarding on the Privacy Policy page (auto-close if open).
+  // Never show onboarding on the Privacy Policy or landing pages (auto-close
+  // if open) — the landing page's z-60 wrapper hides the dialog visually but
+  // its hit-boxes still capture pointer events from the hero CTAs.
   useEffect(() => {
-    if (isPrivacyPage && showOnboarding) {
+    if ((isPrivacyPage || isLandingPage) && showOnboarding) {
       setShowOnboarding(false);
     }
-  }, [isPrivacyPage, showOnboarding]);
+  }, [isPrivacyPage, isLandingPage, showOnboarding]);
 
   const handleComplete = useCallback(() => {
     setShowOnboarding(false);
@@ -280,7 +296,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
       <Dialog open={showOnboarding} onOpenChange={setShowOnboarding}>
         <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
           <DialogHeader className="sr-only">
-            <DialogTitle>Setup Trading Account</DialogTitle>
+            <DialogTitle>Set Up Trading Account</DialogTitle>
             <DialogDescription>
               Complete a few one-time steps — wallet connection, trading wallet
               deployment, and approvals — to start placing orders on Polymarket.

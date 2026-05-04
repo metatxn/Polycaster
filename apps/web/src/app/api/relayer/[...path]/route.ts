@@ -9,17 +9,19 @@ const log = createLogger("api.relayer");
 /**
  * Server-side proxy for Polymarket's V2 Relayer.
  *
- * The web app and extension call this route instead of relayer-v2.polymarket.com
+ * The web app and extension call this route instead of Polymarket's relayer
  * directly. Secrets stay server-side — they never appear in the browser bundle,
  * extension bundle, or network requests from either client.
  *
  * Flow:
- *   Browser    → POST /api/relayer/{path} → this route → relayer-v2.polymarket.com/{path}
- *   Extension  → POST /api/relayer/{path} → this route → relayer-v2.polymarket.com/{path}
+ *   Browser    → POST /api/relayer/{path} → this route → Polymarket relayer/{path}
+ *   Extension  → POST /api/relayer/{path} → this route → Polymarket relayer/{path}
  *
  * Auth strategy:
- *   - SAFE-CREATE deploy requests use builder-HMAC headers, matching the
- *     published Polymarket builder SDK's deploy path.
+ *   - SAFE-CREATE and WALLET-CREATE deploy requests prefer builder-HMAC
+ *     headers, matching the published Polymarket builder SDK's deploy paths,
+ *     and fall back to RELAYER_API_KEY auth where the relayer environment
+ *     expects V2 key auth.
  *   - All other upstream relayer calls use RELAYER_API_KEY +
  *     RELAYER_API_KEY_ADDRESS headers.
  *
@@ -33,7 +35,7 @@ const log = createLogger("api.relayer");
  * Environment variables (server-only, NO NEXT_PUBLIC_ prefix):
  *   POLY_RELAYER_API_KEY         – Polymarket V2 relayer API key
  *   POLY_RELAYER_API_KEY_ADDRESS – Address that owns the relayer key
- *   BUILDER_SIGNING_SERVER_URL   – signing server for SAFE-CREATE
+ *   BUILDER_SIGNING_SERVER_URL   – signing server for SAFE/WALLET-CREATE
  *   INTERNAL_AUTH_TOKEN          – bearer token for the signing server
  *   EXTENSION_SESSION_SECRET     – extension session signing secret
  */
@@ -66,7 +68,7 @@ async function getBuilderHmacHeaders(
   if (!signUrl || !token) {
     log.error("signing.config.missing", {
       reason:
-        "BUILDER_SIGNING_SERVER_URL / INTERNAL_AUTH_TOKEN not configured for SAFE-CREATE",
+        "BUILDER_SIGNING_SERVER_URL / INTERNAL_AUTH_TOKEN not configured for relayer create auth",
     });
     return null;
   }
@@ -92,6 +94,21 @@ async function getBuilderHmacHeaders(
     log.error("signing.fetch.failed", { err });
     return null;
   }
+}
+
+function getRelayerApiKeyHeaders(): Record<string, string> | null {
+  const apiKey = process.env.POLY_RELAYER_API_KEY;
+  const apiKeyAddress = process.env.POLY_RELAYER_API_KEY_ADDRESS;
+  if (!apiKey || !apiKeyAddress) {
+    log.error("config.missing", {
+      reason: "POLY_RELAYER_API_KEY(_ADDRESS) not configured",
+    });
+    return null;
+  }
+  return {
+    RELAYER_API_KEY: apiKey,
+    RELAYER_API_KEY_ADDRESS: apiKeyAddress,
+  };
 }
 
 function getContentLength(request: NextRequest): number | null {
@@ -213,19 +230,20 @@ async function proxy(
   const safeCreateBody =
     method === "POST" &&
     pathSegments[0] === "submit" &&
-    submitType === "SAFE-CREATE" &&
+    (submitType === "SAFE-CREATE" || submitType === "WALLET-CREATE") &&
     typeof body === "string"
       ? body
       : null;
   const safeSubmitBody =
     method === "POST" &&
     pathSegments[0] === "submit" &&
-    submitType === "SAFE" &&
+    (submitType === "SAFE" || submitType === "WALLET") &&
     typeof body === "string"
       ? body
       : null;
 
   const upstreamHeaders: Record<string, string> = {};
+  let usedBuilderHmac = false;
   if (method === "POST") {
     upstreamHeaders["Content-Type"] = "application/json";
   }
@@ -236,27 +254,28 @@ async function proxy(
       `/${pathSegments.join("/")}`,
       safeCreateBody
     );
-    if (!hmacHeaders) {
-      return NextResponse.json(
-        { error: "Relayer not configured" },
-        { status: 503 }
-      );
+    if (hmacHeaders) {
+      Object.assign(upstreamHeaders, hmacHeaders);
+      usedBuilderHmac = true;
+    } else {
+      const apiKeyHeaders = getRelayerApiKeyHeaders();
+      if (!apiKeyHeaders) {
+        return NextResponse.json(
+          { error: "Relayer not configured" },
+          { status: 503 }
+        );
+      }
+      Object.assign(upstreamHeaders, apiKeyHeaders);
     }
-    Object.assign(upstreamHeaders, hmacHeaders);
   } else {
-    const apiKey = process.env.POLY_RELAYER_API_KEY;
-    const apiKeyAddress = process.env.POLY_RELAYER_API_KEY_ADDRESS;
-    if (!apiKey || !apiKeyAddress) {
-      log.error("config.missing", {
-        reason: "POLY_RELAYER_API_KEY(_ADDRESS) not configured",
-      });
+    const apiKeyHeaders = getRelayerApiKeyHeaders();
+    if (!apiKeyHeaders) {
       return NextResponse.json(
         { error: "Relayer not configured" },
         { status: 503 }
       );
     }
-    upstreamHeaders.RELAYER_API_KEY = apiKey;
-    upstreamHeaders.RELAYER_API_KEY_ADDRESS = apiKeyAddress;
+    Object.assign(upstreamHeaders, apiKeyHeaders);
   }
 
   const controller = new AbortController();
@@ -287,6 +306,28 @@ async function proxy(
     }
 
     upstreamBody = await upstream.text();
+
+    if (upstream.status === 400 && safeCreateBody !== null && usedBuilderHmac) {
+      log.warn("create.builderHmac.rejected.retryingRelayerKey", {
+        path: pathSegments.join("/"),
+        status: upstream.status,
+        type: submitType,
+        body: upstreamBody.slice(0, 500),
+      });
+      const apiKeyHeaders = getRelayerApiKeyHeaders();
+      if (apiKeyHeaders) {
+        upstream = await fetch(upstreamUrl, {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            ...apiKeyHeaders,
+          },
+          body: safeCreateBody,
+          signal: controller.signal,
+        });
+        upstreamBody = await upstream.text();
+      }
+    }
 
     if (upstream.status === 400 && safeSubmitBody !== null) {
       log.warn("safe.relayerKey.rejected.retryingHmac", {

@@ -3563,6 +3563,15 @@
   font-family: inherit !important;
 }
 
+.knoww-tp-wallet-mode-option:first-child {
+  grid-column: 1 / -1 !important;
+}
+
+.knoww-tp-wallet-mode-options.no-safe
+  .knoww-tp-wallet-mode-option:last-child:not(:first-child) {
+  grid-column: 1 / -1 !important;
+}
+
 .knoww-tp-wallet-mode-option.active {
   border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
   background: rgba(29, 155, 240, 0.1) !important;
@@ -3605,12 +3614,71 @@
 .knoww-tp-btn-connect:hover {
   background: rgb(0, 166, 110) !important;
 }
+.knoww-tp-btn-connect.secondary {
+  background: transparent !important;
+  border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.14)) !important;
+  color: var(--knoww-text, #e7e9ea) !important;
+  box-shadow: none !important;
+}
+.knoww-tp-btn-connect.secondary:hover {
+  background: var(--knoww-card-bg, rgba(255, 255, 255, 0.08)) !important;
+  border-color: var(--knoww-accent, rgb(0, 186, 124)) !important;
+}
 .knoww-tp-btn-connect:active {
   transform: scale(0.97) !important;
 }
 .knoww-tp-btn-connect svg {
   width: 16px !important;
   height: 16px !important;
+}
+
+.knoww-tp-connect-divider {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  max-width: 240px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+}
+.knoww-tp-connect-divider::before,
+.knoww-tp-connect-divider::after {
+  content: "" !important;
+  height: 1px !important;
+  flex: 1 1 0 !important;
+  background: var(--knoww-border, rgba(255, 255, 255, 0.12)) !important;
+}
+
+.knoww-tp-mobile-qr {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+.knoww-tp-mobile-qr-code {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 212px !important;
+  height: 212px !important;
+  padding: 8px !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  color: #050505 !important;
+}
+.knoww-tp-mobile-qr-code svg {
+  display: block !important;
+  width: 196px !important;
+  height: 196px !important;
+}
+.knoww-tp-mobile-qr-caption {
+  max-width: 260px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
 }
 
 .knoww-tp-wallet-list {

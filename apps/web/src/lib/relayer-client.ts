@@ -2,7 +2,7 @@
  * Polymarket V2 Relayer Client (web).
  *
  * Replaces @polymarket/builder-relayer-client with a thin custom client that:
- *   - Talks to /api/relayer/[...path] (which proxies to relayer-v2.polymarket.com
+ *   - Talks to /api/relayer/[...path] (which proxies to Polymarket's relayer
  *     and adds RELAYER_API_KEY headers server-side)
  *   - Builds Safe multiSend transactions with viem
  *   - Signs SafeTx EIP-712 with the user's viem WalletClient
@@ -13,13 +13,16 @@
  */
 
 import {
-  assertRelayerSubmitAccepted,
-  buildSafeCreateSubmitRequest,
-  buildSafeSubmitRequest,
+  deployDepositWalletRelayerWallet,
+  deploySafeRelayerWallet,
+  derivePolymarketDepositWallet,
+  executeDepositWalletRelayerTransaction,
+  executeSafeRelayerTransaction,
   pollRelayerTransaction,
-  prepareSafeCreate,
-  prepareSafeExecution,
   type RelayerExecuteResult,
+  type RelayerExecutionTransport,
+  type RelayerNonceType,
+  type RelayerSigner,
   type RelayerSubmitResponse,
   type RelayerTransaction,
   type RelayerTxStatus,
@@ -28,7 +31,10 @@ import type { Address, WalletClient } from "viem";
 
 const PROXY_BASE = "/api/relayer";
 
-export { derivePolymarketSafe } from "@knoww/shared-types/relayer";
+export {
+  derivePolymarketDepositWallet,
+  derivePolymarketSafe,
+} from "@knoww/shared-types/relayer";
 
 // ── HTTP helpers (always go through /api/relayer/[...path]) ──
 
@@ -69,16 +75,19 @@ async function proxyPost<T>(path: string, body: unknown): Promise<T> {
 
 // ── Public API ──
 
-export async function getDeployed(safeAddress: Address): Promise<boolean> {
-  const res = await proxyGet<{ deployed: boolean }>("deployed", {
-    address: safeAddress,
-  });
+export async function getDeployed(
+  walletAddress: Address,
+  type?: RelayerNonceType
+): Promise<boolean> {
+  const params: Record<string, string> = { address: walletAddress };
+  if (type) params.type = type;
+  const res = await proxyGet<{ deployed: boolean }>("deployed", params);
   return res.deployed;
 }
 
 export async function getNonce(
   eoaAddress: Address,
-  type: "SAFE" | "PROXY" = "SAFE"
+  type: RelayerNonceType = "SAFE"
 ): Promise<string> {
   const res = await proxyGet<{ nonce: string }>("nonce", {
     address: eoaAddress,
@@ -91,6 +100,16 @@ export async function getTransaction(
   transactionID: string
 ): Promise<RelayerTxStatus[]> {
   return proxyGet<RelayerTxStatus[]>("transaction", { id: transactionID });
+}
+
+const relayerTransport: RelayerExecutionTransport = {
+  getNonce,
+  submit: (request) => proxyPost<RelayerSubmitResponse>("submit", request),
+  getTransaction,
+};
+
+function toRelayerSigner(walletClient: WalletClient): RelayerSigner {
+  return walletClient as unknown as RelayerSigner;
 }
 
 /**
@@ -129,40 +148,12 @@ export async function executeViaRelayer(
   eoaAddress: Address,
   transactions: RelayerTransaction[]
 ): Promise<RelayerExecuteResult> {
-  if (transactions.length === 0) {
-    throw new Error("No transactions to execute");
-  }
-
-  const nonce = await getNonce(eoaAddress, "SAFE");
-  const prepared = prepareSafeExecution({
+  return executeSafeRelayerTransaction({
+    signer: toRelayerSigner(walletClient),
+    transport: relayerTransport,
     eoaAddress,
     transactions,
-    nonce,
   });
-
-  const signature = await walletClient.signMessage({
-    account: eoaAddress,
-    message: { raw: prepared.hash },
-  });
-
-  // Post-Apr-21-2026: /submit returns immediately with { transactionID, state }
-  // — no `transactionHash`. We obtain the on-chain hash by polling /transaction
-  // with `transactionID` in `pollUntilConfirmed` below.
-  const submitRes = await proxyPost<RelayerSubmitResponse>("submit", {
-    ...buildSafeSubmitRequest({
-      eoaAddress,
-      prepared,
-      signature,
-    }),
-  });
-
-  assertRelayerSubmitAccepted(submitRes, "submit");
-
-  const txHash = await pollUntilConfirmed(submitRes.transactionID);
-  return {
-    transactionID: submitRes.transactionID,
-    transactionHash: txHash,
-  };
 }
 
 /**
@@ -186,34 +177,46 @@ export async function deploySafe(
   walletClient: WalletClient,
   eoaAddress: Address
 ): Promise<RelayerExecuteResult> {
-  const prepared = prepareSafeCreate({ eoaAddress });
-
-  // CreateProxy EIP-712: domain includes a `name`, unlike SafeTx.
-  const signature = await walletClient.signTypedData({
-    account: eoaAddress,
-    ...prepared.typedData,
+  return deploySafeRelayerWallet({
+    signer: toRelayerSigner(walletClient),
+    transport: relayerTransport,
+    eoaAddress,
   });
+}
 
-  // SAFE-CREATE does not take a nonce — the factory deploys at a deterministic
-  // CREATE2 address with no pre-existing state. The upstream /nonce endpoint
-  // only accepts `type=SAFE | PROXY` (per the public OpenAPI spec); requesting
-  // `SAFECREATE` returns 400 "bad request".
-  //
-  // Post-Apr-21-2026: /submit returns immediately with { transactionID, state };
-  // the on-chain hash is only available from /transaction polling.
-  const submitRes = await proxyPost<RelayerSubmitResponse>("submit", {
-    ...buildSafeCreateSubmitRequest({
-      eoaAddress,
-      prepared,
-      signature,
-    }),
+/**
+ * Execute a batch of calls via the user's deposit wallet.
+ *
+ * This is the new Polymarket onboarding path for new API users. The owner EOA
+ * signs a DepositWallet Batch EIP-712 payload, and the relayer submits it as a
+ * `WALLET` transaction. The signature is deliberately not the CLOB POLY_1271
+ * order signature.
+ */
+export async function executeViaDepositWallet(
+  walletClient: WalletClient,
+  ownerAddress: Address,
+  transactions: RelayerTransaction[],
+  walletAddress: Address = derivePolymarketDepositWallet(ownerAddress)
+): Promise<RelayerExecuteResult> {
+  return executeDepositWalletRelayerTransaction({
+    signer: toRelayerSigner(walletClient),
+    transport: relayerTransport,
+    ownerAddress,
+    transactions,
+    walletAddress,
   });
+}
 
-  assertRelayerSubmitAccepted(submitRes, "deploy");
-
-  const txHash = await pollUntilConfirmed(submitRes.transactionID);
-  return {
-    transactionID: submitRes.transactionID,
-    transactionHash: txHash,
-  };
+/**
+ * Deploy the user's deterministic deposit wallet via relayer `WALLET-CREATE`.
+ * The relayer request has no user signature; the owner address and factory
+ * address are enough for the deterministic deployment.
+ */
+export async function deployDepositWallet(
+  ownerAddress: Address
+): Promise<RelayerExecuteResult & { walletAddress: Address }> {
+  return deployDepositWalletRelayerWallet({
+    transport: relayerTransport,
+    ownerAddress,
+  });
 }

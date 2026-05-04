@@ -40,6 +40,7 @@ export const CLOB_ASSET_TYPES = {
 } as const;
 
 export const TRADING_WALLET_MODES = {
+  DEPOSIT: "deposit",
   SAFE: "safe",
   EOA: "eoa",
 } as const;
@@ -586,6 +587,7 @@ export const SIGNATURE_TYPES = {
   EOA: 0,
   POLY_PROXY: 1,
   POLY_GNOSIS_SAFE: 2,
+  POLY_1271: 3,
 } as const;
 
 export type PolymarketSignatureType =
@@ -594,9 +596,12 @@ export type PolymarketSignatureType =
 export function normalizeTradingWalletMode(
   mode?: string | null
 ): TradingWalletMode {
-  return mode === TRADING_WALLET_MODES.EOA
-    ? TRADING_WALLET_MODES.EOA
-    : TRADING_WALLET_MODES.SAFE;
+  if (mode === TRADING_WALLET_MODES.DEPOSIT) {
+    return TRADING_WALLET_MODES.DEPOSIT;
+  }
+  if (mode === TRADING_WALLET_MODES.EOA) return TRADING_WALLET_MODES.EOA;
+  if (mode === TRADING_WALLET_MODES.SAFE) return TRADING_WALLET_MODES.SAFE;
+  return TRADING_WALLET_MODES.SAFE;
 }
 
 export function isEoaTradingWalletMode(mode?: string | null): boolean {
@@ -607,12 +612,19 @@ export function isSafeTradingWalletMode(mode?: string | null): boolean {
   return normalizeTradingWalletMode(mode) === TRADING_WALLET_MODES.SAFE;
 }
 
+export function isDepositTradingWalletMode(mode?: string | null): boolean {
+  return normalizeTradingWalletMode(mode) === TRADING_WALLET_MODES.DEPOSIT;
+}
+
 export function getPolymarketSignatureType(
   mode?: string | null
 ): PolymarketSignatureType {
-  return isEoaTradingWalletMode(mode)
-    ? SIGNATURE_TYPES.EOA
-    : SIGNATURE_TYPES.POLY_GNOSIS_SAFE;
+  const normalizedMode = normalizeTradingWalletMode(mode);
+  if (normalizedMode === TRADING_WALLET_MODES.EOA) return SIGNATURE_TYPES.EOA;
+  if (normalizedMode === TRADING_WALLET_MODES.SAFE) {
+    return SIGNATURE_TYPES.POLY_GNOSIS_SAFE;
+  }
+  return SIGNATURE_TYPES.POLY_1271;
 }
 
 export const RELAYER_API_URL = POLYMARKET_API.RELAYER.BASE;

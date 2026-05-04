@@ -19,10 +19,13 @@ import {
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import Decimal from "decimal.js";
+import React from "react";
+import { createRoot, type Root } from "react-dom/client";
+import QRCode from "react-qr-code";
 import type { ClobOrderType } from "../../types/chrome-messages";
 import type { Market } from "../../types/market";
 import { escapeHtml } from "../utils";
-import { getNonce, WalletBridge } from "./bridge";
+import { getNonce, WALLETCONNECT_WALLET_UUID, WalletBridge } from "./bridge";
 import {
   CHAIN_METADATA,
   createDepositAddresses,
@@ -119,6 +122,7 @@ type DepositState =
 let activePanel: HTMLElement | null = null;
 let panelOpts: PanelOptions | null = null;
 let activeUnsubscribe: (() => void) | null = null;
+let mobileQrRoot: Root | null = null;
 
 let activeSide: TradeSide = "buy";
 let activeView: ActiveView = "order";
@@ -363,6 +367,28 @@ function setButtonLoading(btn: HTMLElement, text: string): void {
 function rerender(): void {
   if (activePanel && panelOpts)
     render(activePanel, panelOpts, TradingService.getContext());
+}
+
+function unmountMobileQrRoot(): void {
+  if (mobileQrRoot) {
+    mobileQrRoot.unmount();
+    mobileQrRoot = null;
+  }
+}
+
+function mountMobileQrCode(container: HTMLElement, uri: string): void {
+  unmountMobileQrRoot();
+  mobileQrRoot = createRoot(container);
+  mobileQrRoot.render(
+    React.createElement(QRCode, {
+      value: uri,
+      size: 196,
+      bgColor: "#ffffff",
+      fgColor: "#050505",
+      level: "Q",
+      title: "WalletConnect QR code",
+    })
+  );
 }
 
 function getBestBidAskFromOrderBook(
@@ -668,7 +694,7 @@ function createPanel(opts: PanelOptions): HTMLElement {
 
   render(panel, opts, TradingService.getContext());
 
-  const unsub = TradingService.onStateChange((ctx) => {
+  const stateUnsub = TradingService.onStateChange((ctx) => {
     if (
       opts.yesTokenId &&
       opts.noTokenId &&
@@ -683,7 +709,12 @@ function createPanel(opts: PanelOptions): HTMLElement {
     }
     render(panel, opts, ctx);
   });
-  activeUnsubscribe = unsub;
+  const mobileUnsub = WalletBridge.onMobileConnectionChange(() => rerender());
+  activeUnsubscribe = () => {
+    stateUnsub();
+    mobileUnsub();
+    unmountMobileQrRoot();
+  };
 
   WalletBridge.init();
 
@@ -994,6 +1025,65 @@ function addPortfolioBar(
 
 let disconnectedUnsub: (() => void) | null = null;
 
+function connectMobileWallet(btn?: HTMLElement): void {
+  if (btn) setButtonLoading(btn, "Preparing QR…");
+  trackPanelAnalytics("wallet_connect_clicked", {
+    walletProvider: "walletconnect_mobile",
+  });
+  void TradingService.connectWallet(WALLETCONNECT_WALLET_UUID);
+}
+
+function addMobileWalletPairing(p: HTMLElement): void {
+  const mobileState = WalletBridge.getMobileConnectionState();
+  const s = el("div", "knoww-tp-connect-section");
+  s.appendChild(elHtml("div", "knoww-tp-wallet-icon", I.wallet));
+  s.appendChild(
+    el(
+      "div",
+      "knoww-tp-connect-msg",
+      mobileState.qrUri
+        ? "Scan with MetaMask Mobile or any WalletConnect wallet"
+        : "Preparing mobile wallet connection…"
+    )
+  );
+
+  if (mobileState.qrUri) {
+    const qrWrap = el("div", "knoww-tp-mobile-qr");
+    const qr = el("div", "knoww-tp-mobile-qr-code");
+    mountMobileQrCode(qr, mobileState.qrUri);
+    qrWrap.appendChild(qr);
+    qrWrap.appendChild(
+      el(
+        "div",
+        "knoww-tp-mobile-qr-caption",
+        "Open your mobile wallet, scan this QR, then approve the connection."
+      )
+    );
+    s.appendChild(qrWrap);
+  } else {
+    s.appendChild(el("div", "knoww-tp-spinner"));
+  }
+
+  if (mobileState.error) {
+    s.appendChild(el("div", "knoww-tp-enable-error", mobileState.error));
+  }
+
+  p.appendChild(s);
+}
+
+function addMobileWalletButton(p: HTMLElement): void {
+  const btn = elHtml(
+    "button",
+    "knoww-tp-btn-connect secondary",
+    `${I.wallet} Mobile Wallet`
+  );
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    connectMobileWallet(btn);
+  };
+  p.appendChild(btn);
+}
+
 function addDisconnected(p: HTMLElement): void {
   if (disconnectedUnsub) {
     disconnectedUnsub();
@@ -1002,6 +1092,15 @@ function addDisconnected(p: HTMLElement): void {
 
   const existing = p.querySelector(".knoww-tp-connect-section");
   if (existing) existing.remove();
+
+  const mobileState = WalletBridge.getMobileConnectionState();
+  if (
+    mobileState.status === "initializing" ||
+    mobileState.status === "pairing"
+  ) {
+    addMobileWalletPairing(p);
+    return;
+  }
 
   const s = el("div", "knoww-tp-connect-section");
   s.appendChild(elHtml("div", "knoww-tp-wallet-icon", I.wallet));
@@ -1029,6 +1128,8 @@ function addDisconnected(p: HTMLElement): void {
       list.appendChild(item);
     }
     s.appendChild(list);
+    s.appendChild(el("div", "knoww-tp-connect-divider", "or"));
+    addMobileWalletButton(s);
   } else {
     const btn = elHtml(
       "button",
@@ -1069,6 +1170,12 @@ function addDisconnected(p: HTMLElement): void {
       }, 2000);
     };
     s.appendChild(btn);
+    s.appendChild(el("div", "knoww-tp-connect-divider", "or"));
+    addMobileWalletButton(s);
+  }
+
+  if (mobileState.error) {
+    s.appendChild(el("div", "knoww-tp-enable-error", mobileState.error));
   }
 
   disconnectedUnsub = WalletBridge.onWalletsChanged((newWallets) => {
@@ -1099,22 +1206,33 @@ function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
   wrap.appendChild(title);
 
   const options = el("div", "knoww-tp-wallet-mode-options");
+  const showLegacySafe = ctx.legacySafeAvailable || ctx.walletMode === "safe";
+  if (!showLegacySafe) options.classList.add("no-safe");
   const modes: Array<{
     mode: TradingContext["walletMode"];
     label: string;
     desc: string;
-  }> = [
-    {
+  }> = [];
+
+  modes.push({
+    mode: "deposit",
+    label: "Deposit Wallet",
+    desc: "New Polymarket wallet for gasless setup and trading.",
+  });
+
+  if (showLegacySafe) {
+    modes.push({
       mode: "safe",
       label: "Safe",
-      desc: "Gasless setup through Polymarket relayer.",
-    },
-    {
-      mode: "eoa",
-      label: "EOA",
-      desc: "Trade directly from this wallet. Requires POL for gas.",
-    },
-  ];
+      desc: "Legacy Polymarket Safe wallet.",
+    });
+  }
+
+  modes.push({
+    mode: "eoa",
+    label: "EOA",
+    desc: "Trade directly from this wallet. Requires POL for gas.",
+  });
 
   for (const item of modes) {
     const btn = el(
@@ -1138,13 +1256,11 @@ function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
 }
 
 /**
- * Deploy Safe gate — rendered after wallet connect but before "Enable Trading".
+ * Deploy wallet gate — rendered after wallet connect but before "Enable Trading".
  *
- * The Safe must exist on-chain before CLOB credentials can be useful: orders
- * are signed with `signatureType: POLY_GNOSIS_SAFE` and `funderAddress = safe`,
- * so settlement fails if the Safe isn't deployed. Deploy is a one-click gasless
- * flow via the relayer (`SAFE-CREATE`), same underlying mechanism as web
- * onboarding.
+ * Relayer-backed wallets must exist on-chain before CLOB credentials can be
+ * useful because orders use the relayer wallet as funderAddress. Deploy is a
+ * one-click gasless flow through the Polymarket relayer.
  */
 function addDeploySafe(
   p: HTMLElement,
@@ -4302,6 +4418,7 @@ function render(
   ctx: TradingContext
 ): void {
   const { state, address, error } = ctx;
+  unmountMobileQrRoot();
   panel.innerHTML = "";
 
   addHeader(panel, opts, ctx, address);
@@ -4311,6 +4428,14 @@ function render(
     return;
   }
   if (state === "connecting") {
+    const mobileState = WalletBridge.getMobileConnectionState();
+    if (
+      mobileState.status === "initializing" ||
+      mobileState.status === "pairing"
+    ) {
+      addMobileWalletPairing(panel);
+      return;
+    }
     addLoading(panel, "Connecting wallet...");
     return;
   }
@@ -4321,34 +4446,32 @@ function render(
 
   addPortfolioBar(panel, ctx, opts);
 
-  if (activeView === "deposit") {
-    renderDepositForm(panel, ctx);
-  } else if (state === "deploying") {
+  if (state === "deploying") {
     addLoading(panel, "Deploying your trading wallet…");
     return;
   } else if (ctx.isDeployed === null && ctx.proxyAddress && !ctx.credentials) {
     // Initial on-chain deployment check still in flight (first balance fetch).
-    // Show a neutral spinner instead of flashing the Deploy gate for ~500ms
-    // on users who already have a Safe.
+    // Show a neutral spinner instead of flashing the Deploy gate for ~500ms.
     addLoading(panel, "Loading trading wallet…");
     return;
   } else if (ctx.isDeployed === false && ctx.proxyAddress) {
-    // Safe not deployed yet — takes precedence over "Enable Trading" because
-    // credentials derived for the EOA are useless until the Safe exists
-    // (CLOB orders sign against the Safe as funderAddress).
+    // Relayer wallet not deployed yet. This takes precedence over "Enable
+    // Trading" because CLOB orders use the relayer wallet as funderAddress.
     addDeploySafe(panel, ctx, {
       errorMessage: state === "error" ? error : null,
     });
     if (state !== "error") {
       return;
     }
+  } else if (activeView === "deposit") {
+    renderDepositForm(panel, ctx);
   } else if (state === "deriving-credentials") {
     addLoading(panel, "Confirm signature in your wallet...");
     return;
   } else if (!ctx.credentials) {
     // Credentials required before trading. Hit in two scenarios:
     //   - right after Connect Wallet (state === "connected")
-    //   - right after Deploy Trading Wallet (state === "ready", Safe just
+    //   - right after Deploy Trading Wallet (state === "ready", wallet just
     //     created but CLOB creds not yet derived)
     // Earlier branches already handled the transient states (connecting,
     // switching-chain, deploying, deriving-credentials), so reaching here

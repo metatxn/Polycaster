@@ -262,6 +262,11 @@ module.exports = (_env, argv) => {
         "process.env.POLY_BUILDER_CODE": JSON.stringify(
           process.env.POLY_BUILDER_CODE || ""
         ),
+        "process.env.WALLETCONNECT_PROJECT_ID": JSON.stringify(
+          process.env.WALLETCONNECT_PROJECT_ID ||
+            process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
+            ""
+        ),
       }),
       new webpack.ProvidePlugin({
         Buffer: ["buffer", "Buffer"],

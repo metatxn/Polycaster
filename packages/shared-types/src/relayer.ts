@@ -1,17 +1,26 @@
 import {
   type Address,
+  concat,
   encodeAbiParameters,
   encodeFunctionData,
   encodePacked,
   getContractAddress,
+  getCreate2Address,
   type Hex,
   hashTypedData,
   keccak256,
+  pad,
   parseAbi,
   size,
+  toHex,
   zeroAddress,
 } from "viem";
-import { SAFE_FACTORY_ADDRESS, SAFE_INIT_CODE_HASH } from "./contracts";
+import {
+  DEPOSIT_WALLET_FACTORY_ADDRESS,
+  DEPOSIT_WALLET_IMPLEMENTATION_ADDRESS,
+  SAFE_FACTORY_ADDRESS,
+  SAFE_INIT_CODE_HASH,
+} from "./contracts";
 
 declare function setTimeout(callback: () => void, delay?: number): unknown;
 
@@ -19,6 +28,13 @@ export const POLYMARKET_RELAYER_CHAIN_ID = 137;
 export const SAFE_MULTISEND_ADDRESS: Address =
   "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761";
 export const SAFE_FACTORY_NAME = "Polymarket Contract Proxy Factory";
+export const DEPOSIT_WALLET_DOMAIN_NAME = "DepositWallet";
+export const DEPOSIT_WALLET_DOMAIN_VERSION = "1";
+const ERC1967_CONST1 =
+  "0xcc3735a920a3ca505d382bbc545af43d6000803e6038573d6000fd5b3d6000f3";
+const ERC1967_CONST2 =
+  "0x5155f3363d3d373d3d363d7f360894a13ba1a3210667c828492db98dca3e2076";
+const ERC1967_PREFIX = BigInt("0x61003d3d8160233d3973");
 
 export const RELAYER_SUCCESS_STATES = new Set([
   "STATE_EXECUTED",
@@ -59,6 +75,8 @@ export interface RelayerSubmitResponse {
   transactionID: string;
   state: string;
 }
+
+export type RelayerNonceType = "SAFE" | "PROXY" | "WALLET";
 
 export interface RelayerSafeSubmitRequest {
   from: Address;
@@ -127,6 +145,70 @@ export interface PreparedRelayerSafeCreate {
   };
 }
 
+export interface DepositWalletCall {
+  target: Address;
+  value: string;
+  data: Hex;
+}
+
+export interface RelayerDepositWalletCreateSubmitRequest {
+  type: "WALLET-CREATE";
+  from: Address;
+  to: Address;
+}
+
+export interface RelayerDepositWalletSubmitRequest {
+  type: "WALLET";
+  from: Address;
+  to: Address;
+  nonce: string;
+  signature: Hex;
+  depositWalletParams: {
+    depositWallet: Address;
+    deadline: string;
+    calls: DepositWalletCall[];
+  };
+}
+
+export interface PreparedDepositWalletBatch {
+  walletAddress: Address;
+  nonce: string;
+  deadline: string;
+  calls: DepositWalletCall[];
+  typedData: {
+    domain: {
+      name: typeof DEPOSIT_WALLET_DOMAIN_NAME;
+      version: typeof DEPOSIT_WALLET_DOMAIN_VERSION;
+      chainId: number;
+      verifyingContract: Address;
+    };
+    types: {
+      Call: readonly [
+        { readonly name: "target"; readonly type: "address" },
+        { readonly name: "value"; readonly type: "uint256" },
+        { readonly name: "data"; readonly type: "bytes" },
+      ];
+      Batch: readonly [
+        { readonly name: "wallet"; readonly type: "address" },
+        { readonly name: "nonce"; readonly type: "uint256" },
+        { readonly name: "deadline"; readonly type: "uint256" },
+        { readonly name: "calls"; readonly type: "Call[]" },
+      ];
+    };
+    primaryType: "Batch";
+    message: {
+      wallet: Address;
+      nonce: bigint;
+      deadline: bigint;
+      calls: readonly {
+        target: Address;
+        value: bigint;
+        data: Hex;
+      }[];
+    };
+  };
+}
+
 export type RelayerTransactionFetcher = (
   transactionID: string
 ) => Promise<RelayerTxStatus[]>;
@@ -139,6 +221,70 @@ export interface RelayerPollOptions {
   onConfirmed?: (transactionHash: string) => void;
 }
 
+export interface RelayerSigner {
+  signMessage(args: { account: Address; message: { raw: Hex } }): Promise<Hex>;
+  signTypedData(
+    args: { account: Address } & (
+      | PreparedRelayerSafeCreate["typedData"]
+      | PreparedDepositWalletBatch["typedData"]
+    )
+  ): Promise<Hex>;
+}
+
+export interface RelayerExecutionTransport {
+  getNonce(address: Address, type: RelayerNonceType): Promise<string>;
+  getDeployed?(address: Address, type?: RelayerNonceType): Promise<boolean>;
+  submit(
+    request:
+      | RelayerSafeSubmitRequest
+      | RelayerSafeCreateSubmitRequest
+      | RelayerDepositWalletSubmitRequest
+      | RelayerDepositWalletCreateSubmitRequest
+  ): Promise<RelayerSubmitResponse>;
+  getTransaction: RelayerTransactionFetcher;
+}
+
+export interface RelayerRetryContext {
+  attempt: number;
+  maxAttempts: number;
+  transactionID?: string;
+}
+
+export interface RelayerRetryEvent extends RelayerRetryContext {
+  error: Error;
+}
+
+export interface RelayerSubmittedEvent {
+  attempt: number;
+  transactionID: string;
+  state: string;
+}
+
+export interface RelayerExecutionOptions {
+  maxPollAttempts?: number;
+  pollIntervalMs?: number;
+  onConfirmed?: (transactionHash: string) => void;
+  maxSubmitAttempts?: number;
+  retryDelayMs?: number;
+  shouldRetry?: (error: Error, context: RelayerRetryContext) => boolean;
+  onRetry?: (event: RelayerRetryEvent) => void;
+  onSubmitted?: (event: RelayerSubmittedEvent) => void;
+}
+
+export interface RelayerDepositWalletDeployResult extends RelayerExecuteResult {
+  walletAddress: Address;
+}
+
+export interface RelayerSafeDeployOptions extends RelayerExecutionOptions {
+  checkDeployed?: boolean;
+  onAlreadyDeployed?: (safeAddress: Address) => void;
+}
+
+export interface RelayerSafeDeployResult extends RelayerExecuteResult {
+  safeAddress: Address;
+  alreadyDeployed?: boolean;
+}
+
 export function derivePolymarketSafe(eoaAddress: Address): Address {
   const salt = keccak256(
     encodeAbiParameters([{ type: "address" }], [eoaAddress])
@@ -149,6 +295,36 @@ export function derivePolymarketSafe(eoaAddress: Address): Address {
     salt,
     bytecodeHash: SAFE_INIT_CODE_HASH as Hex,
   });
+}
+
+function initCodeHashERC1967(implementation: Address, args: Hex): Hex {
+  const n = BigInt((args.length - 2) / 2);
+  const combined = ERC1967_PREFIX + (n << BigInt(56));
+  return keccak256(
+    concat([
+      toHex(combined, { size: 10 }),
+      implementation,
+      "0x6009",
+      ERC1967_CONST2,
+      ERC1967_CONST1,
+      args,
+    ])
+  );
+}
+
+export function derivePolymarketDepositWallet(
+  ownerAddress: Address,
+  factory: Address = DEPOSIT_WALLET_FACTORY_ADDRESS,
+  implementation: Address = DEPOSIT_WALLET_IMPLEMENTATION_ADDRESS
+): Address {
+  const walletId = pad(ownerAddress, { dir: "left", size: 32 });
+  const args = encodeAbiParameters(
+    [{ type: "address" }, { type: "bytes32" }],
+    [factory, walletId]
+  );
+  const salt = keccak256(args);
+  const bytecodeHash = initCodeHashERC1967(implementation, args);
+  return getCreate2Address({ from: factory, salt, bytecodeHash });
 }
 
 export function aggregateSafeTransactions(
@@ -351,6 +527,400 @@ export function buildSafeCreateSubmitRequest(args: {
       paymentReceiver: args.prepared.paymentReceiver,
     },
     type: "SAFE-CREATE",
+  };
+}
+
+export function toDepositWalletCalls(
+  transactions: RelayerTransaction[]
+): DepositWalletCall[] {
+  return transactions.map((tx) => ({
+    target: tx.to,
+    value: tx.value || "0",
+    data: tx.data,
+  }));
+}
+
+export function prepareDepositWalletBatch(args: {
+  ownerAddress: Address;
+  walletAddress?: Address;
+  transactions: RelayerTransaction[];
+  nonce: string;
+  deadline: string;
+  chainId?: number;
+}): PreparedDepositWalletBatch {
+  if (args.transactions.length === 0) {
+    throw new Error("No transactions to execute");
+  }
+
+  const walletAddress =
+    args.walletAddress ?? derivePolymarketDepositWallet(args.ownerAddress);
+  const calls = toDepositWalletCalls(args.transactions);
+
+  return {
+    walletAddress,
+    nonce: args.nonce,
+    deadline: args.deadline,
+    calls,
+    typedData: {
+      domain: {
+        name: DEPOSIT_WALLET_DOMAIN_NAME,
+        version: DEPOSIT_WALLET_DOMAIN_VERSION,
+        chainId: args.chainId ?? POLYMARKET_RELAYER_CHAIN_ID,
+        verifyingContract: walletAddress,
+      },
+      types: {
+        Call: [
+          { name: "target", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "data", type: "bytes" },
+        ],
+        Batch: [
+          { name: "wallet", type: "address" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+          { name: "calls", type: "Call[]" },
+        ],
+      },
+      primaryType: "Batch",
+      message: {
+        wallet: walletAddress,
+        nonce: BigInt(args.nonce),
+        deadline: BigInt(args.deadline),
+        calls: calls.map((call) => ({
+          target: call.target,
+          value: BigInt(call.value),
+          data: call.data,
+        })),
+      },
+    },
+  };
+}
+
+export function buildDepositWalletSubmitRequest(args: {
+  ownerAddress: Address;
+  prepared: PreparedDepositWalletBatch;
+  signature: Hex;
+}): RelayerDepositWalletSubmitRequest {
+  return {
+    type: "WALLET",
+    from: args.ownerAddress,
+    to: DEPOSIT_WALLET_FACTORY_ADDRESS,
+    nonce: args.prepared.nonce,
+    signature: args.signature,
+    depositWalletParams: {
+      depositWallet: args.prepared.walletAddress,
+      deadline: args.prepared.deadline,
+      calls: args.prepared.calls,
+    },
+  };
+}
+
+export function buildDepositWalletCreateSubmitRequest(
+  ownerAddress: Address
+): RelayerDepositWalletCreateSubmitRequest {
+  return {
+    type: "WALLET-CREATE",
+    from: ownerAddress,
+    to: DEPOSIT_WALLET_FACTORY_ADDRESS,
+  };
+}
+
+function assertRelayerTransactionsNotEmpty(
+  transactions: RelayerTransaction[]
+): void {
+  if (transactions.length === 0) {
+    throw new Error("No transactions to execute");
+  }
+}
+
+function toRelayerError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function getRelayerSubmitAttemptCount(
+  options: RelayerExecutionOptions | undefined
+): number {
+  return Math.max(1, Math.floor(options?.maxSubmitAttempts ?? 1));
+}
+
+async function waitForRelayerRetry(options?: RelayerExecutionOptions) {
+  const retryDelayMs = options?.retryDelayMs ?? 1500;
+  if (retryDelayMs <= 0) return;
+
+  await new Promise<void>((resolve) => {
+    setTimeout(() => resolve(), retryDelayMs);
+  });
+}
+
+export function isRetryableSafeNonceRaceError(error: Error): boolean {
+  return (
+    error.message.includes("STATE_FAILED") ||
+    error.message.includes("GS026") ||
+    error.message.includes("reverted")
+  );
+}
+
+async function pollSubmittedRelayerTransaction(
+  transactionID: string,
+  transport: Pick<RelayerExecutionTransport, "getTransaction">,
+  options?: RelayerExecutionOptions
+): Promise<string> {
+  return pollRelayerTransaction({
+    transactionID,
+    getTransaction: transport.getTransaction,
+    maxAttempts: options?.maxPollAttempts,
+    intervalMs: options?.pollIntervalMs,
+    onConfirmed: options?.onConfirmed,
+  });
+}
+
+export async function executeSafeRelayerTransaction(args: {
+  signer: RelayerSigner;
+  transport: RelayerExecutionTransport;
+  eoaAddress: Address;
+  transactions: RelayerTransaction[];
+  options?: RelayerExecutionOptions;
+}): Promise<RelayerExecuteResult> {
+  assertRelayerTransactionsNotEmpty(args.transactions);
+
+  const maxAttempts = getRelayerSubmitAttemptCount(args.options);
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await waitForRelayerRetry(args.options);
+    }
+
+    let transactionID: string | undefined;
+
+    try {
+      const nonce = await args.transport.getNonce(args.eoaAddress, "SAFE");
+      const prepared = prepareSafeExecution({
+        eoaAddress: args.eoaAddress,
+        transactions: args.transactions,
+        nonce,
+      });
+
+      const signature = await args.signer.signMessage({
+        account: args.eoaAddress,
+        message: { raw: prepared.hash },
+      });
+
+      const submitRes = await args.transport.submit(
+        buildSafeSubmitRequest({
+          eoaAddress: args.eoaAddress,
+          prepared,
+          signature,
+        })
+      );
+      assertRelayerSubmitAccepted(submitRes, "submit");
+      transactionID = submitRes.transactionID;
+      args.options?.onSubmitted?.({
+        attempt,
+        transactionID: submitRes.transactionID,
+        state: submitRes.state,
+      });
+
+      const transactionHash = await pollSubmittedRelayerTransaction(
+        submitRes.transactionID,
+        args.transport,
+        args.options
+      );
+      return { transactionID: submitRes.transactionID, transactionHash };
+    } catch (error) {
+      lastError = toRelayerError(error);
+      const context: RelayerRetryContext = {
+        attempt,
+        maxAttempts,
+        transactionID,
+      };
+      const shouldRetry =
+        attempt < maxAttempts - 1 &&
+        (args.options?.shouldRetry?.(lastError, context) ?? false);
+
+      if (!shouldRetry) {
+        throw lastError;
+      }
+
+      args.options?.onRetry?.({ ...context, error: lastError });
+    }
+  }
+
+  throw lastError ?? new Error("Relayer execution failed");
+}
+
+export async function deploySafeRelayerWallet(args: {
+  signer: RelayerSigner;
+  transport: RelayerExecutionTransport;
+  eoaAddress: Address;
+  options?: RelayerSafeDeployOptions;
+}): Promise<RelayerSafeDeployResult> {
+  const prepared = prepareSafeCreate({ eoaAddress: args.eoaAddress });
+  if (args.options?.checkDeployed) {
+    if (!args.transport.getDeployed) {
+      throw new Error("Relayer deployment preflight is not available");
+    }
+    const deployed = await args.transport.getDeployed(
+      prepared.safeAddress,
+      "SAFE"
+    );
+    if (deployed) {
+      args.options.onAlreadyDeployed?.(prepared.safeAddress);
+      return {
+        transactionID: "",
+        transactionHash: "",
+        safeAddress: prepared.safeAddress,
+        alreadyDeployed: true,
+      };
+    }
+  }
+
+  const signature = await args.signer.signTypedData({
+    account: args.eoaAddress,
+    ...prepared.typedData,
+  });
+
+  const submitRes = await args.transport.submit(
+    buildSafeCreateSubmitRequest({
+      eoaAddress: args.eoaAddress,
+      prepared,
+      signature,
+    })
+  );
+  assertRelayerSubmitAccepted(submitRes, "deploy");
+  args.options?.onSubmitted?.({
+    attempt: 0,
+    transactionID: submitRes.transactionID,
+    state: submitRes.state,
+  });
+
+  const transactionHash = await pollSubmittedRelayerTransaction(
+    submitRes.transactionID,
+    args.transport,
+    args.options
+  );
+  return {
+    transactionID: submitRes.transactionID,
+    transactionHash,
+    safeAddress: prepared.safeAddress,
+  };
+}
+
+export function buildDepositWalletDeadline(
+  ttlSeconds = 240,
+  nowMs = Date.now()
+): string {
+  return Math.floor(nowMs / 1000 + ttlSeconds).toString();
+}
+
+export async function executeDepositWalletRelayerTransaction(args: {
+  signer: RelayerSigner;
+  transport: RelayerExecutionTransport;
+  ownerAddress: Address;
+  transactions: RelayerTransaction[];
+  walletAddress?: Address;
+  deadline?: string;
+  deadlineTtlSeconds?: number;
+  options?: RelayerExecutionOptions;
+}): Promise<RelayerExecuteResult> {
+  assertRelayerTransactionsNotEmpty(args.transactions);
+
+  const walletAddress =
+    args.walletAddress ?? derivePolymarketDepositWallet(args.ownerAddress);
+  const maxAttempts = getRelayerSubmitAttemptCount(args.options);
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await waitForRelayerRetry(args.options);
+    }
+
+    let transactionID: string | undefined;
+
+    try {
+      const nonce = await args.transport.getNonce(args.ownerAddress, "WALLET");
+      const prepared = prepareDepositWalletBatch({
+        ownerAddress: args.ownerAddress,
+        walletAddress,
+        transactions: args.transactions,
+        nonce,
+        deadline:
+          args.deadline ?? buildDepositWalletDeadline(args.deadlineTtlSeconds),
+      });
+
+      const signature = await args.signer.signTypedData({
+        account: args.ownerAddress,
+        ...prepared.typedData,
+      });
+
+      const submitRes = await args.transport.submit(
+        buildDepositWalletSubmitRequest({
+          ownerAddress: args.ownerAddress,
+          prepared,
+          signature,
+        })
+      );
+      assertRelayerSubmitAccepted(submitRes, "submit");
+      transactionID = submitRes.transactionID;
+      args.options?.onSubmitted?.({
+        attempt,
+        transactionID: submitRes.transactionID,
+        state: submitRes.state,
+      });
+
+      const transactionHash = await pollSubmittedRelayerTransaction(
+        submitRes.transactionID,
+        args.transport,
+        args.options
+      );
+      return { transactionID: submitRes.transactionID, transactionHash };
+    } catch (error) {
+      lastError = toRelayerError(error);
+      const context: RelayerRetryContext = {
+        attempt,
+        maxAttempts,
+        transactionID,
+      };
+      const shouldRetry =
+        attempt < maxAttempts - 1 &&
+        (args.options?.shouldRetry?.(lastError, context) ?? false);
+
+      if (!shouldRetry) {
+        throw lastError;
+      }
+
+      args.options?.onRetry?.({ ...context, error: lastError });
+    }
+  }
+
+  throw lastError ?? new Error("Relayer execution failed");
+}
+
+export async function deployDepositWalletRelayerWallet(args: {
+  transport: Pick<RelayerExecutionTransport, "submit" | "getTransaction">;
+  ownerAddress: Address;
+  options?: RelayerExecutionOptions;
+}): Promise<RelayerDepositWalletDeployResult> {
+  const walletAddress = derivePolymarketDepositWallet(args.ownerAddress);
+  const submitRes = await args.transport.submit(
+    buildDepositWalletCreateSubmitRequest(args.ownerAddress)
+  );
+  assertRelayerSubmitAccepted(submitRes, "deploy");
+  args.options?.onSubmitted?.({
+    attempt: 0,
+    transactionID: submitRes.transactionID,
+    state: submitRes.state,
+  });
+
+  const transactionHash = await pollSubmittedRelayerTransaction(
+    submitRes.transactionID,
+    args.transport,
+    args.options
+  );
+  return {
+    transactionID: submitRes.transactionID,
+    transactionHash,
+    walletAddress,
   };
 }
 

@@ -1,6 +1,9 @@
 "use client";
 
-import { derivePolymarketSafe } from "@knoww/shared-types/relayer";
+import {
+  derivePolymarketDepositWallet,
+  derivePolymarketSafe,
+} from "@knoww/shared-types/relayer";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { type Address, getAddress } from "viem";
@@ -55,7 +58,11 @@ async function fetchWalletData(
     };
   }
 
-  const proxyAddress = derivePolymarketSafe(getAddress(eoaAddress) as Address);
+  const ownerAddress = getAddress(eoaAddress) as Address;
+  const proxyAddress =
+    mode === "deposit"
+      ? derivePolymarketDepositWallet(ownerAddress)
+      : derivePolymarketSafe(ownerAddress);
 
   // Step 2: Check if the derived Safe is actually deployed on-chain
   const isDeployed = await rpcCheckIsDeployed(proxyAddress);
@@ -147,6 +154,7 @@ export function useProxyWallet() {
     usdcBalance: query.data?.usdcBalance ?? 0,
     walletMode: query.data?.walletMode ?? mode,
     isSafeMode: mode === "safe",
+    isDepositMode: mode === "deposit",
     isEoaMode: mode === "eoa",
     isLoading: query.isLoading,
     error: query.error ? (query.error as Error).message : null,

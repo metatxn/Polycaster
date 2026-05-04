@@ -6,7 +6,10 @@
  * background service worker which already has the viem trading runtime bundled.
  */
 
-import type { TradingBalanceData } from "../../types/chrome-messages";
+import type {
+  TradingBalanceData,
+  TradingWalletMode,
+} from "../../types/chrome-messages";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
@@ -58,9 +61,12 @@ function sendTradingMessage<T>(
 }
 
 export const ProxyWallet = {
-  async deriveAddress(eoaAddress: string): Promise<string> {
+  async deriveAddress(
+    eoaAddress: string,
+    walletMode?: TradingWalletMode
+  ): Promise<string> {
     const data = await sendTradingMessage<{ proxyAddress: string }>(
-      { type: "trading:derive-proxy-address", eoaAddress },
+      { type: "trading:derive-proxy-address", eoaAddress, walletMode },
       "Failed to derive proxy address"
     );
     return data.proxyAddress;

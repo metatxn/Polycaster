@@ -48,7 +48,11 @@ export function TradingOnboarding({
 }: TradingOnboardingProps) {
   const { isConnected } = useConnection();
   const { open } = useAppKit();
-  const { mode: walletMode, setMode: setWalletMode } = useTradingWalletMode();
+  const {
+    mode: walletMode,
+    setMode: setWalletMode,
+    hasLegacySafe,
+  } = useTradingWalletMode();
   const {
     deploySafe,
     approveUsdcForTrading,
@@ -65,12 +69,18 @@ export function TradingOnboarding({
     isDeployed: hasProxyWalletFromHook,
     refresh: refreshProxyWallet,
     proxyAddress: computedProxyAddress,
+    walletMode: proxyWalletMode,
     usdcBalance,
   } = useProxyWallet();
 
   // Use relayer state as primary source (most reliable after deployment)
-  const hasProxyWallet = hasDeployedSafe || hasProxyWalletFromHook;
-  const proxyAddress = relayerProxyAddress || computedProxyAddress;
+  const hasProxyWalletFromSelectedMode =
+    hasProxyWalletFromHook && proxyWalletMode === walletMode;
+  const hasProxyWallet = hasDeployedSafe || hasProxyWalletFromSelectedMode;
+  const proxyAddress =
+    relayerProxyAddress ||
+    (proxyWalletMode === walletMode ? computedProxyAddress : null);
+  const showLegacySafeOption = walletMode === "safe" || hasLegacySafe;
 
   // Track if USDC is already approved (for returning users)
   const [hasUsdcApproval, setHasUsdcApproval] = useState<boolean | null>(null);
@@ -108,7 +118,7 @@ export function TradingOnboarding({
     },
     {
       id: "credentials",
-      title: "Setup API Access",
+      title: "Set Up API Access",
       description: "Sign to generate your trading credentials",
       icon: <CheckCircle2 className="h-5 w-5" />,
       status: "pending",
@@ -299,7 +309,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "credentials",
         "error",
-        formatTradingOnboardingError(err, "Failed to setup credentials")
+        formatTradingOnboardingError(err, "Failed to set up credentials")
       );
     }
   }, [
@@ -486,8 +496,7 @@ export function TradingOnboarding({
     if (step.id === "approve" && walletMode === "eoa") {
       return {
         ...step,
-        description:
-          "Approve limited spending caps on-chain. MetaMask will show one prompt per token or operator.",
+        description: "Set limited on-chain spending caps.",
       };
     }
 
@@ -497,13 +506,15 @@ export function TradingOnboarding({
   const contextCopy = (): string | null => {
     if (allStepsComplete) return null;
     if (currentStep === 1)
-      return walletMode === "safe"
-        ? "Your trading wallet is a Gnosis Safe controlled by your connected wallet. Polymarket's relayer pays the gas for setup and trading operations."
-        : "Your connected wallet is the trading wallet. This is simpler, but approvals and on-chain operations require POL for gas.";
+      return walletMode === "eoa"
+        ? "Your connected wallet is the trading wallet. This is simpler, but approvals and on-chain operations require POL for gas."
+        : walletMode === "safe"
+          ? "Your existing trading wallet is a Gnosis Safe controlled by your connected wallet. Polymarket's relayer pays the gas for setup and trading operations."
+          : "Your trading wallet is a Polymarket deposit wallet controlled by your connected wallet. Polymarket's relayer pays the gas for setup and trading operations.";
     if (currentStep === 2)
-      return walletMode === "safe"
-        ? "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals."
-        : "EOA approvals are normal Polygon transactions. MetaMask describes ERC-20 allowances as permission to withdraw tokens; the spender should be a Polymarket contract such as CTF, CTFExchange, NegRiskExchange, or CollateralOnramp.";
+      return walletMode === "eoa"
+        ? "These are normal Polygon approvals. Spenders should be Polymarket contracts."
+        : "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals.";
     if (currentStep === 3)
       return "Sign a message to create your unique trading credentials. No private keys are shared.";
     return "All setup transactions are gasless — Polymarket covers the gas fees through their relayer.";
@@ -543,7 +554,7 @@ export function TradingOnboarding({
       {/* Header */}
       <div className="px-6 pt-7 pb-5 border-b border-border/40">
         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-3">
-          § {allStepsComplete ? "Setup Complete" : "Setup Trading"}
+          § {allStepsComplete ? "Setup Complete" : "Set Up Trading"}
         </p>
         <h2 className="font-editorial italic font-medium text-3xl sm:text-4xl leading-[1.05] tracking-tight">
           {allStepsComplete ? "You're set." : "A few steps, then trade."}
@@ -558,22 +569,43 @@ export function TradingOnboarding({
           <div className="mt-5 grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => setWalletMode("safe")}
+              onClick={() => setWalletMode("deposit")}
               className={cn(
                 "border px-3 py-3 text-left transition-colors",
-                walletMode === "safe"
+                showLegacySafeOption && "col-span-2",
+                walletMode === "deposit"
                   ? "border-foreground bg-foreground/5"
                   : "border-border/60 hover:border-foreground/40"
               )}
             >
               <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
                 <Shield className="h-3.5 w-3.5" />
-                Safe
+                Deposit Wallet
               </span>
               <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
-                Gasless smart wallet. Best for most users.
+                Gasless deposit wallet. Best for most users.
               </span>
             </button>
+            {showLegacySafeOption && (
+              <button
+                type="button"
+                onClick={() => setWalletMode("safe")}
+                className={cn(
+                  "border px-3 py-3 text-left transition-colors",
+                  walletMode === "safe"
+                    ? "border-foreground bg-foreground/5"
+                    : "border-border/60 hover:border-foreground/40"
+                )}
+              >
+                <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                  <Shield className="h-3.5 w-3.5" />
+                  Safe
+                </span>
+                <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                  Existing gasless smart wallet.
+                </span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setWalletMode("eoa")}
@@ -683,7 +715,7 @@ export function TradingOnboarding({
             step.id === "deploy"
               ? walletMode === "eoa"
                 ? "Using your connected wallet"
-                : "Creating your secure wallet — 10–30 seconds"
+                : "Creating your deposit wallet — 10–30 seconds"
               : step.id === "approve"
                 ? walletMode === "eoa"
                   ? "Waiting for wallet approval transactions"
@@ -770,7 +802,7 @@ export function TradingOnboarding({
                     </div>
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
                       {walletMode === "eoa"
-                        ? "MetaMask will call these spending cap requests. The cap is limited to the amount above; outcome-token sell permissions are binary and cannot be amount-limited."
+                        ? "MetaMask will prompt for each approval."
                         : "ERC-20 allowances use this limit. Outcome-token sell permissions are binary and cannot be amount-limited."}
                     </p>
                   </div>

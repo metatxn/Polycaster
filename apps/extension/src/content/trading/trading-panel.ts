@@ -2164,10 +2164,12 @@ function addSubmitButton(
           shares: effectiveSize,
           totalCost: cost,
         });
-        showToast(panel, "Limit order placed!", "success");
-        TradingService.refreshBalance().catch(() => {});
+        await TradingService.refreshBalance().catch(() => {});
         if (opts.yesTokenId && opts.noTokenId) {
-          TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
+          await TradingService.getOutcomeBalances(
+            opts.yesTokenId,
+            opts.noTokenId
+          )
             .then((b) => {
               outcomeBalances = b;
               rerender();
@@ -2175,6 +2177,7 @@ function addSubmitButton(
             .catch(() => {});
         }
         rerender();
+        showToast(panel, "Limit order placed!", "success");
         resumeLivePanelRefresh();
       } else {
         orderSettling = true;

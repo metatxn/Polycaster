@@ -1,20 +1,22 @@
 /**
  * Lightweight Polymarket V2 relayer client for the extension.
  *
- * HTTP/auth handling stays extension-specific, while Safe derivation,
- * multiSend aggregation, SafeTx hashing, and signature packing are shared with
- * the web app through @knoww/shared-types/relayer.
+ * HTTP/auth handling stays extension-specific, while Safe/deposit wallet
+ * derivation, batching, hashing, and signature packing are shared with the web
+ * app through @knoww/shared-types/relayer.
  */
 
 import { logInfo } from "@knoww/logger";
 import {
-  assertRelayerSubmitAccepted,
-  buildSafeCreateSubmitRequest,
-  buildSafeSubmitRequest,
+  deployDepositWalletRelayerWallet,
+  deploySafeRelayerWallet,
+  derivePolymarketDepositWallet,
   derivePolymarketSafe,
-  pollRelayerTransaction,
-  prepareSafeCreate,
-  prepareSafeExecution,
+  executeDepositWalletRelayerTransaction,
+  executeSafeRelayerTransaction,
+  isRetryableSafeNonceRaceError,
+  type RelayerExecutionTransport,
+  type RelayerSigner,
   type RelayerSubmitResponse,
   type RelayerTransaction,
 } from "@knoww/shared-types/relayer";
@@ -126,6 +128,41 @@ async function sendAuthedRequest<T>(
   return relayerPost<T>(path, body ?? "", headers);
 }
 
+const relayerTransport: RelayerExecutionTransport = {
+  async getNonce(address, type) {
+    const noncePayload = await sendAuthedRequest<{ nonce: string }>(
+      "GET",
+      "/nonce",
+      undefined,
+      { address, type }
+    );
+    return noncePayload.nonce;
+  },
+  async getDeployed(address, type) {
+    const params: Record<string, string> = { address };
+    if (type) params.type = type;
+    const deployed = await sendAuthedRequest<{ deployed: boolean }>(
+      "GET",
+      "/deployed",
+      undefined,
+      params
+    );
+    return deployed.deployed;
+  },
+  submit(request) {
+    return sendAuthedRequest<RelayerSubmitResponse>(
+      "POST",
+      "/submit",
+      JSON.stringify(request)
+    );
+  },
+  getTransaction: (id) => relayerGet("/transaction", { id }),
+};
+
+function toRelayerSigner(walletClient: BridgeWalletClient): RelayerSigner {
+  return walletClient as unknown as RelayerSigner;
+}
+
 export async function executeViaRelayer(
   walletClient: BridgeWalletClient,
   eoaAddress: Address,
@@ -138,95 +175,103 @@ export async function executeViaRelayer(
 
   logInfo("relayer.execute-safe", { safeAddress });
 
-  const deployed = await sendAuthedRequest<{ deployed: boolean }>(
-    "GET",
-    "/deployed",
-    undefined,
-    { address: safeAddress }
-  );
-  if (!deployed.deployed) {
+  const deployed = await relayerTransport.getDeployed?.(safeAddress, "SAFE");
+  if (!deployed) {
     throw new Error(
       "Your trading wallet (Safe) is not deployed. Complete onboarding on knoww.app first."
     );
   }
 
-  const maxRetries = 2;
-  let lastError: Error | null = null;
+  const result = await executeSafeRelayerTransaction({
+    signer: toRelayerSigner(walletClient),
+    transport: relayerTransport,
+    eoaAddress: owner,
+    transactions,
+    options: {
+      maxSubmitAttempts: 2,
+      shouldRetry: isRetryableSafeNonceRaceError,
+      onSubmitted: ({ transactionID, state, attempt }) => {
+        logInfo("relayer.submitted", {
+          transactionID,
+          state,
+          attempt,
+        });
+      },
+      onRetry: ({ attempt, error, transactionID }) => {
+        logInfo("relayer.nonce-race-detected", {
+          transactionID,
+          error: error.message,
+        });
+        logInfo("relayer.retry", {
+          attempt: attempt + 1,
+          reason: error.message,
+        });
+      },
+      onConfirmed: (transactionHash) =>
+        logInfo("relayer.confirmed", { transactionHash }),
+    },
+  });
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    if (attempt > 0) {
-      logInfo("relayer.retry", { attempt, reason: lastError?.message });
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-
-    const noncePayload = await sendAuthedRequest<{ nonce: string }>(
-      "GET",
-      "/nonce",
-      undefined,
-      { address: owner, type: "SAFE" }
-    );
-
-    const prepared = prepareSafeExecution({
-      eoaAddress: owner,
-      transactions,
-      nonce: noncePayload.nonce,
-    });
-    const signature = await walletClient.signMessage({
-      account: owner,
-      message: { raw: prepared.hash },
-    });
-
-    const requestPayload = JSON.stringify(
-      buildSafeSubmitRequest({
-        eoaAddress: owner,
-        prepared,
-        signature,
-      })
-    );
-
-    const submitResponse = await sendAuthedRequest<RelayerSubmitResponse>(
-      "POST",
-      "/submit",
-      requestPayload
-    );
-    assertRelayerSubmitAccepted(submitResponse, "submit");
-
-    logInfo("relayer.submitted", {
-      transactionID: submitResponse.transactionID,
-      state: submitResponse.state,
-      attempt,
-    });
-
-    try {
-      const txHash = await pollTransaction(submitResponse.transactionID);
-      return { transactionID: submitResponse.transactionID, txHash };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      const isNonceRace =
-        lastError.message.includes("STATE_FAILED") ||
-        lastError.message.includes("GS026") ||
-        lastError.message.includes("reverted");
-
-      if (!isNonceRace || attempt >= maxRetries - 1) {
-        throw lastError;
-      }
-      logInfo("relayer.nonce-race-detected", {
-        transactionID: submitResponse.transactionID,
-        error: lastError.message,
-      });
-    }
-  }
-
-  throw lastError ?? new Error("Relayer execution failed");
+  return {
+    transactionID: result.transactionID,
+    txHash: result.transactionHash,
+  };
 }
 
-async function pollTransaction(transactionID: string): Promise<string> {
-  return pollRelayerTransaction({
-    transactionID,
-    getTransaction: (id) => relayerGet("/transaction", { id }),
-    onConfirmed: (transactionHash) =>
-      logInfo("relayer.confirmed", { transactionHash }),
+export async function executeViaDepositWallet(
+  walletClient: BridgeWalletClient,
+  ownerAddress: Address,
+  transactions: RelayerTransaction[],
+  walletAddress: Address = derivePolymarketDepositWallet(ownerAddress)
+): Promise<{ transactionID: string; txHash: string }> {
+  if (transactions.length === 0) throw new Error("No transactions to execute");
+
+  const owner = getAddress(ownerAddress) as Address;
+  const depositWallet = getAddress(walletAddress) as Address;
+
+  logInfo("relayer.execute-deposit-wallet", {
+    walletAddress: depositWallet,
   });
+
+  const deployed = await relayerTransport.getDeployed?.(depositWallet);
+  if (!deployed) {
+    throw new Error(
+      "Your deposit wallet is not deployed. Complete trading wallet setup first."
+    );
+  }
+
+  const result = await executeDepositWalletRelayerTransaction({
+    signer: toRelayerSigner(walletClient),
+    transport: relayerTransport,
+    ownerAddress: owner,
+    walletAddress: depositWallet,
+    transactions,
+    options: {
+      maxSubmitAttempts: 2,
+      shouldRetry: isRetryableSafeNonceRaceError,
+      onSubmitted: ({ transactionID, state, attempt }) => {
+        logInfo("relayer.deposit-wallet.submitted", {
+          transactionID,
+          state,
+          attempt,
+        });
+      },
+      onRetry: ({ attempt, error, transactionID }) => {
+        logInfo("relayer.deposit-wallet.retry", {
+          transactionID,
+          attempt: attempt + 1,
+          reason: error.message,
+        });
+      },
+      onConfirmed: (transactionHash) =>
+        logInfo("relayer.confirmed", { transactionHash }),
+    },
+  });
+
+  return {
+    transactionID: result.transactionID,
+    txHash: result.transactionHash,
+  };
 }
 
 export async function deployProxyWallet(
@@ -243,53 +288,81 @@ export async function deployProxyWallet(
 
   logInfo("relayer.deploy-safe.start", { eoaAddress: owner, safeAddress });
 
-  const deployedCheck = await sendAuthedRequest<{ deployed: boolean }>(
-    "GET",
-    "/deployed",
-    undefined,
-    { address: safeAddress }
-  );
-  if (deployedCheck.deployed) {
-    logInfo("relayer.deploy-safe.already-deployed", { safeAddress });
+  const result = await deploySafeRelayerWallet({
+    signer: toRelayerSigner(walletClient),
+    transport: relayerTransport,
+    eoaAddress: owner,
+    options: {
+      checkDeployed: true,
+      onAlreadyDeployed: (deployedSafeAddress) => {
+        logInfo("relayer.deploy-safe.already-deployed", {
+          safeAddress: deployedSafeAddress,
+        });
+      },
+      onSubmitted: ({ transactionID, state }) => {
+        logInfo("relayer.deploy-safe.submitted", {
+          transactionID,
+          state,
+        });
+      },
+      onConfirmed: (transactionHash) =>
+        logInfo("relayer.confirmed", { transactionHash }),
+    },
+  });
+
+  return {
+    transactionID: result.transactionID,
+    txHash: result.transactionHash,
+    proxyAddress: result.safeAddress,
+    ...(result.alreadyDeployed ? { alreadyDeployed: true } : {}),
+  };
+}
+
+export async function deployDepositWallet(ownerAddress: Address): Promise<{
+  transactionID: string;
+  txHash: string;
+  proxyAddress: string;
+  alreadyDeployed?: boolean;
+}> {
+  const owner = getAddress(ownerAddress) as Address;
+  const walletAddress = derivePolymarketDepositWallet(owner);
+
+  logInfo("relayer.deploy-deposit-wallet.start", {
+    ownerAddress: owner,
+    walletAddress,
+  });
+
+  const deployed = await relayerTransport.getDeployed?.(walletAddress);
+  if (deployed) {
+    logInfo("relayer.deploy-deposit-wallet.already-deployed", {
+      walletAddress,
+    });
     return {
       transactionID: "",
       txHash: "",
-      proxyAddress: safeAddress,
+      proxyAddress: walletAddress,
       alreadyDeployed: true,
     };
   }
 
-  const prepared = prepareSafeCreate({ eoaAddress: owner });
-
-  const signature = await walletClient.signTypedData({
-    account: owner,
-    ...prepared.typedData,
+  const result = await deployDepositWalletRelayerWallet({
+    transport: relayerTransport,
+    ownerAddress: owner,
+    options: {
+      onSubmitted: ({ transactionID, state }) => {
+        logInfo("relayer.deploy-deposit-wallet.submitted", {
+          transactionID,
+          state,
+        });
+      },
+      onConfirmed: (transactionHash) =>
+        logInfo("relayer.confirmed", { transactionHash }),
+    },
   });
 
-  const requestPayload = JSON.stringify(
-    buildSafeCreateSubmitRequest({
-      eoaAddress: owner,
-      prepared,
-      signature,
-    })
-  );
-
-  const submitResponse = await sendAuthedRequest<RelayerSubmitResponse>(
-    "POST",
-    "/submit",
-    requestPayload
-  );
-  assertRelayerSubmitAccepted(submitResponse, "deploy");
-
-  logInfo("relayer.deploy-safe.submitted", {
-    transactionID: submitResponse.transactionID,
-    state: submitResponse.state,
-  });
-
-  const txHash = await pollTransaction(submitResponse.transactionID);
   return {
-    transactionID: submitResponse.transactionID,
-    txHash,
-    proxyAddress: safeAddress,
+    transactionID: result.transactionID,
+    txHash: result.transactionHash,
+    proxyAddress: result.walletAddress,
   };
 }

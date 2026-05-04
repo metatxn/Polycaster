@@ -215,6 +215,11 @@ export const API_HOST_PERMISSIONS: string[] = [
   // Polygon RPC
   "https://polygon-bor-rpc.publicnode.com/*",
 
+  // WalletConnect / Reown mobile wallet pairing
+  "https://*.walletconnect.com/*",
+  "https://*.walletconnect.org/*",
+  "https://*.reown.com/*",
+
   // Kalshi API
   "https://api.elections.kalshi.com/*",
 

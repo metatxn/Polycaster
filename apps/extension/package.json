@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.25",
+  "version": "2.5.26",
   "private": true,
   "scripts": {
     "build": "webpack --mode production && node scripts/assert-production-bundle.mjs",
@@ -21,10 +21,12 @@
     "@knoww/logger": "workspace:*",
     "@knoww/shared-types": "workspace:*",
     "@polymarket/clob-client-v2": "catalog:",
+    "@walletconnect/universal-provider": "2.23.9",
     "decimal.js": "catalog:",
     "minisearch": "7.2.0",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-qr-code": "catalog:",
     "viem": "catalog:",
     "wink-eng-lite-web-model": "1.8.1",
     "wink-nlp": "2.4.0"

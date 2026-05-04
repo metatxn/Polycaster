@@ -49,7 +49,10 @@ import {
 } from "@/constants/contracts";
 import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { checkAllApprovals } from "@/lib/approvals";
-import { executeViaRelayer } from "@/lib/relayer-client";
+import {
+  executeViaDepositWallet,
+  executeViaRelayer,
+} from "@/lib/relayer-client";
 import { getRpcUrl } from "@/lib/rpc";
 import {
   getViemWalletClient,
@@ -155,6 +158,7 @@ export function useClobClient() {
     proxyAddress,
     isDeployed: hasProxyWallet,
     isEoaMode,
+    walletMode,
   } = useProxyWallet();
   const { approveUsdcForTrading } = useRelayerClient();
 
@@ -189,12 +193,12 @@ export function useClobClient() {
       signer,
       creds,
       signatureType: getPolymarketSignatureType(
-        isEoaMode ? "eoa" : "safe"
+        walletMode
       ) as unknown as number,
       funderAddress: isEoaMode ? address : proxyAddress,
       ...(builderCode ? { builderConfig: { builderCode } } : {}),
     });
-  }, [credentials, proxyAddress, isEoaMode, address, walletClient]);
+  }, [credentials, proxyAddress, isEoaMode, walletMode, address, walletClient]);
 
   /**
    * Check if the client can be used. Either an injected provider or an active
@@ -337,9 +341,19 @@ export function useClobClient() {
         return;
       }
 
+      if (walletMode === "deposit") {
+        await executeViaDepositWallet(
+          walletClient,
+          address as `0x${string}`,
+          txns,
+          proxyAddress as `0x${string}`
+        );
+        return;
+      }
+
       await executeViaRelayer(walletClient, address as `0x${string}`, txns);
     },
-    [proxyAddress, walletClient, address, isEoaMode]
+    [proxyAddress, walletClient, address, isEoaMode, walletMode]
   );
 
   /**

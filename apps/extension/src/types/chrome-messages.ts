@@ -73,6 +73,12 @@ export interface TradingGetBalanceMessage {
 
 export type TradingBalanceData = TradingWalletBalance;
 
+export interface TradingDeriveProxyAddressMessage {
+  type: "trading:derive-proxy-address";
+  eoaAddress: string;
+  walletMode?: TradingWalletMode;
+}
+
 export interface TradingPlaceOrderMessage {
   type: "trading:place-order";
   tokenId: string;
@@ -150,6 +156,7 @@ export interface TradingRelayerApproveMessage {
 export interface TradingDeploySafeMessage {
   type: "trading:deploy-safe";
   address: string;
+  walletMode?: TradingWalletMode;
 }
 
 export interface TradingPrewarmOffscreenMessage {
@@ -183,6 +190,7 @@ export interface AnalyticsTrackMessage {
 export type TradingMessage =
   | TradingDeriveCredentialsMessage
   | TradingGetBalanceMessage
+  | TradingDeriveProxyAddressMessage
   | TradingPlaceOrderMessage
   | TradingGetAllowanceMessage
   | TradingGetAllAllowancesMessage

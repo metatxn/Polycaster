@@ -27,9 +27,12 @@ import { CONTRACTS } from "@/constants/contracts";
 import { POLYGON_CHAIN_ID, RELAYER_API_URL } from "@/constants/polymarket";
 
 import {
+  derivePolymarketDepositWallet,
   derivePolymarketSafe,
+  executeViaDepositWallet,
   executeViaRelayer,
   getDeployed,
+  deployDepositWallet as relayerDeployDepositWallet,
   deploySafe as relayerDeploySafe,
 } from "@/lib/relayer-client";
 // Shared RPC utilities
@@ -38,7 +41,10 @@ import {
   getPublicClient,
   checkIsDeployed as rpcCheckIsDeployed,
 } from "@/lib/rpc";
-import { useTradingWalletMode } from "./use-trading-wallet-mode";
+import {
+  type TradingWalletMode,
+  useTradingWalletMode,
+} from "./use-trading-wallet-mode";
 
 const POLYMARKET_RELAYER_URL = RELAYER_API_URL;
 const CHAIN_ID = POLYGON_CHAIN_ID;
@@ -58,6 +64,7 @@ interface RelayerClientState {
   error: string | null;
   proxyAddress: string | null;
   hasDeployedSafe: boolean;
+  walletMode: TradingWalletMode | null;
 }
 
 // Debounce time for deployment checks
@@ -67,6 +74,7 @@ export function useRelayerClient() {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
   const { mode, isEoaMode } = useTradingWalletMode();
+  const isDepositMode = mode === "deposit";
 
   const [state, setState] = useState<RelayerClientState>({
     isInitialized: false,
@@ -74,10 +82,12 @@ export function useRelayerClient() {
     error: null,
     proxyAddress: null,
     hasDeployedSafe: false,
+    walletMode: null,
   });
 
   // Ref for debouncing deployment checks
   const lastCheckRef = useRef<number>(0);
+  const lastCheckKeyRef = useRef<string | null>(null);
   const checkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   /**
@@ -90,12 +100,15 @@ export function useRelayerClient() {
     if (!address) return null;
     if (isEoaMode) return address;
     try {
+      if (isDepositMode) {
+        return derivePolymarketDepositWallet(address as `0x${string}`);
+      }
       return derivePolymarketSafe(address as `0x${string}`);
     } catch (err) {
       log.warn("derive.failed", err);
       return null;
     }
-  }, [address, isEoaMode]);
+  }, [address, isEoaMode, isDepositMode]);
 
   /**
    * Deploy a Safe wallet for the user (gasless)
@@ -115,6 +128,7 @@ export function useRelayerClient() {
         error: null,
         proxyAddress: address,
         hasDeployedSafe: true,
+        walletMode: mode,
       }));
       return {
         success: true,
@@ -124,18 +138,27 @@ export function useRelayerClient() {
       };
     }
 
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    setState((prev) => ({
+      ...prev,
+      isLoading: true,
+      error: null,
+      proxyAddress: null,
+      hasDeployedSafe: false,
+      walletMode: mode,
+    }));
 
     try {
-      const result = await relayerDeploySafe(
-        walletClient,
-        address as `0x${string}`
-      );
-      const safe = derivePolymarketSafe(address as `0x${string}`);
+      const result = isDepositMode
+        ? await relayerDeployDepositWallet(address as `0x${string}`)
+        : await relayerDeploySafe(walletClient, address as `0x${string}`);
+      const safe = isDepositMode
+        ? derivePolymarketDepositWallet(address as `0x${string}`)
+        : derivePolymarketSafe(address as `0x${string}`);
 
-      log.info("safe.deployed", {
+      log.info("trading_wallet.deployed", {
         transactionHash: result.transactionHash,
         proxyAddress: safe,
+        mode,
       });
 
       setState((prev) => ({
@@ -143,6 +166,7 @@ export function useRelayerClient() {
         isLoading: false,
         proxyAddress: safe,
         hasDeployedSafe: true,
+        walletMode: mode,
       }));
 
       return {
@@ -154,14 +178,17 @@ export function useRelayerClient() {
       const errMessage =
         deployErr instanceof Error ? deployErr.message : String(deployErr);
 
-      // Preserve existing "safe already deployed" handling
-      if (errMessage.toLowerCase().includes("safe already deployed")) {
-        const derivedAddress = derivePolymarketSafe(address as `0x${string}`);
+      // Preserve existing "already deployed" handling
+      if (errMessage.toLowerCase().includes("already deployed")) {
+        const derivedAddress = isDepositMode
+          ? derivePolymarketDepositWallet(address as `0x${string}`)
+          : derivePolymarketSafe(address as `0x${string}`);
         setState((prev) => ({
           ...prev,
           isLoading: false,
           proxyAddress: derivedAddress,
           hasDeployedSafe: true,
+          walletMode: mode,
         }));
         return {
           success: true,
@@ -172,7 +199,7 @@ export function useRelayerClient() {
       }
 
       log.error("deploy.error", deployErr);
-      const errorMessage = errMessage || "Failed to deploy Safe";
+      const errorMessage = errMessage || "Failed to deploy trading wallet";
       setState((prev) => ({
         ...prev,
         isLoading: false,
@@ -180,7 +207,7 @@ export function useRelayerClient() {
       }));
       return { success: false, error: errorMessage };
     }
-  }, [walletClient, address, isEoaMode]);
+  }, [walletClient, address, isEoaMode, isDepositMode, mode]);
 
   /**
    * Set the default token approvals for app trading (gasless)
@@ -229,7 +256,10 @@ export function useRelayerClient() {
 
         const isDeployed = isEoaMode
           ? true
-          : await getDeployed(expectedSafe as `0x${string}`);
+          : await getDeployed(
+              expectedSafe as `0x${string}`,
+              isDepositMode ? "WALLET" : "SAFE"
+            );
         log.debug("approvals.safe_check", { expectedSafe, isDeployed });
 
         // Check if approvals are already set
@@ -307,15 +337,23 @@ export function useRelayerClient() {
               );
             }
 
-            result = await executeViaRelayer(
-              walletClient,
-              address as `0x${string}`,
-              approvalTxs.map((t) => ({
-                to: t.to as `0x${string}`,
-                data: t.data as `0x${string}`,
-                value: t.value,
-              }))
-            );
+            const txs = approvalTxs.map((t) => ({
+              to: t.to as `0x${string}`,
+              data: t.data as `0x${string}`,
+              value: t.value,
+            }));
+            result = isDepositMode
+              ? await executeViaDepositWallet(
+                  walletClient,
+                  address as `0x${string}`,
+                  txs,
+                  expectedSafe as `0x${string}`
+                )
+              : await executeViaRelayer(
+                  walletClient,
+                  address as `0x${string}`,
+                  txs
+                );
 
             log.info("approvals.result", {
               transactionID: result.transactionID,
@@ -354,7 +392,7 @@ export function useRelayerClient() {
         return { success: false, error: errorMessage };
       }
     },
-    [walletClient, address, deriveSafeAddress, isEoaMode]
+    [walletClient, address, deriveSafeAddress, isEoaMode, isDepositMode]
   );
 
   /**
@@ -385,13 +423,16 @@ export function useRelayerClient() {
 
       // Debounce: skip if called too recently (unless forced)
       const now = Date.now();
+      const checkKey = `${address.toLowerCase()}:${mode}`;
       if (
         !options?.force &&
+        lastCheckKeyRef.current === checkKey &&
         now - lastCheckRef.current < CHECK_DEPLOYMENT_DEBOUNCE_MS
       ) {
         return;
       }
       lastCheckRef.current = now;
+      lastCheckKeyRef.current = checkKey;
 
       // Clear any pending check
       if (checkTimeoutRef.current) {
@@ -399,7 +440,14 @@ export function useRelayerClient() {
         checkTimeoutRef.current = null;
       }
 
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+      setState((prev) => ({
+        ...prev,
+        isLoading: true,
+        error: null,
+        proxyAddress: null,
+        hasDeployedSafe: false,
+        walletMode: mode,
+      }));
 
       try {
         if (isEoaMode) {
@@ -409,6 +457,7 @@ export function useRelayerClient() {
             isInitialized: true,
             hasDeployedSafe: true,
             proxyAddress: address ?? null,
+            walletMode: mode,
           }));
           return;
         }
@@ -423,6 +472,7 @@ export function useRelayerClient() {
             isInitialized: true,
             hasDeployedSafe: false,
             proxyAddress: null,
+            walletMode: mode,
           }));
           return;
         }
@@ -447,6 +497,7 @@ export function useRelayerClient() {
           // For new users, we don't want to show a non-existent address
           proxyAddress: isDeployed ? derivedAddress : null,
           hasDeployedSafe: isDeployed,
+          walletMode: mode,
         }));
       } catch (err) {
         log.error("deployment.check_error", err);
@@ -455,10 +506,13 @@ export function useRelayerClient() {
           isLoading: false,
           isInitialized: true,
           error: err instanceof Error ? err.message : "Failed to check Safe",
+          proxyAddress: null,
+          hasDeployedSafe: false,
+          walletMode: mode,
         }));
       }
     },
-    [address, deriveSafeAddress, checkIsDeployed, isEoaMode]
+    [address, mode, deriveSafeAddress, checkIsDeployed, isEoaMode]
   );
 
   /**
@@ -467,7 +521,7 @@ export function useRelayerClient() {
   const forceCheckSafeDeployment = useCallback(async () => {
     // Clear the deployment cache for this address
     const derivedAddress = await deriveSafeAddress();
-    if (derivedAddress && mode === "safe") {
+    if (derivedAddress && mode !== "eoa") {
       clearDeploymentCache(derivedAddress);
     }
     return checkSafeDeployment({ force: true });
@@ -521,12 +575,14 @@ export function useRelayerClient() {
     if (isConnected && address) {
       checkSafeDeployment();
     } else {
+      lastCheckKeyRef.current = null;
       setState({
         isInitialized: false,
         isLoading: false,
         error: null,
         proxyAddress: null,
         hasDeployedSafe: false,
+        walletMode: null,
       });
     }
 
@@ -537,9 +593,13 @@ export function useRelayerClient() {
     };
   }, [isConnected, address, checkSafeDeployment]);
 
+  const stateMatchesMode = state.walletMode === mode;
+
   return {
     // State
     ...state,
+    proxyAddress: stateMatchesMode ? state.proxyAddress : null,
+    hasDeployedSafe: stateMatchesMode ? state.hasDeployedSafe : false,
     isConnected,
 
     // Actions

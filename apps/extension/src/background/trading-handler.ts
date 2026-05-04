@@ -45,7 +45,11 @@ import {
   POLYMARKET_API,
   syncClobBalanceAllowance,
 } from "@knoww/shared-types/polymarket";
-import { derivePolymarketSafe } from "@knoww/shared-types/relayer";
+import {
+  derivePolymarketDepositWallet,
+  derivePolymarketSafe,
+  type RelayerTransaction,
+} from "@knoww/shared-types/relayer";
 import {
   buildClobOrderPreflightPlan,
   buildPusdAutoWrapTransactions,
@@ -66,6 +70,7 @@ import {
 import type {
   TradingDeploySafeMessage,
   TradingDeriveCredentialsMessage,
+  TradingDeriveProxyAddressMessage,
   TradingErrorResponse,
   TradingGetAllAllowancesMessage,
   TradingGetAllowanceMessage,
@@ -83,7 +88,12 @@ import {
   type BridgeWalletClient,
   createBridgeWalletClient,
 } from "./bridge-signer";
-import { deployProxyWallet, executeViaRelayer } from "./relayer-client";
+import {
+  deployDepositWallet,
+  deployProxyWallet,
+  executeViaDepositWallet,
+  executeViaRelayer,
+} from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
@@ -132,6 +142,48 @@ async function executeDirectTransactions(
   return { txHash: lastHash };
 }
 
+function deriveTradingWalletAddress(
+  ownerAddress: Address,
+  walletMode?: TradingWalletMode
+): Address {
+  const mode = normalizeTradingWalletMode(walletMode);
+  if (mode === "eoa") return ownerAddress;
+  if (mode === "deposit") return derivePolymarketDepositWallet(ownerAddress);
+  return derivePolymarketSafe(ownerAddress);
+}
+
+function deriveProxyAddressSync(
+  eoaAddress: string,
+  walletMode?: TradingWalletMode
+): string {
+  return deriveTradingWalletAddress(
+    getAddress(eoaAddress) as Address,
+    walletMode
+  );
+}
+
+async function executeWalletModeTransactions(
+  walletClient: BridgeWalletClient,
+  ownerAddress: Address,
+  walletMode: TradingWalletMode | undefined,
+  transactions: RelayerTransaction[],
+  walletAddress?: Address
+): Promise<{ txHash: string }> {
+  const mode = normalizeTradingWalletMode(walletMode);
+  if (mode === "eoa") {
+    return executeDirectTransactions(walletClient, transactions);
+  }
+  if (mode === "deposit") {
+    return executeViaDepositWallet(
+      walletClient,
+      ownerAddress,
+      transactions,
+      walletAddress ?? derivePolymarketDepositWallet(ownerAddress)
+    );
+  }
+  return executeViaRelayer(walletClient, ownerAddress, transactions);
+}
+
 export async function handleTradingMessage(
   message: { type: string; [key: string]: unknown },
   sender: chrome.runtime.MessageSender
@@ -169,7 +221,7 @@ export async function handleTradingMessage(
         );
       case "trading:derive-proxy-address":
         return await handleDeriveProxyAddress(
-          message as unknown as { type: string; eoaAddress: string }
+          message as unknown as TradingDeriveProxyAddressMessage
         );
       case "trading:get-orderbook":
         return await handleGetOrderBook(
@@ -424,11 +476,11 @@ async function handlePlaceOrder(
 
 // ── Proxy Address ──
 
-async function handleDeriveProxyAddress(msg: {
-  eoaAddress: string;
-}): Promise<TradingResponse> {
+async function handleDeriveProxyAddress(
+  msg: TradingDeriveProxyAddressMessage
+): Promise<TradingResponse> {
   const owner = getAddress(msg.eoaAddress) as Address;
-  const proxyAddress = derivePolymarketSafe(owner);
+  const proxyAddress = deriveTradingWalletAddress(owner, msg.walletMode);
 
   const code = await publicClient.getBytecode({ address: proxyAddress });
   return ok({ proxyAddress, isDeployed: !!code && code !== "0x" });
@@ -688,10 +740,13 @@ async function handleSplitPosition(
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
 
+  const walletMode = normalizeTradingWalletMode(msg.walletMode);
   const proxyAddress =
-    normalizeTradingWalletMode(msg.walletMode) === "eoa"
+    walletMode === "eoa"
       ? ownerAddress
-      : (msg.proxyAddress ?? deriveProxyAddressSync(msg.address));
+      : (getAddress(
+          msg.proxyAddress ?? deriveProxyAddressSync(msg.address, walletMode)
+        ) as Address);
   const plan = await planCtfOperationTransactions({
     operation: "splitPosition",
     conditionId: msg.conditionId,
@@ -702,19 +757,22 @@ async function handleSplitPosition(
     fallbackToApproval: true,
   });
   if (plan.approvalTransaction) {
-    if (normalizeTradingWalletMode(msg.walletMode) === "eoa") {
-      await executeDirectTransactions(walletClient, [plan.approvalTransaction]);
-    } else {
-      await executeViaRelayer(walletClient, ownerAddress, [
-        plan.approvalTransaction,
-      ]);
-    }
+    await executeWalletModeTransactions(
+      walletClient,
+      ownerAddress,
+      walletMode,
+      [plan.approvalTransaction],
+      proxyAddress
+    );
   }
 
-  const result =
-    normalizeTradingWalletMode(msg.walletMode) === "eoa"
-      ? await executeDirectTransactions(walletClient, [plan.transaction])
-      : await executeViaRelayer(walletClient, ownerAddress, [plan.transaction]);
+  const result = await executeWalletModeTransactions(
+    walletClient,
+    ownerAddress,
+    walletMode,
+    [plan.transaction],
+    proxyAddress
+  );
 
   syncBalancesAfterCTF(msg).catch((e) =>
     logWarn("trading.ctf-post-sync-failed", {
@@ -737,6 +795,13 @@ async function handleMergePositions(
 
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
+  const walletMode = normalizeTradingWalletMode(msg.walletMode);
+  const proxyAddress =
+    walletMode === "eoa"
+      ? ownerAddress
+      : (getAddress(
+          msg.proxyAddress ?? deriveProxyAddressSync(msg.address, walletMode)
+        ) as Address);
 
   const plan = planCtfOperationTransaction({
     operation: "mergePositions",
@@ -745,10 +810,13 @@ async function handleMergePositions(
     negRisk: msg.negRisk,
   });
 
-  const result =
-    normalizeTradingWalletMode(msg.walletMode) === "eoa"
-      ? await executeDirectTransactions(walletClient, [plan.transaction])
-      : await executeViaRelayer(walletClient, ownerAddress, [plan.transaction]);
+  const result = await executeWalletModeTransactions(
+    walletClient,
+    ownerAddress,
+    walletMode,
+    [plan.transaction],
+    proxyAddress
+  );
 
   syncBalancesAfterCTF(msg).catch((e) =>
     logWarn("trading.ctf-post-sync-failed", {
@@ -760,29 +828,48 @@ async function handleMergePositions(
   return ok({ txHash: result.txHash, success: true });
 }
 
-// ── Gasless Safe Deployment via Relayer ──
+// ── Gasless Trading Wallet Deployment via Relayer ──
 
 /**
- * Deploys the user's Polymarket Safe (trading wallet) for new users who don't
- * yet have one. Invoked from the content script when the trading panel detects
+ * Deploys the user's selected Polymarket trading wallet. Invoked from the
+ * content script when the trading panel detects
  * `isDeployed === false` on an authenticated wallet.
- *
- * Pairs with `deployProxyWallet()` in `./relayer-client.ts` which handles the
- * CreateProxy EIP-712 signing + /submit POST + /transaction polling.
  */
 async function handleDeploySafe(
   msg: TradingDeploySafeMessage,
   sender: chrome.runtime.MessageSender
 ): Promise<TradingResponse> {
-  const tabId = sender.tab?.id;
-  if (!tabId) return fail("No active tab for signing");
-
   const ownerAddress = getAddress(msg.address) as Address;
-  const walletClient = createBridgeWalletClient(ownerAddress, tabId);
+  const walletMode = normalizeTradingWalletMode(msg.walletMode);
 
-  logInfo("trading.deploy-safe.submit", { address: msg.address });
+  logInfo("trading.deploy-wallet.submit", {
+    address: msg.address,
+    walletMode,
+  });
   try {
-    const result = await deployProxyWallet(walletClient, ownerAddress);
+    if (walletMode === "eoa") {
+      return ok({
+        txHash: "",
+        proxyAddress: ownerAddress,
+        alreadyDeployed: true,
+      });
+    }
+
+    if (walletMode === "deposit") {
+      const result = await deployDepositWallet(ownerAddress);
+      return ok({
+        txHash: result.txHash,
+        proxyAddress: result.proxyAddress,
+        alreadyDeployed: result.alreadyDeployed ?? false,
+      });
+    }
+
+    const tabId = sender.tab?.id;
+    if (!tabId) return fail("No active tab for signing");
+    const result = await deployProxyWallet(
+      createBridgeWalletClient(ownerAddress, tabId),
+      ownerAddress
+    );
     return ok({
       txHash: result.txHash,
       proxyAddress: result.proxyAddress,
@@ -809,7 +896,11 @@ async function handleRelayerApprove(
   const approvalAmount = parseApprovalAmountRaw(msg.approvalAmount);
   const walletMode = normalizeTradingWalletMode(msg.walletMode);
   const proxyAddress =
-    walletMode === "eoa" ? ownerAddress : deriveProxyAddressSync(msg.address);
+    walletMode === "eoa"
+      ? ownerAddress
+      : (getAddress(
+          deriveProxyAddressSync(msg.address, walletMode)
+        ) as Address);
 
   const txns = await readTradingApprovalStatus(
     publicClient,
@@ -824,10 +915,13 @@ async function handleRelayerApprove(
   }
 
   logInfo("trading.approve.submit", { txnCount: txns.length, walletMode });
-  const result =
-    walletMode === "eoa"
-      ? await executeDirectTransactions(walletClient, txns)
-      : await executeViaRelayer(walletClient, ownerAddress, txns);
+  const result = await executeWalletModeTransactions(
+    walletClient,
+    ownerAddress,
+    walletMode,
+    txns,
+    proxyAddress
+  );
   return ok({ txHash: result.txHash, success: true });
 }
 
@@ -873,17 +967,15 @@ async function ensurePusdSufficient(
 
   const txns = buildPusdAutoWrapTransactions(owner, wrapPlan.wrapAmountRaw);
 
-  if (normalizeTradingWalletMode(walletMode) === "eoa") {
-    await executeDirectTransactions(walletClient, txns);
-  } else {
-    await executeViaRelayer(walletClient, walletClient.account.address, txns);
-  }
+  await executeWalletModeTransactions(
+    walletClient,
+    getAddress(walletClient.account.address) as Address,
+    walletMode,
+    txns,
+    owner
+  );
 
   logInfo("trading.auto-wrap", { wrapped: wrapPlan.wrapAmountRaw.toString() });
-}
-
-function deriveProxyAddressSync(eoaAddress: string): string {
-  return derivePolymarketSafe(getAddress(eoaAddress) as Address);
 }
 
 // ── Outcome Token Balances ──

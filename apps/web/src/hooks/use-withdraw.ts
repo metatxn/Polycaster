@@ -12,7 +12,10 @@ import {
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
-import { executeViaRelayer } from "@/lib/relayer-client";
+import {
+  executeViaDepositWallet,
+  executeViaRelayer,
+} from "@/lib/relayer-client";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import { useBridge } from "./use-bridge";
 import { PROXY_WALLET_QUERY_KEY, useProxyWallet } from "./use-proxy-wallet";
@@ -341,6 +344,7 @@ export function useWithdraw() {
     usdcBalance,
     refresh: refreshBalance,
     isEoaMode,
+    walletMode,
   } = useProxyWallet();
   const {
     getWithdrawalAddresses,
@@ -602,15 +606,15 @@ export function useWithdraw() {
       return { success: true, transactionHash: lastHash };
     }
 
-    const result = await executeViaRelayer(
-      signer,
-      account,
-      transactions.map((t) => ({
-        to: t.to as `0x${string}`,
-        data: t.data as `0x${string}`,
-        value: t.value,
-      }))
-    );
+    const relayerTransactions = transactions.map((t) => ({
+      to: t.to as `0x${string}`,
+      data: t.data as `0x${string}`,
+      value: t.value,
+    }));
+    const result =
+      walletMode === "deposit"
+        ? await executeViaDepositWallet(signer, account, relayerTransactions)
+        : await executeViaRelayer(signer, account, relayerTransactions);
 
     log.info("tx.confirmed", { transactionHash: result.transactionHash });
     setState("confirmed");

@@ -89,7 +89,7 @@ export function useNotifications() {
   const {
     proxyAddress,
     isDeployed: hasProxyWallet,
-    isEoaMode,
+    walletMode,
   } = useProxyWallet();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -139,11 +139,11 @@ export function useNotifications() {
       signer,
       creds,
       signatureType: getPolymarketSignatureType(
-        isEoaMode ? "eoa" : "safe"
+        walletMode
       ) as unknown as number,
       funderAddress: proxyAddress,
     }) as InstanceType<typeof ClobClient> & ClobClientWithNotificationMethods;
-  }, [address, credentials, proxyAddress, isEoaMode, walletClient]);
+  }, [address, credentials, proxyAddress, walletMode, walletClient]);
 
   /**
    * Fetch notifications from the CLOB API

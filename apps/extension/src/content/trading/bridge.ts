@@ -15,6 +15,13 @@
  * sides validate. Messages without a matching nonce are silently dropped.
  */
 
+import {
+  WalletConnectBridge,
+  type WalletConnectState,
+} from "./walletconnect-bridge";
+
+export const WALLETCONNECT_WALLET_UUID = "__knoww_walletconnect_mobile__";
+
 export interface DiscoveredWallet {
   uuid: string;
   name: string;
@@ -41,6 +48,10 @@ let initialized = false;
 let wallets: DiscoveredWallet[] = [];
 let walletListeners: Array<(w: DiscoveredWallet[]) => void> = [];
 let selectedWalletUuid: string | undefined;
+
+function isWalletConnectSelected(walletUuid?: string): boolean {
+  return (walletUuid ?? selectedWalletUuid) === WALLETCONNECT_WALLET_UUID;
+}
 
 export function getNonce(): string | undefined {
   return window.__KNOWW_BRIDGE_NONCE__;
@@ -131,6 +142,47 @@ function request(
   params?: unknown[],
   walletUuid?: string
 ): Promise<unknown> {
+  if (isWalletConnectSelected(walletUuid)) {
+    switch (method) {
+      case "eth_accounts":
+      case "eth_requestAccounts":
+        return WalletConnectBridge.getAccounts();
+      case "eth_chainId":
+        return WalletConnectBridge.getChainId();
+      case "wallet_switchEthereumChain": {
+        const chainId = (params?.[0] as { chainId?: string } | undefined)
+          ?.chainId;
+        return WalletConnectBridge.switchChain(chainId ?? "0x89");
+      }
+      case "eth_signTypedData_v4":
+        return WalletConnectBridge.signTypedData(
+          String(params?.[0] ?? ""),
+          String(params?.[1] ?? "")
+        );
+      case "personal_sign":
+        return WalletConnectBridge.signMessage(
+          String(params?.[1] ?? ""),
+          String(params?.[0] ?? "")
+        );
+      case "eth_sendTransaction":
+        return WalletConnectBridge.sendTransaction(
+          (params?.[0] as Record<string, unknown> | undefined) ?? {}
+        );
+      case "eth_call": {
+        const call = params?.[0] as { to?: string; data?: string } | undefined;
+        return WalletConnectBridge.ethCall(call?.to ?? "", call?.data ?? "0x");
+      }
+      case "eth_getBalance":
+        return WalletConnectBridge.getBalance(String(params?.[0] ?? ""));
+      case "eth_getTransactionReceipt":
+        return WalletConnectBridge.getTransactionReceipt(
+          String(params?.[0] ?? "")
+        );
+      default:
+        return Promise.reject(new Error(`Method not allowed: ${method}`));
+    }
+  }
+
   init();
   const nonce = getNonce();
   const uuid = walletUuid ?? selectedWalletUuid;
@@ -176,6 +228,7 @@ export const WalletBridge = {
 
   selectWallet(uuid: string): void {
     selectedWalletUuid = uuid;
+    if (uuid === WALLETCONNECT_WALLET_UUID) return;
     window.postMessage(
       { type: "KNOWW_SELECT_WALLET", uuid, _n: getNonce() },
       window.location.origin
@@ -183,6 +236,10 @@ export const WalletBridge = {
   },
 
   async connect(walletUuid?: string): Promise<string[]> {
+    if (walletUuid === WALLETCONNECT_WALLET_UUID) {
+      selectedWalletUuid = WALLETCONNECT_WALLET_UUID;
+      return WalletConnectBridge.connect();
+    }
     if (walletUuid) {
       this.selectWallet(walletUuid);
     }
@@ -198,8 +255,21 @@ export const WalletBridge = {
   },
 
   async getAccounts(): Promise<string[]> {
-    const accounts = (await request("eth_accounts")) as string[];
-    return accounts || [];
+    if (isWalletConnectSelected()) {
+      return WalletConnectBridge.getAccounts();
+    }
+    let accounts: string[] = [];
+    try {
+      accounts = (await request("eth_accounts")) as string[];
+    } catch {
+      accounts = [];
+    }
+    if (accounts?.length > 0) return accounts;
+    const mobileAccounts = await WalletConnectBridge.getAccounts();
+    if (mobileAccounts.length > 0) {
+      selectedWalletUuid = WALLETCONNECT_WALLET_UUID;
+    }
+    return mobileAccounts;
   },
 
   async getChainId(): Promise<string> {
@@ -240,5 +310,21 @@ export const WalletBridge = {
       status: string;
       blockNumber: string;
     } | null;
+  },
+
+  onMobileConnectionChange(
+    listener: (state: WalletConnectState) => void
+  ): () => void {
+    return WalletConnectBridge.onStateChange(listener);
+  },
+
+  getMobileConnectionState(): WalletConnectState {
+    return WalletConnectBridge.getState();
+  },
+
+  async disconnect(): Promise<void> {
+    if (!isWalletConnectSelected()) return;
+    await WalletConnectBridge.disconnect();
+    selectedWalletUuid = undefined;
   },
 };

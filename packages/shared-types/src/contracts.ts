@@ -53,6 +53,14 @@ export const SAFE_FACTORY_ADDRESS =
 export const SAFE_INIT_CODE_HASH =
   "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf" as const;
 
+/** Polymarket Deposit Wallet Factory */
+export const DEPOSIT_WALLET_FACTORY_ADDRESS =
+  "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07" as const;
+
+/** Polymarket Deposit Wallet implementation on Polygon mainnet */
+export const DEPOSIT_WALLET_IMPLEMENTATION_ADDRESS =
+  "0x58CA52ebe0DadfdF531Cde7062e76746de4Db1eB" as const;
+
 export const CONTRACTS = {
   USDC_E: USDC_E_ADDRESS,
   PUSD: PUSD_ADDRESS,
@@ -64,6 +72,8 @@ export const CONTRACTS = {
   NEG_RISK_CTF_EXCHANGE: NEG_RISK_CTF_EXCHANGE_ADDRESS,
   NEG_RISK_ADAPTER: NEG_RISK_ADAPTER_ADDRESS,
   SAFE_FACTORY: SAFE_FACTORY_ADDRESS,
+  DEPOSIT_WALLET_FACTORY: DEPOSIT_WALLET_FACTORY_ADDRESS,
+  DEPOSIT_WALLET_IMPLEMENTATION: DEPOSIT_WALLET_IMPLEMENTATION_ADDRESS,
 } as const;
 
 /** USDC.e approval target — needed for the Onramp `wrap()` call */

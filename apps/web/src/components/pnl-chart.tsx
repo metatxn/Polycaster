@@ -41,7 +41,7 @@ function formatCurrency(value: number): string {
 }
 
 function formatPercent(value: number): string {
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 function formatDate(dateStr: string): string {
@@ -67,7 +67,7 @@ const INTERVAL_OPTIONS: { value: PnLInterval; label: string }[] = [
 // Chart Component
 // ============================================================================
 
-function InteractiveLineChart({
+export function InteractiveLineChart({
   data,
   height = 200,
 }: {

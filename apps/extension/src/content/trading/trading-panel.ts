@@ -11,6 +11,11 @@
  */
 
 import { PUSD_ADDRESS, USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
+import {
+  type ExpirationPreset,
+  getGtdExpirationTimestamp,
+  ORDER_EXPIRATION_PRESETS,
+} from "@knoww/shared-types/orders";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import Decimal from "decimal.js";
@@ -87,7 +92,6 @@ interface PanelOptions {
 type OrderMode = "market" | "limit";
 type TradeSide = "buy" | "sell";
 type ActiveView = "order" | "split" | "merge" | "deposit";
-type ExpirationPreset = "GTC" | "1h" | "4h" | "24h" | "7d" | "30d";
 
 interface DepositToken {
   symbol: string;
@@ -216,6 +220,17 @@ function clearLivePanelRefreshTimer(): void {
   }
 }
 
+function pauseLivePanelRefresh(): void {
+  livePanelRefreshEnabled = false;
+  clearLivePanelRefreshTimer();
+}
+
+function resumeLivePanelRefresh(): void {
+  if (!activePanel?.isConnected || !panelOpts) return;
+  livePanelRefreshEnabled = true;
+  scheduleLivePanelRefresh();
+}
+
 function canRefreshLivePanel(): boolean {
   return Boolean(
     livePanelRefreshEnabled && activePanel?.isConnected && panelOpts
@@ -227,15 +242,6 @@ function normalizePrice(price: number, tick?: number): number {
   const rounded = roundToTick(price, t);
   return Math.max(t, Math.min(1 - t, Number(rounded.toFixed(4))));
 }
-
-const EXPIRATION_MAP: Record<ExpirationPreset, number> = {
-  GTC: 0,
-  "1h": 3600,
-  "4h": 14400,
-  "24h": 86400,
-  "7d": 604800,
-  "30d": 2592000,
-};
 
 // ── SVG Icons ──
 
@@ -758,12 +764,14 @@ function addHeader(
     const addr = el("span", "knoww-tp-header-addr", truncAddr(address));
     walletPill.appendChild(addr);
 
-    const balText = `$${formatTokenAmount(ctx.balance)}`;
+    const availableCollateral = getAvailableTradingCollateral(ctx);
+    const balText = `$${formatTokenAmount(availableCollateral)}`;
     const bal = el(
       "span",
-      `knoww-tp-header-bal${ctx.balance < 1 ? " low" : ""}`,
+      `knoww-tp-header-bal${availableCollateral < 1 ? " low" : ""}`,
       balText
     );
+    bal.title = `Available collateral: ${formatCollateralBreakdown(ctx)}`;
     walletPill.appendChild(bal);
 
     right.appendChild(walletPill);
@@ -909,6 +917,26 @@ function formatTokenAmount(amount: number): string {
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M`;
   if (amount >= 1_000) return `${(amount / 1_000).toFixed(2)}K`;
   return amount.toFixed(2);
+}
+
+function getTokenBalance(ctx: TradingContext, symbol: string): number {
+  const normalized = symbol.toLowerCase();
+  return (
+    ctx.tokenBalances.find((token) => token.symbol.toLowerCase() === normalized)
+      ?.amount ?? 0
+  );
+}
+
+function getPusdBalance(ctx: TradingContext): number {
+  return ctx.pusdBalance ?? getTokenBalance(ctx, "pUSD");
+}
+
+function getAvailableTradingCollateral(ctx: TradingContext): number {
+  return ctx.balance;
+}
+
+function formatCollateralBreakdown(ctx: TradingContext): string {
+  return `pUSD ${formatTokenAmount(getPusdBalance(ctx))} + USDC.e ${formatTokenAmount(ctx.usdcEBalance ?? getTokenBalance(ctx, "USDC.e"))}`;
 }
 
 function addPortfolioBar(
@@ -1065,6 +1093,50 @@ function formatTradingPanelErrorMessage(
   return formatTradingErrorLine(message);
 }
 
+function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
+  const wrap = el("div", "knoww-tp-wallet-mode");
+  const title = el("div", "knoww-tp-wallet-mode-title", "Trading wallet");
+  wrap.appendChild(title);
+
+  const options = el("div", "knoww-tp-wallet-mode-options");
+  const modes: Array<{
+    mode: TradingContext["walletMode"];
+    label: string;
+    desc: string;
+  }> = [
+    {
+      mode: "safe",
+      label: "Safe",
+      desc: "Gasless setup through Polymarket relayer.",
+    },
+    {
+      mode: "eoa",
+      label: "EOA",
+      desc: "Trade directly from this wallet. Requires POL for gas.",
+    },
+  ];
+
+  for (const item of modes) {
+    const btn = el(
+      "button",
+      `knoww-tp-wallet-mode-option${
+        ctx.walletMode === item.mode ? " active" : ""
+      }`
+    );
+    btn.innerHTML = `<span>${item.label}</span><small>${item.desc}</small>`;
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (ctx.walletMode === item.mode) return;
+      btn.classList.add("loading");
+      void TradingService.setWalletMode(item.mode).catch(() => {});
+    };
+    options.appendChild(btn);
+  }
+
+  wrap.appendChild(options);
+  p.appendChild(wrap);
+}
+
 /**
  * Deploy Safe gate — rendered after wallet connect but before "Enable Trading".
  *
@@ -1076,6 +1148,7 @@ function formatTradingPanelErrorMessage(
  */
 function addDeploySafe(
   p: HTMLElement,
+  ctx: TradingContext,
   options?: { errorMessage?: string | null }
 ): void {
   const errorMessage = options?.errorMessage
@@ -1083,6 +1156,7 @@ function addDeploySafe(
     : null;
   const s = el("div", "knoww-tp-enable-section");
   s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
+  addWalletModeSelector(s, ctx);
   s.appendChild(
     el(
       "div",
@@ -1114,6 +1188,7 @@ function addDeploySafe(
 
 function addEnableTrading(
   p: HTMLElement,
+  ctx: TradingContext,
   options?: { errorMessage?: string | null }
 ): void {
   const errorMessage = options?.errorMessage
@@ -1121,6 +1196,7 @@ function addEnableTrading(
     : null;
   const s = el("div", "knoww-tp-enable-section");
   s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
+  addWalletModeSelector(s, ctx);
   s.appendChild(
     el(
       "div",
@@ -1496,8 +1572,7 @@ function addLimitPrice(
   expBlock.appendChild(expHeader);
 
   const expRow = el("div", "knoww-tp-exp-row");
-  const presets: ExpirationPreset[] = ["GTC", "1h", "4h", "24h", "7d", "30d"];
-  for (const p of presets) {
+  for (const p of ORDER_EXPIRATION_PRESETS) {
     const btn = el(
       "button",
       `knoww-tp-exp-btn${expirationPreset === p ? " active" : ""}`,
@@ -1581,6 +1656,7 @@ function addAmountSection(
   const positionSize = getPositionSize(opts);
   const cost = getCost(opts, ctx);
   const minShares = isSell ? 1 : Math.max(1, Math.ceil(ctx.minOrderSize));
+  const availableCollateral = getAvailableTradingCollateral(ctx);
 
   // Shares header: "Shares" label on left, cost on right
   const sharesHeader = el("div", "knoww-tp-section-header");
@@ -1650,10 +1726,10 @@ function addAmountSection(
     e.stopPropagation();
     if (isSell && positionSize > 0) {
       selectedShares = positionSize;
-    } else if (!isSell && ctx.balance > 0 && effectivePrice > 0) {
+    } else if (!isSell && availableCollateral > 0 && effectivePrice > 0) {
       selectedShares = Math.max(
         minShares,
-        Math.floor(ctx.balance / effectivePrice)
+        Math.floor(availableCollateral / effectivePrice)
       );
     }
     trackPanelAnalytics("trading_form_max_clicked", {
@@ -1663,7 +1739,7 @@ function addAmountSection(
     });
     rerender();
   };
-  if ((isSell && positionSize <= 0) || (!isSell && ctx.balance <= 0)) {
+  if ((isSell && positionSize <= 0) || (!isSell && availableCollateral <= 0)) {
     maxBtn.disabled = true;
   }
   sharesRow.appendChild(maxBtn);
@@ -1836,9 +1912,9 @@ function addBalanceWarning(
   ctx: TradingContext
 ): void {
   if (activeSide === "sell") return;
-  const { balance, address } = ctx;
+  const { address } = ctx;
   const cost = getCost(opts, ctx);
-  const balanceDecimal = new Decimal(balance);
+  const balanceDecimal = new Decimal(getAvailableTradingCollateral(ctx));
   const costDecimal = new Decimal(cost);
   if (costDecimal.lte(balanceDecimal) || balanceDecimal.lt(0)) return;
 
@@ -1877,7 +1953,7 @@ function addBalanceWarning(
     el(
       "div",
       "knoww-tp-warn-detail",
-      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} pUSD`
+      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} available (${formatCollateralBreakdown(ctx)})`
     )
   );
   form.appendChild(w);
@@ -1891,11 +1967,11 @@ function addSubmitButton(
   ctx: TradingContext
 ): void {
   const side = activeSide === "sell" ? "SELL" : "BUY";
-  const { balance, state, minOrderSize, usdcAllowance, usdcAllowanceNegRisk } =
-    ctx;
+  const { state, minOrderSize, usdcAllowance, usdcAllowanceNegRisk } = ctx;
   const isSubmitting = state === "placing-order" || state === "approving";
   const cost = getCost(opts, ctx);
-  const noFunds = activeSide === "buy" && cost > balance;
+  const availableCollateral = getAvailableTradingCollateral(ctx);
+  const noFunds = activeSide === "buy" && cost > availableCollateral;
   const noShares = selectedShares <= 0;
   const shares = selectedShares;
   const minShares = Math.max(1, Math.ceil(minOrderSize));
@@ -1923,6 +1999,7 @@ function addSubmitButton(
     shares > positionSize;
 
   const btn = el("button", `knoww-tp-submit ${activeSide}`);
+  btn.setAttribute("type", "button");
 
   if (orderSettling) {
     btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Settling...`;
@@ -1967,7 +2044,9 @@ function addSubmitButton(
   }
 
   btn.onclick = async (e) => {
+    e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
     if (btn.disabled) {
       let reason = "unknown";
       if (orderSettling) reason = "settling";
@@ -1987,10 +2066,13 @@ function addSubmitButton(
       });
       return;
     }
-    if (!activePanel) return;
-    const panel = activePanel;
+    const panel =
+      activePanel ??
+      (btn.closest('[data-knoww-trading="true"]') as HTMLElement | null);
+    if (!panel) return;
 
     if (needsApproval) {
+      pauseLivePanelRefresh();
       trackPanelAnalytics("trading_usdc_approve_started", {
         marketId: opts.market.id,
       });
@@ -2011,6 +2093,8 @@ function addSubmitButton(
           err instanceof Error ? err.message : "Approval failed",
           "error"
         );
+      } finally {
+        resumeLivePanelRefresh();
       }
       return;
     }
@@ -2028,8 +2112,7 @@ function addSubmitButton(
         clobOrderType = "GTC";
       } else {
         clobOrderType = "GTD";
-        expiration =
-          Math.floor(Date.now() / 1000) + EXPIRATION_MAP[expirationPreset] + 60;
+        expiration = getGtdExpirationTimestamp(expirationPreset);
       }
     }
 
@@ -2037,6 +2120,7 @@ function addSubmitButton(
     btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Placing Order...`;
     btn.disabled = true;
     btn.classList.add("loading");
+    pauseLivePanelRefresh();
 
     try {
       let effectiveSize = shares;
@@ -2080,10 +2164,12 @@ function addSubmitButton(
           shares: effectiveSize,
           totalCost: cost,
         });
-        showToast(panel, "Limit order placed!", "success");
-        TradingService.refreshBalance().catch(() => {});
+        await TradingService.refreshBalance().catch(() => {});
         if (opts.yesTokenId && opts.noTokenId) {
-          TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
+          await TradingService.getOutcomeBalances(
+            opts.yesTokenId,
+            opts.noTokenId
+          )
             .then((b) => {
               outcomeBalances = b;
               rerender();
@@ -2091,11 +2177,13 @@ function addSubmitButton(
             .catch(() => {});
         }
         rerender();
+        showToast(panel, "Limit order placed!", "success");
+        resumeLivePanelRefresh();
       } else {
         orderSettling = true;
         rerender();
 
-        const prevBalance = ctx.balance;
+        const prevBalance = getAvailableTradingCollateral(ctx);
         const prevYes = outcomeBalances?.yesBalance ?? 0;
         const prevNo = outcomeBalances?.noBalance ?? 0;
         const POLL_INTERVAL = 3000;
@@ -2122,6 +2210,7 @@ function addSubmitButton(
           }
           showToast(panel, message, type);
           rerender();
+          resumeLivePanelRefresh();
         };
 
         const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
@@ -2160,7 +2249,9 @@ function addSubmitButton(
           const newCtx = TradingService.getContext();
           const newYes = outcomeBalances?.yesBalance ?? 0;
           const newNo = outcomeBalances?.noBalance ?? 0;
-          const balanceChanged = Math.abs(newCtx.balance - prevBalance) > 0.001;
+          const balanceChanged =
+            Math.abs(getAvailableTradingCollateral(newCtx) - prevBalance) >
+            0.001;
           const positionChanged =
             Math.abs(newYes - prevYes) > 0.001 ||
             Math.abs(newNo - prevNo) > 0.001;
@@ -2212,6 +2303,7 @@ function addSubmitButton(
         "error"
       );
       rerender();
+      resumeLivePanelRefresh();
     }
   };
 
@@ -2265,7 +2357,8 @@ function renderSplitForm(
     return;
   }
 
-  const { balance, state } = ctx;
+  const { state } = ctx;
+  const pusdBalance = getPusdBalance(ctx);
   const isSplitting = state === "splitting";
   const form = el("div", "knoww-tp-form");
 
@@ -2304,8 +2397,8 @@ function renderSplitForm(
   const maxBtn = el("button", "knoww-tp-max-btn", "Max");
   maxBtn.onclick = (e) => {
     e.stopPropagation();
-    splitMergeAmount = balance;
-    input.value = String(balance);
+    splitMergeAmount = pusdBalance;
+    input.value = String(pusdBalance);
     rerender();
   };
   inputRow.appendChild(input);
@@ -2337,7 +2430,7 @@ function renderSplitForm(
     form.appendChild(summary);
   }
 
-  if (splitMergeAmount > balance) {
+  if (splitMergeAmount > pusdBalance) {
     const w = el("div", "knoww-tp-balance-warn");
     const top = el("div", "knoww-tp-warn-top");
     const left = el("div", "knoww-tp-warn-left");
@@ -2358,7 +2451,7 @@ function renderSplitForm(
   } else if (splitMergeAmount <= 0) {
     btn.textContent = "Enter Amount";
     btn.disabled = true;
-  } else if (splitMergeAmount > balance) {
+  } else if (splitMergeAmount > pusdBalance) {
     btn.textContent = "Insufficient Balance";
     btn.disabled = true;
   } else {
@@ -2378,7 +2471,8 @@ function renderSplitForm(
         opts.conditionId,
         splitMergeAmount,
         opts.yesTokenId,
-        opts.noTokenId
+        opts.noTokenId,
+        !!opts.negRisk
       );
       trackPanelAnalytics("position_split_succeeded", {
         marketId: opts.market.id,
@@ -2571,7 +2665,8 @@ function renderMergeForm(
         opts.conditionId,
         splitMergeAmount,
         opts.yesTokenId,
-        opts.noTokenId
+        opts.noTokenId,
+        !!opts.negRisk
       );
       trackPanelAnalytics("position_merge_succeeded", {
         marketId: opts.market.id,
@@ -4162,6 +4257,7 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
     }
     notice.appendChild(noticeText);
     form.appendChild(notice);
+    addWalletModeSelector(form, ctx);
 
     const enableBtn = el("button", "knoww-tp-submit deposit");
     enableBtn.textContent = enableTradingError ? "Retry" : "Enable Trading";
@@ -4230,7 +4326,7 @@ function render(
   } else if (state === "deploying") {
     addLoading(panel, "Deploying your trading wallet…");
     return;
-  } else if (ctx.isDeployed === null && ctx.proxyAddress) {
+  } else if (ctx.isDeployed === null && ctx.proxyAddress && !ctx.credentials) {
     // Initial on-chain deployment check still in flight (first balance fetch).
     // Show a neutral spinner instead of flashing the Deploy gate for ~500ms
     // on users who already have a Safe.
@@ -4240,7 +4336,9 @@ function render(
     // Safe not deployed yet — takes precedence over "Enable Trading" because
     // credentials derived for the EOA are useless until the Safe exists
     // (CLOB orders sign against the Safe as funderAddress).
-    addDeploySafe(panel, { errorMessage: state === "error" ? error : null });
+    addDeploySafe(panel, ctx, {
+      errorMessage: state === "error" ? error : null,
+    });
     if (state !== "error") {
       return;
     }
@@ -4255,7 +4353,9 @@ function render(
     // Earlier branches already handled the transient states (connecting,
     // switching-chain, deploying, deriving-credentials), so reaching here
     // with no credentials means the user needs to Enable Trading.
-    addEnableTrading(panel, { errorMessage: state === "error" ? error : null });
+    addEnableTrading(panel, ctx, {
+      errorMessage: state === "error" ? error : null,
+    });
     if (state !== "error") {
       return;
     }

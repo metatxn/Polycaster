@@ -569,7 +569,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
             className="flex items-center flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] uppercase tracking-[0.15em]"
           >
             <Link
-              href="/live"
+              href="/events/sports/live"
               className="group inline-flex items-center gap-1.5 py-1 text-muted-foreground hover:text-foreground transition-colors"
             >
               <span className="relative flex h-1.5 w-1.5">

@@ -1,9 +1,6 @@
 "use client";
 
-import { createLogger } from "@knoww/logger";
 import { useAppKit } from "@reown/appkit/react";
-
-const log = createLogger("wallet-provider");
 
 import {
   createContext,
@@ -24,7 +21,7 @@ import { getRpcUrl } from "@/lib/rpc";
 /**
  * Wallet context value
  *
- * Provides a clean abstraction over wagmi with both ethers and viem clients.
+ * Provides a clean abstraction over wagmi with viem clients.
  * Components should use this hook instead of importing wagmi hooks directly.
  *
  * Reference: https://github.com/Polymarket/wagmi-safe-builder-example
@@ -44,9 +41,6 @@ interface WalletContextValue {
   // Actions
   connect: () => void;
   disconnect: () => void;
-
-  // Helpers
-  getEthersSigner: () => Promise<import("ethers").Signer | null>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -64,13 +58,12 @@ const polygonPublicClient = createPublicClient({
  * This provider wraps wagmi and provides:
  * 1. Clean API for wallet connection state
  * 2. viem public client for efficient reads
- * 3. Helper to get ethers signer (for Polymarket SDKs)
- * 4. Single source of truth for wallet state
+ * 3. Single source of truth for wallet state
  *
  * Benefits:
  * - Components never import wagmi hooks directly
  * - Easy to swap wallet providers in the future
- * - Both ethers and viem clients available
+ * - viem clients available to app code
  */
 export function WalletProvider({ children }: { children: ReactNode }) {
   const { address, isConnected, isConnecting } = useConnection();
@@ -91,33 +84,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     await close();
   }, [close]);
 
-  /**
-   * Get ethers signer from wallet client
-   *
-   * Polymarket SDKs (ClobClient, RelayClient) require ethers signers.
-   * This helper creates an ethers signer from the viem wallet client.
-   *
-   * Note: This uses dynamic import to avoid bundling ethers when not needed.
-   */
-  const getEthersSigner = useCallback(async () => {
-    if (typeof window === "undefined" || !window.ethereum) {
-      return null;
-    }
-
-    try {
-      const ethersModule = await import("ethers");
-      const provider = new ethersModule.providers.Web3Provider(
-        // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-        window.ethereum as any
-      );
-      await provider.send("eth_requestAccounts", []);
-      return provider.getSigner();
-    } catch (err) {
-      log.error("ethers_signer.failed", { error: err });
-      return null;
-    }
-  }, []);
-
   const value = useMemo<WalletContextValue>(
     () => ({
       // Connection state
@@ -134,9 +100,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       // Actions
       connect,
       disconnect,
-
-      // Helpers
-      getEthersSigner,
     }),
     [
       isConnected,
@@ -146,7 +109,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       walletClient,
       connect,
       disconnect,
-      getEthersSigner,
     ]
   );
 
@@ -160,14 +122,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
  *
  * Usage:
  * ```tsx
- * const { eoaAddress, isConnected, publicClient, getEthersSigner } = useWallet();
+ * const { eoaAddress, isConnected, publicClient, walletClient } = useWallet();
  *
  * // Read data with viem
  * const balance = await publicClient.readContract({...});
- *
- * // Get ethers signer for Polymarket SDKs
- * const signer = await getEthersSigner();
- * const clobClient = new ClobClient(url, chainId, signer, ...);
  * ```
  */
 export function useWallet() {

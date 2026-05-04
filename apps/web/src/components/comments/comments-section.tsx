@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import type { TokenMarketMap } from "@/types/comments";
+import type { ParentEntityType, TokenMarketMap } from "@/types/comments";
 // TODO: Uncomment when POST comments API is available
 // import { CommentInput } from "./comment-input";
 import { CommentList } from "./comment-list";
@@ -21,7 +21,11 @@ type SortOption = "latest" | "oldest" | "most_liked";
 
 interface CommentsSectionProps {
   /** Numeric event ID for fetching comments */
-  eventId: number;
+  eventId?: number;
+  /** Entity type for Polymarket comments. Defaults to Event for existing detail pages. */
+  entityType?: ParentEntityType;
+  /** Numeric entity ID for fetching comments. Use with Series or market comments. */
+  entityId?: number;
   /** Optional class name for styling */
   className?: string;
   /** Whether to show as a card or inline */
@@ -48,6 +52,8 @@ const SORT_OPTIONS: { value: SortOption; label: string; icon: typeof Clock }[] =
 
 export function CommentsSection({
   eventId,
+  entityType = "Event",
+  entityId,
   className,
   variant = "card",
   tokenMarketMap,
@@ -59,6 +65,7 @@ export function CommentsSection({
 }: CommentsSectionProps) {
   const [holdersOnly, setHoldersOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption>("latest");
+  const resolvedEntityId = entityId ?? eventId;
   // TODO: Uncomment when POST comments API is available
   // Track which comment has an active reply form (null = none)
   // const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
@@ -229,7 +236,8 @@ export function CommentsSection({
 
       {/* Comments list */}
       <CommentList
-        eventId={eventId}
+        entityType={entityType}
+        entityId={resolvedEntityId}
         holdersOnly={holdersOnly}
         order={order}
         ascending={ascending}

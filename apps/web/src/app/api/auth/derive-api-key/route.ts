@@ -1,4 +1,8 @@
 import { createLogger } from "@knoww/logger";
+import {
+  buildClobL1Headers,
+  createOrDeriveClobApiKey,
+} from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
@@ -25,84 +29,6 @@ const l1AuthSchema = z.object({
   nonce: z.string().optional().default("0").describe("Nonce used in signature"),
 });
 
-/**
- * L1 Headers for Polymarket API authentication
- */
-interface L1Headers {
-  POLY_ADDRESS: string;
-  POLY_SIGNATURE: string;
-  POLY_TIMESTAMP: string;
-  POLY_NONCE: string;
-}
-
-/**
- * API Key response from Polymarket
- */
-interface ApiKeyResponse {
-  error?: string;
-  apiKey?: string;
-  secret?: string;
-  passphrase?: string;
-}
-
-/**
- * Create a new API key for a first-time user
- * POST /auth/api-key
- */
-async function createApiKey(
-  clobHost: string,
-  headers: L1Headers
-): Promise<{ success: boolean; data?: ApiKeyResponse; error?: string }> {
-  const response = await fetch(`${clobHost}/auth/api-key`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-  });
-
-  const responseText = await response.text();
-
-  try {
-    const data = JSON.parse(responseText) as ApiKeyResponse;
-    if (response.ok && data.apiKey) {
-      return { success: true, data };
-    }
-    return { success: false, error: data.error || responseText };
-  } catch {
-    return { success: false, error: responseText };
-  }
-}
-
-/**
- * Derive (retrieve) an existing API key
- * GET /auth/derive-api-key
- */
-async function deriveApiKey(
-  clobHost: string,
-  headers: L1Headers
-): Promise<{ success: boolean; data?: ApiKeyResponse; error?: string }> {
-  const response = await fetch(`${clobHost}/auth/derive-api-key`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-  });
-
-  const responseText = await response.text();
-
-  try {
-    const data = JSON.parse(responseText) as ApiKeyResponse;
-    if (response.ok && data.apiKey) {
-      return { success: true, data };
-    }
-    return { success: false, error: data.error || responseText };
-  } catch {
-    return { success: false, error: responseText };
-  }
-}
-
 function trackApiKeyEvent(
   address: string,
   event: string,
@@ -128,8 +54,8 @@ function trackApiKeyEvent(
  * Create or derive API key credentials for a user using their L1 authentication.
  * This endpoint implements the "createOrDeriveApiKey" pattern:
  *
- * 1. First, try to CREATE a new API key (for first-time users)
- * 2. If creation fails (key already exists), DERIVE the existing key
+ * 1. First, try to DERIVE an existing API key (for returning users)
+ * 2. If derivation fails, CREATE a new API key (for first-time users)
  *
  * This ensures:
  * - New users get their API key created
@@ -138,8 +64,8 @@ function trackApiKeyEvent(
  * Flow:
  * 1. Frontend signs EIP-712 ClobAuth message
  * 2. Frontend sends signature + metadata to this endpoint
- * 3. Backend tries POST /auth/api-key (create)
- * 4. If fails, backend tries GET /auth/derive-api-key (derive)
+ * 3. Backend tries GET /auth/derive-api-key (derive)
+ * 4. If fails, backend tries POST /auth/api-key (create)
  * 5. Backend returns the API credentials to frontend
  * 6. Frontend stores credentials for future order submissions
  */
@@ -169,56 +95,44 @@ export async function POST(request: NextRequest) {
 
     const clobHost = CLOB_BASE_URL;
 
-    // Build L1 headers for Polymarket authentication
-    const l1Headers: L1Headers = {
-      POLY_ADDRESS: address,
-      POLY_SIGNATURE: signature,
-      POLY_TIMESTAMP: timestamp,
-      POLY_NONCE: nonce,
-    };
+    const result = await createOrDeriveClobApiKey(
+      clobHost,
+      buildClobL1Headers({ address, signature, timestamp, nonce })
+    );
 
-    // Step 1: Try to CREATE a new API key (for first-time users)
-    const createResult = await createApiKey(clobHost, l1Headers);
-
-    if (createResult.success && createResult.data) {
-      trackApiKeyEvent(address, "trading_api_key_created", "create");
+    if (result.success && result.data && result.method) {
+      trackApiKeyEvent(
+        address,
+        result.method === "derive"
+          ? "trading_api_key_derived"
+          : "trading_api_key_created",
+        result.method
+      );
       return NextResponse.json({
         success: true,
-        credentials: createResult.data,
-        method: "create",
-      });
-    }
-
-    // Step 2: If create failed, try to DERIVE existing API key
-    const deriveResult = await deriveApiKey(clobHost, l1Headers);
-
-    if (deriveResult.success && deriveResult.data) {
-      trackApiKeyEvent(address, "trading_api_key_derived", "derive");
-      return NextResponse.json({
-        success: true,
-        credentials: deriveResult.data,
-        method: "derive",
+        credentials: result.data,
+        method: result.method,
       });
     }
 
     // Both create and derive failed
     log.error("auth.both_failed", {
-      createError: createResult.error,
-      deriveError: deriveResult.error,
+      createError: result.createError,
+      deriveError: result.deriveError,
     });
 
     // Provide helpful error message
     let errorMessage = "Failed to create or retrieve API credentials.";
 
     if (
-      createResult.error?.includes("not enabled") ||
-      deriveResult.error?.includes("not enabled")
+      result.createError?.includes("not enabled") ||
+      result.deriveError?.includes("not enabled")
     ) {
       errorMessage =
         "Your wallet is not enabled for trading. Please complete the wallet setup steps first (Deploy wallet & Approve trading tokens).";
     } else if (
-      createResult.error?.includes("signature") ||
-      deriveResult.error?.includes("signature")
+      result.createError?.includes("signature") ||
+      result.deriveError?.includes("signature")
     ) {
       errorMessage = "Signature verification failed. Please try signing again.";
     }
@@ -227,10 +141,6 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: errorMessage,
-        details: {
-          createError: createResult.error,
-          deriveError: deriveResult.error,
-        },
       },
       { status: 400 }
     );
@@ -239,7 +149,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to create or retrieve API credentials.",
       },
       { status: 500 }
     );

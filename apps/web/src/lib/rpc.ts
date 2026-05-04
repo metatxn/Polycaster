@@ -12,17 +12,11 @@
  */
 
 import { createLogger } from "@knoww/logger";
-import { createPublicClient, erc20Abi, http, type PublicClient } from "viem";
+import { readTradingWalletBalance } from "@knoww/shared-types/balances";
+import { createPublicClient, http, type PublicClient } from "viem";
 import { polygon } from "viem/chains";
 
 const log = createLogger("rpc");
-
-import {
-  PUSD_ADDRESS,
-  PUSD_DECIMALS,
-  USDC_E_ADDRESS,
-  USDC_E_DECIMALS,
-} from "@/constants/contracts";
 
 const DEPLOYMENT_CACHE_TTL = 5 * 60 * 1000;
 const BALANCE_CACHE_TTL = 30 * 1000;
@@ -293,38 +287,10 @@ export async function fetchUsdcBalance(
     try {
       await throttleRpc();
       const client = getPublicClient();
-      const { formatUnits } = await import("viem");
-
-      // One multicall round-trip instead of two parallel eth_calls.
-      const [pusdResult, usdcEResult] = await client.multicall({
-        allowFailure: true,
-        contracts: [
-          {
-            address: PUSD_ADDRESS as `0x${string}`,
-            abi: erc20Abi,
-            functionName: "balanceOf",
-            args: [address as `0x${string}`],
-          },
-          {
-            address: USDC_E_ADDRESS as `0x${string}`,
-            abi: erc20Abi,
-            functionName: "balanceOf",
-            args: [address as `0x${string}`],
-          },
-        ],
-      });
-
-      const rawPusd =
-        pusdResult.status === "success"
-          ? (pusdResult.result as bigint)
-          : BigInt(0);
-      const rawUsdcE =
-        usdcEResult.status === "success"
-          ? (usdcEResult.result as bigint)
-          : BigInt(0);
-      const pusd = Number(formatUnits(rawPusd, PUSD_DECIMALS));
-      const usdcE = Number(formatUnits(rawUsdcE, USDC_E_DECIMALS));
-      const balance = pusd + usdcE;
+      const { balance } = await readTradingWalletBalance(
+        client,
+        address as `0x${string}`
+      );
 
       setCachedValue(balanceCache, cacheKey, balance);
 

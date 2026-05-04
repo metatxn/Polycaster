@@ -21,6 +21,14 @@ export const PUSD_DECIMALS = 6;
 export const COLLATERAL_ONRAMP_ADDRESS =
   "0x93070a847efEf7F70739046A929D47a521F5B8ee" as const;
 
+/** pUSD → legacy CTF adapter — standard binary markets */
+export const CTF_COLLATERAL_ADAPTER_ADDRESS =
+  "0xAdA100Db00Ca00073811820692005400218FcE1f" as const;
+
+/** pUSD → legacy NegRisk CTF adapter — negative-risk markets */
+export const NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS =
+  "0xadA2005600Dec949baf300f4C6120000bDB6eAab" as const;
+
 /** Conditional Tokens Framework (CTF) — ERC1155 outcome tokens (unchanged) */
 export const CTF_ADDRESS =
   "0x4d97dcd97ec945f40cf65f87097ace5ea0476045" as const;
@@ -49,6 +57,8 @@ export const CONTRACTS = {
   USDC_E: USDC_E_ADDRESS,
   PUSD: PUSD_ADDRESS,
   COLLATERAL_ONRAMP: COLLATERAL_ONRAMP_ADDRESS,
+  CTF_COLLATERAL_ADAPTER: CTF_COLLATERAL_ADAPTER_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER: NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
   CTF: CTF_ADDRESS,
   CTF_EXCHANGE: CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE: NEG_RISK_CTF_EXCHANGE_ADDRESS,
@@ -59,19 +69,23 @@ export const CONTRACTS = {
 /** USDC.e approval target — needed for the Onramp `wrap()` call */
 export const USDC_E_ONRAMP_APPROVAL_TARGET = COLLATERAL_ONRAMP_ADDRESS;
 
-/** pUSD approval target — direct CTF split/merge/redeem collateral approval */
+/** pUSD approval target listed by Polymarket docs for direct CTF split/mint flows */
 export const PUSD_CTF_APPROVAL_TARGET = CTF_ADDRESS;
 
-/** pUSD approval targets — V2 trading collateral approvals */
+/** pUSD approval targets tracked by the app, including CLOB and adapter flows */
 export const PUSD_APPROVAL_TARGETS = [
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   NEG_RISK_ADAPTER_ADDRESS,
+  CTF_COLLATERAL_ADAPTER_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
 ] as const;
 
-/** ERC-1155 outcome token approval targets (unchanged) */
+/** ERC-1155 outcome token operator targets tracked by the app */
 export const CTF_APPROVAL_OPERATORS = [
   CTF_EXCHANGE_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   NEG_RISK_ADAPTER_ADDRESS,
+  CTF_COLLATERAL_ADAPTER_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
 ] as const;

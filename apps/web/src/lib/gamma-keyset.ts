@@ -1,4 +1,7 @@
-import { resolveNegRisk } from "@knoww/shared-types/polymarket";
+import {
+  parseGammaStringArray,
+  resolveNegRisk,
+} from "@knoww/shared-types/polymarket";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import type { GammaEvent, GammaMarket, GammaTag } from "@/types/gamma-api";
 
@@ -46,9 +49,11 @@ export function toSlimGammaEvent(event: GammaEvent, fullMarkets = false) {
     live: event.live,
     ended: event.ended,
     competitive: event.competitive,
+    parentEventId: event.parentEventId,
     negRisk: resolveNegRisk(event),
     score: event.score,
     startDate: event.startDate,
+    startTime: event.startTime,
     endDate: event.endDate,
     markets: event.markets?.map((market: GammaMarket) =>
       fullMarkets
@@ -60,15 +65,12 @@ export function toSlimGammaEvent(event: GammaEvent, fullMarkets = false) {
             groupItemTitle: market.groupItemTitle,
             image: market.image,
             icon: market.icon,
-            clobTokenIds: (() => {
-              try {
-                return JSON.parse(market.clobTokenIds || "[]");
-              } catch {
-                return [];
-              }
-            })(),
+            clobTokenIds: parseGammaStringArray(market.clobTokenIds),
             conditionId: market.conditionId,
             gameStartTime: market.gameStartTime,
+            sportsMarketType: market.sportsMarketType,
+            parentEventId: market.parentEventId,
+            parentEventTitle: market.parentEventTitle,
           }
         : { id: market.id }
     ),

@@ -1,181 +1,43 @@
 "use client";
 
+import {
+  type BridgeRequestOptions,
+  CHAIN_METADATA,
+  createDepositAddresses as createSharedDepositAddresses,
+  type DepositAddress,
+  type DepositTransaction,
+  fetchDepositStatus as fetchSharedDepositStatus,
+  fetchQuote as fetchSharedQuote,
+  fetchSupportedAssets as fetchSharedSupportedAssets,
+  fetchWithdrawalAddresses as fetchSharedWithdrawalAddresses,
+  type QuoteRequest,
+  type QuoteResponse,
+  type SupportedAsset,
+  type WithdrawalAddressesResponse,
+  type WithdrawalRequest,
+} from "@knoww/shared-types/bridge";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 import { useProxyWallet } from "./use-proxy-wallet";
 
-/**
- * Polymarket Bridge API base URL
- * @see https://docs.polymarket.com/api-reference/bridge
- */
-const BRIDGE_API_URL = "https://bridge.polymarket.com";
+export type {
+  DepositAddress,
+  DepositStatus,
+  DepositTransaction,
+  FeeBreakdown,
+  QuoteRequest,
+  QuoteResponse,
+  SupportedAsset,
+  WithdrawalAddressesResponse,
+  WithdrawalRequest,
+} from "@knoww/shared-types/bridge";
+export { CHAIN_METADATA };
 
-/**
- * Supported asset from the Bridge API
- */
-export interface SupportedAsset {
-  chainId: string;
-  chainName: string;
-  token: {
-    name: string;
-    symbol: string;
-    address: string;
-    decimals: number;
+function getBridgeOptions(): BridgeRequestOptions {
+  return {
+    builderCode: process.env.NEXT_PUBLIC_POLY_BUILDER_CODE,
   };
-  minCheckoutUsd: number;
 }
-
-/**
- * Deposit address for a specific chain/token
- */
-export interface DepositAddress {
-  chainId: string;
-  chainName: string;
-  tokenAddress: string;
-  tokenSymbol: string;
-  depositAddress: string;
-}
-
-/**
- * Response from the create deposit endpoint
- * The API returns a single address object with addresses for different chains
- */
-export interface CreateDepositResponse {
-  address: {
-    evm: string; // For EVM chains (Ethereum, Polygon, Arbitrum, etc.)
-    svm: string; // For Solana
-    btc: string; // For Bitcoin
-  };
-  note?: string;
-}
-
-/**
- * Response from the supported assets endpoint
- */
-export interface SupportedAssetsResponse {
-  supportedAssets: SupportedAsset[];
-}
-
-/**
- * Quote request parameters
- * @see https://docs.polymarket.com/api-reference/bridge/get-a-quote
- */
-export interface QuoteRequest {
-  fromAmountBaseUnit: string;
-  fromChainId: string;
-  fromTokenAddress: string;
-  recipientAddress: string;
-  toChainId: string;
-  toTokenAddress: string;
-}
-
-/**
- * Fee breakdown from quote response
- */
-export interface FeeBreakdown {
-  appFeeLabel: string;
-  appFeePercent: number;
-  appFeeUsd: number;
-  fillCostPercent: number;
-  fillCostUsd: number;
-  gasUsd: number;
-  maxSlippage: number;
-  minReceived: number;
-  swapImpact: number;
-  swapImpactUsd: number;
-  totalImpact: number;
-  totalImpactUsd: number;
-}
-
-/**
- * Quote response from the Bridge API
- */
-export interface QuoteResponse {
-  estCheckoutTimeMs: number;
-  estFeeBreakdown: FeeBreakdown;
-  estInputUsd: number;
-  estOutputUsd: number;
-  estToTokenBaseUnit: string;
-  quoteId: string;
-}
-
-/**
- * Deposit transaction status
- * @see https://docs.polymarket.com/api-reference/bridge/get-deposit-status
- */
-export type DepositStatus =
-  | "DEPOSIT_DETECTED"
-  | "PROCESSING"
-  | "ORIGIN_TX_CONFIRMED"
-  | "SUBMITTED"
-  | "COMPLETED"
-  | "FAILED";
-
-/**
- * Single deposit transaction from status API
- */
-export interface DepositTransaction {
-  fromChainId: string;
-  fromTokenAddress: string;
-  fromAmountBaseUnit: string;
-  toChainId: string;
-  toTokenAddress: string;
-  status: DepositStatus;
-  txHash?: string;
-  createdTimeMs?: number;
-}
-
-/**
- * Response from deposit status endpoint
- */
-export interface DepositStatusResponse {
-  transactions: DepositTransaction[];
-}
-
-/**
- * Withdrawal request parameters for Bridge API
- * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
- */
-export interface WithdrawalRequest {
-  address: string;
-  toChainId: string;
-  toTokenAddress: string;
-  recipientAddr: string;
-}
-
-/**
- * Response from the withdrawal endpoint — bridge deposit addresses
- * to which you transfer pUSD from the proxy wallet;
- * the bridge then routes funds cross-chain to the recipient.
- * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
- */
-export interface WithdrawalAddressesResponse {
-  address: {
-    evm: string;
-    svm: string;
-    btc: string;
-    tvm?: string;
-  };
-  note?: string;
-}
-
-/**
- * Chain metadata for display
- */
-export const CHAIN_METADATA: Record<
-  string,
-  { name: string; icon: string; color: string }
-> = {
-  "1": { name: "Ethereum", icon: "⟠", color: "#627EEA" },
-  "137": { name: "Polygon", icon: "⬡", color: "#8247E5" },
-  "42161": { name: "Arbitrum", icon: "🔷", color: "#28A0F0" },
-  "10": { name: "Optimism", icon: "🔴", color: "#FF0420" },
-  "8453": { name: "Base", icon: "🔵", color: "#0052FF" },
-  "43114": { name: "Avalanche", icon: "🔺", color: "#E84142" },
-  "56": { name: "BNB Chain", icon: "⛓️", color: "#F0B90B" },
-  "324": { name: "zkSync", icon: "⚡", color: "#8C8DFC" },
-  "1151111081099710": { name: "Solana", icon: "◎", color: "#9945FF" },
-};
 
 /**
  * Query keys for React Query
@@ -200,179 +62,32 @@ export const BRIDGE_QUERY_KEYS = {
     ["bridge-withdrawal-addresses", address, toChainId] as const,
 };
 
-/**
- * Fetch supported assets from Bridge API
- */
 async function fetchSupportedAssets(): Promise<SupportedAsset[]> {
-  const response = await fetch(`${BRIDGE_API_URL}/supported-assets`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch supported assets: ${response.status}`);
-  }
-
-  const data: SupportedAssetsResponse = await response.json();
-  return data.supportedAssets;
+  return fetchSharedSupportedAssets(getBridgeOptions());
 }
 
-/**
- * Fetch a quote for a deposit
- * @see https://docs.polymarket.com/api-reference/bridge/get-a-quote
- */
-async function fetchQuote(params: QuoteRequest): Promise<QuoteResponse> {
-  const response = await fetch(`${BRIDGE_API_URL}/quote`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(params),
-  });
-
-  if (!response.ok) {
-    const errorData = (await response.json().catch(() => ({}))) as {
-      error?: string;
-    };
-    throw new Error(
-      errorData.error || `Failed to fetch quote: ${response.status}`
-    );
-  }
-
-  return response.json();
+export async function fetchBridgeQuote(
+  params: QuoteRequest
+): Promise<QuoteResponse> {
+  return fetchSharedQuote(params, getBridgeOptions());
 }
 
-/**
- * Fetch deposit status for an address
- * @see https://docs.polymarket.com/api-reference/bridge/get-deposit-status
- */
 async function fetchDepositStatus(
   depositAddress: string
 ): Promise<DepositTransaction[]> {
-  const response = await fetch(
-    `${BRIDGE_API_URL}/status/${encodeURIComponent(depositAddress)}`
-  );
-
-  if (!response.ok) {
-    const errorData = (await response.json().catch(() => ({}))) as {
-      error?: string;
-    };
-    throw new Error(
-      errorData.error || `Failed to fetch deposit status: ${response.status}`
-    );
-  }
-
-  const data: DepositStatusResponse = await response.json();
-  return data.transactions;
+  return fetchSharedDepositStatus(depositAddress, getBridgeOptions());
 }
 
-/**
- * Create withdrawal addresses via Bridge API
- * Returns bridge deposit addresses to which USDC.e should be transferred;
- * the bridge handles cross-chain routing to the final recipient.
- * @see https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses
- */
 async function fetchWithdrawalAddresses(
   params: WithdrawalRequest
 ): Promise<WithdrawalAddressesResponse> {
-  const response = await fetch(`${BRIDGE_API_URL}/withdraw`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(params),
-  });
-
-  if (!response.ok) {
-    const errorData = (await response.json().catch(() => ({}))) as {
-      error?: string;
-    };
-    throw new Error(
-      errorData.error ||
-        `Failed to create withdrawal addresses: ${response.status}`
-    );
-  }
-
-  return response.json();
+  return fetchSharedWithdrawalAddresses(params, getBridgeOptions());
 }
 
-/**
- * Convert API response to DepositAddress format
- */
-function convertToDepositAddresses(
-  data: CreateDepositResponse
-): DepositAddress[] {
-  // Convert the API response to our DepositAddress format
-  // The EVM address is used for all EVM chains (Polygon, Ethereum, Arbitrum, etc.)
-  return [
-    // Polygon (primary for Polymarket)
-    {
-      chainId: "137",
-      chainName: "Polygon",
-      tokenAddress: "", // Any supported token
-      tokenSymbol: "USDC", // Default to USDC
-      depositAddress: data.address.evm,
-    },
-    // Ethereum
-    {
-      chainId: "1",
-      chainName: "Ethereum",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: data.address.evm,
-    },
-    // Arbitrum
-    {
-      chainId: "42161",
-      chainName: "Arbitrum",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: data.address.evm,
-    },
-    // Base
-    {
-      chainId: "8453",
-      chainName: "Base",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: data.address.evm,
-    },
-    // Optimism
-    {
-      chainId: "10",
-      chainName: "Optimism",
-      tokenAddress: "",
-      tokenSymbol: "USDC",
-      depositAddress: data.address.evm,
-    },
-  ];
-}
-
-/**
- * Create deposit addresses for a wallet
- */
 async function createDepositAddresses(
   walletAddress: string
 ): Promise<DepositAddress[]> {
-  const response = await fetch(`${BRIDGE_API_URL}/deposit`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      address: walletAddress,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorData = (await response.json().catch(() => ({}))) as {
-      message?: string;
-    };
-    throw new Error(
-      errorData.message ||
-        `Failed to create deposit addresses: ${response.status}`
-    );
-  }
-
-  const data: CreateDepositResponse = await response.json();
-  return convertToDepositAddresses(data);
+  return createSharedDepositAddresses(walletAddress, getBridgeOptions());
 }
 
 /**
@@ -428,7 +143,7 @@ export function useBridge() {
 
   // Mutation for fetching quotes
   const quoteMutation = useMutation({
-    mutationFn: fetchQuote,
+    mutationFn: fetchBridgeQuote,
   });
 
   // Mutation for fetching deposit status

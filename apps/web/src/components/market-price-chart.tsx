@@ -79,11 +79,23 @@ interface MarketPriceChartProps {
   hideBothToggle?: boolean;
 }
 
-export type TimeRange = "1H" | "6H" | "1D" | "1W" | "1M" | "ALL";
+export type TimeRange =
+  | "30M"
+  | "1H"
+  | "2H"
+  | "3H"
+  | "6H"
+  | "1D"
+  | "1W"
+  | "1M"
+  | "ALL";
 
 // Map time range to startTs offset (seconds ago from now)
 const timeRangeToStartTsOffset: Record<TimeRange, number> = {
+  "30M": 30 * 60,
   "1H": 60 * 60,
+  "2H": 2 * 60 * 60,
+  "3H": 3 * 60 * 60,
   "6H": 6 * 60 * 60,
   "1D": 24 * 60 * 60,
   "1W": 7 * 24 * 60 * 60,
@@ -100,7 +112,10 @@ const timeRangeToStartTsOffset: Record<TimeRange, number> = {
 // a year of 1-minute data for mature markets, but we DO want minute-level
 // data for a market that's only been live for a day.
 const timeRangeToFidelity: Record<Exclude<TimeRange, "ALL">, number> = {
+  "30M": 1,
   "1H": 1,
+  "2H": 1,
+  "3H": 1,
   "6H": 1,
   "1D": 5,
   "1W": 30,
@@ -500,9 +515,19 @@ export function MarketPriceChart({
     const plotBottom = containerH - timeAxisH;
     const plotRight = containerW - priceAxisW;
 
+    const LABEL_RESERVE = 200;
+    const flipped = x + LABEL_RESERVE > plotRight;
     const bottomBound = plotBottom - HALF - 4;
-    const topBound = HALF + 4;
+    // When labels flip left near the right edge, they share horizontal space
+    // with the timestamp badge. Keep the timestamp in the top slot and push
+    // high-price market pills below it.
+    const topBound = flipped ? 64 : HALF + 4;
     if (items.length > 0) {
+      if (items[0].y < topBound) {
+        const shift = topBound - items[0].y;
+        for (const it of items) it.y += shift;
+      }
+
       const overflow = items[items.length - 1].y - bottomBound;
       if (overflow > 0) {
         for (const it of items) it.y = Math.max(topBound, it.y - overflow);
@@ -518,9 +543,6 @@ export function MarketPriceChart({
     // Horizontal flip: if there isn't room for ~200px of label between
     // the cursor and the start of the price-scale gutter, anchor pills
     // to the LEFT of the cursor so they grow inward.
-    const LABEL_RESERVE = 200;
-    const flipped = x + LABEL_RESERVE > plotRight;
-
     setHoverLabels({ x, flipped, items });
   }, []);
 
@@ -623,6 +645,11 @@ export function MarketPriceChart({
           color: colors.crosshair,
           width: 1,
           style: 2 satisfies LineStyle, // dashed
+          // The chart renders its own timestamp badge. Leaving the native
+          // time-axis crosshair label enabled creates a second, wider date
+          // badge that can overlap bottom-aligned market labels on short
+          // ranges like 30M and 1H.
+          labelVisible: false,
           labelBackgroundColor: colors.text,
         },
         horzLine: {
@@ -754,19 +781,23 @@ export function MarketPriceChart({
 
         tooltip.innerHTML = `<div style="font-size:11px;color:${colors.text};font-weight:500;white-space:nowrap;">${dateLabel}</div>`;
 
-        // Position the badge near the cursor, clamped to container.
+        // Keep the date badge in the chart's top headroom; high-price market
+        // pills are pushed below it by `updateHoverLabels` when they share
+        // the same right-edge space.
         const containerRect = container.getBoundingClientRect();
-        const tipWidth = tooltip.offsetWidth || 120;
-        const tipHeight = tooltip.offsetHeight || 24;
-        let left = point.x + 12;
-        let top = point.y - tipHeight - 8;
-        if (left + tipWidth > containerRect.width) {
-          left = point.x - tipWidth - 12;
-        }
-        if (top < 0) top = point.y + 12;
         tooltip.style.display = "block";
+        tooltip.style.visibility = "hidden";
+        const tipWidth = tooltip.offsetWidth || 136;
+        const TOP_PADDING = 6;
+        let left = point.x - tipWidth / 2;
+        if (left < 4) left = 4;
+        if (left + tipWidth > containerRect.width - 4) {
+          left = containerRect.width - tipWidth - 4;
+        }
+
+        tooltip.style.visibility = "visible";
         tooltip.style.left = `${Math.max(0, left)}px`;
-        tooltip.style.top = `${Math.max(0, top)}px`;
+        tooltip.style.top = `${TOP_PADDING}px`;
       };
     chart.subscribeCrosshairMove(crosshairHandler);
 
@@ -942,7 +973,17 @@ export function MarketPriceChart({
     onOutcomeRangeChanges?.(outcomeRangeChanges);
   }, [onOutcomeRangeChanges, outcomeRangeChanges]);
 
-  const timeRanges: TimeRange[] = ["1H", "6H", "1D", "1W", "1M", "ALL"];
+  const timeRanges: TimeRange[] = [
+    "30M",
+    "1H",
+    "2H",
+    "3H",
+    "6H",
+    "1D",
+    "1W",
+    "1M",
+    "ALL",
+  ];
 
   return (
     <div className="space-y-2">
@@ -1086,9 +1127,21 @@ function generateMockSeries(
   let dataPoints: number;
   let intervalMs: number;
   switch (timeRange) {
+    case "30M":
+      dataPoints = 10;
+      intervalMs = 3 * 60 * 1000;
+      break;
     case "1H":
       dataPoints = 12;
       intervalMs = 5 * 60 * 1000;
+      break;
+    case "2H":
+      dataPoints = 16;
+      intervalMs = 7.5 * 60 * 1000;
+      break;
+    case "3H":
+      dataPoints = 18;
+      intervalMs = 10 * 60 * 1000;
       break;
     case "6H":
       dataPoints = 24;

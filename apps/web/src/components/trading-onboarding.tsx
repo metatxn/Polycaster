@@ -1,6 +1,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import { formatTradingOnboardingError } from "@knoww/shared-types/trading-errors";
 import { useAppKit } from "@reown/appkit/react";
 import Decimal from "decimal.js";
 import { AnimatePresence, motion } from "framer-motion";
@@ -23,6 +24,7 @@ import { useConnection } from "wagmi";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
+import { useTradingWalletMode } from "@/hooks/use-trading-wallet-mode";
 import { checkAllApprovals } from "@/lib/approvals";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +48,7 @@ export function TradingOnboarding({
 }: TradingOnboardingProps) {
   const { isConnected } = useConnection();
   const { open } = useAppKit();
+  const { mode: walletMode, setMode: setWalletMode } = useTradingWalletMode();
   const {
     deploySafe,
     approveUsdcForTrading,
@@ -113,6 +116,26 @@ export function TradingOnboarding({
   ]);
 
   useEffect(() => {
+    setHasUsdcApproval(null);
+    setSteps((prev) =>
+      prev.map((step) => {
+        if (step.id === "connect") {
+          return { ...step, status: isConnected ? "completed" : "pending" };
+        }
+        if (step.id === "deploy") {
+          return {
+            ...step,
+            status:
+              walletMode === "eoa" && isConnected ? "completed" : "pending",
+          };
+        }
+        return { ...step, status: "pending", errorMessage: undefined };
+      })
+    );
+    setCurrentStep(isConnected ? (walletMode === "eoa" ? 2 : 1) : 0);
+  }, [walletMode, isConnected]);
+
+  useEffect(() => {
     if (usdcBalance > 0) {
       setApprovalAmount(new Decimal(usdcBalance).toDecimalPlaces(2).toString());
     }
@@ -143,17 +166,17 @@ export function TradingOnboarding({
   );
 
   /**
-   * Check if ALL V2 trading approvals are already set on the Safe.
+   * Check if the default app trading approvals are already set on the Safe.
    *
-   * V2 trading requires 7 approvals (see `checkAllApprovals` in
+   * The default app trading setup requires 6 approvals (see `checkAllApprovals` in
    * `@/lib/approvals`):
-   *   pUSD → CTF Exchange V2, Neg Risk Exchange V2, Neg Risk Adapter
-   *   USDC.e → Collateral Onramp (for on-demand wrap on BUY)
-   *   CTF setApprovalForAll → those same three operators (needed for SELL)
+   *   pUSD → CTF, CTF Exchange V2, Neg Risk Exchange V2
+   *   USDC.e → CollateralOnramp (for on-demand wrap on BUY)
+   *   CTF setApprovalForAll → both CLOB exchanges (needed for SELL)
    *
    * Returning users with legacy V1 (USDC.e-only) approvals must re-run the
-   * batch to unlock V2 settlement — hence we check every target, not just
-   * one USDC allowance.
+   * batch to unlock V2 settlement — hence we check the trading target set, not
+   * just one USDC allowance.
    */
   const checkUsdcApproval = useCallback(async () => {
     if (!hasProxyWallet || !proxyAddress || isCheckingApproval) return;
@@ -177,12 +200,22 @@ export function TradingOnboarding({
       await open();
       // The wallet connection is handled by the modal
       // We'll check isConnected in the next render
-    } catch {
-      updateStepStatus("connect", "error", "Failed to connect wallet");
+    } catch (err) {
+      updateStepStatus(
+        "connect",
+        "error",
+        formatTradingOnboardingError(err, "Failed to connect wallet")
+      );
     }
   }, [open, updateStepStatus]);
 
   const handleDeploySafe = useCallback(async () => {
+    if (walletMode === "eoa") {
+      updateStepStatus("deploy", "completed");
+      setCurrentStep(2);
+      return;
+    }
+
     updateStepStatus("deploy", "in_progress");
     try {
       const result = await deploySafe();
@@ -198,10 +231,10 @@ export function TradingOnboarding({
       updateStepStatus(
         "deploy",
         "error",
-        err instanceof Error ? err.message : "Failed to deploy wallet"
+        formatTradingOnboardingError(err, "Failed to deploy wallet")
       );
     }
-  }, [deploySafe, updateStepStatus, refreshProxyWallet]);
+  }, [deploySafe, updateStepStatus, refreshProxyWallet, walletMode]);
 
   const handleApproveUsdc = useCallback(async () => {
     if (!isApprovalAmountValid) {
@@ -227,7 +260,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "approve",
         "error",
-        err instanceof Error ? err.message : "Failed to submit approval batch"
+        formatTradingOnboardingError(err, "Failed to submit approval batch")
       );
     }
   }, [
@@ -266,7 +299,7 @@ export function TradingOnboarding({
       updateStepStatus(
         "credentials",
         "error",
-        err instanceof Error ? err.message : "Failed to setup credentials"
+        formatTradingOnboardingError(err, "Failed to setup credentials")
       );
     }
   }, [
@@ -421,7 +454,7 @@ export function TradingOnboarding({
             disabled={isLoading || !isApprovalAmountValid}
             className={ctaClass}
           >
-            Approve
+            {walletMode === "eoa" ? "Approve Caps" : "Approve"}
           </button>
         );
       case "credentials":
@@ -440,12 +473,37 @@ export function TradingOnboarding({
     }
   };
 
+  const getDisplayStep = (step: OnboardingStep): OnboardingStep => {
+    if (step.id === "deploy" && walletMode === "eoa") {
+      return {
+        ...step,
+        title: "Use Connected Wallet",
+        description: "Trade directly from your EOA. Requires POL for gas.",
+        icon: <Wallet className="h-5 w-5" />,
+      };
+    }
+
+    if (step.id === "approve" && walletMode === "eoa") {
+      return {
+        ...step,
+        description:
+          "Approve limited spending caps on-chain. MetaMask will show one prompt per token or operator.",
+      };
+    }
+
+    return step;
+  };
+
   const contextCopy = (): string | null => {
     if (allStepsComplete) return null;
     if (currentStep === 1)
-      return "Your trading wallet is a Gnosis Safe — the most trusted smart-contract wallet in crypto.";
+      return walletMode === "safe"
+        ? "Your trading wallet is a Gnosis Safe controlled by your connected wallet. Polymarket's relayer pays the gas for setup and trading operations."
+        : "Your connected wallet is the trading wallet. This is simpler, but approvals and on-chain operations require POL for gas.";
     if (currentStep === 2)
-      return "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals.";
+      return walletMode === "safe"
+        ? "Choose the ERC-20 approval limit for pUSD and USDC.e. Outcome-token sell permissions are binary, so they are granted as operator approvals."
+        : "EOA approvals are normal Polygon transactions. MetaMask describes ERC-20 allowances as permission to withdraw tokens; the spender should be a Polymarket contract such as CTF, CTFExchange, NegRiskExchange, or CollateralOnramp.";
     if (currentStep === 3)
       return "Sign a message to create your unique trading credentials. No private keys are shared.";
     return "All setup transactions are gasless — Polymarket covers the gas fees through their relayer.";
@@ -495,6 +553,47 @@ export function TradingOnboarding({
             ? "Your trading account is ready."
             : "Complete these once to start trading on Polymarket."}
         </p>
+
+        {!allStepsComplete && (
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setWalletMode("safe")}
+              className={cn(
+                "border px-3 py-3 text-left transition-colors",
+                walletMode === "safe"
+                  ? "border-foreground bg-foreground/5"
+                  : "border-border/60 hover:border-foreground/40"
+              )}
+            >
+              <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                <Shield className="h-3.5 w-3.5" />
+                Safe
+              </span>
+              <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                Gasless smart wallet. Best for most users.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setWalletMode("eoa")}
+              className={cn(
+                "border px-3 py-3 text-left transition-colors",
+                walletMode === "eoa"
+                  ? "border-foreground bg-foreground/5"
+                  : "border-border/60 hover:border-foreground/40"
+              )}
+            >
+              <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                <Wallet className="h-3.5 w-3.5" />
+                EOA
+              </span>
+              <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                Trade from this wallet. You pay Polygon gas.
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* Hairline progress track with checkpoints */}
         <div className="pt-6">
@@ -574,6 +673,7 @@ export function TradingOnboarding({
       {/* Step rows — hairline-divided */}
       <div className="divide-y divide-border/40">
         {steps.map((step, index) => {
+          const displayStep = getDisplayStep(step);
           const isCurrent = index === currentStep;
           const isCompleted = step.status === "completed";
           const isError = step.status === "error";
@@ -581,14 +681,18 @@ export function TradingOnboarding({
 
           const progressCopy =
             step.id === "deploy"
-              ? "Creating your secure wallet — 10–30 seconds"
+              ? walletMode === "eoa"
+                ? "Using your connected wallet"
+                : "Creating your secure wallet — 10–30 seconds"
               : step.id === "approve"
-                ? "Submitting approval batch — 10–30 seconds"
+                ? walletMode === "eoa"
+                  ? "Waiting for wallet approval transactions"
+                  : "Submitting approval batch — 10–30 seconds"
                 : step.id === "credentials"
                   ? "Generating your trading credentials…"
                   : step.id === "connect"
                     ? "Waiting for wallet connection…"
-                    : step.description;
+                    : displayStep.description;
 
           return (
             <motion.div
@@ -614,7 +718,7 @@ export function TradingOnboarding({
                         : "border-border/60 text-muted-foreground/60"
                 )}
               >
-                {step.icon}
+                {displayStep.icon}
               </div>
 
               <div className="flex-1 min-w-0">
@@ -630,11 +734,11 @@ export function TradingOnboarding({
                           : "text-muted-foreground"
                   )}
                 >
-                  {step.title}
+                  {displayStep.title}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                   {step.errorMessage ||
-                    (isInProgress ? progressCopy : step.description)}
+                    (isInProgress ? progressCopy : displayStep.description)}
                 </p>
                 {step.id === "approve" && isCurrent && !isCompleted && (
                   <div className="mt-3 space-y-1.5">
@@ -665,8 +769,9 @@ export function TradingOnboarding({
                       </span>
                     </div>
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      ERC-20 allowances use this limit. Outcome-token sell
-                      permissions are binary and cannot be amount-limited.
+                      {walletMode === "eoa"
+                        ? "MetaMask will call these spending cap requests. The cap is limited to the amount above; outcome-token sell permissions are binary and cannot be amount-limited."
+                        : "ERC-20 allowances use this limit. Outcome-token sell permissions are binary and cannot be amount-limited."}
                     </p>
                   </div>
                 )}

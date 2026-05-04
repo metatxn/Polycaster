@@ -1,15 +1,20 @@
 "use client";
 
+import { derivePolymarketSafe } from "@knoww/shared-types/relayer";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
+import { type Address, getAddress } from "viem";
 import { useConnection } from "wagmi";
-import { deriveProxyAddress } from "@/lib/derive-proxy-address";
 import {
   clearBalanceCache,
   clearDeploymentCache,
   checkIsDeployed as rpcCheckIsDeployed,
   fetchUsdcBalance as rpcFetchUsdcBalance,
 } from "@/lib/rpc";
+import {
+  type TradingWalletMode,
+  useTradingWalletMode,
+} from "./use-trading-wallet-mode";
 
 /**
  * Polymarket Proxy Wallet Hook
@@ -27,6 +32,7 @@ export interface ProxyWalletData {
   usdcBalance: number;
   isLoading: boolean;
   error: string | null;
+  walletMode: TradingWalletMode;
 }
 
 /**
@@ -34,8 +40,22 @@ export interface ProxyWalletData {
  * @param eoaAddress - The EOA address to derive the proxy wallet from
  * @param skipCache - If true, bypass the RPC cache for fresh data
  */
-async function fetchWalletData(eoaAddress: string, skipCache = false) {
-  const proxyAddress = await deriveProxyAddress(eoaAddress);
+async function fetchWalletData(
+  eoaAddress: string,
+  mode: TradingWalletMode,
+  skipCache = false
+) {
+  if (mode === "eoa") {
+    const usdcBalance = await rpcFetchUsdcBalance(eoaAddress, { skipCache });
+    return {
+      proxyAddress: eoaAddress,
+      isDeployed: true,
+      usdcBalance,
+      walletMode: mode,
+    };
+  }
+
+  const proxyAddress = derivePolymarketSafe(getAddress(eoaAddress) as Address);
 
   // Step 2: Check if the derived Safe is actually deployed on-chain
   const isDeployed = await rpcCheckIsDeployed(proxyAddress);
@@ -45,6 +65,7 @@ async function fetchWalletData(eoaAddress: string, skipCache = false) {
       proxyAddress,
       isDeployed: false,
       usdcBalance: 0,
+      walletMode: mode,
     };
   }
 
@@ -56,18 +77,20 @@ async function fetchWalletData(eoaAddress: string, skipCache = false) {
     proxyAddress,
     isDeployed: true,
     usdcBalance,
+    walletMode: mode,
   };
 }
 
 export function useProxyWallet() {
   const { address, isConnected } = useConnection();
+  const { mode } = useTradingWalletMode();
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: [PROXY_WALLET_QUERY_KEY, address],
+    queryKey: [PROXY_WALLET_QUERY_KEY, address, mode],
     queryFn: async () => {
       if (!address) throw new Error("No address");
-      return fetchWalletData(address);
+      return fetchWalletData(address, mode);
     },
     enabled: !!address && isConnected,
     // Proxy wallet data is shared by navbar, trading forms, portfolio chrome,
@@ -122,6 +145,9 @@ export function useProxyWallet() {
     proxyAddress: query.data?.proxyAddress ?? null,
     isDeployed: query.data?.isDeployed ?? false,
     usdcBalance: query.data?.usdcBalance ?? 0,
+    walletMode: query.data?.walletMode ?? mode,
+    isSafeMode: mode === "safe",
+    isEoaMode: mode === "eoa",
     isLoading: query.isLoading,
     error: query.error ? (query.error as Error).message : null,
     refresh,

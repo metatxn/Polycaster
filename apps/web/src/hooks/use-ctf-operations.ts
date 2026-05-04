@@ -12,23 +12,23 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import type { ApprovalTransaction } from "@knoww/shared-types/approvals";
 import {
-  BINARY_PARTITION_BIGINT as BINARY_PARTITION,
-  CTF_JSON_ABI as CTF_ABI,
-  PARENT_COLLECTION_ID,
+  type CtfOperationName,
+  type CtfOperationTransaction,
+  type CtfOutcomeBalances,
+  planCtfOperationTransaction,
+  planCtfOperationTransactions,
+  readCtfOutcomeBalances,
 } from "@knoww/shared-types/ctf";
+import { formatCtfOperationError } from "@knoww/shared-types/trading-errors";
 
 const log = createLogger("ctf-operations");
 
 import { useCallback, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
-import {
-  CONTRACTS,
-  CTF_ADDRESS,
-  PUSD_CTF_APPROVAL_TARGET,
-  PUSD_DECIMALS,
-} from "@/constants/contracts";
 import { executeViaRelayer } from "@/lib/relayer-client";
+import { useTradingWalletMode } from "./use-trading-wallet-mode";
 
 // ============================================================================
 // Types
@@ -40,54 +40,19 @@ export interface CTFOperationState {
   txHash: string | null;
 }
 
-export interface OutcomeTokenBalances {
-  yesBalance: bigint;
-  noBalance: bigint;
-  minBalance: bigint;
-}
+export type OutcomeTokenBalances = CtfOutcomeBalances;
 
 type OperationResult = { success: boolean; txHash?: string; error?: string };
 
-type CTFFunction = "splitPosition" | "mergePositions" | "redeemPositions";
+async function createCtfPublicClient() {
+  const { createPublicClient, http } = await import("viem");
+  const { polygon } = await import("viem/chains");
+  const { getRpcUrl } = await import("@/lib/rpc");
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/**
- * Parse error message into user-friendly format
- */
-function parseUserFriendlyError(errorMessage: string): string {
-  const lowerMsg = errorMessage.toLowerCase();
-
-  const errorMappings: Array<{ patterns: string[]; message: string }> = [
-    {
-      patterns: ["user rejected", "user denied", "rejected the request"],
-      message: "Transaction cancelled",
-    },
-    {
-      patterns: ["insufficient", "exceeds balance"],
-      message: "Insufficient balance",
-    },
-    {
-      patterns: ["network", "timeout", "connection"],
-      message: "Network error. Please try again.",
-    },
-    {
-      patterns: ["gas", "execution reverted"],
-      message: "Transaction failed. Please try again.",
-    },
-  ];
-
-  for (const { patterns, message } of errorMappings) {
-    if (patterns.some((p) => lowerMsg.includes(p))) {
-      return message;
-    }
-  }
-
-  return errorMessage.length > 100
-    ? `${errorMessage.substring(0, 100)}...`
-    : errorMessage;
+  return createPublicClient({
+    chain: polygon,
+    transport: http(getRpcUrl()),
+  });
 }
 
 // ============================================================================
@@ -97,6 +62,7 @@ function parseUserFriendlyError(errorMessage: string): string {
 export function useCtfOperations() {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
+  const { isEoaMode } = useTradingWalletMode();
 
   const [state, setState] = useState<CTFOperationState>({
     isLoading: false,
@@ -104,48 +70,34 @@ export function useCtfOperations() {
     txHash: null,
   });
 
-  const ensureCtfCollateralApproval = useCallback(
-    async (proxyAddress: string, requiredAmount: bigint) => {
+  const executeCtfApprovalTransaction = useCallback(
+    async (
+      approvalTx: ApprovalTransaction,
+      publicClient: Awaited<ReturnType<typeof createCtfPublicClient>>
+    ) => {
       if (!walletClient || !address) {
         throw new Error("Wallet not connected");
       }
 
-      const { createPublicClient, encodeFunctionData, erc20Abi, http } =
-        await import("viem");
       const { polygon } = await import("viem/chains");
-      const { getRpcUrl } = await import("@/lib/rpc");
-      const publicClient = createPublicClient({
-        chain: polygon,
-        transport: http(getRpcUrl()),
-      });
 
-      const allowance = await publicClient.readContract({
-        address: CONTRACTS.PUSD,
-        abi: erc20Abi,
-        functionName: "allowance",
-        args: [
-          proxyAddress as `0x${string}`,
-          PUSD_CTF_APPROVAL_TARGET as `0x${string}`,
-        ],
-      });
-
-      if (allowance >= requiredAmount) return;
-
-      const data = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [PUSD_CTF_APPROVAL_TARGET as `0x${string}`, requiredAmount],
-      });
+      if (isEoaMode) {
+        const hash = await walletClient.sendTransaction({
+          account: address as `0x${string}`,
+          chain: polygon,
+          to: approvalTx.to,
+          data: approvalTx.data,
+          value: BigInt(approvalTx.value),
+        });
+        await publicClient.waitForTransactionReceipt({ hash });
+        return;
+      }
 
       await executeViaRelayer(walletClient, address as `0x${string}`, [
-        {
-          to: CONTRACTS.PUSD,
-          data,
-          value: "0",
-        },
+        approvalTx,
       ]);
     },
-    [walletClient, address]
+    [walletClient, address, isEoaMode]
   );
 
   /**
@@ -153,8 +105,8 @@ export function useCtfOperations() {
    */
   const executeCTFOperation = useCallback(
     async (
-      operationName: CTFFunction,
-      encodedData: `0x${string}`
+      operationName: CtfOperationName,
+      transaction: CtfOperationTransaction
     ): Promise<OperationResult> => {
       setState({ isLoading: true, error: null, txHash: null });
 
@@ -163,31 +115,41 @@ export function useCtfOperations() {
           throw new Error("Wallet not connected");
         }
 
+        if (isEoaMode) {
+          const { polygon } = await import("viem/chains");
+          const { getPublicClient } = await import("@/lib/rpc");
+          const hash = await walletClient.sendTransaction({
+            account: address as `0x${string}`,
+            chain: polygon,
+            to: transaction.to,
+            data: transaction.data,
+            value: BigInt(transaction.value),
+          });
+          await getPublicClient().waitForTransactionReceipt({ hash });
+          setState({ isLoading: false, error: null, txHash: hash });
+          return { success: true, txHash: hash };
+        }
+
         const result = await executeViaRelayer(
           walletClient,
           address as `0x${string}`,
-          [
-            {
-              to: CTF_ADDRESS as `0x${string}`,
-              data: encodedData,
-              value: "0",
-            },
-          ]
+          [transaction]
         );
 
         const txHash = result.transactionHash;
         setState({ isLoading: false, error: null, txHash });
         return { success: true, txHash };
       } catch (err) {
-        const rawMessage =
-          err instanceof Error ? err.message : `${operationName} failed`;
-        const errorMessage = parseUserFriendlyError(rawMessage);
+        const errorMessage = formatCtfOperationError(
+          err,
+          `${operationName} failed`
+        );
         log.error("operation.failed", { operation: operationName, error: err });
         setState({ isLoading: false, error: errorMessage, txHash: null });
         return { success: false, error: errorMessage };
       }
     },
-    [walletClient, address]
+    [walletClient, address, isEoaMode]
   );
 
   /**
@@ -204,29 +166,14 @@ export function useCtfOperations() {
         throw new Error("No address available");
       }
 
-      const { createPublicClient, http } = await import("viem");
-      const { polygon } = await import("viem/chains");
-      const { getRpcUrl } = await import("@/lib/rpc");
+      const publicClient = await createCtfPublicClient();
 
-      const publicClient = createPublicClient({
-        chain: polygon,
-        transport: http(getRpcUrl()),
-      });
-
-      const balances = (await publicClient.readContract({
-        address: CTF_ADDRESS as `0x${string}`,
-        abi: CTF_ABI,
-        functionName: "balanceOfBatch",
-        args: [
-          [owner as `0x${string}`, owner as `0x${string}`],
-          [BigInt(yesTokenId), BigInt(noTokenId)],
-        ],
-      })) as [bigint, bigint];
-
-      const [yesBalance, noBalance] = balances;
-      const minBalance = yesBalance < noBalance ? yesBalance : noBalance;
-
-      return { yesBalance, noBalance, minBalance };
+      return readCtfOutcomeBalances(
+        publicClient,
+        owner as `0x${string}`,
+        yesTokenId,
+        noTokenId
+      );
     },
     [address]
   );
@@ -239,28 +186,28 @@ export function useCtfOperations() {
     async (
       conditionId: string,
       amount: number,
-      proxyAddress: string
+      proxyAddress: string,
+      negRisk = false
     ): Promise<OperationResult> => {
-      const { encodeFunctionData, parseUnits } = await import("viem");
-
-      const amountInWei = parseUnits(amount.toString(), PUSD_DECIMALS);
-      await ensureCtfCollateralApproval(proxyAddress, amountInWei);
-
-      const encodedData = encodeFunctionData({
-        abi: CTF_ABI,
-        functionName: "splitPosition",
-        args: [
-          CONTRACTS.PUSD as `0x${string}`,
-          PARENT_COLLECTION_ID,
-          conditionId as `0x${string}`,
-          BINARY_PARTITION,
-          amountInWei,
-        ],
+      const publicClient = await createCtfPublicClient();
+      const plan = await planCtfOperationTransactions({
+        operation: "splitPosition",
+        conditionId,
+        amount: amount.toString(),
+        negRisk,
+        client: publicClient,
+        collateralOwner: proxyAddress as `0x${string}`,
       });
+      if (plan.approvalTransaction) {
+        await executeCtfApprovalTransaction(
+          plan.approvalTransaction,
+          publicClient
+        );
+      }
 
-      return executeCTFOperation("splitPosition", encodedData);
+      return executeCTFOperation(plan.operation, plan.transaction);
     },
-    [executeCTFOperation, ensureCtfCollateralApproval]
+    [executeCTFOperation, executeCtfApprovalTransaction]
   );
 
   /**
@@ -271,25 +218,16 @@ export function useCtfOperations() {
     async (
       conditionId: string,
       amount: number,
-      _proxyAddress: string
+      _proxyAddress: string,
+      negRisk = false
     ): Promise<OperationResult> => {
-      const { encodeFunctionData, parseUnits } = await import("viem");
-
-      const amountInWei = parseUnits(amount.toString(), PUSD_DECIMALS);
-
-      const encodedData = encodeFunctionData({
-        abi: CTF_ABI,
-        functionName: "mergePositions",
-        args: [
-          CONTRACTS.PUSD as `0x${string}`,
-          PARENT_COLLECTION_ID,
-          conditionId as `0x${string}`,
-          BINARY_PARTITION,
-          amountInWei,
-        ],
+      const plan = planCtfOperationTransaction({
+        operation: "mergePositions",
+        conditionId,
+        amount: amount.toString(),
+        negRisk,
       });
-
-      return executeCTFOperation("mergePositions", encodedData);
+      return executeCTFOperation(plan.operation, plan.transaction);
     },
     [executeCTFOperation]
   );
@@ -300,22 +238,15 @@ export function useCtfOperations() {
   const redeemPositions = useCallback(
     async (
       conditionId: string,
-      _proxyAddress: string
+      _proxyAddress: string,
+      negRisk = false
     ): Promise<OperationResult> => {
-      const { encodeFunctionData } = await import("viem");
-
-      const encodedData = encodeFunctionData({
-        abi: CTF_ABI,
-        functionName: "redeemPositions",
-        args: [
-          CONTRACTS.PUSD as `0x${string}`,
-          PARENT_COLLECTION_ID,
-          conditionId as `0x${string}`,
-          BINARY_PARTITION,
-        ],
+      const plan = planCtfOperationTransaction({
+        operation: "redeemPositions",
+        conditionId,
+        negRisk,
       });
-
-      return executeCTFOperation("redeemPositions", encodedData);
+      return executeCTFOperation(plan.operation, plan.transaction);
     },
     [executeCTFOperation]
   );

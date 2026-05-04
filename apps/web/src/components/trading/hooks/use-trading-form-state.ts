@@ -1,9 +1,16 @@
 "use client";
 
+import {
+  DEFAULT_APPROVAL_AMOUNT,
+  estimateFallbackFeeRaw,
+  parseApprovalAmountRaw,
+  parsePusdUnits,
+} from "@knoww/shared-types/trading";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "wagmi";
+import { PUSD_DECIMALS } from "@/constants/contracts";
 import {
   OrderType as ClobOrderType,
   Side,
@@ -14,6 +21,7 @@ import {
   useProxyWallet,
 } from "@/hooks/use-proxy-wallet";
 import { useUserPositions } from "@/hooks/use-user-positions";
+import { checkAllApprovals } from "@/lib/approvals";
 import { calculatePotentialPnL, OrderSide } from "@/lib/polymarket";
 import { clearBalanceCache } from "@/lib/rpc";
 import {
@@ -26,6 +34,10 @@ import type { TradingFormProps } from "../types";
 
 const DEFAULT_MAX_SLIPPAGE_PERCENT = 2;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+const APPROVAL_CHECK_BUCKET_RAW = BigInt(10) ** BigInt(PUSD_DECIMALS);
+const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
+  DEFAULT_APPROVAL_AMOUNT
+);
 
 export function useTradingFormState({
   outcomes,
@@ -52,6 +64,7 @@ export function useTradingFormState({
   const {
     createOrder,
     isLoading: isClobLoading,
+    operationStep,
     error: clobError,
     hasCredentials,
     canTrade,
@@ -212,7 +225,7 @@ export function useTradingFormState({
     // Returning 0 surfaces an honest "0.0¢ / $0.00" in the summary, and the
     // submit button is already disabled via `canFullyFill` → "Insufficient
     // liquidity" in the parent form.
-    if (slippageResult && !slippageResult.canFill) {
+    if (orderType === "MARKET") {
       return 0;
     }
 
@@ -229,6 +242,7 @@ export function useTradingFormState({
     return Math.max(0.01, roundDownToTick(withSlippage, tickSize));
   }, [
     slippageResult,
+    orderType,
     side,
     tickSize,
     maxSlippagePercent,
@@ -261,8 +275,8 @@ export function useTradingFormState({
   }, [side, orderType, limitPrice, marketOrderPrice, shares, slippageResult]);
 
   const { data: onChainAllowance, refetch: refetchAllowance } = useQuery({
-    queryKey: ["usdcAllowance", proxyAddress, hasProxyWallet],
-    queryFn: () => getUsdcAllowance(proxyAddress || undefined),
+    queryKey: ["usdcAllowance", proxyAddress, hasProxyWallet, negRisk],
+    queryFn: () => getUsdcAllowance(proxyAddress || undefined, negRisk),
     enabled: isConnected && hasProxyWallet && !!proxyAddress,
     // Allowance only changes when we explicitly update it. Polling every
     // trading form mount creates steady Polygon RPC pressure for no benefit.
@@ -283,6 +297,88 @@ export function useTradingFormState({
     allowance !== undefined && calculations.total > allowance;
   const hasNoAllowance = allowance !== undefined && allowance === 0;
 
+  const requiredApprovalAmountRaw = useMemo(() => {
+    if (side === "SELL") {
+      return shares > 0 ? BigInt(1) : BigInt(0);
+    }
+    if (!Number.isFinite(calculations.total) || calculations.total <= 0) {
+      return BigInt(0);
+    }
+    const requiredRaw = parsePusdUnits(new Decimal(calculations.total));
+    return requiredRaw + estimateFallbackFeeRaw(requiredRaw);
+  }, [calculations.total, shares, side]);
+
+  const approvalGrantAmountRaw = useMemo(() => {
+    return requiredApprovalAmountRaw > DEFAULT_TRADING_APPROVAL_RAW
+      ? requiredApprovalAmountRaw
+      : DEFAULT_TRADING_APPROVAL_RAW;
+  }, [requiredApprovalAmountRaw]);
+
+  const approvalAmount = useMemo(() => {
+    return new Decimal(approvalGrantAmountRaw.toString())
+      .div(new Decimal(10).pow(PUSD_DECIMALS))
+      .toString();
+  }, [approvalGrantAmountRaw]);
+
+  const bucketedRequiredApprovalAmountRaw = useMemo(() => {
+    if (requiredApprovalAmountRaw <= BigInt(0)) return BigInt(0);
+    return (
+      ((requiredApprovalAmountRaw + APPROVAL_CHECK_BUCKET_RAW - BigInt(1)) /
+        APPROVAL_CHECK_BUCKET_RAW) *
+      APPROVAL_CHECK_BUCKET_RAW
+    );
+  }, [requiredApprovalAmountRaw]);
+
+  // The market order notional can move on every order book tick. Keep approval
+  // checks close to the actual required amount, but debounce and bucket them so
+  // cent-level quote movement does not create distinct Polygon multicalls.
+  const [tradingApprovalCheckAmountRaw, setTradingApprovalCheckAmountRaw] =
+    useState(bucketedRequiredApprovalAmountRaw);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setTradingApprovalCheckAmountRaw(bucketedRequiredApprovalAmountRaw);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [bucketedRequiredApprovalAmountRaw]);
+
+  const shouldCheckTradingApprovals =
+    isConnected &&
+    hasProxyWallet &&
+    !!proxyAddress &&
+    tradingApprovalCheckAmountRaw > BigInt(0);
+
+  const {
+    data: tradingApprovalStatus,
+    refetch: refetchTradingApprovals,
+    isLoading: isCheckingTradingApprovals,
+  } = useQuery({
+    queryKey: [
+      "tradingApprovals",
+      proxyAddress,
+      hasProxyWallet,
+      tradingApprovalCheckAmountRaw.toString(),
+    ],
+    queryFn: () =>
+      checkAllApprovals(proxyAddress || "", tradingApprovalCheckAmountRaw),
+    enabled: shouldCheckTradingApprovals,
+    // This query is the ticket's approval gate. Keep it fresh enough that the
+    // button matches the order pre-flight, without polling every keystroke.
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
+  });
+  const hasMissingTradingApprovals =
+    shouldCheckTradingApprovals &&
+    tradingApprovalStatus !== undefined &&
+    !tradingApprovalStatus.allApproved;
+  const useAllowanceFallbackGate =
+    side === "BUY" && tradingApprovalStatus === undefined;
+  const hasEffectiveInsufficientAllowance =
+    useAllowanceFallbackGate && hasInsufficientAllowance;
+  const hasEffectiveNoAllowance = useAllowanceFallbackGate && hasNoAllowance;
+
   const isMarketableBuy = useMemo(() => {
     if (side !== "BUY") return false;
     if (orderType === "MARKET") return true;
@@ -298,20 +394,47 @@ export function useTradingFormState({
   const handleSetAllowance = useCallback(async () => {
     setIsUpdatingAllowance(true);
     try {
-      await updateAllowance(new Decimal(calculations.total).toString());
-      await Promise.all([refreshProxyWallet(), refetchAllowance()]);
+      await updateAllowance(approvalAmount);
+      await Promise.all([
+        refreshProxyWallet(),
+        refetchAllowance(),
+        refetchTradingApprovals(),
+        queryClient.invalidateQueries({ queryKey: ["tradingApprovals"] }),
+        queryClient.invalidateQueries({ queryKey: ["usdcAllowance"] }),
+      ]);
+
+      const scheduleApprovalRefetch = (delay: number) => {
+        const timerId = setTimeout(() => {
+          void Promise.all([
+            refreshProxyWallet(),
+            refetchAllowance(),
+            refetchTradingApprovals(),
+          ]);
+          pendingTimersRef.current = pendingTimersRef.current.filter(
+            (id) => id !== timerId
+          );
+        }, delay);
+        pendingTimersRef.current.push(timerId);
+      };
+
+      scheduleApprovalRefetch(1500);
+      scheduleApprovalRefetch(4000);
+      return true;
     } catch (err) {
       const error =
         err instanceof Error ? err : new Error("Failed to set allowance");
       onOrderError?.(error);
+      return false;
     } finally {
       setIsUpdatingAllowance(false);
     }
   }, [
     updateAllowance,
-    calculations.total,
+    approvalAmount,
     refreshProxyWallet,
     refetchAllowance,
+    refetchTradingApprovals,
+    queryClient,
     onOrderError,
   ]);
 
@@ -384,6 +507,8 @@ export function useTradingFormState({
               exact: false, // Match all queries starting with this key
             }),
             queryClient.invalidateQueries({ queryKey: ["usdcBalance"] }),
+            queryClient.invalidateQueries({ queryKey: ["usdcAllowance"] }),
+            queryClient.invalidateQueries({ queryKey: ["tradingApprovals"] }),
             queryClient.invalidateQueries({ queryKey: ["userPositions"] }),
             queryClient.invalidateQueries({ queryKey: ["openOrders"] }),
           ]);
@@ -395,6 +520,8 @@ export function useTradingFormState({
               exact: false,
             }),
             queryClient.refetchQueries({ queryKey: ["usdcBalance"] }),
+            queryClient.refetchQueries({ queryKey: ["usdcAllowance"] }),
+            queryClient.refetchQueries({ queryKey: ["tradingApprovals"] }),
             queryClient.refetchQueries({ queryKey: ["userPositions"] }),
           ]);
 
@@ -408,6 +535,8 @@ export function useTradingFormState({
                 exact: false,
               }),
               queryClient.refetchQueries({ queryKey: ["usdcBalance"] }),
+              queryClient.refetchQueries({ queryKey: ["usdcAllowance"] }),
+              queryClient.refetchQueries({ queryKey: ["tradingApprovals"] }),
               queryClient.refetchQueries({ queryKey: ["userPositions"] }),
             ]);
           };
@@ -441,6 +570,16 @@ export function useTradingFormState({
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Order failed");
+      if (proxyAddress) {
+        clearBalanceCache(proxyAddress);
+        await Promise.allSettled([
+          refreshProxyWallet(),
+          refetchAllowance(),
+          refetchTradingApprovals(),
+          queryClient.invalidateQueries({ queryKey: ["tradingApprovals"] }),
+          queryClient.invalidateQueries({ queryKey: ["usdcAllowance"] }),
+        ]);
+      }
       onOrderError?.(error);
       return false;
     }
@@ -465,6 +604,9 @@ export function useTradingFormState({
     onOrderError,
     initialShares,
     calculations.total,
+    refreshProxyWallet,
+    refetchAllowance,
+    refetchTradingApprovals,
   ]);
 
   return {
@@ -485,13 +627,17 @@ export function useTradingFormState({
     tickSize,
     isUpdatingAllowance,
     isLoading: isClobLoading || isUpdatingAllowance,
+    operationStep,
     error: clobError,
     calculations,
     slippageResult,
     effectiveBalance,
     hasInsufficientBalance,
-    hasInsufficientAllowance,
-    hasNoAllowance,
+    hasInsufficientAllowance: hasEffectiveInsufficientAllowance,
+    hasNoAllowance: hasEffectiveNoAllowance,
+    hasMissingTradingApprovals,
+    isCheckingTradingApprovals:
+      shouldCheckTradingApprovals && isCheckingTradingApprovals,
     isBelowMarketableBuyMinNotional,
     minShares,
     maxSellShares,
@@ -502,6 +648,6 @@ export function useTradingFormState({
     handleSharesChange,
     handleSubmit,
     hasValidTokenId,
-    canFullyFill: slippageResult?.canFill ?? true,
+    canFullyFill: orderType !== "MARKET" || Boolean(slippageResult?.canFill),
   };
 }

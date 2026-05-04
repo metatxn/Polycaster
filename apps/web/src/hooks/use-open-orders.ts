@@ -63,6 +63,19 @@ interface MarketInfoResponse {
   error?: string;
 }
 
+function isExpectedClobReadFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("not found") ||
+    lower.includes("unauthorized") ||
+    lower.includes("forbidden") ||
+    lower.includes("401") ||
+    lower.includes("403") ||
+    lower.includes("404")
+  );
+}
+
 /**
  * Fetch market info for a token ID
  */
@@ -215,7 +228,11 @@ export function useOpenOrders(options: UseOpenOrdersOptions = {}) {
             }))
           ),
           areOrdersScoring(orderIds).catch((err) => {
-            log.error("scoring.fetch_failed", { error: err });
+            if (isExpectedClobReadFailure(err)) {
+              log.debug("scoring.skipped");
+            } else {
+              log.error("scoring.fetch_failed", { error: err });
+            }
             return {} as Record<string, boolean>;
           }),
         ]);
@@ -257,7 +274,13 @@ export function useOpenOrders(options: UseOpenOrdersOptions = {}) {
           orders: filteredOrders,
         };
       } catch (err) {
-        log.error("fetch.failed", { error: err });
+        if (isExpectedClobReadFailure(err)) {
+          log.debug("fetch.skipped", {
+            reason: err instanceof Error ? err.message : String(err),
+          });
+        } else {
+          log.error("fetch.failed", { error: err });
+        }
         // Return empty result on error instead of throwing
         return {
           success: false,

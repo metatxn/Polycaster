@@ -139,7 +139,11 @@ function WalletMenuPanel({
   // pUSD lives on the user's proxy wallet (the trading account), NOT the
   // EOA. Pulling from useProxyWallet keeps this in sync with the trading
   // panel which uses the same hook.
-  const { proxyAddress, usdcBalance: pUsdBalance } = useProxyWallet();
+  const {
+    proxyAddress,
+    usdcBalance: pUsdBalance,
+    isEoaMode,
+  } = useProxyWallet();
 
   if (!address) return null;
 
@@ -242,7 +246,13 @@ function WalletMenuPanel({
             PUSD_DECIMALS,
             2
           )}
-          sublabel={proxyAddress ? "Trading wallet" : null}
+          sublabel={
+            proxyAddress
+              ? isEoaMode
+                ? "Connected wallet"
+                : "Trading wallet"
+              : null
+          }
         />
       </div>
 

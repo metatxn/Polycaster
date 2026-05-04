@@ -1,8 +1,10 @@
 "use client";
 
+import { formatOrderExpiration } from "@knoww/shared-types/orders";
 import {
   ArrowDown,
   ArrowUp,
+  BookOpen,
   ChevronDown,
   ChevronUp,
   History,
@@ -105,11 +107,11 @@ interface OutcomesTableProps {
   selectedOutcomeIndex: number;
   setSelectedOutcomeIndex: (val: number) => void;
   preloadOrderBook: (tokenId: string | undefined) => Promise<void>;
-  getMarketPosition: (market: {
+  getMarketPositions: (market: {
     conditionId: string;
     yesTokenId: string;
     noTokenId: string;
-  }) => Position | null;
+  }) => Position[];
   handlePriceClick: (price: number) => void;
   isSingleMarketEvent: boolean;
   onSellSuccess?: () => void;
@@ -117,7 +119,7 @@ interface OutcomesTableProps {
 
 interface MarketExpandedContentProps {
   isExpanded: boolean;
-  userPosition: Position | null;
+  userPositions: Position[];
   market: {
     id: string;
     yesTokenId: string;
@@ -137,7 +139,7 @@ interface MarketExpandedContentProps {
 
 function MarketExpandedContent({
   isExpanded,
-  userPosition,
+  userPositions,
   market,
   marketOutcomes,
   selectedOutcomeIndex,
@@ -180,12 +182,19 @@ function MarketExpandedContent({
   const { mutate: cancelOrder, variables: cancellingOrderId } =
     useCancelOrder();
 
-  const hasActivity =
-    !!userPosition || marketOpenOrders.length > 0 || marketTrades.length > 0;
+  const hasPositionActivity =
+    userPositions.length > 0 || marketOpenOrders.length > 0;
+  const hasHistory = marketTrades.length > 0;
+  const hasActivity = hasPositionActivity || hasHistory;
+  const defaultActivityTab = hasPositionActivity
+    ? "position"
+    : hasHistory
+      ? "history"
+      : "orderbook";
 
   // Use controlled tab state to ensure proper default selection
   const [activeTab, setActiveTab] = useState<string>(
-    hasActivity ? "position" : "orderbook"
+    hasActivity ? defaultActivityTab : "orderbook"
   );
 
   // Track previous activity to detect changes
@@ -196,13 +205,21 @@ function MarketExpandedContent({
   useEffect(() => {
     if (hasActivity !== hadActivity) {
       if (hasActivity && !hadActivity) {
-        setActiveTab("position");
+        setActiveTab(defaultActivityTab);
       } else if (!hasActivity && hadActivity) {
         setActiveTab("orderbook");
       }
       setHadActivity(hasActivity);
     }
-  }, [hasActivity, hadActivity]);
+  }, [defaultActivityTab, hasActivity, hadActivity]);
+
+  useEffect(() => {
+    if (activeTab === "position" && !hasPositionActivity) {
+      setActiveTab(defaultActivityTab);
+    } else if (activeTab === "history" && !hasHistory) {
+      setActiveTab(defaultActivityTab);
+    }
+  }, [activeTab, defaultActivityTab, hasHistory, hasPositionActivity]);
 
   // Skip rendering heavy children (OrderBook × 2, chart, holders table) until
   // the row is expanded — otherwise every market mounts its fetch chain on
@@ -232,16 +249,22 @@ function MarketExpandedContent({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="flex items-center justify-between px-2 sm:px-6 border-b border-border/50 overflow-x-auto no-scrollbar">
             <TabsList className="h-auto p-0 bg-transparent gap-0 shrink-0 flex">
-              {/* Position tab — shown when the user has a position, open
-                  orders, or trade history for this market. */}
-              {hasActivity && (
+              {/* Position tab — only positions and open orders. Trade history
+                  lives in its own tab below. */}
+              {hasPositionActivity && (
                 <TabsTrigger value="position" className={tabTriggerClass}>
                   <User className="h-3.5 w-3.5 mr-2 inline-block" />
                   Position
                 </TabsTrigger>
               )}
+              {hasHistory && (
+                <TabsTrigger value="history" className={tabTriggerClass}>
+                  <History className="h-3.5 w-3.5 mr-2 inline-block" />
+                  History
+                </TabsTrigger>
+              )}
               <TabsTrigger value="orderbook" className={tabTriggerClass}>
-                <History className="h-3.5 w-3.5 mr-2 inline-block" />
+                <BookOpen className="h-3.5 w-3.5 mr-2 inline-block" />
                 Order Book
               </TabsTrigger>
               {/* Only show Graph tab for multi-market events */}
@@ -263,96 +286,76 @@ function MarketExpandedContent({
             </TabsList>
           </div>
 
-          {/* Position Tab Content — position card + open orders + recent
-              history, scoped to this market only. Mirrors Polymarket's
-              all-in-one panel so users don't have to leave the row. */}
-          {hasActivity && (
+          {/* Position Tab Content — positions + open orders only. */}
+          {hasPositionActivity && (
             <TabsContent value="position" className="m-0 px-6 py-4 space-y-6">
-              {userPosition && (
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-2 md:gap-x-4 lg:gap-x-8 gap-y-4 flex-1">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                        Outcome
-                      </span>
+              {userPositions.length > 0 && (
+                <div className="space-y-2">
+                  <div className="hidden md:grid md:grid-cols-[minmax(80px,1fr)_120px_120px_120px_120px_140px_112px] items-center gap-4 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
+                    <span>Outcome</span>
+                    <span className="text-right">Qty</span>
+                    <span className="text-right">Avg Price</span>
+                    <span className="text-right">Value</span>
+                    <span className="text-right">Cost</span>
+                    <span className="text-right">Return</span>
+                    <span className="text-right">&nbsp;</span>
+                  </div>
+                  {userPositions.map((position) => (
+                    <div
+                      key={position.id}
+                      className="grid grid-cols-2 md:grid-cols-[minmax(80px,1fr)_120px_120px_120px_120px_140px_112px] items-center gap-3 md:gap-4 py-1 text-sm"
+                    >
                       <span
                         className={cn(
-                          "font-bold text-sm",
-                          userPosition.outcome.toLowerCase() === "yes"
+                          "font-bold",
+                          position.outcome.toLowerCase() === "yes"
                             ? "text-emerald-600 dark:text-emerald-400"
                             : "text-rose-600 dark:text-rose-400"
                         )}
                       >
-                        {userPosition.outcome}
+                        {position.outcome}
                       </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                        Qty
+                      <span className="text-right font-bold tabular-nums">
+                        {position.size.toFixed(2)}
                       </span>
-                      <span className="font-bold text-sm tabular-nums">
-                        {userPosition.size.toFixed(2)}
+                      <span className="text-right font-bold tabular-nums">
+                        {(position.avgPrice * 100).toFixed(1)}¢
                       </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                        Avg Price
+                      <span className="text-right font-bold tabular-nums">
+                        ${position.currentValue.toFixed(2)}
                       </span>
-                      <span className="font-bold text-sm tabular-nums">
-                        {(userPosition.avgPrice * 100).toFixed(1)}¢
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                        Value
-                      </span>
-                      <span className="font-bold text-sm tabular-nums">
-                        ${userPosition.currentValue.toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                        Cost
-                      </span>
-                      <span className="font-bold text-sm tabular-nums">
-                        ${userPosition.initialValue.toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">
-                        Return
+                      <span className="text-right font-bold tabular-nums">
+                        ${position.initialValue.toFixed(2)}
                       </span>
                       <span
                         className={cn(
-                          "font-bold text-sm tabular-nums",
-                          userPosition.unrealizedPnl >= 0
+                          "text-right font-bold tabular-nums",
+                          position.unrealizedPnl >= 0
                             ? "text-emerald-600 dark:text-emerald-400"
                             : "text-rose-600 dark:text-rose-400"
                         )}
                       >
-                        ${Math.abs(userPosition.unrealizedPnl).toFixed(2)}
+                        ${Math.abs(position.unrealizedPnl).toFixed(2)}
                         <span className="text-xs ml-1 opacity-80">
-                          ({userPosition.unrealizedPnl >= 0 ? "+" : "-"}
-                          {Math.abs(userPosition.unrealizedPnlPercent).toFixed(
-                            1
-                          )}
+                          ({position.unrealizedPnl >= 0 ? "+" : "-"}
+                          {Math.abs(position.unrealizedPnlPercent).toFixed(1)}
                           %)
                         </span>
                       </span>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="col-span-2 md:col-span-1 md:justify-self-end shrink-0 w-full md:w-auto font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSellPosition(position);
+                        }}
+                      >
+                        <span className="hidden lg:inline">Sell Position</span>
+                        <span className="lg:hidden">Sell</span>
+                      </Button>
                     </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="shrink-0 w-full sm:w-auto font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSellPosition(userPosition);
-                    }}
-                  >
-                    <span className="hidden lg:inline">Sell Position</span>
-                    <span className="lg:hidden">Sell</span>
-                  </Button>
+                  ))}
                 </div>
               )}
 
@@ -364,7 +367,7 @@ function MarketExpandedContent({
                     </h4>
                   </div>
                   <div className="rounded-md border border-border/50 overflow-hidden">
-                    <div className="hidden md:grid md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_160px_92px] items-center gap-4 px-4 py-2 bg-muted/20 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    <div className="hidden md:grid md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_176px_92px] items-center gap-4 px-4 py-2 bg-muted/20 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                       <span>Side</span>
                       <span>Outcome</span>
                       <span className="text-right">Price</span>
@@ -380,7 +383,7 @@ function MarketExpandedContent({
                       return (
                         <div
                           key={order.id}
-                          className="grid grid-cols-[80px_minmax(80px,1fr)_92px] md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_160px_92px] items-center gap-4 px-4 py-2.5 border-t border-border/40 text-xs font-mono tabular-nums"
+                          className="grid grid-cols-[80px_minmax(80px,1fr)_92px] md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_176px_92px] items-center gap-4 px-4 py-2.5 border-t border-border/40 text-xs font-mono tabular-nums"
                         >
                           <span
                             className={cn(
@@ -412,8 +415,8 @@ function MarketExpandedContent({
                           <span className="hidden md:block text-right text-foreground">
                             ${(order.size * order.price).toFixed(2)}
                           </span>
-                          <span className="hidden md:block text-right text-[10px] uppercase text-muted-foreground">
-                            {order.expiration ? "Limited" : "Until cancelled"}
+                          <span className="hidden md:block text-right text-[10px] text-muted-foreground whitespace-nowrap">
+                            {formatOrderExpiration(order.expiration)}
                           </span>
                           <button
                             type="button"
@@ -437,46 +440,43 @@ function MarketExpandedContent({
                   </div>
                 </div>
               )}
+            </TabsContent>
+          )}
 
-              {marketTrades.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-[11px] uppercase font-bold tracking-wider text-muted-foreground">
-                    History
-                  </h4>
-                  <div className="rounded-md border border-border/50 divide-y divide-border/40">
-                    {marketTrades.map((trade) => {
-                      const verb = trade.side === "BUY" ? "Bought" : "Sold";
-                      const outcomeColor =
-                        trade.outcome.toLowerCase() === "yes"
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-rose-600 dark:text-rose-400";
-                      return (
-                        <div
-                          key={trade.id}
-                          className="flex items-center justify-between px-3 py-2 text-xs"
-                        >
-                          <span className="font-mono tabular-nums">
-                            {verb}{" "}
-                            <span className={cn("font-semibold", outcomeColor)}>
-                              {trade.size.toFixed(2)} {trade.outcome}
-                            </span>{" "}
-                            <span className="text-muted-foreground">at</span>{" "}
-                            <span className="text-foreground">
-                              {(trade.price * 100).toFixed(1)}¢
-                            </span>{" "}
-                            <span className="text-muted-foreground">
-                              (${trade.usdcAmount.toFixed(2)})
-                            </span>
-                          </span>
-                          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                            {formatRelativeTime(trade.timestamp)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+          {hasHistory && (
+            <TabsContent value="history" className="m-0 px-6 py-4">
+              <div className="rounded-md border border-border/50 divide-y divide-border/40">
+                {marketTrades.map((trade) => {
+                  const verb = trade.side === "BUY" ? "Bought" : "Sold";
+                  const outcomeColor =
+                    trade.outcome.toLowerCase() === "yes"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400";
+                  return (
+                    <div
+                      key={trade.id}
+                      className="flex items-center justify-between px-3 py-2 text-xs"
+                    >
+                      <span className="font-mono tabular-nums">
+                        {verb}{" "}
+                        <span className={cn("font-semibold", outcomeColor)}>
+                          {trade.size.toFixed(2)} {trade.outcome}
+                        </span>{" "}
+                        <span className="text-muted-foreground">at</span>{" "}
+                        <span className="text-foreground">
+                          {(trade.price * 100).toFixed(1)}¢
+                        </span>{" "}
+                        <span className="text-muted-foreground">
+                          (${trade.usdcAmount.toFixed(2)})
+                        </span>
+                      </span>
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {formatRelativeTime(trade.timestamp)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </TabsContent>
           )}
 
@@ -767,6 +767,45 @@ function SortButton({
   );
 }
 
+function OutcomeTradeButton({
+  label,
+  price,
+  selected,
+  accentClassName,
+  onClick,
+}: {
+  label: "Yes" | "No";
+  price: string;
+  selected: boolean;
+  accentClassName: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left transition-colors active:scale-[0.98]",
+        selected
+          ? "border-foreground bg-foreground text-background"
+          : "border-border/60 bg-muted/20 hover:border-foreground/50 hover:bg-muted/40"
+      )}
+    >
+      <span
+        className={cn(
+          "shrink-0 border-l-[3px] pl-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] xl:text-[11px]",
+          selected ? "border-background/70" : accentClassName
+        )}
+      >
+        {label}
+      </span>
+      <span className="shrink-0 font-mono text-sm font-semibold tabular-nums xl:text-[15px]">
+        {formatPrice(price)}
+      </span>
+    </button>
+  );
+}
+
 export function OutcomesTable({
   sortedMarketData,
   closedMarkets = [],
@@ -782,7 +821,7 @@ export function OutcomesTable({
   selectedOutcomeIndex,
   setSelectedOutcomeIndex,
   preloadOrderBook,
-  getMarketPosition,
+  getMarketPositions,
   handlePriceClick,
   isSingleMarketEvent,
   onSellSuccess,
@@ -944,7 +983,7 @@ export function OutcomesTable({
                     />
                   </div>
                 </div>
-                <span className="w-[160px] text-center">Trade</span>
+                <span className="w-[210px] text-center">Trade</span>
               </div>
             )}
             <div className="divide-y divide-border/50">
@@ -967,11 +1006,15 @@ export function OutcomesTable({
                 ];
 
                 // Check if user has a position in this market
-                const userPosition = getMarketPosition({
+                const userPositions = getMarketPositions({
                   conditionId: market.conditionId,
                   yesTokenId: market.yesTokenId,
                   noTokenId: market.noTokenId,
                 });
+                const totalPositionSize = userPositions.reduce(
+                  (sum, position) => sum + position.size,
+                  0
+                );
 
                 return (
                   <div key={market.id}>
@@ -1016,10 +1059,10 @@ export function OutcomesTable({
                                   <h3 className="font-semibold text-[13px] leading-tight text-foreground group-hover:underline decoration-foreground/40 underline-offset-4 transition-colors">
                                     {market.groupItemTitle}
                                   </h3>
-                                  {userPosition && (
+                                  {userPositions.length > 0 && (
                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground border border-border/60 tabular-nums shrink-0">
                                       <User className="h-2.5 w-2.5" />
-                                      {userPosition.size.toFixed(1)}
+                                      {totalPositionSize.toFixed(1)}
                                     </span>
                                   )}
                                 </div>
@@ -1076,10 +1119,10 @@ export function OutcomesTable({
                                 <h3 className="font-semibold text-[13px] xl:text-sm leading-tight line-clamp-2 group-hover:underline decoration-foreground/40 underline-offset-4 transition-colors">
                                   {market.groupItemTitle}
                                 </h3>
-                                {userPosition && (
+                                {userPositions.length > 0 && (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground border border-border/60 tabular-nums shrink-0">
                                     <User className="h-2.5 w-2.5" />
-                                    {userPosition.size.toFixed(1)}
+                                    {totalPositionSize.toFixed(1)}
                                   </span>
                                 )}
                               </div>
@@ -1132,41 +1175,37 @@ export function OutcomesTable({
 
                       {/* Right Side: Trading Buttons — editorial outline CTAs */}
                       <div className="px-4 pb-3 lg:pb-0 lg:pr-4 lg:pl-0 flex items-center justify-center">
-                        <div className="grid grid-cols-2 lg:flex items-center gap-2 w-full lg:w-auto">
-                          <button
-                            type="button"
-                            className={cn(
-                              "h-8 px-3 lg:w-[82px] border font-mono text-[11px] font-semibold uppercase tracking-[0.12em] tabular-nums transition-colors active:scale-[0.98]",
-                              isExpanded && selectedOutcomeIndex === 0
-                                ? "border-emerald-600 dark:border-emerald-400 text-emerald-700 dark:text-emerald-300 bg-emerald-500/5"
-                                : "border-border/60 text-foreground hover:border-emerald-600/60 hover:text-emerald-700 dark:hover:text-emerald-300"
-                            )}
+                        <div className="grid w-full grid-cols-2 items-center gap-2 lg:w-[210px]">
+                          <OutcomeTradeButton
+                            label="Yes"
+                            price={market.yesPrice}
+                            selected={
+                              selectedMarketId === market.id &&
+                              selectedOutcomeIndex === 0
+                            }
+                            accentClassName="border-emerald-600 dark:border-emerald-400"
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
                               setSelectedMarketId(market.id);
                               setSelectedOutcomeIndex(0);
                               void preloadOrderBook(market.yesTokenId);
                             }}
-                          >
-                            Yes {formatPrice(market.yesPrice)}
-                          </button>
-                          <button
-                            type="button"
-                            className={cn(
-                              "h-8 px-3 lg:w-[82px] border font-mono text-[11px] font-semibold uppercase tracking-[0.12em] tabular-nums transition-colors active:scale-[0.98]",
-                              isExpanded && selectedOutcomeIndex === 1
-                                ? "border-red-600 dark:border-red-400 text-red-700 dark:text-red-300 bg-red-500/5"
-                                : "border-border/60 text-foreground hover:border-red-600/60 hover:text-red-700 dark:hover:text-red-300"
-                            )}
+                          />
+                          <OutcomeTradeButton
+                            label="No"
+                            price={market.noPrice}
+                            selected={
+                              selectedMarketId === market.id &&
+                              selectedOutcomeIndex === 1
+                            }
+                            accentClassName="border-rose-600 dark:border-rose-400"
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
                               setSelectedMarketId(market.id);
                               setSelectedOutcomeIndex(1);
                               void preloadOrderBook(market.noTokenId);
                             }}
-                          >
-                            No {formatPrice(market.noPrice)}
-                          </button>
+                          />
                         </div>
                       </div>
 
@@ -1191,7 +1230,7 @@ export function OutcomesTable({
                     {/* Expanded Content - Order Book, Graph, Top Holders, Resolution Tabs */}
                     <MarketExpandedContent
                       isExpanded={isExpanded}
-                      userPosition={userPosition}
+                      userPositions={userPositions}
                       market={market}
                       marketOutcomes={marketOutcomes}
                       selectedOutcomeIndex={selectedOutcomeIndex}
@@ -1230,11 +1269,15 @@ export function OutcomesTable({
                   {showClosedMarkets && (
                     <div className="divide-y divide-border/30">
                       {closedMarkets.map((market) => {
-                        const userPosition = getMarketPosition({
+                        const userPositions = getMarketPositions({
                           conditionId: market.conditionId,
                           yesTokenId: market.yesTokenId,
                           noTokenId: market.noTokenId,
                         });
+                        const totalPositionSize = userPositions.reduce(
+                          (sum, position) => sum + position.size,
+                          0
+                        );
 
                         return (
                           <div
@@ -1252,10 +1295,10 @@ export function OutcomesTable({
                                     <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-muted text-muted-foreground shrink-0">
                                       Closed
                                     </span>
-                                    {userPosition && (
+                                    {userPositions.length > 0 && (
                                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground border border-border/60 tabular-nums shrink-0">
                                         <User className="h-2.5 w-2.5" />
-                                        {userPosition.size.toFixed(1)}
+                                        {totalPositionSize.toFixed(1)}
                                       </span>
                                     )}
                                   </div>

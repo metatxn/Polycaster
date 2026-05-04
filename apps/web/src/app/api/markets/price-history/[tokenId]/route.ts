@@ -1,6 +1,9 @@
 import { createLogger } from "@knoww/logger";
+import {
+  ClobRequestError,
+  fetchClobPriceHistory,
+} from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
-import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 
@@ -68,44 +71,17 @@ export async function GET(
       startTs = thirtyDaysAgo.toString();
     }
 
-    // Build query parameters for Polymarket API
-    // Format: https://clob.polymarket.com/prices-history?startTs=1754353491&market=TOKEN_ID&fidelity=720
-    const queryParams = new URLSearchParams({
-      market: tokenId,
-      startTs: startTs,
-      fidelity: fidelity,
-    });
-
     // Fetch from Polymarket CLOB API
-    const apiUrl = `${
-      POLYMARKET_API.CLOB.BASE
-    }/prices-history?${queryParams.toString()}`;
-
-    const response = await fetch(apiUrl, {
-      headers: {
-        "Content-Type": "application/json",
-      },
-      next: { revalidate: 60 }, // Cache for 1 minute
-    });
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return NextResponse.json(
-          { success: false, error: "Token not found", history: [] },
-          { status: 404 }
-        );
+    const data = await fetchClobPriceHistory<PolymarketPriceHistoryResponse>(
+      tokenId,
+      { startTs, fidelity },
+      {
+        requestInit: {
+          headers: { "Content-Type": "application/json" },
+          next: { revalidate: 60 }, // Cache for 1 minute
+        },
       }
-
-      const errorText = await response.text();
-      log.error("upstream.error", { body: errorText });
-
-      return NextResponse.json(
-        { success: false, error: "Failed to fetch price history", history: [] },
-        { status: response.status }
-      );
-    }
-
-    const data: PolymarketPriceHistoryResponse = await response.json();
+    );
 
     // Return with cache headers - price history can be cached longer
     return NextResponse.json(
@@ -120,13 +96,21 @@ export async function GET(
     );
   } catch (error) {
     log.error("fetch.failed", { error });
+
+    if (error instanceof ClobRequestError && error.status === 404) {
+      return NextResponse.json(
+        { success: false, error: "Token not found", history: [] },
+        { status: 404 }
+      );
+    }
+
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to fetch price history",
         history: [],
       },
-      { status: 500 }
+      { status: error instanceof ClobRequestError ? error.status : 500 }
     );
   }
 }

@@ -517,6 +517,10 @@
   min-width: 0 !important;
 }
 
+.knoww-card-title-row {
+  min-width: 0 !important;
+}
+
 .knoww-card-title {
   font-size: 15px !important;
   font-weight: 600 !important;
@@ -527,12 +531,20 @@
   flex: 1 !important;
 }
 
+.knoww-card-header-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  flex: 0 0 auto !important;
+}
+
+.knoww-card-minimize-btn,
 .knoww-card-dismiss-btn {
   background: none !important;
   border: none !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
   cursor: pointer !important;
-  padding: 4px 6px !important;
+  padding: 4px !important;
   font-size: 13px !important;
   line-height: 1 !important;
   border-radius: 6px !important;
@@ -543,6 +555,28 @@
     color 0.15s ease !important;
 }
 
+.knoww-card-minimize-btn {
+  width: 22px !important;
+  height: 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.knoww-card-dismiss-btn {
+  width: 22px !important;
+  height: 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.knoww-card-minimize-btn svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.knoww-card-minimize-btn:hover,
 .knoww-card-dismiss-btn:hover {
   opacity: 1 !important;
   background: color-mix(
@@ -551,6 +585,68 @@
     transparent
   ) !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+
+.knoww-card-mini-summary {
+  display: none !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+  margin-top: 8px !important;
+  overflow: hidden !important;
+}
+
+.knoww-card-mini-price {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  border-radius: 999px !important;
+  padding: 5px 10px !important;
+  background: color-mix(
+    in srgb,
+    var(--knoww-text, rgb(231, 233, 234)) 8%,
+    transparent
+  ) !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  font-feature-settings: "tnum" !important;
+  font-variant-numeric: tabular-nums !important;
+  letter-spacing: 0 !important;
+  line-height: 1.2 !important;
+}
+
+.knoww-card-mini-price.yes {
+  background: rgba(0, 186, 124, 0.12) !important;
+  color: rgb(0, 186, 124) !important;
+}
+
+.knoww-card-mini-price.no {
+  background: rgba(249, 24, 128, 0.12) !important;
+  color: rgb(249, 24, 128) !important;
+}
+
+.knoww-card-mini-price.option-1 {
+  background: color-mix(
+    in srgb,
+    var(--knoww-option-1, rgb(96, 165, 250)) 14%,
+    transparent
+  ) !important;
+  color: var(--knoww-option-1, rgb(96, 165, 250)) !important;
+}
+
+.knoww-card-mini-price.option-2 {
+  background: color-mix(
+    in srgb,
+    var(--knoww-option-2, rgb(192, 132, 252)) 14%,
+    transparent
+  ) !important;
+  color: var(--knoww-option-2, rgb(192, 132, 252)) !important;
 }
 
 .knoww-card-volume {
@@ -1076,6 +1172,90 @@
 
 .knoww-platform-slashdot .knoww-option-percent {
   font-size: 13px !important;
+}
+
+.knoww-market-card.knoww-card-minimized {
+  cursor: default !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-header {
+  align-items: center !important;
+  padding: 10px 12px !important;
+  gap: 10px !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-icon {
+  width: 32px !important;
+  height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
+  flex-basis: 32px !important;
+  border-radius: 7px !important;
+  font-size: 17px !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-icon img {
+  max-width: 32px !important;
+  max-height: 32px !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-title-row {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 10px !important;
+  min-width: 0 !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-title {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  font-size: 13.5px !important;
+  line-height: 1.2 !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-mini-summary {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  flex-wrap: nowrap !important;
+  margin-top: 0 !important;
+  gap: 6px !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-mini-price {
+  max-width: none !important;
+  flex: 0 0 auto !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-header-actions {
+  flex: 0 0 auto !important;
+  gap: 4px !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-minimize-btn,
+.knoww-market-card.knoww-card-minimized .knoww-card-dismiss-btn {
+  width: 28px !important;
+  height: 28px !important;
+  opacity: 0.65 !important;
+  font-size: 15px !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-minimize-btn svg,
+.knoww-market-card.knoww-card-minimized .knoww-card-dismiss-btn svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.knoww-market-card.knoww-card-minimized .knoww-card-volume,
+.knoww-market-card.knoww-card-minimized .knoww-card-context,
+.knoww-market-card.knoww-card-minimized .knoww-card-outcomes,
+.knoww-market-card.knoww-card-minimized .knoww-toggle-options,
+.knoww-market-card.knoww-card-minimized .knoww-options-list,
+.knoww-market-card.knoww-card-minimized .knoww-card-footer {
+  display: none !important;
 }
 
 /* ============================================ */
@@ -3343,6 +3523,64 @@
   line-height: 1.4 !important;
 }
 
+.knoww-tp-wallet-mode {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  width: 100% !important;
+  max-width: 300px !important;
+  margin: 2px 0 4px !important;
+}
+
+.knoww-tp-wallet-mode-title {
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  text-align: left !important;
+}
+
+.knoww-tp-wallet-mode-options {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 8px !important;
+}
+
+.knoww-tp-wallet-mode-option {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 4px !important;
+  min-height: 76px !important;
+  padding: 10px !important;
+  border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.12)) !important;
+  border-radius: 10px !important;
+  background: var(--knoww-card-bg, rgba(255, 255, 255, 0.04)) !important;
+  color: var(--knoww-text, #e7e9ea) !important;
+  cursor: pointer !important;
+  text-align: left !important;
+  font-family: inherit !important;
+}
+
+.knoww-tp-wallet-mode-option.active {
+  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+  background: rgba(29, 155, 240, 0.1) !important;
+}
+
+.knoww-tp-wallet-mode-option span {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+}
+
+.knoww-tp-wallet-mode-option small {
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  line-height: 1.3 !important;
+}
+
 .knoww-tp-btn-connect {
   display: flex !important;
   align-items: center !important;
@@ -5082,7 +5320,6 @@
   cursor: pointer !important;
 }
 .knoww-notification-stack.knoww-stack-minimized .knoww-search-container,
-.knoww-notification-stack.knoww-stack-minimized .knoww-stack-content,
-.knoww-notification-stack.knoww-stack-minimized .knoww-search-toggle {
+.knoww-notification-stack.knoww-stack-minimized .knoww-stack-content {
   display: none !important;
 }

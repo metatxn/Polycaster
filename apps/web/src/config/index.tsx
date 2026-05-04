@@ -1,11 +1,5 @@
 import { createLogger } from "@knoww/logger";
-import {
-  type AppKitNetwork,
-  arbitrum,
-  mainnet,
-  polygon,
-  polygonAmoy,
-} from "@reown/appkit/networks";
+import { type AppKitNetwork, polygon } from "@reown/appkit/networks";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { cookieStorage, createStorage, http } from "wagmi";
 
@@ -50,12 +44,9 @@ function getPolygonRpcUrl(): string {
   return "https://polygon-rpc.com";
 }
 
-// Set up the networks you want to support
-// Using Polygon since Polymarket runs on Polygon
-export const networks = [polygon, mainnet, arbitrum, polygonAmoy] as [
-  AppKitNetwork,
-  ...AppKitNetwork[],
-];
+// Polymarket trading runs on Polygon. Keep AppKit scoped to Polygon so other
+// connected wallet chains do not look like supported trading networks.
+export const networks = [polygon] as [AppKitNetwork, ...AppKitNetwork[]];
 
 // Set up the Wagmi Adapter (Config)
 // Configure custom transports to use Alchemy for Polygon
@@ -68,7 +59,6 @@ export const wagmiAdapter = new WagmiAdapter({
   networks,
   transports: {
     [polygon.id]: http(getPolygonRpcUrl()),
-    [polygonAmoy.id]: http("https://rpc-amoy.polygon.technology/"),
   },
 });
 

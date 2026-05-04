@@ -1,10 +1,12 @@
+import {
+  type DepositTransaction,
+  formatCheckoutTime,
+  getDepositStatusDisplay,
+  type QuoteResponse,
+  type SupportedAsset,
+} from "@knoww/shared-types/bridge";
 import { motion } from "framer-motion";
 import { Check, Copy, Loader2 } from "lucide-react";
-import type {
-  DepositTransaction,
-  QuoteResponse,
-  SupportedAsset,
-} from "@/hooks/use-bridge";
 import type { TokenBalance } from "@/hooks/use-wallet-tokens";
 import { formatAddress } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -30,33 +32,6 @@ interface ConfirmationProps {
   isLoadingQuote?: boolean;
   depositTransactions?: DepositTransaction[];
   isLoadingDepositStatus?: boolean;
-}
-
-function getDepositStatusText(status: DepositTransaction["status"]): {
-  text: string;
-  tone: "info" | "warn" | "success" | "error";
-} {
-  switch (status) {
-    case "DEPOSIT_DETECTED":
-      return { text: "Deposit detected", tone: "info" };
-    case "PROCESSING":
-      return { text: "Processing", tone: "warn" };
-    case "ORIGIN_TX_CONFIRMED":
-      return { text: "Origin confirmed", tone: "warn" };
-    case "SUBMITTED":
-      return { text: "Submitted", tone: "info" };
-    case "COMPLETED":
-      return { text: "Completed", tone: "success" };
-    case "FAILED":
-      return { text: "Failed", tone: "error" };
-    default:
-      return { text: status, tone: "info" };
-  }
-}
-
-function formatCheckoutTime(ms: number): string {
-  if (ms < 60000) return `~${Math.ceil(ms / 1000)}s`;
-  return `~${Math.ceil(ms / 60000)} min`;
 }
 
 interface DetailRowProps {
@@ -343,7 +318,7 @@ export function Confirmation({
                 ) : null}
               </div>
               {depositTransactions.slice(0, 3).map((tx, index) => {
-                const statusDisplay = getDepositStatusText(tx.status);
+                const statusDisplay = getDepositStatusDisplay(tx.status);
                 const toneClass =
                   statusDisplay.tone === "success"
                     ? "text-emerald-500"

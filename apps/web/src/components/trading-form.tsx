@@ -1,5 +1,6 @@
 "use client";
 
+import { formatTradingFormError } from "@knoww/shared-types/trading-errors";
 import { useAppKit } from "@reown/appkit/react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -99,6 +100,7 @@ export function TradingForm(props: TradingFormProps) {
     setExpirationTime,
     tickSize,
     isLoading,
+    operationStep,
     error,
     calculations,
     slippageResult,
@@ -106,6 +108,8 @@ export function TradingForm(props: TradingFormProps) {
     hasInsufficientBalance,
     hasInsufficientAllowance,
     hasNoAllowance,
+    hasMissingTradingApprovals,
+    isCheckingTradingApprovals,
     isBelowMarketableBuyMinNotional,
     minShares,
     maxSellShares,
@@ -131,17 +135,10 @@ export function TradingForm(props: TradingFormProps) {
 
   // LIMIT orders enforce min_order_size on both sides; MARKET sells can fill smaller.
   const belowLimitMin = orderType === "LIMIT" && shares < minShares;
-
-  // CLOB error strings come back as `order 0x{hash}... is invalid. {reason}` —
-  // strip the order-id preamble and surface the human-readable reason.
-  const friendlyErrorMessage = (raw: string): string => {
-    const stripped = raw.replace(
-      /^order\s+0x[a-f0-9]+(\.\.\.)?\s+is invalid\.\s*/i,
-      ""
-    );
-    const reason = stripped || raw;
-    return reason.charAt(0).toUpperCase() + reason.slice(1);
-  };
+  const needsApproval =
+    (hasMissingTradingApprovals ||
+      (side === "BUY" && (hasNoAllowance || hasInsufficientAllowance))) &&
+    !hasInsufficientBalance;
 
   return (
     <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
@@ -357,7 +354,7 @@ export function TradingForm(props: TradingFormProps) {
                 <div className="flex items-start gap-2.5 p-3 bg-destructive/10 border border-destructive/20">
                   <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
                   <span className="text-sm text-destructive leading-snug wrap-break-word">
-                    {friendlyErrorMessage(error.message)}
+                    {formatTradingFormError(error.message)}
                   </span>
                 </div>
               </motion.div>
@@ -409,21 +406,18 @@ export function TradingForm(props: TradingFormProps) {
               </motion.div>
             )}
 
-            {(hasNoAllowance || hasInsufficientAllowance) &&
-              !hasInsufficientBalance && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                >
-                  <AllowanceWarning
-                    totalCost={calculations.total}
-                    hasNoAllowance={hasNoAllowance}
-                    isUpdating={isLoading}
-                    onApprove={handleSetAllowance}
-                  />
-                </motion.div>
-              )}
+            {needsApproval && !hasInsufficientBalance && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <AllowanceWarning
+                  totalCost={calculations.total}
+                  hasNoAllowance={hasNoAllowance || hasMissingTradingApprovals}
+                />
+              </motion.div>
+            )}
           </AnimatePresence>
 
           {/* Submit Action */}
@@ -462,13 +456,26 @@ export function TradingForm(props: TradingFormProps) {
                 className={`w-full h-11 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                   (side === "BUY" && hasInsufficientBalance) ||
                   (side === "SELL" && maxSellShares <= 0) ||
+                  isCheckingTradingApprovals ||
                   belowLimitMin
                     ? "bg-muted text-muted-foreground"
-                    : side === "BUY"
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                      : "bg-red-600 hover:bg-red-700 text-white"
+                    : needsApproval
+                      ? "bg-zinc-800 text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
+                      : side === "BUY"
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                        : "bg-red-600 hover:bg-red-700 text-white"
                 }`}
                 onClick={async () => {
+                  if (needsApproval) {
+                    const approved = await handleSetAllowance();
+                    if (approved) {
+                      toast.success("Approval confirmed", {
+                        description: "You can place the order now.",
+                      });
+                    }
+                    return;
+                  }
+
                   const submittedShares = shares;
                   const submittedSide = side;
                   const submittedOrderType = orderType;
@@ -507,12 +514,11 @@ export function TradingForm(props: TradingFormProps) {
                 }}
                 disabled={
                   isLoading ||
+                  isCheckingTradingApprovals ||
                   (side === "BUY" && hasInsufficientBalance) ||
                   (side === "SELL" && maxSellShares <= 0) ||
                   (side === "SELL" && shares > maxSellShares) ||
                   (side === "SELL" && shares <= 0) ||
-                  hasInsufficientAllowance ||
-                  hasNoAllowance ||
                   belowLimitMin ||
                   (side === "BUY" && isBelowMarketableBuyMinNotional) ||
                   !selectedOutcome ||
@@ -523,7 +529,9 @@ export function TradingForm(props: TradingFormProps) {
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Placing Order...
+                    {operationStep === "approving"
+                      ? "Approving..."
+                      : "Placing Order..."}
                   </>
                 ) : !hasValidTokenId ? (
                   "Trading not available"
@@ -539,6 +547,8 @@ export function TradingForm(props: TradingFormProps) {
                   `Minimum shares: ${minShares}`
                 ) : side === "BUY" && isBelowMarketableBuyMinNotional ? (
                   "Minimum order: $1"
+                ) : needsApproval ? (
+                  "Approve"
                 ) : (
                   <>
                     {side === "BUY" ? (
@@ -574,6 +584,7 @@ export function TradingForm(props: TradingFormProps) {
           onOpenChange={setShowSplitModal}
           conditionId={conditionId}
           marketTitle={marketTitle}
+          negRisk={props.negRisk}
         />
       )}
 
@@ -586,6 +597,7 @@ export function TradingForm(props: TradingFormProps) {
           yesTokenId={outcomes[0]?.tokenId || ""}
           noTokenId={outcomes[1]?.tokenId || ""}
           marketTitle={marketTitle}
+          negRisk={props.negRisk}
         />
       )}
     </div>

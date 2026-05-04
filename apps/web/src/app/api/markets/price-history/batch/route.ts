@@ -1,7 +1,7 @@
 import { createLogger } from "@knoww/logger";
+import { fetchClobPriceHistory } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 
@@ -56,17 +56,21 @@ async function fetchOne(
   startTs: string,
   fidelity: string
 ): Promise<PriceHistoryPoint[]> {
-  const qs = new URLSearchParams({ market: tokenId, startTs, fidelity });
-  const res = await fetch(
-    `${POLYMARKET_API.CLOB.BASE}/prices-history?${qs.toString()}`,
-    {
-      headers: { "Content-Type": "application/json" },
-      next: { revalidate: 60 },
-    }
-  );
-  if (!res.ok) return [];
-  const data = (await res.json()) as PolymarketPriceHistoryResponse;
-  return data.history ?? [];
+  try {
+    const data = await fetchClobPriceHistory<PolymarketPriceHistoryResponse>(
+      tokenId,
+      { startTs, fidelity },
+      {
+        requestInit: {
+          headers: { "Content-Type": "application/json" },
+          next: { revalidate: 60 },
+        },
+      }
+    );
+    return data.history ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /**

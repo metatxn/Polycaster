@@ -225,7 +225,7 @@ function getThemeOverride(): string {
  * Check if debug mode is enabled
  */
 function isDebugMode(): boolean {
-  return USER_SETTINGS.debugMode ?? DEFAULT_USER_SETTINGS.debugMode ?? DEV_MODE;
+  return USER_SETTINGS.debugMode === true || DEV_MODE;
 }
 
 /**

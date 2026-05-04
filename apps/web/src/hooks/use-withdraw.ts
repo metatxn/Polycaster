@@ -1,9 +1,10 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import type { DepositStatus, QuoteResponse } from "@knoww/shared-types/bridge";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { encodeFunctionData, parseUnits } from "viem";
+import { encodeFunctionData, getAddress, parseUnits } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
 import {
   PUSD_ADDRESS,
@@ -12,7 +13,7 @@ import {
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
 import { executeViaRelayer } from "@/lib/relayer-client";
-import type { DepositStatus, QuoteResponse } from "./use-bridge";
+import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import { useBridge } from "./use-bridge";
 import { PROXY_WALLET_QUERY_KEY, useProxyWallet } from "./use-proxy-wallet";
 
@@ -339,6 +340,7 @@ export function useWithdraw() {
     proxyAddress,
     usdcBalance,
     refresh: refreshBalance,
+    isEoaMode,
   } = useProxyWallet();
   const {
     getWithdrawalAddresses,
@@ -368,6 +370,34 @@ export function useWithdraw() {
     () => buildBridgeTokenIndex(supportedAssets),
     [supportedAssets]
   );
+
+  const resolveWithdrawalSigner = useCallback(async () => {
+    const hookAccount = address
+      ? (address as `0x${string}`)
+      : walletClient?.account?.address;
+
+    if (!walletClient) {
+      log.debug("wallet_client.missing.fallback_provider", {
+        hasAddress: Boolean(address),
+        isConnected,
+      });
+    }
+
+    const signer = await getViemWalletClient(walletClient, hookAccount);
+    const accounts = hookAccount
+      ? [hookAccount]
+      : await signer.requestAddresses();
+    const account = accounts[0];
+
+    if (!account) {
+      throw new Error("Wallet not connected. Please reconnect and try again.");
+    }
+
+    return {
+      signer,
+      account: getAddress(account) as `0x${string}`,
+    };
+  }, [address, isConnected, walletClient]);
 
   /**
    * Fetch a quote from the Polymarket Bridge API.
@@ -545,15 +575,36 @@ export function useWithdraw() {
   const submitAndPollRelayer = async (
     transactions: Array<{ to: string; data: string; value: string }>
   ): Promise<WithdrawResult> => {
-    if (!walletClient || !address) {
-      throw new Error("Wallet not connected");
-    }
+    const { signer, account } = await resolveWithdrawalSigner();
 
     setState("submitting");
 
+    if (isEoaMode) {
+      const { polygon } = await import("viem/chains");
+      const { getPublicClient } = await import("@/lib/rpc");
+      let lastHash: `0x${string}` | null = null;
+      for (const tx of transactions) {
+        const hash = await signer.sendTransaction({
+          account,
+          chain: polygon,
+          to: tx.to as `0x${string}`,
+          data: tx.data as `0x${string}`,
+          value: BigInt(tx.value || "0"),
+        });
+        lastHash = hash;
+        await getPublicClient().waitForTransactionReceipt({ hash });
+      }
+
+      if (!lastHash) throw new Error("No withdrawal transaction submitted");
+      log.info("tx.confirmed", { transactionHash: lastHash });
+      setState("confirmed");
+      await refreshBalance();
+      return { success: true, transactionHash: lastHash };
+    }
+
     const result = await executeViaRelayer(
-      walletClient,
-      address as `0x${string}`,
+      signer,
+      account,
       transactions.map((t) => ({
         to: t.to as `0x${string}`,
         data: t.data as `0x${string}`,

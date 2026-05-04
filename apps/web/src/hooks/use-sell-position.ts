@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchClobOrderBook } from "@knoww/shared-types/clob";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { useCallback, useMemo, useState } from "react";
@@ -21,8 +22,6 @@ import {
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import { clearBalanceCache } from "@/lib/rpc";
 import { calculateSlippage, roundDownToTick } from "@/lib/slippage";
-
-const CLOB_HOST = CLOB_BASE_URL;
 
 interface OrderBookData {
   bids: Array<{ price: string; size: string }>;
@@ -81,18 +80,13 @@ export function useSellPosition({
     queryKey: ["orderBook", tokenId],
     queryFn: async (): Promise<OrderBookData | null> => {
       if (!tokenId) return null;
-      const response = await fetch(`${CLOB_HOST}/book?token_id=${tokenId}`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) return null;
-      const data = (await response.json()) as {
-        bids?: Array<{ price: string; size: string }>;
-        asks?: Array<{ price: string; size: string }>;
-      };
-      const bids = Array.isArray(data?.bids) ? data.bids : [];
-      const asks = Array.isArray(data?.asks) ? data.asks : [];
-      setOrderBookFromRest(tokenId, bids, asks);
-      return { bids, asks };
+      try {
+        const data = await fetchClobOrderBook(tokenId, { host: CLOB_BASE_URL });
+        setOrderBookFromRest(tokenId, data.bids, data.asks);
+        return { bids: data.bids, asks: data.asks };
+      } catch {
+        return null;
+      }
     },
     enabled: !!tokenId,
     staleTime: 30_000,

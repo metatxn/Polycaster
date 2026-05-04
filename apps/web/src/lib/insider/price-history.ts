@@ -7,18 +7,12 @@
  * price at T, and where did the market go N minutes after?"
  */
 
-import { POLYMARKET_API } from "@/constants/polymarket";
+import {
+  type ClobPriceHistoryPoint,
+  fetchClobPriceHistory,
+} from "@knoww/shared-types/clob";
 
-export interface PriceBucket {
-  /** Bucket start timestamp in unix seconds. */
-  t: number;
-  /** Mid price at the bucket, 0..1. */
-  p: number;
-}
-
-interface PriceHistoryResponse {
-  history?: PriceBucket[];
-}
+export type PriceBucket = ClobPriceHistoryPoint;
 
 /** Fetch a market's price history. `tokenId` is the CLOB token id for
  *  the specific outcome side (from Gamma's `clobTokenIds`). */
@@ -28,19 +22,18 @@ export async function fetchPriceHistory(
   endTs: number,
   fidelityMinutes = 5
 ): Promise<PriceBucket[]> {
-  const url = new URL(`${POLYMARKET_API.CLOB.BASE}/prices-history`);
-  url.searchParams.set("market", tokenId);
-  url.searchParams.set("startTs", Math.floor(startTs).toString());
-  url.searchParams.set("endTs", Math.floor(endTs).toString());
-  url.searchParams.set("fidelity", fidelityMinutes.toString());
-
   try {
-    const response = await fetch(url.toString(), {
-      headers: { Accept: "application/json" },
-      next: { revalidate: 300 },
-    });
-    if (!response.ok) return [];
-    const data = (await response.json()) as PriceHistoryResponse;
+    const data = await fetchClobPriceHistory(
+      tokenId,
+      {
+        startTs: Math.floor(startTs),
+        endTs: Math.floor(endTs),
+        fidelity: fidelityMinutes,
+      },
+      {
+        requestInit: { next: { revalidate: 300 } },
+      }
+    );
     return data.history ?? [];
   } catch {
     return [];

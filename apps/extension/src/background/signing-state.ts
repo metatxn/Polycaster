@@ -1,11 +1,11 @@
 /**
  * Signing State — lightweight module that manages the pending signing
- * request map and the bridge signer response listener.
+ * request map and the bridge wallet response listener.
  *
  * Extracted from bridge-signer.ts so background.ts can statically import
- * the listener setup without pulling in ethers (~180 KiB).
+ * the listener setup without pulling in the trading runtime.
  *
- * The BridgeSigner class (in bridge-signer.ts) imports sendSigningRequest
+ * The bridge wallet client (in bridge-signer.ts) imports sendSigningRequest
  * from here, sharing the same pendingRequests Map instance.
  */
 
@@ -18,7 +18,7 @@ const pendingRequests = new Map<string, PendingRequest>();
 
 let currentTabId: number | null = null;
 
-export function initBridgeSigner(): void {
+export function initBridgeWallet(): void {
   chrome.runtime.onMessage.addListener(
     (message: unknown, _sender, sendResponse) => {
       const msg = message as {

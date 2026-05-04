@@ -1,176 +1,73 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import Decimal from "decimal.js";
+import {
+  buildFullTradingApprovalTransactions,
+  getPusdExchangeApprovalSpender,
+  readErc1155Approval,
+  readPusdExchangeAllowance,
+} from "@knoww/shared-types/approvals";
+import { fetchClobOrderBook } from "@knoww/shared-types/clob";
+import { CTF_JSON_ABI } from "@knoww/shared-types/ctf";
+import {
+  assertClobPostOrderSuccess,
+  CLOB_ASSET_TYPES,
+  CLOB_ORDER_TYPES,
+  type ClobBalanceAllowanceClient,
+  type ClobBalanceAllowanceTarget,
+  type ClobOrderType,
+  getPolymarketSignatureType,
+  syncClobBalanceAllowance,
+  TRADING_SIDES,
+  type TradingSide,
+} from "@knoww/shared-types/polymarket";
+import {
+  buildClobOrderPreflightPlan,
+  buildPusdAutoWrapTransactions,
+  DEFAULT_APPROVAL_AMOUNT,
+  formatConditionalShares,
+  parseApprovalAmountRaw,
+  planPusdAutoWrap,
+} from "@knoww/shared-types/trading";
+import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
+import type {
+  OrderType as SdkOrderType,
+  Side as SdkSide,
+} from "@polymarket/clob-client-v2";
 import { useCallback, useMemo, useState } from "react";
+import type { Address } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
 
 const log = createLogger("clob-client");
-const DEFAULT_APPROVAL_AMOUNT = "100";
-const APPROVAL_DECIMALS = 6;
-const PROTOCOL_FEE_DECIMALS = 5;
 
-type ProtocolFeeDetails = {
-  rate: Decimal;
-  exponent: Decimal;
-};
-
-function normalizeApprovalAmount(amount?: string): string {
-  const decimal = new Decimal(amount || DEFAULT_APPROVAL_AMOUNT);
-  if (!decimal.isFinite() || decimal.lte(0)) {
-    throw new Error("Approval amount must be greater than 0");
-  }
-  return decimal
-    .toDecimalPlaces(APPROVAL_DECIMALS, Decimal.ROUND_DOWN)
-    .toFixed();
-}
-
-import { COLLATERAL_ONRAMP_ABI } from "@/constants/abi";
 import {
-  COLLATERAL_ONRAMP_ADDRESS,
   CTF_ADDRESS,
-  CTF_APPROVAL_OPERATORS,
-  CTF_EXCHANGE_ADDRESS,
-  NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
-  PUSD_APPROVAL_TARGETS,
   PUSD_DECIMALS,
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
 import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { checkAllApprovals } from "@/lib/approvals";
-import { SignatureType } from "@/lib/polymarket";
 import { executeViaRelayer } from "@/lib/relayer-client";
 import { getRpcUrl } from "@/lib/rpc";
+import {
+  getViemWalletClient,
+  hasViemWalletProvider,
+} from "@/lib/viem-wallet-client";
 import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
 import { useRelayerClient } from "./use-relayer-client";
 
-function getNestedValue(source: unknown, path: string[]): unknown {
-  let current = source;
-  for (const key of path) {
-    if (!current || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[key];
-  }
-  return current;
-}
-
-function decimalFromUnknown(value: unknown): Decimal | null {
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const decimal = new Decimal(value);
-  return decimal.isFinite() ? decimal : null;
-}
-
-function parseProtocolFeeDetails(info: unknown): ProtocolFeeDetails {
-  const rate =
-    decimalFromUnknown(getNestedValue(info, ["fd", "r"])) ??
-    decimalFromUnknown(getNestedValue(info, ["fee_details", "r"]));
-  const exponent =
-    decimalFromUnknown(getNestedValue(info, ["fd", "e"])) ??
-    decimalFromUnknown(getNestedValue(info, ["fee_details", "e"]));
-
-  return {
-    rate: rate ?? new Decimal(0),
-    exponent: exponent?.isFinite() ? exponent : new Decimal(1),
-  };
-}
-
-function parseBuilderTakerFeeRate(info: unknown): Decimal {
-  const rawBps =
-    decimalFromUnknown(getNestedValue(info, ["tbf"])) ??
-    decimalFromUnknown(getNestedValue(info, ["builderTakerFeeBps"])) ??
-    decimalFromUnknown(getNestedValue(info, ["builder_taker_fee_bps"]));
-  if (!rawBps) return new Decimal(0);
-  return rawBps.div(10_000);
-}
-
-function decimalToPusdRaw(
-  value: Decimal,
-  rounding: Decimal.Rounding = Decimal.ROUND_CEIL
-): bigint {
-  const fixed = value
-    .toDecimalPlaces(PUSD_DECIMALS, rounding)
-    .toFixed(PUSD_DECIMALS);
-  const [whole, fraction = ""] = fixed.split(".");
-  return (
-    BigInt(whole || "0") * BigInt(10 ** PUSD_DECIMALS) +
-    BigInt(fraction.padEnd(PUSD_DECIMALS, "0").slice(0, PUSD_DECIMALS))
-  );
-}
-
-function estimateFallbackFeeRaw(amount: bigint): bigint {
-  const FEE_BUFFER_BPS = BigInt(300); // 3%
-  const BPS_DENOMINATOR = BigInt(10_000);
-  return (amount * FEE_BUFFER_BPS) / BPS_DENOMINATOR;
-}
-
-async function estimateBuyTakerFeeRaw(
-  client: {
-    getClobMarketInfo?: (conditionId: string) => Promise<unknown>;
-  },
-  conditionId: string | undefined,
-  size: number,
-  price: number,
-  notional: Decimal
-): Promise<bigint | null> {
-  if (!conditionId || typeof client.getClobMarketInfo !== "function") {
-    return null;
-  }
-
-  try {
-    const info = await client.getClobMarketInfo(conditionId);
-    const shares = new Decimal(size);
-    const effectivePrice =
-      price > 0 ? new Decimal(price) : notional.div(shares);
-    if (
-      !shares.isFinite() ||
-      shares.lte(0) ||
-      !effectivePrice.isFinite() ||
-      effectivePrice.lte(0) ||
-      effectivePrice.gte(1)
-    ) {
-      return BigInt(0);
-    }
-
-    const { rate: protocolRate, exponent: protocolExponent } =
-      parseProtocolFeeDetails(info);
-    const priceCurve = effectivePrice
-      .mul(new Decimal(1).sub(effectivePrice))
-      .pow(protocolExponent);
-    const protocolFee = shares
-      .mul(protocolRate)
-      .mul(priceCurve)
-      .toDecimalPlaces(PROTOCOL_FEE_DECIMALS, Decimal.ROUND_HALF_UP);
-    const builderFee = notional.mul(parseBuilderTakerFeeRate(info));
-    return decimalToPusdRaw(Decimal.max(0, protocolFee.plus(builderFee)));
-  } catch (err) {
-    log.warn("fee_info.fetch_failed", {
-      conditionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
-
-/**
- * Order side enum
- */
-export enum Side {
-  BUY = "BUY",
-  SELL = "SELL",
-}
+export const Side = TRADING_SIDES;
+export type Side = TradingSide;
 
 /**
  * Order type enum
  * @see https://docs.polymarket.com/developers/CLOB/orders/create-order
  */
-export enum OrderType {
-  GTC = "GTC", // Good Till Cancelled - Limit order active until fulfilled or cancelled
-  GTD = "GTD", // Good Till Date - Limit order active until specified date
-  FOK = "FOK", // Fill Or Kill - Market order that must execute entirely or cancel
-  FAK = "FAK", // Fill And Kill - Market order that fills as much as possible, cancels rest
-}
+export const OrderType = CLOB_ORDER_TYPES;
+export type OrderType = ClobOrderType;
 
 /**
  * Order parameters for creating a new order
@@ -199,32 +96,52 @@ export interface CreateOrderParams {
 // Module-level config to avoid hook dependencies
 const CLOB_HOST = CLOB_BASE_URL;
 const CHAIN_ID = POLYMARKET_CHAIN_ID;
+const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
+  DEFAULT_APPROVAL_AMOUNT
+);
+const CLOB_BALANCE_SYNC_DELAYS_MS = [0, 250, 750, 1500, 2500] as const;
 
-/**
- * The V2 ClobClient's `postOrder` does not throw on non-2xx responses — it
- * logs the axios error internally and returns the server's error body as
- * the resolved value (e.g. `{ error: "not enough balance / allowance", status: 400 }`).
- * Detect that shape and raise a proper error so the UI surfaces it instead
- * of silently reporting the order as submitted.
- */
-function assertPostOrderSuccess(response: unknown): void {
-  if (!response || typeof response !== "object") return;
-  const r = response as {
-    success?: boolean;
-    error?: unknown;
-    errorMsg?: unknown;
-    status?: unknown;
-  };
-  const errMsg =
-    typeof r.error === "string" && r.error
-      ? r.error
-      : typeof r.errorMsg === "string" && r.errorMsg
-        ? r.errorMsg
-        : null;
-  if (errMsg || r.success === false) {
-    throw new Error(errMsg || "Order rejected by CLOB");
+type ClobBalanceAllowanceReadableClient = ClobBalanceAllowanceClient & {
+  getBalanceAllowance?: (
+    args: ClobBalanceAllowanceTarget
+  ) => Promise<{ balance?: string | number | bigint }>;
+};
+
+function parseRawUnits(value: string | number | bigint | undefined): bigint {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0
+      ? BigInt(Math.trunc(value))
+      : BigInt(0);
   }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    return BigInt(value);
+  }
+  return BigInt(0);
 }
+
+function isBalanceAllowanceError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return /not enough balance\s*\/\s*allowance|balance is not enough/i.test(
+    message
+  );
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type ClobOperationStep =
+  | "idle"
+  | "checking"
+  | "approving"
+  | "preparing"
+  | "placing";
 
 /**
  * Hook for interacting with Polymarket CLOB using the official SDK
@@ -234,45 +151,28 @@ export function useClobClient() {
   const { data: walletClient } = useWalletClient();
   const { credentials, hasCredentials, deriveCredentials } =
     useClobCredentials();
-  const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
+  const {
+    proxyAddress,
+    isDeployed: hasProxyWallet,
+    isEoaMode,
+  } = useProxyWallet();
   const { approveUsdcForTrading } = useRelayerClient();
 
   const [isLoading, setIsLoading] = useState(false);
+  const [operationStep, setOperationStep] = useState<ClobOperationStep>("idle");
   const [error, setError] = useState<Error | null>(null);
-
-  /**
-   * Internal helper to get an ethers signer that works for both injected
-   * wallets (MetaMask) and WalletConnect (mobile EOAs scanned via QR).
-   *
-   * For WalletConnect, `window.ethereum` is undefined; viem's
-   * `walletClient.transport` is the EIP-1193 transport bound to the active
-   * wagmi connector and is what we wrap into ethers.
-   */
-  const getEthersSigner = useCallback(async () => {
-    if (typeof window === "undefined") {
-      throw new Error("No wallet provider found.");
-    }
-    // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
-    const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
-    if (!eip1193Provider) {
-      throw new Error("No wallet provider found.");
-    }
-    const { providers } = await import("ethers");
-    const provider = new providers.Web3Provider(eip1193Provider);
-    await provider.send("eth_requestAccounts", []);
-    return provider.getSigner();
-  }, [walletClient?.transport]);
 
   /**
    * Internal helper to initialize the ClobClient
    */
   const getClient = useCallback(async () => {
     if (!credentials) throw new Error("API credentials not available");
-    if (!proxyAddress) throw new Error("Proxy wallet not found");
+    if (!proxyAddress) throw new Error("Trading wallet not found");
+    if (isEoaMode && !address) throw new Error("Wallet not connected");
 
     const [{ ClobClient }, signer] = await Promise.all([
       import("@polymarket/clob-client-v2"),
-      getEthersSigner(),
+      getViemWalletClient(walletClient, address as `0x${string}` | undefined),
     ]);
 
     const creds = {
@@ -288,34 +188,50 @@ export function useClobClient() {
       chain: CHAIN_ID,
       signer,
       creds,
-      signatureType: SignatureType.POLY_GNOSIS_SAFE as unknown as number,
-      funderAddress: proxyAddress,
+      signatureType: getPolymarketSignatureType(
+        isEoaMode ? "eoa" : "safe"
+      ) as unknown as number,
+      funderAddress: isEoaMode ? address : proxyAddress,
       ...(builderCode ? { builderConfig: { builderCode } } : {}),
     });
-  }, [credentials, proxyAddress, getEthersSigner]);
+  }, [credentials, proxyAddress, isEoaMode, address, walletClient]);
 
   /**
-   * Check if the client can be used. Either an injected provider
-   * (`window.ethereum`) or an active wagmi walletClient transport (used
-   * by WalletConnect / mobile EOAs) is sufficient.
+   * Check if the client can be used. Either an injected provider or an active
+   * wagmi viem wallet client is sufficient.
    */
   const canTrade = useMemo(() => {
     if (typeof window === "undefined") return false;
-    const hasProvider = !!walletClient?.transport || !!window.ethereum;
     return (
       isConnected &&
       hasCredentials &&
       hasProxyWallet &&
       !!proxyAddress &&
-      hasProvider
+      hasViemWalletProvider(walletClient)
     );
-  }, [
-    isConnected,
-    hasCredentials,
-    hasProxyWallet,
-    proxyAddress,
-    walletClient?.transport,
-  ]);
+  }, [isConnected, hasCredentials, hasProxyWallet, proxyAddress, walletClient]);
+
+  const readConditionalBalanceRaw = useCallback(
+    async (tokenId: string, owner: string): Promise<bigint> => {
+      const { createPublicClient, http } = await import("viem");
+      const { polygon } = await import("viem/chains");
+
+      const publicClient = createPublicClient({
+        chain: polygon,
+        transport: http(getRpcUrl()),
+      });
+
+      const balances = (await publicClient.readContract({
+        address: CTF_ADDRESS as Address,
+        abi: CTF_JSON_ABI,
+        functionName: "balanceOfBatch",
+        args: [[owner as Address], [BigInt(tokenId)]],
+      })) as readonly bigint[];
+
+      return balances[0] ?? BigInt(0);
+    },
+    []
+  );
 
   /**
    * Ensure the proxy wallet has enough pUSD to cover a BUY order.
@@ -343,29 +259,10 @@ export function useClobClient() {
       if (!proxyAddress) throw new Error("Proxy wallet not found");
       if (requiredPusdRaw <= BigInt(0)) return;
 
-      const { createPublicClient, http, encodeFunctionData, formatUnits } =
-        await import("viem");
+      const { createPublicClient, erc20Abi, formatUnits, http } = await import(
+        "viem"
+      );
       const { polygon } = await import("viem/chains");
-
-      const ERC20_READ_APPROVE_ABI = [
-        {
-          inputs: [{ name: "owner", type: "address" }],
-          name: "balanceOf",
-          outputs: [{ name: "", type: "uint256" }],
-          stateMutability: "view",
-          type: "function",
-        },
-        {
-          inputs: [
-            { name: "spender", type: "address" },
-            { name: "amount", type: "uint256" },
-          ],
-          name: "approve",
-          outputs: [{ name: "", type: "bool" }],
-          stateMutability: "nonpayable",
-          type: "function",
-        },
-      ] as const;
 
       const publicClient = createPublicClient({
         chain: polygon,
@@ -374,52 +271,35 @@ export function useClobClient() {
 
       const pusdBalanceOnChain = (await publicClient.readContract({
         address: PUSD_ADDRESS,
-        abi: ERC20_READ_APPROVE_ABI,
+        abi: erc20Abi,
         functionName: "balanceOf",
         args: [proxyAddress as `0x${string}`],
       })) as bigint;
-
-      // The CLOB server reserves pUSD against the user's existing open BUY
-      // orders (price * unmatched size). A new order's required collateral
-      // must fit within the *available* balance, i.e. on-chain balance minus
-      // reservations — not the raw on-chain balance.
-      const pusdBalance =
-        pusdBalanceOnChain > reservedPusdRaw
-          ? pusdBalanceOnChain - reservedPusdRaw
-          : BigInt(0);
-
-      // V2 Exchange pulls `makerAmount + fees` from the Safe. Prefer the
-      // current market fee parameters from getClobMarketInfo(); fall back to
-      // the previous 3% buffer if metadata is unavailable so order placement
-      // remains resilient to transient CLOB metadata failures.
-      const targetPusdRaw =
-        requiredPusdRaw +
-        (estimatedFeeRaw ?? estimateFallbackFeeRaw(requiredPusdRaw));
-
-      if (pusdBalance >= targetPusdRaw) return;
-
-      const shortfall = targetPusdRaw - pusdBalance;
 
       const usdcBalance = (await publicClient.readContract({
         address: USDC_E_ADDRESS,
-        abi: ERC20_READ_APPROVE_ABI,
+        abi: erc20Abi,
         functionName: "balanceOf",
         args: [proxyAddress as `0x${string}`],
       })) as bigint;
 
-      // If the user doesn't have enough USDC.e to cover the buffered
-      // shortfall, fall back to covering at least the base requirement and
-      // let the Exchange reject if fees don't fit — at least the user isn't
-      // blocked when the shortfall is satisfiable without a fee buffer.
-      const baseShortfall =
-        requiredPusdRaw > pusdBalance
-          ? requiredPusdRaw - pusdBalance
-          : BigInt(0);
+      const wrapPlan = planPusdAutoWrap({
+        pusdBalanceRaw: pusdBalanceOnChain,
+        usdcEBalanceRaw: usdcBalance,
+        requiredPusdRaw,
+        reservedPusdRaw,
+        estimatedFeeRaw,
+      });
 
-      if (usdcBalance < baseShortfall) {
-        const needed = formatUnits(baseShortfall, PUSD_DECIMALS);
+      if (!wrapPlan.needsWrap) return;
+
+      if (!wrapPlan.hasEnoughBaseCollateral) {
+        const needed = formatUnits(wrapPlan.baseShortfallRaw, PUSD_DECIMALS);
         const haveUsdc = formatUnits(usdcBalance, USDC_E_DECIMALS);
-        const haveAvailable = formatUnits(pusdBalance, PUSD_DECIMALS);
+        const haveAvailable = formatUnits(
+          wrapPlan.availablePusdRaw,
+          PUSD_DECIMALS
+        );
         const reservedHint =
           reservedPusdRaw > BigInt(0)
             ? ` (${formatUnits(reservedPusdRaw, PUSD_DECIMALS)} pUSD is reserved by your open orders — cancel them to free it up)`
@@ -431,42 +311,40 @@ export function useClobClient() {
         );
       }
 
-      const wrapAmount = usdcBalance < shortfall ? usdcBalance : shortfall;
-
-      const approveData = encodeFunctionData({
-        abi: ERC20_READ_APPROVE_ABI,
-        functionName: "approve",
-        args: [COLLATERAL_ONRAMP_ADDRESS, wrapAmount],
-      });
-      const wrapData = encodeFunctionData({
-        abi: COLLATERAL_ONRAMP_ABI,
-        functionName: "wrap",
-        args: [USDC_E_ADDRESS, proxyAddress as `0x${string}`, wrapAmount],
-      });
+      const txns = buildPusdAutoWrapTransactions(
+        proxyAddress as `0x${string}`,
+        wrapPlan.wrapAmountRaw
+      );
 
       if (!walletClient) throw new Error("Wallet not connected");
       if (!address) throw new Error("Wallet not connected");
 
-      await executeViaRelayer(walletClient, address as `0x${string}`, [
-        {
-          to: USDC_E_ADDRESS as `0x${string}`,
-          data: approveData,
-          value: "0",
-        },
-        {
-          to: COLLATERAL_ONRAMP_ADDRESS as `0x${string}`,
-          data: wrapData,
-          value: "0",
-        },
-      ]);
+      if (isEoaMode) {
+        const { polygon } = await import("viem/chains");
+        const { getPublicClient } = await import("@/lib/rpc");
+        const publicClient = getPublicClient();
+
+        for (const tx of txns) {
+          const hash = await walletClient.sendTransaction({
+            account: address as `0x${string}`,
+            chain: polygon,
+            to: tx.to,
+            data: tx.data,
+            value: BigInt(tx.value),
+          });
+          await publicClient.waitForTransactionReceipt({ hash });
+        }
+        return;
+      }
+
+      await executeViaRelayer(walletClient, address as `0x${string}`, txns);
     },
-    [proxyAddress, walletClient, address]
+    [proxyAddress, walletClient, address, isEoaMode]
   );
 
   /**
-   * Ensure every V2 allowance (pUSD → exchanges, USDC.e → onramp, CTF
-   * setApprovalForAll → operators) is set on the Safe. If any is missing,
-   * submit the full approval batch via the relayer before the order call.
+   * Ensure the default app trading approvals are set on the Safe. If any are
+   * missing, submit the approval batch via the relayer before the order call.
    *
    * This makes the trade flow self-healing: a user who skipped onboarding
    * or was onboarded pre-V2 can place an order and the app will submit the
@@ -474,39 +352,45 @@ export function useClobClient() {
    * cryptic "not enough balance / allowance" from the server.
    */
   const ensureV2Approvals = useCallback(
-    async (required?: { requiredPusdRaw: bigint; negRisk?: boolean }) => {
+    async (
+      required?: { requiredPusdRaw: bigint; negRisk?: boolean },
+      onApprovalStart?: () => void
+    ) => {
       if (!proxyAddress) throw new Error("Proxy wallet not found");
       const status = await checkAllApprovals(proxyAddress);
+      const markApproving = () => {
+        onApprovalStart?.();
+        setOperationStep("approving");
+      };
 
       let hasRequiredPusdAllowance = true;
       if (required) {
-        const [
-          { createPublicClient, erc20Abi, formatUnits, http },
-          { polygon },
-        ] = await Promise.all([import("viem"), import("viem/chains")]);
+        const [{ createPublicClient, formatUnits, http }, { polygon }] =
+          await Promise.all([import("viem"), import("viem/chains")]);
         const client = createPublicClient({
           chain: polygon,
           transport: http(getRpcUrl()),
         });
-        const exchangeAddress = required.negRisk
-          ? NEG_RISK_CTF_EXCHANGE_ADDRESS
-          : CTF_EXCHANGE_ADDRESS;
-        const allowance = await client.readContract({
-          address: PUSD_ADDRESS,
-          abi: erc20Abi,
-          functionName: "allowance",
-          args: [proxyAddress as `0x${string}`, exchangeAddress],
-        });
+        const allowance = await readPusdExchangeAllowance(
+          client,
+          proxyAddress as Address,
+          required.negRisk
+        );
         hasRequiredPusdAllowance = allowance >= required.requiredPusdRaw;
 
         if (!(status.allApproved && hasRequiredPusdAllowance)) {
+          markApproving();
+          const approvalAmountRaw =
+            required.requiredPusdRaw > DEFAULT_TRADING_APPROVAL_RAW
+              ? required.requiredPusdRaw
+              : DEFAULT_TRADING_APPROVAL_RAW;
           const result = await approveUsdcForTrading(
-            formatUnits(required.requiredPusdRaw, PUSD_DECIMALS)
+            formatUnits(approvalAmountRaw, PUSD_DECIMALS)
           );
           if (!result.success) {
             throw new Error(
               result.error ||
-                "Failed to update V2 trading approvals for this order."
+                "Failed to update trading approvals for this order."
             );
           }
           return;
@@ -515,11 +399,52 @@ export function useClobClient() {
 
       if (status.allApproved) return;
 
+      markApproving();
       const result = await approveUsdcForTrading();
       if (!result.success) {
         throw new Error(
           result.error ||
-            "Failed to grant V2 trading approvals. Please open trading setup and try again."
+            "Failed to grant trading approvals. Please open trading setup and try again."
+        );
+      }
+    },
+    [proxyAddress, approveUsdcForTrading]
+  );
+
+  /**
+   * SELL orders require ERC-1155 operator approval from the CTF contract to
+   * the exact exchange that will fill the order. Check that approval directly
+   * so a missing SELL allowance is repaired before CLOB returns its generic
+   * "not enough balance / allowance" rejection.
+   */
+  const ensureSellCtfApproval = useCallback(
+    async (negRisk?: boolean, onApprovalStart?: () => void) => {
+      if (!proxyAddress) throw new Error("Proxy wallet not found");
+
+      const [{ createPublicClient, http }, { polygon }] = await Promise.all([
+        import("viem"),
+        import("viem/chains"),
+      ]);
+      const client = createPublicClient({
+        chain: polygon,
+        transport: http(getRpcUrl()),
+      });
+      const exchange = getPusdExchangeApprovalSpender(negRisk);
+      const approved = await readErc1155Approval(
+        client,
+        proxyAddress as Address,
+        exchange
+      );
+
+      if (approved) return;
+
+      onApprovalStart?.();
+      setOperationStep("approving");
+      const result = await approveUsdcForTrading();
+      if (!result.success) {
+        throw new Error(
+          result.error ||
+            "Failed to approve outcome-token trading for this sell order."
         );
       }
     },
@@ -535,118 +460,153 @@ export function useClobClient() {
       if (!canTrade) throw new Error("Trading setup incomplete");
 
       setIsLoading(true);
+      const activeStepRef: { current: ClobOperationStep } = {
+        current: "checking",
+      };
+      const setActiveStep = (step: ClobOperationStep) => {
+        activeStepRef.current = step;
+        setOperationStep(step);
+      };
+      setActiveStep("checking");
       setError(null);
+      let requiredConditionalRaw: bigint | null = null;
+      let sellBalanceBeforePostRaw: bigint | null = null;
+      let didPostOrder = false;
 
       try {
         const client = await getClient();
         const orderOptions = params.negRisk ? { negRisk: true } : undefined;
+        const balanceAllowanceClient =
+          client as unknown as ClobBalanceAllowanceReadableClient;
 
-        const isMarket =
-          params.orderType === OrderType.FAK ||
-          params.orderType === OrderType.FOK;
+        const syncBalanceAllowance = async (options?: {
+          requireSellBalance?: boolean;
+        }) => {
+          for (const delayMs of CLOB_BALANCE_SYNC_DELAYS_MS) {
+            if (delayMs > 0) await wait(delayMs);
 
-        let requiredPusdRaw: bigint | null = null;
-        let requiredNotional: Decimal | null = null;
-        if (params.side === Side.BUY) {
-          const { parseUnits } = await import("viem");
-          if (isMarket) {
-            const notional = params.amount;
-            if (notional == null) {
-              throw new Error(
-                "BUY market orders require a notional amount (params.amount)"
-              );
+            try {
+              await syncClobBalanceAllowance(balanceAllowanceClient, {
+                tokenId: params.tokenId,
+                includeCollateral: !options?.requireSellBalance,
+              });
+
+              if (
+                !options?.requireSellBalance ||
+                requiredConditionalRaw === null ||
+                !balanceAllowanceClient.getBalanceAllowance
+              ) {
+                return;
+              }
+
+              const balanceAllowance =
+                await balanceAllowanceClient.getBalanceAllowance({
+                  asset_type: CLOB_ASSET_TYPES.CONDITIONAL,
+                  token_id: params.tokenId,
+                });
+              const clobBalanceRaw = parseRawUnits(balanceAllowance?.balance);
+
+              if (clobBalanceRaw >= requiredConditionalRaw) return;
+            } catch (err) {
+              if (options?.requireSellBalance) throw err;
+              // Non-fatal for legacy paths: the server may still accept the
+              // order if its cache is already fresh; postOrder surfaces any
+              // real issue.
+              return;
             }
-            requiredNotional = new Decimal(notional);
-            requiredPusdRaw = parseUnits(
-              requiredNotional.toString(),
-              PUSD_DECIMALS
+          }
+
+          if (options?.requireSellBalance && requiredConditionalRaw !== null) {
+            throw new Error(
+              "Polymarket has not indexed these shares for trading yet. Please try again in a few seconds."
             );
-          } else {
-            // Limit BUY: price (dollars) * size (shares) = notional dollars.
-            requiredNotional = new Decimal(params.price).mul(params.size);
-            requiredPusdRaw = parseUnits(
-              requiredNotional.toString(),
-              PUSD_DECIMALS
+          }
+        };
+
+        const preflight = await buildClobOrderPreflightPlan({
+          side: params.side,
+          orderType: params.orderType,
+          amount: params.amount,
+          size: params.size,
+          price: params.price,
+          conditionId: params.conditionId,
+          marketInfoClient: client,
+          getOpenOrders: () => client.getOpenOrders(),
+          onFeeError: (err) =>
+            log.warn("fee_info.fetch_failed", {
+              conditionId: params.conditionId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+        });
+        const isMarket = preflight.isMarketOrder;
+        requiredConditionalRaw = preflight.sell?.requiredConditionalRaw ?? null;
+
+        if (params.side === Side.SELL && requiredConditionalRaw !== null) {
+          if (!proxyAddress) throw new Error("Trading wallet not found");
+
+          const onChainBalanceRaw = await readConditionalBalanceRaw(
+            params.tokenId,
+            proxyAddress
+          );
+          sellBalanceBeforePostRaw = onChainBalanceRaw;
+
+          if (onChainBalanceRaw < requiredConditionalRaw) {
+            throw new Error(
+              `Insufficient shares: this wallet holds ${formatConditionalShares(
+                onChainBalanceRaw
+              )}, but this sell order needs ${formatConditionalShares(
+                requiredConditionalRaw
+              )}. Refresh your portfolio and try again.`
             );
           }
         }
-
-        const estimatedFeeRaw =
-          requiredPusdRaw !== null && requiredNotional
-            ? await estimateBuyTakerFeeRaw(
-                client,
-                params.conditionId,
-                params.size,
-                params.price,
-                requiredNotional
-              )
-            : null;
-        const requiredCollateralRaw =
-          requiredPusdRaw !== null
-            ? requiredPusdRaw +
-              (estimatedFeeRaw ?? estimateFallbackFeeRaw(requiredPusdRaw))
-            : null;
 
         // Approvals pre-flight: if any V2 allowance is missing, or if a finite
         // pUSD allowance is below this BUY's notional, update it before posting.
         // SELL needs CTF.setApprovalForAll → exchanges to transfer outcome
         // tokens; BUY needs sufficient pUSD → exchange allowance for settlement.
+        if (params.side === Side.SELL) {
+          await ensureSellCtfApproval(params.negRisk, () => {
+            activeStepRef.current = "approving";
+          });
+        }
+
         await ensureV2Approvals(
-          requiredCollateralRaw !== null
+          preflight.buy
             ? {
-                requiredPusdRaw: requiredCollateralRaw,
+                requiredPusdRaw: preflight.buy.requiredCollateralRaw,
                 negRisk: params.negRisk,
               }
-            : undefined
+            : undefined,
+          () => {
+            activeStepRef.current = "approving";
+          }
         );
 
         // Wrap-on-trade pre-flight (BUY only). SELL receives pUSD and does
         // not need collateral wrapped beforehand.
         if (params.side === Side.BUY) {
-          if (requiredPusdRaw === null) {
+          if (!preflight.buy) {
             throw new Error("Failed to determine required pUSD amount");
           }
 
-          // The CLOB reserves pUSD against the user's existing open BUY
-          // orders (price * unmatched size). Count those reservations so
-          // we compare the new order against *available* pUSD, not just
-          // on-chain balance.
-          let reservedPusdRaw = BigInt(0);
-          try {
-            const openOrders = await client.getOpenOrders();
-            const arr = Array.isArray(openOrders) ? openOrders : [];
-            for (const raw of arr) {
-              const o = raw as {
-                side?: string;
-                price?: string | number;
-                original_size?: string | number;
-                size_matched?: string | number;
-              };
-              if (o?.side !== "BUY") continue;
-              const price = Number(o.price ?? 0);
-              const remaining =
-                Number(o.original_size ?? 0) - Number(o.size_matched ?? 0);
-              if (
-                !Number.isFinite(price) ||
-                !Number.isFinite(remaining) ||
-                remaining <= 0
-              )
-                continue;
-              reservedPusdRaw += BigInt(
-                Math.round(price * remaining * 1_000_000)
-              );
-            }
-          } catch {
-            // If getOpenOrders fails, proceed with 0 reserved — worst case
-            // the server rejects with its own error message.
-          }
-
+          setActiveStep("preparing");
           await ensurePusdSufficient(
-            requiredPusdRaw,
-            reservedPusdRaw,
-            estimatedFeeRaw
+            preflight.buy.requiredPusdRaw,
+            preflight.buy.reservedPusdRaw,
+            preflight.buy.estimatedFeeRaw
           );
         }
+
+        setActiveStep("placing");
+
+        // Push the latest on-chain balances into the CLOB cache before
+        // building/posting. SELL orders depend on the conditional-token cache;
+        // wait until CLOB reports enough shares so we do not submit an order
+        // that the server immediately rejects as balance 0.
+        await syncBalanceAllowance({
+          requireSellBalance: params.side === Side.SELL,
+        });
 
         if (isMarket) {
           const buyAmount = params.amount;
@@ -669,46 +629,23 @@ export function useClobClient() {
             {
               tokenID: params.tokenId,
               amount: marketAmount,
-              side: params.side,
+              side: params.side as SdkSide,
               // feeRateBps removed (V2: protocol-determined at match time)
               ...(params.price > 0 ? { price: params.price } : {}),
             },
             orderOptions
           );
 
-          // Resync the CLOB server's cached view of this user's on-chain
-          // balance/allowance before posting. Without this, the server
-          // returns a generic "not enough balance / allowance" 400 even
-          // when the Safe holds sufficient pUSD with unlimited allowances
-          // — the server simply hasn't observed the latest on-chain state
-          // for this funder. Mirrors the extension's trading-handler.ts.
-          try {
-            await (
-              client as unknown as {
-                updateBalanceAllowance: (args: {
-                  asset_type: string;
-                  token_id?: string;
-                }) => Promise<unknown>;
-              }
-            ).updateBalanceAllowance({ asset_type: "COLLATERAL" });
-            await (
-              client as unknown as {
-                updateBalanceAllowance: (args: {
-                  asset_type: string;
-                  token_id?: string;
-                }) => Promise<unknown>;
-              }
-            ).updateBalanceAllowance({
-              asset_type: "CONDITIONAL",
-              token_id: params.tokenId,
-            });
-          } catch {
-            // Non-fatal: the server may still accept the order if its
-            // cache is already fresh; postOrder surfaces any real issue.
-          }
+          // Resync once more after signing; keep this best-effort because the
+          // strict SELL cache check already happened immediately above.
+          await syncBalanceAllowance();
 
-          const response = await client.postOrder(order, params.orderType);
-          assertPostOrderSuccess(response);
+          didPostOrder = true;
+          const response = await client.postOrder(
+            order,
+            params.orderType as SdkOrderType | undefined
+          );
+          assertClobPostOrderSuccess(response);
           return { success: true, order: response };
         }
 
@@ -717,7 +654,7 @@ export function useClobClient() {
             tokenID: params.tokenId,
             price: params.price,
             size: params.size,
-            side: params.side,
+            side: params.side as SdkSide,
             // feeRateBps removed (V2: protocol-determined at match time)
             expiration:
               params.orderType === OrderType.GTD ? params.expiration : 0,
@@ -725,47 +662,83 @@ export function useClobClient() {
           orderOptions
         );
 
-        // Resync server-side cached balance/allowance before posting (V2
-        // requires this; without it the server returns a stale "not
-        // enough balance / allowance" 400). Mirrors the extension.
-        try {
-          await (
-            client as unknown as {
-              updateBalanceAllowance: (args: {
-                asset_type: string;
-                token_id?: string;
-              }) => Promise<unknown>;
-            }
-          ).updateBalanceAllowance({ asset_type: "COLLATERAL" });
-          await (
-            client as unknown as {
-              updateBalanceAllowance: (args: {
-                asset_type: string;
-                token_id?: string;
-              }) => Promise<unknown>;
-            }
-          ).updateBalanceAllowance({
-            asset_type: "CONDITIONAL",
-            token_id: params.tokenId,
-          });
-        } catch {
-          // Non-fatal: the server may still accept the order if its cache
-          // is already fresh; postOrder surfaces any real issue.
-        }
+        // Resync once more after signing; keep this best-effort because the
+        // strict SELL cache check already happened immediately above.
+        await syncBalanceAllowance();
 
-        const response = await client.postOrder(order, params.orderType);
-        assertPostOrderSuccess(response);
+        didPostOrder = true;
+        const response = await client.postOrder(
+          order,
+          params.orderType as SdkOrderType | undefined
+        );
+        assertClobPostOrderSuccess(response);
         return { success: true, order: response };
       } catch (err) {
+        if (
+          didPostOrder &&
+          params.side === Side.SELL &&
+          proxyAddress &&
+          sellBalanceBeforePostRaw !== null &&
+          requiredConditionalRaw !== null &&
+          isBalanceAllowanceError(err)
+        ) {
+          try {
+            const sellBalanceAfterPostRaw = await readConditionalBalanceRaw(
+              params.tokenId,
+              proxyAddress
+            );
+
+            if (sellBalanceAfterPostRaw < sellBalanceBeforePostRaw) {
+              setError(null);
+              log.warn("sell.post_order_error_after_fill", {
+                tokenId: params.tokenId,
+                before: sellBalanceBeforePostRaw.toString(),
+                after: sellBalanceAfterPostRaw.toString(),
+                requested: requiredConditionalRaw.toString(),
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return {
+                success: true,
+                order: {
+                  status: "matched_with_stale_balance_error",
+                  error: err instanceof Error ? err.message : String(err),
+                },
+              };
+            }
+          } catch (balanceReadError) {
+            log.warn("sell.post_error_balance_check_failed", {
+              tokenId: params.tokenId,
+              error:
+                balanceReadError instanceof Error
+                  ? balanceReadError.message
+                  : String(balanceReadError),
+            });
+          }
+        }
+
         const error =
-          err instanceof Error ? err : new Error("Failed to create order");
+          isWalletRejectionError(err) && activeStepRef.current !== "approving"
+            ? new Error("Wallet request was rejected. No order was placed.")
+            : err instanceof Error
+              ? err
+              : new Error("Failed to create order");
         setError(error);
         throw error;
       } finally {
         setIsLoading(false);
+        setOperationStep("idle");
       }
     },
-    [address, canTrade, getClient, ensurePusdSufficient, ensureV2Approvals]
+    [
+      address,
+      canTrade,
+      getClient,
+      ensurePusdSufficient,
+      ensureSellCtfApproval,
+      ensureV2Approvals,
+      proxyAddress,
+      readConditionalBalanceRaw,
+    ]
   );
 
   /**
@@ -773,11 +746,7 @@ export function useClobClient() {
    */
   const getOrderBook = useCallback(async (tokenId: string) => {
     try {
-      const response = await fetch(`${CLOB_HOST}/book?token_id=${tokenId}`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch order book: ${response.statusText}`);
-      }
-      return await response.json();
+      return await fetchClobOrderBook(tokenId, { host: CLOB_HOST });
     } catch (err) {
       log.error("order_book.fetch_failed", { error: err });
       throw err;
@@ -801,14 +770,12 @@ export function useClobClient() {
   }, [canTrade, getClient]);
 
   /**
-   * Update (set) the CLOB V2 allowance set for the connected EOA.
+   * Update (set) the default app trading allowance set for the connected EOA.
    *
    * V2 moves collateral through pUSD, so the manual approve flow must:
-   *   - Approve USDC.e → CollateralOnramp (so the Onramp can pull USDC.e
-   *     when wrapping to pUSD)
-   *   - Approve pUSD → CTF, standard CTF Exchange V2, Neg Risk Exchange V2,
-   *     and Neg Risk Adapter
-   *   - Approve CTF outcome-token operators for sells/conversions
+   *   - Approve pUSD → CTF, standard CTF Exchange V2, and Neg Risk Exchange V2
+   *   - Approve USDC.e → CollateralOnramp for auto-wrap
+   *   - Approve CTF outcome-token operators for standard/neg-risk sells
    *
    * Note: The gasless onboarding path in `use-relayer-client.ts` already
    * sets approvals on the user's Safe. This callback is the fallback for
@@ -819,91 +786,53 @@ export function useClobClient() {
       if (!address) throw new Error("Wallet not connected");
 
       setIsLoading(true);
+      setOperationStep("approving");
       setError(null);
 
       try {
-        const [{ createWalletClient, custom, parseUnits }, { polygon }] =
-          await Promise.all([import("viem"), import("viem/chains")]);
-        const approvalAmountRaw = parseUnits(
-          normalizeApprovalAmount(approvalAmount),
-          APPROVAL_DECIMALS
+        if (!isEoaMode) {
+          const result = await approveUsdcForTrading(approvalAmount);
+          if (!result.success) {
+            throw new Error(
+              result.error ||
+                "Failed to grant trading approvals. Please try again."
+            );
+          }
+          return {
+            success: true,
+            hashes: result.transactionHashes ?? [result.transactionHash],
+            message:
+              result.message ||
+              "Approved app trading pUSD, USDC.e Onramp, and outcome-token operators",
+          };
+        }
+
+        const [{ createPublicClient, http }, { polygon }] = await Promise.all([
+          import("viem"),
+          import("viem/chains"),
+        ]);
+        const approvalAmountRaw = parseApprovalAmountRaw(approvalAmount);
+
+        const approveWalletClient = await getViemWalletClient(
+          walletClient,
+          address as `0x${string}`
         );
 
-        const ERC20_APPROVE_ABI = [
-          {
-            inputs: [
-              { name: "spender", type: "address" },
-              { name: "amount", type: "uint256" },
-            ],
-            name: "approve",
-            outputs: [{ name: "", type: "bool" }],
-            stateMutability: "nonpayable",
-            type: "function",
-          },
-        ] as const;
-        const ERC1155_APPROVAL_ABI = [
-          {
-            inputs: [
-              { name: "operator", type: "address" },
-              { name: "approved", type: "bool" },
-            ],
-            name: "setApprovalForAll",
-            outputs: [],
-            stateMutability: "nonpayable",
-            type: "function",
-          },
-        ] as const;
-
-        // Same provider-resolution as `getEthersSigner` so this manual EOA
-        // allowance flow works for WalletConnect (mobile) too.
-        // biome-ignore lint/suspicious/noExplicitAny: EIP-1193 provider is structurally typed
-        const eip1193Provider: any = walletClient?.transport ?? window.ethereum;
-        if (!eip1193Provider) {
-          throw new Error("No wallet provider found.");
-        }
-        const approveWalletClient = createWalletClient({
-          chain: polygon,
-          transport: custom(eip1193Provider),
-          account: address,
-        });
-
-        const { createPublicClient, http } = await import("viem");
         const publicClient = createPublicClient({
           chain: polygon,
           transport: http(getRpcUrl()),
         });
 
-        await approveWalletClient.requestAddresses();
-
-        const approve = async (
-          token: `0x${string}`,
-          spender: `0x${string}`
-        ) => {
-          const hash = await approveWalletClient.writeContract({
-            account: address,
-            address: token,
-            abi: ERC20_APPROVE_ABI,
-            functionName: "approve",
-            args: [spender, approvalAmountRaw],
-          });
-          const receipt = await publicClient.waitForTransactionReceipt({
-            hash,
-            pollingInterval: 5_000, // Poll every 5 seconds to avoid rate limiting
-            timeout: 120_000, // 2 minute timeout
-            confirmations: 1, // Wait for 1 confirmation
-          });
-          if (receipt.status !== "success") {
-            throw new Error(`Approval failed for ${spender}`);
-          }
-          return hash;
-        };
-        const approveOperator = async (operator: `0x${string}`) => {
-          const hash = await approveWalletClient.writeContract({
-            account: address,
-            address: CTF_ADDRESS,
-            abi: ERC1155_APPROVAL_ABI,
-            functionName: "setApprovalForAll",
-            args: [operator, true],
+        const approvalTxs =
+          buildFullTradingApprovalTransactions(approvalAmountRaw);
+        const hashes: `0x${string}`[] = [];
+        for (const tx of approvalTxs) {
+          const hash = await approveWalletClient.sendTransaction({
+            account: address as `0x${string}`,
+            chain: polygon,
+            to: tx.to,
+            data: tx.data,
+            value: BigInt(tx.value),
           });
           const receipt = await publicClient.waitForTransactionReceipt({
             hash,
@@ -912,37 +841,31 @@ export function useClobClient() {
             confirmations: 1,
           });
           if (receipt.status !== "success") {
-            throw new Error(`Operator approval failed for ${operator}`);
+            throw new Error(`Approval failed for ${tx.to}`);
           }
-          return hash;
-        };
-
-        const hashes = await Promise.all([
-          approve(USDC_E_ADDRESS, COLLATERAL_ONRAMP_ADDRESS),
-          ...PUSD_APPROVAL_TARGETS.map((spender) =>
-            approve(PUSD_ADDRESS, spender)
-          ),
-          ...CTF_APPROVAL_OPERATORS.map((operator) =>
-            approveOperator(operator)
-          ),
-        ]);
+          hashes.push(hash);
+        }
 
         return {
           success: true,
           hashes,
           message:
-            "Approved V2 pUSD, USDC.e Onramp, and outcome-token operators",
+            "Approved app trading pUSD, USDC.e Onramp, and outcome-token operators",
         };
       } catch (err) {
-        const error =
-          err instanceof Error ? err : new Error("Failed to approve");
+        const error = isWalletRejectionError(err)
+          ? new Error("Approval was rejected. No order was placed.")
+          : err instanceof Error
+            ? err
+            : new Error("Failed to approve");
         setError(error);
         throw error;
       } finally {
         setIsLoading(false);
+        setOperationStep("idle");
       }
     },
-    [address, walletClient?.transport]
+    [address, walletClient, isEoaMode, approveUsdcForTrading]
   );
 
   /**
@@ -1076,34 +999,16 @@ export function useClobClient() {
         const { createPublicClient, http, formatUnits } = await import("viem");
         const { polygon } = await import("viem/chains");
 
-        const exchangeAddress = negRisk
-          ? NEG_RISK_CTF_EXCHANGE_ADDRESS
-          : CTF_EXCHANGE_ADDRESS;
-
-        const ERC20_ABI = [
-          {
-            inputs: [
-              { name: "owner", type: "address" },
-              { name: "spender", type: "address" },
-            ],
-            name: "allowance",
-            outputs: [{ name: "", type: "uint256" }],
-            stateMutability: "view",
-            type: "function",
-          },
-        ] as const;
-
         const client = createPublicClient({
           chain: polygon,
           transport: http(getRpcUrl()),
         });
 
-        const allowance = await client.readContract({
-          address: PUSD_ADDRESS,
-          abi: ERC20_ABI,
-          functionName: "allowance",
-          args: [targetAddress as `0x${string}`, exchangeAddress],
-        });
+        const allowance = await readPusdExchangeAllowance(
+          client,
+          targetAddress as Address,
+          negRisk
+        );
 
         return {
           allowance: Number(formatUnits(allowance, PUSD_DECIMALS)),
@@ -1165,6 +1070,7 @@ export function useClobClient() {
     hasProxyWallet,
     proxyAddress,
     isLoading,
+    operationStep,
     error,
 
     // Actions

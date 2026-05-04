@@ -1,15 +1,16 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import { getPolymarketSignatureType } from "@knoww/shared-types/polymarket";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConnection } from "wagmi";
+import { useConnection, useWalletClient } from "wagmi";
 
 const log = createLogger("notifications");
 
 import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
-import { SignatureType } from "@/lib/polymarket";
+import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import type {
   DropNotificationParams,
   Notification,
@@ -56,6 +57,19 @@ function transformNotification(
 /** Auto-refresh interval in milliseconds (30 seconds) */
 const REFRESH_INTERVAL_MS = 30_000;
 
+function isExpectedClobReadFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("not found") ||
+    lower.includes("unauthorized") ||
+    lower.includes("forbidden") ||
+    lower.includes("401") ||
+    lower.includes("403") ||
+    lower.includes("404")
+  );
+}
+
 /**
  * Hook for managing Polymarket CLOB notifications
  *
@@ -69,9 +83,14 @@ const REFRESH_INTERVAL_MS = 30_000;
  * Reference: https://docs.polymarket.com/developers/CLOB/clients/methods-l2#notifications
  */
 export function useNotifications() {
-  const { isConnected } = useConnection();
+  const { address, isConnected } = useConnection();
+  const { data: walletClient } = useWalletClient();
   const { credentials, hasCredentials } = useClobCredentials();
-  const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
+  const {
+    proxyAddress,
+    isDeployed: hasProxyWallet,
+    isEoaMode,
+  } = useProxyWallet();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -86,7 +105,7 @@ export function useNotifications() {
 
   /**
    * Helper to get an authenticated CLOB client with notification methods
-   * Uses SignatureType.POLY_GNOSIS_SAFE (1) for proxy wallet authentication
+   * Uses the active trading wallet mode for CLOB authentication.
    */
   const getAuthenticatedClient = useCallback(async () => {
     if (!credentials) {
@@ -96,24 +115,17 @@ export function useNotifications() {
     }
 
     if (!proxyAddress) {
-      throw new Error("Proxy wallet address required for notifications");
+      throw new Error("Trading wallet address required for notifications");
     }
 
-    if (typeof window === "undefined" || !window.ethereum) {
+    if (typeof window === "undefined") {
       throw new Error("No wallet provider found");
     }
 
-    const [{ ClobClient }, ethersModule] = await Promise.all([
+    const [{ ClobClient }, signer] = await Promise.all([
       import("@polymarket/clob-client-v2"),
-      import("ethers"),
+      getViemWalletClient(walletClient, address as `0x${string}` | undefined),
     ]);
-
-    const provider = new ethersModule.providers.Web3Provider(
-      // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is the wallet provider
-      window.ethereum as any
-    );
-    await provider.send("eth_requestAccounts", []);
-    const signer = provider.getSigner();
 
     const creds = {
       key: credentials.apiKey,
@@ -121,16 +133,17 @@ export function useNotifications() {
       passphrase: credentials.apiPassphrase,
     };
 
-    // Use POLY_GNOSIS_SAFE signature type (1) for proxy wallet
     return new ClobClient({
       host: CLOB_BASE_URL,
       chain: POLYMARKET_CHAIN_ID,
       signer,
       creds,
-      signatureType: SignatureType.POLY_GNOSIS_SAFE as unknown as number,
+      signatureType: getPolymarketSignatureType(
+        isEoaMode ? "eoa" : "safe"
+      ) as unknown as number,
       funderAddress: proxyAddress,
     }) as InstanceType<typeof ClobClient> & ClobClientWithNotificationMethods;
-  }, [credentials, proxyAddress]);
+  }, [address, credentials, proxyAddress, isEoaMode, walletClient]);
 
   /**
    * Fetch notifications from the CLOB API
@@ -167,7 +180,11 @@ export function useNotifications() {
       const error =
         err instanceof Error ? err : new Error("Failed to fetch notifications");
       setError(error);
-      log.error("fetch.failed", { error: err });
+      if (isExpectedClobReadFailure(err)) {
+        log.debug("fetch.skipped", { reason: error.message });
+      } else {
+        log.error("fetch.failed", { error: err });
+      }
     } finally {
       setIsLoading(false);
     }

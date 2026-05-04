@@ -11,6 +11,7 @@
  * Dollar profit = profit-per-share × size.
  */
 
+import { parseGammaArrayField } from "@knoww/shared-types/polymarket";
 import Decimal from "decimal.js";
 import type { TradeSide } from "./detector";
 
@@ -52,13 +53,7 @@ export interface TradePnl {
  * Returns a normalized structure; never throws.
  */
 export function parseOutcomes(outcomePricesJson: string): ResolvedOutcomes {
-  let prices: number[] = [];
-  try {
-    const raw = JSON.parse(outcomePricesJson) as string[] | number[];
-    prices = (raw as Array<string | number>).map((v) => Number(v));
-  } catch {
-    return { prices: [], winnerIndex: null, isDraw: false };
-  }
+  const prices = parseGammaArrayField(outcomePricesJson).map((v) => Number(v));
 
   if (prices.length === 0 || prices.some((p) => Number.isNaN(p))) {
     return { prices: [], winnerIndex: null, isDraw: false };

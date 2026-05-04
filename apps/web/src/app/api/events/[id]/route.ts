@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { logger } from "@/lib/logger";
 
 /**
  * Check if the identifier is a numeric event ID or a slug
@@ -74,8 +75,18 @@ export async function GET(
         );
       }
       const errorText = await eventResponse.text();
-      throw new Error(
-        `Gamma API error: ${eventResponse.status} ${eventResponse.statusText} - ${errorText}`
+      logger.warn("events.detail.gamma_failed", {
+        id,
+        status: eventResponse.status,
+        statusText: eventResponse.statusText,
+        body: errorText.slice(0, 500),
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Failed to fetch event details",
+        },
+        { status: 502 }
       );
     }
 
@@ -93,11 +104,11 @@ export async function GET(
 
     // Fetch markets associated with this event
     // Markets are linked to events, so we need to fetch them separately
-    let markets = [];
+    let markets: Record<string, unknown>[] = [];
 
     // If the event has markets array, use it directly
     if (event.markets && Array.isArray(event.markets)) {
-      markets = event.markets;
+      markets = event.markets as Record<string, unknown>[];
     } else {
       // Otherwise, fetch markets by event slug or ID (always filter closed=false)
       const marketsUrl = `${POLYMARKET_API.GAMMA.MARKETS}?events_slug=${
@@ -117,8 +128,77 @@ export async function GET(
         if (marketsResponse.ok) {
           markets = (await marketsResponse.json()) as Record<string, unknown>[];
         }
-      } catch {
+      } catch (error) {
+        logger.warn("events.detail.markets_fetch_failed", {
+          id,
+          error: error instanceof Error ? error.message : String(error),
+        });
         // Continue with empty markets array
+      }
+    }
+
+    // Polymarket nests "Most Sixes" / "Top Batter" / "Toss Match Double" etc.
+    // as separate negRisk child events linked back via `parentEventId`. The
+    // standard `/events/slug/{slug}` payload does NOT include them, so the
+    // detail page would silently drop those rows. Fan out to fetch the
+    // children and append their markets to the response so the outcomes
+    // table renders the full set.
+    const eventId = typeof event.id === "string" ? event.id : null;
+    if (eventId) {
+      try {
+        const childrenUrl = `${POLYMARKET_API.GAMMA.EVENTS}?parent_event_id=${eventId}&limit=50&closed=false`;
+        const childrenResponse = await fetch(childrenUrl, {
+          headers: { "Content-Type": "application/json" },
+          ...(fresh
+            ? { cache: "no-store" as const }
+            : { next: { revalidate: CACHE_DURATION.EVENTS } }),
+        });
+
+        if (childrenResponse.ok) {
+          const childEvents = (await childrenResponse.json()) as Array<
+            Record<string, unknown>
+          >;
+          if (Array.isArray(childEvents)) {
+            const seenMarketIds = new Set(
+              markets
+                .map((m) => (typeof m.id === "string" ? m.id : null))
+                .filter((v): v is string => v !== null)
+            );
+            for (const child of childEvents) {
+              const childMarkets = Array.isArray(child.markets)
+                ? (child.markets as Record<string, unknown>[])
+                : [];
+              const childEventId =
+                typeof child.id === "string"
+                  ? child.id
+                  : typeof child.id === "number"
+                    ? String(child.id)
+                    : null;
+              for (const market of childMarkets) {
+                const mid = typeof market.id === "string" ? market.id : null;
+                if (mid && seenMarketIds.has(mid)) continue;
+                if (mid) seenMarketIds.add(mid);
+                markets.push({
+                  ...market,
+                  // Tag with the IMMEDIATE child event id (Most Sixes, Top
+                  // Batter, …), not the grandparent event id. The UI groups
+                  // negRisk siblings by this so each section maps to one
+                  // child event — using the grandparent collapsed every
+                  // negRisk market into a single nine-button row.
+                  parentEventId: childEventId,
+                  parentEventTitle: child.title,
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn("events.detail.children_fetch_failed", {
+          id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Children fan-out is best-effort; missing children should not fail
+        // the parent event response.
       }
     }
 
@@ -131,10 +211,13 @@ export async function GET(
       },
     });
   } catch (error) {
+    logger.error("events.detail.fetch_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to fetch event details",
       },
       { status: 500 }
     );

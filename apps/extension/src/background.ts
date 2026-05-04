@@ -5,7 +5,7 @@
 // ============================================
 
 import { logWarn } from "@knoww/logger";
-import { POLYMARKET_API } from "@knoww/shared-types/polymarket";
+import { fetchClobOrderBook } from "@knoww/shared-types/clob";
 import {
   flushAnalyticsQueue,
   queueAnalyticsEvent,
@@ -243,7 +243,7 @@ async function ensureOffscreen(): Promise<void> {
   const creation = chrome.offscreen.createDocument({
     url: OFFSCREEN_URL,
     reasons: ["WORKERS" as chrome.offscreen.Reason],
-    justification: "Trading operations require ethers.js and ClobClient",
+    justification: "Trading operations require viem and ClobClient",
   });
   offscreenCreating = creation;
   try {
@@ -464,19 +464,10 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "trading:get-orderbook" &&
       typeof msg.tokenId === "string"
     ) {
+      const { tokenId } = msg;
       (async () => {
         try {
-          const res = await fetch(
-            `${POLYMARKET_API.CLOB.BASE}/book?token_id=${msg.tokenId}`
-          );
-          if (!res.ok) {
-            sendResponse({
-              ok: false,
-              error: `Failed to fetch order book: ${res.statusText}`,
-            } as BackgroundResponse);
-            return;
-          }
-          const data = await res.json();
+          const data = await fetchClobOrderBook(tokenId);
           sendResponse({ ok: true, data } as BackgroundResponse);
         } catch (e) {
           sendResponse({

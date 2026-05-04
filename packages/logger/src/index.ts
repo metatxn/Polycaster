@@ -37,6 +37,26 @@ function getExtensionDevMode(): boolean | null {
   return null;
 }
 
+function getBrowserDebugMode(): boolean {
+  try {
+    if (typeof window === "undefined" || !window) return false;
+    const browserWindow = window as {
+      KNOWW_CONFIG?: {
+        isDebugMode?: () => boolean;
+        getUserSettings?: () => { debugMode?: boolean };
+      };
+    };
+
+    if (browserWindow.KNOWW_CONFIG?.isDebugMode?.() === true) {
+      return true;
+    }
+
+    return browserWindow.KNOWW_CONFIG?.getUserSettings?.().debugMode === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Server/worker runtime = no `window` and `process` is defined. In these
  * environments log lines end up in a log drain (Cloudflare Workers, Node),
@@ -58,7 +78,9 @@ function isServerRuntime(): boolean {
 
 function shouldLog(level: LogLevel): boolean {
   const extensionDevMode = getExtensionDevMode();
-  if (extensionDevMode !== null) return extensionDevMode;
+  if (extensionDevMode !== null) {
+    return extensionDevMode || getBrowserDebugMode();
+  }
 
   if (isDevMode()) return true;
   return level === "warn" || level === "error";
@@ -137,14 +159,40 @@ function emitBrowser(
   else console.error(prefix, data);
 }
 
+function emitBrowserArgs(
+  level: LogLevel,
+  event: string,
+  args: readonly unknown[]
+): void {
+  const prefix = `[Knoww:${event}]`;
+  if (level === "debug") console.debug(prefix, ...args);
+  else if (level === "info") console.info(prefix, ...args);
+  else if (level === "warn") console.warn(prefix, ...args);
+  else console.error(prefix, ...args);
+}
+
 function emit(level: LogLevel, event: string, payload?: LogPayload): void {
   if (!shouldLog(level)) return;
   if (isServerRuntime()) emitServer(level, event, payload);
   else emitBrowser(level, event, payload);
 }
 
+function emitArgs(
+  level: LogLevel,
+  event: string,
+  args: readonly unknown[]
+): void {
+  if (!shouldLog(level)) return;
+  if (isServerRuntime()) emitServer(level, event, { args });
+  else emitBrowserArgs(level, event, args);
+}
+
 export function logDebug(event: string, payload?: LogPayload): void {
   emit("debug", event, payload);
+}
+
+export function logDebugArgs(event: string, ...args: unknown[]): void {
+  emitArgs("debug", event, args);
 }
 
 export function logInfo(event: string, payload?: LogPayload): void {
@@ -161,6 +209,7 @@ export function logError(event: string, payload?: LogPayload): void {
 
 export interface Logger {
   debug(event: string, payload?: LogPayload): void;
+  debugArgs(event: string, ...args: unknown[]): void;
   info(event: string, payload?: LogPayload): void;
   warn(event: string, payload?: LogPayload): void;
   error(event: string, payload?: LogPayload): void;
@@ -174,6 +223,7 @@ export interface Logger {
 export function createLogger(scope: string): Logger {
   return {
     debug: (event, payload) => logDebug(`${scope}.${event}`, payload),
+    debugArgs: (event, ...args) => logDebugArgs(`${scope}.${event}`, ...args),
     info: (event, payload) => logInfo(`${scope}.${event}`, payload),
     warn: (event, payload) => logWarn(`${scope}.${event}`, payload),
     error: (event, payload) => logError(`${scope}.${event}`, payload),
@@ -186,6 +236,7 @@ export function createLogger(scope: string): Logger {
  */
 export const logger: Logger = {
   debug: logDebug,
+  debugArgs: logDebugArgs,
   info: logInfo,
   warn: logWarn,
   error: logError,

@@ -3,11 +3,14 @@
  *
  * Since keccak256 is needed for CREATE2 derivation and we want to keep
  * the content script lightweight, the computation is delegated to the
- * background service worker which already has ethers bundled.
+ * background service worker which already has the viem trading runtime bundled.
  */
+
+import type { TradingBalanceData } from "../../types/chrome-messages";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
+const MESSAGE_TIMEOUT_MS = 20_000;
 
 function sendTradingMessage<T>(
   message: Record<string, unknown>,
@@ -17,9 +20,20 @@ function sendTradingMessage<T>(
 
   function trySend(): Promise<T> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`${errorLabel} timed out`));
+      }, MESSAGE_TIMEOUT_MS);
+
       chrome.runtime.sendMessage(
         message,
         (response: { ok: boolean; data?: T; error?: string }) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+
           if (chrome.runtime.lastError) {
             const err = chrome.runtime.lastError.message || "Unknown error";
             if (attempt < MAX_RETRIES && err.includes("message port closed")) {
@@ -52,14 +66,7 @@ export const ProxyWallet = {
     return data.proxyAddress;
   },
 
-  async getBalance(proxyAddress: string): Promise<{
-    balance: number;
-    balanceRaw: string;
-    polBalance?: number;
-    tokenBalances?: Array<{ symbol: string; amount: number }>;
-    /** On-chain Safe-deployment status (true iff code exists at proxyAddress). */
-    isDeployed?: boolean;
-  }> {
+  async getBalance(proxyAddress: string): Promise<TradingBalanceData> {
     return sendTradingMessage(
       { type: "trading:get-balance", proxyAddress },
       "Failed to get balance"

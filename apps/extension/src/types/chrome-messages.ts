@@ -48,9 +48,13 @@ export interface ContextGateResult {
 
 // ── Order types (from shared package) ──
 
-import type { ClobOrderType } from "@knoww/shared-types/polymarket";
+import type { TradingWalletBalance } from "@knoww/shared-types/balances";
+import type {
+  ClobOrderType,
+  TradingWalletMode,
+} from "@knoww/shared-types/polymarket";
 
-export type { ClobOrderType };
+export type { ClobOrderType, TradingWalletMode };
 
 // ── Trading messages (content → background) ──
 
@@ -67,6 +71,8 @@ export interface TradingGetBalanceMessage {
   proxyAddress: string;
 }
 
+export type TradingBalanceData = TradingWalletBalance;
+
 export interface TradingPlaceOrderMessage {
   type: "trading:place-order";
   tokenId: string;
@@ -81,6 +87,7 @@ export interface TradingPlaceOrderMessage {
   negRisk?: boolean;
   address: string;
   proxyAddress: string;
+  walletMode?: TradingWalletMode;
   credentials: { apiKey: string; apiSecret: string; apiPassphrase: string };
 }
 
@@ -105,7 +112,9 @@ export interface TradingSplitPositionMessage {
   conditionId: string;
   amount: number;
   address: string;
+  negRisk?: boolean;
   proxyAddress?: string;
+  walletMode?: TradingWalletMode;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   yesTokenId?: string;
   noTokenId?: string;
@@ -116,7 +125,9 @@ export interface TradingMergePositionsMessage {
   conditionId: string;
   amount: number;
   address: string;
+  negRisk?: boolean;
   proxyAddress?: string;
+  walletMode?: TradingWalletMode;
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   yesTokenId?: string;
   noTokenId?: string;
@@ -132,6 +143,7 @@ export interface TradingGetOutcomeBalancesMessage {
 export interface TradingRelayerApproveMessage {
   type: "trading:relayer-approve";
   address: string;
+  walletMode?: TradingWalletMode;
   approvalAmount?: string;
 }
 

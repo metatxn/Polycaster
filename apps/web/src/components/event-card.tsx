@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  parseGammaNumberArray,
+  parseGammaStringArray,
+} from "@knoww/shared-types/polymarket";
 import { motion } from "framer-motion";
 import { Flame } from "lucide-react";
 import Image from "next/image";
@@ -119,15 +123,6 @@ export function EventCard({
     const markets = event.markets || [];
     if (markets.length === 0) return [];
 
-    const parseJson = <T,>(v: string | undefined): T | null => {
-      if (!v) return null;
-      try {
-        return JSON.parse(v) as T;
-      } catch {
-        return null;
-      }
-    };
-
     if (markets.length > 1) {
       // Use groupItemTitle when available (clean candidate name, e.g.
       // "Brazil", "Gavin Newsom"). When absent, fall back to `question`
@@ -164,8 +159,8 @@ export function EventCard({
 
       return markets
         .map((m, i) => {
-          const prices = parseJson<string[]>(m.outcomePrices) || [];
-          const price = Number.parseFloat(prices[0] || "0");
+          const prices = parseGammaNumberArray(m.outcomePrices);
+          const price = prices[0] ?? 0;
           return {
             name: names[i] || rawNames[i],
             price: Number.isFinite(price) ? price : 0,
@@ -177,11 +172,11 @@ export function EventCard({
     }
 
     const m = markets[0];
-    const names = parseJson<string[]>(m.outcomes) || [];
-    const prices = parseJson<string[]>(m.outcomePrices) || [];
+    const names = parseGammaStringArray(m.outcomes);
+    const prices = parseGammaNumberArray(m.outcomePrices);
     return names
       .map((name, i) => {
-        const price = Number.parseFloat(prices[i] || "0");
+        const price = prices[i] ?? 0;
         return {
           name,
           price: Number.isFinite(price) ? price : 0,

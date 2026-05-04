@@ -38,8 +38,36 @@ interface Market {
   createdAt?: string;
   /** Whether this is a negative risk market */
   negRisk?: boolean;
+  /** Shared bucket key for negRisk groups (one per outcome) */
+  negRiskMarketID?: string;
   /** 24h price change as a fraction (Gamma `oneDayPriceChange`, e.g. 0.05 = +5%). */
   oneDayPriceChange?: number;
+  /** Kickoff time for sports markets, ISO string */
+  gameStartTime?: string;
+  /** Polymarket sports type tag, e.g. "moneyline", "cricket_toss_winner" */
+  sportsMarketType?: string;
+  /** ID of the parent event when this market belongs to a linked child event. */
+  parentEventId?: string | number;
+  /** Title of the linked child event (filled when fanned-out from parent). */
+  parentEventTitle?: string;
+  /** Resolution deadline (ISO) for the per-market About panel. */
+  endDate?: string;
+  /** Public canonical URL of the resolution source (e.g. ESPN cricinfo). */
+  resolutionSource?: string;
+  /** Resolver wallet address — rendered as a Polygonscan link. */
+  resolvedBy?: string;
+}
+
+/** Sports team data from Polymarket gamma `event.teams` */
+export interface EventTeam {
+  id?: number | string;
+  name: string;
+  abbreviation?: string;
+  alias?: string;
+  logo?: string;
+  color?: string;
+  league?: string;
+  record?: string;
 }
 
 export type Event = {
@@ -54,6 +82,10 @@ export type Event = {
   active?: boolean;
   closed?: boolean;
   archived?: boolean;
+  live?: boolean;
+  score?: string;
+  elapsed?: string | number;
+  period?: string;
   tags?: string[];
   markets?: Market[];
   marketCount?: number;
@@ -62,6 +94,10 @@ export type Event = {
   negRisk?: boolean;
   enableNegRisk?: boolean;
   negRiskAugmented?: boolean;
+  /** Sports event teams (length 2 for team-vs-team games) */
+  teams?: EventTeam[];
+  /** Kickoff time for the event (sports), ISO string */
+  startTime?: string;
 };
 
 interface EventDetailResponse {

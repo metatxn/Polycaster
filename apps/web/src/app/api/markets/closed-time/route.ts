@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
-import { getClobHost } from "@/lib/polymarket";
+import { fetchMarket } from "@/lib/polymarket";
 
 /**
  * Polymarket condition IDs are hex strings, optionally 0x-prefixed.
@@ -50,18 +50,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const host = getClobHost();
   const closedTimes: Record<string, string> = {};
 
   const results = await Promise.allSettled(
     conditionIds.map(async (id) => {
-      const res = await fetch(`${host}/markets/${encodeURIComponent(id)}`);
-      if (!res.ok) return { id, date: null };
-      const data = (await res.json()) as {
+      const data = (await fetchMarket(id).catch(() => null)) as {
         end_date_iso?: string;
         endDate?: string;
-      };
-      return { id, date: data.end_date_iso || data.endDate || null };
+      } | null;
+      return { id, date: data?.end_date_iso || data?.endDate || null };
     })
   );
 

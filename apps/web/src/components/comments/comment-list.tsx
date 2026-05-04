@@ -5,13 +5,15 @@ import { Loader2, MessageSquareOff } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { buildCommentTree, useEventComments } from "@/hooks/use-comments";
+import { buildCommentTree, useComments } from "@/hooks/use-comments";
 import { cn } from "@/lib/utils";
-import type { TokenMarketMap } from "@/types/comments";
+import type { ParentEntityType, TokenMarketMap } from "@/types/comments";
 import { CommentItem } from "./comment-item";
 
 interface CommentListProps {
-  eventId: number;
+  eventId?: number;
+  entityType?: ParentEntityType;
+  entityId?: number;
   holdersOnly?: boolean;
   /** Sort order field */
   order?: string;
@@ -38,6 +40,8 @@ interface CommentListProps {
 
 export function CommentList({
   eventId,
+  entityType = "Event",
+  entityId,
   holdersOnly = false,
   order = "createdAt",
   ascending = false,
@@ -53,6 +57,7 @@ export function CommentList({
 // onReply,
 CommentListProps) {
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const resolvedEntityId = entityId ?? eventId;
 
   const {
     data,
@@ -62,7 +67,7 @@ CommentListProps) {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useEventComments(eventId, {
+  } = useComments(entityType, resolvedEntityId, {
     limit: 20,
     order,
     ascending,
@@ -146,7 +151,7 @@ CommentListProps) {
           No comments yet
         </p>
         <p className="text-xs text-muted-foreground/70 mt-1">
-          Be the first to share your thoughts on this event
+          Be the first to share your thoughts here
         </p>
       </motion.div>
     );

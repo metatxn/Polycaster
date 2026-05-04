@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchClobOrderBook } from "@knoww/shared-types/clob";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -113,44 +114,12 @@ export interface OrderBookProps {
 }
 
 /**
- * Polymarket CLOB API response structure
- */
-interface ClobOrderBookResponse {
-  market: string;
-  asset_id: string;
-  hash: string;
-  timestamp: string;
-  bids: OrderBookLevel[];
-  asks: OrderBookLevel[];
-  min_order_size?: string;
-  tick_size?: string;
-}
-
-/**
  * Fetch order book directly from Polymarket CLOB API
  * This is faster than going through our Next.js API route
  * CLOB API is public and allows CORS
  */
 async function fetchOrderBook(tokenId: string): Promise<OrderBookData> {
-  // Direct call to Polymarket CLOB API (no proxy needed)
-  const response = await fetch(`${CLOB_BASE_URL}/book?token_id=${tokenId}`, {
-    headers: {
-      Accept: "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch order book: ${response.status}`);
-  }
-
-  const data: ClobOrderBookResponse = await response.json();
-
-  return {
-    bids: data.bids || [],
-    asks: data.asks || [],
-    min_order_size: data.min_order_size,
-    tick_size: data.tick_size,
-  };
+  return fetchClobOrderBook(tokenId, { host: CLOB_BASE_URL });
 }
 
 /**

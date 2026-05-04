@@ -908,6 +908,102 @@ html.softpop {
   margin-bottom: 0.3em !important;
 }
 
+/* ===== APP TYPOGRAPHY TOKENS =====
+ * App screens are operational surfaces, so tiny uppercase mono labels must
+ * stay readable. Keep landing-page marketing typography separate via the
+ * `.kw-landing` guard.
+ */
+:root {
+  --ui-label-size: 12px;
+  --ui-label-line-height: 1rem;
+  --ui-label-letter-spacing: 0.08em;
+  --ui-label-muted: color-mix(
+    in oklch,
+    var(--muted-foreground) 88%,
+    var(--foreground) 12%
+  );
+}
+
+.ui-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+  text-transform: uppercase;
+  letter-spacing: var(--ui-label-letter-spacing);
+  color: var(--ui-label-muted);
+}
+
+.ui-label-strong {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+  text-transform: uppercase;
+  letter-spacing: var(--ui-label-letter-spacing);
+  color: var(--foreground);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    .uppercase[class*="text-[8px]"],
+    .uppercase[class*="text-[9px]"],
+    .uppercase[class*="text-[10px]"],
+    .uppercase[class*="text-[11px]"],
+    .font-mono.uppercase[class*="text-[8px]"],
+    .font-mono.uppercase[class*="text-[9px]"],
+    .font-mono.uppercase[class*="text-[10px]"],
+    .font-mono.uppercase[class*="text-[11px]"],
+    .font-mono.uppercase.text-xs
+  ) {
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    .uppercase[class*="tracking-[0.1"],
+    .uppercase[class*="tracking-[0.2"],
+    .uppercase.tracking-wider,
+    .uppercase.tracking-widest,
+    .font-mono.uppercase[class*="tracking-[0.1"],
+    .font-mono.uppercase[class*="tracking-[0.2"],
+    .font-mono.uppercase.tracking-wider,
+    .font-mono.uppercase.tracking-widest
+  ) {
+  letter-spacing: var(--ui-label-letter-spacing);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    [class*="text-[9px]"][class*="text-muted-foreground"],
+    [class*="text-[10px]"][class*="text-muted-foreground"],
+    [class*="text-[11px]"][class*="text-muted-foreground"],
+    .font-mono.uppercase[class*="text-muted-foreground"],
+    .font-mono[class*="text-[9px]"][class*="text-muted-foreground"],
+    .font-mono[class*="text-[10px]"][class*="text-muted-foreground"],
+    .font-mono[class*="text-[11px]"][class*="text-muted-foreground"]
+  ) {
+  color: var(--ui-label-muted);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    [class*="text-[9px]"][class*="text-muted-foreground"],
+    [class*="text-[10px]"][class*="text-muted-foreground"],
+    [class*="text-[11px]"][class*="text-muted-foreground"]
+  ) {
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    .font-mono.uppercase.opacity-50,
+    .font-mono.uppercase.opacity-60,
+    .font-mono.uppercase.opacity-70
+  ) {
+  opacity: 0.9;
+}
+
 /* Word-stagger entry animation — each word gets its own delay. */
 .kw-stagger {
   display: inline-block;

@@ -282,8 +282,7 @@ export function PositionsTable({
                       : "text-red-600 dark:text-red-400"
                   )}
                 >
-                  {isProfit ? "+" : ""}
-                  {formatCurrency(position.unrealizedPnl, true)}
+                  {formatCurrency(position.unrealizedPnl)}
                   <span className="ml-1 opacity-70">
                     ({formatPercent(position.unrealizedPnlPercent)})
                   </span>
@@ -349,8 +348,7 @@ export function PositionsTable({
                   : "text-red-600 dark:text-red-400"
               )}
             >
-              {totalPnl >= 0 ? "+" : ""}
-              {formatCurrency(totalPnl, true)}
+              {formatCurrency(totalPnl)}
               <span className="ml-1 opacity-70">
                 ({formatPercent(totalPnlPercent)})
               </span>
@@ -423,8 +421,7 @@ export function PositionsTable({
                         : "text-red-600 dark:text-red-400"
                     )}
                   >
-                    {isProfit ? "+" : ""}
-                    {formatCurrency(position.unrealizedPnl, true)}
+                    {formatCurrency(position.unrealizedPnl)}
                     <span className="ml-1 opacity-70">
                       ({formatPercent(position.unrealizedPnlPercent)})
                     </span>
@@ -511,8 +508,7 @@ export function PositionsTable({
                     : "text-red-600 dark:text-red-400"
                 )}
               >
-                {totalPnl >= 0 ? "+" : ""}
-                {formatCurrency(totalPnl, true)}{" "}
+                {formatCurrency(totalPnl)}{" "}
                 <span className="opacity-70">
                   ({formatPercent(totalPnlPercent)})
                 </span>

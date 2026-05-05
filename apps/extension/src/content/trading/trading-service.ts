@@ -21,6 +21,7 @@ import {
   EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
   type TradingBalanceData,
+  type TradingGetOrderPreflightResponse,
   type TradingWalletMode,
 } from "../../types/chrome-messages";
 import { WalletBridge } from "./bridge";
@@ -656,6 +657,29 @@ export const TradingService = {
     }
   },
 
+  async getOrderPreflight(params: {
+    side: "BUY" | "SELL";
+    price: number;
+    size: number;
+    amount?: number;
+    orderType?: ClobOrderType;
+    conditionId?: string;
+    isMarketableBuy?: boolean;
+  }): Promise<TradingGetOrderPreflightResponse> {
+    return sendMsg<TradingGetOrderPreflightResponse>(
+      {
+        type: "trading:get-order-preflight",
+        ...params,
+        // Forward creds when available so the background preflight uses the
+        // same authenticated client (and builderConfig) as place-order — fee
+        // estimates can otherwise diverge and the panel gate would be wrong.
+        ...(ctx.credentials ? { credentials: ctx.credentials } : {}),
+      },
+      "Order preflight failed",
+      30_000
+    );
+  },
+
   // ── Place Order (Limit + Market) ──
 
   async placeOrder(params: {
@@ -669,6 +693,7 @@ export const TradingService = {
     orderType?: ClobOrderType;
     expiration?: number;
     negRisk?: boolean;
+    isMarketableBuy?: boolean;
   }): Promise<unknown> {
     if (!ctx.address || !ctx.proxyAddress || !ctx.credentials) {
       throw new Error("Trading setup incomplete");

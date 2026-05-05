@@ -202,6 +202,7 @@ declare global {
         query: string,
         matchedTags?: string[]
       ) => Promise<Market[]>;
+      fetchPolymarketEventRefresh: (market: Market) => Promise<Market | null>;
       searchAllMarkets: (
         query: string,
         matchedTags?: string[]

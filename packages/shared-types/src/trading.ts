@@ -39,6 +39,23 @@ export interface ClobOrderPreflightPlanInput {
   openOrders?: unknown;
   getOpenOrders?: () => Promise<unknown>;
   marketInfoClient?: ClobMarketInfoClient;
+  builderCode?: string;
+  /**
+   * Resolves the maker + taker builder fee rates as fractions (e.g. 0.001 for
+   * 10 bps). Required when `builderCode` is set; without it the preflight
+   * falls back to whatever rate is embedded in `getClobMarketInfo`, which the
+   * CLOB does NOT populate for builder orders.
+   */
+  getBuilderFeeRates?: (
+    builderCode: string
+  ) => Promise<{ maker: number; taker: number }>;
+  /**
+   * Whether the BUY order will execute immediately as a taker (true) or rest
+   * in the book as a maker (false). When omitted, defaults to taker — the
+   * conservative choice for the allowance pre-flight, since builder taker
+   * rates are typically ≥ maker rates.
+   */
+  isMarketableBuy?: boolean;
   estimatedFeeRaw?: bigint | null;
   onOpenOrdersError?: (error: unknown) => void;
   onFeeError?: (error: unknown) => void;
@@ -289,7 +306,12 @@ export async function buildClobOrderPreflightPlan(
           input.size,
           input.price,
           requiredNotional,
-          { onError: input.onFeeError }
+          {
+            builderCode: input.builderCode,
+            getBuilderFeeRates: input.getBuilderFeeRates,
+            isMarketableBuy: input.isMarketableBuy,
+            onError: input.onFeeError,
+          }
         );
   const feeRequirementRaw =
     estimatedFeeRaw ?? estimateFallbackFeeRaw(requiredPusdRaw);
@@ -379,6 +401,16 @@ export async function estimateBuyTakerFeeRaw(
   price: number,
   notional: Decimal.Value,
   options?: {
+    builderCode?: string;
+    getBuilderFeeRates?: (
+      builderCode: string
+    ) => Promise<{ maker: number; taker: number }>;
+    /**
+     * `false` → order will rest as a maker, use the maker rate.
+     * `true` or omitted → order will execute as a taker (or marketability is
+     * unknown), use the taker rate.
+     */
+    isMarketableBuy?: boolean;
     onError?: (error: unknown) => void;
   }
 ): Promise<bigint | null> {
@@ -411,7 +443,19 @@ export async function estimateBuyTakerFeeRaw(
       .mul(protocolRate)
       .mul(priceCurve)
       .toDecimalPlaces(PROTOCOL_FEE_DECIMALS, Decimal.ROUND_HALF_UP);
-    const builderFee = notionalDecimal.mul(parseBuilderTakerFeeRate(info));
+    // Pick the side-appropriate builder rate. The CLOB's balance check uses
+    // whichever rate the order will actually incur — taker for marketable
+    // BUYs, maker for resting limits. Default to taker when marketability
+    // is unknown (it's typically the higher rate, so the safer over-reserve).
+    let builderFeeRate: Decimal;
+    if (options?.builderCode && options.getBuilderFeeRates) {
+      const rates = await options.getBuilderFeeRates(options.builderCode);
+      const useMaker = options.isMarketableBuy === false;
+      builderFeeRate = new Decimal(useMaker ? rates.maker : rates.taker);
+    } else {
+      builderFeeRate = parseBuilderTakerFeeRate(info);
+    }
+    const builderFee = notionalDecimal.mul(builderFeeRate);
     return parsePusdUnits(Decimal.max(0, protocolFee.plus(builderFee)));
   } catch (error) {
     options?.onError?.(error);

@@ -10,7 +10,11 @@
  * Split/Merge accessible via "..." dropdown menu.
  */
 
-import { PUSD_ADDRESS, USDC_E_ADDRESS } from "@knoww/shared-types/contracts";
+import {
+  PUSD_ADDRESS,
+  PUSD_DECIMALS,
+  USDC_E_ADDRESS,
+} from "@knoww/shared-types/contracts";
 import {
   type ExpirationPreset,
   getGtdExpirationTimestamp,
@@ -18,6 +22,10 @@ import {
 } from "@knoww/shared-types/orders";
 import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
+import {
+  estimateFallbackFeeRaw,
+  parsePusdUnits,
+} from "@knoww/shared-types/trading";
 import Decimal from "decimal.js";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -142,6 +150,17 @@ let moreMenuOpen = false;
 
 let orderSettling = false;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
+let orderApprovalPreview: {
+  key: string;
+  requiredCollateral: number;
+  requiredCollateralRaw: string;
+} | null = null;
+let orderApprovalPreviewInFlightKey: string | null = null;
+let orderApprovalPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+// Debounce window for the preflight call. The user typing in the shares input
+// would otherwise fire one round-trip per keystroke; the preview state stays
+// "Checking allowance..." during the debounce so the gate is never wrong.
+const ORDER_APPROVAL_PREVIEW_DEBOUNCE_MS = 200;
 
 let depositState: DepositState = "idle";
 let depositStep: DepositStep = "method";
@@ -544,6 +563,112 @@ function getCost(opts: PanelOptions, ctx?: TradingContext): number {
   return price.mul(selectedShares).toNumber();
 }
 
+function rawPusdToNumber(raw: string): number {
+  return new Decimal(raw || "0")
+    .div(new Decimal(10).pow(PUSD_DECIMALS))
+    .toNumber();
+}
+
+function getFallbackRequiredCollateral(cost: number): number {
+  const requiredRaw = parsePusdUnits(new Decimal(cost));
+  const feeRaw = estimateFallbackFeeRaw(requiredRaw);
+  return rawPusdToNumber((requiredRaw + feeRaw).toString());
+}
+
+function getPanelOrderType(): ClobOrderType {
+  if (orderMode === "market") return "FAK";
+  return expirationPreset === "GTC" ? "GTC" : "GTD";
+}
+
+function getOrderApprovalPreviewKey(
+  opts: PanelOptions,
+  cost: number,
+  isMarketableBuy: boolean | undefined
+): string | null {
+  if (activeSide !== "buy" || !Number.isFinite(cost) || cost <= 0) return null;
+  const price =
+    orderMode === "market" ? 0 : normalizePrice(limitPrice || opts.price);
+  return [
+    opts.tokenId,
+    opts.conditionId ?? "",
+    activeSide,
+    getPanelOrderType(),
+    selectedShares,
+    price,
+    new Decimal(cost).toDecimalPlaces(PUSD_DECIMALS).toFixed(),
+    // Marketability flips the required collateral (taker vs maker builder
+    // fee), so it must invalidate the cached preview. The "?" state covers
+    // the case where bestAsk is unavailable for a limit order — the
+    // background falls back to taker (the conservative upper bound), and we
+    // need to invalidate the preview when bestAsk later loads and we can
+    // assert maker confidently.
+    isMarketableBuy === undefined ? "?" : isMarketableBuy ? "T" : "M",
+  ].join(":");
+}
+
+function ensureOrderApprovalPreview(
+  opts: PanelOptions,
+  cost: number,
+  isMarketableBuy: boolean | undefined
+): string | null {
+  const key = getOrderApprovalPreviewKey(opts, cost, isMarketableBuy);
+  if (!key) return null;
+  if (
+    orderApprovalPreview?.key === key ||
+    orderApprovalPreviewInFlightKey === key
+  ) {
+    return key;
+  }
+
+  if (orderApprovalPreviewTimer) {
+    clearTimeout(orderApprovalPreviewTimer);
+    orderApprovalPreviewTimer = null;
+  }
+  orderApprovalPreviewInFlightKey = key;
+
+  orderApprovalPreviewTimer = setTimeout(() => {
+    orderApprovalPreviewTimer = null;
+    if (orderApprovalPreviewInFlightKey !== key) return;
+
+    const orderType = getPanelOrderType();
+    const price =
+      orderMode === "market" ? 0 : normalizePrice(limitPrice || opts.price);
+    TradingService.getOrderPreflight({
+      side: "BUY",
+      price,
+      size: selectedShares,
+      amount: cost,
+      orderType,
+      conditionId: opts.conditionId,
+      isMarketableBuy,
+    })
+      .then((preflight) => {
+        // Drop the result if a newer key is now in flight, otherwise a slow
+        // earlier request would clobber the fresher preview.
+        if (orderApprovalPreviewInFlightKey !== key) return;
+        orderApprovalPreviewInFlightKey = null;
+        orderApprovalPreview = {
+          key,
+          requiredCollateral: rawPusdToNumber(preflight.requiredCollateralRaw),
+          requiredCollateralRaw: preflight.requiredCollateralRaw,
+        };
+        rerender();
+      })
+      .catch(() => {
+        if (orderApprovalPreviewInFlightKey !== key) return;
+        orderApprovalPreviewInFlightKey = null;
+        orderApprovalPreview = {
+          key,
+          requiredCollateral: getFallbackRequiredCollateral(cost),
+          requiredCollateralRaw: "",
+        };
+        rerender();
+      });
+  }, ORDER_APPROVAL_PREVIEW_DEBOUNCE_MS);
+
+  return key;
+}
+
 function refreshDynamicUI(): void {
   if (!activePanel || !panelOpts) return;
   const ctx = TradingService.getContext();
@@ -663,6 +788,12 @@ function createPanel(opts: PanelOptions): HTMLElement {
   outcomeBalancesLoaded = false;
   outcomeBalancesFetching = false;
   moreMenuOpen = false;
+  orderApprovalPreview = null;
+  orderApprovalPreviewInFlightKey = null;
+  if (orderApprovalPreviewTimer) {
+    clearTimeout(orderApprovalPreviewTimer);
+    orderApprovalPreviewTimer = null;
+  }
   depositState = "idle";
   depositTokens = [];
   depositSelected = null;
@@ -2093,15 +2224,39 @@ function addSubmitButton(
   const minShares = Math.max(1, Math.ceil(minOrderSize));
   const belowMinShares = activeSide === "buy" && shares < minShares;
   const relevantAllowance = opts.negRisk ? usdcAllowanceNegRisk : usdcAllowance;
-  const needsApproval =
-    activeSide === "buy" && cost > 0 && relevantAllowance < cost;
+  // Compute marketability before the preflight call — it gates which builder
+  // fee rate (taker vs maker) the gate sizes against, so it must be part of
+  // the preview cache key. Use `undefined` (not `false`) when bestAsk is
+  // unavailable for a limit order, so the background falls back to the
+  // conservative taker rate instead of mistakenly sizing as a maker.
   const { bestAsk } = getBestBidAsk(ctx);
-  const isMarketableBuy =
+  const isMarketableBuy: boolean | undefined =
+    activeSide !== "buy"
+      ? undefined
+      : orderMode === "market"
+        ? true
+        : bestAsk !== undefined
+          ? limitPrice >= bestAsk
+          : undefined;
+  const approvalPreviewKey = ensureOrderApprovalPreview(
+    opts,
+    cost,
+    isMarketableBuy
+  );
+  const approvalRequirement =
+    approvalPreviewKey && orderApprovalPreview?.key === approvalPreviewKey
+      ? orderApprovalPreview.requiredCollateral
+      : cost;
+  const isCheckingApprovalRequirement =
     activeSide === "buy" &&
-    (orderMode === "market" ||
-      (orderMode === "limit" &&
-        bestAsk !== undefined &&
-        limitPrice >= bestAsk));
+    cost > 0 &&
+    Boolean(approvalPreviewKey) &&
+    orderApprovalPreview?.key !== approvalPreviewKey;
+  const needsApproval =
+    activeSide === "buy" &&
+    cost > 0 &&
+    !isCheckingApprovalRequirement &&
+    relevantAllowance < approvalRequirement;
   const belowMinNotional =
     isMarketableBuy && cost < MIN_MARKETABLE_BUY_NOTIONAL_USD;
   const positionSize = getPositionSize(opts);
@@ -2127,6 +2282,10 @@ function addSubmitButton(
     btn.classList.add("loading");
   } else if (sellBalancesLoading) {
     btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Loading position...`;
+    btn.disabled = true;
+    btn.classList.add("loading");
+  } else if (isCheckingApprovalRequirement) {
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Checking allowance...`;
     btn.disabled = true;
     btn.classList.add("loading");
   } else if (noShares) {
@@ -2168,6 +2327,7 @@ function addSubmitButton(
       if (orderSettling) reason = "settling";
       else if (isSubmitting) reason = "submitting";
       else if (sellBalancesLoading) reason = "loading_position";
+      else if (isCheckingApprovalRequirement) reason = "checking_allowance";
       else if (noShares) reason = "no_shares";
       else if (noPosition) reason = "no_position";
       else if (overPosition) reason = "over_position";
@@ -2193,7 +2353,7 @@ function addSubmitButton(
         marketId: opts.market.id,
       });
       try {
-        await TradingService.approveUsdc(!!opts.negRisk, cost);
+        await TradingService.approveUsdc(!!opts.negRisk, approvalRequirement);
         trackPanelAnalytics("trading_usdc_approve_succeeded", {
           marketId: opts.market.id,
         });
@@ -2266,6 +2426,10 @@ function addSubmitButton(
         orderType: clobOrderType,
         expiration,
         negRisk: opts.negRisk,
+        // Forward the same marketability flag the panel preview gated against,
+        // so the background's collateral check uses the same builder fee rate
+        // (and therefore the same required-collateral) as the preview.
+        isMarketableBuy: side === "BUY" ? isMarketableBuy : undefined,
       });
 
       const isLimitOrder = clobOrderType === "GTC" || clobOrderType === "GTD";

@@ -18,10 +18,14 @@ import {
   readTradingWalletBalance,
 } from "@knoww/shared-types/balances";
 import { POLYGON_CHAIN } from "@knoww/shared-types/chains";
-import { fetchClobOrderBook } from "@knoww/shared-types/clob";
+import {
+  fetchClobBuilderFeeRates,
+  fetchClobOrderBook,
+} from "@knoww/shared-types/clob";
 import {
   COLLATERAL_ONRAMP_ADDRESS,
   CTF_APPROVAL_OPERATORS,
+  NEG_RISK_ADAPTER_ADDRESS,
   PUSD_ADDRESS,
   PUSD_APPROVAL_TARGETS,
   PUSD_CTF_APPROVAL_TARGET,
@@ -76,6 +80,8 @@ import type {
   TradingGetAllowanceMessage,
   TradingGetBalanceMessage,
   TradingGetOrderBookMessage,
+  TradingGetOrderPreflightMessage,
+  TradingGetOrderPreflightResponse,
   TradingGetOutcomeBalancesMessage,
   TradingMergePositionsMessage,
   TradingPlaceOrderMessage,
@@ -117,6 +123,32 @@ type ClobOpenOrder = {
   original_size?: string | number;
   size_matched?: string | number;
 };
+// Memoize the public CLOB builder-fee endpoint per builder code. The rates
+// are effectively static (set by Polymarket per builder), so caching for the
+// lifetime of the offscreen document is safe and avoids one extra round-trip
+// per debounced preflight call. Cached as the maker+taker pair so the
+// preflight can pick the side-appropriate rate.
+const builderFeeRatesCache = new Map<
+  string,
+  Promise<{ maker: number; taker: number }>
+>();
+
+function getBuilderFeeRates(
+  builderCode: string
+): Promise<{ maker: number; taker: number }> {
+  const cached = builderFeeRatesCache.get(builderCode);
+  if (cached) return cached;
+  const pending = fetchClobBuilderFeeRates(builderCode, {
+    host: CLOB_HOST,
+  }).catch((err) => {
+    // Don't poison the cache on a transient failure — let the next call retry.
+    builderFeeRatesCache.delete(builderCode);
+    throw err;
+  });
+  builderFeeRatesCache.set(builderCode, pending);
+  return pending;
+}
+
 function ok(data: unknown): TradingSuccessResponse {
   return { ok: true, data };
 }
@@ -226,6 +258,10 @@ export async function handleTradingMessage(
       case "trading:get-orderbook":
         return await handleGetOrderBook(
           message as unknown as TradingGetOrderBookMessage
+        );
+      case "trading:get-order-preflight":
+        return await handleGetOrderPreflight(
+          message as unknown as TradingGetOrderPreflightMessage
         );
       case "trading:split-position":
         return await handleSplitPosition(
@@ -340,6 +376,9 @@ async function handlePlaceOrder(
     price: msg.price,
     conditionId: msg.conditionId,
     marketInfoClient: client,
+    builderCode,
+    getBuilderFeeRates,
+    isMarketableBuy: msg.isMarketableBuy,
     getOpenOrders: () => clobGetOpenOrders(msg.address, msg.credentials),
     onOpenOrdersError: (err) =>
       logWarn("trading.open-orders-fetch-failed", {
@@ -364,13 +403,27 @@ async function handlePlaceOrder(
       msg.walletMode
     );
 
-    const allowance = await readPusdExchangeAllowance(
+    const exchangeAllowance = await readPusdExchangeAllowance(
       publicClient,
       funderAddress,
       msg.negRisk,
       { fallbackRaw: 0n }
     );
-    if (allowance < requiredCollateralPusd) {
+    // CLOB V2 also pulls pUSD via the neg-risk adapter for neg-risk markets, so
+    // verify that allowance up-front instead of relying on the server's misleading
+    // "not enough balance / allowance" rejection.
+    const adapterAllowance = msg.negRisk
+      ? await readErc20Allowance(
+          publicClient,
+          funderAddress,
+          NEG_RISK_ADAPTER_ADDRESS as Address,
+          { fallbackRaw: 0n }
+        )
+      : requiredCollateralPusd;
+    if (
+      exchangeAllowance < requiredCollateralPusd ||
+      adapterAllowance < requiredCollateralPusd
+    ) {
       return fail(
         `Approval too low for this order. Approve at least ${formatUnits(requiredCollateralPusd, 6)} pUSD and retry.`
       );
@@ -491,12 +544,27 @@ async function handleDeriveProxyAddress(
 async function handleGetAllowance(
   msg: TradingGetAllowanceMessage
 ): Promise<TradingResponse> {
-  const allowance = await readPusdExchangeAllowance(
+  const owner = getAddress(msg.ownerAddress) as Address;
+  const exchangeAllowance = await readPusdExchangeAllowance(
     publicClient,
-    getAddress(msg.ownerAddress) as Address,
+    owner,
     msg.negRisk,
     { fallbackRaw: 0n }
   );
+  // For neg-risk markets, CLOB V2 also pulls pUSD via the neg-risk adapter, so
+  // the binding allowance is min(exchange, adapter). Reporting the minimum keeps
+  // the trading panel's approval CTA in sync with what the order pre-flight
+  // requires.
+  const adapterAllowance = msg.negRisk
+    ? await readErc20Allowance(
+        publicClient,
+        owner,
+        NEG_RISK_ADAPTER_ADDRESS as Address,
+        { fallbackRaw: 0n }
+      )
+    : exchangeAllowance;
+  const allowance =
+    exchangeAllowance < adapterAllowance ? exchangeAllowance : adapterAllowance;
   return ok({
     allowance: Number(formatUnits(allowance, 6)),
     allowanceRaw: allowance.toString(),
@@ -573,6 +641,54 @@ async function handleGetOrderBook(
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err));
   }
+}
+
+async function handleGetOrderPreflight(
+  msg: TradingGetOrderPreflightMessage
+): Promise<TradingResponse> {
+  // Mirror handlePlaceOrder's ClobClient construction (creds + builderConfig)
+  // when credentials are available, so the fee preview uses the same fee
+  // schedule (including builder-taker fees) the authoritative pre-flight will.
+  const builderCode = process.env.POLY_BUILDER_CODE;
+  const creds = msg.credentials
+    ? {
+        key: msg.credentials.apiKey,
+        secret: msg.credentials.apiSecret,
+        passphrase: msg.credentials.apiPassphrase,
+      }
+    : undefined;
+  const client = new ClobClient({
+    host: CLOB_HOST,
+    chain: POLYGON_CHAIN_ID,
+    ...(creds ? { creds } : {}),
+    ...(builderCode ? { builderConfig: { builderCode } } : {}),
+  });
+  const preflight = await buildClobOrderPreflightPlan({
+    side: msg.side,
+    orderType: msg.orderType || "GTC",
+    amount: msg.amount,
+    size: msg.size,
+    price: msg.price,
+    conditionId: msg.conditionId,
+    marketInfoClient: client,
+    builderCode,
+    getBuilderFeeRates,
+    isMarketableBuy: msg.isMarketableBuy,
+    onFeeError: (err) =>
+      logWarn("trading.preflight-fee-info-fetch-failed", {
+        conditionId: msg.conditionId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+  });
+
+  const response: TradingGetOrderPreflightResponse = {
+    isMarketOrder: preflight.isMarketOrder,
+    requiredCollateralRaw:
+      preflight.buy?.requiredCollateralRaw.toString() ?? "0",
+    requiredPusdRaw: preflight.buy?.requiredPusdRaw.toString() ?? "0",
+    estimatedFeeRaw: preflight.buy?.estimatedFeeRaw?.toString() ?? null,
+  };
+  return ok(response);
 }
 
 // ── Post-split/merge: tell the CLOB about updated on-chain balances ──
@@ -893,7 +1009,17 @@ async function handleRelayerApprove(
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
 
-  const approvalAmount = parseApprovalAmountRaw(msg.approvalAmount);
+  // Floor the approval amount at the default. Callers (e.g. the trading panel's
+  // "Approve pUSD" CTA) pass the visible order cost, but the place-order
+  // pre-flight requires allowance against the fee-inclusive collateral, so
+  // approving exactly the cost would still fail. Mirrors the web's behaviour
+  // (use-clob-client.ts: max(requiredPusdRaw, DEFAULT_TRADING_APPROVAL_RAW)).
+  const requestedApprovalAmount = parseApprovalAmountRaw(msg.approvalAmount);
+  const defaultApprovalAmount = parseApprovalAmountRaw();
+  const approvalAmount =
+    requestedApprovalAmount > defaultApprovalAmount
+      ? requestedApprovalAmount
+      : defaultApprovalAmount;
   const walletMode = normalizeTradingWalletMode(msg.walletMode);
   const proxyAddress =
     walletMode === "eoa"

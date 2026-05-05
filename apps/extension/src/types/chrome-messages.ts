@@ -95,6 +95,10 @@ export interface TradingPlaceOrderMessage {
   proxyAddress: string;
   walletMode?: TradingWalletMode;
   credentials: { apiKey: string; apiSecret: string; apiPassphrase: string };
+  // Whether this BUY will execute as a taker (true) or rest as a maker
+  // (false). Drives which builder fee rate the pre-flight uses for sizing
+  // the required pUSD collateral. Omitted for SELLs and when unknown.
+  isMarketableBuy?: boolean;
 }
 
 export interface TradingGetAllowanceMessage {
@@ -111,6 +115,32 @@ export interface TradingGetAllAllowancesMessage {
 export interface TradingGetOrderBookMessage {
   type: "trading:get-orderbook";
   tokenId: string;
+}
+
+export interface TradingGetOrderPreflightMessage {
+  type: "trading:get-order-preflight";
+  side: "BUY" | "SELL";
+  price: number;
+  size: number;
+  amount?: number;
+  orderType?: ClobOrderType;
+  conditionId?: string;
+  // Optional: when present, the preflight client will mirror handlePlaceOrder's
+  // ClobClient (creds + builderConfig) so the fee preview matches the
+  // authoritative pre-flight performed before postOrder.
+  credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
+  // See TradingPlaceOrderMessage.isMarketableBuy. Threading the same flag here
+  // keeps the panel preview and the place-order pre-flight consistent.
+  isMarketableBuy?: boolean;
+}
+
+// Raw bigint values are serialized as base-unit decimal strings because
+// chrome.runtime.sendMessage cannot transport bigints.
+export interface TradingGetOrderPreflightResponse {
+  isMarketOrder: boolean;
+  requiredCollateralRaw: string;
+  requiredPusdRaw: string;
+  estimatedFeeRaw: string | null;
 }
 
 export interface TradingSplitPositionMessage {

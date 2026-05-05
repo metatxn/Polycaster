@@ -9,6 +9,7 @@ import {
   KwThemeToggle,
   useKwTheme,
 } from "@/components/kw-theme";
+import { TweetOverlayHero } from "@/components/tweet-overlay-hero";
 
 const CHROME_STORE_URL =
   "https://chromewebstore.google.com/detail/knoww-%E2%80%94-every-opinion-is/naoaonihikedoiemhbolbnolibpmojgf";
@@ -181,9 +182,9 @@ export default function LandingPageClient() {
               </div>
             </div>
 
-            {/* Reserved artifact slot — populated separately. Kept in the
-                grid so the left column composes correctly on xl+ screens. */}
-            <div aria-hidden className="hidden xl:block xl:col-span-5" />
+            <div className="hidden sm:col-span-12 sm:mt-10 sm:block xl:col-span-5 xl:mt-0">
+              <TweetOverlayHero />
+            </div>
           </div>
         </div>
       </section>

@@ -6,6 +6,7 @@
 
 import { logWarn } from "@knoww/logger";
 import { fetchClobOrderBook } from "@knoww/shared-types/clob";
+import { RELAYER_API_HOST } from "@knoww/shared-types/polymarket";
 import {
   flushAnalyticsQueue,
   queueAnalyticsEvent,
@@ -81,7 +82,7 @@ const ALLOWED_DOMAINS = [
   "clob.polymarket.com",
   "data-api.polymarket.com",
   "polygon-bor-rpc.publicnode.com",
-  "relayer-v2.polymarket.com",
+  RELAYER_API_HOST,
   ...(__DEV_MODE__ ? ["localhost"] : []),
 ] as const;
 

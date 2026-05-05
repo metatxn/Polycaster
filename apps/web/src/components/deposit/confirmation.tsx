@@ -25,6 +25,7 @@ interface ConfirmationProps {
   isConfirming: boolean;
   isOnChainConfirmed: boolean;
   isConfirmed: boolean;
+  isWalletReady: boolean;
   copied: boolean;
   onCopy: () => void;
   onDeposit: () => void;
@@ -72,6 +73,7 @@ export function Confirmation({
   isConfirming,
   isOnChainConfirmed,
   isConfirmed,
+  isWalletReady,
   copied,
   onCopy,
   onDeposit,
@@ -363,6 +365,7 @@ export function Confirmation({
             onClick={onDeposit}
             disabled={
               !bridgeAddress ||
+              !isWalletReady ||
               isProcessing ||
               isPending ||
               isConfirming ||
@@ -374,6 +377,7 @@ export function Confirmation({
               isConfirmed
                 ? "bg-emerald-500/20 text-emerald-500 cursor-default"
                 : !bridgeAddress ||
+                    !isWalletReady ||
                     isProcessing ||
                     isPending ||
                     isConfirming ||
@@ -406,6 +410,8 @@ export function Confirmation({
               </span>
             ) : !bridgeAddress ? (
               "Loading Bridge"
+            ) : !isWalletReady ? (
+              "Wallet Loading"
             ) : (
               "Confirm Deposit"
             )}

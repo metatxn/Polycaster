@@ -15,9 +15,15 @@ const log = createLogger("deposit-modal");
 
 import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { erc20Abi, parseUnits } from "viem";
+import {
+  createPublicClient,
+  erc20Abi,
+  getAddress,
+  http,
+  parseUnits,
+} from "viem";
 import { polygon } from "viem/chains";
-import { useConnection } from "wagmi";
+import { useConnection, useWalletClient } from "wagmi";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +34,7 @@ import { PUSD_ADDRESS as POLYGON_PUSD_ADDRESS } from "@/constants/contracts";
 import { fetchBridgeQuote, useBridge } from "@/hooks/use-bridge";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { type TokenBalance, useWalletTokens } from "@/hooks/use-wallet-tokens";
+import { getViemWalletClient } from "@/lib/viem-wallet-client";
 
 import { AmountInput } from "./deposit/amount-input";
 import { BridgeSelection } from "./deposit/bridge-selection";
@@ -43,6 +50,7 @@ interface DepositModalProps {
 
 export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   const { address, isConnected } = useConnection();
+  const { data: walletClient } = useWalletClient();
   const { usdcBalance: polymarketBalance, refresh: refreshProxyWallet } =
     useProxyWallet();
   const {
@@ -276,9 +284,13 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     (percent: number) => {
       if (!selectedToken) return;
       const value = (selectedToken.balance * percent) / 100;
-      setAmount(
-        value.toFixed(selectedToken.decimals > 6 ? 6 : selectedToken.decimals)
-      );
+      const maxDecimals =
+        selectedToken.decimals > 6 ? 6 : selectedToken.decimals;
+      let formatted = value.toFixed(maxDecimals);
+      if (formatted.includes(".")) {
+        formatted = formatted.replace(/0+$/, "").replace(/\.$/, "");
+      }
+      setAmount(formatted);
     },
     [selectedToken]
   );
@@ -293,7 +305,6 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
   const handleDeposit = useCallback(async () => {
     if (!selectedToken || !amount || !bridgeAddress) return;
-    if (typeof window === "undefined" || !window.ethereum) return;
 
     let waitingForBridge = false;
 
@@ -306,15 +317,26 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     setDepositTransactions([]);
 
     try {
-      const { createWalletClient, createPublicClient, custom, http } =
-        await import("viem");
       const amountInWei = parseUnits(amount, selectedToken.decimals);
-      const walletClient = createWalletClient({
-        chain: polygon,
-        // biome-ignore lint/suspicious/noExplicitAny: window.ethereum is not typed
-        transport: custom(window.ethereum as any),
-      });
-      const [account] = await walletClient.requestAddresses();
+      const connectedAccount = address as `0x${string}` | undefined;
+      if (!walletClient || !connectedAccount) {
+        throw new Error(
+          "Wallet not connected. Please reconnect and try again."
+        );
+      }
+
+      const signer = await getViemWalletClient(walletClient, connectedAccount);
+      const signerAccount =
+        signer.account?.address ?? (await signer.requestAddresses())[0];
+      if (
+        !signerAccount ||
+        getAddress(signerAccount) !== getAddress(connectedAccount)
+      ) {
+        throw new Error(
+          "Connected wallet changed. Please reconnect and try again."
+        );
+      }
+      const account = getAddress(connectedAccount) as `0x${string}`;
       const isNativeToken =
         selectedToken.symbol === "POL" ||
         selectedToken.symbol === "MATIC" ||
@@ -324,14 +346,14 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
       let hash: `0x${string}`;
       if (isNativeToken) {
-        hash = await walletClient.sendTransaction({
+        hash = await signer.sendTransaction({
           account,
           to: bridgeAddress as `0x${string}`,
           value: amountInWei,
           chain: polygon,
         });
       } else {
-        hash = await walletClient.writeContract({
+        hash = await signer.writeContract({
           account,
           address: selectedToken.address as `0x${string}`,
           abi: erc20Abi,
@@ -378,7 +400,14 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
         setIsConfirming(false);
       }
     }
-  }, [selectedToken, amount, bridgeAddress, selectedMethod, address]);
+  }, [
+    selectedToken,
+    amount,
+    bridgeAddress,
+    selectedMethod,
+    address,
+    walletClient,
+  ]);
 
   const handleBack = useCallback(() => {
     if (step === "token" || step === "bridge-select") {
@@ -679,6 +708,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
                 isConfirming={isConfirming}
                 isOnChainConfirmed={isOnChainConfirmed}
                 isConfirmed={isConfirmed}
+                isWalletReady={Boolean(walletClient && address)}
                 copied={copied}
                 onCopy={handleCopy}
                 onDeposit={handleDeposit}

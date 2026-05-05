@@ -67,7 +67,7 @@ export function TradingOnboarding({
   } = useClobCredentials();
   const {
     isDeployed: hasProxyWalletFromHook,
-    refresh: refreshProxyWallet,
+    forceRefresh: forceRefreshProxyWallet,
     proxyAddress: computedProxyAddress,
     walletMode: proxyWalletMode,
     usdcBalance,
@@ -232,8 +232,9 @@ export function TradingOnboarding({
       if (result.success) {
         updateStepStatus("deploy", "completed");
         setCurrentStep(2);
-        // Refresh proxy wallet state to pick up the new address
-        await refreshProxyWallet();
+        // Bust the deployment cache so the on-chain isDeployed check sees the
+        // freshly deployed wallet instead of the pre-deploy `false`.
+        await forceRefreshProxyWallet();
       } else {
         updateStepStatus("deploy", "error", result.error);
       }
@@ -244,7 +245,7 @@ export function TradingOnboarding({
         formatTradingOnboardingError(err, "Failed to deploy wallet")
       );
     }
-  }, [deploySafe, updateStepStatus, refreshProxyWallet, walletMode]);
+  }, [deploySafe, updateStepStatus, forceRefreshProxyWallet, walletMode]);
 
   const handleApproveUsdc = useCallback(async () => {
     if (!isApprovalAmountValid) {

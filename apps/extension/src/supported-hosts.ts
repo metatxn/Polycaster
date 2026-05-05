@@ -209,6 +209,8 @@ export const API_HOST_PERMISSIONS: string[] = [
   "https://gamma-api.polymarket.com/*",
   "https://clob.polymarket.com/*",
   "https://data-api.polymarket.com/*",
+  // Keep in sync with RELAYER_API_HOST_PERMISSION in @knoww/shared-types/polymarket.
+  // webpack.config.js reads this file with a regex and cannot resolve imports.
   "https://relayer-v2.polymarket.com/*",
   "https://user-pnl-api.polymarket.com/*",
 

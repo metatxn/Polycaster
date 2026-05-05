@@ -41,6 +41,7 @@ import {
   getPublicClient,
   checkIsDeployed as rpcCheckIsDeployed,
 } from "@/lib/rpc";
+import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import {
   type TradingWalletMode,
   useTradingWalletMode,
@@ -148,9 +149,12 @@ export function useRelayerClient() {
     }));
 
     try {
+      const signer = isDepositMode
+        ? walletClient
+        : await getViemWalletClient(walletClient, address as `0x${string}`);
       const result = isDepositMode
         ? await relayerDeployDepositWallet(address as `0x${string}`)
-        : await relayerDeploySafe(walletClient, address as `0x${string}`);
+        : await relayerDeploySafe(signer, address as `0x${string}`);
       const safe = isDepositMode
         ? derivePolymarketDepositWallet(address as `0x${string}`)
         : derivePolymarketSafe(address as `0x${string}`);
@@ -242,6 +246,10 @@ export function useRelayerClient() {
       try {
         const { polygon } = await import("viem/chains");
         const { checkAllApprovals } = await import("@/lib/approvals");
+        const signer = await getViemWalletClient(
+          walletClient,
+          address as `0x${string}`
+        );
         const normalizedApprovalAmount =
           normalizeApprovalAmount(approvalAmount);
         const approvalAmountRaw = parseApprovalAmountRaw(approvalAmount);
@@ -290,7 +298,7 @@ export function useRelayerClient() {
           const publicClient = getPublicClient();
           const txHashes: `0x${string}`[] = [];
           for (const tx of approvalTxs) {
-            const hash = await walletClient.sendTransaction({
+            const hash = await signer.sendTransaction({
               account: address as `0x${string}`,
               chain: polygon,
               to: tx.to,
@@ -344,16 +352,12 @@ export function useRelayerClient() {
             }));
             result = isDepositMode
               ? await executeViaDepositWallet(
-                  walletClient,
+                  signer,
                   address as `0x${string}`,
                   txs,
                   expectedSafe as `0x${string}`
                 )
-              : await executeViaRelayer(
-                  walletClient,
-                  address as `0x${string}`,
-                  txs
-                );
+              : await executeViaRelayer(signer, address as `0x${string}`, txs);
 
             log.info("approvals.result", {
               transactionID: result.transactionID,

@@ -807,7 +807,7 @@ export async function deploySafeRelayerWallet(args: {
 }
 
 export function buildDepositWalletDeadline(
-  ttlSeconds = 240,
+  ttlSeconds = 1200,
   nowMs = Date.now()
 ): string {
   return Math.floor(nowMs / 1000 + ttlSeconds).toString();

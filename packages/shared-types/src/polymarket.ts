@@ -629,6 +629,15 @@ export function getPolymarketSignatureType(
 
 export const RELAYER_API_URL = POLYMARKET_API.RELAYER.BASE;
 
+/** Relayer base URL with no trailing slash — for `${RELAYER_API_ORIGIN}/submit` style joins. */
+export const RELAYER_API_ORIGIN = RELAYER_API_URL.replace(/\/$/, "");
+
+/** Relayer hostname only (no protocol, no slash) — for ALLOWED_DOMAINS-style allowlists. */
+export const RELAYER_API_HOST = RELAYER_API_ORIGIN.replace(/^https?:\/\//, "");
+
+/** Chrome extension `host_permissions` match pattern for the relayer. */
+export const RELAYER_API_HOST_PERMISSION = `https://${RELAYER_API_HOST}/*`;
+
 export function normalizeApiKeyCreds(
   raw: ApiKeyCredsLike | null | undefined
 ): ApiKeyCreds {

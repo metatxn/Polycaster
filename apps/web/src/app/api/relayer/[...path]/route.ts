@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import { RELAYER_API_ORIGIN } from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { requireExtensionSession } from "@/lib/auth/extension-session";
@@ -40,7 +41,7 @@ const log = createLogger("api.relayer");
  *   EXTENSION_SESSION_SECRET     – extension session signing secret
  */
 
-const UPSTREAM_BASE = "https://relayer-v2.polymarket.com";
+const UPSTREAM_BASE = RELAYER_API_ORIGIN;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_BODY_SIZE = 16 * 1024;
 

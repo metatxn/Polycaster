@@ -201,8 +201,8 @@ export function useClobClient() {
   }, [credentials, proxyAddress, isEoaMode, walletMode, address, walletClient]);
 
   /**
-   * Check if the client can be used. Either an injected provider or an active
-   * wagmi viem wallet client is sufficient.
+   * Check if the client can be used. All signing should route through the active
+   * wagmi wallet client so WalletConnect sessions keep signing on mobile.
    */
   const canTrade = useMemo(() => {
     if (typeof window === "undefined") return false;

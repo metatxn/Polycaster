@@ -1,3 +1,4 @@
+import { RELAYER_API_ORIGIN } from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
 
 /**
@@ -68,7 +69,7 @@ const SECURITY_HEADERS: Record<string, string> = {
     // Connect: self + PostHog + Cloudflare Insights beacon + knoww.app subdomains
     // + Polymarket APIs + Alchemy + WalletConnect/Web3Modal + Polygon RPC
     // + Coinbase Wallet SDK analytics (cca-lite.coinbase.com)
-    `connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com https://cloudflareinsights.com https://*.knoww.app https://clob.polymarket.com https://clob-v2.polymarket.com https://gamma-api.polymarket.com https://data-api.polymarket.com https://user-pnl-api.polymarket.com https://bridge.polymarket.com https://relayer-v2.polymarket.com https://*.alchemy.com https://*.walletconnect.com https://*.walletconnect.org wss://*.walletconnect.com wss://*.walletconnect.org https://*.web3modal.org https://*.web3modal.com https://polygon-rpc.com https://polygon-mainnet.g.alchemy.com wss://ws-subscriptions-clob.polymarket.com wss://ws-subscriptions-clob-v2.polymarket.com wss://sports-api.polymarket.com https://openrouter.ai https://*.reown.com wss://*.reown.com https://cca-lite.coinbase.com${process.env.NODE_ENV === "development" ? " http://127.0.0.1:7503" : ""}`,
+    `connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com https://cloudflareinsights.com https://*.knoww.app https://clob.polymarket.com https://clob-v2.polymarket.com https://gamma-api.polymarket.com https://data-api.polymarket.com https://user-pnl-api.polymarket.com https://bridge.polymarket.com ${RELAYER_API_ORIGIN} https://*.alchemy.com https://*.walletconnect.com https://*.walletconnect.org wss://*.walletconnect.com wss://*.walletconnect.org https://*.web3modal.org https://*.web3modal.com https://polygon-rpc.com https://polygon-mainnet.g.alchemy.com wss://ws-subscriptions-clob.polymarket.com wss://ws-subscriptions-clob-v2.polymarket.com wss://sports-api.polymarket.com https://openrouter.ai https://*.reown.com wss://*.reown.com https://cca-lite.coinbase.com${process.env.NODE_ENV === "development" ? " http://127.0.0.1:7503" : ""}`,
     // Frames: none (we don't embed iframes)
     "frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://*.reown.com",
     // Object/base/form restrictions

@@ -300,3 +300,58 @@ export function fetchClobPriceHistory<T = ClobPriceHistoryResponse>(
     options
   );
 }
+
+/**
+ * Bytes32 zero used by CLOB for "no builder" orders. Matches the SDK's
+ * isBuilderOrder check (any builder code equal to this is treated as absent).
+ */
+const CLOB_BUILDER_CODE_ZERO =
+  "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+/** CLOB returns builder fees in basis-points; divide by 1e4 to get the rate. */
+const CLOB_BUILDER_FEES_BPS_DIVISOR = 10_000;
+
+export interface ClobBuilderFeeRates {
+  /** Maker fee rate as a fraction (e.g. 0.001 = 10 bps = 0.1 %). */
+  maker: number;
+  /** Taker fee rate as a fraction. */
+  taker: number;
+}
+
+interface BuilderFeesResponse {
+  builder_maker_fee_rate_bps?: number;
+  builder_taker_fee_rate_bps?: number;
+}
+
+/**
+ * Fetch the builder maker/taker fee rates for a given builder code from the
+ * CLOB's public `/fees/builder-fees/{code}` endpoint. Returned as fractions
+ * (already divided by 10_000). Both the place-order pre-flight and the
+ * trading-panel preview must source builder fees from this endpoint — the
+ * order-creation path does the same internally, and `getClobMarketInfo` does
+ * not include builder-specific fees.
+ *
+ * Returns `{ maker: 0, taker: 0 }` when the builder code is missing or the
+ * bytes32 zero sentinel.
+ */
+export async function fetchClobBuilderFeeRates(
+  builderCode: string | undefined,
+  options?: ClobRequestOptions
+): Promise<ClobBuilderFeeRates> {
+  if (!builderCode || builderCode === CLOB_BUILDER_CODE_ZERO) {
+    return { maker: 0, taker: 0 };
+  }
+
+  const data = await fetchClobJson<BuilderFeesResponse>(
+    `fees/builder-fees/${encodeURIComponent(builderCode)}`,
+    undefined,
+    options
+  );
+
+  return {
+    maker:
+      (data.builder_maker_fee_rate_bps ?? 0) / CLOB_BUILDER_FEES_BPS_DIVISOR,
+    taker:
+      (data.builder_taker_fee_rate_bps ?? 0) / CLOB_BUILDER_FEES_BPS_DIVISOR,
+  };
+}

@@ -42,11 +42,19 @@ if (!projectId) {
   throw new Error("Project ID is not defined in context");
 }
 
+function getAppUrl(): string {
+  if (typeof window === "undefined") {
+    return "https://knoww.app";
+  }
+
+  return window.location.origin;
+}
+
 // Set up metadata
 const metadata = {
   name: "Knoww",
   description: "A prediction market layer for the open internet.",
-  url: "https://knoww.app", // origin must match your domain & subdomain
+  url: getAppUrl(), // origin must match the active domain and subdomain
   icons: ["https://avatars.githubusercontent.com/u/179229932"],
 };
 

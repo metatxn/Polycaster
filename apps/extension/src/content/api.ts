@@ -36,6 +36,7 @@ const POLYMARKET_SEARCH_EMPTY_CACHE_TTL_MS = 30 * 1000;
 const POLYMARKET_SEARCH_FAILURE_CACHE_TTL_MS = 30 * 1000;
 const POLYMARKET_SEARCH_MIN_INTERVAL_MS = 900;
 const POLYMARKET_SEARCH_CACHE_MAX_ENTRIES = 120;
+const POLYMARKET_EVENT_REFRESH_MIN_INTERVAL_MS = 8000;
 
 interface PolymarketSearchCacheEntry {
   markets: Market[];
@@ -48,6 +49,11 @@ const polymarketSearchCache = new Map<string, PolymarketSearchCacheEntry>();
 const polymarketSearchInFlight = new Map<string, Promise<Market[]>>();
 let polymarketSearchQueue: Promise<void> = Promise.resolve();
 let lastPolymarketSearchStartedAt = 0;
+const polymarketEventRefreshInFlight = new Map<
+  string,
+  Promise<Market | null>
+>();
+const polymarketEventLastRefreshStartedAt = new Map<string, number>();
 
 // Memory optimization: Track cache size for cleanup decisions
 const CACHE_CLEANUP_THRESHOLD = 30 * 60 * 1000; // 30 minutes of inactivity
@@ -1201,6 +1207,30 @@ function buildKnowwPolymarketSearchUrl(
   return url.toString();
 }
 
+function buildKnowwPolymarketEventUrl(market: Market): string | null {
+  const identifier = market.slug || market.id;
+  if (!identifier) return null;
+
+  const baseUrl = window.KNOWW_CONFIG.KNOWW_APP_URL || "https://knoww.app";
+  const url = new URL(`/api/events/${encodeURIComponent(identifier)}`, baseUrl);
+  url.searchParams.set("fresh", "1");
+  url.searchParams.set("source", "extension");
+  return url.toString();
+}
+
+function parsePolymarketEventDetailPayload(payload: unknown): Market | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const wrapper = payload as { success?: unknown; event?: unknown };
+  if (wrapper.success === false || !wrapper.event) return null;
+
+  const [market] = mapRawPolymarketEvents(
+    [wrapper.event as RawPolymarketEvent],
+    "search"
+  );
+  return market ?? null;
+}
+
 function enqueuePolymarketSearch<T>(task: () => Promise<T>): Promise<T> {
   const run = polymarketSearchQueue
     .catch(() => undefined)
@@ -1366,6 +1396,68 @@ async function searchPolymarketEvents(
   }
 
   return searchPolymarketEventsViaKnoww(query, matchedTags);
+}
+
+async function fetchPolymarketEventRefresh(
+  market: Market
+): Promise<Market | null> {
+  const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;
+
+  if (market.source !== "polymarket") return null;
+  if (!isExtensionContextValid()) {
+    log("Extension context invalidated, cannot refresh market event");
+    return null;
+  }
+
+  const refreshUrl = buildKnowwPolymarketEventUrl(market);
+  if (!refreshUrl) return null;
+
+  const refreshKey = market.slug || market.id;
+  const inFlight = polymarketEventRefreshInFlight.get(refreshKey);
+  if (inFlight) return inFlight;
+
+  const request = (async () => {
+    const lastStartedAt =
+      polymarketEventLastRefreshStartedAt.get(refreshKey) ?? 0;
+    const elapsed = Date.now() - lastStartedAt;
+    const delayMs = Math.max(
+      0,
+      POLYMARKET_EVENT_REFRESH_MIN_INTERVAL_MS - elapsed
+    );
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    polymarketEventLastRefreshStartedAt.set(refreshKey, Date.now());
+
+    try {
+      const response = await safeSendMessage({
+        type: "fetch-json",
+        method: "GET",
+        url: refreshUrl,
+      });
+
+      if (!response?.ok || !("data" in response)) {
+        return null;
+      }
+
+      const responseStatus =
+        "status" in response && typeof response.status === "number"
+          ? response.status
+          : 200;
+      if (responseStatus >= 400) return null;
+
+      return parsePolymarketEventDetailPayload(response.data);
+    } catch (error) {
+      log("Polymarket event refresh failed:", error);
+      return null;
+    } finally {
+      polymarketEventRefreshInFlight.delete(refreshKey);
+    }
+  })();
+
+  polymarketEventRefreshInFlight.set(refreshKey, request);
+  return request;
 }
 
 /**
@@ -2090,6 +2182,7 @@ const KNOWW_API_BASE = {
   extractKeywordsWithAI,
   // Search functions
   searchPolymarketEvents,
+  fetchPolymarketEventRefresh,
   searchAllMarkets,
   // Scoring
   calculateRelevanceScore,

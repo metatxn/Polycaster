@@ -205,6 +205,13 @@ interface ParsedOutcomeData {
   firstActiveMarketIndex: number;
 }
 
+interface MarketDisplayData extends ParsedOutcomeData {
+  hasMultipleOptions: boolean;
+}
+
+const LIVE_MARKET_REFRESH_INTERVAL_MS = 30000;
+const LIVE_MARKET_REFRESH_INITIAL_DELAY_MS = 5000;
+
 /**
  * Safely resolve extension asset URLs.
  * Guards against "Extension context invalidated" after hot-reload/update.
@@ -351,6 +358,70 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
   result.prices = result.multiOutcomeData.map((d) => d.price);
 
   return result;
+}
+
+function resolveMarketDisplayData(market: Market): MarketDisplayData {
+  const parsed = parseMultiOutcomeData(market);
+  let outcomes = parsed.outcomes;
+  let prices: number[] = parsed.prices;
+  const isMultiOutcomeEvent = parsed.isMultiOutcome;
+  const multiOutcomeData = parsed.multiOutcomeData;
+  const firstActiveMarketIndex = parsed.firstActiveMarketIndex;
+  let hasMultipleOptions = multiOutcomeData.length > 2;
+
+  if (!isMultiOutcomeEvent && market.markets && market.markets.length > 0) {
+    const firstMarket =
+      market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
+
+    if (firstMarket.outcomePrices) {
+      prices = parseGammaPriceArray(firstMarket.outcomePrices);
+    }
+
+    if (firstMarket.outcomes) {
+      outcomes = parseGammaStringArray(firstMarket.outcomes);
+      hasMultipleOptions = outcomes.length > 2;
+    }
+
+    if (prices.length >= 2 && outcomes.length === 0) {
+      outcomes = ["Yes", "No"];
+    }
+
+    if (outcomes.length === 0 || prices.length === 0) {
+      if (firstMarket.groupItemTitle) {
+        outcomes = [firstMarket.groupItemTitle];
+        if (firstMarket.outcomePrices) {
+          prices = parseGammaPriceArray(firstMarket.outcomePrices);
+        }
+      } else {
+        outcomes = ["Yes", "No"];
+        prices = [0.5, 0.5];
+      }
+    }
+  }
+
+  if (outcomes.length === 0 && market.outcomes) {
+    outcomes = market.outcomes.map((o) => o.title || o.name || "Unknown");
+    prices = market.outcomes.map((o) => o.price || 0.5);
+    hasMultipleOptions = outcomes.length > 2;
+  }
+
+  if (outcomes.length === 0) {
+    outcomes = ["Yes", "No"];
+    prices = [0.5, 0.5];
+  }
+
+  while (prices.length < outcomes.length) {
+    prices.push(0.5);
+  }
+
+  return {
+    isMultiOutcome: isMultiOutcomeEvent,
+    outcomes,
+    prices,
+    multiOutcomeData,
+    firstActiveMarketIndex,
+    hasMultipleOptions,
+  };
 }
 
 const OPTION_INDICATOR_CLASSES = [
@@ -504,6 +575,174 @@ function buildKnowwUrlForOutcome(
   return `${url}?${params.toString()}`;
 }
 
+function normalizeOutcomeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function formatProbability(price: number | undefined): string {
+  const safePrice =
+    typeof price === "number" && Number.isFinite(price) ? price : 0.5;
+  return `${Math.round(safePrice * 100)}%`;
+}
+
+function getUpdatedOutcomePrice(
+  displayData: MarketDisplayData,
+  outcomeName: string,
+  fallbackIndex: number
+): number {
+  const lookup = new Map<string, number>();
+  for (let i = 0; i < displayData.outcomes.length; i++) {
+    lookup.set(
+      normalizeOutcomeName(displayData.outcomes[i]),
+      displayData.prices[i] ?? 0.5
+    );
+  }
+  for (const option of displayData.multiOutcomeData) {
+    lookup.set(normalizeOutcomeName(option.name), option.price);
+  }
+
+  return (
+    lookup.get(normalizeOutcomeName(outcomeName)) ??
+    displayData.prices[fallbackIndex] ??
+    0.5
+  );
+}
+
+function updateInlineCardPrices(
+  card: HTMLElement,
+  state: {
+    outcomes: string[];
+    prices: number[];
+    multiOutcomeData: MultiOutcomeItem[];
+  },
+  freshMarket: Market
+): void {
+  const displayData = resolveMarketDisplayData(freshMarket);
+  const nextPrices = state.outcomes.map((outcome, index) =>
+    getUpdatedOutcomePrice(displayData, outcome, index)
+  );
+
+  state.prices.splice(0, state.prices.length, ...nextPrices);
+
+  const freshOptionsByName = new Map(
+    displayData.multiOutcomeData.map((option) => [
+      normalizeOutcomeName(option.name),
+      option,
+    ])
+  );
+  for (let i = 0; i < state.multiOutcomeData.length; i++) {
+    const currentOption = state.multiOutcomeData[i];
+    const freshOption =
+      freshOptionsByName.get(normalizeOutcomeName(currentOption.name)) ??
+      displayData.multiOutcomeData[i];
+    if (!freshOption) continue;
+    currentOption.price = freshOption.price;
+    currentOption.conditionId = freshOption.conditionId;
+  }
+
+  const summaryItems = Array.from(
+    card.querySelectorAll<HTMLElement>(".knoww-card-mini-summary span")
+  );
+  for (let i = 0; i < summaryItems.length; i++) {
+    const outcome = state.outcomes[i];
+    if (!outcome) continue;
+    summaryItems[i].textContent = `${outcome} ${formatProbability(
+      state.prices[i]
+    )}`;
+  }
+
+  const outcomeButtons = Array.from(
+    card.querySelectorAll<HTMLElement>(
+      ".knoww-card-outcomes .knoww-outcome-btn"
+    )
+  );
+  for (let i = 0; i < outcomeButtons.length; i++) {
+    const price = outcomeButtons[i].querySelector<HTMLElement>(
+      ".knoww-outcome-price"
+    );
+    if (price) price.textContent = formatProbability(state.prices[i]);
+  }
+
+  const optionRows = Array.from(
+    card.querySelectorAll<HTMLElement>(".knoww-options-list .knoww-option-row")
+  );
+  for (let i = 0; i < optionRows.length; i++) {
+    const row = optionRows[i];
+    const name =
+      row.querySelector<HTMLElement>(".knoww-option-name")?.textContent ?? "";
+    const option =
+      state.multiOutcomeData.find(
+        (item) => normalizeOutcomeName(item.name) === normalizeOutcomeName(name)
+      ) ?? state.multiOutcomeData[i + 2];
+    if (!option) continue;
+
+    const pct = formatProbability(option.price);
+    row.style.setProperty("--knoww-pct", pct);
+    const percent = row.querySelector<HTMLElement>(".knoww-option-percent");
+    if (percent) percent.textContent = pct;
+  }
+
+  card.setAttribute("data-knoww-live-price-updated-at", String(Date.now()));
+}
+
+function mergeFreshMarketIntoCurrent(
+  currentMarket: Market,
+  freshMarket: Market
+): void {
+  const contextReason = currentMarket._contextReason;
+  const aiConfidence = currentMarket._aiConfidence;
+
+  Object.assign(currentMarket, freshMarket);
+
+  if (contextReason && !currentMarket._contextReason) {
+    currentMarket._contextReason = contextReason;
+  }
+  if (aiConfidence !== undefined && currentMarket._aiConfidence === undefined) {
+    currentMarket._aiConfidence = aiConfidence;
+  }
+}
+
+function startLiveMarketPriceUpdates(
+  card: HTMLElement,
+  market: Market,
+  state: {
+    outcomes: string[];
+    prices: number[];
+    multiOutcomeData: MultiOutcomeItem[];
+  }
+): void {
+  if (market.source !== "polymarket") return;
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const schedule = (delayMs: number) => {
+    timer = setTimeout(refresh, delayMs);
+  };
+
+  const refresh = async () => {
+    if (!document.body.contains(card)) {
+      if (timer) clearTimeout(timer);
+      return;
+    }
+
+    if (document.visibilityState === "hidden") {
+      schedule(LIVE_MARKET_REFRESH_INTERVAL_MS);
+      return;
+    }
+
+    const freshMarket =
+      await window.KNOWW_API?.fetchPolymarketEventRefresh?.(market);
+    if (freshMarket && document.body.contains(card)) {
+      mergeFreshMarketIntoCurrent(market, freshMarket);
+      updateInlineCardPrices(card, state, market);
+    }
+
+    schedule(LIVE_MARKET_REFRESH_INTERVAL_MS);
+  };
+
+  schedule(LIVE_MARKET_REFRESH_INITIAL_DELAY_MS);
+}
+
 /**
  * Create a market card (supports multiple sources: Polymarket, Kalshi)
  */
@@ -532,62 +771,13 @@ function createInlineMarketCard(
     card.style.pointerEvents = "auto";
   }
 
-  const parsed = parseMultiOutcomeData(market);
-  let outcomes = parsed.outcomes;
-  let prices: number[] = parsed.prices;
-  const isMultiOutcomeEvent = parsed.isMultiOutcome;
-  const multiOutcomeData = parsed.multiOutcomeData;
-  const firstActiveMarketIdx = parsed.firstActiveMarketIndex;
-  let hasMultipleOptions = multiOutcomeData.length > 2;
-
-  // If not a multi-outcome event, try standard parsing
-  if (!isMultiOutcomeEvent && market.markets && market.markets.length > 0) {
-    const firstMarket =
-      market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
-
-    if (firstMarket.outcomePrices) {
-      prices = parseGammaPriceArray(firstMarket.outcomePrices);
-    }
-
-    if (firstMarket.outcomes) {
-      outcomes = parseGammaStringArray(firstMarket.outcomes);
-      hasMultipleOptions = outcomes.length > 2;
-    }
-
-    if (prices.length >= 2 && outcomes.length === 0) {
-      outcomes = ["Yes", "No"];
-    }
-
-    if (outcomes.length === 0 || prices.length === 0) {
-      if (firstMarket.groupItemTitle) {
-        outcomes = [firstMarket.groupItemTitle];
-        if (firstMarket.outcomePrices) {
-          prices = parseGammaPriceArray(firstMarket.outcomePrices);
-        }
-      } else {
-        outcomes = ["Yes", "No"];
-        prices = [0.5, 0.5];
-      }
-    }
-  }
-
-  // Fallback: check if outcomes/prices are directly on the market object
-  if (outcomes.length === 0 && market.outcomes) {
-    outcomes = market.outcomes.map((o) => o.title || o.name || "Unknown");
-    prices = market.outcomes.map((o) => o.price || 0.5);
-    hasMultipleOptions = outcomes.length > 2;
-  }
-
-  // Ensure we always have at least Yes/No for display
-  if (outcomes.length === 0) {
-    outcomes = ["Yes", "No"];
-    prices = [0.5, 0.5];
-  }
-
-  // Ensure prices array matches outcomes length
-  while (prices.length < outcomes.length) {
-    prices.push(0.5);
-  }
+  const displayData = resolveMarketDisplayData(market);
+  const outcomes = displayData.outcomes;
+  const prices: number[] = displayData.prices;
+  const isMultiOutcomeEvent = displayData.isMultiOutcome;
+  const multiOutcomeData = displayData.multiOutcomeData;
+  const firstActiveMarketIdx = displayData.firstActiveMarketIndex;
+  const hasMultipleOptions = displayData.hasMultipleOptions;
 
   // Header
   const header = document.createElement("div");
@@ -792,6 +982,7 @@ function createInlineMarketCard(
       btn.className = `knoww-outcome-btn ${isBinaryMarket ? binaryClasses[idx] : multiClasses[idx] || `option-${idx + 1}`}`;
       if (displayCount === 1) btn.style.flex = "1";
       const percent = Math.round(prices[idx] * 100);
+      btn.style.setProperty("--knoww-pct", `${percent}%`);
       const label = document.createElement("span");
       label.className = "knoww-outcome-label";
       label.textContent = outcomes[idx];
@@ -1224,6 +1415,12 @@ function createInlineMarketCard(
     card.addEventListener("click", stopKalshiTilePropagation);
     card.addEventListener("auxclick", stopKalshiTilePropagation);
   }
+
+  startLiveMarketPriceUpdates(card, market, {
+    outcomes,
+    prices,
+    multiOutcomeData,
+  });
 
   return card;
 }

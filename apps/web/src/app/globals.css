@@ -1050,3 +1050,1356 @@ body:not(:has(.kw-landing))
     animation: none !important;
   }
 }
+
+/* ============================================================
+ * TWEET OVERLAY HERO — right-side artifact for landing hero
+ * Direction B from the design bundle: simulated x.com browser
+ * showing a 3-tweet feed where Knoww scans, surfaces a matching
+ * Polymarket card, and cycles to the next tweet. Card surface
+ * mirrors the landing page's light/dark theme via [data-theme]
+ * on the kw-page wrapper; the dark palette is the default.
+ * ============================================================ */
+.kwt-root {
+  /* Scoped accent for the embedded card (warm muted green from design) */
+  --kwt-accent: #7fb37a;
+  /* x.com dark palette (default) */
+  --kwt-x-bg: rgba(0, 0, 0, 0.62);
+  --kwt-x-text: #e7e9ea;
+  --kwt-x-text-2: #71767b;
+  --kwt-x-border: rgba(232, 227, 216, 0.12);
+  --kwt-x-blue: #1d9bf0;
+  --kwt-x-pink: #f91880;
+  --kwt-x-green: #00ba7c;
+  /* Browser chrome + injected card surfaces */
+  --kwt-chrome-bg: rgba(10, 10, 10, 0.55);
+  --kwt-addr-bg: rgba(26, 26, 26, 0.7);
+  --kwt-addr-border: rgba(255, 255, 255, 0.06);
+  --kwt-card-border: rgba(255, 255, 255, 0.08);
+  --kwt-card-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.07) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 -1px 0 rgba(0, 0, 0, 0.4) inset,
+    0 50px 100px -30px rgba(0, 0, 0, 0.65),
+    0 24px 48px -16px color-mix(in srgb, var(--kwt-accent) 32%, transparent),
+    0 4px 16px -4px rgba(0, 0, 0, 0.4);
+  --kwt-pm-bg: rgba(10, 10, 12, 0.55);
+  --kwt-pm-border: rgba(255, 255, 255, 0.08);
+  --kwt-pm-icon-bg: rgba(255, 255, 255, 0.05);
+  --kwt-pm-title: #fff;
+  --kwt-pm-meta: #6e7378;
+  --kwt-pm-meta-strong: #8b8f94;
+  --kwt-pm-opt-bg: rgba(255, 255, 255, 0.03);
+  --kwt-pm-opt-border: rgba(255, 255, 255, 0.06);
+  --kwt-pm-opt-border-hover: rgba(255, 255, 255, 0.18);
+  --kwt-pm-divider: rgba(255, 255, 255, 0.05);
+  --kwt-pm-fb-border: rgba(255, 255, 255, 0.1);
+  --kwt-pm-fb-text: #8b8f94;
+  --kwt-pm-fb-border-hover: rgba(255, 255, 255, 0.25);
+  --kwt-pm-icon-btn-hover-bg: rgba(255, 255, 255, 0.06);
+  --kwt-pm-more-hover-bg: rgba(255, 255, 255, 0.04);
+  /* Aurora — three colored radials + a slow conic sweep, drifting on a
+     60s loop. Reads as cinematic atmosphere, not a single hard halo. */
+  --kwt-halo-1: color-mix(in srgb, var(--kwt-accent) 32%, transparent);
+  --kwt-halo-2: rgba(125, 95, 200, 0.22);
+  --kwt-halo-3: rgba(212, 176, 106, 0.16);
+  /* Etched corner registration marks — editorial detail */
+  --kwt-corner: color-mix(in srgb, var(--kwt-accent) 38%, transparent);
+  /* Inner passé-partout frame */
+  --kwt-frame: color-mix(in srgb, var(--kwt-accent) 9%, transparent);
+  position: relative;
+  isolation: isolate;
+}
+
+/* Aurora background — drifts slowly to give the card cinematic depth. */
+.kwt-root::before {
+  content: "";
+  position: absolute;
+  inset: -12% -10% -16%;
+  background:
+    radial-gradient(50% 40% at 22% 12%, var(--kwt-halo-1), transparent 65%),
+    radial-gradient(45% 35% at 85% 88%, var(--kwt-halo-2), transparent 65%),
+    radial-gradient(35% 28% at 60% 50%, var(--kwt-halo-3), transparent 70%),
+    conic-gradient(
+      from 220deg at 50% 50%,
+      transparent 0deg,
+      color-mix(in srgb, var(--kwt-accent) 10%, transparent) 90deg,
+      transparent 180deg,
+      rgba(125, 95, 200, 0.08) 270deg,
+      transparent 360deg
+    );
+  filter: blur(56px);
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.92;
+  animation: kwtAuroraDrift 60s ease-in-out infinite;
+}
+@keyframes kwtAuroraDrift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(18px, -12px, 0) scale(1.04);
+  }
+}
+
+/* Etched L-bracket corner registration marks — editorial publication
+   hallmark, 1px hairlines tinted with the accent. */
+.kwt-card::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  pointer-events: none;
+  z-index: 3;
+  background:
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) top left / 14px 1px
+    no-repeat,
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) top left / 1px 14px
+    no-repeat,
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) top right / 14px 1px
+    no-repeat,
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) top right / 1px 14px
+    no-repeat,
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) bottom left / 14px 1px
+    no-repeat,
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) bottom left / 1px 14px
+    no-repeat,
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) bottom right / 14px
+    1px no-repeat,
+    linear-gradient(var(--kwt-corner), var(--kwt-corner)) bottom right / 1px
+    14px no-repeat;
+}
+/* Inner passé-partout — soft second border 6px inside the outer card. */
+.kwt-card::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid var(--kwt-frame);
+  border-radius: 10px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Light theme — mirrors x.com's light mode */
+[data-theme="light"] .kwt-root {
+  --kwt-x-bg: rgba(255, 255, 255, 0.62);
+  --kwt-x-text: #0f1419;
+  --kwt-x-text-2: #536471;
+  --kwt-x-border: rgba(15, 20, 25, 0.08);
+  --kwt-chrome-bg: rgba(243, 244, 246, 0.55);
+  --kwt-addr-bg: rgba(255, 255, 255, 0.7);
+  --kwt-addr-border: rgba(15, 20, 25, 0.08);
+  --kwt-card-border: rgba(255, 255, 255, 0.55);
+  --kwt-card-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 0 0 1px rgba(15, 20, 25, 0.04) inset,
+    0 50px 100px -30px rgba(15, 20, 25, 0.22),
+    0 24px 48px -16px color-mix(in srgb, var(--kwt-accent) 30%, transparent),
+    0 4px 16px -4px rgba(15, 20, 25, 0.08);
+  --kwt-pm-bg: rgba(255, 255, 255, 0.55);
+  --kwt-pm-border: rgba(15, 20, 25, 0.08);
+  --kwt-pm-icon-bg: rgba(15, 20, 25, 0.04);
+  --kwt-pm-title: #0f1419;
+  --kwt-pm-meta: #536471;
+  --kwt-pm-meta-strong: #0f1419;
+  --kwt-pm-opt-bg: rgba(15, 20, 25, 0.03);
+  --kwt-pm-opt-border: rgba(15, 20, 25, 0.06);
+  --kwt-pm-opt-border-hover: rgba(15, 20, 25, 0.18);
+  --kwt-pm-divider: rgba(15, 20, 25, 0.06);
+  --kwt-pm-fb-border: rgba(15, 20, 25, 0.12);
+  --kwt-pm-fb-text: #536471;
+  --kwt-pm-fb-border-hover: rgba(15, 20, 25, 0.35);
+  --kwt-pm-icon-btn-hover-bg: rgba(15, 20, 25, 0.06);
+  --kwt-pm-more-hover-bg: rgba(15, 20, 25, 0.04);
+  --kwt-halo-1: color-mix(in srgb, var(--kwt-accent) 38%, transparent);
+  --kwt-halo-2: rgba(125, 95, 200, 0.26);
+  --kwt-halo-3: rgba(212, 176, 106, 0.22);
+  --kwt-corner: color-mix(in srgb, var(--kwt-accent) 50%, transparent);
+  --kwt-frame: color-mix(in srgb, var(--kwt-accent) 14%, transparent);
+}
+[data-theme="light"] .kwt-dots span:nth-child(1) {
+  background: #ff5f57;
+}
+[data-theme="light"] .kwt-dots span:nth-child(2) {
+  background: #febc2e;
+}
+[data-theme="light"] .kwt-dots span:nth-child(3) {
+  background: #28c840;
+}
+[data-theme="light"] .kwt-pm-source-mark {
+  color: #fff;
+}
+/* Active tweet wash: brighter green tint over white reads as a soft mint
+   highlight rather than a near-invisible 4% over black. */
+[data-theme="light"] .kwt-feed-item.kwt-active {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kwt-accent) 10%, transparent),
+    transparent 60%
+  );
+}
+/* Light-mode option label/accent text needs more contrast than dark mode's
+   bright fills, since the bars sit on a near-white background. */
+[data-theme="light"] .kwt-pm-opt-label {
+  color: var(--kwt-pm-title);
+}
+[data-theme="light"] .kwt-pm-blue {
+  color: #1a72c4;
+}
+[data-theme="light"] .kwt-pm-purple {
+  color: #6d49d6;
+}
+[data-theme="light"] .kwt-pm-fb-good.kwt-on {
+  color: #fff;
+}
+
+.kwt-card {
+  background: var(--kwt-x-bg);
+  border: 1px solid var(--kwt-card-border);
+  border-radius: 14px;
+  overflow: hidden;
+  font-family:
+    var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+  color: var(--kwt-x-text);
+  box-shadow: var(--kwt-card-shadow);
+  position: relative;
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  /* Lock the card to a fixed vertical envelope so platform swaps and PM
+     card surfacing don't change the column's height. Without this, the
+     grid's items-center recentres the hero text every time the card
+     resizes — visible as the headline jittering up and down. The floor
+     is sized for the 2-post variant (default below 1920px); the 2xl
+     breakpoint below bumps it for the 3-post variant. */
+  display: flex;
+  flex-direction: column;
+  min-height: 620px;
+}
+/* 2xl (matches the 3-post breakpoint in useTweetLimit). At this width
+   X tops out at ~757px and Reddit at ~660px; 780 covers both with a
+   small buffer so the headline doesn't shift on platform swap. */
+@media (min-width: 1920px) {
+  .kwt-card {
+    min-height: 780px;
+  }
+}
+/* Status footer pins to the bottom; any spare space sits between the
+   feed and the footer rather than below it. */
+.kwt-status {
+  margin-top: auto;
+}
+
+/* Browser tab strip — sits above the chrome. Two tabs (x.com / reddit.com)
+   that read like real browser tabs, with an animated rail underneath the
+   active one for the platform switch flourish. */
+.kwt-tabs {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px 0;
+  background: var(--kwt-chrome-bg);
+  border-bottom: 1px solid var(--kwt-x-border);
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+.kwt-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: var(--kwt-x-text-2);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+  font-weight: 600;
+}
+.kwt-tab:hover {
+  color: var(--kwt-x-text);
+  background: var(--kwt-pm-icon-btn-hover-bg);
+}
+.kwt-tab-active {
+  color: var(--kwt-x-text);
+  background: var(--kwt-x-bg);
+  border-color: var(--kwt-x-border);
+  border-bottom-color: var(--kwt-x-bg);
+  margin-bottom: -1px;
+  z-index: 1;
+}
+.kwt-tab-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: #fff;
+  flex-shrink: 0;
+  transition: filter 0.2s;
+}
+.kwt-tab-logo-x {
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.kwt-tab-logo-reddit {
+  background: #ff4500;
+}
+.kwt-tab:not(.kwt-tab-active) .kwt-tab-logo {
+  filter: grayscale(0.5) opacity(0.7);
+}
+[data-theme="light"] .kwt-tab-logo-x {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+/* Animated rail under the active tab — slides between tabs on switch. */
+.kwt-tab-rail {
+  position: absolute;
+  bottom: -1px;
+  left: 10px;
+  height: 2px;
+  width: calc(50% - 12px);
+  max-width: 140px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--kwt-accent) 20%,
+    var(--kwt-accent) 80%,
+    transparent 100%
+  );
+  box-shadow: 0 0 12px color-mix(in srgb, var(--kwt-accent) 50%, transparent);
+  transition: transform 0.45s cubic-bezier(0.5, 0, 0.2, 1);
+  pointer-events: none;
+  border-radius: 2px;
+  transform-origin: left;
+}
+[data-platform="reddit"] .kwt-tab-rail {
+  transform: translateX(calc(100% + 4px));
+}
+
+/* Browser chrome */
+.kwt-chrome {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: var(--kwt-chrome-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--kwt-x-border);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+}
+.kwt-dots {
+  display: flex;
+  gap: 6px;
+}
+.kwt-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.kwt-dots span:nth-child(1) {
+  background: #4a4a4a;
+}
+.kwt-dots span:nth-child(2) {
+  background: #3a3a3a;
+}
+.kwt-dots span:nth-child(3) {
+  background: #2a2a2a;
+}
+.kwt-addr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: center;
+  padding: 5px 14px;
+  background: var(--kwt-addr-bg);
+  border: 1px solid var(--kwt-addr-border);
+  border-radius: 6px;
+  color: var(--kwt-x-text);
+  font-size: 11px;
+}
+.kwt-addr-dim {
+  color: var(--kwt-x-text-2);
+}
+.kwt-lock {
+  color: var(--kwt-x-text-2);
+  font-size: 10px;
+}
+.kwt-ext {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--kwt-accent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kwt-accent) 10%, transparent);
+}
+.kwt-k-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+  border-radius: 4px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-weight: 700;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kwt-accent) 88%, white) 0%,
+    var(--kwt-accent) 60%,
+    color-mix(in srgb, var(--kwt-accent) 92%, black) 100%
+  );
+  color: #0a0a0a;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 0 0 0.5px color-mix(in srgb, var(--kwt-accent) 70%, black);
+  letter-spacing: -0.02em;
+}
+.kwt-k-mark-sm {
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+}
+.kwt-ext-label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--kwt-accent);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.kwt-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--kwt-accent);
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.kwt-pulse.kwt-on {
+  opacity: 1;
+  animation: kwtPulseDot 1s infinite;
+  box-shadow: 0 0 8px var(--kwt-accent);
+}
+@keyframes kwtPulseDot {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--kwt-accent) 50%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--kwt-accent) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--kwt-accent) 0%, transparent);
+  }
+}
+
+/* Feed shell */
+.kwt-feed {
+  display: flex;
+  flex-direction: column;
+  max-height: 640px;
+  overflow: hidden;
+  position: relative;
+}
+.kwt-feed-item {
+  border-bottom: 1px solid var(--kwt-x-border);
+  position: relative;
+  transition:
+    opacity 0.5s ease,
+    filter 0.5s ease;
+  opacity: 0.45;
+  filter: saturate(0.7);
+}
+.kwt-feed-item.kwt-active {
+  opacity: 1;
+  filter: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kwt-accent) 4%, transparent),
+    transparent 60%
+  );
+}
+/* Vertical accent rail — left edge of the active tweet. Reads as a
+   scanner / focus indicator. The gradient softens the ends so it doesn't
+   collide with adjacent tweet borders. */
+.kwt-feed-item.kwt-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    var(--kwt-accent) 18%,
+    var(--kwt-accent) 82%,
+    transparent
+  );
+  pointer-events: none;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--kwt-accent) 60%, transparent);
+  z-index: 1;
+}
+.kwt-feed-item:last-child {
+  border-bottom: none;
+}
+
+/* Tweet */
+.kwt-tweet {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 12px 16px 4px;
+  position: relative;
+}
+.kwt-avatar {
+  width: 40px;
+}
+.kwt-avatar-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  /* Lens-like depth: inset highlight + bottom darken + hairline ring */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 0 0 1.5px rgba(255, 255, 255, 0.04),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+  position: relative;
+}
+[data-theme="light"] .kwt-avatar-img {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+    0 0 0 1.5px rgba(15, 20, 25, 0.04),
+    0 1px 2px rgba(15, 20, 25, 0.1);
+}
+.kwt-body {
+  min-width: 0;
+}
+.kwt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.kwt-names {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.kwt-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--kwt-x-text);
+  letter-spacing: -0.005em;
+}
+.kwt-handle,
+.kwt-time,
+.kwt-sep {
+  color: var(--kwt-x-text-2);
+  font-size: 15px;
+}
+.kwt-more-btn {
+  background: transparent;
+  border: none;
+  color: var(--kwt-x-text-2);
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.kwt-more-btn:hover {
+  background: rgba(29, 155, 240, 0.1);
+  color: var(--kwt-x-blue);
+}
+.kwt-text {
+  margin: 4px 0 10px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--kwt-x-text);
+  letter-spacing: -0.008em;
+  text-wrap: pretty;
+}
+.kwt-hl {
+  position: relative;
+  display: inline-block;
+  transition: color 0.4s;
+}
+/* Highlighter pen-stroke: tapered ends (mimics pen-tip lift-off) and a
+   vertical gradient (pressure variation), plus a faint underline that
+   lands a beat after the fill. Feels hand-marked, not rectangle-filled. */
+.kwt-hl::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  bottom: -1px;
+  top: 55%;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--kwt-accent) 32%, transparent) 14%,
+      color-mix(in srgb, var(--kwt-accent) 30%, transparent) 86%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--kwt-accent) 28%, transparent),
+      color-mix(in srgb, var(--kwt-accent) 16%, transparent)
+    );
+  background-blend-mode: multiply;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition:
+    transform 0.65s cubic-bezier(0.6, 0.05, 0.2, 1),
+    opacity 0.3s;
+  z-index: -1;
+  border-radius: 1px;
+}
+.kwt-hl::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--kwt-accent) 22%,
+    var(--kwt-accent) 78%,
+    transparent 100%
+  );
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition:
+    transform 0.5s cubic-bezier(0.6, 0.05, 0.2, 1) 0.15s,
+    opacity 0.4s ease 0.15s;
+}
+.kwt-hl.on::before {
+  transform: scaleX(1);
+}
+.kwt-hl.on::after {
+  transform: scaleX(1);
+  opacity: 0.5;
+}
+
+/* Scan beam */
+.kwt-scan-beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 36px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, var(--kwt-accent) 18%, transparent) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 2;
+  animation: kwtScanSweep 1.05s ease-in-out forwards;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--kwt-accent) 30%, transparent);
+}
+@keyframes kwtScanSweep {
+  0% {
+    transform: translateY(-36px);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Action bar */
+.kwt-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0 6px;
+  gap: 4px;
+}
+.kwt-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  background: transparent;
+  border: none;
+  color: var(--kwt-x-text-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  cursor: pointer;
+  border-radius: 999px;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.kwt-act-reply:hover {
+  color: var(--kwt-x-blue);
+  background: rgba(29, 155, 240, 0.1);
+}
+.kwt-act-retweet:hover {
+  color: var(--kwt-x-green);
+  background: rgba(0, 186, 124, 0.1);
+}
+.kwt-act-like:hover {
+  color: var(--kwt-x-pink);
+  background: rgba(249, 24, 128, 0.1);
+}
+.kwt-act-like.kwt-on {
+  color: var(--kwt-x-pink);
+}
+.kwt-act-like.kwt-on svg path {
+  fill: var(--kwt-x-pink);
+}
+.kwt-act-views:hover {
+  color: var(--kwt-x-blue);
+  background: rgba(29, 155, 240, 0.1);
+}
+.kwt-act-mini {
+  padding: 6px;
+}
+.kwt-act-mini:hover {
+  color: var(--kwt-x-blue);
+  background: rgba(29, 155, 240, 0.1);
+}
+.kwt-act-end {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Reddit post layout — different anatomy than tweets: vote rail on the
+   left, subreddit + user metadata, bold title, body, action bar. Density
+   is tighter than X (Reddit posts have title + body + actions vs X's
+   single body block) so the card fits the same vertical envelope. */
+.kwt-rd {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 8px;
+  padding: 10px 14px 2px;
+  position: relative;
+}
+.kwt-rd-vote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: 2px;
+}
+.kwt-rd-vote-btn {
+  width: 24px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--kwt-x-text-2);
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.kwt-rd-up:hover,
+.kwt-rd-up.kwt-on {
+  color: #ff4500;
+  background: rgba(255, 69, 0, 0.08);
+}
+.kwt-rd-down:hover,
+.kwt-rd-down.kwt-on {
+  color: #7193ff;
+  background: rgba(113, 147, 255, 0.08);
+}
+.kwt-rd-score {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--kwt-x-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.kwt-rd-up.kwt-on ~ .kwt-rd-score {
+  color: #ff4500;
+}
+.kwt-rd-body {
+  min-width: 0;
+}
+.kwt-rd-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.kwt-rd-sub-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 10px;
+  flex-shrink: 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+}
+.kwt-rd-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--kwt-x-text-2);
+}
+.kwt-rd-sub {
+  font-weight: 700;
+  color: var(--kwt-x-text);
+  letter-spacing: -0.005em;
+}
+.kwt-rd-user {
+  color: var(--kwt-x-text-2);
+}
+.kwt-rd-dot {
+  color: var(--kwt-x-text-2);
+  opacity: 0.6;
+}
+.kwt-rd-time {
+  color: var(--kwt-x-text-2);
+}
+.kwt-rd-title {
+  margin: 0 0 4px;
+  font-family:
+    var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--kwt-x-text);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.kwt-rd-text {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--kwt-x-text-2);
+  letter-spacing: -0.005em;
+  text-wrap: pretty;
+}
+.kwt-rd-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 0 4px;
+  flex-wrap: wrap;
+}
+.kwt-rd-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  background: transparent;
+  border: none;
+  color: var(--kwt-x-text-2);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  transition:
+    color 0.15s,
+    background 0.15s;
+  font-variant-numeric: tabular-nums;
+}
+.kwt-rd-act:hover {
+  color: var(--kwt-x-text);
+  background: var(--kwt-pm-icon-btn-hover-bg);
+}
+.kwt-rd-act.kwt-on {
+  color: var(--kwt-accent);
+}
+.kwt-rd-act.kwt-on svg {
+  fill: var(--kwt-accent);
+}
+
+/* Cross-fade the feed when the platform changes — a brief opacity sweep
+   so the swap feels intentional, not abrupt. */
+.kwt-feed-x,
+.kwt-feed-reddit {
+  animation: kwtFeedSwap 0.45s ease-out;
+}
+@keyframes kwtFeedSwap {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Polymarket-style injected card */
+.kwt-pm-card {
+  background: var(--kwt-pm-bg);
+  border: 1px solid var(--kwt-pm-border);
+  border-radius: 14px;
+  overflow: hidden;
+  margin: 4px 0 12px;
+  opacity: 0;
+  transform: translateY(14px) scale(0.96);
+  transition:
+    opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.7s cubic-bezier(0.16, 1.18, 0.32, 1),
+    box-shadow 0.6s ease;
+  font-family:
+    var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+.kwt-pm-card.kwt-in {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  box-shadow:
+    0 12px 30px -10px rgba(0, 0, 0, 0.25),
+    0 0 0 1px color-mix(in srgb, var(--kwt-accent) 20%, transparent);
+}
+.kwt-pm-card.kwt-in:hover {
+  box-shadow:
+    0 18px 40px -10px rgba(0, 0, 0, 0.32),
+    0 0 0 1px color-mix(in srgb, var(--kwt-accent) 32%, transparent),
+    0 0 24px -4px color-mix(in srgb, var(--kwt-accent) 18%, transparent);
+  transform: translateY(-1px) scale(1);
+}
+.kwt-pm-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px 10px;
+}
+.kwt-pm-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--kwt-pm-icon-bg);
+}
+.kwt-pm-icon-letter {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+.kwt-pm-seal {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kwt-pm-title-wrap {
+  min-width: 0;
+}
+.kwt-pm-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--kwt-pm-title);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kwt-pm-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--kwt-pm-meta);
+  text-transform: uppercase;
+}
+.kwt-pm-match {
+  color: var(--kwt-pm-meta-strong);
+  font-weight: 600;
+}
+.kwt-pm-meta-dot {
+  opacity: 0.5;
+}
+.kwt-pm-cat {
+  color: var(--kwt-pm-meta);
+}
+.kwt-pm-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.kwt-pm-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--kwt-pm-meta);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.kwt-pm-icon-btn:hover {
+  background: var(--kwt-pm-icon-btn-hover-bg);
+  color: var(--kwt-pm-title);
+}
+
+/* Options */
+.kwt-pm-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 0 8px;
+}
+.kwt-pm-opt {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--kwt-pm-opt-border);
+  border-radius: 9px;
+  background: var(--kwt-pm-opt-bg);
+  cursor: pointer;
+  font-family: inherit;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.kwt-pm-opt:hover {
+  border-color: var(--kwt-pm-opt-border-hover);
+}
+.kwt-pm-opt-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 10px 0 0 10px;
+  pointer-events: none;
+  transition: width 0.6s cubic-bezier(0.4, 0.1, 0.2, 1);
+  z-index: 0;
+}
+.kwt-pm-blue .kwt-pm-opt-bar {
+  background: linear-gradient(
+    90deg,
+    rgba(29, 155, 240, 0.32) 0%,
+    rgba(29, 155, 240, 0.08) 100%
+  );
+  border-right: 1px solid rgba(29, 155, 240, 0.4);
+}
+.kwt-pm-purple .kwt-pm-opt-bar {
+  background: linear-gradient(
+    90deg,
+    rgba(139, 92, 246, 0.32) 0%,
+    rgba(139, 92, 246, 0.08) 100%
+  );
+  border-right: 1px solid rgba(139, 92, 246, 0.4);
+}
+.kwt-pm-blue {
+  color: #6cb8f6;
+}
+.kwt-pm-purple {
+  color: #b39ef9;
+}
+.kwt-pm-opt-label {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--kwt-pm-title);
+  letter-spacing: -0.01em;
+}
+.kwt-pm-opt-pct {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kwt-pm-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 14px 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  color: var(--kwt-pm-meta);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-weight: 600;
+  border-radius: 4px;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.kwt-pm-more:hover {
+  color: var(--kwt-pm-title);
+  background: var(--kwt-pm-more-hover-bg);
+}
+.kwt-pm-divider {
+  height: 1px;
+  background: var(--kwt-pm-divider);
+  margin: 8px 0 0;
+}
+.kwt-pm-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  gap: 12px;
+}
+.kwt-pm-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.kwt-pm-source-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #4ab4f7 0%, #1d9bf0 55%, #1582cc 100%);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: -0.02em;
+  /* Embossed seal feel: top inset highlight + bottom inset darken +
+     hairline outer ring. Reads as a pressed mark, not a flat chip. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 0 0 0.5px rgba(29, 155, 240, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+}
+.kwt-pm-source-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--kwt-pm-title);
+  font-weight: 600;
+}
+.kwt-pm-foot-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.kwt-pm-feedback {
+  display: inline-flex;
+  gap: 4px;
+}
+.kwt-pm-fb {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--kwt-pm-fb-border);
+  background: transparent;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--kwt-pm-fb-text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.kwt-pm-fb:hover {
+  border-color: var(--kwt-pm-fb-border-hover);
+  color: var(--kwt-pm-title);
+}
+.kwt-pm-fb-good.kwt-on {
+  background: var(--kwt-accent);
+  color: #000;
+  border-color: var(--kwt-accent);
+}
+.kwt-pm-fb-bad.kwt-on {
+  background: #f4212e;
+  color: #fff;
+  border-color: #f4212e;
+}
+.kwt-pm-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: var(--kwt-pm-title);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  cursor: pointer;
+}
+.kwt-pm-view:hover {
+  color: var(--kwt-accent);
+}
+
+/* Status footer */
+.kwt-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid var(--kwt-x-border);
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--kwt-accent) 4%, transparent)
+  );
+}
+.kwt-status-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.kwt-status-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--kwt-x-text);
+  text-transform: uppercase;
+}
+.kwt-phase {
+  display: flex;
+  gap: 4px;
+}
+.kwt-phase-bar {
+  width: 22px;
+  height: 3px;
+  background: var(--kwt-x-border);
+  display: inline-block;
+  border-radius: 2px;
+  transition:
+    background 0.3s,
+    box-shadow 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+.kwt-phase-bar.kwt-on {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kwt-accent) 80%, white) 0%,
+    var(--kwt-accent) 60%,
+    color-mix(in srgb, var(--kwt-accent) 92%, black) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 0 8px color-mix(in srgb, var(--kwt-accent) 50%, transparent);
+}
+.kwt-phase-bar.kwt-done {
+  background: color-mix(in srgb, var(--kwt-accent) 50%, var(--kwt-x-border));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Responsive: below xl the card stacks under the hero text and renders 2
+   tweets (gated in TS). The card is hidden entirely below sm via the
+   wrapper's Tailwind classes, so no phone-specific rules are needed. */
+@media (max-width: 1279px) {
+  .kwt-root {
+    max-width: 560px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .kwt-feed {
+    max-height: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kwt-scan-beam,
+  .kwt-pulse.kwt-on {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    animation: none !important;
+  }
+  .kwt-pm-card,
+  .kwt-feed-item,
+  .kwt-hl::before {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    transition: none !important;
+  }
+  .kwt-card,
+  .kwt-pm-card,
+  .kwt-chrome {
+    /* biome-ignore lint/complexity/noImportantStyles: backdrop-filter is expensive on low-end */
+    backdrop-filter: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: ditto */
+    -webkit-backdrop-filter: none !important;
+  }
+}

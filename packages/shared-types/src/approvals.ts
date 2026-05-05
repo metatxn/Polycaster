@@ -276,8 +276,10 @@ export async function readTradingApprovalStatus(
     pusdCtf &&
     pusdCtfExchange &&
     pusdNegRiskExchange &&
+    pusdNegRiskAdapter &&
     ctfExchangeApproval &&
-    ctfNegRiskExchangeApproval;
+    ctfNegRiskExchangeApproval &&
+    ctfNegRiskAdapterApproval;
   const autoWrapApproved = usdcOnramp;
   const ctfOperationsApproved =
     pusdCtf &&
@@ -363,6 +365,8 @@ export function buildTradingApprovalTransactions(
     [status.pusdCtf, PUSD_CTF_APPROVAL_TARGET as Address],
     [status.pusdCtfExchange, CTF_EXCHANGE_ADDRESS as Address],
     [status.pusdNegRiskExchange, NEG_RISK_CTF_EXCHANGE_ADDRESS as Address],
+    // CLOB V2 pulls pUSD via the neg-risk adapter for neg-risk market orders.
+    [status.pusdNegRiskAdapter, NEG_RISK_ADAPTER_ADDRESS as Address],
   ];
   for (const [approved, spender] of pusdTargets) {
     if (!approved) {
@@ -392,6 +396,7 @@ export function buildTradingApprovalTransactions(
       status.ctfNegRiskExchangeApproval,
       NEG_RISK_CTF_EXCHANGE_ADDRESS as Address,
     ],
+    [status.ctfNegRiskAdapterApproval, NEG_RISK_ADAPTER_ADDRESS as Address],
   ];
   for (const [approved, operator] of ctfTargets) {
     if (!approved) {

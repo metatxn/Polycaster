@@ -417,58 +417,69 @@ function injectInlineStyles(): void {
 
       .knoww-outcome-btn {
         flex: 1 !important;
+        position: relative !important;
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
-        padding: 8px 12px !important;
-        border-radius: 9999px !important;
+        padding: 10px 14px !important;
+        border-radius: 10px !important;
         font-size: 14px !important;
         font-weight: 700 !important;
         cursor: pointer !important;
-        border: none !important;
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        background: rgba(255, 255, 255, 0.04) !important;
+        color: var(--knoww-text, rgb(231, 233, 234)) !important;
         transition: all 0.15s ease !important;
         min-width: 0 !important;
         overflow: hidden !important;
       }
 
-      .knoww-outcome-btn.yes {
-        background: rgba(0, 186, 124, 0.1) !important;
-        color: rgb(0, 186, 124) !important;
+      /* Probability fill — width tracks --knoww-pct set on the button */
+      .knoww-outcome-btn::before {
+        content: "" !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        bottom: 0 !important;
+        width: var(--knoww-pct, 0%) !important;
+        background: rgba(255, 255, 255, 0.06) !important;
+        pointer-events: none !important;
+        transition: width 0.3s ease, background 0.15s ease !important;
+        z-index: 0 !important;
       }
 
-      .knoww-outcome-btn.yes:hover {
-        background: rgba(0, 186, 124, 0.2) !important;
+      .knoww-outcome-btn.yes::before {
+        background: rgba(0, 186, 124, 0.28) !important;
+      }
+      .knoww-outcome-btn.yes:hover::before {
+        background: rgba(0, 186, 124, 0.4) !important;
       }
 
-      .knoww-outcome-btn.no {
-        background: rgba(249, 24, 128, 0.1) !important;
-        color: rgb(249, 24, 128) !important;
+      .knoww-outcome-btn.no::before {
+        background: rgba(249, 24, 128, 0.28) !important;
       }
-
-      .knoww-outcome-btn.no:hover {
-        background: rgba(249, 24, 128, 0.2) !important;
+      .knoww-outcome-btn.no:hover::before {
+        background: rgba(249, 24, 128, 0.4) !important;
       }
 
       /* Multi-outcome buttons (non Yes/No) */
-      .knoww-outcome-btn.option-1 {
-        background: rgba(41, 98, 255, 0.1) !important;
-        color: rgb(41, 98, 255) !important;
+      .knoww-outcome-btn.option-1::before {
+        background: rgba(0, 186, 124, 0.28) !important;
+      }
+      .knoww-outcome-btn.option-1:hover::before {
+        background: rgba(0, 186, 124, 0.4) !important;
       }
 
-      .knoww-outcome-btn.option-1:hover {
-        background: rgba(41, 98, 255, 0.2) !important;
+      .knoww-outcome-btn.option-2::before {
+        background: rgba(168, 132, 255, 0.32) !important;
       }
-
-      .knoww-outcome-btn.option-2 {
-        background: rgba(156, 39, 176, 0.1) !important;
-        color: rgb(156, 39, 176) !important;
-      }
-
-      .knoww-outcome-btn.option-2:hover {
-        background: rgba(156, 39, 176, 0.2) !important;
+      .knoww-outcome-btn.option-2:hover::before {
+        background: rgba(168, 132, 255, 0.44) !important;
       }
 
       .knoww-outcome-label {
+        position: relative !important;
+        z-index: 1 !important;
         font-weight: 700 !important;
         white-space: nowrap !important;
         overflow: hidden !important;
@@ -479,6 +490,8 @@ function injectInlineStyles(): void {
       }
 
       .knoww-outcome-price {
+        position: relative !important;
+        z-index: 1 !important;
         font-weight: 700 !important;
         flex-shrink: 0 !important;
         margin-left: 8px !important;

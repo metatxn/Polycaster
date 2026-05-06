@@ -11,6 +11,7 @@ import type {
   PolymarketTag,
   PolymarketTagsCache,
 } from "../types/market";
+import type { MarketLinkHint } from "../types/platform";
 import { KNOWW_CONFIG } from "./config";
 import { HIGH_SIGNAL_TOKENS } from "./scoring-policy";
 
@@ -37,6 +38,8 @@ const POLYMARKET_SEARCH_FAILURE_CACHE_TTL_MS = 30 * 1000;
 const POLYMARKET_SEARCH_MIN_INTERVAL_MS = 900;
 const POLYMARKET_SEARCH_CACHE_MAX_ENTRIES = 120;
 const POLYMARKET_EVENT_REFRESH_MIN_INTERVAL_MS = 8000;
+const POLYMARKET_DIRECT_LINK_CACHE_TTL_MS = 5 * 60 * 1000;
+const POLYMARKET_DIRECT_LINK_MAX_HINTS = 4;
 
 interface PolymarketSearchCacheEntry {
   markets: Market[];
@@ -54,6 +57,10 @@ const polymarketEventRefreshInFlight = new Map<
   Promise<Market | null>
 >();
 const polymarketEventLastRefreshStartedAt = new Map<string, number>();
+const polymarketDirectUrlCache = new Map<
+  string,
+  { value: string | null; expiresAt: number }
+>();
 
 // Memory optimization: Track cache size for cleanup decisions
 const CACHE_CLEANUP_THRESHOLD = 30 * 60 * 1000; // 30 minutes of inactivity
@@ -1211,9 +1218,20 @@ function buildKnowwPolymarketEventUrl(market: Market): string | null {
   const identifier = market.slug || market.id;
   if (!identifier) return null;
 
+  return buildKnowwPolymarketEventUrlByIdentifier(identifier);
+}
+
+function buildKnowwPolymarketEventUrlByIdentifier(identifier: string): string {
   const baseUrl = window.KNOWW_CONFIG.KNOWW_APP_URL || "https://knoww.app";
   const url = new URL(`/api/events/${encodeURIComponent(identifier)}`, baseUrl);
   url.searchParams.set("fresh", "1");
+  url.searchParams.set("source", "extension");
+  return url.toString();
+}
+
+function buildKnowwPolymarketMarketSlugUrl(slug: string): string {
+  const baseUrl = window.KNOWW_CONFIG.KNOWW_APP_URL || "https://knoww.app";
+  const url = new URL(`/api/markets/slug/${encodeURIComponent(slug)}`, baseUrl);
   url.searchParams.set("source", "extension");
   return url.toString();
 }
@@ -1229,6 +1247,53 @@ function parsePolymarketEventDetailPayload(payload: unknown): Market | null {
     "search"
   );
   return market ?? null;
+}
+
+function parsePolymarketMarketSlugPayload(payload: unknown): Market | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const wrapper = payload as { success?: unknown; market?: unknown };
+  if (wrapper.success === false || !wrapper.market) return null;
+  if (typeof wrapper.market !== "object" || wrapper.market === null) {
+    return null;
+  }
+
+  const raw = wrapper.market as Record<string, unknown>;
+  const rawSlug = typeof raw.slug === "string" ? raw.slug : "";
+  const id =
+    typeof raw.id === "string"
+      ? raw.id
+      : typeof raw.conditionId === "string"
+        ? raw.conditionId
+        : rawSlug;
+  const title =
+    typeof raw.question === "string"
+      ? raw.question
+      : typeof raw.groupItemTitle === "string"
+        ? raw.groupItemTitle
+        : rawSlug.replace(/-/g, " ");
+
+  if (!id || !title) return null;
+
+  const nestedMarket = raw as unknown as NonNullable<Market["markets"]>[number];
+  return {
+    ...raw,
+    id,
+    title,
+    slug: rawSlug || undefined,
+    source: "polymarket",
+    image: typeof raw.image === "string" ? raw.image : undefined,
+    active: raw.active !== false,
+    closed: raw.closed === true,
+    volume:
+      typeof raw.volume === "number"
+        ? raw.volume
+        : typeof raw.volume === "string"
+          ? Number(raw.volume)
+          : undefined,
+    volume24hr: typeof raw.volume24hr === "number" ? raw.volume24hr : undefined,
+    markets: [nestedMarket],
+  } as Market;
 }
 
 function enqueuePolymarketSearch<T>(task: () => Promise<T>): Promise<T> {
@@ -1458,6 +1523,283 @@ async function fetchPolymarketEventRefresh(
 
   polymarketEventRefreshInFlight.set(refreshKey, request);
   return request;
+}
+
+type PolymarketDirectLocation = {
+  kind: "event" | "market";
+  slug: string;
+  nestedMarketSlug?: string;
+};
+
+function parsePolymarketDirectLocation(
+  rawUrl: string
+): PolymarketDirectLocation | null {
+  try {
+    const url = new URL(rawUrl);
+    const host = url.hostname.toLowerCase();
+    if (host !== "polymarket.com" && !host.endsWith(".polymarket.com")) {
+      return null;
+    }
+
+    const segments = url.pathname
+      .split("/")
+      .map((segment) => decodeURIComponent(segment).trim())
+      .filter(Boolean);
+    const section = segments[0]?.toLowerCase();
+    const slug = segments[1];
+
+    if (!slug || !/^[a-z0-9-]+$/i.test(slug)) return null;
+    const nestedMarketSlug =
+      typeof segments[2] === "string" && /^[a-z0-9-]+$/i.test(segments[2])
+        ? segments[2]
+        : undefined;
+
+    if (section === "event" || section === "events") {
+      return { kind: "event", slug, nestedMarketSlug };
+    }
+    if (section === "market" || section === "markets") {
+      return { kind: "market", slug };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function readDirectUrlCache(key: string): string | null | undefined {
+  const cached = polymarketDirectUrlCache.get(key);
+  if (!cached) return undefined;
+  if (cached.expiresAt <= Date.now()) {
+    polymarketDirectUrlCache.delete(key);
+    return undefined;
+  }
+  return cached.value;
+}
+
+function writeDirectUrlCache(key: string, value: string | null): void {
+  polymarketDirectUrlCache.set(key, {
+    value,
+    expiresAt: Date.now() + POLYMARKET_DIRECT_LINK_CACHE_TTL_MS,
+  });
+
+  if (polymarketDirectUrlCache.size > POLYMARKET_SEARCH_CACHE_MAX_ENTRIES) {
+    const oldestKey = polymarketDirectUrlCache.keys().next().value;
+    if (oldestKey) polymarketDirectUrlCache.delete(oldestKey);
+  }
+}
+
+function findPolymarketUrlInText(text: string): string | null {
+  const match = text.match(/https:\/\/(?:www\.)?polymarket\.com\/[^\s"'<>]+/i);
+  return match?.[0] || null;
+}
+
+function normalizeDirectMarketTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[_]+/g, " blank ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getDirectMarketTitleScore(hintTitle: string, market: Market): number {
+  const hint = normalizeDirectMarketTitle(hintTitle);
+  const title = normalizeDirectMarketTitle(market.title || "");
+  if (!hint || !title) return 0;
+  if (hint === title) return 1;
+  if (hint.includes(title) || title.includes(hint)) return 0.95;
+
+  const hintTokens = new Set(
+    hint.split(" ").filter((token) => token.length > 2)
+  );
+  const titleTokens = new Set(
+    title.split(" ").filter((token) => token.length > 2)
+  );
+  if (hintTokens.size === 0 || titleTokens.size === 0) return 0;
+
+  let shared = 0;
+  for (const token of hintTokens) {
+    if (titleTokens.has(token)) shared++;
+  }
+
+  return shared / Math.max(hintTokens.size, titleTokens.size);
+}
+
+async function fetchDirectPolymarketMarketByTitle(
+  hintTitle: string
+): Promise<Market | null> {
+  const { log } = window.KNOWW_UTILS;
+  const normalizedHintTitle = normalizeDirectMarketTitle(hintTitle);
+  if (!normalizedHintTitle || normalizedHintTitle.length < 6) return null;
+
+  const searchResults = await searchPolymarketEvents(hintTitle, []);
+  const ranked = searchResults
+    .filter((market) => market.closed !== true && market.active !== false)
+    .map((market) => ({
+      market,
+      score: getDirectMarketTitleScore(hintTitle, market),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked[0];
+  if (!best || best.score < 0.6) {
+    log("Direct Polymarket title fallback found no strong match:", {
+      title: hintTitle.slice(0, 100),
+      bestScore: best?.score,
+      bestTitle: best?.market.title?.slice(0, 100),
+    });
+    return null;
+  }
+
+  log("Direct Polymarket title fallback matched:", {
+    title: hintTitle.slice(0, 100),
+    market: best.market.title?.slice(0, 100),
+    score: Number(best.score.toFixed(3)),
+  });
+
+  return best.market;
+}
+
+async function resolvePolymarketHintUrl(
+  hint: MarketLinkHint
+): Promise<string | null> {
+  const { log, safeSendMessage } = window.KNOWW_UTILS;
+  if (!hint.url) return null;
+
+  try {
+    const directLocation = parsePolymarketDirectLocation(hint.url);
+    if (directLocation) return hint.url;
+
+    const url = new URL(hint.url, window.location.origin);
+    const host = url.hostname.toLowerCase();
+    if (host !== "t.co") return null;
+
+    const cacheKey = url.toString();
+    const cached = readDirectUrlCache(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const response = await safeSendMessage({
+      type: "fetch-text",
+      url: cacheKey,
+    });
+
+    if (!response?.ok || !("text" in response)) {
+      writeDirectUrlCache(cacheKey, null);
+      return null;
+    }
+
+    const expandedUrl =
+      (typeof response.responseUrl === "string" &&
+      parsePolymarketDirectLocation(response.responseUrl)
+        ? response.responseUrl
+        : null) || findPolymarketUrlInText(response.text);
+    writeDirectUrlCache(cacheKey, expandedUrl);
+    return expandedUrl;
+  } catch (error) {
+    log("Failed to resolve Polymarket link hint:", error);
+    return null;
+  }
+}
+
+async function fetchDirectPolymarketMarket(
+  location: PolymarketDirectLocation
+): Promise<Market | null> {
+  const { safeSendMessage } = window.KNOWW_UTILS;
+
+  const fetchJson = async (url: string) => {
+    return safeSendMessage({
+      type: "fetch-json",
+      method: "GET",
+      url,
+    });
+  };
+
+  if (location.kind === "event") {
+    if (location.nestedMarketSlug) {
+      const nestedMarketResponse = await fetchJson(
+        buildKnowwPolymarketMarketSlugUrl(location.nestedMarketSlug)
+      );
+      if (nestedMarketResponse?.ok && "data" in nestedMarketResponse) {
+        const market = parsePolymarketMarketSlugPayload(
+          nestedMarketResponse.data
+        );
+        if (market) return market;
+      }
+    }
+
+    const eventResponse = await fetchJson(
+      buildKnowwPolymarketEventUrlByIdentifier(location.slug)
+    );
+    if (eventResponse?.ok && "data" in eventResponse) {
+      const market = parsePolymarketEventDetailPayload(eventResponse.data);
+      if (market) return market;
+    }
+
+    const marketResponse = await fetchJson(
+      buildKnowwPolymarketMarketSlugUrl(location.slug)
+    );
+    if (marketResponse?.ok && "data" in marketResponse) {
+      return parsePolymarketMarketSlugPayload(marketResponse.data);
+    }
+    return null;
+  }
+
+  const marketResponse = await fetchJson(
+    buildKnowwPolymarketMarketSlugUrl(location.slug)
+  );
+  if (marketResponse?.ok && "data" in marketResponse) {
+    const market = parsePolymarketMarketSlugPayload(marketResponse.data);
+    if (market) return market;
+  }
+
+  const eventResponse = await fetchJson(
+    buildKnowwPolymarketEventUrlByIdentifier(location.slug)
+  );
+  if (eventResponse?.ok && "data" in eventResponse) {
+    return parsePolymarketEventDetailPayload(eventResponse.data);
+  }
+  return null;
+}
+
+async function resolvePolymarketMarketsFromHints(
+  hints: MarketLinkHint[]
+): Promise<Market[]> {
+  const { log } = window.KNOWW_UTILS;
+  const directMarkets: Market[] = [];
+  const seen = new Set<string>();
+
+  for (const hint of hints.slice(0, POLYMARKET_DIRECT_LINK_MAX_HINTS)) {
+    if (hint.source !== "polymarket") continue;
+
+    const resolvedUrl = await resolvePolymarketHintUrl(hint);
+    const location = resolvedUrl
+      ? parsePolymarketDirectLocation(resolvedUrl)
+      : null;
+    let market = location ? await fetchDirectPolymarketMarket(location) : null;
+
+    if (!market && hint.title) {
+      market = await fetchDirectPolymarketMarketByTitle(hint.title);
+    }
+
+    if (!market || market.closed === true || market.active === false) continue;
+
+    const key = market.id || market.slug || market.title;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+
+    market._contextReason = "Direct Polymarket link";
+    directMarkets.push(market);
+  }
+
+  if (directMarkets.length > 0) {
+    log(
+      "Resolved direct Polymarket link(s):",
+      directMarkets.map((market) => market.title?.slice(0, 80))
+    );
+  }
+
+  return directMarkets;
 }
 
 /**
@@ -2183,6 +2525,7 @@ const KNOWW_API_BASE = {
   // Search functions
   searchPolymarketEvents,
   fetchPolymarketEventRefresh,
+  resolvePolymarketMarketsFromHints,
   searchAllMarkets,
   // Scoring
   calculateRelevanceScore,

@@ -6,10 +6,15 @@
 import type {
   CardStyles,
   InjectionPoint,
+  MarketLinkHint,
   ThemeStyles,
 } from "../../types/platform";
 import { registerAdapterWithRetry } from "../platform-registry";
 import { createBasicAdapter } from "./basic-adapter";
+
+const POLYMARKET_HOST_RE = /(^|\.)polymarket\.com$/i;
+const POLYMARKET_TEXT_RE = /\bpolymarket\.com\b/i;
+const POLYMARKET_FROM_RE = /\bfrom\s+polymarket\.com\b/gi;
 
 function isTwitterTheme(
   theme: string | undefined
@@ -177,6 +182,126 @@ function findTwitterSidebarInjectionPoint(): {
   }
 }
 
+function getUrlHost(rawUrl: string): string {
+  try {
+    return new URL(rawUrl, window.location.origin).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function isPolymarketUrl(rawUrl: string | undefined): boolean {
+  if (!rawUrl) return false;
+  return POLYMARKET_HOST_RE.test(getUrlHost(rawUrl));
+}
+
+function getAnchorSignalText(anchor: HTMLAnchorElement): string {
+  const parts = [
+    anchor.textContent || "",
+    anchor.getAttribute("aria-label") || "",
+    anchor.getAttribute("title") || "",
+    anchor.getAttribute("data-expanded-url") || "",
+    anchor.getAttribute("data-url") || "",
+    anchor.getAttribute("href") || "",
+  ];
+
+  for (const attr of Array.from(anchor.attributes || [])) {
+    if (/url|href|expanded|title|label/i.test(attr.name)) {
+      parts.push(attr.value);
+    }
+  }
+
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function getSlugTitleFromPolymarketUrl(rawUrl: string | undefined): string {
+  if (!rawUrl || !isPolymarketUrl(rawUrl)) return "";
+
+  try {
+    const url = new URL(rawUrl, window.location.origin);
+    const segments = url.pathname
+      .split("/")
+      .map((segment) => decodeURIComponent(segment).trim())
+      .filter(Boolean);
+    let slug = "";
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (segments[i] !== "event" && segments[i] !== "events") {
+        slug = segments[i];
+        break;
+      }
+    }
+    if (!slug || !/^[a-z0-9-]+$/i.test(slug)) return "";
+    return slug.replace(/-/g, " ");
+  } catch {
+    return "";
+  }
+}
+
+function cleanPolymarketPreviewTitle(text: string): string {
+  return text
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(POLYMARKET_FROM_RE, " ")
+    .replace(POLYMARKET_TEXT_RE, " ")
+    .replace(/\bShow more\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTwitterMarketLinkHints(postElement: Element): MarketLinkHint[] {
+  const hints: MarketLinkHint[] = [];
+  const seen = new Set<string>();
+  const anchors = Array.from(
+    postElement.querySelectorAll<HTMLAnchorElement>("a[href]")
+  );
+
+  for (const anchor of anchors) {
+    const href = anchor.href || anchor.getAttribute("href") || "";
+    const signalText = getAnchorSignalText(anchor);
+    const hasPolymarketSignal =
+      isPolymarketUrl(href) || POLYMARKET_TEXT_RE.test(signalText);
+
+    if (!hasPolymarketSignal) continue;
+
+    const title =
+      cleanPolymarketPreviewTitle(signalText) ||
+      getSlugTitleFromPolymarketUrl(href);
+    const key = JSON.stringify([href, title]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    hints.push({
+      source: "polymarket",
+      url: href || undefined,
+      title: title || undefined,
+    });
+
+    if (hints.length >= 4) break;
+  }
+
+  return hints;
+}
+
+function extractTwitterPostText(postElement: Element): string {
+  try {
+    const tweetTextEl = postElement.querySelector(
+      'div[data-testid="tweetText"]'
+    );
+    const tweetText = (tweetTextEl?.textContent || "").trim();
+    const linkHintText = extractTwitterMarketLinkHints(postElement)
+      .flatMap((hint) => [hint.title, getSlugTitleFromPolymarketUrl(hint.url)])
+      .filter((part): part is string => !!part && part.length > 2)
+      .join(" ");
+
+    return [tweetText, linkHintText]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
 const TwitterAdapter = createBasicAdapter({
   name: "twitter",
   hostPatterns: [/^(www\.)?twitter\.com$/, /^(www\.)?x\.com$/],
@@ -191,17 +316,8 @@ const TwitterAdapter = createBasicAdapter({
   fontFamily:
     '"TwitterChirp", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   borderRadius: "16px",
-  extractPostText(postElement: Element): string {
-    try {
-      const tweetTextEl = postElement.querySelector(
-        'div[data-testid="tweetText"]'
-      );
-      if (!tweetTextEl) return "";
-      return (tweetTextEl.textContent || "").trim();
-    } catch {
-      return "";
-    }
-  },
+  extractPostText: extractTwitterPostText,
+  extractMarketLinkHints: extractTwitterMarketLinkHints,
   findInjectionPoint: findTwitterInjectionPoint,
   detectTheme: detectTwitterTheme,
   getCardStyles: getTwitterCardStyles,
@@ -239,4 +355,8 @@ window.KNOWW_TWITTER = TwitterAdapter;
 
 registerAdapterWithRetry(TwitterAdapter, 100, 50);
 
-export { TwitterAdapter };
+export {
+  extractTwitterMarketLinkHints,
+  extractTwitterPostText,
+  TwitterAdapter,
+};

@@ -79,6 +79,8 @@ const ALLOWED_DOMAINS = [
   "gamma-api.polymarket.com",
   "api.elections.kalshi.com",
   "knoww.app",
+  "polymarket.com",
+  "t.co",
   "clob.polymarket.com",
   "data-api.polymarket.com",
   "polygon-bor-rpc.publicnode.com",
@@ -109,6 +111,24 @@ function isAllowedUrl(urlString: string): { valid: boolean; error?: string } {
     return { valid: true };
   } catch {
     return { valid: false, error: `Invalid URL format: ${urlString}` };
+  }
+}
+
+function isAllowedRedirect(
+  originalUrlString: string,
+  responseUrlString: string
+): boolean {
+  try {
+    const originalUrl = new URL(originalUrlString);
+    if (originalUrl.hostname.toLowerCase() !== "t.co") return true;
+
+    const responseUrl = new URL(responseUrlString);
+    const hostname = responseUrl.hostname.toLowerCase();
+    return (
+      hostname === "polymarket.com" || hostname.endsWith(".polymarket.com")
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -542,8 +562,21 @@ chrome.runtime.onMessage.addListener(
             signal: controller.signal,
           });
           clearTimeout(timeoutId);
+          if (!isAllowedRedirect(message.url, res.url)) {
+            sendResponse({
+              ok: false,
+              status: res.status,
+              error: "Security: t.co redirect target is not allowed",
+            });
+            return;
+          }
           const text = await res.text();
-          sendResponse({ ok: true, status: res.status, text });
+          sendResponse({
+            ok: true,
+            status: res.status,
+            text,
+            responseUrl: res.url,
+          });
         } catch (e) {
           clearTimeout(timeoutId);
           sendResponse({
@@ -641,13 +674,26 @@ chrome.runtime.onMessage.addListener(
 
           const res = await fetch(message.url, options);
           clearTimeout(timeoutId);
+          if (!isAllowedRedirect(message.url, res.url)) {
+            sendResponse({
+              ok: false,
+              status: res.status,
+              error: "Security: t.co redirect target is not allowed",
+            });
+            return;
+          }
           if (res.status === 401 && isKnowwApiUrl(message.url)) {
             await clearExtensionAccessToken();
           }
           const text = await res.text();
           try {
             const data = JSON.parse(text);
-            sendResponse({ ok: true, status: res.status, data });
+            sendResponse({
+              ok: true,
+              status: res.status,
+              data,
+              responseUrl: res.url,
+            });
           } catch {
             sendResponse({
               ok: false,

@@ -20,7 +20,10 @@ import {
   getGtdExpirationTimestamp,
   ORDER_EXPIRATION_PRESETS,
 } from "@knoww/shared-types/orders";
-import { POLYGON_CHAIN_ID_HEX } from "@knoww/shared-types/polymarket";
+import {
+  POLYGON_CHAIN_ID_HEX,
+  SHOW_EOA_OPTION,
+} from "@knoww/shared-types/polymarket";
 import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
 import {
   estimateFallbackFeeRaw,
@@ -1332,24 +1335,12 @@ function formatTradingPanelErrorMessage(
 }
 
 function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
-  const wrap = el("div", "knoww-tp-wallet-mode");
-  const title = el("div", "knoww-tp-wallet-mode-title", "Trading wallet");
-  wrap.appendChild(title);
-
-  const options = el("div", "knoww-tp-wallet-mode-options");
   const showLegacySafe = ctx.legacySafeAvailable || ctx.walletMode === "safe";
-  if (!showLegacySafe) options.classList.add("no-safe");
   const modes: Array<{
     mode: TradingContext["walletMode"];
     label: string;
     desc: string;
   }> = [];
-
-  modes.push({
-    mode: "deposit",
-    label: "Deposit Wallet",
-    desc: "New Polymarket wallet for gasless setup and trading.",
-  });
 
   if (showLegacySafe) {
     modes.push({
@@ -1357,13 +1348,41 @@ function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
       label: "Safe",
       desc: "Legacy Polymarket Safe wallet.",
     });
+  } else {
+    modes.push({
+      mode: "deposit",
+      label: "Deposit Wallet",
+      desc: "New Polymarket wallet for gasless setup and trading.",
+    });
   }
 
-  modes.push({
-    mode: "eoa",
-    label: "EOA",
-    desc: "Trade directly from this wallet. Requires POL for gas.",
-  });
+  if (SHOW_EOA_OPTION) {
+    modes.push({
+      mode: "eoa",
+      label: "EOA",
+      desc: "Trade directly from this wallet. Requires POL for gas.",
+    });
+  }
+
+  if (modes.length === 1) {
+    const onlyMode = modes[0];
+    const statusLabel =
+      onlyMode.mode === "safe" ? "Safe Wallet" : "Deposit Wallet";
+    const status = el(
+      "div",
+      "knoww-tp-wallet-mode-status",
+      `Using ${statusLabel}`
+    );
+    p.appendChild(status);
+    return;
+  }
+
+  const wrap = el("div", "knoww-tp-wallet-mode");
+  const title = el("div", "knoww-tp-wallet-mode-title", "Trading wallet");
+  wrap.appendChild(title);
+
+  const options = el("div", "knoww-tp-wallet-mode-options");
+  if (!showLegacySafe) options.classList.add("no-safe");
 
   for (const item of modes) {
     const btn = el(

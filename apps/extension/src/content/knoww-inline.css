@@ -3578,13 +3578,19 @@
   font-family: inherit !important;
 }
 
-.knoww-tp-wallet-mode-option:first-child {
+.knoww-tp-wallet-mode-option:first-child:nth-last-child(3) {
   grid-column: 1 / -1 !important;
 }
 
-.knoww-tp-wallet-mode-options.no-safe
-  .knoww-tp-wallet-mode-option:last-child:not(:first-child) {
-  grid-column: 1 / -1 !important;
+.knoww-tp-wallet-mode-status {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  text-align: center !important;
+  padding: 10px 0 !important;
+  font-family: inherit !important;
 }
 
 .knoww-tp-wallet-mode-option.active {

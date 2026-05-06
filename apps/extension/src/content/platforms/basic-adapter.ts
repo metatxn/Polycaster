@@ -24,6 +24,7 @@ export interface BasicAdapterConfig {
   itemSelectors: string[];
   containerSelectors: string[];
   textSelectors: string[];
+  extractMarketLinkHints?: PlatformAdapter["extractMarketLinkHints"];
   contextSelectors?: string[];
   referenceSelectors?: string[];
   beforeSelectors?: string[];
@@ -110,6 +111,9 @@ export function createBasicAdapter(
       ];
 
       return combineTextParts(parts);
+    },
+    extractMarketLinkHints(postElement: Element) {
+      return config.extractMarketLinkHints?.(postElement) || [];
     },
     findInjectionPoint(postElement: Element): InjectionPoint | null {
       if (config.findInjectionPoint) {

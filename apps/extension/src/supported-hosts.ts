@@ -206,6 +206,7 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
  */
 export const API_HOST_PERMISSIONS: string[] = [
   // Polymarket APIs
+  "https://polymarket.com/*",
   "https://gamma-api.polymarket.com/*",
   "https://clob.polymarket.com/*",
   "https://data-api.polymarket.com/*",
@@ -227,6 +228,10 @@ export const API_HOST_PERMISSIONS: string[] = [
 
   // Knoww backend
   "https://knoww.app/*",
+
+  // X/Twitter short links. The content script only follows links that X has
+  // rendered as Polymarket previews.
+  "https://t.co/*",
 
   // HuggingFace model downloads (embedding model ONNX weights)
   "https://huggingface.co/*",

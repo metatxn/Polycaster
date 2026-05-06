@@ -937,8 +937,12 @@ async function analyzePostAndFindMarket(
   post: Element
 ): Promise<AnalysisResult | null> {
   const { log, isEnglishText, extractPostText } = window.KNOWW_UTILS;
-  const { extractSearchKeywords, searchAllMarkets, calculateRelevanceScore } =
-    window.KNOWW_API;
+  const {
+    extractSearchKeywords,
+    searchAllMarkets,
+    calculateRelevanceScore,
+    resolvePolymarketMarketsFromHints,
+  } = window.KNOWW_API;
   const { CONFIG, ENABLED_SOURCES } = window.KNOWW_CONFIG;
   const currentPlatform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
   const isDebug =
@@ -946,15 +950,40 @@ async function analyzePostAndFindMarket(
     window.KNOWW_CONFIG?.DEV_MODE ??
     false;
 
-  const text = extractPostText(post);
+  const extractedText = extractPostText(post);
+  const linkHints =
+    currentPlatform
+      ?.extractMarketLinkHints?.(post)
+      ?.filter((hint) => hint.source === "polymarket") || [];
+  const directMarkets =
+    linkHints.length > 0
+      ? await resolvePolymarketMarketsFromHints(linkHints)
+      : [];
+  const directMarketText = directMarkets
+    .map((market) => market.title)
+    .filter(Boolean)
+    .join(" ");
+  const hintText = linkHints
+    .map((hint) => hint.title)
+    .filter(Boolean)
+    .join(" ");
+  const text = [extractedText, directMarketText, hintText]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
   const postKey = getPostIdentityKey(post) ?? undefined;
 
-  if (!text || text.length < 20) {
+  if ((!text || text.length < 20) && directMarkets.length === 0) {
     log("Post text too short:", text?.slice(0, 30));
     return null;
   }
 
-  if (!currentPlatform?.bypassEnglishCheck && !isEnglishText(text)) {
+  if (
+    directMarkets.length === 0 &&
+    !currentPlatform?.bypassEnglishCheck &&
+    !isEnglishText(text)
+  ) {
     log("Skipping non-English post:", `${text.slice(0, 50)}...`);
     return null;
   }
@@ -965,7 +994,11 @@ async function analyzePostAndFindMarket(
 
   const result = await extractSearchKeywords(text);
 
-  if (!result.keywords?.trim() && result.matchedTags.length === 0) {
+  if (
+    !result.keywords?.trim() &&
+    result.matchedTags.length === 0 &&
+    directMarkets.length === 0
+  ) {
     log("No keywords or tags extracted from post");
     return null;
   }
@@ -977,8 +1010,21 @@ async function analyzePostAndFindMarket(
     });
   }
 
-  // Search ALL enabled sources (Polymarket + Kalshi)
-  const markets = await searchAllMarkets(result.keywords, result.matchedTags);
+  // Search ALL enabled sources (Polymarket + Kalshi), then prepend exact
+  // markets from direct Polymarket link cards.
+  const searchedMarkets =
+    result.keywords?.trim() || result.matchedTags.length > 0
+      ? await searchAllMarkets(result.keywords, result.matchedTags)
+      : [];
+  const directMarketIds = new Set(directMarkets.map((market) => market.id));
+  const markets: Market[] = [];
+  const seenMarkets = new Set<string>();
+  for (const market of [...directMarkets, ...searchedMarkets]) {
+    const key = market.id || market.slug || market.title;
+    if (!key || seenMarkets.has(key)) continue;
+    seenMarkets.add(key);
+    markets.push(market);
+  }
 
   if (markets.length === 0) {
     log("No markets found for this post from any source");
@@ -1252,17 +1298,35 @@ async function analyzePostAndFindMarket(
       continue;
     }
 
-    const score = marketScores[i];
+    const isDirectPolymarketLink = directMarketIds.has(market.id);
+    const score = isDirectPolymarketLink
+      ? Math.max(marketScores[i] ?? 0, 0.99)
+      : (marketScores[i] ?? 0);
 
-    const gateDecision = evaluateCandidateGate({
-      postText: text,
-      market,
-      matchedTags: result.matchedTags,
-      scoringMode,
-      score,
-      gate: contextGateResults[i],
-      relaxed: currentPlatform?.relaxContextGate === true,
-    });
+    const gateDecision = isDirectPolymarketLink
+      ? ({
+          pass: true,
+          gate: {
+            pass: true,
+            sharedNouns: 0,
+            meaningfulNouns: 0,
+            sharedEntities: 0,
+            details: "direct-polymarket-link",
+          },
+          recoveryGate: undefined,
+          retryEligible: false,
+          usedFallbackGate: false,
+          usedRecoveryGate: false,
+        } as const)
+      : evaluateCandidateGate({
+          postText: text,
+          market,
+          matchedTags: result.matchedTags,
+          scoringMode,
+          score,
+          gate: contextGateResults[i],
+          relaxed: currentPlatform?.relaxContextGate === true,
+        });
     const gate = gateDecision.gate;
     const signals = (gate.meaningfulNouns || 0) + (gate.sharedEntities || 0);
     const gateReason =
@@ -1357,6 +1421,10 @@ async function analyzePostAndFindMarket(
       market._contextReason = topicHint
         ? `${pct}% match · ${topicHint}`
         : `${pct}% match`;
+    }
+
+    if (isDirectPolymarketLink) {
+      market._contextReason = "Direct Polymarket link";
     }
 
     const existingCandidate = candidateMarketsById.get(market.id);

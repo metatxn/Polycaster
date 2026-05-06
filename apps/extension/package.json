@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.26",
+  "version": "2.5.27",
   "private": true,
   "scripts": {
     "build": "webpack --mode production && node scripts/assert-production-bundle.mjs",

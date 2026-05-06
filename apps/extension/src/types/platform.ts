@@ -44,6 +44,12 @@ export interface CardStyles {
   [key: string]: string; // Index signature for Record<string, unknown> compatibility
 }
 
+export interface MarketLinkHint {
+  source: "polymarket";
+  url?: string;
+  title?: string;
+}
+
 /**
  * Platform Adapter Interface
  */
@@ -79,6 +85,7 @@ export interface PlatformAdapter {
     text?: string;
   };
   extractPostText: (post: Element) => string;
+  extractMarketLinkHints?: (post: Element) => MarketLinkHint[];
   findInjectionPoint: (post: Element) => InjectionPoint | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getCardStyles?: (theme?: string) => any;

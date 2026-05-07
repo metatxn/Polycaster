@@ -1,6 +1,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
+import { SHOW_EOA_OPTION } from "@knoww/shared-types/polymarket";
 import { formatTradingOnboardingError } from "@knoww/shared-types/trading-errors";
 import { useAppKit } from "@reown/appkit/react";
 import Decimal from "decimal.js";
@@ -81,6 +82,15 @@ export function TradingOnboarding({
     relayerProxyAddress ||
     (proxyWalletMode === walletMode ? computedProxyAddress : null);
   const showLegacySafeOption = walletMode === "safe" || hasLegacySafe;
+  const showDepositOption = !showLegacySafeOption;
+  const visibleWalletOptionCount =
+    (showDepositOption ? 1 : 0) +
+    (showLegacySafeOption ? 1 : 0) +
+    (SHOW_EOA_OPTION ? 1 : 0);
+  const isSingleWalletOption = visibleWalletOptionCount === 1;
+  const singleWalletLabel = showLegacySafeOption
+    ? "Safe Wallet"
+    : "Deposit Wallet";
 
   // Track if USDC is already approved (for returning users)
   const [hasUsdcApproval, setHasUsdcApproval] = useState<boolean | null>(null);
@@ -566,67 +576,79 @@ export function TradingOnboarding({
             : "Complete these once to start trading on Polymarket."}
         </p>
 
-        {!allStepsComplete && (
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setWalletMode("deposit")}
-              className={cn(
-                "border px-3 py-3 text-left transition-colors",
-                showLegacySafeOption && "col-span-2",
-                walletMode === "deposit"
-                  ? "border-foreground bg-foreground/5"
-                  : "border-border/60 hover:border-foreground/40"
+        {!allStepsComplete &&
+          (isSingleWalletOption ? (
+            <div className="mt-5 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">
+              <Shield className="h-3.5 w-3.5" />
+              <span>
+                Using{" "}
+                <span className="text-foreground">{singleWalletLabel}</span>
+              </span>
+            </div>
+          ) : (
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              {showDepositOption && (
+                <button
+                  type="button"
+                  onClick={() => setWalletMode("deposit")}
+                  className={cn(
+                    "border px-3 py-3 text-left transition-colors",
+                    walletMode === "deposit"
+                      ? "border-foreground bg-foreground/5"
+                      : "border-border/60 hover:border-foreground/40"
+                  )}
+                >
+                  <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                    <Shield className="h-3.5 w-3.5" />
+                    Deposit Wallet
+                  </span>
+                  <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                    Gasless deposit wallet. Best for most users.
+                  </span>
+                </button>
               )}
-            >
-              <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
-                <Shield className="h-3.5 w-3.5" />
-                Deposit Wallet
-              </span>
-              <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
-                Gasless deposit wallet. Best for most users.
-              </span>
-            </button>
-            {showLegacySafeOption && (
-              <button
-                type="button"
-                onClick={() => setWalletMode("safe")}
-                className={cn(
-                  "border px-3 py-3 text-left transition-colors",
-                  walletMode === "safe"
-                    ? "border-foreground bg-foreground/5"
-                    : "border-border/60 hover:border-foreground/40"
-                )}
-              >
-                <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
-                  <Shield className="h-3.5 w-3.5" />
-                  Safe
-                </span>
-                <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
-                  Existing gasless smart wallet.
-                </span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setWalletMode("eoa")}
-              className={cn(
-                "border px-3 py-3 text-left transition-colors",
-                walletMode === "eoa"
-                  ? "border-foreground bg-foreground/5"
-                  : "border-border/60 hover:border-foreground/40"
+              {showLegacySafeOption && (
+                <button
+                  type="button"
+                  onClick={() => setWalletMode("safe")}
+                  className={cn(
+                    "border px-3 py-3 text-left transition-colors",
+                    walletMode === "safe"
+                      ? "border-foreground bg-foreground/5"
+                      : "border-border/60 hover:border-foreground/40"
+                  )}
+                >
+                  <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                    <Shield className="h-3.5 w-3.5" />
+                    Safe
+                  </span>
+                  <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                    Existing gasless smart wallet.
+                  </span>
+                </button>
               )}
-            >
-              <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
-                <Wallet className="h-3.5 w-3.5" />
-                EOA
-              </span>
-              <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
-                Trade from this wallet. You pay Polygon gas.
-              </span>
-            </button>
-          </div>
-        )}
+              {SHOW_EOA_OPTION && (
+                <button
+                  type="button"
+                  onClick={() => setWalletMode("eoa")}
+                  className={cn(
+                    "border px-3 py-3 text-left transition-colors",
+                    walletMode === "eoa"
+                      ? "border-foreground bg-foreground/5"
+                      : "border-border/60 hover:border-foreground/40"
+                  )}
+                >
+                  <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] font-semibold text-foreground">
+                    <Wallet className="h-3.5 w-3.5" />
+                    EOA
+                  </span>
+                  <span className="mt-1.5 block text-[11px] leading-relaxed text-muted-foreground">
+                    Trade from this wallet. You pay Polygon gas.
+                  </span>
+                </button>
+              )}
+            </div>
+          ))}
 
         {/* Hairline progress track with checkpoints */}
         <div className="pt-6">

@@ -247,12 +247,14 @@ export interface FetchTextSuccessResponse {
   ok: true;
   status: number;
   text: string;
+  responseUrl?: string;
 }
 
 export interface FetchJsonSuccessResponse {
   ok: true;
   status: number;
   data: unknown;
+  responseUrl?: string;
 }
 
 export interface FetchErrorResponse {

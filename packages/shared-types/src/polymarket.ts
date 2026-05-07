@@ -45,6 +45,8 @@ export const TRADING_WALLET_MODES = {
   EOA: "eoa",
 } as const;
 
+export const SHOW_EOA_OPTION = false;
+
 export type ClobOrderType =
   (typeof CLOB_ORDER_TYPES)[keyof typeof CLOB_ORDER_TYPES];
 export type TradingSide = (typeof TRADING_SIDES)[keyof typeof TRADING_SIDES];
@@ -344,8 +346,8 @@ export function findGammaOutcomeIndex(
   label: string
 ): number {
   const normalizedLabel = label.toLowerCase();
-  return outcomes.findIndex((outcome) =>
-    outcome.toLowerCase().includes(normalizedLabel)
+  return outcomes.findIndex(
+    (outcome) => outcome.toLowerCase() === normalizedLabel
   );
 }
 

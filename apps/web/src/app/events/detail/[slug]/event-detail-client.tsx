@@ -37,6 +37,7 @@ import { usePriceAlertDetection } from "@/hooks/use-price-alerts";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
 import { type Position, useUserPositions } from "@/hooks/use-user-positions";
+import { ensureReadableSeriesColors } from "@/lib/chart-colors";
 import { formatVolume } from "@/lib/formatters";
 import { getMarketShortLabel } from "@/lib/market-labels";
 import { SPORT_GROUPS } from "@/lib/sport-categories";
@@ -1441,6 +1442,14 @@ export default function EventDetailClient({
     "hsl(340, 82%, 52%)", // Rose
   ];
   const topChartMarkets = sortedMarketData.slice(0, 5);
+  const matchupChartColors = ensureReadableSeriesColors(
+    [
+      event.teams?.[0]?.color || CANDIDATE_PALETTE[0],
+      "hsl(35, 92%, 50%)",
+      event.teams?.[1]?.color || CANDIDATE_PALETTE[1],
+    ],
+    CANDIDATE_PALETTE
+  );
 
   // Sports matchup detection — gated strictly on `event.teams` so non-sports
   // events fall through to the existing single/multi-candidate behavior.
@@ -1506,11 +1515,11 @@ export default function EventDetailClient({
             name: matchupMoneylineLabel(market.groupItemTitle, matchupTeams),
             color:
               rank === 0
-                ? event.teams?.[0]?.color || CANDIDATE_PALETTE[0]
+                ? matchupChartColors[0]
                 : rank === 1
-                  ? "hsl(35, 92%, 50%)"
+                  ? matchupChartColors[1]
                   : rank === 2
-                    ? event.teams?.[1]?.color || CANDIDATE_PALETTE[1]
+                    ? matchupChartColors[2]
                     : CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length],
           };
         })
@@ -1520,12 +1529,12 @@ export default function EventDetailClient({
             name: event.teams?.[0]?.name.trim() ?? "Team A",
             // Use team brand color when available; fall back to the palette so
             // we never render a transparent line if upstream data is missing.
-            color: event.teams?.[0]?.color || CANDIDATE_PALETTE[0],
+            color: matchupChartColors[0],
           },
           {
             tokenId: moneylineMarket?.noTokenId || "",
             name: event.teams?.[1]?.name.trim() ?? "Team B",
-            color: event.teams?.[1]?.color || CANDIDATE_PALETTE[1],
+            color: matchupChartColors[2],
           },
         ]
     : isSingleMarketEvent
@@ -1584,11 +1593,17 @@ export default function EventDetailClient({
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
           <button
             type="button"
-            onClick={() => router.push("/markets")}
+            onClick={() => {
+              if (typeof window !== "undefined" && window.history.length > 1) {
+                router.back();
+              } else {
+                router.push("/markets");
+              }
+            }}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />
-            <span>All Markets</span>
+            <span>Back</span>
           </button>
           <span>/</span>
           <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">

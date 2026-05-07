@@ -203,6 +203,9 @@ declare global {
         matchedTags?: string[]
       ) => Promise<Market[]>;
       fetchPolymarketEventRefresh: (market: Market) => Promise<Market | null>;
+      resolvePolymarketMarketsFromHints: (
+        hints: import("./platform").MarketLinkHint[]
+      ) => Promise<Market[]>;
       searchAllMarkets: (
         query: string,
         matchedTags?: string[]

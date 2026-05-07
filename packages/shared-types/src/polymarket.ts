@@ -346,8 +346,8 @@ export function findGammaOutcomeIndex(
   label: string
 ): number {
   const normalizedLabel = label.toLowerCase();
-  return outcomes.findIndex((outcome) =>
-    outcome.toLowerCase().includes(normalizedLabel)
+  return outcomes.findIndex(
+    (outcome) => outcome.toLowerCase() === normalizedLabel
   );
 }
 

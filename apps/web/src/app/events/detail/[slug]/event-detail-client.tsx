@@ -1593,11 +1593,17 @@ export default function EventDetailClient({
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
           <button
             type="button"
-            onClick={() => router.push("/markets")}
+            onClick={() => {
+              if (typeof window !== "undefined" && window.history.length > 1) {
+                router.back();
+              } else {
+                router.push("/markets");
+              }
+            }}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />
-            <span>All Markets</span>
+            <span>Back</span>
           </button>
           <span>/</span>
           <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">

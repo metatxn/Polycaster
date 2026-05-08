@@ -15,3 +15,11 @@ declare module "node:test" {
 
   export default test;
 }
+
+declare module "node:module" {
+  const Module: {
+    _load(request: string, parent: unknown, isMain: boolean): unknown;
+  };
+
+  export default Module;
+}

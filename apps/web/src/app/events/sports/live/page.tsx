@@ -36,6 +36,10 @@ import {
 } from "@/hooks/use-sports-websocket";
 import { SPORT_GROUPS } from "@/lib/sport-categories";
 import { getSportRailOpenGroupSlugsFromEvents } from "@/lib/sport-rail-open-groups";
+import {
+  getInitialCompanionMarketSlugs,
+  shouldFetchScheduledSportsFallback,
+} from "@/lib/sports-live-request-plan";
 
 const TradingForm = dynamic(
   () =>
@@ -70,7 +74,9 @@ interface EventWithDates {
   }>;
 }
 
-const MAX_COMPANION_MARKET_FETCHES = 16;
+const MAX_INITIAL_COMPANION_MARKET_FETCHES = 0;
+const AUTO_SELECT_INITIAL_MARKET = false;
+const LIVE_MARKET_REFETCH_INTERVAL_MS = 30_000;
 const RECENTLY_STARTED_EVENT_WINDOW_MS = 8 * 60 * 60 * 1000;
 
 // ── Event-to-game matching ──────────────────────────────────────────
@@ -210,32 +216,6 @@ function parseStringArray(input?: string): string[] {
   }
 }
 
-function needsCompanionMarkets(event: EventWithDates): boolean {
-  if (
-    !event.slug ||
-    event.title.toLowerCase().includes("more markets") ||
-    !event.slug.match(/-\d{4}-\d{2}-\d{2}$/)
-  ) {
-    return false;
-  }
-
-  const markets = event.markets ?? [];
-  if (markets.length === 0) return false;
-
-  const hasSpreadOrTotal = markets.some((market) => {
-    const text =
-      `${market.sportsMarketType ?? ""} ${market.groupItemTitle ?? ""} ${market.question ?? ""}`.toLowerCase();
-    return (
-      text.includes("spread") ||
-      text.includes("total") ||
-      text.includes("o/u") ||
-      text.includes("over/under")
-    );
-  });
-
-  return !hasSpreadOrTotal;
-}
-
 function normalizePrice(price: number): number {
   if (!Number.isFinite(price)) return 0;
   return Math.max(0, Math.min(1, price));
@@ -262,8 +242,18 @@ export default function LiveMarketsPage() {
     closed: false,
     tagSlug: "sports",
     filters: { live: true },
-    refetchInterval: 10_000,
+    refetchInterval: LIVE_MARKET_REFETCH_INTERVAL_MS,
     fullMarkets: true,
+  });
+
+  const rawEventsBase = useMemo(
+    () => paginatedData?.pages.flatMap((page) => page.events || page) || [],
+    [paginatedData]
+  );
+
+  const shouldFetchScheduledSports = shouldFetchScheduledSportsFallback({
+    liveQueryLoading: isLoading,
+    liveEventCount: rawEventsBase.length,
   });
 
   const {
@@ -276,13 +266,9 @@ export default function LiveMarketsPage() {
     ascending: false,
     closed: false,
     tagSlug: "sports",
+    enabled: shouldFetchScheduledSports,
     fullMarkets: true,
   });
-
-  const rawEventsBase = useMemo(
-    () => paginatedData?.pages.flatMap((page) => page.events || page) || [],
-    [paginatedData]
-  );
 
   const allSportsEventsBase = useMemo(
     () => scheduledData?.pages.flatMap((page) => page.events || page) || [],
@@ -324,10 +310,10 @@ export default function LiveMarketsPage() {
   // ── Companion "More Markets" enrichment ─────────────────────────
   const companionSlugs = useMemo(() => {
     const all = [...rawEventsBase, ...scheduledEventsBase];
-    return all
-      .filter(needsCompanionMarkets)
-      .slice(0, MAX_COMPANION_MARKET_FETCHES)
-      .map((e) => `${e.slug}-more-markets`);
+    return getInitialCompanionMarketSlugs(
+      all,
+      MAX_INITIAL_COMPANION_MARKET_FETCHES
+    );
   }, [rawEventsBase, scheduledEventsBase]);
 
   const stableCompanionKey = useMemo(
@@ -472,6 +458,7 @@ export default function LiveMarketsPage() {
   }, []);
 
   useEffect(() => {
+    if (!AUTO_SELECT_INITIAL_MARKET) return;
     if (selectedMarket || userClosedPanel.current) return;
     const firstEvent = rawEvents[0] || scheduledEvents[0];
     if (!firstEvent?.markets?.length) return;
@@ -625,7 +612,10 @@ export default function LiveMarketsPage() {
         <div className="grid min-w-0 items-start gap-6 lg:gap-6 lg:grid-cols-[220px_minmax(0,1fr)_400px] xl:gap-8 xl:grid-cols-[240px_minmax(0,1fr)_440px]">
           {/* Left: League rail (sticky under header) */}
           <div className="hidden lg:sticky lg:top-4 lg:block lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-            <LeagueRail defaultOpenGroupSlugs={liveRailOpenGroupSlugs} />
+            <LeagueRail
+              defaultOpenGroupSlugs={liveRailOpenGroupSlugs}
+              countsEnabled={false}
+            />
           </div>
 
           {/* Left: Sportsbook */}

@@ -42,6 +42,9 @@ interface InjectionPoint {
   cleanup?: () => void;
   referenceElement?: Element | null | undefined;
   insertPosition: "append" | "before" | "after";
+  wrapperClassName?: string;
+  wrapperStyles?: string;
+  cardClassName?: string;
 }
 
 // State management
@@ -1838,6 +1841,9 @@ function injectMarketCards(
     cleanup,
     referenceElement,
     insertPosition,
+    wrapperClassName,
+    wrapperStyles: injectionPointWrapperStyles,
+    cardClassName,
   } = injectionPoint;
 
   const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
@@ -1888,6 +1894,10 @@ function injectMarketCards(
     wrapperStyles = platform.getWrapperStyles();
   }
 
+  if (injectionPointWrapperStyles) {
+    wrapperStyles = injectionPointWrapperStyles;
+  }
+
   // Detect platform for CSS class
   const platformName = window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown";
 
@@ -1904,7 +1914,9 @@ function injectMarketCards(
   wrapper.setAttribute("data-knoww-injected", "true");
   wrapper.setAttribute("data-knoww-platform", platformName);
   wrapper.setAttribute("data-knoww-post-key", postKey);
-  wrapper.className = `knoww-stacked-cards knoww-platform-${platformName}${themeClass}`;
+  wrapper.className = `knoww-stacked-cards knoww-platform-${platformName}${themeClass}${
+    wrapperClassName ? ` ${wrapperClassName}` : ""
+  }`;
   wrapper.style.cssText = wrapperStyles;
   applyPlatformStyleVariables(wrapper, platform?.getCardStyles?.());
 
@@ -1915,6 +1927,9 @@ function injectMarketCards(
     const card = createInlineMarketCard(market, score, topics);
     card.setAttribute("data-knoww-market-id", market.id);
     card.setAttribute("data-knoww-post-key", postKey);
+    if (cardClassName) {
+      card.classList.add(...cardClassName.split(/\s+/).filter(Boolean));
+    }
     wrapper.appendChild(card);
     injectedCards.push({ market, card });
   }

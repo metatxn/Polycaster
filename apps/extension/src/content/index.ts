@@ -71,6 +71,7 @@ import "./platforms/thehindu";
 import "./platforms/hindustan-times";
 import "./platforms/cnbc";
 import "./platforms/forbes";
+import "./platforms/espncricinfo";
 import "./platforms/skysports";
 import "./platforms/sporting-news";
 import "./platforms/fox-sports";

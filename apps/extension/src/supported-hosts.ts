@@ -207,6 +207,7 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
 export const API_HOST_PERMISSIONS: string[] = [
   // Polymarket APIs
   "https://polymarket.com/*",
+  "https://polymarket-upload.s3.us-east-2.amazonaws.com/*",
   "https://gamma-api.polymarket.com/*",
   "https://clob.polymarket.com/*",
   "https://data-api.polymarket.com/*",

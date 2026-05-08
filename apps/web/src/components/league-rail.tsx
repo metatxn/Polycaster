@@ -22,6 +22,8 @@ interface LeagueCounts {
 interface LeagueRailProps {
   /** Active /events/sports/{slug} — used to highlight + auto-expand parent. */
   activeSlug?: string;
+  /** Additional parent sport groups to open by default. */
+  defaultOpenGroupSlugs?: string[];
   /** Mobile drawer integration: external close handler when a link is tapped. */
   onNavigate?: () => void;
   /** Wrapper class so the rail can pin under sticky headers when desired. */
@@ -102,11 +104,20 @@ function RailGroup({
   }, [defaultOpen]);
 
   const groupActive = activeSlug === group.slug;
-  const groupCount = countsByTag?.[group.tagSlug];
+  const groupCount =
+    group.leagues.length > 0 && countsByTag
+      ? group.leagues.reduce(
+          (total, league) => total + (countsByTag[league.tagSlug] ?? 0),
+          0
+        )
+      : countsByTag?.[group.tagSlug];
+  const countsLoaded = countsByTag !== undefined;
 
   // Single-league sports (Golf, F1, Boxing, …): render as a leaf, no
   // collapsible affordance. Polymarket does the same.
   if (group.leagues.length === 0) {
+    if (countsLoaded && !groupCount) return null;
+
     return (
       <Link
         href={`/events/sports/${group.slug}`}
@@ -123,6 +134,12 @@ function RailGroup({
       </Link>
     );
   }
+
+  const visibleLeagues = countsLoaded
+    ? group.leagues.filter((league) => (countsByTag[league.tagSlug] ?? 0) > 0)
+    : group.leagues;
+
+  if (countsLoaded && visibleLeagues.length === 0) return null;
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -150,7 +167,7 @@ function RailGroup({
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
         <div className="pb-1">
-          {group.leagues.map((league) => {
+          {visibleLeagues.map((league) => {
             const isActive = activeSlug === league.slug;
             const count = countsByTag?.[league.tagSlug];
             return (
@@ -186,11 +203,16 @@ function RailGroup({
  */
 export function LeagueRail({
   activeSlug,
+  defaultOpenGroupSlugs = [],
   onNavigate,
   className,
 }: LeagueRailProps) {
   const pathname = usePathname();
   const { data } = useLeagueCounts();
+  const defaultOpenGroupSet = useMemo(
+    () => new Set(defaultOpenGroupSlugs),
+    [defaultOpenGroupSlugs]
+  );
 
   // Derive which group should auto-open: the one containing the active slug.
   const activeGroupSlug = useMemo(() => {
@@ -242,7 +264,10 @@ export function LeagueRail({
             activeSlug={activeSlug}
             countsByTag={data?.byTagSlug}
             onNavigate={onNavigate}
-            defaultOpen={activeGroupSlug === group.slug}
+            defaultOpen={
+              activeGroupSlug === group.slug ||
+              defaultOpenGroupSet.has(group.slug)
+            }
           />
         ))}
       </nav>

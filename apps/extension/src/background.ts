@@ -22,6 +22,7 @@ import {
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import type {
   BackgroundResponse,
+  FetchImageDataUrlMessage,
   FetchJsonMessage,
   FetchTextMessage,
   ScoreMarketsMessage,
@@ -36,6 +37,7 @@ import { TRADING_SESSION_DISCONNECTED_MESSAGE } from "./types/chrome-messages";
 // for supported platforms via chrome.scripting.
 const CONTENT_SCRIPT_ID = "knoww-content";
 const TRADING_CREDS_STORAGE_PREFIX = "knoww_clob_creds_";
+const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
 
 async function registerContentScripts(): Promise<void> {
   try {
@@ -80,6 +82,7 @@ const ALLOWED_DOMAINS = [
   "api.elections.kalshi.com",
   "knoww.app",
   "polymarket.com",
+  "polymarket-upload.s3.us-east-2.amazonaws.com",
   "t.co",
   "clob.polymarket.com",
   "data-api.polymarket.com",
@@ -195,6 +198,29 @@ function isFetchJsonMessage(message: unknown): message is FetchJsonMessage {
     (message as FetchJsonMessage).type === "fetch-json" &&
     typeof (message as FetchJsonMessage).url === "string"
   );
+}
+
+function isFetchImageDataUrlMessage(
+  message: unknown
+): message is FetchImageDataUrlMessage {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as FetchImageDataUrlMessage).type === "fetch-image-data-url" &&
+    typeof (message as FetchImageDataUrlMessage).url === "string"
+  );
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+
+  return btoa(binary);
 }
 
 function isScoreMarketsMessage(
@@ -625,6 +651,95 @@ chrome.runtime.onMessage.addListener(
             error: error instanceof Error ? error.message : String(error),
           });
         });
+      return true;
+    }
+
+    // Fetch image bytes and return a data URL for pages whose CSP blocks
+    // direct Polymarket image origins in injected DOM.
+    if (isFetchImageDataUrlMessage(message)) {
+      (async () => {
+        const urlValidation = isAllowedUrl(message.url);
+        if (!urlValidation.valid) {
+          sendResponse({
+            ok: false,
+            error: urlValidation.error || "URL not allowed",
+          });
+          return;
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        try {
+          const res = await fetch(message.url, {
+            cache: "force-cache",
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (!isAllowedRedirect(message.url, res.url)) {
+            sendResponse({
+              ok: false,
+              status: res.status,
+              error: "Security: image redirect target is not allowed",
+            });
+            return;
+          }
+
+          if (!res.ok) {
+            sendResponse({
+              ok: false,
+              status: res.status,
+              error: `Image request failed with status ${res.status}`,
+            });
+            return;
+          }
+
+          const contentType =
+            res.headers.get("content-type")?.split(";")[0].toLowerCase() || "";
+          if (!contentType.startsWith("image/")) {
+            sendResponse({
+              ok: false,
+              status: res.status,
+              error: "Response is not an image",
+            });
+            return;
+          }
+
+          const contentLength = Number(res.headers.get("content-length") || 0);
+          if (contentLength > MAX_IMAGE_PROXY_BYTES) {
+            sendResponse({
+              ok: false,
+              status: res.status,
+              error: "Image is too large",
+            });
+            return;
+          }
+
+          const buffer = await res.arrayBuffer();
+          if (buffer.byteLength > MAX_IMAGE_PROXY_BYTES) {
+            sendResponse({
+              ok: false,
+              status: res.status,
+              error: "Image is too large",
+            });
+            return;
+          }
+
+          sendResponse({
+            ok: true,
+            status: res.status,
+            contentType,
+            dataUrl: `data:${contentType};base64,${arrayBufferToBase64(buffer)}`,
+            responseUrl: res.url,
+          });
+        } catch (e) {
+          clearTimeout(timeoutId);
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
       return true;
     }
 

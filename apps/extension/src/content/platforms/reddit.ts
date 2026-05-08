@@ -7,6 +7,7 @@ import type { CardStyles, InjectionPoint } from "../../types/platform";
 import { registerAdapterWithRetry } from "../platform-registry";
 import { createBasicAdapter } from "./basic-adapter";
 import { buildGenericCardStyles } from "./helpers";
+import { hasInjectedCardSibling } from "./story-adapter-helpers";
 
 function isRedditDarkMode(): boolean {
   const htmlDark =
@@ -246,7 +247,10 @@ const RedditAdapter = createBasicAdapter({
   },
   hasInjectedCard(postElement: Element): boolean {
     if (postElement.tagName?.toLowerCase() === "shreddit-post") {
-      return !!postElement.querySelector(".knoww-market-card");
+      // Reddit's findInjectionPoint inserts the wrapper as a SIBLING of
+      // <shreddit-post>, not a descendant. Check the sibling slot first so
+      // virtualized re-renders don't trigger duplicate re-injection.
+      return hasInjectedCardSibling(postElement);
     }
 
     const postContainer =

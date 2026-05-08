@@ -91,6 +91,7 @@ export type Event = {
   marketCount?: number;
   volume?: string;
   liquidity?: string;
+  updatedAt?: string;
   negRisk?: boolean;
   enableNegRisk?: boolean;
   negRiskAugmented?: boolean;

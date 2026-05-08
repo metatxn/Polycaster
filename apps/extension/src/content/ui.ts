@@ -12,6 +12,7 @@ import type {
   Market,
   NestedMarket,
 } from "../types/market";
+import { setCspSafeImageSrc } from "./image-proxy";
 import { TradingPanel } from "./trading/trading-panel";
 import { escapeHtml, escapeSelectorValue } from "./utils";
 
@@ -798,10 +799,9 @@ function createInlineMarketCard(
 
   if (imageUrl) {
     const img = document.createElement("img");
-    img.src = imageUrl;
     img.alt = "";
     img.decoding = "async";
-    img.onerror = () => {
+    const renderFallback = () => {
       log("Image failed to load:", imageUrl);
       icon.innerHTML = "";
       if (marketSource === "kalshi") {
@@ -814,6 +814,8 @@ function createInlineMarketCard(
         icon.textContent = getMarketEmoji(market);
       }
     };
+    img.onerror = renderFallback;
+    setCspSafeImageSrc(img, imageUrl, renderFallback);
     icon.appendChild(img);
     log("Using event image:", imageUrl);
   } else {
@@ -1530,6 +1532,7 @@ const SCROLLED_OUT_GRACE_MS = 8000;
 const TRENDING_FETCH_DELAY_MS = 10_000;
 const TRENDING_SHUFFLE_INTERVAL_MS = 60_000;
 const MAX_TRENDING_DISPLAY = 2;
+const MAX_EXPANDED_TRENDING_DISPLAY = 10;
 let trendingFetchTimer: ReturnType<typeof setTimeout> | null = null;
 let trendingShuffleTimer: ReturnType<typeof setInterval> | null = null;
 let trendingPool: Market[] = [];
@@ -1582,6 +1585,8 @@ function persistWelcomeSeen(): void {
 // per-origin so it survives page navigations and reloads.
 
 const STACK_MINIMIZED_STORAGE_KEY = "knoww-stack-minimized";
+const STACK_EXPANDED_SESSION_KEY = "knoww-stack-expanded";
+const NOTIFICATION_STACK_VIEWPORT_MARGIN = 12;
 
 const STACK_MINIMIZE_ICON_HTML = `
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1595,7 +1600,11 @@ const STACK_EXPAND_ICON_HTML = `
   </svg>
 `;
 
+type StackFilter = "all" | "active" | "seen" | "trending";
+
 let cachedStackMinimized = false;
+let cachedStackExpanded = readPersistedStackExpanded();
+let cachedStackFilter: StackFilter = "all";
 
 function readPersistedStackMinimized(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -1621,6 +1630,25 @@ function persistStackMinimized(value: boolean): void {
   }
 }
 
+function readPersistedStackExpanded(): boolean {
+  try {
+    return sessionStorage.getItem(STACK_EXPANDED_SESSION_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistStackExpanded(value: boolean): void {
+  try {
+    sessionStorage.setItem(
+      STACK_EXPANDED_SESSION_KEY,
+      value ? "true" : "false"
+    );
+  } catch {
+    // Non-fatal; expanded state is session-only convenience.
+  }
+}
+
 function applyMinimizedState(
   container: HTMLElement,
   toggleBtn: HTMLElement,
@@ -1636,6 +1664,354 @@ function applyMinimizedState(
     minimized ? "Expand markets panel" : "Minimize markets panel"
   );
   toggleBtn.setAttribute("aria-expanded", minimized ? "false" : "true");
+}
+
+function applyStackExpandedState(
+  container: HTMLElement,
+  seeAll: HTMLButtonElement,
+  expanded: boolean
+): void {
+  container.classList.toggle("knoww-stack-expanded", expanded);
+  seeAll.textContent = formatSeeAllLabel(expanded, 0, 0);
+  seeAll.setAttribute("aria-pressed", expanded ? "true" : "false");
+  seeAll.setAttribute(
+    "aria-label",
+    expanded ? "Show fewer markets" : "See all markets in this panel"
+  );
+}
+
+function clampNotificationStackToViewport(container: HTMLElement): void {
+  const rect = container.getBoundingClientRect();
+  const maxLeft = Math.max(
+    NOTIFICATION_STACK_VIEWPORT_MARGIN,
+    window.innerWidth - rect.width - NOTIFICATION_STACK_VIEWPORT_MARGIN
+  );
+  const maxTop = Math.max(
+    NOTIFICATION_STACK_VIEWPORT_MARGIN,
+    window.innerHeight - rect.height - NOTIFICATION_STACK_VIEWPORT_MARGIN
+  );
+
+  let nextLeft = rect.left;
+  let nextTop = rect.top;
+  let shouldClamp = false;
+
+  if (rect.right > window.innerWidth - NOTIFICATION_STACK_VIEWPORT_MARGIN) {
+    nextLeft = maxLeft;
+    shouldClamp = true;
+  }
+  if (rect.left < NOTIFICATION_STACK_VIEWPORT_MARGIN) {
+    nextLeft = NOTIFICATION_STACK_VIEWPORT_MARGIN;
+    shouldClamp = true;
+  }
+  if (rect.bottom > window.innerHeight - NOTIFICATION_STACK_VIEWPORT_MARGIN) {
+    nextTop = maxTop;
+    shouldClamp = true;
+  }
+  if (rect.top < NOTIFICATION_STACK_VIEWPORT_MARGIN) {
+    nextTop = NOTIFICATION_STACK_VIEWPORT_MARGIN;
+    shouldClamp = true;
+  }
+
+  if (!shouldClamp) return;
+
+  container.style.setProperty("left", `${nextLeft}px`, "important");
+  container.style.setProperty("top", `${nextTop}px`, "important");
+  container.style.setProperty("right", "auto", "important");
+}
+
+function formatSeeAllLabel(
+  expanded: boolean,
+  totalAvailable: number,
+  totalDisplayed: number
+): string {
+  if (expanded) return "Show less";
+  if (totalAvailable > totalDisplayed) return `See all ${totalAvailable} →`;
+  return "See all →";
+}
+
+function updateStackSeeAllButton(
+  expanded: boolean,
+  totalAvailable: number,
+  totalDisplayed: number
+): void {
+  const seeAll = document.querySelector<HTMLButtonElement>(
+    "#knoww-stack-footer .knoww-stack-footer-see-all"
+  );
+  if (!seeAll) return;
+  seeAll.textContent = formatSeeAllLabel(
+    expanded,
+    totalAvailable,
+    totalDisplayed
+  );
+  seeAll.title =
+    !expanded && totalAvailable > totalDisplayed
+      ? `Showing ${totalDisplayed} of ${totalAvailable} markets`
+      : "";
+}
+
+function createStackTabs(): HTMLElement {
+  const tabs = document.createElement("div");
+  tabs.className = "knoww-stack-tabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Market list filters");
+
+  const options: Array<{ value: StackFilter; label: string }> = [
+    { value: "all", label: "All" },
+    { value: "active", label: "Active" },
+    { value: "seen", label: "Seen" },
+    { value: "trending", label: "Trending" },
+  ];
+
+  options.forEach((option) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "knoww-stack-tab";
+    tab.dataset.knowwStackFilter = option.value;
+    tab.setAttribute("role", "tab");
+    tab.textContent = option.label;
+    tab.addEventListener("click", () => {
+      cachedStackFilter = option.value;
+      updateStackTabsState();
+      void window.KNOWW_ANALYTICS?.track("notification_stack_filter_changed", {
+        filter: cachedStackFilter,
+      });
+      updateNotificationStack(
+        window.KNOWW_INJECTION?.getInjectedMarkets?.() || []
+      );
+    });
+    tabs.appendChild(tab);
+  });
+
+  updateStackTabsState(tabs);
+  return tabs;
+}
+
+function updateStackTabsState(root?: HTMLElement): void {
+  const tabsRoot =
+    root || document.querySelector<HTMLElement>("#knoww-stack-tabs");
+  if (!tabsRoot) return;
+
+  tabsRoot
+    .querySelectorAll<HTMLButtonElement>("[data-knoww-stack-filter]")
+    .forEach((tab) => {
+      const isActive = tab.dataset.knowwStackFilter === cachedStackFilter;
+      tab.classList.toggle("knoww-stack-tab-active", isActive);
+      tab.setAttribute("aria-selected", isActive ? "true" : "false");
+      tab.tabIndex = isActive ? 0 : -1;
+    });
+}
+
+function setStackExpanded(
+  container: HTMLElement,
+  seeAll: HTMLButtonElement,
+  expanded: boolean
+): void {
+  cachedStackExpanded = expanded;
+  persistStackExpanded(expanded);
+  applyStackExpandedState(container, seeAll, expanded);
+  requestAnimationFrame(() => clampNotificationStackToViewport(container));
+  if (expanded) updateStackTabsState();
+  updateNotificationStack(window.KNOWW_INJECTION?.getInjectedMarkets?.() || []);
+}
+
+function handleNotificationStackKeydown(e: KeyboardEvent): void {
+  if (!notificationStackContainer) return;
+  if (notificationStackContainer.style.display === "none") return;
+
+  const seeAll = document.querySelector<HTMLButtonElement>(
+    "#knoww-stack-footer .knoww-stack-footer-see-all"
+  );
+
+  if (e.key === "Escape") {
+    if (notificationStackContainer.classList.contains("knoww-stack-expanded")) {
+      if (seeAll) {
+        setStackExpanded(notificationStackContainer, seeAll, false);
+        seeAll.focus();
+      }
+      e.preventDefault();
+      return;
+    }
+
+    const searchContainer = notificationStackContainer.querySelector(
+      "#knoww-search-container"
+    );
+    const searchToggle = notificationStackContainer.querySelector<HTMLElement>(
+      "#knoww-search-toggle"
+    );
+    if (searchContainer?.classList.contains("knoww-search-open")) {
+      searchContainer.classList.remove("knoww-search-open");
+      searchToggle?.classList.remove("knoww-search-active");
+      e.preventDefault();
+    }
+    return;
+  }
+
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const items = Array.from(
+      notificationStackContainer.querySelectorAll<HTMLElement>(
+        ".knoww-notification-item"
+      )
+    );
+    if (items.length === 0) return;
+    const activeIndex = items.indexOf(document.activeElement as HTMLElement);
+    const nextIndex =
+      e.key === "ArrowDown"
+        ? activeIndex < 0
+          ? 0
+          : Math.min(activeIndex + 1, items.length - 1)
+        : activeIndex < 0
+          ? items.length - 1
+          : Math.max(activeIndex - 1, 0);
+    items[nextIndex]?.focus();
+    e.preventDefault();
+  }
+}
+
+// ─── Editorial helpers ─────────────────────────────────────────────────
+//
+// Formatting + per-row derivations used by the editorial notification
+// layout: live clock in the footer, the 2–3 char category badge in the
+// row thumbnail, the volume meta line, and the big serif ¢ price column.
+
+let liveTimeTicker: ReturnType<typeof setInterval> | null = null;
+
+function formatLiveTimeLabel(now: Date = new Date()): string {
+  const time = now.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  });
+  let zone = "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZoneName: "short",
+    }).formatToParts(now);
+    zone = parts.find((p) => p.type === "timeZoneName")?.value || "";
+  } catch {
+    zone = "";
+  }
+  return zone ? `Live · ${time} ${zone}` : `Live · ${time}`;
+}
+
+function refreshLiveTimeLabel(): void {
+  const node = document.getElementById("knoww-stack-footer-live");
+  if (node) node.textContent = formatLiveTimeLabel();
+}
+
+function startLiveTimeTicker(): void {
+  if (liveTimeTicker) return;
+  liveTimeTicker = setInterval(refreshLiveTimeLabel, 30_000);
+}
+
+/**
+ * Build a 32×32 row thumbnail. Prefers the market's image (event or first
+ * nested market); falls back to a diagonal-stripe tile with the category
+ * code when no image is available or the image fails to load.
+ */
+function renderRowThumbnail(market: Market): HTMLElement {
+  const icon = document.createElement("div");
+  icon.className = "knoww-notification-icon";
+  const code = getCategoryCode(market);
+
+  const imageUrl =
+    market.image ||
+    (market.markets?.[0] as (NestedMarket & { image?: string }) | undefined)
+      ?.image;
+
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.alt = "";
+    img.loading = "lazy";
+    const renderFallback = () => {
+      img.remove();
+      icon.classList.add("knoww-notification-icon-fallback");
+      icon.textContent = code;
+    };
+    img.onerror = renderFallback;
+    setCspSafeImageSrc(img, imageUrl, renderFallback);
+    icon.appendChild(img);
+  } else {
+    icon.classList.add("knoww-notification-icon-fallback");
+    icon.textContent = code;
+  }
+
+  return icon;
+}
+
+function getCategoryCode(market: Market): string {
+  const candidates: string[] = [];
+  if (market.category) candidates.push(market.category);
+  const firstTag = market.tags?.[0];
+  if (firstTag) candidates.push(firstTag.label || firstTag.slug || "");
+  if (market.title) candidates.push(market.title);
+  for (const raw of candidates) {
+    const cleaned = (raw || "").replace(/[^a-zA-Z]/g, "").toUpperCase();
+    if (cleaned.length >= 2) return cleaned.slice(0, 3);
+  }
+  return "MKT";
+}
+
+function formatMarketVolume(market: Market): string | null {
+  const raw = market.volume24hr ?? market.volume ?? market.liquidity;
+  let value: number;
+  if (typeof raw === "string") value = parseFloat(raw);
+  else if (typeof raw === "number") value = raw;
+  else value = Number.NaN;
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value >= 1_000_000_000)
+    return `$${(value / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
+  if (value >= 1_000_000)
+    return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (value >= 1_000)
+    return `$${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return `$${Math.round(value)}`;
+}
+
+/**
+ * Render the editorial price column: big serif ¢ price + mono side label.
+ * `outcomes` and `prices` are already aligned and parsed by the caller.
+ */
+function renderEditorialPrice(
+  container: HTMLElement,
+  outcomes: string[],
+  prices: number[]
+): void {
+  container.innerHTML = "";
+
+  if (!outcomes.length || !prices.length) return;
+
+  let leadingIdx = 0;
+  for (let i = 1; i < prices.length; i++) {
+    if (prices[i] > prices[leadingIdx]) leadingIdx = i;
+  }
+
+  const leadingPrice = prices[leadingIdx] ?? 0;
+  const leadingOutcome = (outcomes[leadingIdx] || "").trim();
+  const cents = Math.max(0, Math.min(99, Math.round(leadingPrice * 100)));
+
+  const numEl = document.createElement("span");
+  numEl.className = "knoww-notification-price-num";
+  const lower = leadingOutcome.toLowerCase();
+  const isBinary = outcomes.length === 2;
+  // Color when one side has a clear majority. "No" wins gets salmon; any
+  // other leader (Yes, by-date, multi-outcome name) gets green.
+  if (cents > 50) {
+    if (isBinary && lower === "no") numEl.classList.add("no");
+    else numEl.classList.add("yes");
+  }
+
+  numEl.textContent = String(cents);
+  const centsGlyph = document.createElement("span");
+  centsGlyph.className = "knoww-notification-price-cents";
+  centsGlyph.textContent = "¢";
+  numEl.appendChild(centsGlyph);
+
+  const sideLabel = document.createElement("span");
+  sideLabel.className = "knoww-notification-side-label";
+  sideLabel.textContent = leadingOutcome || (isBinary ? "Yes" : "Top");
+
+  container.appendChild(numEl);
+  container.appendChild(sideLabel);
 }
 
 /**
@@ -1705,16 +2081,12 @@ function createNotificationStack(): HTMLElement {
 
   const headerTitle = document.createElement("div");
   headerTitle.className = "knoww-stack-title";
-
-  // Brand mark — the diamond-cutout K logo, served from the extension's
-  // bundled `icons/` folder so it matches the toolbar icon, the web's
-  // <KnowwMark />, and the favicons exactly.
   const brandIconUrl =
-    getSafeRuntimeUrl("icons/icon-48.png") || "icons/icon-48.png";
+    getSafeRuntimeUrl("icons/icon-128.png") || "icons/icon-128.png";
   headerTitle.innerHTML = `
-    <div class="knoww-stack-icon">
-      <img src="${brandIconUrl}" alt="" width="20" height="20" />
-    </div>
+    <span class="knoww-stack-icon" aria-hidden="true">
+      <img src="${brandIconUrl}" alt="Knoww" width="20" height="20" />
+    </span>
     <span>Markets</span>
   `;
 
@@ -1724,6 +2096,7 @@ function createNotificationStack(): HTMLElement {
   const searchToggle = document.createElement("button");
   searchToggle.className = "knoww-search-toggle";
   searchToggle.id = "knoww-search-toggle";
+  searchToggle.type = "button";
   searchToggle.innerHTML = `
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <circle cx="11" cy="11" r="8"></circle>
@@ -1741,8 +2114,21 @@ function createNotificationStack(): HTMLElement {
   minimizeToggle.setAttribute("aria-label", "Minimize");
   minimizeToggle.setAttribute("aria-expanded", "true");
 
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "knoww-stack-close";
+  closeBtn.id = "knoww-stack-close";
+  closeBtn.type = "button";
+  closeBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M18 6 6 18M6 6l12 12"/>
+    </svg>
+  `;
+  closeBtn.title = "Close";
+  closeBtn.setAttribute("aria-label", "Close markets panel");
+
   headerRight.appendChild(searchToggle);
   headerRight.appendChild(minimizeToggle);
+  headerRight.appendChild(closeBtn);
   header.appendChild(headerTitle);
   header.appendChild(headerRight);
 
@@ -1780,6 +2166,9 @@ function createNotificationStack(): HTMLElement {
   searchContainer.appendChild(searchInputWrapper);
   searchContainer.appendChild(searchResults);
 
+  const stackTabs = createStackTabs();
+  stackTabs.id = "knoww-stack-tabs";
+
   // Content area — single container that holds EITHER the empty state
   // OR the market items. Never both at the same time.
   const contentArea = document.createElement("div");
@@ -1812,12 +2201,15 @@ function createNotificationStack(): HTMLElement {
     <div class="knoww-stack-scanning" data-knoww-scanning>
       <div class="knoww-stack-empty-title-row">
         <span class="knoww-stack-empty-pulse" aria-hidden="true"></span>
-        <span class="knoww-stack-empty-title">Searching for markets</span>
+        <span class="knoww-stack-empty-title">No markets found on this page yet</span>
         <span class="knoww-stack-empty-dots" aria-hidden="true">
           <span></span><span></span><span></span>
         </span>
       </div>
-      <span class="knoww-stack-empty-sub">Scroll your feed to discover markets</span>
+      <span class="knoww-stack-empty-sub">Scroll your feed to discover matches, or browse trending markets.</span>
+      <button type="button" class="knoww-stack-empty-action" data-knoww-browse-trending>
+        Browse trending
+      </button>
     </div>
   `;
 
@@ -1835,6 +2227,9 @@ function createNotificationStack(): HTMLElement {
   );
   const welcomeDismissBtn = emptyState.querySelector<HTMLButtonElement>(
     "[data-knoww-welcome-dismiss]"
+  );
+  const browseTrendingBtn = emptyState.querySelector<HTMLButtonElement>(
+    "[data-knoww-browse-trending]"
   );
 
   const dismissWelcome = () => {
@@ -1856,13 +2251,54 @@ function createNotificationStack(): HTMLElement {
     }
   });
 
+  // Footer — "● LIVE · HH:MM ET" left, "SEE ALL →" right.
+  const footer = document.createElement("div");
+  footer.className = "knoww-stack-footer";
+  footer.id = "knoww-stack-footer";
+
+  const liveLabel = document.createElement("span");
+  liveLabel.className = "knoww-stack-footer-live";
+  liveLabel.id = "knoww-stack-footer-live";
+  liveLabel.textContent = formatLiveTimeLabel();
+
+  const seeAll = document.createElement("button");
+  seeAll.className = "knoww-stack-footer-see-all";
+  seeAll.type = "button";
+  applyStackExpandedState(container, seeAll, cachedStackExpanded);
+  seeAll.addEventListener("click", () => {
+    const nextExpanded = !cachedStackExpanded;
+    if (nextExpanded && container.classList.contains("knoww-stack-minimized")) {
+      cachedStackMinimized = false;
+      applyMinimizedState(container, minimizeToggle, false);
+      persistStackMinimized(false);
+    }
+    setStackExpanded(container, seeAll, nextExpanded);
+    void window.KNOWW_ANALYTICS?.track("notification_stack_see_all_clicked", {
+      expanded: nextExpanded,
+    });
+  });
+
+  browseTrendingBtn?.addEventListener("click", () => {
+    cachedStackFilter = "trending";
+    setStackExpanded(container, seeAll, true);
+    updateStackTabsState();
+    void window.KNOWW_ANALYTICS?.track("notification_empty_browse_trending");
+  });
+
+  footer.appendChild(liveLabel);
+  footer.appendChild(seeAll);
+
   container.appendChild(header);
   container.appendChild(searchContainer);
+  container.appendChild(stackTabs);
   container.appendChild(contentArea);
+  container.appendChild(footer);
 
   // Append to body with fixed positioning (all platforms)
   document.body.appendChild(container);
   log("Notification stack created with fixed position");
+
+  startLiveTimeTicker();
 
   setupSearchFunctionality(
     searchToggle,
@@ -1890,6 +2326,12 @@ function createNotificationStack(): HTMLElement {
   minimizeToggle.addEventListener("click", (e) => {
     e.stopPropagation();
     toggleMinimized();
+  });
+
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    container.style.setProperty("display", "none", "important");
+    void window.KNOWW_ANALYTICS?.track("notification_stack_closed");
   });
 
   // When minimized, clicking the title row (logo + "Markets" label) expands
@@ -2070,9 +2512,8 @@ function createSearchResultItem(market: Market): HTMLElement {
 
   if (imageUrl) {
     const img = document.createElement("img");
-    img.src = imageUrl;
     img.alt = "";
-    img.onerror = () => {
+    const renderFallback = () => {
       icon.innerHTML = "";
       if (marketSource === "kalshi") {
         const fallbackImg = document.createElement("img");
@@ -2083,6 +2524,8 @@ function createSearchResultItem(market: Market): HTMLElement {
         icon.textContent = getMarketEmoji(market);
       }
     };
+    img.onerror = renderFallback;
+    setCspSafeImageSrc(img, imageUrl, renderFallback);
     icon.appendChild(img);
   } else {
     if (marketSource === "kalshi") {
@@ -2177,57 +2620,61 @@ function createNotificationItem(
   item.className = `knoww-notification-item knoww-source-${marketSource} ${
     isActive ? "knoww-notification-active" : "knoww-notification-unavailable"
   }`;
+  item.tabIndex = 0;
+  item.setAttribute("role", "button");
   item.setAttribute("data-market-id", market.id);
   item.setAttribute("data-market-source", marketSource);
   item.setAttribute("data-market-status", isActive ? "active" : "scrolled-out");
+  item.setAttribute(
+    "aria-label",
+    isActive
+      ? `Scroll to ${market.title || "market"}`
+      : `Restore or open ${market.title || "market"}`
+  );
+  if (!isActive) {
+    item.title = "Restore this market card or open the market";
+  }
   item.style.animationDelay = `${index * 50}ms`;
 
-  const icon = document.createElement("div");
-  icon.className = "knoww-notification-icon";
-
-  let imageUrl = market.image;
-  if (!imageUrl && market.markets && market.markets.length > 0) {
-    imageUrl = (market.markets[0] as NestedMarket & { image?: string }).image;
-  }
-
-  // Build a data URI fallback for when chrome.runtime is unavailable
-  const kalshiFallbackIcon =
-    getSafeRuntimeUrl("icons/icon-48.png") ||
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect fill='%234a5568' width='48' height='48' rx='8'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='white'%3EK%3C/text%3E%3C/svg%3E";
-
-  if (imageUrl) {
-    const img = document.createElement("img");
-    img.src = imageUrl;
-    img.alt = "";
-    img.onerror = () => {
-      icon.innerHTML = "";
-      if (marketSource === "kalshi") {
-        const fallbackImg = document.createElement("img");
-        fallbackImg.src = kalshiFallbackIcon;
-        fallbackImg.alt = "Kalshi";
-        icon.appendChild(fallbackImg);
-      } else {
-        icon.textContent = getMarketEmoji(market);
-      }
-    };
-    icon.appendChild(img);
-  } else {
-    if (marketSource === "kalshi") {
-      const img = document.createElement("img");
-      img.src = kalshiFallbackIcon;
-      img.alt = "Kalshi";
-      icon.appendChild(img);
-    } else {
-      icon.textContent = getMarketEmoji(market);
-    }
-  }
+  const icon = renderRowThumbnail(market);
 
   const content = document.createElement("div");
   content.className = "knoww-notification-content";
 
   const title = document.createElement("div");
   title.className = "knoww-notification-title";
-  title.textContent = truncateText(market.title || "Untitled Market", 50);
+  title.textContent = market.title || "Untitled Market";
+
+  const meta = document.createElement("div");
+  meta.className = "knoww-notification-meta";
+  const categoryLabel = market.category || market.tags?.[0]?.label || "";
+  const volumeLabel = formatMarketVolume(market);
+  if (categoryLabel) {
+    const cat = document.createElement("span");
+    cat.textContent = categoryLabel;
+    meta.appendChild(cat);
+  }
+  if (categoryLabel && volumeLabel) {
+    const dot = document.createElement("span");
+    dot.className = "knoww-notification-meta-dot";
+    meta.appendChild(dot);
+  }
+  if (volumeLabel) {
+    const vol = document.createElement("span");
+    vol.textContent = volumeLabel;
+    meta.appendChild(vol);
+  }
+  if (!isActive) {
+    if (meta.childNodes.length > 0) {
+      const dot = document.createElement("span");
+      dot.className = "knoww-notification-meta-dot";
+      meta.appendChild(dot);
+    }
+    const action = document.createElement("span");
+    action.className = "knoww-notification-action-label";
+    action.textContent = "Restore";
+    meta.appendChild(action);
+  }
 
   const pricesDiv = document.createElement("div");
   pricesDiv.className = "knoww-notification-prices";
@@ -2260,22 +2707,14 @@ function createNotificationItem(
     priceData = [0.5, 0.5];
   }
 
-  renderOutcomePrices(pricesDiv, outcomes, priceData, 2);
+  renderEditorialPrice(pricesDiv, outcomes, priceData);
 
   content.appendChild(title);
-  content.appendChild(pricesDiv);
-
-  const arrow = document.createElement("div");
-  arrow.className = "knoww-notification-arrow";
-  arrow.innerHTML = `
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M5 12h14M12 5l7 7-7 7"/>
-    </svg>
-  `;
+  if (meta.childNodes.length > 0) content.appendChild(meta);
 
   item.appendChild(icon);
   item.appendChild(content);
-  item.appendChild(arrow);
+  item.appendChild(pricesDiv);
 
   // Click handler to scroll to the market card, or open URL if card is gone
   item.onclick = () => {
@@ -2306,22 +2745,34 @@ function createNotificationItem(
     );
     window.KNOWW_PREFERENCES?.recordClick(market);
   };
+  item.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      item.click();
+    }
+  });
 
   return item;
 }
 
 /**
- * Create a section header within the notification stack list
+ * Create a section header within the notification stack list.
+ * `kind` controls the dot color: green for active/trending, gray otherwise.
  */
 function createNotificationSectionHeader(
   title: string,
-  count: number
+  count: number,
+  kind: "active" | "scrolled-out" | "trending" = "scrolled-out"
 ): HTMLElement {
   const header = document.createElement("div");
   header.className = "knoww-stack-section-header";
+  const countLabel = count < 10 ? `0${count}` : String(count);
   header.innerHTML = `
-    <span class="knoww-stack-section-title">${title}</span>
-    <span class="knoww-stack-section-count">${count}</span>
+    <span class="knoww-stack-section-title">
+      <span class="knoww-stack-section-dot ${kind}" aria-hidden="true"></span>
+      <span>${title}</span>
+    </span>
+    <span class="knoww-stack-section-count">${countLabel}</span>
   `;
   return header;
 }
@@ -2479,55 +2930,41 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
 
   const item = document.createElement("div");
   item.className = `knoww-notification-item knoww-trending-item knoww-source-${marketSource} knoww-notification-active`;
+  item.tabIndex = 0;
+  item.setAttribute("role", "button");
   item.setAttribute("data-market-id", market.id);
   item.setAttribute("data-market-source", marketSource);
+  item.setAttribute("aria-label", `Open ${market.title || "trending market"}`);
   item.style.animationDelay = `${index * 60}ms`;
 
-  const icon = document.createElement("div");
-  icon.className = "knoww-notification-icon";
-
-  let imageUrl = market.image;
-  if (!imageUrl && market.markets && market.markets.length > 0) {
-    imageUrl = (market.markets[0] as NestedMarket & { image?: string }).image;
-  }
-
-  const kalshiFallbackIcon =
-    getSafeRuntimeUrl("icons/icon-48.png") ||
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect fill='%234a5568' width='48' height='48' rx='8'/%3E%3Ctext x='24' y='32' font-size='24' text-anchor='middle' fill='white'%3EK%3C/text%3E%3C/svg%3E";
-
-  if (imageUrl) {
-    const img = document.createElement("img");
-    img.src = imageUrl;
-    img.alt = "";
-    img.onerror = () => {
-      icon.innerHTML = "";
-      if (marketSource === "kalshi") {
-        const fallbackImg = document.createElement("img");
-        fallbackImg.src = kalshiFallbackIcon;
-        fallbackImg.alt = "Kalshi";
-        icon.appendChild(fallbackImg);
-      } else {
-        icon.textContent = getMarketEmoji(market);
-      }
-    };
-    icon.appendChild(img);
-  } else {
-    if (marketSource === "kalshi") {
-      const img = document.createElement("img");
-      img.src = kalshiFallbackIcon;
-      img.alt = "Kalshi";
-      icon.appendChild(img);
-    } else {
-      icon.textContent = getMarketEmoji(market);
-    }
-  }
+  const icon = renderRowThumbnail(market);
 
   const content = document.createElement("div");
   content.className = "knoww-notification-content";
 
   const title = document.createElement("div");
   title.className = "knoww-notification-title";
-  title.textContent = truncateText(market.title || "Untitled Market", 50);
+  title.textContent = market.title || "Untitled Market";
+
+  const meta = document.createElement("div");
+  meta.className = "knoww-notification-meta";
+  const categoryLabel = market.category || market.tags?.[0]?.label || "";
+  const volumeLabel = formatMarketVolume(market);
+  if (categoryLabel) {
+    const cat = document.createElement("span");
+    cat.textContent = categoryLabel;
+    meta.appendChild(cat);
+  }
+  if (categoryLabel && volumeLabel) {
+    const dot = document.createElement("span");
+    dot.className = "knoww-notification-meta-dot";
+    meta.appendChild(dot);
+  }
+  if (volumeLabel) {
+    const vol = document.createElement("span");
+    vol.textContent = volumeLabel;
+    meta.appendChild(vol);
+  }
 
   const pricesDiv = document.createElement("div");
   pricesDiv.className = "knoww-notification-prices";
@@ -2556,22 +2993,14 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
     priceData = [0.5, 0.5];
   }
 
-  renderOutcomePrices(pricesDiv, outcomes, priceData, 2);
+  renderEditorialPrice(pricesDiv, outcomes, priceData);
 
   content.appendChild(title);
-  content.appendChild(pricesDiv);
-
-  const arrow = document.createElement("div");
-  arrow.className = "knoww-notification-arrow";
-  arrow.innerHTML = `
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M5 12h14M12 5l7 7-7 7"/>
-    </svg>
-  `;
+  if (meta.childNodes.length > 0) content.appendChild(meta);
 
   item.appendChild(icon);
   item.appendChild(content);
-  item.appendChild(arrow);
+  item.appendChild(pricesDiv);
 
   item.onclick = () => {
     void window.KNOWW_ANALYTICS?.track("notification_trending_clicked", {
@@ -2581,6 +3010,12 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
     window.open(marketUrl, "_blank", "noopener,noreferrer");
     window.KNOWW_PREFERENCES?.recordClick(market);
   };
+  item.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      item.click();
+    }
+  });
 
   return item;
 }
@@ -2674,6 +3109,18 @@ function stopTrendingShuffleTimer(): void {
   }
 }
 
+function getVisibleTrendingMarkets(
+  realMarketIds: Set<string>,
+  expandedTrending: boolean
+): Market[] {
+  const source = expandedTrending ? trendingPool : visibleTrending;
+  const limit = expandedTrending
+    ? MAX_EXPANDED_TRENDING_DISPLAY
+    : MAX_TRENDING_DISPLAY;
+
+  return source.filter((m) => !realMarketIds.has(m.id)).slice(0, limit);
+}
+
 /**
  * Append the trending section to the items container.
  * Skips any trending market whose id already appears in the
@@ -2682,23 +3129,22 @@ function stopTrendingShuffleTimer(): void {
 function appendTrendingSection(
   itemsContainer: HTMLElement,
   realMarketIds: Set<string>,
-  animationIndex: number
+  animationIndex: number,
+  expandedTrending = false
 ): void {
-  const trendingToShow = visibleTrending
-    .filter((m) => !realMarketIds.has(m.id))
-    .slice(0, MAX_TRENDING_DISPLAY);
+  const trendingToShow = getVisibleTrendingMarkets(
+    realMarketIds,
+    expandedTrending
+  );
 
   if (trendingToShow.length === 0) return;
 
-  const header = document.createElement("div");
-  header.className = "knoww-stack-section-header knoww-trending-header";
-  header.innerHTML = `
-    <span class="knoww-stack-section-title">
-      <span class="knoww-trending-icon" aria-hidden="true">🔥</span>
-      Trending now
-    </span>
-    <span class="knoww-stack-section-count">${trendingToShow.length}</span>
-  `;
+  const header = createNotificationSectionHeader(
+    "Trending now",
+    trendingToShow.length,
+    "trending"
+  );
+  header.classList.add("knoww-trending-header");
   itemsContainer.appendChild(header);
 
   trendingToShow.forEach((market, index) => {
@@ -2797,15 +3243,29 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
 
   // Keep bounded lists for readability (platform-aware caps)
   const caps = resolveNotificationCaps();
-  const recentActiveMarkets = activeMarkets.slice(-caps.active).reverse();
-  const recentScrolledMarkets = scrolledOutMarkets
-    .slice(-caps.scrolled)
-    .reverse();
+  const recentActiveMarkets = cachedStackExpanded
+    ? [...activeMarkets].reverse()
+    : activeMarkets.slice(-caps.active).reverse();
+  const recentScrolledMarkets = cachedStackExpanded
+    ? [...scrolledOutMarkets].reverse()
+    : scrolledOutMarkets.slice(-caps.scrolled).reverse();
+  const activeFilter = cachedStackExpanded ? cachedStackFilter : "all";
+  const showActiveSection = activeFilter === "all" || activeFilter === "active";
+  const showSeenSection = activeFilter === "all" || activeFilter === "seen";
+  const showTrendingSection =
+    activeFilter === "all" || activeFilter === "trending";
+  const displayedActiveMarkets = showActiveSection ? recentActiveMarkets : [];
+  const displayedScrolledMarkets = showSeenSection ? recentScrolledMarkets : [];
 
   const totalDisplayed =
-    recentActiveMarkets.length + recentScrolledMarkets.length;
+    displayedActiveMarkets.length + displayedScrolledMarkets.length;
+  const totalAvailable = activeMarkets.length + scrolledOutMarkets.length;
+  updateStackSeeAllButton(cachedStackExpanded, totalAvailable, totalDisplayed);
 
-  if (totalDisplayed === 0 && visibleTrending.length === 0) {
+  if (
+    totalDisplayed === 0 &&
+    (!showTrendingSection || visibleTrending.length === 0)
+  ) {
     log(`📭 [NotificationStack] No markets to show, displaying empty state`);
     itemsContainer.innerHTML = "";
     showNotificationContent("empty");
@@ -2826,25 +3286,30 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
 
   let animationIndex = 0;
 
-  if (recentActiveMarkets.length > 0) {
+  if (displayedActiveMarkets.length > 0) {
     itemsContainer.appendChild(
-      createNotificationSectionHeader("Active now", recentActiveMarkets.length)
+      createNotificationSectionHeader(
+        "Active now",
+        displayedActiveMarkets.length,
+        "active"
+      )
     );
-    recentActiveMarkets.forEach((marketData) => {
+    displayedActiveMarkets.forEach((marketData) => {
       const item = createNotificationItem(marketData, animationIndex, true);
       animationIndex++;
       itemsContainer.appendChild(item);
     });
   }
 
-  if (recentScrolledMarkets.length > 0) {
+  if (displayedScrolledMarkets.length > 0) {
     itemsContainer.appendChild(
       createNotificationSectionHeader(
-        "Recently scrolled out",
-        recentScrolledMarkets.length
+        "Seen earlier",
+        displayedScrolledMarkets.length,
+        "scrolled-out"
       )
     );
-    recentScrolledMarkets.forEach((marketData) => {
+    displayedScrolledMarkets.forEach((marketData) => {
       const item = createNotificationItem(marketData, animationIndex, false);
       animationIndex++;
       itemsContainer.appendChild(item);
@@ -2857,7 +3322,14 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
   for (const entry of dedupedMarkets) {
     realMarketIds.add(entry.market.id);
   }
-  appendTrendingSection(itemsContainer, realMarketIds, animationIndex);
+  if (showTrendingSection) {
+    appendTrendingSection(
+      itemsContainer,
+      realMarketIds,
+      animationIndex,
+      cachedStackExpanded && activeFilter === "trending"
+    );
+  }
 
   setTimeout(() => {
     if (itemsContainer.scrollHeight > itemsContainer.clientHeight) {
@@ -2939,6 +3411,7 @@ function initNotificationStack(): void {
   // Guard: only attach global listeners/observers once to prevent accumulation on re-init
   if (!notificationStackListenersAttached) {
     notificationStackListenersAttached = true;
+    document.addEventListener("keydown", handleNotificationStackKeydown);
 
     // PERFORMANCE: Debounce theme observer — theme changes are rare,
     // but body class/style mutations fire frequently on Twitter.
@@ -2971,6 +3444,12 @@ function initNotificationStack(): void {
         .matchMedia("(prefers-color-scheme: dark)")
         .addEventListener("change", debouncedThemeUpdate);
     }
+
+    window.addEventListener("resize", () => {
+      if (notificationStackContainer) {
+        clampNotificationStackToViewport(notificationStackContainer);
+      }
+    });
 
     // ============================================
     // DRAGGABLE NOTIFICATION STACK (all platforms)
@@ -3062,6 +3541,7 @@ export const KNOWW_UI = {
   createNotificationStack,
   createNotificationItem,
   updateNotificationStack,
+  updateNotificationStackTheme,
   scrollToMarket,
   initNotificationStack,
   fetchAndCacheTrending,

@@ -2074,10 +2074,10 @@ function addOrderSummary(
     summary.appendChild(posRow);
   }
 
-  // Total Cost (buy) or You Receive (sell)
+  // Primary cash movement for the order.
   const r1 = el("div", "knoww-tp-summary-row");
   r1.appendChild(
-    el("span", "knoww-tp-summary-label", isBuy ? "Total Cost" : "You Receive")
+    el("span", "knoww-tp-summary-label", isBuy ? "You pay" : "You receive")
   );
   const costDec = new Decimal(cost);
   r1.appendChild(
@@ -2107,7 +2107,9 @@ function addOrderSummary(
   if (isBuy) {
     const potentialReturn = new Decimal(shares);
     const r3 = el("div", "knoww-tp-summary-row");
-    r3.appendChild(el("span", "knoww-tp-summary-label", "Potential Return"));
+    r3.appendChild(
+      el("span", "knoww-tp-summary-label", `Payout if ${opts.outcomeName}`)
+    );
     r3.appendChild(
       el(
         "span",
@@ -2120,9 +2122,7 @@ function addOrderSummary(
     const profit = potentialReturn.sub(costDec);
     const pct = costDec.gt(0) ? profit.div(costDec).mul(100) : new Decimal(0);
     const r4 = el("div", "knoww-tp-summary-row");
-    r4.appendChild(
-      el("span", "knoww-tp-summary-label", `Profit if ${opts.outcomeName}`)
-    );
+    r4.appendChild(el("span", "knoww-tp-summary-label", "Estimated Profit"));
     r4.appendChild(
       el(
         "span",
@@ -2183,6 +2183,7 @@ function addBalanceWarning(
   const balanceDecimal = new Decimal(getAvailableTradingCollateral(ctx));
   const costDecimal = new Decimal(cost);
   if (costDecimal.lte(balanceDecimal) || balanceDecimal.lt(0)) return;
+  if (address && costDecimal.gt(balanceDecimal)) return;
 
   const w = el("div", "knoww-tp-balance-warn");
 
@@ -2197,15 +2198,6 @@ function addBalanceWarning(
     )
   );
   top.appendChild(left);
-  if (address) {
-    const depBtn = el("button", "knoww-tp-warn-deposit-btn", "Deposit");
-    depBtn.onclick = (e) => {
-      e.stopPropagation();
-      activeView = "deposit";
-      startDepositFlow(address);
-    };
-    top.appendChild(depBtn);
-  }
   w.appendChild(top);
 
   const progress = Decimal.min(100, balanceDecimal.div(costDecimal).mul(100));
@@ -2238,6 +2230,7 @@ function addSubmitButton(
   const cost = getCost(opts, ctx);
   const availableCollateral = getAvailableTradingCollateral(ctx);
   const noFunds = activeSide === "buy" && cost > availableCollateral;
+  const missingFunds = new Decimal(cost).sub(availableCollateral);
   const noShares = selectedShares <= 0;
   const shares = selectedShares;
   const minShares = Math.max(1, Math.ceil(minOrderSize));
@@ -2323,8 +2316,14 @@ function addSubmitButton(
     btn.textContent = `Minimum shares: ${minShares}`;
     btn.disabled = true;
   } else if (noFunds) {
-    btn.textContent = "Insufficient Balance";
-    btn.disabled = true;
+    if (ctx.address) {
+      btn.textContent = `Deposit $${missingFunds.toFixed(2)} more`;
+      btn.classList.add("deposit");
+      btn.classList.add("deposit-needed");
+    } else {
+      btn.textContent = "Insufficient Balance";
+      btn.disabled = true;
+    }
   } else if (needsApproval) {
     btn.innerHTML = `${I.shield} Approve pUSD`;
     btn.classList.add("approve");
@@ -2365,6 +2364,16 @@ function addSubmitButton(
       activePanel ??
       (btn.closest('[data-knoww-trading="true"]') as HTMLElement | null);
     if (!panel) return;
+
+    if (noFunds && ctx.address) {
+      activeView = "deposit";
+      trackPanelAnalytics("trading_insufficient_balance_deposit_clicked", {
+        marketId: opts.market.id,
+        missingFunds: missingFunds.toNumber(),
+      });
+      startDepositFlow(ctx.address);
+      return;
+    }
 
     if (needsApproval) {
       pauseLivePanelRefresh();

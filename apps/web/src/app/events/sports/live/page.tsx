@@ -34,6 +34,8 @@ import {
   type LiveGameState,
   useSportsWebSocket,
 } from "@/hooks/use-sports-websocket";
+import { SPORT_GROUPS } from "@/lib/sport-categories";
+import { getSportRailOpenGroupSlugsFromEvents } from "@/lib/sport-rail-open-groups";
 
 const TradingForm = dynamic(
   () =>
@@ -435,6 +437,10 @@ export default function LiveMarketsPage() {
 
   const liveEventCount = rawEvents.length;
   const scheduledEventCount = scheduledEvents.length;
+  const liveRailOpenGroupSlugs = useMemo(
+    () => getSportRailOpenGroupSlugsFromEvents(rawEvents, SPORT_GROUPS),
+    [rawEvents]
+  );
 
   const selectedTokenIds = useMemo(() => {
     if (!selectedMarket) return [];
@@ -619,7 +625,7 @@ export default function LiveMarketsPage() {
         <div className="grid min-w-0 items-start gap-6 lg:gap-6 lg:grid-cols-[220px_minmax(0,1fr)_400px] xl:gap-8 xl:grid-cols-[240px_minmax(0,1fr)_440px]">
           {/* Left: League rail (sticky under header) */}
           <div className="hidden lg:sticky lg:top-4 lg:block lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-            <LeagueRail />
+            <LeagueRail defaultOpenGroupSlugs={liveRailOpenGroupSlugs} />
           </div>
 
           {/* Left: Sportsbook */}

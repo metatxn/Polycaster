@@ -8,6 +8,7 @@ import type {
   PolymarketTagsCache,
 } from "../types/market";
 import type { UserSettings } from "../types/settings";
+import { startXTraderPnlBadges } from "./x-pnl-badges";
 
 const logger = createLogger("extension.main");
 
@@ -61,6 +62,10 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
   // Initialize notification stack for market discovery (if enabled)
   if (isNotificationStackEnabled()) {
     initNotificationStack();
+  }
+
+  if (platformName === "twitter") {
+    startXTraderPnlBadges();
   }
 
   // Pre-fetch data from enabled sources (cached for 24h)
@@ -222,6 +227,7 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
         ? "block"
         : "none";
     }
+    window.KNOWW_UI.updateNotificationStackTheme?.();
   });
 
   // ============================================

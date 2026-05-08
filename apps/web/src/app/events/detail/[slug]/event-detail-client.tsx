@@ -36,11 +36,21 @@ import {
 import { usePriceAlertDetection } from "@/hooks/use-price-alerts";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
+import { useSportsWebSocket } from "@/hooks/use-sports-websocket";
 import { type Position, useUserPositions } from "@/hooks/use-user-positions";
 import { ensureReadableSeriesColors } from "@/lib/chart-colors";
 import { formatVolume } from "@/lib/formatters";
 import { getMarketShortLabel } from "@/lib/market-labels";
 import { SPORT_GROUPS } from "@/lib/sport-categories";
+import { matchSportsEventToGame } from "@/lib/sports-event-match";
+import {
+  type CachedSportsLiveGame,
+  readCachedSportsLiveGame,
+  SPORTS_LIVE_GAME_CACHE_TTL_MS,
+  shouldUseCachedSportsLiveGame,
+  sportsLiveGameCacheKey,
+  writeCachedSportsLiveGame,
+} from "@/lib/sports-live-game-cache";
 import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
 import { CandidateTicker } from "./candidate-ticker";
@@ -443,6 +453,8 @@ export default function EventDetailClient({
     return true; // Default to expanded for SSR
   });
   const [isScrolled, setIsScrolled] = useState(false);
+  const [cachedLiveGame, setCachedLiveGame] =
+    useState<CachedSportsLiveGame | null>(null);
 
   // Track pending refetch timers so we can cancel them on unmount
   const sellRefetchTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -526,6 +538,74 @@ export default function EventDetailClient({
     isLoading: loading,
     error,
   } = useEventDetail(eventSlugOrId, initialEvent);
+  const hasTeamMatchup = isTeamMatchupEvent(event?.teams);
+  const { games: liveSportsGames } = useSportsWebSocket({
+    enabled: hasTeamMatchup,
+  });
+  const liveGame = useMemo(
+    () => (event ? matchSportsEventToGame(event, liveSportsGames) : null),
+    [event, liveSportsGames]
+  );
+  const liveGameCacheKey = useMemo(() => {
+    const keySource = event?.slug ?? eventSlugOrId;
+    return keySource ? sportsLiveGameCacheKey(keySource) : null;
+  }, [event?.slug, eventSlugOrId]);
+
+  useEffect(() => {
+    if (!liveGameCacheKey || !event || typeof window === "undefined") {
+      setCachedLiveGame(null);
+      return;
+    }
+
+    setCachedLiveGame(
+      readCachedSportsLiveGame(window.sessionStorage, liveGameCacheKey, event)
+    );
+  }, [event, liveGameCacheKey]);
+
+  useEffect(() => {
+    if (!liveGame || !liveGameCacheKey || typeof window === "undefined") return;
+
+    const cacheEntry: CachedSportsLiveGame = {
+      gameId: liveGame.gameId,
+      leagueAbbreviation: liveGame.leagueAbbreviation,
+      slug: liveGame.slug,
+      homeTeam: liveGame.homeTeam,
+      awayTeam: liveGame.awayTeam,
+      status: liveGame.status,
+      score: liveGame.score,
+      period: liveGame.period,
+      elapsed: liveGame.elapsed,
+      live: liveGame.live,
+      ended: liveGame.ended,
+      updatedAt: liveGame.updatedAt,
+      receivedAt: liveGame.receivedAt,
+    };
+
+    writeCachedSportsLiveGame(
+      window.sessionStorage,
+      liveGameCacheKey,
+      cacheEntry
+    );
+    setCachedLiveGame(cacheEntry);
+  }, [liveGame, liveGameCacheKey]);
+
+  useEffect(() => {
+    if (!cachedLiveGame) return;
+
+    const ageMs = Date.now() - cachedLiveGame.receivedAt;
+    const expiresInMs = Math.max(0, SPORTS_LIVE_GAME_CACHE_TTL_MS - ageMs);
+    const timeout = window.setTimeout(() => {
+      setCachedLiveGame(null);
+    }, expiresInMs);
+
+    return () => window.clearTimeout(timeout);
+  }, [cachedLiveGame]);
+
+  const displayLiveGame = liveGame
+    ? liveGame
+    : shouldUseCachedSportsLiveGame(cachedLiveGame, event)
+      ? cachedLiveGame
+      : null;
 
   const handleChartTimeRangeChange = useCallback((range: TimeRange) => {
     chartTimeRangeTouchedRef.current = true;
@@ -1657,9 +1737,9 @@ export default function EventDetailClient({
                   <TeamMatchupHero
                     teams={event.teams}
                     kickoffAt={kickoffAt}
-                    score={event.score}
-                    period={event.period}
-                    elapsed={event.elapsed}
+                    score={displayLiveGame?.score ?? event.score}
+                    period={displayLiveGame?.period ?? event.period}
+                    elapsed={displayLiveGame?.elapsed ?? event.elapsed}
                   />
                 )}
 

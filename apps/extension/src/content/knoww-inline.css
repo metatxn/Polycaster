@@ -380,6 +380,7 @@
   gap: 8px !important;
   position: relative !important;
   z-index: 10 !important;
+  box-sizing: border-box !important;
   width: 100% !important;
   max-width: 100% !important;
   min-width: 0 !important;
@@ -387,6 +388,7 @@
 }
 
 .knoww-stacked-cards .knoww-market-card {
+  box-sizing: border-box !important;
   margin: 0 !important; /* Remove margin when stacked, gap handles spacing */
 }
 
@@ -702,8 +704,8 @@
   font-size: 14px !important;
   font-weight: 700 !important;
   cursor: pointer !important;
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
-  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.06)) !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.04)) !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   transition: all 0.15s ease !important;
   min-width: 0 !important;
@@ -3755,8 +3757,11 @@
 
 /* biome-ignore lint: unrelated selector, not an override */
 .knoww-tp-btn-enable {
-  display: block !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   width: auto !important;
+  min-height: 34px !important;
   max-width: 220px !important;
   padding: 10px 20px !important;
   text-align: center !important;
@@ -3772,6 +3777,9 @@
     color 0.15s,
     transform 0.1s !important;
   font-family: inherit !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
+  box-sizing: border-box !important;
   align-self: center !important;
   margin: 0 auto !important;
 }
@@ -3800,10 +3808,16 @@
 /* ── Form Container ── */
 
 .knoww-tp-form {
-  padding: 12px 16px 16px !important;
+  padding: 14px 16px 18px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 14px !important;
+}
+.knoww-tp-dynamic {
   display: flex !important;
   flex-direction: column !important;
   gap: 12px !important;
+  margin-top: 2px !important;
 }
 
 /* ── Order Type Toggle (Market / Limit) — pill style ── */
@@ -4170,7 +4184,7 @@
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  padding: 4px 0 !important;
+  padding: 2px 0 !important;
   font-size: 12px !important;
 }
 .knoww-tp-exec-group {
@@ -4192,6 +4206,11 @@
 
 /* ── Amount Section ── */
 
+.knoww-tp-amount-section {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
 .knoww-tp-cost-display {
   font-size: 14px !important;
   font-weight: 600 !important;
@@ -4227,8 +4246,7 @@
   display: flex !important;
   align-items: center !important;
   flex-wrap: nowrap !important;
-  gap: 4px !important;
-  margin-top: 4px !important;
+  gap: 6px !important;
   width: 100% !important;
 }
 .knoww-tp-shares-btn {
@@ -4291,8 +4309,8 @@
 .knoww-tp-summary {
   display: flex !important;
   flex-direction: column !important;
-  gap: 6px !important;
-  padding-top: 12px !important;
+  gap: 7px !important;
+  padding-top: 14px !important;
   border-top: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
 }
 .knoww-tp-summary-row {
@@ -4388,6 +4406,7 @@
   justify-content: center !important;
   gap: 8px !important;
   width: 100% !important;
+  margin-top: 2px !important;
   padding: 12px 16px !important;
   border: none !important;
   border-radius: 12px !important;
@@ -4445,6 +4464,21 @@
     rgb(18, 164, 148)
   ) !important;
 }
+.knoww-tp-submit.deposit-needed {
+  background: linear-gradient(
+    135deg,
+    rgb(245, 158, 11),
+    rgb(234, 88, 12)
+  ) !important;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.28) !important;
+}
+.knoww-tp-submit.deposit-needed:hover:not(:disabled) {
+  background: linear-gradient(
+    135deg,
+    rgb(217, 119, 6),
+    rgb(194, 65, 12)
+  ) !important;
+}
 .knoww-tp-submit.approve {
   background: linear-gradient(
     135deg,
@@ -4488,6 +4522,7 @@
 /* ── Terms ── */
 
 .knoww-tp-terms {
+  margin-top: 2px !important;
   font-size: 10px !important;
   color: var(--knoww-text-secondary) !important;
   text-align: center !important;
@@ -4806,9 +4841,14 @@
 .knoww-platform-reddit .knoww-tp-enable-section,
 .knoww-platform-reddit .knoww-tp-connect-section,
 .knoww-platform-reddit .knoww-tp-loading-section {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
   padding: 20px 12px !important;
   max-width: 100% !important;
   overflow: hidden !important;
+  text-align: center !important;
 }
 
 .knoww-platform-reddit .knoww-tp-enable-msg,
@@ -4821,9 +4861,20 @@
 }
 
 .knoww-platform-reddit .knoww-tp-btn-enable {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-height: 32px !important;
   max-width: 180px !important;
   padding: 8px 16px !important;
   font-size: 13px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  align-self: center !important;
+  text-align: center !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
 }
 
 .knoww-platform-reddit .knoww-tp-btn-connect {
@@ -5411,4 +5462,657 @@
 .knoww-notification-stack.knoww-stack-minimized .knoww-search-container,
 .knoww-notification-stack.knoww-stack-minimized .knoww-stack-content {
   display: none !important;
+}
+
+/* ============================================
+   EDITORIAL PANEL OVERRIDE
+   The notification panel keeps the editorial layout, while its palette
+   follows the current platform theme. We anchor on the panel's id selector
+   so the rules win
+   over the per-platform `.knoww-notification-stack-{twitter,reddit,...}`
+   blocks above (which would otherwise force native palettes/fonts).
+   ============================================ */
+
+#knoww-notification-stack {
+  --kse-bg: #14110d;
+  --kse-panel: #1b1813;
+  --kse-panel-2: #211d17;
+  --kse-bg-3: #201c17;
+  --kse-ink: #f4efe2;
+  --kse-ink-2: #d8d2c2;
+  --kse-ink-dim: #a39c8a;
+  --kse-yes: #a8d196;
+  --kse-no: #e29c8c;
+  --kse-hairline: rgba(232, 227, 216, 0.12);
+  --kse-hairline-2: rgba(232, 227, 216, 0.22);
+  --kse-row-hover: rgba(232, 227, 216, 0.03);
+  --kse-control-hover: rgba(232, 227, 216, 0.04);
+  --kse-control-active: rgba(232, 227, 216, 0.08);
+  --kse-fallback-stripe: rgba(232, 227, 216, 0.06);
+  --kse-live-glow: rgba(168, 209, 150, 0.55);
+  --kse-tab-active-bg: #f4efe2;
+  --kse-tab-active-ink: #14110d;
+  --kse-tab-active-border: #f4efe2;
+
+  background: var(--kse-panel) !important;
+  border: 1px solid var(--kse-hairline) !important;
+  border-radius: 10px !important;
+  color: var(--kse-ink) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+}
+
+#knoww-notification-stack.knoww-theme-light {
+  --kse-bg: #ffffff;
+  --kse-panel: #ffffff;
+  --kse-panel-2: #f7f9f9;
+  --kse-bg-3: #f7f9f9;
+  --kse-ink: #0f1419;
+  --kse-ink-2: #536471;
+  --kse-ink-dim: #6b7280;
+  --kse-yes: #16833a;
+  --kse-no: #b7355c;
+  --kse-hairline: rgba(15, 20, 25, 0.12);
+  --kse-hairline-2: rgba(15, 20, 25, 0.22);
+  --kse-row-hover: rgba(15, 20, 25, 0.035);
+  --kse-control-hover: rgba(15, 20, 25, 0.045);
+  --kse-control-active: rgba(15, 20, 25, 0.075);
+  --kse-fallback-stripe: rgba(15, 20, 25, 0.06);
+  --kse-live-glow: rgba(22, 131, 58, 0.35);
+  --kse-tab-active-bg: #0f1419;
+  --kse-tab-active-ink: #ffffff;
+  --kse-tab-active-border: #0f1419;
+  box-shadow: 0 8px 28px rgba(15, 20, 25, 0.16) !important;
+}
+
+#knoww-notification-stack.knoww-theme-dim {
+  --kse-bg: #15202b;
+  --kse-panel: #182533;
+  --kse-panel-2: #1f2d3d;
+  --kse-bg-3: #1f2d3d;
+  --kse-ink: #f7f9f9;
+  --kse-ink-2: #b6c2cf;
+  --kse-ink-dim: #8b98a5;
+  --kse-yes: #8fd28f;
+  --kse-no: #e28ba3;
+  --kse-hairline: rgba(247, 249, 249, 0.12);
+  --kse-hairline-2: rgba(247, 249, 249, 0.22);
+  --kse-row-hover: rgba(247, 249, 249, 0.035);
+  --kse-control-hover: rgba(247, 249, 249, 0.045);
+  --kse-control-active: rgba(247, 249, 249, 0.085);
+  --kse-fallback-stripe: rgba(247, 249, 249, 0.06);
+  --kse-live-glow: rgba(143, 210, 143, 0.45);
+  --kse-tab-active-bg: #f7f9f9;
+  --kse-tab-active-ink: #15202b;
+  --kse-tab-active-border: #f7f9f9;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.38) !important;
+}
+
+#knoww-notification-stack:not(.knoww-stack-minimized) {
+  width: 340px !important;
+}
+
+#knoww-notification-stack.knoww-stack-expanded:not(.knoww-stack-minimized) {
+  width: min(520px, calc(100vw - 32px)) !important;
+}
+
+#knoww-notification-stack .knoww-stack-tabs {
+  display: none !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 8px 14px !important;
+  border-bottom: 1px solid var(--kse-hairline) !important;
+}
+
+#knoww-notification-stack.knoww-stack-expanded .knoww-stack-tabs {
+  display: flex !important;
+}
+
+#knoww-notification-stack .knoww-stack-tab {
+  border: 1px solid var(--kse-hairline) !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: var(--kse-ink-2) !important;
+  cursor: pointer !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.12em !important;
+  line-height: 1 !important;
+  padding: 8px 11px !important;
+  text-transform: uppercase !important;
+}
+
+#knoww-notification-stack .knoww-stack-tab:hover {
+  background: var(--kse-control-active) !important;
+  border-color: var(--kse-hairline-2) !important;
+  color: var(--kse-ink) !important;
+}
+
+#knoww-notification-stack .knoww-stack-tab.knoww-stack-tab-active {
+  background: var(--kse-tab-active-bg) !important;
+  border-color: var(--kse-tab-active-border) !important;
+  color: var(--kse-tab-active-ink) !important;
+}
+
+/* ─── Header ─── */
+#knoww-notification-stack .knoww-stack-header {
+  padding: 10px 14px !important;
+  border-bottom: 1px solid var(--kse-hairline) !important;
+  background: transparent !important;
+}
+
+#knoww-notification-stack .knoww-stack-title {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  color: var(--kse-ink) !important;
+}
+
+#knoww-notification-stack .knoww-stack-icon {
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  overflow: hidden !important;
+}
+
+#knoww-notification-stack .knoww-stack-icon img {
+  width: 22px !important;
+  height: 22px !important;
+  display: block !important;
+  border-radius: 5px !important;
+  object-fit: cover !important;
+}
+
+#knoww-notification-stack .knoww-stack-title span {
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 10px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  color: var(--kse-ink) !important;
+}
+
+#knoww-notification-stack .knoww-stack-header-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+/* Header buttons — uniform ghost outline shared by search/chevron/close */
+#knoww-notification-stack .knoww-search-toggle,
+#knoww-notification-stack .knoww-stack-minimize,
+#knoww-notification-stack .knoww-stack-close {
+  width: 26px !important;
+  height: 26px !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  border: 1px solid var(--kse-hairline) !important;
+  color: var(--kse-ink-2) !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease !important;
+}
+
+#knoww-notification-stack .knoww-search-toggle:hover,
+#knoww-notification-stack .knoww-stack-minimize:hover,
+#knoww-notification-stack .knoww-stack-close:hover {
+  background: var(--kse-control-hover) !important;
+  color: var(--kse-ink) !important;
+  border-color: var(--kse-hairline-2) !important;
+}
+
+#knoww-notification-stack .knoww-search-toggle.knoww-search-active {
+  background: var(--kse-control-active) !important;
+  color: var(--kse-ink) !important;
+  border-color: var(--kse-hairline-2) !important;
+}
+
+#knoww-notification-stack .knoww-search-toggle svg,
+#knoww-notification-stack .knoww-stack-minimize svg,
+#knoww-notification-stack .knoww-stack-close svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+/* ─── Section header ─── */
+#knoww-notification-stack .knoww-stack-section-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 14px 14px 8px !important;
+  border-top: none !important;
+  background: transparent !important;
+}
+
+#knoww-notification-stack .knoww-stack-section-header:not(:first-child) {
+  border-top: 1px solid var(--kse-hairline) !important;
+  margin-top: 4px !important;
+}
+
+#knoww-notification-stack .knoww-stack-section-title {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 9px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  color: var(--kse-ink-2) !important;
+}
+
+#knoww-notification-stack .knoww-stack-section-dot {
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 999px !important;
+  background: var(--kse-ink-dim) !important;
+  flex-shrink: 0 !important;
+  display: inline-block !important;
+}
+
+#knoww-notification-stack .knoww-stack-section-dot.trending,
+#knoww-notification-stack .knoww-stack-section-dot.active {
+  background: var(--kse-yes) !important;
+}
+
+#knoww-notification-stack .knoww-stack-section-count {
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 8.5px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  color: var(--kse-ink-2) !important;
+  border: 1px solid var(--kse-hairline-2) !important;
+  border-radius: 999px !important;
+  padding: 2px 7px !important;
+  line-height: 1 !important;
+  background: var(--kse-control-hover) !important;
+}
+
+/* The legacy fire emoji on the trending header is replaced by a colored dot */
+#knoww-notification-stack .knoww-trending-icon {
+  display: none !important;
+}
+
+/* ─── Notification item ─── */
+#knoww-notification-stack .knoww-notification-item {
+  display: grid !important;
+  grid-template-columns: 32px 1fr auto !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 12px 14px !important;
+  border-bottom: none !important;
+  border-left: none !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease !important;
+  position: relative !important;
+}
+
+#knoww-notification-stack .knoww-notification-item:hover {
+  background: var(--kse-row-hover) !important;
+}
+
+#knoww-notification-stack.knoww-stack-expanded .knoww-stack-items {
+  max-height: min(640px, calc(100vh - 180px)) !important;
+  overflow-y: auto !important;
+}
+
+#knoww-notification-stack
+  .knoww-notification-item.knoww-notification-unavailable {
+  opacity: 0.55 !important;
+}
+
+#knoww-notification-stack
+  .knoww-notification-item.knoww-notification-unavailable::after {
+  display: none !important;
+}
+
+#knoww-notification-stack .knoww-notification-item.knoww-source-kalshi,
+#knoww-notification-stack .knoww-notification-item.knoww-source-polymarket {
+  border-left: none !important;
+}
+
+/* ─── Row thumbnail ─── */
+#knoww-notification-stack .knoww-notification-icon {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 5px !important;
+  background: var(--kse-bg-3) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  flex-shrink: 0 !important;
+}
+
+#knoww-notification-stack .knoww-notification-icon img {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  object-fit: cover !important;
+  border-radius: 5px !important;
+}
+
+/* Fallback tile when no market image is available — diagonal stripes
+   plus the category code in mono. */
+#knoww-notification-stack .knoww-notification-icon-fallback {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--kse-fallback-stripe) 0,
+      var(--kse-fallback-stripe) 1px,
+      transparent 1px,
+      transparent 5px
+    ),
+    var(--kse-bg-3) !important;
+  color: var(--kse-ink-2) !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 8px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+}
+
+/* ─── Title + meta line ─── */
+#knoww-notification-stack .knoww-notification-content {
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+}
+
+#knoww-notification-stack .knoww-notification-title {
+  font-family: inherit !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  font-style: normal !important;
+  line-height: 1.28 !important;
+  letter-spacing: 0 !important;
+  color: var(--kse-ink) !important;
+  margin: 0 !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+}
+
+#knoww-notification-stack .knoww-notification-meta {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 8.5px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  color: var(--kse-ink-2) !important;
+}
+
+#knoww-notification-stack .knoww-notification-meta-dot {
+  width: 2px !important;
+  height: 2px !important;
+  border-radius: 999px !important;
+  background: var(--kse-ink-2) !important;
+  display: inline-block !important;
+  flex-shrink: 0 !important;
+}
+
+#knoww-notification-stack .knoww-notification-action-label {
+  color: var(--kse-ink-dim) !important;
+}
+
+/* ─── Right column: big serif number + side label ─── */
+#knoww-notification-stack .knoww-notification-prices {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  gap: 2px !important;
+  font-size: inherit !important;
+  font-weight: normal !important;
+  min-width: 0 !important;
+}
+
+#knoww-notification-stack .knoww-notification-price-num {
+  font-family: inherit !important;
+  font-size: 24px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+  font-feature-settings: "tnum" !important;
+  font-variant-numeric: tabular-nums !important;
+  color: var(--kse-ink) !important;
+  display: inline-flex !important;
+  align-items: baseline !important;
+}
+
+#knoww-notification-stack .knoww-notification-price-num.yes {
+  color: var(--kse-yes) !important;
+}
+
+#knoww-notification-stack .knoww-notification-price-num.no {
+  color: var(--kse-no) !important;
+}
+
+#knoww-notification-stack .knoww-notification-price-cents {
+  font-family: inherit !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  font-style: normal !important;
+  letter-spacing: 0 !important;
+  color: var(--kse-ink-2) !important;
+  margin-left: 1px !important;
+  opacity: 0.85 !important;
+}
+
+#knoww-notification-stack .knoww-notification-side-label {
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 8px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  color: var(--kse-ink-2) !important;
+  text-align: right !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 90px !important;
+}
+
+#knoww-notification-stack
+  .knoww-notification-price-num.yes
+  ~ .knoww-notification-side-label {
+  color: var(--kse-yes) !important;
+  opacity: 0.92 !important;
+}
+
+#knoww-notification-stack
+  .knoww-notification-price-num.no
+  ~ .knoww-notification-side-label {
+  color: var(--kse-no) !important;
+  opacity: 0.92 !important;
+}
+
+#knoww-notification-stack .knoww-notification-arrow {
+  display: none !important;
+}
+
+/* ─── Footer ─── */
+#knoww-notification-stack .knoww-stack-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 10px 14px !important;
+  border-top: 1px solid var(--kse-hairline) !important;
+  background: transparent !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 9px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+}
+
+#knoww-notification-stack .knoww-stack-footer-live {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: var(--kse-ink-2) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+}
+
+#knoww-notification-stack .knoww-stack-footer-live::before {
+  content: "" !important;
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 999px !important;
+  background: var(--kse-yes) !important;
+  display: inline-block !important;
+  box-shadow: 0 0 6px var(--kse-live-glow) !important;
+  animation: knoww-live-pulse 2.4s ease-in-out infinite !important;
+}
+
+@keyframes knoww-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
+#knoww-notification-stack .knoww-stack-footer-see-all {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font: inherit !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  color: var(--kse-ink) !important;
+  cursor: pointer !important;
+}
+
+#knoww-notification-stack .knoww-stack-footer-see-all:hover {
+  color: var(--kse-ink-2) !important;
+}
+
+#knoww-notification-stack.knoww-stack-minimized .knoww-stack-footer {
+  display: none !important;
+}
+
+/* ─── Search container retains the editorial palette ─── */
+#knoww-notification-stack .knoww-search-container {
+  border-bottom: 1px solid var(--kse-hairline) !important;
+  background: transparent !important;
+}
+
+#knoww-notification-stack .knoww-search-input {
+  background: var(--kse-bg-3) !important;
+  border: 1px solid var(--kse-hairline) !important;
+  color: var(--kse-ink) !important;
+  font-family: inherit !important;
+}
+
+#knoww-notification-stack .knoww-search-input:focus {
+  border-color: var(--kse-hairline-2) !important;
+}
+
+#knoww-notification-stack .knoww-search-input::placeholder {
+  color: var(--kse-ink-dim) !important;
+}
+
+#knoww-notification-stack .knoww-search-clear {
+  background: var(--kse-hairline) !important;
+  color: var(--kse-ink) !important;
+}
+
+#knoww-notification-stack .knoww-search-clear:hover {
+  background: var(--kse-hairline-2) !important;
+}
+
+#knoww-notification-stack .knoww-stack-empty {
+  color: var(--kse-ink-dim) !important;
+}
+
+#knoww-notification-stack .knoww-stack-empty-action {
+  background: var(--kse-control-hover) !important;
+  border: 1px solid var(--kse-hairline) !important;
+  border-radius: 999px !important;
+  color: var(--kse-ink) !important;
+  cursor: pointer !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 8.5px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.12em !important;
+  margin-top: 8px !important;
+  padding: 7px 10px !important;
+  text-transform: uppercase !important;
+}
+
+#knoww-notification-stack .knoww-stack-empty-action:hover {
+  background: var(--kse-control-active) !important;
+  border-color: var(--kse-hairline-2) !important;
+}
+
+.knoww-x-pnl-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  height: 18px !important;
+  margin-left: 4px !important;
+  padding: 0 4px !important;
+  border-radius: 4px !important;
+  border: 1px solid currentColor !important;
+  background: transparent !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 18px !important;
+  letter-spacing: 0 !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+}
+
+.knoww-x-pnl-name-row {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+}
+
+.knoww-x-pnl-positive {
+  color: rgb(0, 186, 124) !important;
+}
+
+.knoww-x-pnl-negative {
+  color: rgb(244, 33, 46) !important;
 }

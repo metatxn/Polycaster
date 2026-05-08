@@ -51,6 +51,7 @@ import {
   sportsLiveGameCacheKey,
   writeCachedSportsLiveGame,
 } from "@/lib/sports-live-game-cache";
+import { applyLiveTradingOutcomeQuotes } from "@/lib/trading-outcome-quotes";
 import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
 import { CandidateTicker } from "./candidate-ticker";
@@ -773,7 +774,7 @@ export default function EventDetailClient({
   // Compute selected market, trading outcomes, and sorted market data for display
   const {
     selectedMarket,
-    tradingOutcomes,
+    tradingOutcomes: staticTradingOutcomes,
     currentTokenId,
     tokenMarketMap,
     sortedMarketData,
@@ -947,6 +948,59 @@ export default function EventDetailClient({
       sortedMarketData,
     };
   }, [event, openMarkets, selectedMarketId, selectedOutcomeIndex]);
+
+  const tradingOutcomeQuoteKey = useOrderBookStore((state) =>
+    staticTradingOutcomes
+      .map((outcome) => {
+        const lastTrade = outcome.tokenId
+          ? state.lastTrades.get(outcome.tokenId)
+          : undefined;
+        const orderBook = outcome.tokenId
+          ? state.orderBooks.get(outcome.tokenId)
+          : undefined;
+
+        return [
+          outcome.tokenId,
+          lastTrade?.price ?? "",
+          orderBook?.midpoint ?? "",
+          orderBook?.bestBid ?? "",
+          orderBook?.bestAsk ?? "",
+        ].join(":");
+      })
+      .join("|")
+  );
+
+  const tradingOutcomes = useMemo(() => {
+    if (!tradingOutcomeQuoteKey) return staticTradingOutcomes;
+
+    const quotesByTokenId = new Map<
+      string,
+      {
+        lastTradePrice?: number | null;
+        midpoint?: number | null;
+        bestBid?: number | null;
+        bestAsk?: number | null;
+      }
+    >();
+
+    for (const entry of tradingOutcomeQuoteKey.split("|")) {
+      const [tokenId, rawLastTrade, rawMidpoint, rawBestBid, rawBestAsk] =
+        entry.split(":");
+      if (!tokenId) continue;
+
+      quotesByTokenId.set(tokenId, {
+        lastTradePrice: Number.parseFloat(rawLastTrade ?? ""),
+        midpoint: Number.parseFloat(rawMidpoint ?? ""),
+        bestBid: Number.parseFloat(rawBestBid ?? ""),
+        bestAsk: Number.parseFloat(rawBestAsk ?? ""),
+      });
+    }
+
+    return applyLiveTradingOutcomeQuotes(
+      staticTradingOutcomes,
+      quotesByTokenId
+    );
+  }, [staticTradingOutcomes, tradingOutcomeQuoteKey]);
 
   // Bound WS scope to the market the user is actively inspecting/trading.
   // Table rows get their initial BID/ASK strip from REST hydration below; the

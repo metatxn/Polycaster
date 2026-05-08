@@ -21,7 +21,8 @@ interface GammaKeysetPayload<T> {
 interface FetchGammaKeysetPageParams {
   endpoint: string;
   params: URLSearchParams;
-  revalidate: number;
+  revalidate?: number;
+  cache?: RequestCache;
 }
 
 export interface GammaKeysetPage<T> {
@@ -125,15 +126,21 @@ function extractTotalResults<T>(
 }
 
 export async function fetchGammaKeysetPage<T>(
-  { endpoint, params, revalidate }: FetchGammaKeysetPageParams,
+  { endpoint, params, revalidate, cache }: FetchGammaKeysetPageParams,
   preferredKeys: KeysetItemKey[]
 ): Promise<GammaKeysetPage<T>> {
-  const response = await fetch(`${endpoint}?${params.toString()}`, {
+  const init: RequestInit & { next?: { revalidate: number } } = {
     headers: {
       Accept: "application/json",
     },
-    next: { revalidate },
-  });
+  };
+  if (cache) {
+    init.cache = cache;
+  } else if (revalidate !== undefined) {
+    init.next = { revalidate };
+  }
+
+  const response = await fetch(`${endpoint}?${params.toString()}`, init);
 
   if (!response.ok) {
     throw new Error(`Gamma API error: ${response.statusText}`);

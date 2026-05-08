@@ -180,6 +180,8 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://www.forbes.com/*",
   "https://www.espn.com/*",
   "https://www.espn.in/*",
+  "https://www.espncricinfo.com/*",
+  "https://espncricinfo.com/*",
   "https://www.skysports.com/*",
   "https://www.sportingnews.com/*",
   "https://www.cbssports.com/*",

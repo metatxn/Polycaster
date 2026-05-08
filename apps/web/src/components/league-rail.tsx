@@ -10,11 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-  ALL_SPORTS_TAG_SLUG,
-  SPORT_GROUPS,
-  type SportGroup,
-} from "@/lib/sport-categories";
+import { SPORT_GROUPS, type SportGroup } from "@/lib/sport-categories";
 import { cn } from "@/lib/utils";
 
 interface LeagueCounts {
@@ -32,6 +28,8 @@ interface LeagueRailProps {
   onNavigate?: () => void;
   /** Wrapper class so the rail can pin under sticky headers when desired. */
   className?: string;
+  /** Disable count fetching for routes where the rail is navigation-only. */
+  countsEnabled?: boolean;
 }
 
 function getActiveGroupSlug(activeSlug?: string): string | null {
@@ -46,7 +44,7 @@ function getActiveGroupSlug(activeSlug?: string): string | null {
 }
 
 function getCountTagSlugs(openGroupSlugs: ReadonlySet<string>) {
-  const slugs = new Set<string>([ALL_SPORTS_TAG_SLUG]);
+  const slugs = new Set<string>();
   for (const group of SPORT_GROUPS) {
     if (group.tagSlug) slugs.add(group.tagSlug);
 
@@ -59,7 +57,7 @@ function getCountTagSlugs(openGroupSlugs: ReadonlySet<string>) {
   return Array.from(slugs).sort();
 }
 
-function useLeagueCounts(tagSlugs: string[]) {
+function useLeagueCounts(tagSlugs: string[], enabled = true) {
   return useQuery<LeagueCounts>({
     queryKey: ["league-counts", tagSlugs.join(",")],
     queryFn: async () => {
@@ -71,6 +69,7 @@ function useLeagueCounts(tagSlugs: string[]) {
     },
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    enabled: enabled && tagSlugs.length > 0,
   });
 }
 
@@ -144,7 +143,7 @@ function RailGroup({
   // Single-league sports (Golf, F1, Boxing, …): render as a leaf, no
   // collapsible affordance. Polymarket does the same.
   if (group.leagues.length === 0) {
-    if (!countsLoaded || !groupCount) return null;
+    if (countsLoaded && !groupCount) return null;
 
     return (
       <Link
@@ -165,7 +164,7 @@ function RailGroup({
 
   const visibleLeagues = countsLoaded
     ? group.leagues.filter((league) => (countsByTag[league.tagSlug] ?? 0) > 0)
-    : [];
+    : group.leagues;
 
   if (countsLoaded && visibleLeagues.length === 0) return null;
 
@@ -234,6 +233,7 @@ export function LeagueRail({
   defaultOpenGroupSlugs = [],
   onNavigate,
   className,
+  countsEnabled = true,
 }: LeagueRailProps) {
   const pathname = usePathname();
   const defaultOpenGroupSet = useMemo(
@@ -271,7 +271,7 @@ export function LeagueRail({
     () => getCountTagSlugs(openGroupSlugs),
     [openGroupSlugs]
   );
-  const { data } = useLeagueCounts(countTagSlugs);
+  const { data } = useLeagueCounts(countTagSlugs, countsEnabled);
 
   const isLiveActive = pathname === "/events/sports/live";
 

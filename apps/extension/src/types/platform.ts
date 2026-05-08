@@ -13,6 +13,9 @@ export interface InjectionPoint {
   cleanup?: () => void;
   referenceElement?: Element | null | undefined;
   insertPosition: "append" | "before" | "after";
+  wrapperClassName?: string;
+  wrapperStyles?: string;
+  cardClassName?: string;
 }
 
 /**

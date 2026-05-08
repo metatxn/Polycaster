@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
+import { fetchGammaKeysetCountPage } from "@/lib/gamma-keyset-count";
 import { logger } from "@/lib/logger";
 import { ALL_SPORTS_TAG_SLUG, SPORT_GROUPS } from "@/lib/sport-categories";
 import {
@@ -9,7 +10,7 @@ import {
   type SportsEventActivityCandidate,
 } from "@/lib/sports-event-activity";
 
-const COUNT_FETCH_CONCURRENCY = 6;
+const COUNT_FETCH_CONCURRENCY = 3;
 const COUNT_PAGE_LIMIT = 500;
 const COUNT_MAX_PAGES = 100;
 
@@ -223,23 +224,31 @@ async function fetchCount(
       const params = new URLSearchParams(baseParams);
       if (afterCursor) params.set("after_cursor", afterCursor);
 
+      if (!shouldFilterCurrentSchedule) {
+        const page = await fetchGammaKeysetCountPage({
+          endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
+          params,
+          revalidate: CACHE_DURATION.EVENTS,
+        });
+
+        total += page.count;
+        if (!page.nextCursor) return total;
+        afterCursor = page.nextCursor;
+        continue;
+      }
+
       const page = await fetchGammaKeysetPage<SportsEventActivityCandidate>(
         {
           endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
           params,
-          revalidate: CACHE_DURATION.EVENTS,
+          cache: "no-store",
         },
         ["events", "data"]
       );
 
-      if (page.totalResults !== undefined && !shouldFilterCurrentSchedule) {
-        return page.totalResults;
-      }
-
-      total += shouldFilterCurrentSchedule
-        ? page.items.filter((event) => isCurrentSportsEvent(event, nowMs))
-            .length
-        : page.items.length;
+      total += page.items.filter((event) =>
+        isCurrentSportsEvent(event, nowMs)
+      ).length;
       if (!page.nextCursor) return total;
       afterCursor = page.nextCursor;
     }

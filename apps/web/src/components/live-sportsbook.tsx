@@ -19,6 +19,7 @@ import type { LiveGameState } from "@/hooks/use-sports-websocket";
 import { type Position, useUserPositions } from "@/hooks/use-user-positions";
 import { type Trade, useUserTrades } from "@/hooks/use-user-trades";
 import { formatPrice, formatVolume } from "@/lib/formatters";
+import { isTennisSetScore, parseSportsScore } from "@/lib/sports-score-format";
 import { cn } from "@/lib/utils";
 
 const OrderBook = dynamic(
@@ -974,26 +975,6 @@ function parseTeamsFromTitle(title: string): [string, string] | null {
   return null;
 }
 
-/**
- * Parse scores from Polymarket format.
- * Regular sports: "2-0" → ["2", "0"]
- * Esports (pipe-delimited): "000-000|1-0|Bo3" → ["1", "0"]
- *   The middle segment is the series score; first segment is round-level.
- */
-function parseScore(raw: string | undefined): [string, string] {
-  if (!raw) return ["", ""];
-  if (raw.includes("|")) {
-    const segments = raw.split("|");
-    const seriesScore = segments[1];
-    if (seriesScore) {
-      const parts = seriesScore.split("-").map((s) => s.trim());
-      return [parts[0] ?? "", parts[1] ?? ""];
-    }
-  }
-  const parts = raw.split("-").map((s) => s.trim());
-  return [parts[0] ?? "", parts[1] ?? ""];
-}
-
 function getSeriesInfo(title: string): string | null {
   const boMatch = title.match(/\(BO(\d+)\)/i);
   return boMatch ? `Best of ${boMatch[1]}` : null;
@@ -1663,6 +1644,7 @@ function SportEventRow({
   event,
   game,
   variant = "live",
+  isTennis = false,
   expandedMarketId,
   onToggleExpand,
   onOpenExpand,
@@ -1675,6 +1657,7 @@ function SportEventRow({
   event: LiveEvent;
   game: LiveGameState | null;
   variant?: SportRowVariant;
+  isTennis?: boolean;
   expandedMarketId: string | null;
   onToggleExpand: (marketId: string) => void;
   onOpenExpand: (marketId: string) => void;
@@ -1713,7 +1696,9 @@ function SportEventRow({
   const teamNames = moneylineDisplay.teamNames;
   const primaryMarket = moneylineDisplay.primaryLine ?? spread ?? total;
 
-  const [homeScore, awayScore] = parseScore(game?.score || event.score);
+  const rawScore = game?.score || event.score;
+  const [homeScore, awayScore] = parseSportsScore(rawScore);
+  const showInlineScore = isTennis || isTennisSetScore(rawScore);
 
   const href = event.slug
     ? `/events/detail/${event.slug}`
@@ -1858,9 +1843,10 @@ function SportEventRow({
     onToggleExpand(primaryMarket.market.id);
   };
 
-  const gridClass = isLive
-    ? "event-grid-live grid grid-cols-[auto_auto_1fr_auto]"
-    : "event-grid-scheduled grid grid-cols-[auto_1fr_auto]";
+  const gridClass =
+    isLive && !showInlineScore
+      ? "event-grid-live grid grid-cols-[auto_auto_1fr_auto]"
+      : "event-grid-scheduled grid grid-cols-[auto_1fr_auto]";
 
   return (
     /* biome-ignore lint/a11y/useSemanticElements: can't use <button> here — it contains child <button> and <a> elements */
@@ -1957,15 +1943,22 @@ function SportEventRow({
                 moneylineDisplay.draw ? "pt-3 pb-1.5" : "py-3"
               )}
             >
-              {isLive && (
+              {isLive && !showInlineScore && (
                 <span className="w-6 text-center text-base font-bold tabular-nums text-foreground">
                   {homeScore}
                 </span>
               )}
               <TeamAvatar name={teamNames[0]} />
-              <span className="text-base font-semibold text-foreground truncate">
-                {teamNames[0]}
-              </span>
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="min-w-0 truncate text-base font-semibold text-foreground">
+                  {teamNames[0]}
+                </span>
+                {showInlineScore && homeScore && (
+                  <span className="shrink-0 font-mono text-sm font-bold tabular-nums text-foreground/80">
+                    {homeScore}
+                  </span>
+                )}
+              </div>
               <div className="w-[106px] flex justify-center">
                 {moneylineDisplay.home ? (
                   <PriceButton
@@ -2058,15 +2051,22 @@ function SportEventRow({
                 moneylineDisplay.draw ? "pt-1.5 pb-3" : "py-3"
               )}
             >
-              {isLive && (
+              {isLive && !showInlineScore && (
                 <span className="w-6 text-center text-base font-bold tabular-nums text-foreground">
                   {awayScore}
                 </span>
               )}
               <TeamAvatar name={teamNames[1]} />
-              <span className="text-base font-semibold text-foreground truncate">
-                {teamNames[1]}
-              </span>
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="min-w-0 truncate text-base font-semibold text-foreground">
+                  {teamNames[1]}
+                </span>
+                {showInlineScore && awayScore && (
+                  <span className="shrink-0 font-mono text-sm font-bold tabular-nums text-foreground/80">
+                    {awayScore}
+                  </span>
+                )}
+              </div>
               <div className="w-[106px] flex justify-center">
                 {moneylineDisplay.away ? (
                   <PriceButton
@@ -2167,6 +2167,7 @@ function CompactEventRow({
   getMarketPositions,
   tradingAddress,
   variant = "live",
+  isTennis = false,
 }: {
   event: LiveEvent;
   game: LiveGameState | null;
@@ -2177,6 +2178,7 @@ function CompactEventRow({
   getMarketPositions: (market: EventMarket) => Position[];
   tradingAddress?: string;
   variant?: "live" | "scheduled";
+  isTennis?: boolean;
 }) {
   const moneyline = useMemo(
     () => (event.markets ? findMoneyline(event.markets) : null),
@@ -2188,7 +2190,9 @@ function CompactEventRow({
   );
   const teamNames = moneylineDisplay.teamNames;
 
-  const [homeScore, awayScore] = parseScore(game?.score || event.score);
+  const rawScore = game?.score || event.score;
+  const [homeScore, awayScore] = parseSportsScore(rawScore);
+  const showInlineScore = isTennis || isTennisSetScore(rawScore);
   const href = event.slug
     ? `/events/detail/${event.slug}`
     : `/events/detail/${event.id}`;
@@ -2352,14 +2356,23 @@ function CompactEventRow({
             moneylineDisplay.draw ? "pt-2.5 pb-1" : "py-2.5"
           )}
         >
-          <div className="flex items-center gap-2.5">
-            <span className="w-5 text-center text-sm font-bold tabular-nums">
-              {homeScore}
-            </span>
+          <div className="flex min-w-0 items-center gap-2.5">
+            {!showInlineScore && (
+              <span className="w-5 text-center text-sm font-bold tabular-nums">
+                {homeScore}
+              </span>
+            )}
             <TeamAvatar name={teamNames[0]} size="sm" />
-            <span className="text-sm font-semibold truncate max-w-[160px]">
-              {teamNames[0]}
-            </span>
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 truncate text-sm font-semibold">
+                {teamNames[0]}
+              </span>
+              {showInlineScore && homeScore && (
+                <span className="shrink-0 font-mono text-[13px] font-bold tabular-nums text-foreground/80">
+                  {homeScore}
+                </span>
+              )}
+            </div>
           </div>
           {moneylineDisplay.home && (
             <PriceButton
@@ -2406,14 +2419,23 @@ function CompactEventRow({
               moneylineDisplay.draw ? "pt-1 pb-2.5" : "py-2.5"
             )}
           >
-            <div className="flex items-center gap-2.5">
-              <span className="w-5 text-center text-sm font-bold tabular-nums">
-                {awayScore}
-              </span>
+            <div className="flex min-w-0 items-center gap-2.5">
+              {!showInlineScore && (
+                <span className="w-5 text-center text-sm font-bold tabular-nums">
+                  {awayScore}
+                </span>
+              )}
               <TeamAvatar name={teamNames[1]} size="sm" />
-              <span className="text-sm font-semibold truncate max-w-[160px]">
-                {teamNames[1]}
-              </span>
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="min-w-0 truncate text-sm font-semibold">
+                  {teamNames[1]}
+                </span>
+                {showInlineScore && awayScore && (
+                  <span className="shrink-0 font-mono text-[13px] font-bold tabular-nums text-foreground/80">
+                    {awayScore}
+                  </span>
+                )}
+              </div>
             </div>
             {moneylineDisplay.away && (
               <PriceButton
@@ -2489,6 +2511,7 @@ function LeagueSection({
   selectedOutcomeTokenId?: string;
 }) {
   const leagueIcon = events[0]?.image;
+  const isTennis = league === "tennis";
 
   return (
     <div className="space-y-2">
@@ -2511,14 +2534,24 @@ function LeagueSection({
           </span>
         </div>
       </div>
-      <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
-        <span className="w-6 text-center">Score</span>
-        <span className="w-7" />
-        <span>Team</span>
-        <span className="w-[106px] text-center">Moneyline</span>
-        <span className="hidden lg:inline w-[132px] text-center">Spread</span>
-        <span className="hidden lg:inline w-[122px] text-center">Total</span>
-      </div>
+      {isTennis ? (
+        <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+          <span className="w-7" />
+          <span>Player</span>
+          <span className="w-[106px] text-center">Moneyline</span>
+          <span className="hidden lg:inline w-[132px] text-center">Spread</span>
+          <span className="hidden lg:inline w-[122px] text-center">Total</span>
+        </div>
+      ) : (
+        <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+          <span className="w-6 text-center">Score</span>
+          <span className="w-7" />
+          <span>Team</span>
+          <span className="w-[106px] text-center">Moneyline</span>
+          <span className="hidden lg:inline w-[132px] text-center">Spread</span>
+          <span className="hidden lg:inline w-[122px] text-center">Total</span>
+        </div>
+      )}
       <div className="-mt-px">
         {events.map((event) => {
           const game = eventGameMap.get(event.id) ?? null;
@@ -2529,6 +2562,7 @@ function LeagueSection({
                   variant="live"
                   event={event}
                   game={game}
+                  isTennis={isTennis}
                   expandedMarketId={expandedMarketId}
                   onToggleExpand={onToggleExpand}
                   onOpenExpand={onOpenExpand}
@@ -2545,6 +2579,7 @@ function LeagueSection({
                 <CompactEventRow
                   event={event}
                   game={game}
+                  isTennis={isTennis}
                   expandedMarketId={expandedMarketId}
                   onToggleExpand={onToggleExpand}
                   onOpenExpand={onOpenExpand}

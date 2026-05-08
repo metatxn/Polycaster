@@ -23,6 +23,11 @@ export interface FetchJsonMessage {
   body?: unknown;
 }
 
+export interface FetchImageDataUrlMessage {
+  type: "fetch-image-data-url";
+  url: string;
+}
+
 export interface ScoreMarketsMessage {
   type: "score-markets";
   postText: string;
@@ -235,6 +240,7 @@ export type TradingMessage =
 export type BackgroundMessage =
   | FetchTextMessage
   | FetchJsonMessage
+  | FetchImageDataUrlMessage
   | ScoreMarketsMessage
   | ScoringPrewarmMessage
   | TradingMessage
@@ -254,6 +260,14 @@ export interface FetchJsonSuccessResponse {
   ok: true;
   status: number;
   data: unknown;
+  responseUrl?: string;
+}
+
+export interface FetchImageDataUrlSuccessResponse {
+  ok: true;
+  status: number;
+  dataUrl: string;
+  contentType: string;
   responseUrl?: string;
 }
 
@@ -294,6 +308,7 @@ export interface ScoreMarketsSuccessResponse {
 export type BackgroundResponse =
   | FetchTextSuccessResponse
   | FetchJsonSuccessResponse
+  | FetchImageDataUrlSuccessResponse
   | FetchErrorResponse
   | TradingSuccessResponse
   | TradingErrorResponse

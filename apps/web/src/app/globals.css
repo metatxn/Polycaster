@@ -1028,6 +1028,66 @@ body:not(:has(.kw-landing))
   }
 }
 
+/* Coverage orbit reveal — one-shot build animation that runs when the
+   diagram enters the viewport. Rings scale + fade in inner→middle→
+   outer; pills fade up ring-by-ring shortly after. After the reveal
+   completes, the diagram is fully static (no looping ambient motion).
+   `transform-box: fill-box` anchors each ellipse's scale origin to its
+   own bounding-box centre even though the SVG uses
+   preserveAspectRatio="none". */
+.kw-orbit-ring {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.6);
+}
+.kw-orbit-pill {
+  opacity: 0;
+}
+.kw-orbit-pill > span {
+  display: inline-block;
+  transform: translateY(8px);
+}
+
+@keyframes kwOrbitRingReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes kwOrbitPillReveal {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes kwOrbitPillSpanLift {
+  0% {
+    transform: translateY(8px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.kw-coverage-built .kw-orbit-ring {
+  animation: kwOrbitRingReveal 800ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.kw-coverage-built .kw-orbit-pill {
+  animation: kwOrbitPillReveal 600ms ease-out forwards;
+}
+.kw-coverage-built .kw-orbit-pill > span {
+  animation: kwOrbitPillSpanLift 600ms ease-out forwards;
+  /* Inherit the parent's animation-delay so lift + fade stay in sync. */
+  animation-delay: inherit;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Reduced-motion overrides must win regardless of specificity or
      source order — users opting out of motion get a guaranteed
@@ -1044,6 +1104,10 @@ body:not(:has(.kw-landing))
   .kw-tilt:hover {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     transform: none !important;
+  }
+  .kw-orbit-ring {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    animation: none !important;
   }
   .animate-\[ticker_60s_linear_infinite\] {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */

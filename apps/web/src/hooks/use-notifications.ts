@@ -160,8 +160,10 @@ export function useNotifications() {
       const client = await getAuthenticatedClient();
       const rawData = await client.getNotifications();
 
-      // Transform raw data to our typed notifications
-      const transformed = rawData?.map((raw, index) =>
+      // SDK types claim Notification[] but the API may return null or an
+      // error envelope; harden the boundary before iterating.
+      const list: RawNotification[] = Array.isArray(rawData) ? rawData : [];
+      const transformed = list.map((raw, index) =>
         transformNotification(raw, index)
       );
 

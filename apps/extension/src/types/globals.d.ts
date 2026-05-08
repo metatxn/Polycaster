@@ -276,6 +276,7 @@ declare global {
         index: number
       ) => HTMLElement;
       updateNotificationStack: (markets: InjectedMarketEntry[]) => void;
+      updateNotificationStackTheme: () => void;
       scrollToMarket: (
         cardRefOrElement: WeakRef<HTMLElement> | HTMLElement | null | undefined,
         marketId: string,

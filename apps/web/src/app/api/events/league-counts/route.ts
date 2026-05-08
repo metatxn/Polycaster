@@ -4,6 +4,10 @@ import { checkRateLimit } from "@/lib/api-rate-limit";
 import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
 import { ALL_SPORTS_TAG_SLUG, SPORT_GROUPS } from "@/lib/sport-categories";
+import {
+  isCurrentSportsEvent,
+  type SportsEventActivityCandidate,
+} from "@/lib/sports-event-activity";
 
 const COUNT_FETCH_CONCURRENCY = 6;
 const COUNT_PAGE_LIMIT = 500;
@@ -11,6 +15,7 @@ const COUNT_MAX_PAGES = 100;
 
 type CountFilter = {
   tagSlug: string;
+  filterCurrentSchedule?: boolean;
   seriesId?: number;
 };
 
@@ -19,10 +24,13 @@ const COUNT_FILTERS_BY_TAG_SLUG = (() => {
     [ALL_SPORTS_TAG_SLUG, { tagSlug: ALL_SPORTS_TAG_SLUG }],
   ]);
   for (const group of SPORT_GROUPS) {
-    filters.set(group.tagSlug, { tagSlug: group.tagSlug });
+    filters.set(group.tagSlug, {
+      tagSlug: group.tagSlug,
+    });
     for (const league of group.leagues) {
       filters.set(league.tagSlug, {
         tagSlug: league.tagSlug,
+        filterCurrentSchedule: true,
         seriesId: league.seriesId,
       });
     }
@@ -55,8 +63,8 @@ async function mapWithConcurrency<T, R>(
  * @openapi
  * /api/events/league-counts:
  *   get:
- *     summary: Get open sports event counts by Gamma tag slug.
- *     description: Returns a count per allowlisted sports `tag_slug`, plus the live sports count. League entries with a configured `seriesId` are counted with Gamma `series_id` while preserving the response key as the requested tag slug. Rate limited by the shared API limiter with 60 unique tokens per interval.
+ *     summary: Get current open sports event counts by Gamma tag slug.
+ *     description: Returns a count per allowlisted sports `tag_slug`, plus the live sports count. League entries with a configured `seriesId` are counted with Gamma `series_id` while preserving the response key as the requested tag slug, and stale completed sports schedules are excluded for league and single-sport entries. Rate limited by the shared API limiter with 60 unique tokens per interval.
  *     tags:
  *       - Events
  *     parameters:
@@ -193,6 +201,8 @@ async function fetchCount(
 ): Promise<number> {
   if (!filter) return 0;
 
+  const nowMs = Date.now();
+  const shouldFilterCurrentSchedule = filter.filterCurrentSchedule === true;
   const baseParams = new URLSearchParams({
     closed: "false",
     active: "true",
@@ -213,7 +223,7 @@ async function fetchCount(
       const params = new URLSearchParams(baseParams);
       if (afterCursor) params.set("after_cursor", afterCursor);
 
-      const page = await fetchGammaKeysetPage<unknown>(
+      const page = await fetchGammaKeysetPage<SportsEventActivityCandidate>(
         {
           endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
           params,
@@ -222,11 +232,14 @@ async function fetchCount(
         ["events", "data"]
       );
 
-      if (page.totalResults !== undefined) {
+      if (page.totalResults !== undefined && !shouldFilterCurrentSchedule) {
         return page.totalResults;
       }
 
-      total += page.items.length;
+      total += shouldFilterCurrentSchedule
+        ? page.items.filter((event) => isCurrentSportsEvent(event, nowMs))
+            .length
+        : page.items.length;
       if (!page.nextCursor) return total;
       afterCursor = page.nextCursor;
     }

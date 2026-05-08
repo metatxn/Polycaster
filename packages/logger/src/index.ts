@@ -86,9 +86,25 @@ function shouldLog(level: LogLevel): boolean {
   return level === "warn" || level === "error";
 }
 
-function serializeError(value: unknown): unknown {
+function serializeError(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value instanceof Error) {
     return { name: value.name, message: value.message, stack: value.stack };
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeError(item, seen));
+  }
+  if (value && typeof value === "object") {
+    if (seen.has(value)) return "[circular]";
+    seen.add(value);
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        serializeError(item, seen),
+      ])
+    );
   }
   return value;
 }
@@ -100,7 +116,7 @@ function emitServer(
 ): void {
   const payloadObj =
     payload && typeof payload === "object" && !(payload instanceof Error)
-      ? (payload as Record<string, unknown>)
+      ? (serializeError(payload) as Record<string, unknown>)
       : payload !== undefined
         ? { payload: serializeError(payload) }
         : {};
@@ -119,7 +135,7 @@ function emitServer(
 
 function safeStringify(value: unknown): string {
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(serializeError(value));
   } catch {
     return "[unserializable]";
   }

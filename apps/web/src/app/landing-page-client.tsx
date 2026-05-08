@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Check, Download, Lock } from "lucide-react";
+import { ArrowUpRight, Download } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { KnowwMark } from "@/components/knoww-mark";
@@ -25,43 +25,87 @@ const TICKER = [
   { label: "US-RECESSION-2026", side: "NO", price: "71¢", delta: "-4" },
 ];
 
-// Feature checks for the "same scroll, with odds" section. Three short
-// promises that map back to the three pillars of the experience.
-const SAME_SCROLL_FEATURES = [
-  "Auto-detects context — tweets, headlines, threads, replies",
-  "Live Polymarket odds, volume & resolution rules",
-  "Trade in one click — without leaving the page",
+// Coverage orbit geometry — three concentric ellipses around centre
+// (50, 55) in the orbit container's percentage coordinate system.
+// Pills sit at fixed angles on these rings; the only motion is from
+// signal bursts that fire from Knoww out to a random pill on a
+// loose 1.5–3s cadence. Dash drift is kept slow & ambient so the
+// rings feel alive between bursts.
+type RingId = "inner" | "middle" | "outer";
+
+const RINGS: Record<RingId, { rx: number; ry: number; dashDur: string }> = {
+  inner: { rx: 26, ry: 21, dashDur: "6s" },
+  middle: { rx: 38, ry: 33, dashDur: "8s" },
+  outer: { rx: 48, ry: 43, dashDur: "10s" },
+};
+
+// Each pill belongs to a ring and has an angle in degrees, where
+// 0° = right-of-centre and increasing angle moves clockwise (sin(θ)
+// > 0 ⇒ +y on screen, since y grows downward). Angles preserve the
+// original hand-arranged static layout.
+const COVERAGE_PILLS: Array<{ name: string; ring: RingId; angle: number }> = [
+  // Inner ring — discussion platforms
+  { name: "Reddit", ring: "inner", angle: -110 },
+  { name: "Hacker News", ring: "inner", angle: -70 },
+  { name: "X / Twitter", ring: "inner", angle: 180 },
+  { name: "Threads", ring: "inner", angle: 0 },
+  { name: "Bluesky", ring: "inner", angle: 110 },
+  { name: "Substack", ring: "inner", angle: 70 },
+  // Middle ring — media & publications
+  { name: "NYT", ring: "middle", angle: -130 },
+  { name: "Bloomberg", ring: "middle", angle: -50 },
+  { name: "Financial Times", ring: "middle", angle: -169 },
+  { name: "Axios", ring: "middle", angle: -11 },
+  { name: "Politico", ring: "middle", angle: 130 },
+  { name: "The Verge", ring: "middle", angle: 50 },
+  // Outer ring — knowledge, culture & professional
+  { name: "Wikipedia", ring: "outer", angle: 180 },
+  { name: "YouTube", ring: "outer", angle: 0 },
+  { name: "ESPN", ring: "outer", angle: 130 },
+  { name: "LinkedIn", ring: "outer", angle: 50 },
 ];
 
-// Constellation pills for the Coverage section. Coordinates sit ON the
-// dotted rings (computed from each ring's rx/ry around centre 50,55),
-// not floating near them — so the diagram reads as typeset, not
-// hand-arranged. Inner = discussion platforms, middle = media, outer =
-// knowledge/culture/professional.
-const COVERAGE_PILLS: Array<{ name: string; x: number; y: number }> = [
-  // Inner ring — discussion platforms (rx≈26%, ry≈21%)
-  { name: "Reddit", x: 41, y: 35 },
-  { name: "Hacker News", x: 59, y: 35 },
-  { name: "X / Twitter", x: 24, y: 55 },
-  { name: "Threads", x: 76, y: 55 },
-  { name: "Bluesky", x: 41, y: 75 },
-  { name: "Substack", x: 59, y: 75 },
-  // Middle ring — media & publications (rx≈38%, ry≈33%)
-  { name: "NYT", x: 26, y: 30 },
-  { name: "Bloomberg", x: 74, y: 30 },
-  { name: "Financial Times", x: 13, y: 49 },
-  { name: "Axios", x: 87, y: 49 },
-  { name: "Politico", x: 26, y: 80 },
-  { name: "The Verge", x: 74, y: 80 },
-  // Outer ring — knowledge, culture & professional (rx≈48%, ry≈43%)
-  { name: "Wikipedia", x: 3, y: 55 },
-  { name: "YouTube", x: 97, y: 55 },
-  { name: "ESPN", x: 19, y: 88 },
-  { name: "LinkedIn", x: 81, y: 88 },
-];
+// Reveal-stagger delays (ms). The rings scale + fade in inner→middle→
+// outer so the diagram reads as growing outward from Knoww, and each
+// ring's pills fade up shortly after their ring is in place.
+const REVEAL_DELAYS: Record<RingId, { ring: number; pill: number }> = {
+  inner: { ring: 0, pill: 500 },
+  middle: { ring: 200, pill: 700 },
+  outer: { ring: 400, pill: 900 },
+};
 
 export default function LandingPageClient() {
   const { theme, toggleTheme } = useKwTheme();
+  const orbitRef = useRef<HTMLDivElement | null>(null);
+  const [revealed, setRevealed] = useState(false);
+
+  // Reveal toggle — when the orbit map enters the viewport we add the
+  // `kw-coverage-built` class to play the staggered ring + pill build;
+  // when it leaves we remove it so the animation replays on the next
+  // scroll-in. Reduced-motion users get the final state immediately.
+  useEffect(() => {
+    const el = orbitRef.current;
+    if (!el) return;
+
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    if (reduceMotion) {
+      setRevealed(true);
+      return;
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          setRevealed(entry.isIntersecting);
+        }
+      },
+      { threshold: 0.3 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   return (
     <div
@@ -197,7 +241,7 @@ export default function LandingPageClient() {
               § I. The gap we&apos;re closing
             </h2>
             <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              P. 01 / 05
+              P. 01 / 04
             </span>
           </div>
 
@@ -284,7 +328,7 @@ export default function LandingPageClient() {
               § II. The thesis
             </h2>
             <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              P. 02 / 05
+              P. 02 / 04
             </span>
           </div>
 
@@ -355,186 +399,6 @@ export default function LandingPageClient() {
         </div>
       </section>
 
-      {/* SAME SCROLL, WITH ODDS — show, don't tell. The thesis above
-          described Detect/Match/Execute in the abstract; this section
-          re-enacts it inside a browser-mockup so the value prop is felt,
-          not just read. */}
-      <section className="border-b border-(--kw-fg)/10">
-        <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32">
-          <div className="kw-reveal flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5 mb-8">
-            <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              § III. In context
-            </h2>
-            <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              P. 03 / 05
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-8 lg:gap-12 items-center">
-            {/* LEFT — editorial copy + feature checks */}
-            <div className="kw-reveal md:col-span-5">
-              <h3 className="font-bold tracking-[-0.035em] leading-[0.98] text-[36px] sm:text-[46px] md:text-[50px] mb-5">
-                The same scroll.
-                <br />
-                With{" "}
-                <span className="kw-editorial italic kw-tilt text-(--kw-accent-text)">
-                  odds.
-                </span>
-              </h3>
-              <p className="text-[15px] leading-[1.6] text-(--kw-fg)/70 max-w-[480px] mb-7">
-                When you read a tweet about Bitcoin, an article about an
-                election, a Substack on AI — Knoww quietly reads the context,
-                fetches the relevant Polymarket market, and shows the current
-                odds where you already are.
-              </p>
-              <ul className="space-y-4">
-                {SAME_SCROLL_FEATURES.map((line) => (
-                  <li key={line} className="flex items-start gap-3.5">
-                    <span className="shrink-0 mt-[3px] w-[18px] h-[18px] rounded-full border border-(--kw-accent)/55 bg-(--kw-accent)/8 flex items-center justify-center">
-                      <Check
-                        className="w-2.5 h-2.5 text-(--kw-accent-text)"
-                        strokeWidth={3}
-                      />
-                    </span>
-                    <span className="text-[14.5px] leading-[1.55] text-(--kw-fg)/85">
-                      {line}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* RIGHT — browser mockup with tweet + Knoww panel */}
-            <div className="kw-reveal md:col-span-7 relative">
-              <div aria-hidden className="kw-stage-glow" />
-              <div className="relative border border-(--kw-fg)/15 bg-(--kw-bg-card) shadow-[0_30px_70px_-30px_rgba(0,0,0,0.32)]">
-                {/* Browser chrome */}
-                <div className="px-4 py-3 border-b border-(--kw-fg)/10 flex items-center gap-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-(--kw-fg)/15" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-(--kw-fg)/15" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-(--kw-fg)/15" />
-                  </div>
-                  <div className="flex-1 mx-2 h-7 px-3 rounded-md bg-(--kw-fg)/5 border border-(--kw-fg)/10 flex items-center gap-2 text-[11px] font-mono text-(--kw-fg)/55 min-w-0">
-                    <Lock className="w-3 h-3 shrink-0" />
-                    <span className="truncate">x.com/yardeni/status/…</span>
-                  </div>
-                  <span className="w-7 h-7 bg-(--kw-accent)/15 border border-(--kw-accent)/30 flex items-center justify-center rounded-sm">
-                    <KnowwMark size="sm" />
-                  </span>
-                </div>
-
-                {/* Body */}
-                <div className="p-5 sm:p-6 space-y-4">
-                  {/* Tweet card */}
-                  <div className="rounded-md border border-(--kw-fg)/15 p-4 sm:p-5 bg-(--kw-bg-card)">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="w-9 h-9 rounded-full bg-(--kw-fg)/8 border border-(--kw-fg)/15 flex items-center justify-center font-mono text-[12px] tracking-wider font-semibold text-(--kw-fg)/75">
-                        Y
-                      </span>
-                      <div className="flex flex-col leading-tight">
-                        <span className="text-[14px] font-semibold">
-                          Ed Yardeni
-                        </span>
-                        <span className="text-[12px] font-mono text-(--kw-fg)/50">
-                          @yardeni · 2m
-                        </span>
-                      </div>
-                    </div>
-                    <p className="text-[14.5px] sm:text-[15px] leading-[1.55] text-(--kw-fg)/90">
-                      <span className="font-semibold">BREAKING:</span>{" "}
-                      Disinflation back on track. Markets pricing a Fed cut as
-                      early as <span className="font-semibold">Q1 2026</span> —
-                      and history says momentum compounds once the cycle turns.
-                    </p>
-                    <div className="mt-3.5 flex items-center gap-6 text-[11px] font-mono text-(--kw-fg)/50 tabular-nums">
-                      <span>1.2K</span>
-                      <span>4.8K</span>
-                      <span>22K</span>
-                    </div>
-                  </div>
-
-                  {/* Knoww panel — inverted */}
-                  <div className="rounded-md border border-(--kw-fg)/30 bg-(--kw-fg) text-(--kw-bg) overflow-hidden">
-                    <div className="px-4 sm:px-5 py-3 border-b border-(--kw-bg)/15 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-(--kw-accent-inv) animate-pulse" />
-                        <span className="w-5 h-5 bg-(--kw-accent)/20 border border-(--kw-accent)/40 flex items-center justify-center rounded-[3px]">
-                          <KnowwMark size="sm" />
-                        </span>
-                        <span className="font-bold text-[13px]">Knoww</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.18em] text-(--kw-bg)/60">
-                        <span>Polymarket</span>
-                        <span className="text-(--kw-bg)/25 hidden sm:inline">
-                          ·
-                        </span>
-                        <span className="tabular-nums hidden sm:inline">
-                          8.4M VOL
-                        </span>
-                      </div>
-                    </div>
-                    <div className="px-4 sm:px-5 pt-4 pb-5">
-                      <h4 className="text-[18px] sm:text-[20px] font-bold tracking-[-0.02em] leading-[1.22] mb-4 max-w-[460px]">
-                        Will the Fed cut rates by Q1 2026?
-                      </h4>
-
-                      {/* Odds bar — single bar split YES / NO */}
-                      <div className="relative h-[36px] rounded-sm overflow-hidden bg-(--kw-bg)/12">
-                        <div
-                          className="absolute inset-y-0 left-0 bg-(--kw-accent-inv)/85"
-                          style={{ width: "82%" }}
-                        />
-                        <div className="absolute inset-0 flex items-center justify-between px-3.5 font-mono text-[11px] tabular-nums">
-                          <span className="font-semibold text-(--kw-bg)">
-                            YES 82¢
-                          </span>
-                          <span className="text-(--kw-bg)/65">NO 18¢</span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 mt-4">
-                        <button
-                          type="button"
-                          className="py-2.5 px-2 border border-(--kw-bg)/20 hover:border-(--kw-bg)/45 transition-colors text-[12px] font-medium flex items-center justify-center gap-1.5"
-                        >
-                          Buy YES{" "}
-                          <span className="font-mono tabular-nums text-(--kw-accent-inv)">
-                            82¢
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="py-2.5 px-2 border border-(--kw-bg)/20 hover:border-(--kw-bg)/45 transition-colors text-[12px] font-medium flex items-center justify-center gap-1.5"
-                        >
-                          Buy NO{" "}
-                          <span className="font-mono tabular-nums text-(--kw-danger-bright)">
-                            18¢
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="py-2.5 px-2 border border-(--kw-bg)/20 hover:border-(--kw-bg)/45 transition-colors text-[12px] font-medium flex items-center justify-center gap-1"
-                        >
-                          Details <ArrowUpRight className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.18em] text-(--kw-bg)/55">
-                        <span>Resolves Mar 31, 2026</span>
-                        <span className="hidden sm:inline">
-                          Powered by Knoww
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* COVERAGE — orbit map of the places where opinions form. The
           reference image is recreated in code so it can adapt to theme
           colors, text scaling and responsive breakpoints. */}
@@ -545,10 +409,10 @@ export default function LandingPageClient() {
         <div className="mx-auto w-full max-w-[1280px] 2xl:max-w-[1440px] px-6 sm:px-8 py-20 md:py-28 lg:py-32">
           <div className="kw-reveal mb-6 flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5">
             <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              § IV. Coverage
+              § III. Coverage
             </h2>
             <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              P. 04 / 05
+              P. 03 / 04
             </span>
           </div>
 
@@ -562,59 +426,77 @@ export default function LandingPageClient() {
           </h3>
 
           <div className="kw-reveal relative mt-10 md:mt-12">
-            {/* Desktop orbit map. */}
-            <div className="relative mx-auto hidden h-[380px] max-w-[1120px] overflow-visible md:block lg:h-[420px] xl:h-[460px]">
-              <div
+            {/* Desktop orbit map. When the section enters the viewport
+                `kw-coverage-built` is added, which triggers the staggered
+                ring + pill reveal animations defined in globals.css. */}
+            <div
+              ref={orbitRef}
+              className={`relative mx-auto hidden h-[380px] max-w-[1120px] overflow-visible md:block lg:h-[420px] xl:h-[460px] ${
+                revealed ? "kw-coverage-built" : ""
+              }`}
+            >
+              <svg
                 aria-hidden
-                className="absolute left-1/2 top-[55%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-dashed border-(--kw-fg)/24"
-                style={{ width: "96%", height: "86%" }}
-              />
-              <div
-                aria-hidden
-                className="absolute left-1/2 top-[55%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-dashed border-(--kw-fg)/24"
-                style={{ width: "76%", height: "66%" }}
-              />
-              <div
-                aria-hidden
-                className="absolute left-1/2 top-[55%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border border-dashed border-(--kw-fg)/24"
-                style={{ width: "52%", height: "42%" }}
-              />
+                role="presentation"
+                focusable="false"
+                className="pointer-events-none absolute inset-0 h-full w-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                {(["inner", "middle", "outer"] as const).map((id) => {
+                  const r = RINGS[id];
+                  return (
+                    <ellipse
+                      key={id}
+                      className="kw-orbit-ring"
+                      cx="50"
+                      cy="55"
+                      rx={r.rx}
+                      ry={r.ry}
+                      fill="none"
+                      stroke="var(--kw-fg)"
+                      strokeOpacity={0.28}
+                      strokeWidth={1}
+                      strokeDasharray="6 10"
+                      vectorEffect="non-scaling-stroke"
+                      style={{ animationDelay: `${REVEAL_DELAYS[id].ring}ms` }}
+                    />
+                  );
+                })}
+              </svg>
 
               <div
                 aria-hidden
                 className="absolute left-1/2 top-[55%] h-[210px] w-[430px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-(--kw-accent)/14 blur-3xl"
               />
 
-              <div className="absolute left-1/2 top-[0%] -translate-x-1/2 font-mono text-[11px] uppercase tracking-[0.18em] text-(--kw-accent-text) whitespace-nowrap">
-                <span className="text-(--kw-accent)">•</span>
-                <span className="mx-4">Knowledge, Culture & Professional</span>
-                <span className="text-(--kw-accent)">•</span>
-              </div>
-              <div className="absolute left-1/2 top-[17%] -translate-x-1/2 font-mono text-[11px] uppercase tracking-[0.18em] text-(--kw-accent-text) whitespace-nowrap">
-                <span className="text-(--kw-accent)">•</span>
-                <span className="mx-4">Media & Publications</span>
-                <span className="text-(--kw-accent)">•</span>
-              </div>
-              <div className="absolute left-1/2 top-[42%] -translate-x-1/2 font-mono text-[11px] uppercase tracking-[0.18em] text-(--kw-accent-text) whitespace-nowrap">
-                <span className="text-(--kw-accent)">•</span>
-                <span className="mx-4">Discussion Platforms</span>
-                <span className="text-(--kw-accent)">•</span>
-              </div>
+              {/* Pills sit at fixed angles on their rings. They fade up
+                  ring-by-ring (delay set inline) once the parent gets
+                  `kw-coverage-built`, then sit fully static. */}
+              {COVERAGE_PILLS.map((p) => {
+                const ring = RINGS[p.ring];
+                const a = (p.angle * Math.PI) / 180;
+                const x = 50 + ring.rx * Math.cos(a);
+                const y = 55 + ring.ry * Math.sin(a);
+                return (
+                  <div
+                    key={p.name}
+                    className="kw-orbit-pill absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                      left: `${x}%`,
+                      top: `${y}%`,
+                      animationDelay: `${REVEAL_DELAYS[p.ring].pill}ms`,
+                    }}
+                  >
+                    <span className="inline-block rounded-full border border-(--kw-fg)/12 bg-(--kw-bg-card)/95 px-4 py-1.5 text-[12px] font-semibold text-(--kw-fg)/90 whitespace-nowrap shadow-[0_10px_28px_-20px_rgba(0,0,0,0.55),0_2px_10px_-8px_rgba(0,0,0,0.35)]">
+                      {p.name}
+                    </span>
+                  </div>
+                );
+              })}
 
-              {/* Outer pills */}
-              {COVERAGE_PILLS.map((p) => (
-                <div
-                  key={p.name}
-                  className="absolute -translate-x-1/2 -translate-y-1/2"
-                  style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                >
-                  <span className="inline-block rounded-full border border-(--kw-fg)/12 bg-(--kw-bg-card)/95 px-4 py-1.5 text-[12px] font-semibold text-(--kw-fg)/90 whitespace-nowrap shadow-[0_10px_28px_-20px_rgba(0,0,0,0.55),0_2px_10px_-8px_rgba(0,0,0,0.35)]">
-                    {p.name}
-                  </span>
-                </div>
-              ))}
-
-              {/* Centre pill — Knoww */}
+              {/* Centre pill — Knoww. Always visible as the anchor; rings
+                  and pills appear around it during the reveal. */}
               <div className="absolute left-1/2 top-[55%] -translate-x-1/2 -translate-y-1/2">
                 <span className="relative inline-flex items-center gap-3 rounded-full border-[3px] border-(--kw-accent) bg-(--kw-bg-card)/92 px-8 py-4 shadow-[0_0_0_16px_color-mix(in_srgb,var(--kw-accent)_9%,transparent),0_24px_60px_-24px_rgba(13,159,110,0.55)]">
                   <span className="w-8 h-8 bg-(--kw-fg) text-(--kw-bg) flex items-center justify-center rounded-[4px]">
@@ -672,10 +554,10 @@ export default function LandingPageClient() {
         <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32">
           <div className="flex items-baseline justify-between border-b border-(--kw-bg)/15 pb-5 mb-8">
             <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-bg)/75">
-              § V. Installation to position, in about a minute
+              § IV. Installation to position, in about a minute
             </h2>
             <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-bg)/70">
-              P. 05 / 05
+              P. 04 / 04
             </span>
           </div>
 
@@ -755,7 +637,7 @@ export default function LandingPageClient() {
         <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32">
           <div className="max-w-[860px]">
             <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60 mb-6 block">
-              § VI — Install
+              § V — Install
             </span>
             <h2 className="text-[48px] sm:text-[64px] md:text-[80px] font-bold tracking-[-0.035em] leading-[0.94] mb-8">
               Start reading

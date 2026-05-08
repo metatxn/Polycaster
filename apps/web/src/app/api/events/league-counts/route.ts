@@ -26,7 +26,6 @@ const COUNT_FILTERS_BY_TAG_SLUG = (() => {
   for (const group of SPORT_GROUPS) {
     filters.set(group.tagSlug, {
       tagSlug: group.tagSlug,
-      filterCurrentSchedule: group.leagues.length === 0,
     });
     for (const league of group.leagues) {
       filters.set(league.tagSlug, {

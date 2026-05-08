@@ -10,7 +10,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { SPORT_GROUPS, type SportGroup } from "@/lib/sport-categories";
+import {
+  ALL_SPORTS_TAG_SLUG,
+  SPORT_GROUPS,
+  type SportGroup,
+} from "@/lib/sport-categories";
 import { cn } from "@/lib/utils";
 
 interface LeagueCounts {
@@ -30,23 +34,37 @@ interface LeagueRailProps {
   className?: string;
 }
 
-const COUNT_TAG_SLUGS = (() => {
-  const slugs = new Set<string>(["sports"]);
+function getActiveGroupSlug(activeSlug?: string): string | null {
+  if (!activeSlug) return null;
   for (const group of SPORT_GROUPS) {
-    if (group.tagSlug) slugs.add(group.tagSlug);
-    for (const league of group.leagues) {
-      if (league.tagSlug) slugs.add(league.tagSlug);
+    if (group.slug === activeSlug) return group.slug;
+    if (group.leagues.some((league) => league.slug === activeSlug)) {
+      return group.slug;
     }
   }
-  return Array.from(slugs);
-})();
+  return null;
+}
 
-function useLeagueCounts() {
+function getCountTagSlugs(openGroupSlugs: ReadonlySet<string>) {
+  const slugs = new Set<string>([ALL_SPORTS_TAG_SLUG]);
+  for (const group of SPORT_GROUPS) {
+    if (group.tagSlug) slugs.add(group.tagSlug);
+
+    if (openGroupSlugs.has(group.slug)) {
+      for (const league of group.leagues) {
+        if (league.tagSlug) slugs.add(league.tagSlug);
+      }
+    }
+  }
+  return Array.from(slugs).sort();
+}
+
+function useLeagueCounts(tagSlugs: string[]) {
   return useQuery<LeagueCounts>({
-    queryKey: ["league-counts", COUNT_TAG_SLUGS.join(",")],
+    queryKey: ["league-counts", tagSlugs.join(",")],
     queryFn: async () => {
       const params = new URLSearchParams();
-      for (const slug of COUNT_TAG_SLUGS) params.append("slug", slug);
+      for (const slug of tagSlugs) params.append("slug", slug);
       const res = await fetch(`/api/events/league-counts?${params}`);
       if (!res.ok) throw new Error("Failed to load league counts");
       return res.json();
@@ -83,6 +101,7 @@ interface RailGroupProps {
   activeSlug?: string;
   countsByTag: Record<string, number> | undefined;
   onNavigate?: () => void;
+  onOpenChange?: (open: boolean) => void;
   defaultOpen: boolean;
 }
 
@@ -91,6 +110,7 @@ function RailGroup({
   activeSlug,
   countsByTag,
   onNavigate,
+  onOpenChange,
   defaultOpen,
 }: RailGroupProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -103,9 +123,17 @@ function RailGroup({
     if (defaultOpen) setOpen(true);
   }, [defaultOpen]);
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
+
   const groupActive = activeSlug === group.slug;
+  const hasChildCounts =
+    group.leagues.length > 0 &&
+    group.leagues.some((league) => countsByTag?.[league.tagSlug] !== undefined);
   const groupCount =
-    group.leagues.length > 0 && countsByTag
+    hasChildCounts && countsByTag
       ? group.leagues.reduce(
           (total, league) => total + (countsByTag[league.tagSlug] ?? 0),
           0
@@ -116,7 +144,7 @@ function RailGroup({
   // Single-league sports (Golf, F1, Boxing, …): render as a leaf, no
   // collapsible affordance. Polymarket does the same.
   if (group.leagues.length === 0) {
-    if (countsLoaded && !groupCount) return null;
+    if (!countsLoaded || !groupCount) return null;
 
     return (
       <Link
@@ -137,12 +165,12 @@ function RailGroup({
 
   const visibleLeagues = countsLoaded
     ? group.leagues.filter((league) => (countsByTag[league.tagSlug] ?? 0) > 0)
-    : group.leagues;
+    : [];
 
   if (countsLoaded && visibleLeagues.length === 0) return null;
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={handleOpenChange}>
       <CollapsibleTrigger asChild>
         <button
           type="button"
@@ -208,21 +236,42 @@ export function LeagueRail({
   className,
 }: LeagueRailProps) {
   const pathname = usePathname();
-  const { data } = useLeagueCounts();
   const defaultOpenGroupSet = useMemo(
     () => new Set(defaultOpenGroupSlugs),
     [defaultOpenGroupSlugs]
   );
 
   // Derive which group should auto-open: the one containing the active slug.
-  const activeGroupSlug = useMemo(() => {
-    if (!activeSlug) return null;
-    for (const group of SPORT_GROUPS) {
-      if (group.slug === activeSlug) return group.slug;
-      if (group.leagues.some((l) => l.slug === activeSlug)) return group.slug;
-    }
-    return null;
-  }, [activeSlug]);
+  const activeGroupSlug = useMemo(
+    () => getActiveGroupSlug(activeSlug),
+    [activeSlug]
+  );
+  const initialOpenGroupSlugs = useMemo(() => {
+    const slugs = new Set(defaultOpenGroupSlugs);
+    if (activeGroupSlug) slugs.add(activeGroupSlug);
+    return Array.from(slugs).sort();
+  }, [activeGroupSlug, defaultOpenGroupSlugs]);
+  const [openGroupSlugs, setOpenGroupSlugs] = useState<Set<string>>(
+    () => new Set(initialOpenGroupSlugs)
+  );
+  useEffect(() => {
+    setOpenGroupSlugs((previousSlugs) => {
+      let changed = false;
+      const nextSlugs = new Set(previousSlugs);
+      for (const slug of initialOpenGroupSlugs) {
+        if (!nextSlugs.has(slug)) {
+          nextSlugs.add(slug);
+          changed = true;
+        }
+      }
+      return changed ? nextSlugs : previousSlugs;
+    });
+  }, [initialOpenGroupSlugs]);
+  const countTagSlugs = useMemo(
+    () => getCountTagSlugs(openGroupSlugs),
+    [openGroupSlugs]
+  );
+  const { data } = useLeagueCounts(countTagSlugs);
 
   const isLiveActive = pathname === "/events/sports/live";
 
@@ -264,6 +313,15 @@ export function LeagueRail({
             activeSlug={activeSlug}
             countsByTag={data?.byTagSlug}
             onNavigate={onNavigate}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) return;
+              setOpenGroupSlugs((previousSlugs) => {
+                if (previousSlugs.has(group.slug)) return previousSlugs;
+                const nextSlugs = new Set(previousSlugs);
+                nextSlugs.add(group.slug);
+                return nextSlugs;
+              });
+            }}
             defaultOpen={
               activeGroupSlug === group.slug ||
               defaultOpenGroupSet.has(group.slug)

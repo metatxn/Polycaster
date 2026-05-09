@@ -24,6 +24,11 @@ import {
   type LiveGameState,
   useSportsWebSocket,
 } from "@/hooks/use-sports-websocket";
+import {
+  isCurrentSportsEvent,
+  isUpcomingSportsEvent,
+} from "@/lib/sports-event-activity";
+import { selectedSportsMarketExists } from "@/lib/sports-selected-market";
 
 const TradingForm = dynamic(
   () =>
@@ -61,6 +66,7 @@ interface SportsEvent {
   image?: string;
   live?: boolean;
   ended?: boolean;
+  closed?: boolean;
   parentEventId?: string | number | null;
   startDate?: string;
   startTime?: string;
@@ -317,9 +323,11 @@ export function SportsbookView({
 
   const allFetchedEvents = useMemo(
     () =>
-      (paginatedData?.pages.flatMap(
-        (page) => page.events || page
-      ) as SportsEvent[]) || [],
+      (
+        (paginatedData?.pages.flatMap(
+          (page) => page.events || page
+        ) as SportsEvent[]) || []
+      ).filter((event) => isCurrentSportsEvent(event)),
     [paginatedData]
   );
 
@@ -366,6 +374,7 @@ export function SportsbookView({
         if (getInferredParentId(event, parentIdByTitle)) return false;
         if (liveIds.has(event.id)) return false;
         if (event.live || event.ended) return false;
+        if (!isUpcomingSportsEvent(event)) return false;
         return true;
       })
       .map((event) => enrichWithChildMarkets(event, childEventsByParent));
@@ -510,6 +519,15 @@ export function SportsbookView({
   const lastTrades = useOrderBookStore((s) => s.lastTrades);
 
   const userClosedPanel = useRef(false);
+
+  useEffect(() => {
+    if (!selectedMarket) return;
+    const allEvents = [...liveEvents, ...scheduledEvents];
+    if (selectedSportsMarketExists(selectedMarket, allEvents)) return;
+
+    setSelectedMarket(null);
+    setSelectedOutcomeIndex(0);
+  }, [liveEvents, scheduledEvents, selectedMarket]);
 
   const handleMarketSelect = useCallback(
     (market: SelectedMarketInfo, outcomeIndex: number) => {

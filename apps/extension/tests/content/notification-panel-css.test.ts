@@ -21,6 +21,23 @@ function readSource(path: string): string {
   return readFileSync(join(process.cwd(), path), { encoding: "utf8" });
 }
 
+function extractFunctionSource(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}`);
+  assert.ok(start !== -1, `expected ${name} to exist`);
+  const bodyStart = source.indexOf("{", start);
+  assert.ok(bodyStart !== -1, `expected ${name} body to exist`);
+
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) return source.slice(start, i + 1);
+  }
+
+  throw new Error(`Could not extract ${name}`);
+}
+
 test("notification panel title and price typography inherit platform fonts", () => {
   const css = readInlineCss();
   const panelOverride = css.match(
@@ -33,6 +50,24 @@ test("notification panel title and price typography inherit platform fonts", () 
     /#knoww-notification-stack\s+\.knoww-notification-(?:title|price-num|price-cents)\s*\{[^}]*font-family:\s*"Georgia"/.test(
       overrideCss
     ),
+    false
+  );
+});
+
+test("notification monetary display calculations use Decimal.js", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const volumeFormatter = extractFunctionSource(uiSource, "formatMarketVolume");
+  const priceRenderer = extractFunctionSource(uiSource, "renderEditorialPrice");
+
+  assert.equal(/import Decimal from "decimal\.js";/.test(uiSource), true);
+  assert.equal(/toDecimal\(/.test(volumeFormatter), true);
+  assert.equal(/toDecimal\(prices\[[^\]]+\]\)/.test(priceRenderer), true);
+  assert.equal(
+    /parseFloat|Math\.round|\/\s*1_000/.test(volumeFormatter),
+    false
+  );
+  assert.equal(
+    /Math\.round|leadingPrice\s*\*\s*100/.test(priceRenderer),
     false
   );
 });

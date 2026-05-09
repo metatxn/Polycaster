@@ -71,13 +71,30 @@ export function isCurrentSportsEvent(
       return true;
     }
 
-    if (eventEndMs !== null) {
-      return eventEndMs >= nowMs;
-    }
-
     return nowMs - eventStartMs <= RECENTLY_STARTED_SPORTS_EVENT_WINDOW_MS;
   }
 
+  if (eventEndMs !== null) {
+    return eventEndMs >= nowMs;
+  }
+
+  return true;
+}
+
+export function isUpcomingSportsEvent(
+  event: SportsEventActivityCandidate,
+  nowMs = Date.now()
+): boolean {
+  if (event.closed === true || event.active === false || event.ended === true) {
+    return false;
+  }
+
+  const eventStartMs = getEventStartMs(event);
+  if (eventStartMs !== null) {
+    return eventStartMs >= nowMs;
+  }
+
+  const eventEndMs = parseGammaDate(event.endDate);
   if (eventEndMs !== null) {
     return eventEndMs >= nowMs;
   }

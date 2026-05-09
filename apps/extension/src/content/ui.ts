@@ -7,6 +7,7 @@ import {
   parseGammaStringArray,
   resolveNegRisk,
 } from "@knoww/shared-types/polymarket";
+import Decimal from "decimal.js";
 import type {
   InjectedMarketEntry,
   Market,
@@ -18,6 +19,16 @@ import { escapeHtml, escapeSelectorValue } from "./utils";
 
 function clampGammaPrice(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+function toDecimal(value: number | string | null | undefined): Decimal | null {
+  if (value === null || value === undefined || value === "") return null;
+  try {
+    const decimal = new Decimal(value);
+    return decimal.isFinite() ? decimal : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseGammaPriceArray(
@@ -1953,18 +1964,20 @@ function getCategoryCode(market: Market): string {
 
 function formatMarketVolume(market: Market): string | null {
   const raw = market.volume24hr ?? market.volume ?? market.liquidity;
-  let value: number;
-  if (typeof raw === "string") value = parseFloat(raw);
-  else if (typeof raw === "number") value = raw;
-  else value = Number.NaN;
-  if (!Number.isFinite(value) || value <= 0) return null;
-  if (value >= 1_000_000_000)
-    return `$${(value / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
-  if (value >= 1_000_000)
-    return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (value >= 1_000)
-    return `$${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  return `$${Math.round(value)}`;
+  const value = toDecimal(raw);
+  if (!value || value.lte(0)) return null;
+
+  const formatScaled = (divisor: number, suffix: string) =>
+    `$${value
+      .div(divisor)
+      .toDecimalPlaces(1, Decimal.ROUND_HALF_UP)
+      .toFixed(1)
+      .replace(/\.0$/, "")}${suffix}`;
+
+  if (value.gte(1_000_000_000)) return formatScaled(1_000_000_000, "B");
+  if (value.gte(1_000_000)) return formatScaled(1_000_000, "M");
+  if (value.gte(1_000)) return formatScaled(1_000, "K");
+  return `$${value.toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toFixed(0)}`;
 }
 
 /**
@@ -1981,13 +1994,19 @@ function renderEditorialPrice(
   if (!outcomes.length || !prices.length) return;
 
   let leadingIdx = 0;
+  let leadingPriceDecimal = toDecimal(prices[0]) ?? new Decimal(0);
   for (let i = 1; i < prices.length; i++) {
-    if (prices[i] > prices[leadingIdx]) leadingIdx = i;
+    const candidatePrice = toDecimal(prices[i]) ?? new Decimal(0);
+    if (candidatePrice.gt(leadingPriceDecimal)) {
+      leadingIdx = i;
+      leadingPriceDecimal = candidatePrice;
+    }
   }
 
-  const leadingPrice = prices[leadingIdx] ?? 0;
   const leadingOutcome = (outcomes[leadingIdx] || "").trim();
-  const cents = Math.max(0, Math.min(99, Math.round(leadingPrice * 100)));
+  const cents = Decimal.max(0, Decimal.min(99, leadingPriceDecimal.mul(100)))
+    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
+    .toNumber();
 
   const numEl = document.createElement("span");
   numEl.className = "knoww-notification-price-num";

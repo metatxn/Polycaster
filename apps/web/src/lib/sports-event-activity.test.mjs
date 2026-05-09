@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   isCurrentSportsEvent,
+  isUpcomingSportsEvent,
   RECENTLY_STARTED_SPORTS_EVENT_WINDOW_MS,
 } from "./sports-event-activity.ts";
 
@@ -71,9 +72,71 @@ describe("isCurrentSportsEvent", () => {
     );
   });
 
+  it("excludes stale games even when Gamma keeps the settlement end date in the future", () => {
+    assert.equal(
+      isCurrentSportsEvent(
+        {
+          active: true,
+          closed: false,
+          startTime: new Date(
+            NOW - RECENTLY_STARTED_SPORTS_EVENT_WINDOW_MS - 1000
+          ).toISOString(),
+          endDate: "2026-05-15T04:00:00Z",
+        },
+        NOW
+      ),
+      false
+    );
+  });
+
   it("excludes events that are explicitly inactive, closed, or ended", () => {
     assert.equal(isCurrentSportsEvent({ active: false }, NOW), false);
     assert.equal(isCurrentSportsEvent({ closed: true }, NOW), false);
     assert.equal(isCurrentSportsEvent({ ended: true }, NOW), false);
+  });
+});
+
+describe("isUpcomingSportsEvent", () => {
+  it("keeps future sports events", () => {
+    assert.equal(
+      isUpcomingSportsEvent(
+        {
+          active: true,
+          closed: false,
+          startTime: "2026-05-09T01:30:00Z",
+        },
+        NOW
+      ),
+      true
+    );
+  });
+
+  it("excludes non-live sports events once kickoff is in the past", () => {
+    assert.equal(
+      isUpcomingSportsEvent(
+        {
+          active: true,
+          closed: false,
+          startTime: "2026-05-08T01:30:00Z",
+          endDate: "2026-05-15T01:30:00Z",
+        },
+        NOW
+      ),
+      false
+    );
+  });
+
+  it("keeps untimed futures while their settlement end date is still future", () => {
+    assert.equal(
+      isUpcomingSportsEvent(
+        {
+          active: true,
+          closed: false,
+          endDate: "2026-05-15T01:30:00Z",
+        },
+        NOW
+      ),
+      true
+    );
   });
 });

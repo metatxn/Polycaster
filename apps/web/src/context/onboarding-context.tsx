@@ -294,7 +294,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
 
       {/* Single global onboarding dialog */}
       <Dialog open={showOnboarding} onOpenChange={setShowOnboarding}>
-        <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+        <DialogContent className="sm:max-w-md p-0 gap-0">
           <DialogHeader className="sr-only">
             <DialogTitle>Set Up Trading Account</DialogTitle>
             <DialogDescription>

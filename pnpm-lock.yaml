@@ -71,6 +71,37 @@ importers:
         specifier: 6.0.2
         version: 6.0.2
 
+  apps/agent:
+    dependencies:
+      '@knoww/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
+      '@knoww/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      '@openrouter/ai-sdk-provider':
+        specifier: 2.9.0
+        version: 2.9.0(ai@6.0.174(zod@4.4.3))(zod@4.4.3)
+      ai:
+        specifier: 6.0.174
+        version: 6.0.174(zod@4.4.3)
+      decimal.js:
+        specifier: 'catalog:'
+        version: 10.6.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@biomejs/biome':
+        specifier: 'catalog:'
+        version: 2.4.13
+      '@types/node':
+        specifier: 20.19.39
+        version: 20.19.39
+      typescript:
+        specifier: 6.0.2
+        version: 6.0.2
+
   apps/extension:
     dependencies:
       '@huggingface/transformers':
@@ -158,6 +189,9 @@ importers:
       '@coinbase/wallet-sdk':
         specifier: 4.3.7
         version: 4.3.7(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@5.0.10)(zod@4.4.3)
+      '@knoww/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@knoww/logger':
         specifier: workspace:*
         version: link:../../packages/logger

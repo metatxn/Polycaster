@@ -25,6 +25,14 @@
       "binding": "NEXT_INC_CACHE_R2_BUCKET",
       "bucket_name": "knoww-app"
     }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "AGENT_DB",
+      "database_name": "knoww-agent-paper",
+      "migrations_dir": "../agent/migrations"
+    }
   ]
 
   /**

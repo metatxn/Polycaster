@@ -1,5 +1,4 @@
 import { createLogger } from "@knoww/logger";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -9,6 +8,7 @@ import {
   handleExtensionPreflight,
   verifyExtensionAccessPreAuth,
 } from "@/lib/extension-auth";
+import { createAttributedOpenRouter } from "@/lib/openrouter";
 
 const log = createLogger("api.ai.validate-relevance");
 
@@ -162,7 +162,7 @@ async function validateRelevance(
   }
 
   try {
-    const openrouter = createOpenRouter({ apiKey });
+    const openrouter = createAttributedOpenRouter(apiKey);
     const tagsStr =
       marketTags.length > 0 ? `\nMarket tags: ${marketTags.join(", ")}` : "";
 

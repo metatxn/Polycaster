@@ -30,6 +30,62 @@ const gammaEvent = {
   ],
 };
 
+const peaceDealEvent = {
+  slug: "us-x-iran-permanent-peace-deal-by",
+  title: "US x Iran permanent peace deal by...?",
+  resolutionSource: "https://polymarket.com",
+  startTime: "2026-04-08T16:16:14.414324Z",
+  endDate: "2026-12-31T00:00:00Z",
+  archived: false,
+  markets: [
+    {
+      question: "US x Iran permanent peace deal by April 22, 2026?",
+      conditionId: "0xclosed",
+      slug: "us-x-iran-permanent-peace-deal-by-april-22-2026",
+      outcomes: '["Yes", "No"]',
+      clobTokenIds: '["closed_yes", "closed_no"]',
+      outcomePrices: '["0", "1"]',
+      eventStartTime: "2026-04-08T16:16:14.414324Z",
+      endDate: "2026-04-22T00:00:00Z",
+      active: true,
+      archived: false,
+      closed: true,
+      acceptingOrders: false,
+      enableOrderBook: true,
+    },
+    {
+      question: "US x Iran permanent peace deal by May 31, 2026?",
+      conditionId: "0xmay",
+      slug: "us-x-iran-permanent-peace-deal-by-may-31-2026",
+      outcomes: '["Yes", "No"]',
+      clobTokenIds: '["may_yes", "may_no"]',
+      outcomePrices: '["0.175", "0.825"]',
+      eventStartTime: "2026-04-08T16:16:14.414324Z",
+      endDate: "2026-05-31T00:00:00Z",
+      active: true,
+      archived: false,
+      closed: false,
+      acceptingOrders: true,
+      enableOrderBook: true,
+    },
+    {
+      question: "US x Iran permanent peace deal by December 31, 2026?",
+      conditionId: "0xdec",
+      slug: "us-x-iran-permanent-peace-deal-by-december-31-2026",
+      outcomes: '["Yes", "No"]',
+      clobTokenIds: '["dec_yes", "dec_no"]',
+      outcomePrices: '["0.695", "0.305"]',
+      eventStartTime: "2026-04-08T16:16:14.414324Z",
+      endDate: "2026-12-31T00:00:00Z",
+      active: true,
+      archived: false,
+      closed: false,
+      acceptingOrders: true,
+      enableOrderBook: true,
+    },
+  ],
+};
+
 test("parses a Polymarket event URL to a Gamma slug", () => {
   assert.equal(
     parsePolymarketEventSlug(
@@ -45,6 +101,12 @@ test("normalizes a Gamma event into an Up watchlist item by default", () => {
   assert.equal(item.question, "Bitcoin Up or Down - May 10, 8:25AM-8:30AM ET");
   assert.equal(item.marketSlug, "btc-updown-5m-1778415900");
   assert.equal(item.outcomeLabel, "Up");
+  assert.equal(item.marketType, "multi_outcome");
+  assert.equal(item.eventType, "single_market");
+  assert.deepEqual(item.outcomes, ["Up", "Down"]);
+  assert.equal(item.oppositeOutcomeLabel, undefined);
+  assert.equal(item.oppositeTokenId, undefined);
+  assert.equal(item.eventMarketCount, 1);
   assert.equal(
     item.tokenId,
     "65280938700881719749804790429080618050749954395142741426010680600837471989622"
@@ -68,6 +130,41 @@ test("normalizes a requested outcome when importing a Gamma event", () => {
     item.tokenId,
     "43983957661072376000760020511311666546601443283262754526380755967283206100917"
   );
+});
+
+test("imports the highest-probability open market from a multi-market event", () => {
+  const item = normalizeGammaEventToWatchlistItem(peaceDealEvent);
+
+  assert.equal(
+    item.question,
+    "US x Iran permanent peace deal by December 31, 2026?"
+  );
+  assert.equal(item.conditionId, "0xdec");
+  assert.equal(item.tokenId, "dec_yes");
+  assert.equal(item.marketType, "binary");
+  assert.equal(item.eventType, "multi_market");
+  assert.deepEqual(item.outcomes, ["Yes", "No"]);
+  assert.equal(item.oppositeOutcomeLabel, "No");
+  assert.equal(item.oppositeTokenId, "dec_no");
+  assert.equal(item.eventMarketCount, 3);
+  assert.equal(item.eventEndTime, "2026-12-31T00:00:00Z");
+  assert.equal(item.active, true);
+});
+
+test("imports the requested outcome from the selected open market", () => {
+  const item = normalizeGammaEventToWatchlistItem(peaceDealEvent, {
+    outcomeLabel: "No",
+  });
+
+  assert.equal(
+    item.question,
+    "US x Iran permanent peace deal by December 31, 2026?"
+  );
+  assert.equal(item.outcomeLabel, "No");
+  assert.equal(item.side, "NO");
+  assert.equal(item.tokenId, "dec_no");
+  assert.equal(item.oppositeOutcomeLabel, "Yes");
+  assert.equal(item.oppositeTokenId, "dec_yes");
 });
 
 test("fetches and resolves a Polymarket event URL", async () => {

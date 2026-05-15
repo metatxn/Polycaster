@@ -28,6 +28,7 @@ const RunInputSchema = z.object({
         .regex(/^-?\d+(\.\d+)?$/),
     })
     .optional(),
+  executionMode: z.enum(["paper", "live"]).optional(),
 });
 
 /**

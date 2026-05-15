@@ -8,10 +8,11 @@ This document explains how the `polycaster` repository is put together for a new
 
 Knoww is a prediction-markets product built on top of Polymarket.
 
-It has two user-facing surfaces:
+It has three active product/operator surfaces:
 
 - `apps/web`: the public web app at `knoww.app`, where users browse markets, view portfolios, inspect whale activity, and place trades.
 - `apps/extension`: a Chrome extension that injects relevant prediction-market cards into supported social, community, and editorial sites and can initiate trading flows from those pages.
+- `apps/web/src/app/agent`: an internal operator dashboard for the paper-trading agent and its supporting admin APIs.
 
 ### Who uses it
 
@@ -32,6 +33,7 @@ It has two user-facing surfaces:
 | --- | --- |
 | `apps/web` | Next.js 15 App Router frontend, deployed to Cloudflare Workers via OpenNext |
 | `apps/extension` | MV3 browser extension with content scripts, service worker, and offscreen trading runtime |
+| `apps/agent` | Shared paper-trading engine, D1 repository, search/LLM orchestration, and settlement logic consumed by the web admin surface |
 | `packages/logger` | Shared structured logger used by both runtime surfaces |
 | `packages/shared-types` | Shared constants, contract addresses, ABIs, and Polymarket endpoint definitions |
 
@@ -43,10 +45,12 @@ It has two user-facing surfaces:
 flowchart LR
     U["User Browser"] --> W["apps/web\nNext.js app + API routes"]
     U --> E["apps/extension\nContent + page bridge"]
+    W --> G["apps/web/src/app/agent\nInternal agent dashboard"]
 
     W --> H["apps/web/src/hooks\nClient data fetching"]
     W --> A["apps/web/src/app/api\nBFF / proxy layer"]
     W --> L["apps/web/src/lib\nSecurity, cache, RPC, WS helpers"]
+    A --> AG["apps/agent\nPaper-trading engine + repository"]
 
     E --> BG["Extension service worker\napps/extension/src/background.ts"]
     E --> PB["Page bridge\napps/extension/src/page-bridge.ts"]
@@ -62,6 +66,7 @@ flowchart LR
 
     S["packages/shared-types"] --> W
     S --> E
+    AG --> D1["Cloudflare D1\nAGENT_DB tables"]
 ```
 
 ### Main modules and responsibilities
@@ -73,8 +78,11 @@ flowchart LR
 | Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
 | Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
-| Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/app/whales/_components/*`, `apps/web/src/app/whales/_lib/*` | Powers live sports markets, CLOB notification surfaces, browser-side price alerting, and whale-specific dashboards/aggregations | Web data hooks, websocket managers, Polymarket CLOB |
+| Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/events/sports/live/page.tsx`, `apps/web/src/app/sports/live/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/app/whales/_components/*`, `apps/web/src/app/whales/_lib/*` | Powers live sports markets across the current live-route aliases, CLOB notification surfaces, browser-side price alerting, and whale-specific dashboards/aggregations | Web data hooks, websocket managers, Polymarket CLOB |
+| Agent operator dashboard | `apps/web/src/app/agent/page.tsx`, `apps/web/src/app/agent/agent-dashboard-client.tsx` | Internal UI for managing watchlist items, triggering runs, reviewing evidence/votes, inspecting paper positions, live-order audits, and model calibration | Agent admin APIs, `apps/agent`, D1 |
 | API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI | Polymarket APIs, OpenRouter, relayer proxy, Polygon RPC |
+| Agent admin API helpers | `apps/web/src/lib/agent/api.ts`, `apps/web/src/lib/agent/repository.ts`, `apps/web/src/app/api/agent/**/*/route.ts` | Enforces admin auth/origin checks, binds Cloudflare D1 when available, and exposes the paper-trading control plane over `/api/agent/*` | Agent dashboard, `apps/agent`, D1, origin guard |
+| Agent engine package | `apps/agent/src/*` | Owns watchlist import, evidence gathering, model voting, quorum, paper/live execution adapters, resolution refresh, and the repository schema used by `/api/agent/*` | Web admin APIs, Polymarket APIs, OpenRouter/search providers, D1 |
 | Web infra helpers | `apps/web/src/lib/*` | Caching, origin checks, auth helpers, websocket managers, server-side fetch memoization, RPC utilities, PostHog server capture | Cloudflare Worker runtime, browser, upstream APIs, PostHog |
 | Insider detection and backtesting | `apps/web/src/lib/insider/*`, `apps/web/src/app/api/whales/backtest/route.ts` | Scores suspicious trading with archetype-based detectors, replays the same logic against resolved markets, and exposes the heavyweight backtest API used by the whales backtest UI | Polymarket Gamma/Data/CLOB APIs, trader-history cache, whales pages |
 | Web constants and types | `apps/web/src/constants/*`, `apps/web/src/types/*` | Shared Polymarket constants, API enums, cache durations, and typed response shapes used across routes, hooks, and components | Web app shell, API routes, hooks |
@@ -97,14 +105,18 @@ flowchart LR
 | Home | `apps/web/src/app/page.tsx` | SSR first page of events using edge fetches from Polymarket |
 | Event listing by tag | `apps/web/src/app/events/[tag]/page.tsx` | Category/tag-driven event browsing |
 | Event detail | `apps/web/src/app/events/detail/[slug]/page.tsx` | Event-level market list and event metadata view |
-| Sports | `apps/web/src/app/events/sports/page.tsx` | Sports-specific event/market views |
+| Sports hub | `apps/web/src/app/events/sports/page.tsx` | Sports-specific event and market discovery landing page |
+| Sports by league | `apps/web/src/app/events/sports/[sport]/page.tsx` | League- or sport-specific sports browsing |
+| Sports live | `apps/web/src/app/events/sports/live/page.tsx` | Primary live sports view with websocket-backed game state |
 | Markets index | `apps/web/src/app/markets/page.tsx` | Top-level market browsing and discovery page |
 | Market detail | `apps/web/src/app/markets/[slug]/page.tsx` | Detailed market trading and order book UI |
 | Portfolio | `apps/web/src/app/portfolio/page.tsx` | Positions, orders, trades, P&L, deposit/withdraw |
-| Live | `apps/web/src/app/live/page.tsx` | Live and scheduled sports markets with websocket-backed game state |
+| Live alias | `apps/web/src/app/live/page.tsx` | Shortcut route for the live sports experience |
+| Sports live alias | `apps/web/src/app/sports/live/page.tsx` | Additional alias route for the live sports experience |
 | Search | `apps/web/src/app/search/page.tsx` | Client-side market discovery with recent-search persistence |
 | Whales | `apps/web/src/app/whales/page.tsx` | Whale activity and suspicious/insider activity analysis |
 | Whale backtest | `apps/web/src/app/whales/backtest/page.tsx` | Runs the insider-detector backtest UI against recently resolved markets |
+| Agent dashboard | `apps/web/src/app/agent/page.tsx` | Internal control panel for watchlist curation, agent runs, calibration, positions, and resolution refreshes |
 | Leaderboard | `apps/web/src/app/leaderboard/page.tsx` | Trader leaderboard |
 | Profile | `apps/web/src/app/profile/[address]/page.tsx` | Public trader profile views |
 | Privacy | `apps/web/src/app/privacy/page.tsx` | User-facing privacy and data-retention disclosures |
@@ -255,17 +267,36 @@ Relevant files:
 
 ### The important truth first
 
-This repository does **not** define an application-owned relational schema such as Prisma, Drizzle, Postgres, MySQL, or D1 business tables.
+Most user-facing market data is still fetched live from Polymarket APIs, but the repo now also owns a small operational data model for the paper-trading agent.
 
-Most product data is fetched live from Polymarket APIs. Persistence inside this repo is limited to:
+Persistence inside this repo currently falls into four buckets:
 
+- Agent-owned D1 tables for watchlist, runs, run items, resolutions, positions, and live-order audits
 - OpenNext-generated cache metadata used at build/runtime
 - Browser storage in the web app
 - Browser storage in the extension
 
-### 4.1 SQL schema found in the repository
+### 4.1 Agent-owned D1 schema
 
-The only SQL schema file is:
+The application-owned schema lives inside `apps/agent/src/repository.ts` and is bound in `apps/web/src/lib/agent/repository.ts` through the `AGENT_DB` Cloudflare D1 binding.
+
+| Table | Defined in | Purpose | Keys / indexes | Relationships |
+| --- | --- | --- | --- | --- |
+| `agent_watchlist` | `apps/agent/src/repository.ts` | Stores operator-curated watchlist items and imported market metadata | Primary key `id`; active/created indexes | Referenced by runs, positions, and live orders |
+| `agent_runs` | `apps/agent/src/repository.ts` | Stores top-level paper-trading run lifecycle rows | Primary key `id`; `started_at` index | Parent for `agent_run_items` |
+| `agent_run_items` | `apps/agent/src/repository.ts` | Persists per-watchlist evidence, votes, decisions, and fill snapshots for a run | Primary key `id`; `run_id` and `watchlist_item_id` indexes | Foreign keys to `agent_runs.id` and `agent_watchlist.id` |
+| `agent_resolutions` | `apps/agent/src/repository.ts` | Stores fetched market outcomes used for settlement/calibration | Primary key `token_id`; `resolved_at` index | Joined back to watchlist/run items by token |
+| `agent_positions` | `apps/agent/src/repository.ts` | Tracks paper positions, closes, and realized P&L | Primary key `id`; token/status/watchlist indexes | Foreign key to `agent_watchlist.id` |
+| `agent_live_orders` | `apps/agent/src/repository.ts` | Audit log for live-mode order submission attempts and status changes | Primary key `idempotency_key`; created/status indexes | Linked logically to runs/watchlist items |
+
+Notes:
+
+- When D1 is unavailable, the repository falls back to an in-memory implementation for local/dev resilience.
+- This schema is operational state for the internal agent, not the primary source of truth for Polymarket market data.
+
+### 4.2 Generated SQL schema found in the repository
+
+There is also generated cache bookkeeping SQL at:
 
 - `apps/web/.open-next/cloudflare/cache-assets-manifest.sql`
 
@@ -281,7 +312,7 @@ Notes:
 - This schema is for incremental cache bookkeeping, not market, user, order, or comment data.
 - The app’s actual cached page payloads are stored in the R2 bucket bound as `NEXT_INC_CACHE_R2_BUCKET` in `apps/web/wrangler.jsonc`.
 
-### 4.2 Web-app browser storage
+### 4.3 Web-app browser storage
 
 | Storage | Key shape | Defined in | Purpose |
 | --- | --- | --- | --- |
@@ -294,7 +325,7 @@ Notes:
 | `localStorage` | `price-alerts-storage` | `apps/web/src/hooks/use-price-alerts.ts` | Persists browser-side price alert configuration |
 | `localStorage` | `trading_session_*` envelope keys | `apps/web/src/lib/session.ts` | Persists signed trading-session metadata with integrity checks |
 
-### 4.3 Extension browser storage
+### 4.4 Extension browser storage
 
 | Storage | Structure | Defined in | Purpose |
 | --- | --- | --- | --- |
@@ -305,7 +336,7 @@ Notes:
 | `chrome.storage.local` | `knoww_analytics_queue_v1`, `knoww_analytics_install_id_v1` | `apps/extension/src/background/analytics.ts` | Buffers optional extension analytics before batch upload |
 | IndexedDB | DB `knoww-embeddings`, store `vectors` | `apps/extension/src/background/embeddings.ts` | Persists local text embeddings for relevance ranking |
 
-### 4.4 IndexedDB structure used by the extension
+### 4.5 IndexedDB structure used by the extension
 
 The extension’s IndexedDB layer is the closest thing to an application-defined data store in this repo.
 
@@ -359,7 +390,6 @@ Behavior:
 - No Redis or Memcached layer in repo
 - No Kafka, SQS, Pub/Sub, or other message queue
 - No internal microservice mesh; the API layer is inside the Next.js app itself
-- No app-owned SQL database for business entities
 
 ## 6. Key Design Decisions
 
@@ -377,18 +407,21 @@ Where to see it:
 
 - `apps/web/src/app/api/**/*/route.ts`
 
-### 6.2 Stateless product data, stateful browser session
+### 6.2 Mostly external market data, selectively owned operational state
 
-Pattern: external source of truth + client/session state
+Pattern: external source of truth + targeted owned state
 
 Why:
 
 - Markets, comments, positions, trades, and P&L already live in Polymarket systems
-- Knoww avoids duplicating this data in its own database
+- Knoww still avoids mirroring the full Polymarket product graph in its own database
+- The paper-trading agent does need durable local state for watchlists, run history, positions, resolutions, and live-order audit trails
 - Session-lifetime data such as derived API credentials is stored close to the browser that needs it
 
 Where to see it:
 
+- `apps/agent/src/repository.ts`
+- `apps/web/src/lib/agent/repository.ts`
 - `apps/web/src/hooks/use-clob-credentials.ts`
 - `apps/extension/src/background/extension-session.ts`
 - `apps/extension/src/background/embeddings.ts`

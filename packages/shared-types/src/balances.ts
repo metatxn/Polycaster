@@ -11,7 +11,7 @@ import {
   PUSD_DECIMALS,
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
-} from "./contracts";
+} from "./contracts.ts";
 
 export interface PolygonTokenDefinition {
   symbol: string;

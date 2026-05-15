@@ -66,6 +66,16 @@ function countAllReplies(comment: CommentWithReplies): number {
   return count;
 }
 
+/** Position-pill labels are tight by design (size + outcome). Long
+ *  multi-outcome names ("Republican Party Nominee") would blow out
+ *  the row, so we cap with an ellipsis. The full name remains
+ *  available in the expanded dropdown for users with multi-position
+ *  history. */
+function trimPositionLabel(label: string, max = 14): string {
+  if (label.length <= max) return label;
+  return `${label.slice(0, max - 1)}…`;
+}
+
 export function CommentItem({
   comment,
   depth = 0,
@@ -120,6 +130,7 @@ CommentItemProps) {
       size: string;
       rawSize: number; // Keep raw size for sorting
       marketName: string;
+      outcomeLabel: string;
       isYes: boolean;
     }[] = [];
 
@@ -153,6 +164,7 @@ CommentItemProps) {
           size: formattedSize,
           rawSize: size, // Store raw size for sorting
           marketName: marketInfo.marketName,
+          outcomeLabel: marketInfo.outcome,
           isYes: marketInfo.outcome.toLowerCase() === "yes",
         });
       }
@@ -269,59 +281,72 @@ CommentItemProps) {
               totalPositionSize > 0 &&
               positionDetails &&
               positionDetails.length > 0 &&
-              (positionDetails.length === 1 ? (
-                // Single position — editorial mono-caps outline
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
-                    positionDetails[0].isYes
-                      ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
-                      : "border-red-600/40 text-red-700 dark:text-red-300"
-                  )}
-                >
-                  {positionDetails[0].size} {positionDetails[0].marketName}
-                </span>
-              ) : (
-                // Multiple positions — dropdown
-                <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className={cn(
-                        "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums cursor-pointer hover:bg-foreground/5 transition-colors",
-                        positionDetails[0].isYes
-                          ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
-                          : "border-red-600/40 text-red-700 dark:text-red-300"
-                      )}
-                    >
-                      {positionDetails[0].size} {positionDetails[0].marketName}
-                      <ChevronDown className="h-2.5 w-2.5 ml-0.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="min-w-[200px]">
-                    {positionDetails.map((pos, idx) => (
-                      <DropdownMenuItem
-                        key={idx}
-                        className="flex items-center justify-between gap-3 text-xs"
+              (() => {
+                // Pill label: short option name for multi-outcome
+                // markets ("Arsenal"), Yes/No for binary. Color
+                // already encodes side (green=Yes, red=No), so we
+                // don't repeat that for multi-outcome.
+                const lead = positionDetails[0];
+                const leadLabel = trimPositionLabel(
+                  lead.marketName || lead.outcomeLabel
+                );
+                return positionDetails.length === 1 ? (
+                  // Single position — editorial mono-caps outline
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
+                      lead.isYes
+                        ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                        : "border-red-600/40 text-red-700 dark:text-red-300"
+                    )}
+                  >
+                    {lead.size} {leadLabel}
+                  </span>
+                ) : (
+                  // Multiple positions — dropdown
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className={cn(
+                          "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums cursor-pointer hover:bg-foreground/5 transition-colors",
+                          lead.isYes
+                            ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                            : "border-red-600/40 text-red-700 dark:text-red-300"
+                        )}
                       >
-                        <span className="text-foreground/80">
-                          {pos.marketName}
-                        </span>
-                        <span
-                          className={cn(
-                            "px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
-                            pos.isYes
-                              ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
-                              : "border-red-600/40 text-red-700 dark:text-red-300"
-                          )}
+                        {lead.size} {leadLabel}
+                        <ChevronDown className="h-2.5 w-2.5 ml-0.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="start"
+                      className="min-w-[200px]"
+                    >
+                      {positionDetails.map((pos, idx) => (
+                        <DropdownMenuItem
+                          key={idx}
+                          className="flex items-center justify-between gap-3 text-xs"
                         >
-                          {pos.size} {pos.isYes ? "Yes" : "No"}
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ))}
+                          <span className="text-foreground/80">
+                            {pos.marketName || pos.outcomeLabel}
+                          </span>
+                          <span
+                            className={cn(
+                              "px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
+                              pos.isYes
+                                ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                                : "border-red-600/40 text-red-700 dark:text-red-300"
+                            )}
+                          >
+                            {pos.size} {pos.isYes ? "Yes" : "No"}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                );
+              })()}
 
             {/* Wallet address */}
             {shortAddress &&

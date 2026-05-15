@@ -12,8 +12,96 @@ OPENROUTER_APP_URL=https://knoww.app
 
 # Optional comma-separated list. Keep three independent model families.
 AGENT_LLM_MODELS=google/gemini-3-flash-preview,anthropic/claude-sonnet-4.5,openai/gpt-5.4-mini
-AGENT_LLM_TIMEOUT_MS=25000
+AGENT_LLM_TIMEOUT_MS=90000
 AGENT_LLM_SPACING_MS=1500
+
+# Master search toggle. Default true. Set false to disable both native
+# OpenRouter tool calls and direct Tavily/Exa/Firecrawl enrichment.
+AGENT_LLM_WEB_SEARCH_ENABLED=true
+
+# Search mode:
+# - native: OpenRouter web_search tool calling only (back-compatible default)
+# - direct: Tavily/Exa/Firecrawl evidence enrichment only
+# - both: run direct enrichment and still expose OpenRouter web_search
+AGENT_LLM_WEB_SEARCH_MODE=native
+
+# Direct provider evidence enrichment. Used when mode is direct or both.
+# Providers run before the model vote and add normalized, shared evidence to
+# the prompt. Leave blank to disable direct provider calls even when keys exist.
+AGENT_SEARCH_PROVIDERS=tavily,exa,firecrawl
+AGENT_SEARCH_MAX_RESULTS=3
+AGENT_SEARCH_TIMEOUT_MS=5000
+TAVILY_API_KEY=
+EXA_API_KEY=
+FIRECRAWL_API_KEY=
 
 # Blocks new paper decisions when a market is closed or close to closing.
 AGENT_MARKET_CLOSE_BUFFER_MS=30000
+
+# -----------------------------------------------------------------------------
+# Live-execution (wallet-signing) path
+#
+# These belong in apps/web/.env.local in development — `next dev` does NOT
+# read .dev.vars (that's a wrangler convention), so .env.local is the file
+# Next.js's env loader picks up for process.env.
+#
+# Defaults are conservative: kill switch OFF, dry-run ON, $5 per-trade cap.
+# Real submission additionally requires AGENT_LIVE_CONFIRMED below.
+# -----------------------------------------------------------------------------
+
+# Per-run executionMode override. Leave unset to default to paper; the API
+# also accepts `executionMode: "live"` in the POST body.
+# AGENT_EXECUTION_MODE=paper
+
+# Scheduled agent runner. The Cloudflare Worker cron trigger is configured
+# for every 5 minutes while this is in paper-test mode. Keep this disabled
+# unless the deployment should automatically evaluate active watchlist items.
+# AGENT_CRON_ENABLED=false
+# AGENT_CRON_EXECUTION_MODE=paper
+# AGENT_CRON_LOCK_LEASE_MS=600000
+
+# Master kill switch. MUST be "true" (literal string) to allow the live
+# adapter to sign anything. Default off.
+# AGENT_LIVE_ENABLED=false
+
+# When true (default), the adapter signs and persists an audit row but never
+# POSTs to the CLOB. Set to "false" only together with AGENT_LIVE_CONFIRMED.
+# AGENT_LIVE_DRY_RUN=true
+
+# Belt-and-suspenders confirmation. Must be the literal value below to
+# disable dry-run. Anything else is rejected.
+# AGENT_LIVE_CONFIRMED=I_UNDERSTAND_THIS_IS_REAL_MONEY
+
+# Dedicated agent EOA private key (64 hex chars, 0x-prefixed). Generate one
+# with `node -e "console.log(require('viem/accounts').generatePrivateKey())"`.
+# AGENT_WALLET_PRIVATE_KEY=
+
+# Encrypts cached Polymarket CLOB API credentials in D1. Generate with:
+# `openssl rand -base64 32`
+# Keep this stable; changing it makes existing cached credentials undecryptable.
+# AGENT_CREDENTIAL_ENCRYPTION_KEY=
+
+# Optional cache key namespace for credential encryption rotation. Defaults to
+# v1. A new version causes the adapter to derive and store fresh encrypted creds.
+# AGENT_CREDENTIAL_ENCRYPTION_KEY_VERSION=v1
+
+# Optional Polymarket funder/proxy-wallet address. Defaults to the signer
+# address derived from AGENT_WALLET_PRIVATE_KEY.
+# AGENT_FUNDER_ADDRESS=
+
+# Per-trade live notional cap in USD. Hard floor on top of the regular risk
+# gate — even a misconfigured portfolio cannot oversize a real order.
+AGENT_MAX_LIVE_NOTIONAL_USD=5
+
+# Optional production safety controls. Emergency stop blocks all live adapter
+# execution. Allowlist variables are comma-separated and block any token or
+# condition not listed. Daily caps apply only to real non-dry-run orders.
+# AGENT_LIVE_EMERGENCY_STOP=false
+# AGENT_LIVE_ALLOWLIST_TOKEN_IDS=
+# AGENT_LIVE_ALLOWLIST_CONDITION_IDS=
+# AGENT_LIVE_DAILY_MAX_ORDER_COUNT=
+# AGENT_LIVE_DAILY_MAX_NOTIONAL_USD=
+
+# Polymarket CLOB host override (defaults to POLYMARKET_API.CLOB.BASE from
+# shared-types). Set only when pointing at a non-production endpoint.
+# POLYMARKET_HOST=https://clob.polymarket.com

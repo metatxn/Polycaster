@@ -21,8 +21,14 @@ const WatchlistInputSchema = z
     tokenId: z.string().trim().min(8).max(160).optional(),
     conditionId: z.string().trim().min(8).max(160).optional(),
     marketSlug: z.string().trim().min(1).max(180).optional(),
-    side: z.enum(["YES", "NO"]).default("YES"),
+    side: z.enum(["YES", "NO"]).optional(),
     outcomeLabel: z.string().trim().min(1).max(80).optional(),
+    marketType: z.enum(["binary", "multi_outcome", "unknown"]).optional(),
+    eventType: z.enum(["single_market", "multi_market", "unknown"]).optional(),
+    outcomes: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+    oppositeOutcomeLabel: z.string().trim().min(1).max(80).optional(),
+    oppositeTokenId: z.string().trim().min(8).max(160).optional(),
+    eventMarketCount: z.number().int().nonnegative().max(500).optional(),
     eventStartTime: z.string().datetime().optional(),
     eventEndTime: z.string().datetime().optional(),
     resolutionSource: z.string().trim().url().max(500).optional(),
@@ -120,6 +126,22 @@ export async function GET(request: NextRequest) {
  *                 enum: [YES, NO]
  *               outcomeLabel:
  *                 type: string
+ *               marketType:
+ *                 type: string
+ *                 enum: [binary, multi_outcome, unknown]
+ *               eventType:
+ *                 type: string
+ *                 enum: [single_market, multi_market, unknown]
+ *               outcomes:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               oppositeOutcomeLabel:
+ *                 type: string
+ *               oppositeTokenId:
+ *                 type: string
+ *               eventMarketCount:
+ *                 type: integer
  *               eventStartTime:
  *                 type: string
  *                 format: date-time
@@ -183,8 +205,16 @@ export async function POST(request: NextRequest) {
       tokenId: parsed.data.tokenId ?? imported?.tokenId,
       conditionId: parsed.data.conditionId ?? imported?.conditionId,
       marketSlug: parsed.data.marketSlug ?? imported?.marketSlug,
-      side: parsed.data.side,
+      side: parsed.data.side ?? imported?.side ?? "YES",
       outcomeLabel: parsed.data.outcomeLabel ?? imported?.outcomeLabel,
+      marketType: parsed.data.marketType ?? imported?.marketType,
+      eventType: parsed.data.eventType ?? imported?.eventType,
+      outcomes: parsed.data.outcomes ?? imported?.outcomes ?? [],
+      oppositeOutcomeLabel:
+        parsed.data.oppositeOutcomeLabel ?? imported?.oppositeOutcomeLabel,
+      oppositeTokenId: parsed.data.oppositeTokenId ?? imported?.oppositeTokenId,
+      eventMarketCount:
+        parsed.data.eventMarketCount ?? imported?.eventMarketCount,
       eventStartTime: parsed.data.eventStartTime ?? imported?.eventStartTime,
       eventEndTime: parsed.data.eventEndTime ?? imported?.eventEndTime,
       resolutionSource:

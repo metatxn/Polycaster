@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   isCurrentSportsEvent,
+  isLiveOrRecentlyStartedSportsEvent,
   isUpcomingSportsEvent,
   RECENTLY_STARTED_SPORTS_EVENT_WINDOW_MS,
 } from "./sports-event-activity.ts";
@@ -93,6 +94,70 @@ describe("isCurrentSportsEvent", () => {
     assert.equal(isCurrentSportsEvent({ active: false }, NOW), false);
     assert.equal(isCurrentSportsEvent({ closed: true }, NOW), false);
     assert.equal(isCurrentSportsEvent({ ended: true }, NOW), false);
+  });
+});
+
+describe("isLiveOrRecentlyStartedSportsEvent", () => {
+  it("excludes recently started events once the primary result is proposed", () => {
+    assert.equal(
+      isLiveOrRecentlyStartedSportsEvent(
+        {
+          active: true,
+          closed: false,
+          startTime: "2026-05-08T11:00:00Z",
+          markets: [
+            {
+              sportsMarketType: "moneyline",
+              umaResolutionStatus: "proposed",
+            },
+            {
+              sportsMarketType: "cricket_toss_winner",
+              umaResolutionStatus: "resolved",
+            },
+          ],
+        },
+        NOW
+      ),
+      false
+    );
+  });
+
+  it("keeps recently started sports events in the live bucket before Gamma sets live", () => {
+    assert.equal(
+      isLiveOrRecentlyStartedSportsEvent(
+        {
+          active: true,
+          closed: false,
+          startTime: "2026-05-08T11:00:00Z",
+        },
+        NOW
+      ),
+      true
+    );
+  });
+
+  it("does not treat a proposed toss market as a completed match", () => {
+    assert.equal(
+      isLiveOrRecentlyStartedSportsEvent(
+        {
+          active: true,
+          closed: false,
+          startTime: "2026-05-08T11:00:00Z",
+          markets: [
+            {
+              sportsMarketType: "moneyline",
+              umaResolutionStatuses: "[]",
+            },
+            {
+              sportsMarketType: "cricket_toss_winner",
+              umaResolutionStatus: "proposed",
+            },
+          ],
+        },
+        NOW
+      ),
+      true
+    );
   });
 });
 

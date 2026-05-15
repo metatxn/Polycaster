@@ -32,6 +32,9 @@ interface PaginatedEvent {
     clobTokenIds?: string[];
     conditionId?: string;
     gameStartTime?: string;
+    sportsMarketType?: string;
+    umaResolutionStatus?: string;
+    umaResolutionStatuses?: string;
   }>;
   tags?: Array<string | { id?: string; slug?: string; label?: string }>;
   negRisk?: boolean;

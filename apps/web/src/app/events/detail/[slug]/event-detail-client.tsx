@@ -915,12 +915,20 @@ export default function EventDetailClient({
 
     const tokenId = outcomes[selectedOutcomeIndex]?.tokenId || "";
 
-    // Build token to market mapping for comments position display
+    // Build token to market mapping for comments position display.
+    // For binary events (one market on the page, e.g. "Hantavirus
+    // pandemic?") we leave marketName empty so the comment pill
+    // falls back to the Yes/No outcome label and reads as the tight
+    // "124 NO" form. For multi-outcome events (FIFA, elections —
+    // multiple markets in the same group) we keep the short
+    // `groupItemTitle` (e.g. "Arsenal") so users can tell which
+    // option the position is on.
+    const isMultiOutcomeEvent = marketData.length > 1;
     const tokenMap: TokenMarketMap = new Map();
     for (const market of marketData) {
-      // Get a short market name from groupItemTitle
-      // e.g., "Will Arsenal win?" -> "Arsenal"
-      const marketName = market.groupItemTitle || market.question || "Unknown";
+      const marketName = isMultiOutcomeEvent
+        ? market.groupItemTitle || market.question || ""
+        : "";
 
       if (market.yesTokenId) {
         const yesOutcome = market.rawOutcomes?.[0] || "Yes";

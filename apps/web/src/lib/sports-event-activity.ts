@@ -10,6 +10,9 @@ export type SportsEventActivityCandidate = {
   endDate?: string | null;
   markets?: Array<{
     gameStartTime?: string | null;
+    sportsMarketType?: string | null;
+    umaResolutionStatus?: string | null;
+    umaResolutionStatuses?: string | null;
   }>;
 };
 
@@ -51,6 +54,28 @@ function getEventStartMs(event: SportsEventActivityCandidate): number | null {
   );
 }
 
+function hasResolutionStatus(value?: string | null): boolean {
+  if (!value) return false;
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === "[]" || normalized === "null") {
+    return false;
+  }
+
+  return normalized.includes("proposed") || normalized.includes("resolved");
+}
+
+function hasResolvedPrimaryMarket(
+  event: SportsEventActivityCandidate
+): boolean {
+  return (event.markets ?? []).some(
+    (market) =>
+      market.sportsMarketType === "moneyline" &&
+      (hasResolutionStatus(market.umaResolutionStatus) ||
+        hasResolutionStatus(market.umaResolutionStatuses))
+  );
+}
+
 export function isCurrentSportsEvent(
   event: SportsEventActivityCandidate,
   nowMs = Date.now()
@@ -79,6 +104,30 @@ export function isCurrentSportsEvent(
   }
 
   return true;
+}
+
+export function isLiveOrRecentlyStartedSportsEvent(
+  event: SportsEventActivityCandidate,
+  nowMs = Date.now()
+): boolean {
+  if (event.closed === true || event.active === false || event.ended === true) {
+    return false;
+  }
+
+  if (hasResolvedPrimaryMarket(event)) {
+    return false;
+  }
+
+  if (event.live === true) {
+    return true;
+  }
+
+  const eventStartMs = getEventStartMs(event);
+  if (eventStartMs === null || eventStartMs >= nowMs) {
+    return false;
+  }
+
+  return nowMs - eventStartMs <= RECENTLY_STARTED_SPORTS_EVENT_WINDOW_MS;
 }
 
 export function isUpcomingSportsEvent(

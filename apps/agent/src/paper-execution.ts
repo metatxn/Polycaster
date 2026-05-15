@@ -53,10 +53,10 @@ export function evaluateRisk(input: RiskInput): RiskResult {
     };
   }
 
-  if (cash.lt(requested)) {
+  if (cash.lte(0)) {
     return {
       approved: false,
-      reason: "Insufficient paper cash.",
+      reason: "No paper cash remaining.",
       cappedSizeUsd: "0",
     };
   }
@@ -70,7 +70,11 @@ export function evaluateRisk(input: RiskInput): RiskResult {
     };
   }
 
-  const capped = Decimal.min(requested, maxTrade, maxPosition);
+  // Clamp the requested size to ALL binding constraints rather than hard-
+  // rejecting on cash. The committee sometimes recommends sizes well above the
+  // paper cash or per-trade cap (models without portfolio context overshoot);
+  // a fill at the largest safe size is the right answer for paper trading.
+  const capped = Decimal.min(requested, maxTrade, maxPosition, cash);
   if (capped.lte(0)) {
     return {
       approved: false,
@@ -162,15 +166,6 @@ export function validateLiveOrderPreconditions(
   return request as LiveOrderRequest;
 }
 
-export class LiveExecutionAdapter implements ExecutionAdapter {
-  readonly mode = "live" as const;
-
-  async execute(_request: PaperOrderRequest): Promise<never> {
-    throw new Error("Live execution is disabled for the paper trading agent.");
-  }
-
-  async submitLiveOrder(request: unknown): Promise<never> {
-    validateLiveOrderPreconditions(request as Partial<LiveOrderRequest>);
-    throw new Error("Live execution is disabled for the paper trading agent.");
-  }
-}
+// Live execution lives in ./live-execution.ts now. The agent's
+// ExecutionAdapter switching happens in runPaperAgent based on the
+// `executionMode` option.

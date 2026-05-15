@@ -1,4 +1,4 @@
-import { getLlmPanelStatus } from "@knoww/agent";
+import { getAgentSearchStatus, getLlmPanelStatus } from "@knoww/agent";
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAgentAdmin } from "@/lib/agent/api";
 import { checkRateLimit } from "@/lib/api-rate-limit";
@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
     success: true,
     status: {
       llm: getLlmPanelStatus(),
+      search: getAgentSearchStatus(),
       admin: {
         configured: Boolean(process.env.AGENT_ADMIN_TOKEN),
       },

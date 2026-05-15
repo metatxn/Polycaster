@@ -1,11 +1,11 @@
 import Decimal from "decimal.js";
 import { type Address, encodeFunctionData, erc20Abi, type Hex } from "viem";
-import { COLLATERAL_ONRAMP_ABI } from "./abi";
+import { COLLATERAL_ONRAMP_ABI } from "./abi.ts";
 import {
   COLLATERAL_ONRAMP_ADDRESS,
   PUSD_DECIMALS,
   USDC_E_ADDRESS,
-} from "./contracts";
+} from "./contracts.ts";
 
 export const DEFAULT_APPROVAL_AMOUNT = "100";
 export const APPROVAL_DECIMALS = PUSD_DECIMALS;

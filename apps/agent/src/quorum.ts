@@ -9,9 +9,15 @@ import {
 const MIN_TRADE_CONFIDENCE = 0.6;
 const FALLBACK_HOLD_VOTE: ModelVote = {
   provider: "invalid",
+  resolutionView: "Invalid model output; no analysis available.",
+  marketImpliedProbability: 0,
+  fairProbability: 0,
+  edgePct: 0,
+  evidenceFor: [],
+  evidenceAgainst: [],
+  missingEvidence: [],
   action: "HOLD",
   confidence: 0,
-  fairProbability: 0,
   sizeUsd: "0",
   reasoning: "Invalid model output was downgraded to HOLD.",
   citations: ["validation"],

@@ -4,9 +4,16 @@ import { reduceModelVotes, validateModelVote } from "./quorum.ts";
 
 const baseVote = {
   provider: "model-a",
+  resolutionView:
+    "Market resolves YES if the underlying event occurs by deadline.",
+  marketImpliedProbability: 0.5,
+  fairProbability: 0.64,
+  edgePct: 14,
+  evidenceFor: ["order book midpoint sits below fair value"],
+  evidenceAgainst: [],
+  missingEvidence: [],
   action: "BUY",
   confidence: 0.78,
-  fairProbability: 0.64,
   sizeUsd: "25",
   reasoning: "Order book implies a better price than fair probability.",
   citations: ["market-data"],

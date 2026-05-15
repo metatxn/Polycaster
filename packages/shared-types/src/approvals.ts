@@ -16,7 +16,7 @@ import {
   PUSD_ADDRESS,
   PUSD_CTF_APPROVAL_TARGET,
   USDC_E_ADDRESS,
-} from "./contracts";
+} from "./contracts.ts";
 
 export const APPROVAL_THRESHOLD_RAW = BigInt(1);
 

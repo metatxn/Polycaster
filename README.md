@@ -8,6 +8,7 @@ A prediction markets platform to **Know your Odds**, powered by Polymarket.
 - Multi-wallet support via Reown AppKit
 - Browse by categories: Politics, Sports, Finance, Crypto
 - Event and market detail views with price charts
+- Internal paper-trading agent dashboard and admin APIs
 - Edge deployment on Cloudflare Workers
 
 ## Quick Start
@@ -17,6 +18,8 @@ A prediction markets platform to **Know your Odds**, powered by Polymarket.
 - Node.js 18+
 - pnpm
 - [Reown Cloud Project ID](https://cloud.reown.com/)
+
+If you plan to work on `apps/agent`, use a current Node.js release that supports `node --experimental-strip-types` for that package's test script.
 
 ### Setup
 
@@ -102,14 +105,16 @@ pnpm typecheck      # Type-check all workspace packages
 pnpm typecheck:web  # Type-check the web app only
 pnpm typecheck:ext  # Type-check the extension only
 pnpm audit:security # Run a high-severity dependency audit
+pnpm brand:render   # Render the brand mark asset
 pnpm deploy         # Deploy the web app to Cloudflare
 pnpm release:ext    # Bump, build, and zip the extension release
 ```
 
 Additional package-level scripts live in the workspace packages:
 
-- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`
-- `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `version:bump`, `zip`, `release`
+- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`
+- `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `benchmark:embeddings`, `format`, `version:bump`, `zip`, `release`
+- `apps/agent/package.json`: `build`, `typecheck`, `lint`, `format`, `test`
 
 ## Documentation
 

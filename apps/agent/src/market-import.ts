@@ -1,4 +1,8 @@
-import type { AgentWatchlistItem } from "./types.ts";
+import type {
+  AgentEventType,
+  AgentMarketType,
+  AgentWatchlistItem,
+} from "./types.ts";
 
 const GAMMA_EVENT_BASE = "https://gamma-api.polymarket.com/events/slug";
 const EVENT_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{2,180}$/;
@@ -18,7 +22,12 @@ interface GammaMarketLike {
   eventStartTime?: unknown;
   startDate?: unknown;
   endDate?: unknown;
+  active?: unknown;
   archived?: unknown;
+  closed?: unknown;
+  acceptingOrders?: unknown;
+  enableOrderBook?: unknown;
+  outcomePrices?: unknown;
 }
 
 interface GammaEventLike {
@@ -58,6 +67,31 @@ function parseStringArray(value: unknown): string[] {
   }
 }
 
+function parseNumberArray(value: unknown): number[] {
+  return parseStringArray(value)
+    .map((entry) => Number.parseFloat(entry))
+    .filter(Number.isFinite);
+}
+
+function classifyMarketType(outcomes: string[]): AgentMarketType {
+  const normalized = outcomes.map((outcome) => outcome.trim().toLowerCase());
+  return normalized.length === 2 &&
+    normalized.includes("yes") &&
+    normalized.includes("no")
+    ? "binary"
+    : normalized.length > 0
+      ? "multi_outcome"
+      : "unknown";
+}
+
+function classifyEventType(markets: GammaMarketLike[]): AgentEventType {
+  return markets.length > 1
+    ? "multi_market"
+    : markets.length === 1
+      ? "single_market"
+      : "unknown";
+}
+
 function eventMarkets(event: GammaEventLike): GammaMarketLike[] {
   return Array.isArray(event.markets)
     ? event.markets.filter(
@@ -65,6 +99,31 @@ function eventMarkets(event: GammaEventLike): GammaMarketLike[] {
           Boolean(market) && typeof market === "object"
       )
     : [];
+}
+
+function isImportableMarket(market: GammaMarketLike): boolean {
+  return (
+    market.archived !== true &&
+    market.active !== false &&
+    market.closed !== true &&
+    market.acceptingOrders !== false &&
+    market.enableOrderBook !== false
+  );
+}
+
+function yesOutcomePrice(market: GammaMarketLike): number {
+  return parseNumberArray(market.outcomePrices)[0] ?? 0;
+}
+
+function selectImportMarket(
+  event: GammaEventLike
+): GammaMarketLike | undefined {
+  const markets = eventMarkets(event);
+  const importableMarkets = markets.filter(isImportableMarket);
+  const candidates = importableMarkets.length > 0 ? importableMarkets : markets;
+  return [...candidates].sort(
+    (a, b) => yesOutcomePrice(b) - yesOutcomePrice(a)
+  )[0];
 }
 
 export function parsePolymarketEventSlug(input: string): string {
@@ -96,7 +155,8 @@ export function normalizeGammaEventToWatchlistItem(
     throw new Error("Invalid Gamma event payload.");
   }
   const event = rawEvent as GammaEventLike;
-  const market = eventMarkets(event)[0];
+  const allMarkets = eventMarkets(event);
+  const market = selectImportMarket(event);
   if (!market) {
     throw new Error("Gamma event has no markets.");
   }
@@ -119,6 +179,19 @@ export function normalizeGammaEventToWatchlistItem(
   if (!tokenId) {
     throw new Error("Gamma event market is missing the selected token id.");
   }
+  const marketType = classifyMarketType(outcomes);
+  const eventType = classifyEventType(allMarkets);
+  const oppositeIndex =
+    marketType === "binary" && outcomes.length === 2
+      ? selectedIndex === 0
+        ? 1
+        : 0
+      : -1;
+  const selectedOutcome = outcomes[selectedIndex];
+  const side =
+    marketType === "binary" && selectedOutcome.trim().toLowerCase() === "no"
+      ? "NO"
+      : "YES";
 
   const marketSlug = stringValue(event.slug) ?? stringValue(market.slug);
   if (!marketSlug) {
@@ -133,8 +206,15 @@ export function normalizeGammaEventToWatchlistItem(
     tokenId,
     conditionId: stringValue(market.conditionId),
     marketSlug,
-    side: "YES",
-    outcomeLabel: outcomes[selectedIndex],
+    side,
+    outcomeLabel: selectedOutcome,
+    marketType,
+    eventType,
+    outcomes,
+    oppositeOutcomeLabel:
+      oppositeIndex >= 0 ? outcomes[oppositeIndex] : undefined,
+    oppositeTokenId: oppositeIndex >= 0 ? tokenIds[oppositeIndex] : undefined,
+    eventMarketCount: allMarkets.length,
     eventStartTime:
       stringValue(market.eventStartTime) ??
       stringValue(event.startTime) ??
@@ -145,7 +225,12 @@ export function normalizeGammaEventToWatchlistItem(
       stringValue(event.resolutionSource),
     newsUrls: [],
     socialNotes: [],
-    active: event.archived !== true && market.archived !== true,
+    active:
+      event.archived !== true &&
+      market.archived !== true &&
+      market.active !== false &&
+      market.closed !== true &&
+      market.acceptingOrders !== false,
   };
 }
 

@@ -1,9 +1,19 @@
 import Decimal from "decimal.js";
+import type { AgentResolution } from "./resolutions.ts";
+import { brierScore } from "./resolutions.ts";
 import type {
+  AgentAction,
+  AgentClobCredentialRecord,
+  AgentClobCredentialUpsert,
   AgentEvidencePack,
+  AgentPosition,
   AgentWatchlistItem,
+  LiveOrderRecord,
+  LiveOrderStatus,
+  LiveOrderUpsert,
   ModelVote,
   PaperFill,
+  PositionCloseReason,
   QuorumDecision,
 } from "./types.ts";
 
@@ -39,6 +49,7 @@ export interface AgentRunDetail extends AgentRunSummary {
     votes: ModelVote[];
     decision: QuorumDecision;
     fill: PaperFill | null;
+    resolution: AgentResolution | null;
   }>;
 }
 
@@ -48,6 +59,54 @@ export interface AgentMetrics {
   holdCount: number;
   blockedCount: number;
   notionalUsd: string;
+}
+
+export interface CalibrationModelStat {
+  provider: string;
+  brierMean: number;
+  count: number;
+}
+
+export interface CalibrationSummary {
+  models: CalibrationModelStat[];
+  resolvedVoteCount: number;
+}
+
+export interface PortfolioPnl {
+  openPositionCount: number;
+  closedPositionCount: number;
+  realizedPnlUsd: string;
+  openEntryNotionalUsd: string;
+}
+
+export interface AgentSchedulerLock {
+  lockKey: string;
+  ownerId: string;
+  lockedAt: string;
+  expiresAt: string;
+  updatedAt: string;
+}
+
+export interface AcquireSchedulerLockInput {
+  lockKey: string;
+  ownerId: string;
+  now: string;
+  leaseMs: number;
+}
+
+export interface OpenPositionInput {
+  watchlistItemId: string;
+  tokenId: string;
+  entryPrice: string;
+  shares: string;
+  entryNotionalUsd: string;
+  openedRunId: string | null;
+}
+
+export interface ClosePositionInput {
+  exitPrice: string;
+  closeReason: PositionCloseReason;
+  closedRunId: string | null;
 }
 
 export interface AgentRepository {
@@ -70,12 +129,114 @@ export interface AgentRepository {
   listRuns(): Promise<AgentRunSummary[]>;
   getRun(id: string): Promise<AgentRunDetail | null>;
   getMetrics(): Promise<AgentMetrics>;
+  upsertResolution(resolution: AgentResolution): Promise<void>;
+  getResolutionByTokenId(tokenId: string): Promise<AgentResolution | null>;
+  listResolutions(): Promise<AgentResolution[]>;
+  getCalibration(): Promise<CalibrationSummary>;
+  openPosition(input: OpenPositionInput): Promise<AgentPosition>;
+  closePosition(
+    id: string,
+    input: ClosePositionInput
+  ): Promise<AgentPosition | null>;
+  getOpenPositionByWatchlistItem(
+    watchlistItemId: string
+  ): Promise<AgentPosition | null>;
+  listOpenPositionsByToken(tokenId: string): Promise<AgentPosition[]>;
+  listPositions(): Promise<AgentPosition[]>;
+  getPortfolioPnl(): Promise<PortfolioPnl>;
+  upsertLiveOrder(record: LiveOrderUpsert): Promise<LiveOrderRecord>;
+  getLiveOrderByIdempotencyKey(key: string): Promise<LiveOrderRecord | null>;
+  listLiveOrders(): Promise<LiveOrderRecord[]>;
+  updateLiveOrderStatus(
+    idempotencyKey: string,
+    update: Partial<
+      Pick<
+        LiveOrderRecord,
+        "status" | "orderId" | "submittedAt" | "filledAt" | "error"
+      >
+    >
+  ): Promise<LiveOrderRecord | null>;
+  getClobCredential(key: string): Promise<AgentClobCredentialRecord | null>;
+  upsertClobCredential(
+    record: AgentClobCredentialUpsert
+  ): Promise<AgentClobCredentialRecord>;
+  tryAcquireSchedulerLock(
+    input: AcquireSchedulerLockInput
+  ): Promise<AgentSchedulerLock | null>;
+  releaseSchedulerLock(lockKey: string, ownerId: string): Promise<void>;
 }
 
 const memory = {
   watchlist: new Map<string, AgentWatchlistItem>(),
   runs: new Map<string, AgentRunDetail>(),
+  resolutions: new Map<string, AgentResolution>(),
+  positions: new Map<string, AgentPosition>(),
+  liveOrders: new Map<string, LiveOrderRecord>(),
+  clobCredentials: new Map<string, AgentClobCredentialRecord>(),
+  schedulerLocks: new Map<string, AgentSchedulerLock>(),
 };
+
+function computeRealizedPnl(position: AgentPosition): string {
+  if (
+    position.status !== "CLOSED" ||
+    !position.exitPrice ||
+    !position.exitNotionalUsd
+  ) {
+    return "0";
+  }
+  // Long position only (v1): realized = shares * (exitPrice - entryPrice)
+  return new Decimal(position.shares)
+    .mul(new Decimal(position.exitPrice).sub(position.entryPrice))
+    .toDecimalPlaces(6)
+    .toString();
+}
+
+function aggregatePortfolio(positions: AgentPosition[]): PortfolioPnl {
+  let openCount = 0;
+  let closedCount = 0;
+  let realized = new Decimal(0);
+  let openEntry = new Decimal(0);
+  for (const position of positions) {
+    if (position.status === "OPEN") {
+      openCount += 1;
+      openEntry = openEntry.add(position.entryNotionalUsd || "0");
+    } else {
+      closedCount += 1;
+      realized = realized.add(position.realizedPnlUsd ?? "0");
+    }
+  }
+  return {
+    openPositionCount: openCount,
+    closedPositionCount: closedCount,
+    realizedPnlUsd: realized.toDecimalPlaces(6).toString(),
+    openEntryNotionalUsd: openEntry.toDecimalPlaces(6).toString(),
+  };
+}
+
+function aggregateCalibration(
+  voteSamples: Array<{
+    provider: string;
+    fairProbability: number;
+    outcomeYes: 0 | 1;
+  }>
+): CalibrationSummary {
+  const accum = new Map<string, { sum: number; count: number }>();
+  for (const sample of voteSamples) {
+    const score = brierScore(sample.fairProbability, sample.outcomeYes);
+    const bucket = accum.get(sample.provider) ?? { sum: 0, count: 0 };
+    bucket.sum += score;
+    bucket.count += 1;
+    accum.set(sample.provider, bucket);
+  }
+  const models: CalibrationModelStat[] = [...accum.entries()]
+    .map(([provider, bucket]) => ({
+      provider,
+      brierMean: bucket.count > 0 ? bucket.sum / bucket.count : 0,
+      count: bucket.count,
+    }))
+    .sort((a, b) => a.brierMean - b.brierMean);
+  return { models, resolvedVoteCount: voteSamples.length };
+}
 
 function decimal(value: string): Decimal {
   return new Decimal(value || "0");
@@ -90,6 +251,25 @@ function sumNotionalUsd(fills: PaperFill[]): string {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function addMs(iso: string, ms: number): string {
+  return new Date(Date.parse(iso) + ms).toISOString();
+}
+
+function isDuplicateColumnError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /duplicate column name/i.test(`${error.message}\n${error.stack ?? ""}`)
+  );
+}
+
+function d1ChangeCount(result: unknown): number | null {
+  if (!result || typeof result !== "object") return null;
+  const meta = (result as { meta?: unknown }).meta;
+  if (!meta || typeof meta !== "object") return null;
+  const changes = (meta as { changes?: unknown }).changes;
+  return typeof changes === "number" ? changes : null;
 }
 
 function countRun(detail: AgentRunDetail): AgentRunSummary {
@@ -118,10 +298,15 @@ class MemoryAgentRepository implements AgentRepository {
       id?: string;
     }
   ): Promise<AgentWatchlistItem> {
-    const existing = input.id ? memory.watchlist.get(input.id) : null;
+    const existing =
+      (input.id ? memory.watchlist.get(input.id) : null) ??
+      [...memory.watchlist.values()].find(
+        (item) => item.tokenId === input.tokenId
+      ) ??
+      null;
     const item: AgentWatchlistItem = {
       ...input,
-      id: input.id ?? crypto.randomUUID(),
+      id: input.id ?? existing?.id ?? crypto.randomUUID(),
       createdAt: existing?.createdAt ?? now(),
       updatedAt: now(),
     };
@@ -170,6 +355,7 @@ class MemoryAgentRepository implements AgentRepository {
       votes: input.votes,
       decision: input.decision,
       fill: input.fill,
+      resolution: null,
     });
   }
 
@@ -180,7 +366,17 @@ class MemoryAgentRepository implements AgentRepository {
   }
 
   async getRun(id: string): Promise<AgentRunDetail | null> {
-    return memory.runs.get(id) ?? null;
+    const run = memory.runs.get(id);
+    if (!run) return null;
+    // Overlay the latest resolution for each item so newly-resolved markets
+    // surface without rewriting historical run rows.
+    return {
+      ...run,
+      items: run.items.map((item) => ({
+        ...item,
+        resolution: memory.resolutions.get(item.watchlistItem.tokenId) ?? null,
+      })),
+    };
   }
 
   async getMetrics(): Promise<AgentMetrics> {
@@ -200,13 +396,238 @@ class MemoryAgentRepository implements AgentRepository {
       notionalUsd: sumNotionalUsd(fills),
     };
   }
+
+  async upsertResolution(resolution: AgentResolution): Promise<void> {
+    memory.resolutions.set(resolution.tokenId, resolution);
+  }
+
+  async getResolutionByTokenId(
+    tokenId: string
+  ): Promise<AgentResolution | null> {
+    return memory.resolutions.get(tokenId) ?? null;
+  }
+
+  async listResolutions(): Promise<AgentResolution[]> {
+    return [...memory.resolutions.values()].sort((a, b) =>
+      b.resolvedAt.localeCompare(a.resolvedAt)
+    );
+  }
+
+  async getCalibration(): Promise<CalibrationSummary> {
+    const samples: Array<{
+      provider: string;
+      fairProbability: number;
+      outcomeYes: 0 | 1;
+    }> = [];
+    for (const run of memory.runs.values()) {
+      for (const item of run.items) {
+        const resolution = memory.resolutions.get(item.watchlistItem.tokenId);
+        if (!resolution) continue;
+        for (const vote of item.votes) {
+          samples.push({
+            provider: vote.provider,
+            fairProbability: vote.fairProbability,
+            outcomeYes: resolution.outcomeYes,
+          });
+        }
+      }
+    }
+    return aggregateCalibration(samples);
+  }
+
+  async openPosition(input: OpenPositionInput): Promise<AgentPosition> {
+    const position: AgentPosition = {
+      id: crypto.randomUUID(),
+      watchlistItemId: input.watchlistItemId,
+      tokenId: input.tokenId,
+      side: "BUY",
+      status: "OPEN",
+      entryPrice: input.entryPrice,
+      shares: input.shares,
+      entryNotionalUsd: input.entryNotionalUsd,
+      exitPrice: null,
+      exitNotionalUsd: null,
+      realizedPnlUsd: null,
+      openedAt: now(),
+      closedAt: null,
+      closeReason: null,
+      openedRunId: input.openedRunId,
+      closedRunId: null,
+    };
+    memory.positions.set(position.id, position);
+    return position;
+  }
+
+  async closePosition(
+    id: string,
+    input: ClosePositionInput
+  ): Promise<AgentPosition | null> {
+    const existing = memory.positions.get(id);
+    if (!existing || existing.status === "CLOSED") return existing ?? null;
+    const exitNotional = new Decimal(existing.shares).mul(input.exitPrice);
+    const closed: AgentPosition = {
+      ...existing,
+      status: "CLOSED",
+      exitPrice: input.exitPrice,
+      exitNotionalUsd: exitNotional.toDecimalPlaces(6).toString(),
+      closedAt: now(),
+      closeReason: input.closeReason,
+      closedRunId: input.closedRunId,
+    };
+    closed.realizedPnlUsd = computeRealizedPnl(closed);
+    memory.positions.set(id, closed);
+    return closed;
+  }
+
+  async getOpenPositionByWatchlistItem(
+    watchlistItemId: string
+  ): Promise<AgentPosition | null> {
+    for (const position of memory.positions.values()) {
+      if (
+        position.watchlistItemId === watchlistItemId &&
+        position.status === "OPEN"
+      ) {
+        return position;
+      }
+    }
+    return null;
+  }
+
+  async listOpenPositionsByToken(tokenId: string): Promise<AgentPosition[]> {
+    return [...memory.positions.values()].filter(
+      (position) => position.tokenId === tokenId && position.status === "OPEN"
+    );
+  }
+
+  async listPositions(): Promise<AgentPosition[]> {
+    return [...memory.positions.values()].sort((a, b) =>
+      b.openedAt.localeCompare(a.openedAt)
+    );
+  }
+
+  async getPortfolioPnl(): Promise<PortfolioPnl> {
+    return aggregatePortfolio([...memory.positions.values()]);
+  }
+
+  async upsertLiveOrder(input: LiveOrderUpsert): Promise<LiveOrderRecord> {
+    const existing = memory.liveOrders.get(input.idempotencyKey);
+    const record: LiveOrderRecord = {
+      ...input,
+      createdAt: input.createdAt ?? existing?.createdAt ?? now(),
+      filledNotionalUsd:
+        input.filledNotionalUsd ?? existing?.filledNotionalUsd ?? "0",
+      filledShares: input.filledShares ?? existing?.filledShares ?? "0",
+      averageFillPrice:
+        input.averageFillPrice !== undefined
+          ? input.averageFillPrice
+          : (existing?.averageFillPrice ?? null),
+      lastSyncedAt:
+        input.lastSyncedAt !== undefined
+          ? input.lastSyncedAt
+          : (existing?.lastSyncedAt ?? null),
+      balanceSnapshotJson:
+        input.balanceSnapshotJson !== undefined
+          ? input.balanceSnapshotJson
+          : (existing?.balanceSnapshotJson ?? null),
+    };
+    memory.liveOrders.set(record.idempotencyKey, record);
+    return record;
+  }
+
+  async getLiveOrderByIdempotencyKey(
+    key: string
+  ): Promise<LiveOrderRecord | null> {
+    return memory.liveOrders.get(key) ?? null;
+  }
+
+  async listLiveOrders(): Promise<LiveOrderRecord[]> {
+    return [...memory.liveOrders.values()].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+  }
+
+  async updateLiveOrderStatus(
+    idempotencyKey: string,
+    update: Partial<
+      Pick<
+        LiveOrderRecord,
+        "status" | "orderId" | "submittedAt" | "filledAt" | "error"
+      >
+    >
+  ): Promise<LiveOrderRecord | null> {
+    const existing = memory.liveOrders.get(idempotencyKey);
+    if (!existing) return null;
+    const next: LiveOrderRecord = {
+      ...existing,
+      status: update.status ?? existing.status,
+      orderId: update.orderId !== undefined ? update.orderId : existing.orderId,
+      submittedAt:
+        update.submittedAt !== undefined
+          ? update.submittedAt
+          : existing.submittedAt,
+      filledAt:
+        update.filledAt !== undefined ? update.filledAt : existing.filledAt,
+      error: update.error !== undefined ? update.error : existing.error,
+    };
+    memory.liveOrders.set(idempotencyKey, next);
+    return next;
+  }
+
+  async getClobCredential(
+    key: string
+  ): Promise<AgentClobCredentialRecord | null> {
+    const existing = memory.clobCredentials.get(key);
+    if (!existing) return null;
+    const next = { ...existing, lastUsedAt: now() };
+    memory.clobCredentials.set(key, next);
+    return next;
+  }
+
+  async upsertClobCredential(
+    input: AgentClobCredentialUpsert
+  ): Promise<AgentClobCredentialRecord> {
+    const existing = memory.clobCredentials.get(input.credentialKey);
+    const record: AgentClobCredentialRecord = {
+      ...input,
+      createdAt: input.createdAt ?? existing?.createdAt ?? now(),
+      updatedAt: input.updatedAt ?? now(),
+      lastUsedAt: input.lastUsedAt ?? existing?.lastUsedAt ?? null,
+    };
+    memory.clobCredentials.set(record.credentialKey, record);
+    return record;
+  }
+
+  async tryAcquireSchedulerLock(
+    input: AcquireSchedulerLockInput
+  ): Promise<AgentSchedulerLock | null> {
+    const existing = memory.schedulerLocks.get(input.lockKey);
+    if (existing && existing.expiresAt > input.now) return null;
+    const record: AgentSchedulerLock = {
+      lockKey: input.lockKey,
+      ownerId: input.ownerId,
+      lockedAt: input.now,
+      expiresAt: addMs(input.now, input.leaseMs),
+      updatedAt: input.now,
+    };
+    memory.schedulerLocks.set(input.lockKey, record);
+    return record;
+  }
+
+  async releaseSchedulerLock(lockKey: string, ownerId: string): Promise<void> {
+    const existing = memory.schedulerLocks.get(lockKey);
+    if (existing?.ownerId === ownerId) {
+      memory.schedulerLocks.delete(lockKey);
+    }
+  }
 }
 
 class D1AgentRepository extends MemoryAgentRepository {
   private schemaReady: Promise<void> | null = null;
+  private readonly db: AgentD1Database;
 
-  constructor(private readonly db: AgentD1Database) {
+  constructor(db: AgentD1Database) {
     super();
+    this.db = db;
   }
 
   private async ensureSchema(): Promise<void> {
@@ -221,6 +642,12 @@ class D1AgentRepository extends MemoryAgentRepository {
             market_slug TEXT,
             side TEXT NOT NULL DEFAULT 'YES',
             outcome_label TEXT,
+            market_type TEXT,
+            event_type TEXT,
+            outcomes_json TEXT NOT NULL DEFAULT '[]',
+            opposite_outcome_label TEXT,
+            opposite_token_id TEXT,
+            event_market_count INTEGER,
             event_start_time TEXT,
             event_end_time TEXT,
             resolution_source TEXT,
@@ -279,6 +706,135 @@ class D1AgentRepository extends MemoryAgentRepository {
           "CREATE INDEX IF NOT EXISTS idx_agent_run_items_watchlist_item_id ON agent_run_items(watchlist_item_id, created_at)"
         )
         .run();
+      await this.db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS agent_resolutions (
+            token_id TEXT PRIMARY KEY,
+            condition_id TEXT,
+            market_slug TEXT,
+            outcome_yes INTEGER NOT NULL,
+            settlement_price TEXT,
+            resolved_at TEXT NOT NULL,
+            raw_source TEXT
+          )`
+        )
+        .run();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_resolutions_resolved_at ON agent_resolutions(resolved_at)"
+        )
+        .run();
+      await this.db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS agent_positions (
+            id TEXT PRIMARY KEY,
+            watchlist_item_id TEXT NOT NULL,
+            token_id TEXT NOT NULL,
+            side TEXT NOT NULL DEFAULT 'BUY',
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            entry_price TEXT NOT NULL,
+            shares TEXT NOT NULL,
+            entry_notional_usd TEXT NOT NULL,
+            exit_price TEXT,
+            exit_notional_usd TEXT,
+            realized_pnl_usd TEXT,
+            opened_at TEXT NOT NULL,
+            closed_at TEXT,
+            close_reason TEXT,
+            opened_run_id TEXT,
+            closed_run_id TEXT,
+            FOREIGN KEY (watchlist_item_id) REFERENCES agent_watchlist(id)
+          )`
+        )
+        .run();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_positions_status ON agent_positions(status, opened_at)"
+        )
+        .run();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_positions_token_status ON agent_positions(token_id, status)"
+        )
+        .run();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_positions_watchlist_item ON agent_positions(watchlist_item_id, status)"
+        )
+        .run();
+      await this.db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS agent_live_orders (
+            idempotency_key TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            watchlist_item_id TEXT NOT NULL,
+            token_id TEXT NOT NULL,
+            side TEXT NOT NULL,
+            requested_size_usd TEXT NOT NULL,
+            price TEXT NOT NULL,
+            signed_order_hash TEXT,
+            order_id TEXT,
+            status TEXT NOT NULL,
+            submitted_at TEXT,
+            filled_at TEXT,
+            created_at TEXT NOT NULL,
+            filled_notional_usd TEXT NOT NULL DEFAULT '0',
+            filled_shares TEXT NOT NULL DEFAULT '0',
+            average_fill_price TEXT,
+            last_synced_at TEXT,
+            balance_snapshot_json TEXT,
+            dry_run INTEGER NOT NULL DEFAULT 1,
+            error TEXT
+          )`
+        )
+        .run();
+      await this.ensureLiveOrderColumns();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_live_orders_created_at ON agent_live_orders(created_at DESC)"
+        )
+        .run();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_live_orders_status ON agent_live_orders(status, created_at DESC)"
+        )
+        .run();
+      await this.db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS agent_clob_credentials (
+            credential_key TEXT PRIMARY KEY,
+            clob_host TEXT NOT NULL,
+            signer_address TEXT NOT NULL,
+            funder_address TEXT NOT NULL,
+            encrypted_credentials TEXT NOT NULL,
+            encryption_key_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_used_at TEXT
+          )`
+        )
+        .run();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_clob_credentials_updated_at ON agent_clob_credentials(updated_at DESC)"
+        )
+        .run();
+      await this.db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS agent_scheduler_locks (
+            lock_key TEXT PRIMARY KEY,
+            owner_id TEXT NOT NULL,
+            locked_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )`
+        )
+        .run();
+      await this.db
+        .prepare(
+          "CREATE INDEX IF NOT EXISTS idx_agent_scheduler_locks_expires_at ON agent_scheduler_locks(expires_at)"
+        )
+        .run();
     })();
     await this.schemaReady;
   }
@@ -290,6 +846,12 @@ class D1AgentRepository extends MemoryAgentRepository {
     const columns = new Set(existing.results.map((row) => row.name));
     for (const [column, definition] of [
       ["outcome_label", "TEXT"],
+      ["market_type", "TEXT"],
+      ["event_type", "TEXT"],
+      ["outcomes_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["opposite_outcome_label", "TEXT"],
+      ["opposite_token_id", "TEXT"],
+      ["event_market_count", "INTEGER"],
       ["event_start_time", "TEXT"],
       ["event_end_time", "TEXT"],
       ["resolution_source", "TEXT"],
@@ -300,6 +862,32 @@ class D1AgentRepository extends MemoryAgentRepository {
             `ALTER TABLE agent_watchlist ADD COLUMN ${column} ${definition}`
           )
           .run();
+      }
+    }
+  }
+
+  private async ensureLiveOrderColumns(): Promise<void> {
+    const existing = await this.db
+      .prepare("PRAGMA table_info(agent_live_orders)")
+      .all<{ name: string }>();
+    const columns = new Set(existing.results.map((row) => row.name));
+    for (const [column, definition] of [
+      ["filled_notional_usd", "TEXT NOT NULL DEFAULT '0'"],
+      ["filled_shares", "TEXT NOT NULL DEFAULT '0'"],
+      ["average_fill_price", "TEXT"],
+      ["last_synced_at", "TEXT"],
+      ["balance_snapshot_json", "TEXT"],
+    ] as const) {
+      if (!columns.has(column)) {
+        try {
+          await this.db
+            .prepare(
+              `ALTER TABLE agent_live_orders ADD COLUMN ${column} ${definition}`
+            )
+            .run();
+        } catch (error) {
+          if (!isDuplicateColumnError(error)) throw error;
+        }
       }
     }
   }
@@ -318,20 +906,25 @@ class D1AgentRepository extends MemoryAgentRepository {
     }
   ): Promise<AgentWatchlistItem> {
     await this.ensureSchema();
-    const id = input.id ?? crypto.randomUUID();
     const existing = input.id
       ? await this.db
-          .prepare("SELECT created_at FROM agent_watchlist WHERE id = ?")
+          .prepare("SELECT id, created_at FROM agent_watchlist WHERE id = ?")
           .bind(input.id)
-          .first<{ created_at: string }>()
-      : null;
+          .first<{ id: string; created_at: string }>()
+      : await this.db
+          .prepare(
+            "SELECT id, created_at FROM agent_watchlist WHERE token_id = ? ORDER BY created_at ASC LIMIT 1"
+          )
+          .bind(input.tokenId)
+          .first<{ id: string; created_at: string }>();
+    const id = input.id ?? existing?.id ?? crypto.randomUUID();
     const createdAt = existing?.created_at ?? now();
     const updatedAt = now();
     await this.db
       .prepare(
         `INSERT OR REPLACE INTO agent_watchlist
-        (id, question, token_id, condition_id, market_slug, side, outcome_label, event_start_time, event_end_time, resolution_source, news_urls_json, social_notes_json, active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, question, token_id, condition_id, market_slug, side, outcome_label, market_type, event_type, outcomes_json, opposite_outcome_label, opposite_token_id, event_market_count, event_start_time, event_end_time, resolution_source, news_urls_json, social_notes_json, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         id,
@@ -341,6 +934,12 @@ class D1AgentRepository extends MemoryAgentRepository {
         input.marketSlug ?? null,
         input.side ?? "YES",
         input.outcomeLabel ?? null,
+        input.marketType ?? null,
+        input.eventType ?? null,
+        JSON.stringify(input.outcomes ?? []),
+        input.oppositeOutcomeLabel ?? null,
+        input.oppositeTokenId ?? null,
+        input.eventMarketCount ?? null,
         input.eventStartTime ?? null,
         input.eventEndTime ?? null,
         input.resolutionSource ?? null,
@@ -443,9 +1042,15 @@ class D1AgentRepository extends MemoryAgentRepository {
     if (!run) return null;
     const items = await this.db
       .prepare(
-        `SELECT i.*, w.*
+        `SELECT i.*, w.*,
+          r.outcome_yes AS resolution_outcome_yes,
+          r.settlement_price AS resolution_settlement_price,
+          r.resolved_at AS resolution_resolved_at,
+          r.condition_id AS resolution_condition_id,
+          r.market_slug AS resolution_market_slug
         FROM agent_run_items i
         JOIN agent_watchlist w ON w.id = i.watchlist_item_id
+        LEFT JOIN agent_resolutions r ON r.token_id = w.token_id
         WHERE i.run_id = ?
         ORDER BY i.created_at ASC`
       )
@@ -466,6 +1071,7 @@ class D1AgentRepository extends MemoryAgentRepository {
         fill: row.fill_json
           ? (JSON.parse(String(row.fill_json)) as PaperFill)
           : null,
+        resolution: rowToResolutionOrNull(row),
       })),
     };
     return { ...detail, ...countRun(detail) };
@@ -498,6 +1104,577 @@ class D1AgentRepository extends MemoryAgentRepository {
       notionalUsd: sumNotionalUsd(fills),
     };
   }
+
+  async upsertResolution(resolution: AgentResolution): Promise<void> {
+    await this.ensureSchema();
+    await this.db
+      .prepare(
+        `INSERT OR REPLACE INTO agent_resolutions
+          (token_id, condition_id, market_slug, outcome_yes, settlement_price, resolved_at, raw_source)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        resolution.tokenId,
+        resolution.conditionId ?? null,
+        resolution.marketSlug ?? null,
+        resolution.outcomeYes,
+        resolution.settlementPrice,
+        resolution.resolvedAt,
+        null
+      )
+      .run();
+  }
+
+  async getResolutionByTokenId(
+    tokenId: string
+  ): Promise<AgentResolution | null> {
+    await this.ensureSchema();
+    const row = await this.db
+      .prepare("SELECT * FROM agent_resolutions WHERE token_id = ?")
+      .bind(tokenId)
+      .first<Record<string, unknown>>();
+    return row ? rowToResolution(row) : null;
+  }
+
+  async listResolutions(): Promise<AgentResolution[]> {
+    await this.ensureSchema();
+    const result = await this.db
+      .prepare(
+        "SELECT * FROM agent_resolutions ORDER BY resolved_at DESC LIMIT 500"
+      )
+      .all<Record<string, unknown>>();
+    return result.results.map(rowToResolution);
+  }
+
+  async openPosition(input: OpenPositionInput): Promise<AgentPosition> {
+    await this.ensureSchema();
+    const position: AgentPosition = {
+      id: crypto.randomUUID(),
+      watchlistItemId: input.watchlistItemId,
+      tokenId: input.tokenId,
+      side: "BUY",
+      status: "OPEN",
+      entryPrice: input.entryPrice,
+      shares: input.shares,
+      entryNotionalUsd: input.entryNotionalUsd,
+      exitPrice: null,
+      exitNotionalUsd: null,
+      realizedPnlUsd: null,
+      openedAt: now(),
+      closedAt: null,
+      closeReason: null,
+      openedRunId: input.openedRunId,
+      closedRunId: null,
+    };
+    await this.db
+      .prepare(
+        `INSERT INTO agent_positions
+          (id, watchlist_item_id, token_id, side, status, entry_price, shares,
+           entry_notional_usd, opened_at, opened_run_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        position.id,
+        position.watchlistItemId,
+        position.tokenId,
+        position.side,
+        position.status,
+        position.entryPrice,
+        position.shares,
+        position.entryNotionalUsd,
+        position.openedAt,
+        position.openedRunId
+      )
+      .run();
+    return position;
+  }
+
+  async closePosition(
+    id: string,
+    input: ClosePositionInput
+  ): Promise<AgentPosition | null> {
+    await this.ensureSchema();
+    const existingRow = await this.db
+      .prepare("SELECT * FROM agent_positions WHERE id = ?")
+      .bind(id)
+      .first<Record<string, unknown>>();
+    if (!existingRow) return null;
+    const existing = rowToPosition(existingRow);
+    if (existing.status === "CLOSED") return existing;
+    const exitNotional = new Decimal(existing.shares)
+      .mul(input.exitPrice)
+      .toDecimalPlaces(6)
+      .toString();
+    const closed: AgentPosition = {
+      ...existing,
+      status: "CLOSED",
+      exitPrice: input.exitPrice,
+      exitNotionalUsd: exitNotional,
+      closedAt: now(),
+      closeReason: input.closeReason,
+      closedRunId: input.closedRunId,
+    };
+    closed.realizedPnlUsd = computeRealizedPnl(closed);
+    await this.db
+      .prepare(
+        `UPDATE agent_positions SET
+          status = ?, exit_price = ?, exit_notional_usd = ?, realized_pnl_usd = ?,
+          closed_at = ?, close_reason = ?, closed_run_id = ?
+          WHERE id = ?`
+      )
+      .bind(
+        closed.status,
+        closed.exitPrice,
+        closed.exitNotionalUsd,
+        closed.realizedPnlUsd,
+        closed.closedAt,
+        closed.closeReason,
+        closed.closedRunId,
+        id
+      )
+      .run();
+    return closed;
+  }
+
+  async getOpenPositionByWatchlistItem(
+    watchlistItemId: string
+  ): Promise<AgentPosition | null> {
+    await this.ensureSchema();
+    const row = await this.db
+      .prepare(
+        "SELECT * FROM agent_positions WHERE watchlist_item_id = ? AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1"
+      )
+      .bind(watchlistItemId)
+      .first<Record<string, unknown>>();
+    return row ? rowToPosition(row) : null;
+  }
+
+  async listOpenPositionsByToken(tokenId: string): Promise<AgentPosition[]> {
+    await this.ensureSchema();
+    const result = await this.db
+      .prepare(
+        "SELECT * FROM agent_positions WHERE token_id = ? AND status = 'OPEN' ORDER BY opened_at ASC"
+      )
+      .bind(tokenId)
+      .all<Record<string, unknown>>();
+    return result.results.map(rowToPosition);
+  }
+
+  async listPositions(): Promise<AgentPosition[]> {
+    await this.ensureSchema();
+    const result = await this.db
+      .prepare(
+        "SELECT * FROM agent_positions ORDER BY opened_at DESC LIMIT 500"
+      )
+      .all<Record<string, unknown>>();
+    return result.results.map(rowToPosition);
+  }
+
+  async getPortfolioPnl(): Promise<PortfolioPnl> {
+    await this.ensureSchema();
+    const result = await this.db
+      .prepare("SELECT * FROM agent_positions")
+      .all<Record<string, unknown>>();
+    return aggregatePortfolio(result.results.map(rowToPosition));
+  }
+
+  async upsertLiveOrder(input: LiveOrderUpsert): Promise<LiveOrderRecord> {
+    await this.ensureSchema();
+    const existing = await this.db
+      .prepare("SELECT * FROM agent_live_orders WHERE idempotency_key = ?")
+      .bind(input.idempotencyKey)
+      .first<Record<string, unknown>>();
+    const existingOrder = existing ? rowToLiveOrder(existing) : null;
+    const record: LiveOrderRecord = {
+      ...input,
+      createdAt: input.createdAt ?? existingOrder?.createdAt ?? now(),
+      filledNotionalUsd:
+        input.filledNotionalUsd ?? existingOrder?.filledNotionalUsd ?? "0",
+      filledShares: input.filledShares ?? existingOrder?.filledShares ?? "0",
+      averageFillPrice:
+        input.averageFillPrice !== undefined
+          ? input.averageFillPrice
+          : (existingOrder?.averageFillPrice ?? null),
+      lastSyncedAt:
+        input.lastSyncedAt !== undefined
+          ? input.lastSyncedAt
+          : (existingOrder?.lastSyncedAt ?? null),
+      balanceSnapshotJson:
+        input.balanceSnapshotJson !== undefined
+          ? input.balanceSnapshotJson
+          : (existingOrder?.balanceSnapshotJson ?? null),
+    };
+    await this.db
+      .prepare(
+        `INSERT OR REPLACE INTO agent_live_orders
+          (idempotency_key, run_id, watchlist_item_id, token_id, side,
+           requested_size_usd, price, signed_order_hash, order_id, status,
+           submitted_at, filled_at, created_at, filled_notional_usd,
+           filled_shares, average_fill_price, last_synced_at,
+           balance_snapshot_json, dry_run, error)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        record.idempotencyKey,
+        record.runId,
+        record.watchlistItemId,
+        record.tokenId,
+        record.side,
+        record.requestedSizeUsd,
+        record.price,
+        record.signedOrderHash,
+        record.orderId,
+        record.status,
+        record.submittedAt,
+        record.filledAt,
+        record.createdAt,
+        record.filledNotionalUsd,
+        record.filledShares,
+        record.averageFillPrice,
+        record.lastSyncedAt,
+        record.balanceSnapshotJson,
+        record.dryRun ? 1 : 0,
+        record.error
+      )
+      .run();
+    return record;
+  }
+
+  async getLiveOrderByIdempotencyKey(
+    key: string
+  ): Promise<LiveOrderRecord | null> {
+    await this.ensureSchema();
+    const row = await this.db
+      .prepare("SELECT * FROM agent_live_orders WHERE idempotency_key = ?")
+      .bind(key)
+      .first<Record<string, unknown>>();
+    return row ? rowToLiveOrder(row) : null;
+  }
+
+  async listLiveOrders(): Promise<LiveOrderRecord[]> {
+    await this.ensureSchema();
+    const result = await this.db
+      .prepare(
+        "SELECT * FROM agent_live_orders ORDER BY created_at DESC LIMIT 200"
+      )
+      .all<Record<string, unknown>>();
+    return result.results.map(rowToLiveOrder);
+  }
+
+  async updateLiveOrderStatus(
+    idempotencyKey: string,
+    update: Partial<
+      Pick<
+        LiveOrderRecord,
+        "status" | "orderId" | "submittedAt" | "filledAt" | "error"
+      >
+    >
+  ): Promise<LiveOrderRecord | null> {
+    await this.ensureSchema();
+    const existing = await this.getLiveOrderByIdempotencyKey(idempotencyKey);
+    if (!existing) return null;
+    const next: LiveOrderRecord = {
+      ...existing,
+      status: update.status ?? existing.status,
+      orderId: update.orderId !== undefined ? update.orderId : existing.orderId,
+      submittedAt:
+        update.submittedAt !== undefined
+          ? update.submittedAt
+          : existing.submittedAt,
+      filledAt:
+        update.filledAt !== undefined ? update.filledAt : existing.filledAt,
+      error: update.error !== undefined ? update.error : existing.error,
+    };
+    await this.db
+      .prepare(
+        `UPDATE agent_live_orders SET
+          status = ?, order_id = ?, submitted_at = ?, filled_at = ?, error = ?
+          WHERE idempotency_key = ?`
+      )
+      .bind(
+        next.status,
+        next.orderId,
+        next.submittedAt,
+        next.filledAt,
+        next.error,
+        idempotencyKey
+      )
+      .run();
+    return next;
+  }
+
+  async getClobCredential(
+    key: string
+  ): Promise<AgentClobCredentialRecord | null> {
+    await this.ensureSchema();
+    const row = await this.db
+      .prepare("SELECT * FROM agent_clob_credentials WHERE credential_key = ?")
+      .bind(key)
+      .first<Record<string, unknown>>();
+    if (!row) return null;
+    const lastUsedAt = now();
+    await this.db
+      .prepare(
+        "UPDATE agent_clob_credentials SET last_used_at = ? WHERE credential_key = ?"
+      )
+      .bind(lastUsedAt, key)
+      .run();
+    return rowToClobCredential({ ...row, last_used_at: lastUsedAt });
+  }
+
+  async upsertClobCredential(
+    input: AgentClobCredentialUpsert
+  ): Promise<AgentClobCredentialRecord> {
+    await this.ensureSchema();
+    const existing = await this.db
+      .prepare(
+        "SELECT created_at, last_used_at FROM agent_clob_credentials WHERE credential_key = ?"
+      )
+      .bind(input.credentialKey)
+      .first<{ created_at: string; last_used_at: string | null }>();
+    const record: AgentClobCredentialRecord = {
+      ...input,
+      createdAt: input.createdAt ?? existing?.created_at ?? now(),
+      updatedAt: input.updatedAt ?? now(),
+      lastUsedAt: input.lastUsedAt ?? existing?.last_used_at ?? null,
+    };
+    await this.db
+      .prepare(
+        `INSERT OR REPLACE INTO agent_clob_credentials
+          (credential_key, clob_host, signer_address, funder_address,
+           encrypted_credentials, encryption_key_version, created_at,
+           updated_at, last_used_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        record.credentialKey,
+        record.clobHost,
+        record.signerAddress,
+        record.funderAddress,
+        record.encryptedCredentials,
+        record.encryptionKeyVersion,
+        record.createdAt,
+        record.updatedAt,
+        record.lastUsedAt
+      )
+      .run();
+    return record;
+  }
+
+  async tryAcquireSchedulerLock(
+    input: AcquireSchedulerLockInput
+  ): Promise<AgentSchedulerLock | null> {
+    await this.ensureSchema();
+    const expiresAt = addMs(input.now, input.leaseMs);
+    const result = await this.db
+      .prepare(
+        `INSERT INTO agent_scheduler_locks
+          (lock_key, owner_id, locked_at, expires_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(lock_key) DO UPDATE SET
+            owner_id = excluded.owner_id,
+            locked_at = excluded.locked_at,
+            expires_at = excluded.expires_at,
+            updated_at = excluded.updated_at
+          WHERE agent_scheduler_locks.expires_at <= ?`
+      )
+      .bind(
+        input.lockKey,
+        input.ownerId,
+        input.now,
+        expiresAt,
+        input.now,
+        input.now
+      )
+      .run();
+    const changes = d1ChangeCount(result);
+    if (changes === 0) return null;
+    const row = await this.db
+      .prepare("SELECT * FROM agent_scheduler_locks WHERE lock_key = ?")
+      .bind(input.lockKey)
+      .first<Record<string, unknown>>();
+    if (!row || String(row.owner_id) !== input.ownerId) return null;
+    return rowToSchedulerLock(row);
+  }
+
+  async releaseSchedulerLock(lockKey: string, ownerId: string): Promise<void> {
+    await this.ensureSchema();
+    await this.db
+      .prepare(
+        "DELETE FROM agent_scheduler_locks WHERE lock_key = ? AND owner_id = ?"
+      )
+      .bind(lockKey, ownerId)
+      .run();
+  }
+
+  async getCalibration(): Promise<CalibrationSummary> {
+    await this.ensureSchema();
+    const rows = await this.db
+      .prepare(
+        `SELECT i.votes_json, r.outcome_yes
+          FROM agent_run_items i
+          JOIN agent_watchlist w ON w.id = i.watchlist_item_id
+          JOIN agent_resolutions r ON r.token_id = w.token_id`
+      )
+      .all<{ votes_json: string; outcome_yes: number }>();
+    const samples: Array<{
+      provider: string;
+      fairProbability: number;
+      outcomeYes: 0 | 1;
+    }> = [];
+    for (const row of rows.results) {
+      const outcomeYes: 0 | 1 = Number(row.outcome_yes) === 1 ? 1 : 0;
+      let votes: ModelVote[];
+      try {
+        votes = JSON.parse(String(row.votes_json)) as ModelVote[];
+      } catch {
+        continue;
+      }
+      for (const vote of votes) {
+        samples.push({
+          provider: vote.provider,
+          fairProbability: vote.fairProbability,
+          outcomeYes,
+        });
+      }
+    }
+    return aggregateCalibration(samples);
+  }
+}
+
+function rowToLiveOrder(row: Record<string, unknown>): LiveOrderRecord {
+  const rawSide = String(row.side);
+  const side: AgentAction =
+    rawSide === "BUY" || rawSide === "SELL" || rawSide === "HOLD"
+      ? rawSide
+      : "HOLD";
+  const rawStatus = String(row.status);
+  const status: LiveOrderStatus =
+    rawStatus === "DRY_RUN" ||
+    rawStatus === "POSTED" ||
+    rawStatus === "OPEN" ||
+    rawStatus === "PARTIALLY_FILLED" ||
+    rawStatus === "FILLED" ||
+    rawStatus === "CANCELED" ||
+    rawStatus === "FAILED"
+      ? rawStatus
+      : "FAILED";
+  return {
+    idempotencyKey: String(row.idempotency_key),
+    runId: String(row.run_id),
+    watchlistItemId: String(row.watchlist_item_id),
+    tokenId: String(row.token_id),
+    side,
+    requestedSizeUsd: String(row.requested_size_usd),
+    price: String(row.price),
+    signedOrderHash: row.signed_order_hash
+      ? String(row.signed_order_hash)
+      : null,
+    orderId: row.order_id ? String(row.order_id) : null,
+    status,
+    submittedAt: row.submitted_at ? String(row.submitted_at) : null,
+    filledAt: row.filled_at ? String(row.filled_at) : null,
+    createdAt: String(row.created_at),
+    filledNotionalUsd: String(row.filled_notional_usd ?? "0"),
+    filledShares: String(row.filled_shares ?? "0"),
+    averageFillPrice: row.average_fill_price
+      ? String(row.average_fill_price)
+      : null,
+    lastSyncedAt: row.last_synced_at ? String(row.last_synced_at) : null,
+    balanceSnapshotJson: row.balance_snapshot_json
+      ? String(row.balance_snapshot_json)
+      : null,
+    dryRun: Number(row.dry_run) === 1,
+    error: row.error ? String(row.error) : null,
+  };
+}
+
+function rowToClobCredential(
+  row: Record<string, unknown>
+): AgentClobCredentialRecord {
+  return {
+    credentialKey: String(row.credential_key),
+    clobHost: String(row.clob_host),
+    signerAddress: String(row.signer_address),
+    funderAddress: String(row.funder_address),
+    encryptedCredentials: String(row.encrypted_credentials),
+    encryptionKeyVersion: String(row.encryption_key_version),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    lastUsedAt: row.last_used_at ? String(row.last_used_at) : null,
+  };
+}
+
+function rowToSchedulerLock(row: Record<string, unknown>): AgentSchedulerLock {
+  return {
+    lockKey: String(row.lock_key),
+    ownerId: String(row.owner_id),
+    lockedAt: String(row.locked_at),
+    expiresAt: String(row.expires_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function rowToPosition(row: Record<string, unknown>): AgentPosition {
+  const status = String(row.status) === "CLOSED" ? "CLOSED" : "OPEN";
+  const closeReasonRaw = row.close_reason ? String(row.close_reason) : null;
+  const closeReason: PositionCloseReason | null =
+    closeReasonRaw === "contradict-vote" ||
+    closeReasonRaw === "time-exit" ||
+    closeReasonRaw === "resolution" ||
+    closeReasonRaw === "manual"
+      ? closeReasonRaw
+      : null;
+  return {
+    id: String(row.id),
+    watchlistItemId: String(row.watchlist_item_id),
+    tokenId: String(row.token_id),
+    side: "BUY",
+    status,
+    entryPrice: String(row.entry_price),
+    shares: String(row.shares),
+    entryNotionalUsd: String(row.entry_notional_usd),
+    exitPrice: row.exit_price ? String(row.exit_price) : null,
+    exitNotionalUsd: row.exit_notional_usd
+      ? String(row.exit_notional_usd)
+      : null,
+    realizedPnlUsd: row.realized_pnl_usd ? String(row.realized_pnl_usd) : null,
+    openedAt: String(row.opened_at),
+    closedAt: row.closed_at ? String(row.closed_at) : null,
+    closeReason,
+    openedRunId: row.opened_run_id ? String(row.opened_run_id) : null,
+    closedRunId: row.closed_run_id ? String(row.closed_run_id) : null,
+  };
+}
+
+function rowToResolution(row: Record<string, unknown>): AgentResolution {
+  return {
+    tokenId: String(row.token_id),
+    conditionId: row.condition_id ? String(row.condition_id) : undefined,
+    marketSlug: row.market_slug ? String(row.market_slug) : undefined,
+    outcomeYes: Number(row.outcome_yes) === 1 ? 1 : 0,
+    settlementPrice: String(row.settlement_price ?? ""),
+    resolvedAt: String(row.resolved_at),
+  };
+}
+
+function rowToResolutionOrNull(
+  row: Record<string, unknown>
+): AgentResolution | null {
+  const resolvedAt = row.resolution_resolved_at;
+  if (!resolvedAt) return null;
+  return {
+    tokenId: String(row.token_id),
+    conditionId: row.resolution_condition_id
+      ? String(row.resolution_condition_id)
+      : undefined,
+    marketSlug: row.resolution_market_slug
+      ? String(row.resolution_market_slug)
+      : undefined,
+    outcomeYes: Number(row.resolution_outcome_yes) === 1 ? 1 : 0,
+    settlementPrice: String(row.resolution_settlement_price ?? ""),
+    resolvedAt: String(resolvedAt),
+  };
 }
 
 function parseJsonArray(value: unknown): string[] {
@@ -519,6 +1696,29 @@ function rowToWatchlistItem(row: Record<string, unknown>): AgentWatchlistItem {
     marketSlug: row.market_slug ? String(row.market_slug) : undefined,
     side: row.side === "NO" ? "NO" : "YES",
     outcomeLabel: row.outcome_label ? String(row.outcome_label) : undefined,
+    marketType:
+      row.market_type === "binary" || row.market_type === "multi_outcome"
+        ? row.market_type
+        : row.market_type === "unknown"
+          ? "unknown"
+          : undefined,
+    eventType:
+      row.event_type === "single_market" || row.event_type === "multi_market"
+        ? row.event_type
+        : row.event_type === "unknown"
+          ? "unknown"
+          : undefined,
+    outcomes: parseJsonArray(row.outcomes_json),
+    oppositeOutcomeLabel: row.opposite_outcome_label
+      ? String(row.opposite_outcome_label)
+      : undefined,
+    oppositeTokenId: row.opposite_token_id
+      ? String(row.opposite_token_id)
+      : undefined,
+    eventMarketCount:
+      row.event_market_count === null || row.event_market_count === undefined
+        ? undefined
+        : Number(row.event_market_count),
     eventStartTime: row.event_start_time
       ? String(row.event_start_time)
       : undefined,

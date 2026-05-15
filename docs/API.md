@@ -28,6 +28,376 @@ This document is generated from the route handlers under `apps/web/src/app/api`.
   - `X-RateLimit-Reset`
   - `Retry-After`
 
+## Agent
+
+These routes power the internal paper-trading dashboard at `/agent`.
+
+Shared auth
+
+- Read routes require either `Authorization: Bearer <AGENT_ADMIN_TOKEN>` or `X-Knoww-Agent-Token: <AGENT_ADMIN_TOKEN>`.
+- Mutating routes use the same admin token and also enforce the web app's same-origin checks.
+- In production, missing `AGENT_ADMIN_TOKEN` returns `503 { success: false, error: "Agent admin access is not configured" }`.
+
+### GET `/api/agent/status`
+
+Description: Returns agent readiness without exposing secrets.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `status.llm: { provider: string, models: string[], ready: boolean, missing: string[] }`
+  - `status.search: { enabled: boolean, mode: "native" | "direct" | "both", providers: { provider: "tavily" | "exa" | "firecrawl", ready: boolean, missing: string[] }[] }`
+  - `status.admin: { configured: boolean }`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `503`: admin token not configured outside development
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### GET `/api/agent/watchlist`
+
+Description: Lists stored paper-trading watchlist items.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `items: AgentWatchlistItem[]`
+- `AgentWatchlistItem` fields:
+  - `id: string (uuid)`
+  - `question: string`
+  - `tokenId: string`
+  - Optional: `conditionId`, `marketSlug`, `side`, `outcomeLabel`, `marketType`, `eventType`, `outcomes`, `oppositeOutcomeLabel`, `oppositeTokenId`, `eventMarketCount`, `eventStartTime`, `eventEndTime`, `resolutionSource`
+  - `newsUrls: string[]`
+  - `socialNotes: string[]`
+  - `active: boolean`
+  - `createdAt: string`
+  - `updatedAt: string`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to list watchlist" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### POST `/api/agent/watchlist`
+
+Description: Creates or updates a watchlist item. The request may either provide a direct Polymarket URL to import or provide explicit market fields.
+
+Headers
+
+- `Content-Type: application/json`
+- Auth: agent admin token
+
+Request body
+
+| Field | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `id` | `string` | No | Optional UUID for updates. |
+| `polymarketUrl` | `string` | Conditionally | URL, max 500 chars. If present, it can supply/import market metadata. |
+| `question` | `string` | Conditionally | Required unless `polymarketUrl` is provided. Trimmed, `8..240` chars. |
+| `tokenId` | `string` | Conditionally | Required unless `polymarketUrl` is provided. Trimmed, `8..160` chars. |
+| `conditionId` | `string` | No | Trimmed, `8..160` chars. |
+| `marketSlug` | `string` | No | Trimmed, `1..180` chars. |
+| `side` | `"YES" \| "NO"` | No | Optional token side. |
+| `outcomeLabel` | `string` | No | Trimmed, `1..80` chars. |
+| `marketType` | `"binary" \| "multi_outcome" \| "unknown"` | No | Optional. |
+| `eventType` | `"single_market" \| "multi_market" \| "unknown"` | No | Optional. |
+| `outcomes` | `string[]` | No | Up to 50 entries, each `1..120` chars. |
+| `oppositeOutcomeLabel` | `string` | No | Trimmed, `1..80` chars. |
+| `oppositeTokenId` | `string` | No | Trimmed, `8..160` chars. |
+| `eventMarketCount` | `number` | No | Integer `0..500`. |
+| `eventStartTime` | `string` | No | ISO datetime. |
+| `eventEndTime` | `string` | No | ISO datetime. |
+| `resolutionSource` | `string` | No | URL, max 500 chars. |
+| `newsUrls` | `string[]` | No | URLs, up to 5 items. Defaults to `[]`. |
+| `socialNotes` | `string[]` | No | Up to 10 trimmed strings, each `1..1000` chars. Defaults to `[]`. |
+| `active` | `boolean` | No | Defaults to `true`. |
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `item: AgentWatchlistItem`
+
+Errors
+
+- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid watchlist input", details: zodFlattenedError }`
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `403`: same-origin validation failure for mutating admin routes
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to save watchlist item" }`
+
+Rate limiting
+
+- `20` requests/minute/IP
+
+### GET `/api/agent/runs`
+
+Description: Lists recent paper-trading run summaries.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `runs: { id: string, status: "RUNNING" | "COMPLETED" | "FAILED", startedAt: string, completedAt: string | null, itemCount: number, tradeCount: number, blockedCount: number }[]`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to list agent runs" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### POST `/api/agent/runs`
+
+Description: Runs the paper-trading agent on all active watchlist items or on a selected subset.
+
+Headers
+
+- `Content-Type: application/json`
+- Auth: agent admin token
+
+Request body
+
+| Field | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `watchlistItemIds` | `string[]` | No | UUIDs, max 25. |
+| `portfolio.bankrollUsd` | `string` | No | Non-negative decimal string. |
+| `portfolio.cashUsd` | `string` | No | Non-negative decimal string. |
+| `portfolio.maxPositionUsd` | `string` | No | Non-negative decimal string. |
+| `portfolio.maxTradeUsd` | `string` | No | Non-negative decimal string. |
+| `portfolio.maxDrawdownPct` | `string` | No | Non-negative decimal string. |
+| `portfolio.realizedPnlUsd` | `string` | No | Signed decimal string. |
+| `executionMode` | `"paper" \| "live"` | No | Optional override. |
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `run: { id: string, status: "RUNNING" | "COMPLETED" | "FAILED", startedAt: string, completedAt: string | null, itemCount: number, tradeCount: number, blockedCount: number }`
+
+Errors
+
+- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid run input", details: zodFlattenedError }`
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `403`: same-origin validation failure for mutating admin routes
+- `500`: `{ success: false, error: "Failed to run paper-trading agent" }`
+
+### GET `/api/agent/runs/:id`
+
+Description: Returns the full detail for one paper-trading run.
+
+Headers
+
+- Auth: agent admin token
+
+Path parameters
+
+| Name | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | UUID. |
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `run: RunDetail`
+  - `RunDetail` extends the run summary fields and adds `items`, where each item contains:
+    - `watchlistItem: AgentWatchlistItem`
+    - `evidence: object`
+    - `votes: object[]`
+    - `decision: { action, approved, majorityAction, confidence, fairProbability, sizeUsd, reason, riskFlags, validVotes, invalidVotes }`
+    - `fill: object | null`
+    - `resolution: { tokenId, conditionId?, marketSlug?, outcomeYes: 0 | 1, settlementPrice: string, resolvedAt: string } | null`
+
+Errors
+
+- `400`: `{ success: false, error: "Invalid run id" }`
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `404`: `{ success: false, error: "Run not found" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to load agent run" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### GET `/api/agent/metrics`
+
+Description: Returns aggregate paper-trading metrics.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `metrics: { runCount: number, tradeCount: number, holdCount: number, blockedCount: number, notionalUsd: string }`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to load agent metrics" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### GET `/api/agent/calibration`
+
+Description: Returns per-model calibration stats over resolved runs.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `calibration: { models: { provider: string, brierMean: number, count: number }[], resolvedVoteCount: number }`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to load calibration" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### GET `/api/agent/positions`
+
+Description: Lists paper-trading positions and aggregate realized/open P&L.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `positions: { id, watchlistItemId, tokenId, side: "BUY", status: "OPEN" | "CLOSED", entryPrice, shares, entryNotionalUsd, exitPrice, exitNotionalUsd, realizedPnlUsd, openedAt, closedAt, closeReason, openedRunId, closedRunId }[]`
+  - `pnl: { openPositionCount: number, closedPositionCount: number, realizedPnlUsd: string, openEntryNotionalUsd: string }`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to load positions" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### GET `/api/agent/live-orders`
+
+Description: Lists recent live-order audit records plus non-secret live-execution config.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `orders: { idempotencyKey, runId, watchlistItemId, tokenId, side, requestedSizeUsd, price, signedOrderHash, orderId, status: "DRY_RUN" | "POSTED" | "FILLED" | "CANCELED" | "FAILED", submittedAt, filledAt, createdAt, dryRun, error }[]`
+  - `config: { enabled: boolean, dryRun: boolean, confirmedReal: boolean, hasWalletKey: boolean, maxLiveNotionalUsd: string, clobHost: string, chainId: number }`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to load live orders" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### GET `/api/agent/resolutions`
+
+Description: Lists stored market-resolution rows used for settlement and calibration.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `resolutions: { tokenId: string, conditionId?: string, marketSlug?: string, outcomeYes: 0 | 1, settlementPrice: string, resolvedAt: string }[]`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to list resolutions" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
+### POST `/api/agent/resolutions`
+
+Description: Refreshes resolutions for active watchlist items whose end time has passed, then settles any matching open positions.
+
+Headers
+
+- Auth: agent admin token
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `checked: number`
+  - `resolved: number`
+  - `settledPositions: number`
+  - `stillUnresolved: string[]`
+
+Errors
+
+- `401`: `{ success: false, error: "Unauthorized" }`
+- `403`: same-origin validation failure for mutating admin routes
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to refresh resolutions" }`
+
+Rate limiting
+
+- `12` requests/minute/IP
+
 ## AI
 
 ### OPTIONS `/api/ai/extract-topics`
@@ -391,15 +761,15 @@ Success `200`
 
 - Schema:
   - `success: true`
-  - `credentials: { apiKey?: string, secret?: string, passphrase?: string, error?: string }`
+  - `credentials: { apiKey: string, apiSecret: string, apiPassphrase: string }`
   - `method: "create" | "derive"`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid request body", details: string }` or `{ success: false, error: string, details: { createError?: string, deriveError?: string } }`
+- `400`: `{ success: false, error: "Invalid request body", details: string }` or `{ success: false, error: string }`
 - `401`: Not returned by this handler.
 - `404`: Not returned by this handler.
-- `500`: `{ success: false, error: string }`
+- `500`: `{ success: false, error: "Failed to create or retrieve API credentials." }`
 
 Rate limiting
 
@@ -424,8 +794,8 @@ Content-Type: application/json
   "success": true,
   "credentials": {
     "apiKey": "pmk_live_xxx",
-    "secret": "secret_xxx",
-    "passphrase": "passphrase_xxx"
+    "apiSecret": "secret_xxx",
+    "apiPassphrase": "passphrase_xxx"
   },
   "method": "derive"
 }
@@ -1148,6 +1518,39 @@ GET /api/events/new?limit=2 HTTP/1.1
 }
 ```
 
+### GET `/api/events/league-counts`
+
+Description: Returns counts for allowlisted sports tag slugs plus a separate live-sports count. League-specific slugs use their configured `series_id`, and stale completed schedules are filtered out for league and single-sport counts.
+
+Headers
+
+- Auth: none
+
+Query parameters
+
+| Name | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `slug` | `string[]` | Yes | Repeated query param. Must be one or more supported sports tag slugs and no more than the allowlist size. |
+
+Success `200`
+
+- Schema:
+  - `sports: number`
+  - `live: number`
+  - `byTagSlug: Record<string, number>`
+
+Errors
+
+- `400`: `{ success: false, error: "At least one slug is required" }`, `{ success: false, error: "Maximum N slugs per request" }`, or `{ success: false, error: "One or more slugs are not supported" }`
+- `401`: Not used.
+- `404`: Not used.
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to load league counts" }`
+
+Rate limiting
+
+- `60` requests/minute/IP
+
 ## Leaderboard And Profiles
 
 ### GET `/api/leaderboard`
@@ -1284,6 +1687,37 @@ GET /api/profile/0x1111111111111111111111111111111111111111 HTTP/1.1
   }
 }
 ```
+
+### GET `/api/trader/x-profile`
+
+Description: Resolves an X handle to a public Polymarket trader profile using a short-lived cached leaderboard index.
+
+Headers
+
+- Auth: none
+
+Query parameters
+
+| Name | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `handle` | `string` | Yes | `@` prefix is allowed; normalized value must match `^[A-Za-z0-9_]{1,15}$`. |
+
+Success `200`
+
+- Schema:
+  - `success: true`
+  - `profile: { proxyWallet, userName, profileImage, bio, xUsername, verifiedBadge, volumeTraded, profitLoss }`
+
+Errors
+
+- `400`: `{ success: false, error: "Invalid X handle" }`
+- `404`: `{ success: false, error: "Trader profile not found" }`
+- `429`: shared rate-limit response
+- `500`: `{ success: false, error: "Failed to resolve trader profile" }`
+
+Rate limiting
+
+- `120` requests/minute/IP
 
 ## Markets
 

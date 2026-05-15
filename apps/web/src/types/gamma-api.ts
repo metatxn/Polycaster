@@ -82,6 +82,10 @@ export interface GammaMarket {
   resolutionSource?: string;
   /** On-chain resolver address; rendered as a Polygonscan link. */
   resolvedBy?: string;
+  /** UMA status for markets whose result is under dispute/resolution. */
+  umaResolutionStatus?: string;
+  /** Gamma returns this as a stringified array in list/keyset payloads. */
+  umaResolutionStatuses?: string;
 }
 
 /**

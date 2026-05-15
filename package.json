@@ -1,6 +1,7 @@
 {
   "name": "knoww-monorepo",
   "private": true,
+  "packageManager": "pnpm@10.25.0",
   "scripts": {
     "dev:web": "pnpm --filter @knoww/web dev",
     "dev:ext": "pnpm --filter @knoww/extension dev",

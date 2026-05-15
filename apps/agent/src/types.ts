@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const AgentActionSchema = z.enum(["BUY", "SELL", "HOLD"]);
 export type AgentAction = z.infer<typeof AgentActionSchema>;
+export type AgentMarketType = "binary" | "multi_outcome" | "unknown";
+export type AgentEventType = "single_market" | "multi_market" | "unknown";
 
 export const DecimalStringSchema = z
   .string()
@@ -28,9 +30,17 @@ export const ModelVoteDebugSchema = z.object({
 
 export const ModelVoteSchema = z.object({
   provider: z.string().min(1).max(80),
+  // Structured analysis (the load-bearing fields).
+  resolutionView: z.string().min(1).max(600),
+  marketImpliedProbability: z.number().min(0).max(1),
+  fairProbability: z.number().min(0).max(1),
+  edgePct: z.number().min(-100).max(100),
+  evidenceFor: z.array(z.string().min(1).max(400)).max(6),
+  evidenceAgainst: z.array(z.string().min(1).max(400)).max(6),
+  missingEvidence: z.array(z.string().min(1).max(400)).max(6),
+  // Decision.
   action: AgentActionSchema,
   confidence: z.number().min(0).max(1),
-  fairProbability: z.number().min(0).max(1),
   sizeUsd: DecimalStringSchema,
   reasoning: z.string().min(20).max(1200),
   citations: z.array(z.string().min(1).max(240)).min(1).max(8),
@@ -87,6 +97,10 @@ export interface PaperOrderRequest extends RiskInput {
   runId: string;
   watchlistItemId: string;
   tokenId: string;
+  conditionId?: string;
+  negRisk?: boolean;
+  requestedShares?: string;
+  reduceOnly?: boolean;
 }
 
 export interface LiveOrderRequest extends PaperOrderRequest {
@@ -113,6 +127,120 @@ export interface PaperFill {
   createdAt: string;
 }
 
+export type PositionStatus = "OPEN" | "CLOSED";
+
+/**
+ * Why an open position was closed. Drives both audit trail and the dashboard
+ * label. The set is intentionally small; if we add e.g. partial-close later
+ * we'll widen this union explicitly.
+ */
+export type PositionCloseReason =
+  | "contradict-vote"
+  | "time-exit"
+  | "resolution"
+  | "manual";
+
+export type LiveOrderStatus =
+  | "DRY_RUN"
+  | "POSTED"
+  | "OPEN"
+  | "PARTIALLY_FILLED"
+  | "FILLED"
+  | "CANCELED"
+  | "FAILED";
+
+export interface LiveOrderRecord {
+  idempotencyKey: string;
+  runId: string;
+  watchlistItemId: string;
+  tokenId: string;
+  side: AgentAction;
+  requestedSizeUsd: string;
+  price: string;
+  /**
+   * SHA-256 hex digest of the EIP-712 signed-order JSON. The full payload is
+   * intentionally never persisted (it's a bearer credential — anyone with the
+   * JSON could submit it and bypass the dry-run gate). The hash lets us verify
+   * after the fact that a given order was signed.
+   */
+  signedOrderHash: string | null;
+  /** CLOB-assigned order id after a successful POST. Null in dry-run. */
+  orderId: string | null;
+  status: LiveOrderStatus;
+  submittedAt: string | null;
+  filledAt: string | null;
+  createdAt: string;
+  filledNotionalUsd: string;
+  filledShares: string;
+  averageFillPrice: string | null;
+  lastSyncedAt: string | null;
+  balanceSnapshotJson: string | null;
+  /** True when the order was signed but not submitted to the CLOB. */
+  dryRun: boolean;
+  error: string | null;
+}
+
+export type LiveOrderUpsert = Omit<
+  LiveOrderRecord,
+  | "createdAt"
+  | "filledNotionalUsd"
+  | "filledShares"
+  | "averageFillPrice"
+  | "lastSyncedAt"
+  | "balanceSnapshotJson"
+> &
+  Partial<
+    Pick<
+      LiveOrderRecord,
+      | "createdAt"
+      | "filledNotionalUsd"
+      | "filledShares"
+      | "averageFillPrice"
+      | "lastSyncedAt"
+      | "balanceSnapshotJson"
+    >
+  >;
+
+export interface AgentClobCredentialRecord {
+  credentialKey: string;
+  clobHost: string;
+  signerAddress: string;
+  funderAddress: string;
+  encryptedCredentials: string;
+  encryptionKeyVersion: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+}
+
+export type AgentClobCredentialUpsert = Omit<
+  AgentClobCredentialRecord,
+  "createdAt" | "updatedAt" | "lastUsedAt"
+> &
+  Partial<
+    Pick<AgentClobCredentialRecord, "createdAt" | "updatedAt" | "lastUsedAt">
+  >;
+
+export interface AgentPosition {
+  id: string;
+  watchlistItemId: string;
+  tokenId: string;
+  /** Always 'BUY' in v1 — we go long the watchlist item's tokenId. */
+  side: "BUY";
+  status: PositionStatus;
+  entryPrice: string;
+  shares: string;
+  entryNotionalUsd: string;
+  exitPrice: string | null;
+  exitNotionalUsd: string | null;
+  realizedPnlUsd: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  closeReason: PositionCloseReason | null;
+  openedRunId: string | null;
+  closedRunId: string | null;
+}
+
 export interface ExecutionAdapter {
   mode: "paper" | "live";
   execute(request: PaperOrderRequest): Promise<PaperFill>;
@@ -127,6 +255,12 @@ export interface AgentWatchlistItem {
   marketSlug?: string;
   side?: "YES" | "NO";
   outcomeLabel?: string;
+  marketType?: AgentMarketType;
+  eventType?: AgentEventType;
+  outcomes?: string[];
+  oppositeOutcomeLabel?: string;
+  oppositeTokenId?: string;
+  eventMarketCount?: number;
   eventStartTime?: string;
   eventEndTime?: string;
   resolutionSource?: string;
@@ -146,6 +280,12 @@ export interface AgentEvidencePack {
     conditionId?: string;
     marketSlug?: string;
     outcomeLabel?: string;
+    marketType?: AgentMarketType;
+    eventType?: AgentEventType;
+    outcomes?: string[];
+    oppositeOutcomeLabel?: string;
+    oppositeTokenId?: string;
+    eventMarketCount?: number;
     eventStartTime?: string;
     eventEndTime?: string;
     resolutionSource?: string;
@@ -153,8 +293,28 @@ export interface AgentEvidencePack {
     bestBid: string | null;
     bestAsk: string | null;
     midPrice: string | null;
+    spread: string | null;
+    spreadPct: string | null;
     liquidityUsd: string;
     stale: boolean;
+    orderBook: {
+      bidDepthUsdTop5: string;
+      askDepthUsdTop5: string;
+      bidAskImbalanceTop5: string;
+      bookPressure: "bid-heavy" | "ask-heavy" | "balanced" | "thin";
+      thin: boolean;
+    };
+    priceMovement: {
+      currentPrice: string;
+      lastTradePrice: string | null;
+      lastTradeAt: string | null;
+      recentHigh: string | null;
+      recentLow: string | null;
+      priceChange5m: string | null;
+      priceChange1h: string | null;
+      priceChange24h: string | null;
+      trend: "up" | "down" | "flat" | "volatile" | "unknown";
+    };
     raw?: unknown;
   };
   news: Array<{
@@ -163,8 +323,47 @@ export interface AgentEvidencePack {
     excerpt: string;
     fetchedAt: string;
   }>;
+  relatedMarkets: Array<{
+    question: string;
+    tokenId: string;
+    conditionId?: string;
+    marketSlug?: string;
+    outcomeLabel: string;
+    marketType: AgentMarketType;
+    eventType: AgentEventType;
+    eventEndTime?: string;
+    price: string | null;
+    active: boolean;
+    selected: boolean;
+  }>;
+  search: Array<{
+    provider: "exa" | "tavily" | "firecrawl";
+    kind: "news" | "resolution" | "social" | "web";
+    query: string;
+    url: string;
+    title: string;
+    excerpt: string;
+    publishedAt: string | null;
+    fetchedAt: string;
+    score: number | null;
+  }>;
+  searchDiagnostics?: {
+    enabled: boolean;
+    mode: "native" | "direct" | "both";
+    query: string | null;
+    maxResults: number;
+    timeoutMs: number;
+    providers: Array<{
+      provider: "exa" | "tavily" | "firecrawl";
+      ready: boolean;
+      status: "ok" | "missing-key" | "failed" | "skipped";
+      durationMs: number;
+      resultCount: number;
+      errorMessage?: string;
+    }>;
+  };
   social: Array<{
-    source: "watchlist-note";
+    source: "watchlist-note" | "polymarket-rule" | "polymarket-description";
     text: string;
   }>;
 }

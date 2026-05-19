@@ -4,6 +4,8 @@ packages:
 
 minimumReleaseAge: 10080
 minimumReleaseAgeIgnoreMissingTime: true
+minimumReleaseAgeExclude:
+  - "ws"
 
 catalog:
   "@biomejs/biome": "2.4.15"

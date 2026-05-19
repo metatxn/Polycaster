@@ -2,12 +2,12 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(
-    .dark *,
-    .midnight *,
-    .ocean *,
-    .slate *,
-    .softpop *
-  ));
+  .dark *,
+  .midnight *,
+  .ocean *,
+  .slate *,
+  .softpop *
+));
 
 @theme inline {
   --color-background: var(--background);

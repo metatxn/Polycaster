@@ -70,6 +70,8 @@ export function toSlimGammaEvent(event: GammaEvent, fullMarkets = false) {
             conditionId: market.conditionId,
             gameStartTime: market.gameStartTime,
             sportsMarketType: market.sportsMarketType,
+            umaResolutionStatus: market.umaResolutionStatus,
+            umaResolutionStatuses: market.umaResolutionStatuses,
             parentEventId: market.parentEventId,
             parentEventTitle: market.parentEventTitle,
           }

@@ -8,15 +8,18 @@ A prediction markets platform to **Know your Odds**, powered by Polymarket.
 - Multi-wallet support via Reown AppKit
 - Browse by categories: Politics, Sports, Finance, Crypto
 - Event and market detail views with price charts
+- Internal paper-trading agent dashboard and admin APIs
 - Edge deployment on Cloudflare Workers
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20.19+ (or 22.x)
 - pnpm
 - [Reown Cloud Project ID](https://cloud.reown.com/)
+
+If you plan to work on `apps/agent`, use a current Node.js release that supports `node --experimental-strip-types` for that package's test script.
 
 ### Setup
 
@@ -24,11 +27,18 @@ A prediction markets platform to **Know your Odds**, powered by Polymarket.
 # Install dependencies
 pnpm install
 
-# Seed the web app environment file
+# Seed the Next.js environment file used by `pnpm dev:web`
 cp apps/web/.env.local.example apps/web/.env.local
+
+# Seed the Wrangler/Worker environment file used by `pnpm preview`
+# and by local Cloudflare-style bindings such as D1/cron vars
+cp apps/web/.dev.vars.example apps/web/.dev.vars
 
 # Add required local variables
 $EDITOR apps/web/.env.local
+# Add Worker/runtime variables when you need preview mode, agent admin flows,
+# or parity with Cloudflare bindings
+$EDITOR apps/web/.dev.vars
 # Required beyond the example file:
 # NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
 #
@@ -53,7 +63,7 @@ pnpm dev:web
 
 Open [http://localhost:8000](http://localhost:8000)
 
-For full local parity with production-only features, the web app also reads server-side variables such as `OPENROUTER_API_KEY`, `EXTENSION_SESSION_SECRET`, `BUILDER_SIGNING_SERVER_URL`, `INTERNAL_AUTH_TOKEN`, `ALCHEMY_API_KEY`, and `POLYGON_RPC_URL`.
+`pnpm dev:web` reads `apps/web/.env.local`. `pnpm preview` and the Cloudflare Worker runtime read `apps/web/.dev.vars`, which is also where local D1/agent cron settings belong.
 
 ### Extension Development
 
@@ -102,14 +112,16 @@ pnpm typecheck      # Type-check all workspace packages
 pnpm typecheck:web  # Type-check the web app only
 pnpm typecheck:ext  # Type-check the extension only
 pnpm audit:security # Run a high-severity dependency audit
+pnpm brand:render   # Render the brand mark asset
 pnpm deploy         # Deploy the web app to Cloudflare
 pnpm release:ext    # Bump, build, and zip the extension release
 ```
 
 Additional package-level scripts live in the workspace packages:
 
-- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`
-- `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `version:bump`, `zip`, `release`
+- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`
+- `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `benchmark:embeddings`, `format`, `version:bump`, `zip`, `release`
+- `apps/agent/package.json`: `build`, `typecheck`, `lint`, `format`, `test`
 
 ## Documentation
 

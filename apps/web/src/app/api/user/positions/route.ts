@@ -3,9 +3,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { summarizeUserPositions } from "@/lib/user-position-summary";
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.user.positions");
+const UPSTREAM_TIMEOUT_MS = 10_000;
 
 /**
  * Polymarket Data API base URL
@@ -155,10 +157,41 @@ export async function GET(request: NextRequest) {
       queryParams.set("offset", upstreamOffset.toString());
       const fullUrl = `${DATA_API_BASE}/positions?${queryParams.toString()}`;
 
-      const response = await fetch(fullUrl, {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        UPSTREAM_TIMEOUT_MS
+      );
+
+      let response: Response;
+      try {
+        response = await fetch(fullUrl, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Request to Polymarket timed out",
+            },
+            { status: 504 }
+          );
+        }
+
+        log.error("upstream.fetch.failed", { error });
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Failed to reach Polymarket positions API",
+          },
+          { status: 502 }
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -191,21 +224,8 @@ export async function GET(request: NextRequest) {
     const hasMore = positions.length > limit;
     const trimmedPositions = positions.slice(0, limit);
 
-    // Calculate totals using actual field names from API
-    const totalValue = trimmedPositions.reduce(
-      (sum, p) => sum + (p.currentValue || 0),
-      0
-    );
-
-    const totalUnrealizedPnl = trimmedPositions.reduce(
-      (sum, p) => sum + (p.cashPnl || 0),
-      0
-    );
-
-    const totalRealizedPnl = trimmedPositions.reduce(
-      (sum, p) => sum + (p.realizedPnl || 0),
-      0
-    );
+    // Calculate totals using actual field names from API.
+    const summary = summarizeUserPositions(trimmedPositions);
 
     // Transform positions for frontend
     const transformedPositions = trimmedPositions.map((p) => ({
@@ -267,13 +287,7 @@ export async function GET(request: NextRequest) {
       user,
       positions: transformedPositions,
       lostPositions: transformedLostPositions,
-      summary: {
-        totalValue,
-        totalUnrealizedPnl,
-        totalRealizedPnl,
-        totalPnl: totalUnrealizedPnl + totalRealizedPnl,
-        positionCount: trimmedPositions.length,
-      },
+      summary,
       pagination: {
         limit,
         offset,
@@ -285,8 +299,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error ? error.message : ERROR_MESSAGES.UNKNOWN_ERROR,
+        error: ERROR_MESSAGES.UNKNOWN_ERROR,
       },
       { status: 500 }
     );

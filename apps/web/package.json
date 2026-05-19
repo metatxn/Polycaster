@@ -14,10 +14,13 @@
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts",
+    "agent:d1:list:local": "wrangler d1 migrations list knoww-agent-paper --local --config wrangler.jsonc",
+    "agent:d1:migrate:local": "wrangler d1 migrations apply knoww-agent-paper --local --config wrangler.jsonc",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@coinbase/wallet-sdk": "4.3.7",
+    "@knoww/agent": "workspace:*",
     "@knoww/logger": "workspace:*",
     "@knoww/shared-types": "workspace:*",
     "@metamask/sdk": "0.34.0",
@@ -54,7 +57,7 @@
     "framer-motion": "12.38.0",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "1.14.0",
-    "next": "15.5.15",
+    "next": "15.5.18",
     "next-themes": "0.4.6",
     "porto": "0.2.37",
     "posthog-js": "1.372.6",

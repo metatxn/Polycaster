@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConnection } from "wagmi";
 import { KnowwMark } from "@/components/knoww-mark";
+import { MarketSearch } from "@/components/market-search";
 import { NotificationBellMobile } from "@/components/notifications";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WalletMenu } from "@/components/wallet-menu";
@@ -31,7 +32,6 @@ const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Whales", href: "/whales" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Portfolio", href: "/portfolio" },
-  { label: "Search", href: "/search" },
 ];
 
 /** Category taxonomy — each item maps to the `/events/{slug}` browse
@@ -63,10 +63,13 @@ export function TopNav() {
 
   return (
     <div className="border-b border-border/60">
-      {/* Row 1 — primary nav + wallet + theme */}
+      {/* Row 1 — primary nav + wallet + theme + search.
+          Search lives in the right cluster so it sits next to the
+          other utility actions (bell, wallet, theme) rather than
+          competing for centered space against the wider left nav. */}
       <div className="flex items-center justify-between gap-6 px-1 py-3">
         {/* Left — wordmark + primary links */}
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-6 shrink-0">
           <Link
             href="/"
             className="flex items-center gap-2 font-bold text-[14px] tracking-tight hover:opacity-80 transition-opacity"
@@ -99,8 +102,11 @@ export function TopNav() {
           </nav>
         </div>
 
-        {/* Right — notifications + wallet + theme */}
-        <div className="flex items-center gap-2">
+        {/* Right — search + notifications + wallet + theme. Search
+            leads the cluster as the most-used utility; widths step
+            up at 2xl+ where there's more breathing room. */}
+        <div className="flex items-center gap-2 shrink-0">
+          <MarketSearch variant="boxed" className="w-56 2xl:w-64" />
           {/* Bell renders only when wallet is connected; dropdown opens
               below the nav with `align="end"`. When disconnected the
               component returns null, so the cluster stays stable. */}

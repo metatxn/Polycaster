@@ -2,14 +2,19 @@ packages:
   - "apps/*"
   - "packages/*"
 
+minimumReleaseAge: 10080
+minimumReleaseAgeIgnoreMissingTime: true
+minimumReleaseAgeExclude:
+  - "ws"
+
 catalog:
-  "@biomejs/biome": "2.4.13"
-  "@polymarket/clob-client-v2": "1.0.3"
+  "@biomejs/biome": "2.4.15"
+  "@polymarket/clob-client-v2": "1.0.6"
   "@types/react": "19.2.14"
   "@types/react-dom": "19.2.3"
   "decimal.js": "^10.6.0"
-  "react": "19.2.5"
-  "react-dom": "19.2.5"
+  "react": "19.2.6"
+  "react-dom": "19.2.6"
   "react-qr-code": "2.0.21"
-  "typescript": "6.0.2"
-  "viem": "2.48.4"
+  "typescript": "6.0.3"
+  "viem": "2.48.11"

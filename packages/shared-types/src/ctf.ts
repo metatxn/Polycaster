@@ -17,14 +17,14 @@ import {
   type ApprovalTransaction,
   buildCtfCollateralApprovalTransaction,
   readErc20Allowance,
-} from "./approvals";
+} from "./approvals.ts";
 import {
   CTF_ADDRESS,
   CTF_COLLATERAL_ADAPTER_ADDRESS,
   NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
   PUSD_ADDRESS,
-} from "./contracts";
-import { parsePusdUnits } from "./trading";
+} from "./contracts.ts";
+import { parsePusdUnits } from "./trading.ts";
 
 /** Parent collection ID — always bytes32(0) for Polymarket */
 export const PARENT_COLLECTION_ID =

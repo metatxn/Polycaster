@@ -69,3 +69,4 @@ apps/extension/.embedding-benchmark-cache/
 .playwright/
 .playwright-report/
 .playwright-mcp/
+.pnpm-store

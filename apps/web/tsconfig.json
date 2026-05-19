@@ -9,6 +9,7 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
@@ -19,10 +20,12 @@
       }
     ],
     "paths": {
+      "@knoww/agent": ["../agent/src/index.ts"],
+      "@knoww/agent/*": ["../agent/src/*"],
       "@/*": ["./src/*"]
     },
     "types": ["./cloudflare-env.d.ts", "node"]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "custom-worker.ts"]
 }

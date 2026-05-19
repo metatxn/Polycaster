@@ -1,4 +1,4 @@
-import { POLYMARKET_API } from "./polymarket";
+import { POLYMARKET_API } from "./polymarket.ts";
 
 export type ClobHeaders = Record<string, string>;
 

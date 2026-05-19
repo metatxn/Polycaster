@@ -27,6 +27,7 @@ import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
 import { checkAllApprovals } from "@/lib/approvals";
+import { isOnboardingSuppressedPath } from "./onboarding-route-suppression";
 
 // LocalStorage key for tracking completed onboarding
 const ONBOARDING_COMPLETE_KEY = "knoww_onboarding_complete";
@@ -90,17 +91,16 @@ interface OnboardingProviderProps {
 
 export function OnboardingProvider({ children }: OnboardingProviderProps) {
   const { address, isConnected, status } = useConnection();
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showOnboardingState, setShowOnboardingState] = useState(false);
   const pathname = usePathname();
-  const isPrivacyPage =
-    pathname === "/privacy" || pathname.startsWith("/privacy/");
-  // The marketing landing page renders inside `fixed inset-0 z-60`, which
-  // sits above this dialog's z-50 portal. If the dialog auto-opens here it
-  // is hidden visually but still mounts a polygonscan `<a>` whose hit-box
-  // can capture pointer events meant for the hero CTAs — so suppress the
-  // auto-open on the landing page entirely. Dialog still opens normally
-  // once the user navigates into the app.
-  const isLandingPage = pathname === "/";
+  const isOnboardingSuppressed = isOnboardingSuppressedPath(pathname);
+  const showOnboarding = showOnboardingState && !isOnboardingSuppressed;
+  const setShowOnboarding = useCallback(
+    (show: boolean) => {
+      setShowOnboardingState(show && !isOnboardingSuppressed);
+    },
+    [isOnboardingSuppressed]
+  );
 
   // Track if we've already auto-shown the popup this session
   // This prevents showing it multiple times if user dismisses it
@@ -231,8 +231,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
       !isCheckingSetup &&
       needsTradingSetup &&
       !hasAutoShownRef.current &&
-      !isPrivacyPage &&
-      !isLandingPage
+      !isOnboardingSuppressed
     ) {
       const timer = setTimeout(() => {
         setShowOnboarding(true);
@@ -245,18 +244,17 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     status,
     isCheckingSetup,
     needsTradingSetup,
-    isPrivacyPage,
-    isLandingPage,
+    isOnboardingSuppressed,
+    setShowOnboarding,
   ]);
 
-  // Never show onboarding on the Privacy Policy or landing pages (auto-close
-  // if open) — the landing page's z-60 wrapper hides the dialog visually but
-  // its hit-boxes still capture pointer events from the hero CTAs.
+  // Never show onboarding on routes where the global trading setup dialog
+  // interferes with route-specific surfaces.
   useEffect(() => {
-    if ((isPrivacyPage || isLandingPage) && showOnboarding) {
-      setShowOnboarding(false);
+    if (isOnboardingSuppressed && showOnboardingState) {
+      setShowOnboardingState(false);
     }
-  }, [isPrivacyPage, isLandingPage, showOnboarding]);
+  }, [isOnboardingSuppressed, showOnboardingState]);
 
   const handleComplete = useCallback(() => {
     setShowOnboarding(false);
@@ -275,7 +273,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     setTimeout(() => {
       window.location.reload();
     }, 300);
-  }, [address]);
+  }, [address, setShowOnboarding]);
 
   const handleSkip = () => {
     setShowOnboarding(false);

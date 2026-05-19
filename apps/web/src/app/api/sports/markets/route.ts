@@ -8,7 +8,7 @@ import { logger } from "@/lib/logger";
 const marketsSchema = z.object({
   sport: z.string().nullable().optional(),
   league: z.string().nullable().optional(),
-  limit: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
   after_cursor: z.string().optional(),
 });
 
@@ -57,11 +57,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { sport: parsedSport, league: parsedLeague } = parsed.data;
+    const {
+      sport: parsedSport,
+      league: parsedLeague,
+      limit: parsedLimit,
+    } = parsed.data;
     const tagSlug = parsedLeague || parsedSport;
 
     const queryParams = new URLSearchParams();
-    queryParams.set("limit", limit);
+    queryParams.set("limit", String(parsedLimit));
     queryParams.set("closed", "false");
     queryParams.set("order", "createdAt");
     queryParams.set("ascending", "false");
@@ -124,7 +128,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to fetch sports markets",
       },
       { status: 500 }
     );

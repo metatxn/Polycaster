@@ -5,7 +5,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "knoww",
-  "main": ".open-next/worker.js",
+  "main": "custom-worker.ts",
   "compatibility_date": "2025-03-25",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "keep_names": false,
@@ -20,10 +20,30 @@
     "enabled": true
   },
 
+  "triggers": {
+    // Agent cron is disabled for now. Re-add a schedule such as
+    // "*/5 * * * *" only when automatic agent runs should be deployed.
+    "crons": []
+  },
+
+  "vars": {
+    "AGENT_CRON_ENABLED": "false",
+    "AGENT_CRON_EXECUTION_MODE": "paper",
+    "AGENT_CRON_LOCK_LEASE_MS": "600000"
+  },
+
   "r2_buckets": [
     {
       "binding": "NEXT_INC_CACHE_R2_BUCKET",
       "bucket_name": "knoww-app"
+    }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "AGENT_DB",
+      "database_name": "knoww-agent-paper",
+      "migrations_dir": "../agent/migrations"
     }
   ]
 

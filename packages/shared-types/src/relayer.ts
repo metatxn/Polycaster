@@ -20,7 +20,7 @@ import {
   DEPOSIT_WALLET_IMPLEMENTATION_ADDRESS,
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
-} from "./contracts";
+} from "./contracts.ts";
 
 declare function setTimeout(callback: () => void, delay?: number): unknown;
 

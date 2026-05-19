@@ -26,6 +26,7 @@ import {
 } from "@/hooks/use-sports-websocket";
 import {
   isCurrentSportsEvent,
+  isLiveOrRecentlyStartedSportsEvent,
   isUpcomingSportsEvent,
 } from "@/lib/sports-event-activity";
 import { selectedSportsMarketExists } from "@/lib/sports-selected-market";
@@ -87,6 +88,8 @@ interface SportsEvent {
     conditionId?: string;
     gameStartTime?: string;
     sportsMarketType?: string;
+    umaResolutionStatus?: string;
+    umaResolutionStatuses?: string;
     parentEventId?: string | number;
     parentEventTitle?: string;
   }>;
@@ -350,11 +353,10 @@ export function SportsbookView({
         enrichWithChildMarkets(event, childEventsByParent)
       );
     }
-    // For league pages, only events explicitly marked live by Gamma show up
-    // in the Live section. Most league events don't have live=true so this
-    // bucket stays empty until kickoff.
+    // For league pages, Gamma sometimes lags after kickoff. Treat recently
+    // started games as live until the primary result enters UMA resolution.
     return parentEvents
-      .filter((event) => event.live === true)
+      .filter((event) => isLiveOrRecentlyStartedSportsEvent(event))
       .map((event) => enrichWithChildMarkets(event, childEventsByParent));
   }, [allFetchedEvents, childEventsByParent, liveOnly, parentIdByTitle]);
 

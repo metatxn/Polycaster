@@ -64,6 +64,10 @@ interface MarketSearchProps {
   /** Display label for the scope (e.g. "Politics", "Sports"). Used in
    *  the placeholder, empty state, and result footer. */
   tagLabel?: string;
+  /** Visual treatment. `underline` is the editorial hairline used in
+   *  content areas; `boxed` is a pill-shaped filled input for use in
+   *  chrome (top nav). Defaults to `underline`. */
+  variant?: "underline" | "boxed";
 }
 
 export function MarketSearch({
@@ -71,6 +75,7 @@ export function MarketSearch({
   placeholder,
   tagSlug,
   tagLabel,
+  variant = "underline",
 }: MarketSearchProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -186,10 +191,17 @@ export function MarketSearch({
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>
-      {/* Editorial underline input — no box, just a hairline that deepens
-          on focus. Matches the hero's magazine-index aesthetic. */}
+      {/* Two looks: `underline` is the editorial hairline used inside
+          content areas; `boxed` is a pill-shaped filled input meant for
+          the top-nav chrome. Both share the same Search icon + X
+          affordances; only padding, border, and shape differ. */}
       <div className="relative group">
-        <Search className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70 transition-colors group-focus-within:text-foreground" />
+        <Search
+          className={cn(
+            "absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70 transition-colors group-focus-within:text-foreground",
+            variant === "boxed" ? "left-3.5" : "left-0"
+          )}
+        />
         <input
           ref={inputRef}
           type="text"
@@ -197,13 +209,21 @@ export function MarketSearch({
           value={query}
           onChange={handleInputChange}
           onFocus={() => query.length >= 2 && setIsOpen(true)}
-          className="w-full h-9 pl-6 pr-6 bg-transparent border-0 border-b border-border/70 focus:border-foreground focus:outline-none text-sm placeholder:text-muted-foreground/60 placeholder:font-editorial placeholder:italic transition-colors"
+          className={cn(
+            "w-full bg-transparent focus:outline-none text-sm transition-colors",
+            variant === "boxed"
+              ? "h-10 pl-10 pr-10 bg-muted/30 border border-border/70 rounded-full focus:border-foreground/70 focus:bg-muted/50 placeholder:text-muted-foreground/60"
+              : "h-9 pl-6 pr-6 border-0 border-b border-border/70 focus:border-foreground placeholder:text-muted-foreground/60 placeholder:font-editorial placeholder:italic"
+          )}
         />
         {query && (
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-0 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
+            className={cn(
+              "absolute top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors",
+              variant === "boxed" ? "right-3.5" : "right-0"
+            )}
             aria-label="Clear search"
           >
             <X className="h-3 w-3" />
@@ -211,10 +231,13 @@ export function MarketSearch({
         )}
       </div>
 
-      {/* Results Dropdown — flat panel sitting flush below the input's
-          hairline. No rounded top, no drop shadow; just a clean border
-          that reads as an extension of the input rather than a floating
-          card. */}
+      {/* Results Dropdown.
+          - `underline` variant: flat panel right-anchored at a fixed
+             384px width, sitting flush below the hairline so it reads
+             as an extension of the input.
+          - `boxed` variant: matches the input's full width and pill
+             rounding, with a small gap below so it floats as a
+             rounded card under the nav input. */}
       <AnimatePresence>
         {showDropdown && (
           <motion.div
@@ -222,7 +245,12 @@ export function MarketSearch({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.12 }}
-            className="absolute top-full right-0 w-[clamp(320px,24rem,90vw)] bg-background border border-border/70 shadow-[0_12px_32px_-16px_rgb(0_0_0/0.18)] z-50 overflow-hidden max-h-[70vh] overflow-y-auto"
+            className={cn(
+              "absolute top-full bg-background border border-border/70 shadow-[0_12px_32px_-16px_rgb(0_0_0/0.18)] z-50 overflow-hidden max-h-[70vh] overflow-y-auto",
+              variant === "boxed"
+                ? "inset-x-0 mt-2 rounded-2xl"
+                : "right-0 w-[clamp(320px,24rem,90vw)]"
+            )}
           >
             {/* Loading State - show when typing or fetching */}
             {(isLoading || isTyping) && (

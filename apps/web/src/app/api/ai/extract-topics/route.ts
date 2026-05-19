@@ -1,5 +1,4 @@
 import { createLogger } from "@knoww/logger";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -9,6 +8,7 @@ import {
   handleExtensionPreflight,
   verifyExtensionAccessPreAuth,
 } from "@/lib/extension-auth";
+import { createAttributedOpenRouter } from "@/lib/openrouter";
 
 const log = createLogger("api.ai.extract-topics");
 
@@ -375,7 +375,7 @@ async function extractTopicsFromText(
   }
 
   try {
-    const openrouter = createOpenRouter({ apiKey });
+    const openrouter = createAttributedOpenRouter(apiKey);
     const aiResult = await withTimeout(
       generateText({
         model: openrouter.chat("openai/gpt-5.4-nano"),

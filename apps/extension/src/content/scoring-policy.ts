@@ -7,6 +7,7 @@ export const EMBEDDING_FLOOR = 0.5;
 export const FAIL_OPEN_FLOOR = 0.5;
 export const AI_GATE_RETRY_FLOOR = 0.6;
 export const HEURISTIC_STRICT_SHARED_NOUNS = 3;
+export const HIGH_PRECISION_SINGLE_SIGNAL_FLOOR = 0.7;
 
 type MarketDomain =
   | "business"
@@ -35,6 +36,7 @@ export const HIGH_SIGNAL_TOKENS = new Set([
   "spy",
   "btc",
   "eth",
+  "sol",
   "sec",
   "fda",
   "fed",
@@ -65,7 +67,117 @@ export const HIGH_SIGNAL_TOKENS = new Set([
   "opec",
   "nasa",
   "brics",
+  // Prediction-market venues
+  "polymarket",
+  "kalshi",
+  "manifold",
+  // Crypto exchanges / protocols / wallets that frequently appear in posts
+  // as mixed-case proper nouns — boosting them keeps the upstream search
+  // ranker focused on protocol-specific markets instead of generic crypto.
+  "hyperliquid",
+  "phantom",
+  "solana",
+  "ethereum",
+  "bitcoin",
+  "coinbase",
+  "binance",
+  "uniswap",
+  "arbitrum",
+  "optimism",
+  "polygon",
+  // AI/tech brands
+  "openai",
+  "anthropic",
+  "claude",
+  "perplexity",
+  "deepseek",
+  "mistral",
+  "nvidia",
+  "spacex",
+  "tesla",
 ]);
+
+export const CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS = new Set([
+  "ai",
+  "gpt",
+  "gta",
+  "spy",
+  "btc",
+  "eth",
+  "sol",
+  "sec",
+  "fda",
+  "fed",
+  "imf",
+  "epa",
+  "ipo",
+  "gdp",
+  "cpi",
+  "nyc",
+  "ufo",
+  "nfl",
+  "nba",
+  "mlb",
+  "nhl",
+  "ufc",
+  "grok",
+  "doge",
+  "tsla",
+  "aapl",
+  "nvda",
+  "amzn",
+  "msft",
+  "meta",
+  "usdc",
+  "usdt",
+  "nato",
+  "opec",
+  "nasa",
+  "brics",
+  "polymarket",
+  "kalshi",
+  "manifold",
+  "hyperliquid",
+  "phantom",
+  "solana",
+  "ethereum",
+  "bitcoin",
+  "coinbase",
+  "binance",
+  "uniswap",
+  "arbitrum",
+  "optimism",
+  "polygon",
+  "openai",
+  "anthropic",
+  "claude",
+  "perplexity",
+  "deepseek",
+  "mistral",
+  "nvidia",
+  "spacex",
+  "tesla",
+]);
+
+const HIGH_PRECISION_SINGLE_SIGNAL_TOKENS = new Set([
+  "polymarket",
+  "kalshi",
+  "hyperliquid",
+  "phantom",
+  "solana",
+  "ethereum",
+  "bitcoin",
+  "coinbase",
+  "binance",
+  "uniswap",
+  "arbitrum",
+  "optimism",
+  "polygon",
+]);
+
+const SIGNAL_TOKEN_ALIASES: Record<string, string> = {
+  hyperliquidx: "hyperliquid",
+};
 
 const NAIVE_STOP_WORDS = new Set([
   "the",
@@ -277,7 +389,7 @@ const DOMAIN_PATTERNS: Record<MarketDomain, RegExp[]> = {
     /\b(company|companies|startup|founder|co-?founder|revenue|employees?|hiring|jobs?|roles?|leadership|product|customer|enterprise)\b/i,
   ],
   crypto: [
-    /\b(bitcoin|btc|ethereum|eth|solana|sol|crypto|defi|token|airdrop|blockchain|coinbase|polymarket|usdc|usdt|stablecoin)\b/i,
+    /\b(bitcoin|btc|ethereum|eth|solana|sol|crypto|defi|token|airdrop|blockchain|coinbase|polymarket|hyperliquid|hyperliquidx|perps?|dex|wallet|usdc|usdt|stablecoin)\b/i,
   ],
   entertainment: [
     /\b(movie|film|trailer|premiere|season|episode|hbo|max|netflix|disney|oscars?|grammys?|emmys?|actor|actress|box office)\b/i,
@@ -304,7 +416,7 @@ const DOMAIN_PATTERNS: Record<MarketDomain, RegExp[]> = {
     /\b(ai|openai|anthropic|gpt|claude|software|engineer|engineering|developer|evm|ethereum|cloud|microsoft|google|apple|nvidia|spacex|nasa|robot|gpu)\b/i,
   ],
   sports: [
-    /\b(ufc|mma|fight|fighter|lightweight|heavyweight|boxing|nfl|nba|mlb|nhl|cricket|football|soccer|tennis|golf|match|playoffs?|super bowl|world cup)\b/i,
+    /\b(ufc|mma|fight|fighter|lightweight|heavyweight|boxing|nfl|nba|mlb|nhl|cricket|football|soccer|tennis|golf|match|playoffs?|super bowl|world cup|esports?|counter-?strike)\b/i,
   ],
   transport: [
     /\b(flight|airport|airline|train|railway|irctc|road|traffic|vehicle|bike|car|delivery)\b/i,
@@ -492,6 +604,11 @@ function normalizeText(text: string): string {
     .replace(/'[a-z]{1,2}\b/gi, "");
 }
 
+function normalizeSignalToken(word: string): string {
+  const clean = word.replace(CONTRACTION_SUFFIX_RE, "").replace(/^[$@]+/, "");
+  return SIGNAL_TOKEN_ALIASES[clean] ?? clean;
+}
+
 function extractNaiveEntities(text: string): Set<string> {
   const entities = new Set<string>();
 
@@ -526,18 +643,37 @@ function tokenizeNaiveText(text: string): Set<string> {
   const words = text.toLowerCase().split(NAIVE_GATE_TOKEN_RE);
   const set = new Set<string>();
   for (const word of words) {
-    if (HIGH_SIGNAL_TOKENS.has(word)) {
-      set.add(word);
+    const normalized = normalizeSignalToken(word);
+    if (!normalized) continue;
+    if (CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS.has(normalized)) {
+      set.add(normalized);
       continue;
     }
-    if (word.length >= NAIVE_GATE_MIN_WORD_LEN && !NAIVE_STOP_WORDS.has(word)) {
-      const clean = word.replace(CONTRACTION_SUFFIX_RE, "");
-      if (clean.length >= NAIVE_GATE_MIN_WORD_LEN) {
-        set.add(clean);
-      }
+    if (
+      normalized.length >= NAIVE_GATE_MIN_WORD_LEN &&
+      !NAIVE_STOP_WORDS.has(normalized)
+    ) {
+      set.add(normalized);
     }
   }
   return set;
+}
+
+function getSharedHighPrecisionSignals(
+  postText: string,
+  marketText: string
+): string[] {
+  const postWords = tokenizeNaiveText(normalizeText(postText));
+  const marketWords = tokenizeNaiveText(normalizeText(marketText));
+  const shared: string[] = [];
+
+  for (const word of marketWords) {
+    if (postWords.has(word) && HIGH_PRECISION_SINGLE_SIGNAL_TOKENS.has(word)) {
+      shared.push(word);
+    }
+  }
+
+  return shared;
 }
 
 export function buildMarketGateText(
@@ -656,7 +792,7 @@ export function evaluateCandidateGate({
   const fallbackGate = naiveContextGate(postText, buildMarketGateText(market));
   let resolvedGate = gate ?? fallbackGate;
   let gatePass = resolvedGate.pass;
-  const usedRecoveryGate = false;
+  let usedRecoveryGate = false;
   let recoveryGate: ContextGateResult | undefined;
 
   if (scoringMode === "heuristic") {
@@ -674,6 +810,27 @@ export function evaluateCandidateGate({
       resolvedGate.meaningfulNouns >= 1 || resolvedGate.sharedEntities >= 1;
     if (hasSingleSignal) {
       gatePass = true;
+    }
+  }
+
+  if (
+    !gatePass &&
+    scoringMode === "hybrid" &&
+    score >= HIGH_PRECISION_SINGLE_SIGNAL_FLOOR
+  ) {
+    const marketText = buildMarketGateText(market);
+    const sharedHighPrecisionSignals = getSharedHighPrecisionSignals(
+      postText,
+      marketText
+    );
+    if (sharedHighPrecisionSignals.length > 0) {
+      recoveryGate = fallbackGate;
+      resolvedGate = {
+        ...fallbackGate,
+        details: `${fallbackGate.details}; high-precision-single-signal=[${sharedHighPrecisionSignals.join(",")}]`,
+      };
+      gatePass = true;
+      usedRecoveryGate = gate !== undefined;
     }
   }
 

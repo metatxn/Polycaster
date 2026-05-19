@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
   determineScoringMode,
   evaluateCandidateGate,
   getEffectiveThreshold,
@@ -97,6 +98,11 @@ test("naiveContextGate requires at least two distinct signals", () => {
   );
 
   assert.equal(gate.pass, false);
+});
+
+test("case-insensitive high-signal tokens exclude ambiguous common words", () => {
+  assert.equal(CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS.has("hyperliquid"), true);
+  assert.equal(CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS.has("who"), false);
 });
 
 test("determineScoringMode distinguishes hybrid lexical and heuristic", () => {
@@ -202,6 +208,71 @@ test("evaluateCandidateGate does not recover a single high-score entity match", 
 
   assert.equal(decision.pass, false);
   assert.equal(decision.usedRecoveryGate, false);
+});
+
+test("evaluateCandidateGate accepts high-score Hyperliquid protocol overlap", () => {
+  const decision = evaluateCandidateGate({
+    postText: "When can I access $troll on hyperliquid?",
+    market: createMarket({
+      title: "Hyperliquid listed on Binance in 2026?",
+      category: "Crypto",
+      tags: [{ slug: "crypto", label: "Crypto" }],
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.77,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details:
+        "nouns=[hyperliquid] meaningful=[hyperliquid] entities=[] distinct=1",
+    }),
+  });
+
+  assert.equal(decision.pass, true);
+});
+
+test("evaluateCandidateGate recovers Hyperliquid X handle aliases", () => {
+  const decision = evaluateCandidateGate({
+    postText:
+      "This is awesome but when are you gonna list $TROLL on your platform @HyperliquidX",
+    market: createMarket({
+      title: "Hyperliquid listed on Binance in 2026?",
+      category: "Crypto",
+      tags: [{ slug: "crypto", label: "Crypto" }],
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.8,
+    gate: createGate({
+      meaningfulNouns: 0,
+      sharedEntities: 0,
+      details: "nouns=[] meaningful=[] entities=[] distinct=0",
+    }),
+  });
+
+  assert.equal(decision.pass, true);
+  assert.equal(decision.usedRecoveryGate, true);
+});
+
+test("evaluateCandidateGate still rejects Phantom esports false positives", () => {
+  const decision = evaluateCandidateGate({
+    postText: "I wonder what the #1 trending token on phantom is",
+    market: createMarket({
+      title: "Counter-Strike: Eternal Fire Academy vs Phantom Academy",
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.8,
+    gate: createGate({
+      meaningfulNouns: 1,
+      sharedEntities: 0,
+      details: "nouns=[phantom] meaningful=[phantom] entities=[] distinct=1",
+    }),
+  });
+
+  assert.equal(decision.pass, false);
+  assert.ok(/domain-gate=reject/.test(decision.gate.details));
 });
 
 test("evaluateCandidateGate does not recover a single weak noun overlap", () => {

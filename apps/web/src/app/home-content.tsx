@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Activity,
   Clock,
@@ -514,6 +514,22 @@ export function HomeContent({ initialData }: HomeContentProps) {
   };
 
   const currentData = getCurrentEvents();
+  const lastDesktopEventsRef = useRef<EventWithDates[]>(
+    (initialData?.events as EventWithDates[]) || []
+  );
+
+  useEffect(() => {
+    if (!currentData.isLoading && currentData.events.length > 0) {
+      lastDesktopEventsRef.current = currentData.events;
+    }
+  }, [currentData.events, currentData.isLoading]);
+
+  const desktopEvents =
+    currentData.events.length > 0
+      ? currentData.events
+      : lastDesktopEventsRef.current;
+  const hasDesktopFallback =
+    currentData.isLoading && desktopEvents.length > 0 && !currentData.error;
 
   // Use ref to hold latest fetchMore to avoid recreating IntersectionObserver on each render
   const fetchMoreRef = useRef(currentData.fetchMore);
@@ -654,199 +670,195 @@ export function HomeContent({ initialData }: HomeContentProps) {
         </div>
 
         {/* Events Content */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={viewMode}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-          >
-            {/* Error State */}
-            {currentData.error && (
-              <div className="py-10 border-y border-destructive/30 mb-6">
-                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mb-3">
-                  §&nbsp;&nbsp;Feed Error
-                </p>
-                <p className="kw-editorial italic text-xl md:text-2xl leading-snug text-foreground max-w-xl mb-3">
-                  Markets couldn&apos;t be loaded.
-                </p>
-                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
-                  {currentData.error?.message || "Unable to load markets"}
-                </p>
-              </div>
-            )}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          {/* Error State */}
+          {currentData.error && (
+            <div className="py-10 border-y border-destructive/30 mb-6">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mb-3">
+                §&nbsp;&nbsp;Feed Error
+              </p>
+              <p className="kw-editorial italic text-xl md:text-2xl leading-snug text-foreground max-w-xl mb-3">
+                Markets couldn&apos;t be loaded.
+              </p>
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
+                {currentData.error?.message || "Unable to load markets"}
+              </p>
+            </div>
+          )}
 
-            {/* Loading State — skeleton cards sit on paper-grain backdrop so
+          {/* Loading State — skeleton cards sit on paper-grain backdrop so
                 the grid reads as "developing in from texture" rather than
                 popping out of flat muted rectangles. AnimatePresence handles
                 the dissolve when real cards arrive.
                 At lg+, MarketsView renders its own TableSkeleton via
                 the isTransitioning prop — so we hide the card skeletons
                 there to avoid a duplicate. */}
-            {currentData.isLoading && !currentData.error && (
-              <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
-                {[...Array(10)].map((_, i) => (
-                  <motion.div
-                    key={`skeleton-${i}`}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, filter: "blur(2px)" }}
-                    transition={{ delay: i * 0.05, duration: 0.35 }}
-                    className="skeleton-grain rounded-2xl sm:rounded-3xl bg-muted/40 border border-border/30 overflow-hidden"
-                  >
-                    <Skeleton className="aspect-16/10 w-full bg-muted/50" />
-                    <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
-                      <Skeleton className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/50" />
-                      <Skeleton className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/30" />
-                      <Skeleton className="h-3 sm:h-4 w-2/3 rounded-md sm:rounded-lg bg-muted/30" />
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-            {/* Desktop loading: render the terminal view with its own
+          {currentData.isLoading && !currentData.error && (
+            <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
+              {[...Array(10)].map((_, i) => (
+                <motion.div
+                  key={`skeleton-${i}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, filter: "blur(2px)" }}
+                  transition={{ delay: i * 0.05, duration: 0.35 }}
+                  className="skeleton-grain rounded-2xl sm:rounded-3xl bg-muted/40 border border-border/30 overflow-hidden"
+                >
+                  <Skeleton className="aspect-16/10 w-full bg-muted/50" />
+                  <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
+                    <Skeleton className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/50" />
+                    <Skeleton className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/30" />
+                    <Skeleton className="h-3 sm:h-4 w-2/3 rounded-md sm:rounded-lg bg-muted/30" />
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+          {/* Desktop loading: render the terminal view with its own
                 table-shaped skeleton so tab switches don't reveal cards. */}
-            {currentData.isLoading && !currentData.error && (
+          {currentData.isLoading && !currentData.error && (
+            <div className="hidden lg:block">
+              <MarketsView
+                events={desktopEvents}
+                viewMode={viewMode}
+                onViewChange={handleQuickCategoryClick}
+                advancedFilters={<DesktopFilterChips />}
+                search={<MarketSearch className="w-56 xl:w-64" />}
+                isTransitioning={!hasDesktopFallback}
+              />
+            </div>
+          )}
+
+          {/* Events Grid. At lg+ we render the trading-terminal
+                view, and fall back to the card grid below lg where
+                tables don't fit. */}
+          {!currentData.isLoading && currentData.events.length > 0 && (
+            <>
               <div className="hidden lg:block">
                 <MarketsView
-                  events={[]}
+                  events={currentData.events}
                   viewMode={viewMode}
                   onViewChange={handleQuickCategoryClick}
                   advancedFilters={<DesktopFilterChips />}
                   search={<MarketSearch className="w-56 xl:w-64" />}
-                  isTransitioning
+                  isTransitioning={isPending}
                 />
               </div>
-            )}
-
-            {/* Events Grid. At lg+ we render the trading-terminal
-                view, and fall back to the card grid below lg where
-                tables don't fit. */}
-            {!currentData.isLoading && currentData.events.length > 0 && (
-              <>
-                <div className="hidden lg:block">
-                  <MarketsView
-                    events={currentData.events}
-                    viewMode={viewMode}
-                    onViewChange={handleQuickCategoryClick}
-                    advancedFilters={<DesktopFilterChips />}
-                    search={<MarketSearch className="w-56 xl:w-64" />}
-                    isTransitioning={isPending}
+              <div
+                className={`lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
+                  isPending ? "opacity-70" : "opacity-100"
+                }`}
+              >
+                {currentData.events.map((event, index) => (
+                  <EventCard
+                    key={`${event.id}-${index}`}
+                    event={event}
+                    index={index}
+                    priority={index < PRIORITY_EVENT_CARD_COUNT}
                   />
-                </div>
-                <div
-                  className={`lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
-                    isPending ? "opacity-70" : "opacity-100"
-                  }`}
-                >
-                  {currentData.events.map((event, index) => (
-                    <EventCard
-                      key={`${event.id}-${index}`}
-                      event={event}
-                      index={index}
-                      priority={index < PRIORITY_EVENT_CARD_COUNT}
-                    />
-                  ))}
-                </div>
+                ))}
+              </div>
 
-                {/* Loading More — card-grain skeletons below lg,
+              {/* Loading More — card-grain skeletons below lg,
                     table-row skeletons at lg+. Split so the two
                     layouts stay visually consistent during infinite
                     scroll. */}
-                {currentData.isFetchingMore && (
-                  <>
-                    <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
-                      {[...Array(20)].map((_, i) => (
-                        <div
-                          key={`loading-${i}`}
-                          className="skeleton-grain rounded-2xl sm:rounded-3xl bg-muted/40 border border-border/30 overflow-hidden animate-pulse"
-                        >
-                          <div className="aspect-16/10 w-full bg-muted/30" />
-                          <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
-                            <div className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/30" />
-                            <div className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/20" />
-                          </div>
+              {currentData.isFetchingMore && (
+                <>
+                  <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
+                    {[...Array(20)].map((_, i) => (
+                      <div
+                        key={`loading-${i}`}
+                        className="skeleton-grain rounded-2xl sm:rounded-3xl bg-muted/40 border border-border/30 overflow-hidden animate-pulse"
+                      >
+                        <div className="aspect-16/10 w-full bg-muted/30" />
+                        <div className="p-3 sm:p-5 space-y-3 sm:space-y-4">
+                          <div className="h-5 sm:h-6 w-4/5 rounded-lg sm:rounded-xl bg-muted/30" />
+                          <div className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/20" />
                         </div>
-                      ))}
-                    </div>
-                    <div className="hidden lg:block border-x border-b border-border rounded-b-sm -mt-px">
-                      <ProTableSkeleton rows={5} />
-                    </div>
-                  </>
-                )}
-
-                {/* Universal Infinite Scroll Trigger - Placed inside content to ensure re-detection on tab change */}
-                {currentData.hasMore && (
-                  <div
-                    ref={setLoadMoreElement}
-                    className="h-20 w-full flex items-center justify-center"
-                  >
-                    {currentData.isFetchingMore && (
-                      <div className="flex gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce [animation-delay:-0.3s]" />
-                        <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce [animation-delay:-0.15s]" />
-                        <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce" />
                       </div>
-                    )}
+                    ))}
                   </div>
-                )}
+                  <div className="hidden lg:block border-x border-b border-border rounded-b-sm -mt-px">
+                    <ProTableSkeleton rows={5} />
+                  </div>
+                </>
+              )}
 
-                {/* End of results message */}
-                {!currentData.hasMore &&
-                  !currentData.isFetchingMore &&
-                  currentData.events.length > 0 && (
-                    <div className="flex justify-center py-10 border-t border-border/30 mt-10">
-                      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                        {hasActiveFilters
-                          ? `${currentData.events.length} markets match your filters`
-                          : `End of book — ${currentData.events.length} markets`}
-                      </p>
+              {/* Universal Infinite Scroll Trigger - Placed inside content to ensure re-detection on tab change */}
+              {currentData.hasMore && (
+                <div
+                  ref={setLoadMoreElement}
+                  className="h-20 w-full flex items-center justify-center"
+                >
+                  {currentData.isFetchingMore && (
+                    <div className="flex gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce [animation-delay:-0.3s]" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce [animation-delay:-0.15s]" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-bounce" />
                     </div>
                   )}
-              </>
-            )}
-
-            {/* Empty State */}
-            {!currentData.isLoading &&
-              currentData.events.length === 0 &&
-              !currentData.error && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-center py-24 border-t border-b border-border/40"
-                >
-                  <div className="inline-flex items-center justify-center w-14 h-14 border border-border/60 mb-6">
-                    <Star className="h-6 w-6 text-muted-foreground/70" />
-                  </div>
-                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground mb-3">
-                    § No Results
-                  </p>
-                  <h3 className="font-editorial italic font-medium text-2xl sm:text-3xl mb-3">
-                    {hasActiveFilters
-                      ? "Nothing matches your filters."
-                      : "The book is empty right now."}
-                  </h3>
-                  <p className="text-muted-foreground max-w-md mx-auto text-sm">
-                    {hasActiveFilters
-                      ? "Try widening your filters — or clear them entirely."
-                      : viewMode === "categories"
-                        ? "Check back shortly as new markets come online."
-                        : `No ${viewMode} markets right now. Try another category.`}
-                  </p>
-                  {hasActiveFilters && (
-                    <button
-                      type="button"
-                      onClick={clearAllFilters}
-                      className="mt-6 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold underline underline-offset-4 decoration-foreground/40 hover:decoration-foreground transition-colors"
-                    >
-                      Clear all filters
-                    </button>
-                  )}
-                </motion.div>
+                </div>
               )}
-          </motion.div>
-        </AnimatePresence>
+
+              {/* End of results message */}
+              {!currentData.hasMore &&
+                !currentData.isFetchingMore &&
+                currentData.events.length > 0 && (
+                  <div className="flex justify-center py-10 border-t border-border/30 mt-10">
+                    <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {hasActiveFilters
+                        ? `${currentData.events.length} markets match your filters`
+                        : `End of book — ${currentData.events.length} markets`}
+                    </p>
+                  </div>
+                )}
+            </>
+          )}
+
+          {/* Empty State */}
+          {!currentData.isLoading &&
+            currentData.events.length === 0 &&
+            !currentData.error && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-center py-24 border-t border-b border-border/40"
+              >
+                <div className="inline-flex items-center justify-center w-14 h-14 border border-border/60 mb-6">
+                  <Star className="h-6 w-6 text-muted-foreground/70" />
+                </div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground mb-3">
+                  § No Results
+                </p>
+                <h3 className="font-editorial italic font-medium text-2xl sm:text-3xl mb-3">
+                  {hasActiveFilters
+                    ? "Nothing matches your filters."
+                    : "The book is empty right now."}
+                </h3>
+                <p className="text-muted-foreground max-w-md mx-auto text-sm">
+                  {hasActiveFilters
+                    ? "Try widening your filters — or clear them entirely."
+                    : viewMode === "categories"
+                      ? "Check back shortly as new markets come online."
+                      : `No ${viewMode} markets right now. Try another category.`}
+                </p>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    className="mt-6 font-mono text-[11px] uppercase tracking-[0.18em] font-semibold underline underline-offset-4 decoration-foreground/40 hover:decoration-foreground transition-colors"
+                  >
+                    Clear all filters
+                  </button>
+                )}
+              </motion.div>
+            )}
+        </motion.div>
 
         {/* Bottom CTA — editorial colophon */}
         <motion.section

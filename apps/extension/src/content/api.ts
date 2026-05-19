@@ -13,7 +13,10 @@ import type {
 } from "../types/market";
 import type { MarketLinkHint } from "../types/platform";
 import { KNOWW_CONFIG } from "./config";
-import { HIGH_SIGNAL_TOKENS } from "./scoring-policy";
+import {
+  CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
+  HIGH_SIGNAL_TOKENS,
+} from "./scoring-policy";
 
 const log = createLogger("extension.api");
 
@@ -784,6 +787,18 @@ function extractBasicKeywords(text: string): string {
     const token = match[0].toLowerCase();
     if (HIGH_SIGNAL_TOKENS.has(token)) {
       addCandidate(match[0], CANDIDATE_SCORE.highSignalToken);
+    }
+  }
+
+  // Case-insensitive sweep for high-signal brand/protocol names. Tickers and
+  // acronyms above are caught by SHORT_CAPS_TOKEN_RE; this branch handles
+  // mixed-case proper nouns like "Hyperliquid" or "Polymarket" so they bias
+  // the upstream search ranker instead of falling to the long-noun bucket.
+  for (const word of cleanText.replace(/[^\w\s]/g, " ").split(/\s+/)) {
+    if (!word) continue;
+    const lower = word.toLowerCase();
+    if (CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS.has(lower)) {
+      addCandidate(word, CANDIDATE_SCORE.highSignalToken);
     }
   }
 

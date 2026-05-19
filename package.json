@@ -1,6 +1,7 @@
 {
   "name": "knoww-monorepo",
   "private": true,
+  "packageManager": "pnpm@10.25.0",
   "scripts": {
     "dev:web": "pnpm --filter @knoww/web dev",
     "dev:ext": "pnpm --filter @knoww/extension dev",
@@ -36,7 +37,8 @@
     "overrides": {
       "typescript": "6.0.2",
       "axios": "1.15.2",
-      "@isaacs/brace-expansion": "5.0.1",
+      "@isaacs/brace-expansion": "5.0.6",
+      "brace-expansion": "5.0.6",
       "fast-xml-parser": "5.7.0",
       "qs": "6.15.0",
       "body-parser": "2.2.1",
@@ -50,8 +52,9 @@
       "socket.io-parser": "4.2.6",
       "path-to-regexp": "8.4.0",
       "defu": "6.1.5",
-      "protobufjs": "7.5.5",
-      "fast-uri": "3.1.2"
+      "protobufjs": "7.5.6",
+      "fast-uri": "3.1.2",
+      "ws": "8.20.1"
     }
   }
 }

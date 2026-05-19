@@ -21,11 +21,13 @@
   },
 
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    // Agent cron is disabled for now. Re-add a schedule such as
+    // "*/5 * * * *" only when automatic agent runs should be deployed.
+    "crons": []
   },
 
   "vars": {
-    "AGENT_CRON_ENABLED": "true",
+    "AGENT_CRON_ENABLED": "false",
     "AGENT_CRON_EXECUTION_MODE": "paper",
     "AGENT_CRON_LOCK_LEASE_MS": "600000"
   },

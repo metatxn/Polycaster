@@ -6,9 +6,9 @@ import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
 
 const marketsByTagSchema = z.object({
-  tag_id: z.string(),
+  tag_id: z.string().min(1),
   closed: z.string().optional(),
-  limit: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
   after_cursor: z.string().optional(),
 });
 
@@ -70,10 +70,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const {
+      tag_id: parsedTagId,
+      closed: parsedClosed,
+      limit: parsedLimit,
+    } = parsed.data;
+
     const queryParams = new URLSearchParams();
-    queryParams.set("tag_id", tag_id);
-    queryParams.set("limit", limit);
-    queryParams.set("closed", closed);
+    queryParams.set("tag_id", parsedTagId);
+    queryParams.set("limit", String(parsedLimit));
+    queryParams.set("closed", parsedClosed || "false");
     queryParams.set("order", "createdAt");
     queryParams.set("ascending", "false");
     if (afterCursor) {
@@ -93,7 +99,7 @@ export async function GET(request: NextRequest) {
       success: true,
       count: page.items.length,
       markets: page.items,
-      tag_id,
+      tag_id: parsedTagId,
       pagination: {
         hasMore: Boolean(page.nextCursor),
         nextCursor: page.nextCursor,
@@ -106,7 +112,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Failed to fetch markets",
       },
       { status: 500 }
     );

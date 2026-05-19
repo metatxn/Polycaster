@@ -14,6 +14,10 @@ It has three active product/operator surfaces:
 - `apps/extension`: a Chrome extension that injects relevant prediction-market cards into supported social, community, and editorial sites and can initiate trading flows from those pages.
 - `apps/web/src/app/agent`: an internal operator dashboard for the paper-trading agent and its supporting admin APIs.
 
+There is also one active scheduled runtime path:
+
+- `apps/web/custom-worker.ts`: the Cloudflare Worker entrypoint that serves the OpenNext app and runs the agent cron tick on the configured schedule.
+
 ### Who uses it
 
 - End users browsing prediction markets on the web app
@@ -51,6 +55,7 @@ flowchart LR
     W --> A["apps/web/src/app/api\nBFF / proxy layer"]
     W --> L["apps/web/src/lib\nSecurity, cache, RPC, WS helpers"]
     A --> AG["apps/agent\nPaper-trading engine + repository"]
+    C["Cloudflare cron\napps/web/custom-worker.ts"] --> AG
 
     E --> BG["Extension service worker\napps/extension/src/background.ts"]
     E --> PB["Page bridge\napps/extension/src/page-bridge.ts"]
@@ -60,7 +65,7 @@ flowchart LR
     A --> P["Polymarket APIs\nGamma / CLOB / Data / User PnL / Relayer / Bridge"]
     L --> CF["Cloudflare runtime\nWorkers + R2 incremental cache"]
     OF --> P
-    BG --> K["Knoww web API\n/api/relayer/*, /api/ai/*, /api/extension/session/*"]
+    BG --> K["Knoww web API\n/api/relayer/*, /api/ai/*, /api/extension/session/*, /api/analytics/batch"]
     BG --> P
     BG --> HF["Hugging Face model download/cache\nvia transformers.js"]
 
@@ -76,7 +81,7 @@ flowchart LR
 | Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, preconnects to upstream APIs, and serves the main pages | Hooks, contexts, server-cache, API routes |
 | Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/leaderboard/*`, `apps/web/src/components/notifications/*`, `apps/web/src/components/portfolio/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*` | Houses reusable UI primitives plus feature-level views for comments, deposits, leaderboard, portfolio, notifications, price alerts, and trading flows | App shell, hooks, contexts, wallet state |
 | Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
-| Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
+| Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/extension-auth.ts`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, extension CORS/session helpers, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
 | Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/events/sports/live/page.tsx`, `apps/web/src/app/sports/live/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/app/whales/_components/*`, `apps/web/src/app/whales/_lib/*` | Powers live sports markets across the current live-route aliases, CLOB notification surfaces, browser-side price alerting, and whale-specific dashboards/aggregations | Web data hooks, websocket managers, Polymarket CLOB |
 | Agent operator dashboard | `apps/web/src/app/agent/page.tsx`, `apps/web/src/app/agent/agent-dashboard-client.tsx` | Internal UI for managing watchlist items, triggering runs, reviewing evidence/votes, inspecting paper positions, live-order audits, and model calibration | Agent admin APIs, `apps/agent`, D1 |
@@ -84,19 +89,20 @@ flowchart LR
 | Agent admin API helpers | `apps/web/src/lib/agent/api.ts`, `apps/web/src/lib/agent/repository.ts`, `apps/web/src/app/api/agent/**/*/route.ts` | Enforces admin auth/origin checks, binds Cloudflare D1 when available, and exposes the paper-trading control plane over `/api/agent/*` | Agent dashboard, `apps/agent`, D1, origin guard |
 | Agent engine package | `apps/agent/src/*` | Owns watchlist import, evidence gathering, model voting, quorum, paper/live execution adapters, resolution refresh, and the repository schema used by `/api/agent/*` | Web admin APIs, Polymarket APIs, OpenRouter/search providers, D1 |
 | Web infra helpers | `apps/web/src/lib/*` | Caching, origin checks, auth helpers, websocket managers, server-side fetch memoization, RPC utilities, PostHog server capture | Cloudflare Worker runtime, browser, upstream APIs, PostHog |
+| Worker entrypoint and cron | `apps/web/custom-worker.ts`, `apps/web/wrangler.jsonc` | Boots the OpenNext Worker, exposes the `fetch` handler, and runs scheduled agent ticks against the D1-backed repository | OpenNext output, `apps/agent`, D1, Cloudflare cron |
 | Insider detection and backtesting | `apps/web/src/lib/insider/*`, `apps/web/src/app/api/whales/backtest/route.ts` | Scores suspicious trading with archetype-based detectors, replays the same logic against resolved markets, and exposes the heavyweight backtest API used by the whales backtest UI | Polymarket Gamma/Data/CLOB APIs, trader-history cache, whales pages |
 | Web constants and types | `apps/web/src/constants/*`, `apps/web/src/types/*` | Shared Polymarket constants, API enums, cache durations, and typed response shapes used across routes, hooks, and components | Web app shell, API routes, hooks |
 | Web platform guards | `apps/web/src/middleware.ts`, `apps/web/instrumentation-client.ts` | Applies security headers/CSP and bootstraps browser-side telemetry | Browser, Next.js runtime, PostHog |
 | Extension content runtime | `apps/extension/src/content/index.ts`, `apps/extension/src/content/*` | Bundles the content-script pipeline, detects supported sites, extracts post/article text, ranks relevant markets, and injects inline UI and trading panels | Background service worker, page bridge, Knoww APIs, Polymarket APIs |
 | Extension in-page trading bridge | `apps/extension/src/content/trading/*`, `apps/extension/src/page-bridge.ts` | Manages content-script trading UI, extension-session bootstrapping, proxy-wallet bridging, and page-world wallet RPC handoff for inline trading flows | Content runtime, background worker, page bridge, `/api/extension/session/*`, `/api/relayer/*` |
-| Extension background worker | `apps/extension/src/background.ts`, `apps/extension/src/background/*` | Central message router, auth token storage, batched analytics queue, CORS-safe fetch proxy, local NLP/embedding services | Content scripts, offscreen document, Knoww API, PostHog ingest route, Polymarket APIs |
+| Extension background worker | `apps/extension/src/background.ts`, `apps/extension/src/background/*` | Central message router, auth token storage, batched analytics queue, CORS-safe fetch proxy, local NLP/embedding services | Content scripts, offscreen document, Knoww API, analytics ingest proxy, Polymarket APIs |
 | Extension page bridge | `apps/extension/src/page-bridge.ts` | Runs in the page's main world to discover injected wallets via EIP-6963 and bridge EIP-1193 RPC requests between page wallets and the isolated content script | Content runtime, injected wallet providers |
 | Extension platform and host config | `apps/extension/src/supported-hosts.ts`, `apps/extension/src/content/platform-registry.ts`, `apps/extension/src/content/platforms/*` | Defines match patterns, platform adapters, and site-specific extraction/injection behavior for supported social and editorial surfaces | Content runtime, background worker |
 | Extension offscreen runtimes | `apps/extension/src/offscreen/offscreen.ts`, `apps/extension/src/offscreen/scoring-runtime.ts`, `apps/extension/src/offscreen/trading-runtime.ts`, `apps/extension/src/background/trading-handler.ts` | Splits heavy scoring and trading work out of the MV3 service worker, loading runtime-specific modules only when needed | Background worker, relayer, CLOB, Polygon RPC, local scoring pipeline |
 | Extension options and preferences | `apps/extension/src/options.tsx`, `apps/extension/src/content/preferences.ts`, `apps/extension/src/types/settings.ts` | Manages per-user platform/source toggles, analytics preferences, theme overrides, and debug settings | Chrome storage, content runtime, background worker |
 | Shared logger package | `packages/logger/src/index.ts` | Provides the structured logger used across the web app and extension instead of ad hoc console logging | Web app routes/libs, extension background/content runtimes |
 | Shared market/contracts package | `packages/shared-types/src/*` | Single source of truth for Polymarket endpoints, contract addresses, auth constants, slippage helpers, crypto helpers, ABIs, and shared types | Web app and extension |
-| Deployment config | `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts`, `apps/web/next.config.ts` | Packages the Next.js app for Cloudflare Workers and R2-backed incremental cache | Cloudflare Workers, R2 |
+| Deployment config | `apps/web/custom-worker.ts`, `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts`, `apps/web/next.config.ts` | Packages the Next.js app for Cloudflare Workers, wires the custom Worker entrypoint, and configures the R2-backed incremental cache plus cron schedule | Cloudflare Workers, R2 |
 
 ### Important page surfaces
 

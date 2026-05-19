@@ -43,9 +43,10 @@ Short-duration markets should include `eventEndTime` on the watchlist item. The 
 
 Watchlist items can be entered manually or imported from a Polymarket event URL. URL import fetches Gamma event metadata, picks the requested outcome label when provided, and stores the matching CLOB token id, condition id, market slug, event timestamps, and resolution source.
 
-The web worker can run the agent automatically through the Cloudflare Cron
-Trigger configured in `apps/web/wrangler.jsonc`. While testing, the trigger runs
-every 5 minutes. Enable it explicitly with:
+The web worker can run the agent automatically through a Cloudflare Cron Trigger
+configured in `apps/web/wrangler.jsonc`. The checked-in config currently keeps
+cron triggers disabled with `crons: []` and `AGENT_CRON_ENABLED=false`. To enable
+automatic runs later, add an explicit schedule and set:
 
 ```sh
 AGENT_CRON_ENABLED=true

@@ -198,6 +198,9 @@ module.exports = (_env, argv) => {
     },
     resolve: {
       extensions: [".tsx", ".ts", ".js"],
+      extensionAlias: {
+        ".js": [".ts", ".tsx", ".js"],
+      },
       alias: {
         "@knoww/shared-types": path.resolve(
           __dirname,

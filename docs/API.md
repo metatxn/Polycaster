@@ -7,6 +7,12 @@ This document is generated from the route handlers under `apps/web/src/app/api`.
 - Base path: all routes are rooted at `/api`.
 - Dynamic path parameters are shown as `:param` for runtime URLs, even though the filesystem routes live under Next.js segments such as `[param]`.
 - Content type: all request and response bodies are JSON unless noted otherwise.
+- Preflight handlers: these routes also export explicit `OPTIONS` handlers for CORS preflight and return headers only with no JSON body:
+  - `/api/ai/extract-topics`
+  - `/api/ai/validate-relevance`
+  - `/api/analytics/batch`
+  - `/api/extension/session/logout`
+  - `/api/rpc/polygon`
 - Rate limiting: routes that call `checkRateLimit()` are limited per IP and per normalized route template.
 - Shared `429` response shape:
 
@@ -1735,7 +1741,7 @@ Query parameters
 | ---------- | -------- | -------- | ----------------------------------- |
 | `tag_id`   | `string` | Yes      | Required string.                    |
 | `closed`   | `string` | No       | Optional string. Default `"false"`. |
-| `limit`    | `string` | No       | Optional string. Default `"50"`.    |
+| `limit`    | `number` | No       | Integer from `1` to `100`. Default `50`. |
 | `after_cursor` | `string` | No    | Optional keyset cursor for the next page. |
 
 Success `200`
@@ -1752,7 +1758,7 @@ Errors
 - `400`: `{ success: false, error: "tag_id is required" }`, `{ success: false, error: "offset is no longer supported; use after_cursor" }`, or `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used.
-- `500`: `{ success: false, error: string }`
+- `500`: `{ success: false, error: "Failed to fetch markets" }`
 
 Rate limiting
 
@@ -1903,7 +1909,7 @@ Errors
 
 - `400`: Not used.
 - `401`: Not used.
-- `404`: `{ success: false, error: "Market not found" }`
+- `404`: Not handled locally; upstream fetch failures currently surface as `500`.
 - `500`: `{ success: false, error: string }`
 
 Rate limiting
@@ -2716,7 +2722,7 @@ Query parameters
 | -------------- | ---------------- | -------- | -------------------------------------- |
 | `sport`        | `string \| null` | No       | Optional nullable string.              |
 | `league`       | `string \| null` | No       | Optional nullable string.              |
-| `limit`        | `string`         | No       | Optional string. Default `"20"`.       |
+| `limit`        | `number`         | No       | Integer from `1` to `100`. Default `20`. |
 | `after_cursor` | `string`         | No       | Optional keyset cursor for the next page. |
 
 Success `200`
@@ -2733,7 +2739,7 @@ Errors
 - `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used.
-- `500`: `{ success: false, error: string }`
+- `500`: `{ success: false, error: "Failed to fetch sports markets" }`
 
 Rate limiting
 
@@ -3066,14 +3072,17 @@ Success `200`
   - `lostPositions: LostPosition[]`
   - `summary: { totalValue: number, totalUnrealizedPnl: number, totalRealizedPnl: number, totalPnl: number, positionCount: number }`
   - `pagination: { limit: number, offset: number, hasMore: boolean }`
-- `Position` includes `id`, `asset`, `conditionId`, `outcomeIndex`, `outcome`, `oppositeOutcome`, `size`, `avgPrice`, `currentPrice`, `currentValue`, `initialValue`, `unrealizedPnl`, `unrealizedPnlPercent`, `realizedPnl`, `realizedPnlPercent`, `totalBought`, `redeemable`, `mergeable`, and nested `market`.
+- `Position` includes `id`, `asset`, `conditionId`, `outcomeIndex`, `outcome`, `oppositeOutcome`, `size`, `avgPrice`, `currentPrice`, `currentValue`, `initialValue`, `unrealizedPnl`, `unrealizedPnlPercent`, `realizedPnl`, `realizedPnlPercent`, `totalBought`, `redeemable`, `mergeable`, `negRisk`, and nested `market`.
+- `LostPosition` includes `id`, `asset`, `conditionId`, `outcomeIndex`, `outcome`, `size`, `avgPrice`, `initialValue`, `endDate`, and nested `market`.
 
 Errors
 
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch positions from Polymarket", details: number }`.
-- `500`: `{ success: false, error: string }`
+- `500`: `{ success: false, error: "Unknown error" }`
+- `502`: `{ success: false, error: "Failed to reach Polymarket positions API" }`
+- `504`: `{ success: false, error: "Request to Polymarket timed out" }`
 
 Rate limiting
 

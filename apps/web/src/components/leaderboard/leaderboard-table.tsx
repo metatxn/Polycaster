@@ -191,7 +191,7 @@ export function LeaderboardTable({
                 }
               }}
               className={cn(
-                "group w-full grid grid-cols-[64px_minmax(0,1fr)_160px_160px_64px] items-center gap-3 px-3 py-3.5 border-b border-border/40 text-left transition-colors",
+                "leaderboard-row group w-full grid grid-cols-[64px_minmax(0,1fr)_160px_160px_64px] items-center gap-3 px-3 py-3.5 border-b border-border/40 text-left transition-colors",
                 "hover:bg-muted/40 cursor-pointer focus:outline-none focus-visible:bg-muted/40",
                 isHighlighted && "bg-muted/30"
               )}
@@ -313,7 +313,7 @@ export function LeaderboardTable({
                 }
               }}
               className={cn(
-                "group w-full flex items-start gap-3 px-2 py-3 border-b border-border/40 text-left cursor-pointer",
+                "leaderboard-row group w-full flex items-start gap-3 px-2 py-3 border-b border-border/40 text-left cursor-pointer",
                 "active:bg-muted/40 focus:outline-none focus-visible:bg-muted/40",
                 isHighlighted && "bg-muted/30"
               )}

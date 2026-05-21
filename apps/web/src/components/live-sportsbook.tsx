@@ -1858,7 +1858,7 @@ function SportEventRow({
         if (e.key === "Enter" || e.key === " ") handleRowClick();
       }}
       className={cn(
-        "border-y overflow-hidden transition-colors",
+        "sportsbook-event-row border-y overflow-hidden transition-colors",
         isExpanded ? "border-foreground" : "border-border/40"
       )}
     >
@@ -2301,7 +2301,7 @@ function CompactEventRow({
         if (e.key === "Enter" || e.key === " ") handleCardTap();
       }}
       className={cn(
-        "border-y overflow-hidden transition-colors",
+        "sportsbook-event-row border-y overflow-hidden transition-colors",
         expandedMarket ? "border-foreground" : "border-border/40"
       )}
     >

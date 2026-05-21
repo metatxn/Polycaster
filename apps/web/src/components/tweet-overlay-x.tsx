@@ -106,6 +106,93 @@ export const TWEETS: Tweet[] = [
       more: 34,
     },
   },
+  {
+    name: "Glassnode",
+    handle: "glassnode",
+    verified: true,
+    time: "22m",
+    initials: "GN",
+    avatar: "linear-gradient(135deg, #f7931a, #1d9bf0)",
+    body: [
+      "BTC just reclaimed $120K. On-chain demand is back — ",
+      { hl: "$150K by year-end is live again" },
+      ".",
+    ],
+    stats: { reply: "1.3K", retweet: "4.2K", like: "19.8K", views: "1.8M" },
+    market: {
+      title: "Bitcoin above $150K by Dec 31",
+      icon: {
+        type: "letter",
+        letter: "₿",
+        bg: "linear-gradient(135deg, #f7931a, #b45309)",
+      },
+      cat: "CRYPTO",
+      match: 88,
+      options: [
+        { label: "Above", pct: 31, hue: "blue" },
+        { label: "Below", pct: 69, hue: "purple" },
+      ],
+      more: 4,
+    },
+  },
+  {
+    name: "Adam Schefter",
+    handle: "AdamSchefter",
+    verified: true,
+    time: "47m",
+    initials: "AS",
+    avatar: "linear-gradient(135deg, #c8102e, #7a0c1f)",
+    body: [
+      "Way-too-early Super Bowl LX futures are out — ",
+      { hl: "Chiefs out front, Eagles close behind" },
+      ".",
+    ],
+    stats: { reply: "2.7K", retweet: "5.1K", like: "33.4K", views: "3.2M" },
+    market: {
+      title: "Super Bowl LX Champion",
+      icon: {
+        type: "letter",
+        letter: "SB",
+        bg: "linear-gradient(135deg, #16a34a, #065f46)",
+      },
+      cat: "SPORTS",
+      match: 79,
+      options: [
+        { label: "Chiefs", pct: 27, hue: "blue" },
+        { label: "Eagles", pct: 15, hue: "purple" },
+      ],
+      more: 12,
+    },
+  },
+  {
+    name: "Sawyer Merritt",
+    handle: "SawyerMerritt",
+    verified: true,
+    time: "1h",
+    initials: "SM",
+    avatar: "linear-gradient(135deg, #ef4444, #6366f1)",
+    body: [
+      "Tesla reaffirms the robotaxi network goes wide in 2026. ",
+      { hl: "Markets still skeptical" },
+      ".",
+    ],
+    stats: { reply: "984", retweet: "2.3K", like: "14.1K", views: "1.2M" },
+    market: {
+      title: "Tesla Robotaxi launches in 2026",
+      icon: {
+        type: "letter",
+        letter: "T",
+        bg: "linear-gradient(135deg, #ef4444, #b91c1c)",
+      },
+      cat: "TECH",
+      match: 73,
+      options: [
+        { label: "Yes", pct: 38, hue: "blue" },
+        { label: "No", pct: 62, hue: "purple" },
+      ],
+      more: 5,
+    },
+  },
 ];
 
 function VerifiedIcon({ size = 16 }: { size?: number }) {
@@ -254,8 +341,10 @@ export function TweetItem({
 
         <p className="kwt-text">{renderBody(t.body, active && phase >= 1)}</p>
 
-        {active && !closed && (
-          <div className={`kwt-pm-card${phase === 2 ? " kwt-in" : ""}`}>
+        {!closed && (
+          <div
+            className={`kwt-pm-card${active && phase === 2 ? " kwt-in" : ""}`}
+          >
             <div className="kwt-pm-head">
               <div className="kwt-pm-icon">
                 {t.market.icon.type === "seal" ? (

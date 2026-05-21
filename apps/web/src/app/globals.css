@@ -1116,6 +1116,290 @@ body:not(:has(.kw-landing))
 }
 
 /* ============================================================
+ * LANDING REDESIGN — futuristic prediction-layer sections
+ * Adapts the "Knoww.App — Landing" handoff design into the
+ * editorial --kw- token system. Scoped to .kw-landing so nothing
+ * leaks into app surfaces. The accent glow / soft fills derive
+ * from --kw-accent via color-mix, so every effect tracks the
+ * light/dark toggle automatically.
+ * ============================================================ */
+.kw-landing {
+  /* Landing-only "spark" accent — brighter / electric than the restrained
+   * brand green used on the other --kw- surfaces (privacy, terms). Scoped
+   * here so only the marketing landing pops. `--kw-accent` is the decorative,
+   * high-voltage hue (signal dots, glows, icon chips, radar, borders);
+   * `--kw-accent-text` stays contrast-safe for real text on each theme.
+   * These match the specificity of the base .kw-page rules and sit later in
+   * source order, so they win on the `.kw-page.kw-landing` element. */
+  --kw-accent: #22c55e;
+  --kw-accent-text: #15803d;
+  --kw-accent-glow: color-mix(in srgb, var(--kw-accent) 60%, transparent);
+  --kw-accent-soft: color-mix(in srgb, var(--kw-accent) 20%, transparent);
+}
+.kw-landing[data-theme="dark"] {
+  --kw-accent: #4ade80;
+  --kw-accent-text: #6ee7a0;
+  --kw-accent-inv: #1f9d57;
+  --kw-accent-glow: color-mix(in srgb, var(--kw-accent) 62%, transparent);
+  --kw-accent-soft: color-mix(in srgb, var(--kw-accent) 22%, transparent);
+}
+
+/* Pulsing "live signal" dot — used on eyebrows, status chips, alerts. */
+@keyframes kwSignalPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.6);
+  }
+}
+.kw-signal-dot {
+  border-radius: 50%;
+  background: var(--kw-accent);
+  box-shadow: 0 0 10px var(--kw-accent-glow);
+  animation: kwSignalPulse 2.2s ease-in-out infinite;
+}
+
+/* Card hover lift — feature, use-case, platform tiles. */
+.kw-card-lift {
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    background 0.22s ease;
+}
+.kw-card-lift:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--kw-fg) 22%, transparent);
+}
+
+/* Animated confidence / progress fill. */
+@keyframes kwBarIn {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.kw-bar-fill {
+  transform-origin: left center;
+  background: linear-gradient(
+    90deg,
+    var(--kw-accent),
+    color-mix(in srgb, var(--kw-accent) 55%, var(--kw-fg))
+  );
+  animation: kwBarIn 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Gentle float — chaotic comment cloud + floating context labels. */
+@keyframes kwFloatBob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.kw-float {
+  animation: kwFloatBob 4s ease-in-out infinite;
+}
+
+/* Scan line sweeping a panel as the extension "reads" context. */
+@keyframes kwScan {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(var(--kw-scan-h, 120px));
+    opacity: 0;
+  }
+}
+.kw-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--kw-accent),
+    transparent
+  );
+  box-shadow: 0 0 14px var(--kw-accent-glow);
+  animation: kwScan 3.6s ease-in-out infinite;
+}
+
+/* Market card slide-in under a detected post. */
+@keyframes kwCardIn {
+  0% {
+    transform: translateY(16px);
+    opacity: 0;
+    filter: blur(6px);
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.kw-card-in {
+  animation: kwCardIn 0.9s 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* ---- Probability radar ---- */
+.kw-radar {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  max-width: 420px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at center,
+    var(--kw-accent-soft) 0%,
+    transparent 70%
+  );
+}
+.kw-radar-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--kw-fg) 14%, transparent);
+}
+.kw-radar-ring.r2 {
+  inset: 14%;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--kw-fg) 10%, transparent);
+}
+.kw-radar-ring.r3 {
+  inset: 28%;
+}
+.kw-radar-ring.r4 {
+  inset: 42%;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--kw-fg) 10%, transparent);
+}
+.kw-radar-cross::before,
+.kw-radar-cross::after {
+  content: "";
+  position: absolute;
+  background: color-mix(in srgb, var(--kw-fg) 10%, transparent);
+}
+.kw-radar-cross::before {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.kw-radar-cross::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.kw-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--kw-accent-glow) 50deg,
+    transparent 70deg
+  );
+  animation: kwSweep 4s linear infinite;
+}
+@keyframes kwSweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.kw-radar-blip {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--kw-accent);
+  box-shadow: 0 0 14px var(--kw-accent-glow);
+  transform: translate(-50%, -50%);
+  animation: kwBlip 3s infinite;
+}
+@keyframes kwBlip {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  30% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+.kw-radar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    color-mix(in srgb, var(--kw-accent) 70%, white),
+    var(--kw-accent)
+  );
+  box-shadow:
+    0 0 50px var(--kw-accent-glow),
+    inset 0 0 0 1px color-mix(in srgb, white 25%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Soft accent halo behind product artifacts (extension popup, agent). */
+.kw-glow-halo {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at center,
+    var(--kw-accent-soft),
+    transparent 60%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kw-signal-dot,
+  .kw-float,
+  .kw-scan-line,
+  .kw-radar-sweep,
+  .kw-radar-blip,
+  .kw-bar-fill,
+  .kw-card-in {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    animation: none !important;
+  }
+  .kw-card-lift:hover {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    transform: none !important;
+  }
+}
+
+/* ============================================================
  * TWEET OVERLAY HERO — right-side artifact for landing hero
  * Direction B from the design bundle: simulated x.com browser
  * showing a 3-tweet feed where Knoww scans, surfaces a matching
@@ -1334,11 +1618,15 @@ body:not(:has(.kw-landing))
      card surfacing don't change the column's height. Without this, the
      grid's items-center recentres the hero text every time the card
      resizes — visible as the headline jittering up and down. The floor
-     is sized for the 2-post variant (default below 1920px); the 2xl
-     breakpoint below bumps it for the 3-post variant. */
+     must clear the *injected* state (the PM card grows in on the active
+     post, ~+28px); measured max across platforms is 648px at the
+     side-by-side widths, so 656px keeps the card a constant height (the
+     short platforms get a small static gap above the footer instead of a
+     per-cycle layout shift). The 2xl breakpoint below covers the 3-post
+     variant. */
   display: flex;
   flex-direction: column;
-  min-height: 620px;
+  min-height: 656px;
 }
 /* 2xl (matches the 3-post breakpoint in useTweetLimit). At this width
    X tops out at ~757px and Reddit at ~660px; 780 covers both with a
@@ -1346,6 +1634,18 @@ body:not(:has(.kw-landing))
 @media (min-width: 1920px) {
   .kwt-card {
     min-height: 780px;
+  }
+}
+/* On landscape tablets (≈11"), the side-by-side card sits in a short
+   viewport. Cap its height to the available space so the whole card — through
+   the status bar — stays in view; the feed clips its overflow rather than
+   growing the card. `svh` is stable across mobile toolbar show/hide, so the
+   height stays constant and there's no layout shift. 188px ≈ header (108) +
+   the trimmed hero padding (py-8 → 64) + a small bottom margin. */
+@media (min-width: 1024px) and (max-width: 1279px) and (orientation: landscape) {
+  .kwt-card {
+    min-height: 0;
+    height: min(656px, calc(100svh - 188px));
   }
 }
 /* Status footer pins to the bottom; any spare space sits between the
@@ -1431,6 +1731,26 @@ body:not(:has(.kw-landing))
 }
 [data-theme="light"] .kwt-tab-logo-x {
   border-color: rgba(0, 0, 0, 0.12);
+}
+/* When the embedded card is narrow — i.e. the hero artifact is shown
+   side-by-side with the heading on ~11" tablets / small laptops, where the
+   5-col column is < ~456px — collapse the four browser tabs to logos only so
+   they never overflow or clip. Full text labels return once the card has room
+   (≥ ~456px: 11" landscape, desktop, and the full-width stacked card). The
+   query container is the hero artifact column (`@container` utility on it). */
+@container (max-width: 456px) {
+  .kwt-tab-label {
+    display: none;
+  }
+  /* Equal-width tabs so the quarter-step active rail (translateX 0/100/200/
+     300%) lines up under each logo. Without this the logos pack to the left
+     and the rail floats to the right, "following the big-button flow". */
+  .kwt-tab {
+    flex: 1;
+    justify-content: center;
+    gap: 0;
+    padding: 7px 0 8px;
+  }
 }
 /* Animated rail under the active tab — slides between tabs on switch.
    Width matches one quarter of the strip so the rail sits under each of
@@ -1591,6 +1911,8 @@ body:not(:has(.kw-landing))
 .kwt-feed {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   max-height: 640px;
   overflow: hidden;
   position: relative;
@@ -2320,12 +2642,19 @@ body:not(:has(.kw-landing))
   border: 1px solid var(--kwt-pm-border);
   border-radius: 14px;
   overflow: hidden;
-  margin: 4px 0 12px;
+  /* Collapsed by default so a post that hasn't been "injected" reserves no
+   * vertical space — only the active post at phase 2 grows the card in. Height
+   * + margin animate alongside the slide/fade so it reads as a real injection
+   * pushing the feed down, not a placeholder fading into pre-reserved space. */
+  margin: 0;
+  max-height: 0;
   opacity: 0;
   transform: translateY(14px) scale(0.96);
   transition:
     opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
     transform 0.7s cubic-bezier(0.16, 1.18, 0.32, 1),
+    max-height 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    margin 0.6s cubic-bezier(0.16, 1, 0.3, 1),
     box-shadow 0.6s ease;
   font-family:
     var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -2334,6 +2663,8 @@ body:not(:has(.kw-landing))
   -webkit-backdrop-filter: blur(16px) saturate(140%);
 }
 .kwt-pm-card.kwt-in {
+  margin: 4px 0 12px;
+  max-height: 480px;
   opacity: 1;
   transform: translateY(0) scale(1);
   box-shadow:

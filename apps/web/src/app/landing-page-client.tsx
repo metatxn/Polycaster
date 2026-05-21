@@ -2,13 +2,24 @@
 
 import { ArrowUpRight, Download } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 import { KnowwMark } from "@/components/knoww-mark";
 import {
   KW_PAGE_CLASS,
   KwThemeToggle,
   useKwTheme,
 } from "@/components/kw-theme";
+import {
+  AgentSection,
+  ExtensionSection,
+  FinalCTASection,
+  HowItWorks,
+  ProblemSection,
+  RadarBlock,
+  SolutionSection,
+  TractionSection,
+  UseCasesSection,
+  WhyNowSection,
+} from "@/components/landing/knoww-sections";
 import { TweetOverlayHero } from "@/components/tweet-overlay-hero";
 
 const CHROME_STORE_URL =
@@ -25,94 +36,21 @@ const TICKER = [
   { label: "US-RECESSION-2026", side: "NO", price: "71¢", delta: "-4" },
 ];
 
-// Coverage orbit geometry — three concentric ellipses around centre
-// (50, 55) in the orbit container's percentage coordinate system.
-// Pills sit at fixed angles on these rings; the only motion is from
-// signal bursts that fire from Knoww out to a random pill on a
-// loose 1.5–3s cadence. Dash drift is kept slow & ambient so the
-// rings feel alive between bursts.
-type RingId = "inner" | "middle" | "outer";
-
-const RINGS: Record<RingId, { rx: number; ry: number; dashDur: string }> = {
-  inner: { rx: 26, ry: 21, dashDur: "6s" },
-  middle: { rx: 38, ry: 33, dashDur: "8s" },
-  outer: { rx: 48, ry: 43, dashDur: "10s" },
-};
-
-// Each pill belongs to a ring and has an angle in degrees, where
-// 0° = right-of-centre and increasing angle moves clockwise (sin(θ)
-// > 0 ⇒ +y on screen, since y grows downward). Angles preserve the
-// original hand-arranged static layout.
-const COVERAGE_PILLS: Array<{ name: string; ring: RingId; angle: number }> = [
-  // Inner ring — discussion platforms
-  { name: "Reddit", ring: "inner", angle: -110 },
-  { name: "Hacker News", ring: "inner", angle: -70 },
-  { name: "X / Twitter", ring: "inner", angle: 180 },
-  { name: "Threads", ring: "inner", angle: 0 },
-  { name: "Bluesky", ring: "inner", angle: 110 },
-  { name: "Substack", ring: "inner", angle: 70 },
-  // Middle ring — media & publications
-  { name: "NYT", ring: "middle", angle: -130 },
-  { name: "Bloomberg", ring: "middle", angle: -50 },
-  { name: "Financial Times", ring: "middle", angle: -169 },
-  { name: "Axios", ring: "middle", angle: -11 },
-  { name: "Politico", ring: "middle", angle: 130 },
-  { name: "The Verge", ring: "middle", angle: 50 },
-  // Outer ring — knowledge, culture & professional
-  { name: "Wikipedia", ring: "outer", angle: 180 },
-  { name: "YouTube", ring: "outer", angle: 0 },
-  { name: "ESPN", ring: "outer", angle: 130 },
-  { name: "LinkedIn", ring: "outer", angle: 50 },
-];
-
-// Reveal-stagger delays (ms). The rings scale + fade in inner→middle→
-// outer so the diagram reads as growing outward from Knoww, and each
-// ring's pills fade up shortly after their ring is in place.
-const REVEAL_DELAYS: Record<RingId, { ring: number; pill: number }> = {
-  inner: { ring: 0, pill: 500 },
-  middle: { ring: 200, pill: 700 },
-  outer: { ring: 400, pill: 900 },
-};
-
 export default function LandingPageClient() {
   const { theme, toggleTheme } = useKwTheme();
-  const orbitRef = useRef<HTMLDivElement | null>(null);
-  const [revealed, setRevealed] = useState(false);
-
-  // Reveal toggle — when the orbit map enters the viewport we add the
-  // `kw-coverage-built` class to play the staggered ring + pill build;
-  // when it leaves we remove it so the animation replays on the next
-  // scroll-in. Reduced-motion users get the final state immediately.
-  useEffect(() => {
-    const el = orbitRef.current;
-    if (!el) return;
-
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
-    if (reduceMotion) {
-      setRevealed(true);
-      return;
-    }
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          setRevealed(entry.isIntersecting);
-        }
-      },
-      { threshold: 0.3 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
 
   return (
     <div
-      className={`${KW_PAGE_CLASS} kw-landing fixed inset-0 z-60 overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans`}
+      className={`${KW_PAGE_CLASS} kw-landing fixed inset-0 z-60 overflow-x-hidden overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans`}
       data-theme={theme}
       style={{ colorScheme: theme }}
     >
+      <a
+        href="#content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-100 focus:bg-(--kw-fg) focus:text-(--kw-bg) focus:px-4 focus:py-2 focus:text-sm focus:font-semibold"
+      >
+        Skip to content
+      </a>
       <TickerBar />
 
       <header className="border-b border-(--kw-fg)/10 bg-(--kw-bg)">
@@ -131,16 +69,22 @@ export default function LandingPageClient() {
 
           <nav className="hidden lg:flex items-center gap-8 text-[13px]">
             <a
-              href="#thesis"
+              href="#extension"
               className="hover:text-(--kw-fg)/60 transition-colors"
             >
-              Thesis
+              Extension
             </a>
             <a
               href="#how"
               className="hover:text-(--kw-fg)/60 transition-colors"
             >
-              How It Works
+              How it works
+            </a>
+            <a
+              href="#agent"
+              className="hover:text-(--kw-fg)/60 transition-colors"
+            >
+              Agent
             </a>
             <Link
               href="/markets"
@@ -163,508 +107,108 @@ export default function LandingPageClient() {
         </div>
       </header>
 
-      {/* HERO */}
-      <section className="relative flex min-h-[calc(100svh-109px)] items-center border-b border-(--kw-fg)/10 overflow-hidden">
-        <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 py-14 sm:px-8 md:py-20">
-          {/* 12-col grid: text holds 7/12 on xl+, leaving 5/12 on the right
-              for the product artifact that ships separately. On smaller
-              viewports the text spans full width. */}
-          <div className="grid grid-cols-12 gap-8 xl:gap-12 items-center">
-            <div className="col-span-12 xl:col-span-7">
-              <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-(--kw-fg)/60 mb-6">
-                <span className="w-1.5 h-1.5 bg-(--kw-accent) animate-pulse" />
-                Issue № 01 — The Prediction Layer
-              </div>
-
-              <h1 className="font-bold tracking-[-0.035em] leading-[0.98] text-[44px] sm:text-[60px] md:text-[76px] lg:text-[88px] xl:text-[104px] 2xl:text-[116px] mb-6">
-                <span className="kw-stagger" style={{ animationDelay: "60ms" }}>
-                  Every
-                </span>{" "}
-                <span
-                  className="kw-stagger"
-                  style={{ animationDelay: "160ms" }}
-                >
-                  opinion,
-                </span>
-                <br />
-                <span
-                  className="kw-stagger"
-                  style={{ animationDelay: "260ms" }}
-                >
-                  a
-                </span>{" "}
-                <span
-                  className="kw-stagger italic kw-editorial"
-                  style={{ animationDelay: "360ms" }}
-                >
-                  position.
-                </span>
-              </h1>
-
-              <p className="text-base md:text-[17px] text-(--kw-fg)/70 max-w-[560px] leading-[1.55] mb-8">
-                Knoww reads the internet alongside you. When a claim,
-                prediction, or forecast surfaces — on X, Reddit, Bloomberg,
-                anywhere — we quietly surface the matching Polymarket and let
-                you take the other side in one click.
-              </p>
-
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                <a
-                  href={CHROME_STORE_URL}
-                  className="inline-flex items-center gap-2.5 bg-(--kw-fg) text-(--kw-bg) px-7 py-4 text-[14px] font-semibold hover:bg-(--kw-fg)/90 transition-colors group"
-                >
-                  <Download className="w-4 h-4" />
-                  Install Knoww — Free
-                  <ArrowUpRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                </a>
-                <Link
-                  href="/markets"
-                  className="inline-flex items-center gap-2 text-[14px] font-medium text-(--kw-fg)/70 hover:text-(--kw-fg) px-5 py-4 border-b border-(--kw-fg)/20 hover:border-(--kw-fg) transition-colors"
-                >
-                  Or explore markets without installing
-                </Link>
-              </div>
-            </div>
-
-            <div className="hidden sm:col-span-12 sm:mt-10 sm:block xl:col-span-5 xl:mt-0">
-              <TweetOverlayHero />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* BY THE NUMBERS (PROBLEM) — asymmetric grid, italic units, footnote marks */}
-      <section className="border-b border-(--kw-fg)/10 bg-(--kw-bg-alt)">
-        <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32">
-          <div className="kw-reveal flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5 mb-10">
-            <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              § I. The gap we&apos;re closing
-            </h2>
-            <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              P. 01 / 04
-            </span>
-          </div>
-
-          {/* Asymmetric 12-col grid: first two stats each take 4 cols, third
-              stat (the prize) takes 4 cols but at dramatically larger type. */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 border-t border-(--kw-fg)/15">
-            <div className="kw-reveal lg:col-span-4 py-8 md:py-10 px-6 lg:border-r border-(--kw-fg)/15">
-              <div className="flex items-baseline gap-2 mb-1">
-                <sup className="kw-editorial italic text-[14px] text-(--kw-fg)/50 font-medium mr-1 -translate-y-2">
-                  i
-                </sup>
-                <span className="font-bold text-6xl md:text-7xl tabular-nums tracking-[-0.04em] leading-none">
-                  <CountUp target={4.9} decimals={1} />
-                </span>
-                <span className="kw-editorial text-[20px] md:text-[24px] text-(--kw-fg)/75 ml-1">
-                  billion
-                </span>
-              </div>
-              <p className="text-[14px] leading-[1.55] text-(--kw-fg)/65 max-w-[260px] mt-5">
-                people post, argue, and predict online every day — each one an
-                unrealized market position.
-              </p>
-            </div>
-
-            <div className="kw-reveal lg:col-span-3 py-8 md:py-10 px-6 lg:border-r border-(--kw-fg)/15 border-t lg:border-t-0">
-              <div className="flex items-baseline gap-2 mb-1">
-                <sup className="kw-editorial italic text-[14px] text-(--kw-fg)/50 font-medium mr-1 -translate-y-2">
-                  ii
-                </sup>
-                <span className="font-bold text-5xl md:text-6xl tabular-nums tracking-[-0.04em] leading-none">
-                  <CountUp target={0.1} decimals={1} />
-                </span>
-                <span className="kw-editorial text-[18px] md:text-[22px] text-(--kw-fg)/75 ml-1">
-                  %
-                </span>
-              </div>
-              <p className="text-[14px] leading-[1.55] text-(--kw-fg)/65 max-w-[220px] mt-5">
-                of those opinions ever reach a prediction market. The
-                signal-to-action gap is the product.
-              </p>
-            </div>
-
-            <div className="kw-reveal lg:col-span-5 py-8 md:py-10 px-6 border-t lg:border-t-0">
-              <div className="flex items-baseline gap-2 mb-1">
-                <sup className="kw-editorial italic text-[15px] text-(--kw-accent-text) font-medium mr-1 -translate-y-3">
-                  iii
-                </sup>
-                <span className="text-(--kw-fg)/55 font-bold text-4xl md:text-5xl tracking-[-0.04em] leading-none">
-                  $
-                </span>
-                <span className="font-bold text-7xl md:text-[128px] tabular-nums tracking-[-0.045em] leading-none">
-                  <CountUp target={50} decimals={0} />
-                </span>
-                <span className="kw-editorial text-[24px] md:text-[32px] text-(--kw-fg)/80 ml-2">
-                  billion
-                </span>
-              </div>
-              <p className="text-[14px] leading-[1.55] text-(--kw-fg)/65 max-w-[360px] mt-5">
-                total prediction market opportunity by 2030, per industry
-                forecasts — the market Knoww is building a layer into.
-              </p>
-            </div>
-          </div>
-
-          {/* Editorial citation strip */}
-          <div className="kw-reveal mt-8 pt-5 border-t border-(--kw-fg)/10 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/45">
-            <span>
-              <span className="kw-editorial normal-case tracking-normal text-[12px] text-(--kw-fg)/65 mr-2">
-                Sources —
-              </span>
-              i. Meltwater 2024 · ii. Polymarket usage data · iii. Gartner
-              projection
-            </span>
-            <span>Compiled Q2 2026</span>
-          </div>
-        </div>
-      </section>
-
-      {/* THESIS / SOLUTION */}
-      <section id="thesis" className="border-b border-(--kw-fg)/10">
-        <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32 relative">
-          <div className="kw-reveal flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5 mb-8">
-            <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              § II. The thesis
-            </h2>
-            <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              P. 02 / 04
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-8 lg:gap-10 mb-10">
-            <div className="kw-reveal md:col-span-5">
-              <h3 className="text-3xl md:text-4xl font-bold tracking-[-0.03em] leading-[1.04]">
-                Predictions live where conversations happen —
-                <span className="text-(--kw-fg)/60">
-                  {" "}
-                  not where markets are.
-                </span>
-              </h3>
-            </div>
-            <div className="kw-reveal md:col-span-6 md:col-start-7 text-[15px] leading-[1.65] text-(--kw-fg)/70 space-y-4">
-              <p>
-                Every trading platform asks the same question: come to us, log
-                in, find the market, then trade. Knoww inverts it. We meet you
-                where you already are — the thread, the tweet, the article — and
-                bring the market into view.
-              </p>
-              <p>
-                Think of it as a cursor for public opinion. Hover over a claim,
-                see the odds. Decide to trade, do it in one click. No tabs, no
-                context switch.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 border-t border-(--kw-fg)/15">
-            {[
-              {
-                n: "A",
-                title: "Detect",
-                desc: "A lightweight page scanner identifies predictive language — claims, probabilities, timeframes — as you browse.",
-              },
-              {
-                n: "B",
-                title: "Match",
-                desc: "We cross-reference against the live Polymarket order book and surface the closest tradeable position in under 200ms.",
-              },
-              {
-                n: "C",
-                title: "Execute",
-                desc: "One click, no redirect. Orders route through the same infrastructure power users already rely on — fully self-custody.",
-              },
-            ].map((f, i) => (
-              <div
-                key={f.n}
-                className={`kw-reveal py-7 px-6 ${i !== 2 ? "md:border-r border-(--kw-fg)/15" : ""} ${i !== 0 ? "border-t md:border-t-0 border-(--kw-fg)/15" : ""}`}
-              >
-                <div className="flex items-center gap-3 mb-6">
-                  <span className="w-7 h-7 bg-(--kw-fg) text-(--kw-bg) flex items-center justify-center text-[11px] font-mono font-bold">
-                    {f.n}
-                  </span>
-                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-                    Phase
-                  </span>
+      <main id="content" tabIndex={-1}>
+        {/* HERO — heading + right-side artifact preserved per design direction;
+            no background grid. */}
+        <section className="relative flex min-h-[calc(100svh-109px)] items-center border-b border-(--kw-fg)/10 overflow-hidden">
+          <div className="kw-stage-glow" />
+          <div className="relative z-[1] w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 py-14 sm:px-8 md:py-20 min-[1024px]:max-[1279px]:landscape:py-8">
+            {/* Top-align on landscape tablets so the CTA never gets pushed
+              below the fold by the tall side-by-side card; desktop (xl) keeps
+              the balanced vertical centering. */}
+            <div className="grid grid-cols-12 gap-8 xl:gap-12 items-center min-[1024px]:max-[1279px]:landscape:items-start">
+              <div className="col-span-12 lg:landscape:col-span-7 xl:col-span-7">
+                <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-(--kw-fg)/60 mb-6">
+                  <span className="kw-signal-dot w-1.5 h-1.5" />
+                  Issue № 01 — The Prediction Layer
                 </div>
-                <h3 className="text-2xl font-bold mb-3 tracking-[-0.02em]">
-                  {f.title}
-                </h3>
-                <p className="text-[14px] leading-[1.6] text-(--kw-fg)/65">
-                  {f.desc}
+
+                <h1 className="font-bold tracking-[-0.035em] leading-[0.98] text-[44px] sm:text-[60px] md:text-[76px] lg:text-[88px] xl:text-[104px] 2xl:text-[116px] mb-6">
+                  <span
+                    className="kw-stagger"
+                    style={{ animationDelay: "60ms" }}
+                  >
+                    Every
+                  </span>{" "}
+                  <span
+                    className="kw-stagger"
+                    style={{ animationDelay: "160ms" }}
+                  >
+                    opinion,
+                  </span>
+                  <br />
+                  <span
+                    className="kw-stagger"
+                    style={{ animationDelay: "260ms" }}
+                  >
+                    a
+                  </span>{" "}
+                  <span
+                    className="kw-stagger italic kw-editorial"
+                    style={{ animationDelay: "360ms" }}
+                  >
+                    position.
+                  </span>
+                </h1>
+
+                <p className="text-base md:text-[17px] text-(--kw-fg)/70 max-w-[560px] leading-[1.55] mb-8">
+                  Knoww reads the internet alongside you. When a claim,
+                  prediction, or forecast surfaces — on X, Reddit, Bloomberg,
+                  anywhere — we quietly surface the matching Polymarket and let
+                  you take the other side in one click.
                 </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* COVERAGE — orbit map of the places where opinions form. The
-          reference image is recreated in code so it can adapt to theme
-          colors, text scaling and responsive breakpoints. */}
-      <section
-        id="coverage"
-        className="border-b border-(--kw-fg)/10 bg-(--kw-bg-alt)"
-      >
-        <div className="mx-auto w-full max-w-[1280px] 2xl:max-w-[1440px] px-6 sm:px-8 py-20 md:py-28 lg:py-32">
-          <div className="kw-reveal mb-6 flex items-baseline justify-between border-b border-(--kw-fg)/15 pb-5">
-            <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              § III. Coverage
-            </h2>
-            <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60">
-              P. 03 / 04
-            </span>
-          </div>
-
-          <h3 className="kw-reveal mx-auto max-w-[700px] text-center text-[28px] font-semibold leading-[1.04] text-(--kw-fg) [font-family:var(--font-editorial),Georgia,serif] [letter-spacing:0] sm:text-[34px] md:text-[40px] lg:text-[44px]">
-            Wherever the future{" "}
-            <span className="italic text-(--kw-accent-text)">
-              is discussed,
-            </span>
-            <br />
-            Knoww is already there.
-          </h3>
-
-          <div className="kw-reveal relative mt-10 md:mt-12">
-            {/* Desktop orbit map. When the section enters the viewport
-                `kw-coverage-built` is added, which triggers the staggered
-                ring + pill reveal animations defined in globals.css. */}
-            <div
-              ref={orbitRef}
-              className={`relative mx-auto hidden h-[380px] max-w-[1120px] overflow-visible md:block lg:h-[420px] xl:h-[460px] ${
-                revealed ? "kw-coverage-built" : ""
-              }`}
-            >
-              <svg
-                aria-hidden
-                role="presentation"
-                focusable="false"
-                className="pointer-events-none absolute inset-0 h-full w-full"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-              >
-                {(["inner", "middle", "outer"] as const).map((id) => {
-                  const r = RINGS[id];
-                  return (
-                    <ellipse
-                      key={id}
-                      className="kw-orbit-ring"
-                      cx="50"
-                      cy="55"
-                      rx={r.rx}
-                      ry={r.ry}
-                      fill="none"
-                      stroke="var(--kw-fg)"
-                      strokeOpacity={0.28}
-                      strokeWidth={1}
-                      strokeDasharray="6 10"
-                      vectorEffect="non-scaling-stroke"
-                      style={{ animationDelay: `${REVEAL_DELAYS[id].ring}ms` }}
-                    />
-                  );
-                })}
-              </svg>
-
-              <div
-                aria-hidden
-                className="absolute left-1/2 top-[55%] h-[210px] w-[430px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-(--kw-accent)/14 blur-3xl"
-              />
-
-              {/* Pills sit at fixed angles on their rings. They fade up
-                  ring-by-ring (delay set inline) once the parent gets
-                  `kw-coverage-built`, then sit fully static. */}
-              {COVERAGE_PILLS.map((p) => {
-                const ring = RINGS[p.ring];
-                const a = (p.angle * Math.PI) / 180;
-                const x = 50 + ring.rx * Math.cos(a);
-                const y = 55 + ring.ry * Math.sin(a);
-                return (
-                  <div
-                    key={p.name}
-                    className="kw-orbit-pill absolute -translate-x-1/2 -translate-y-1/2"
-                    style={{
-                      left: `${x}%`,
-                      top: `${y}%`,
-                      animationDelay: `${REVEAL_DELAYS[p.ring].pill}ms`,
-                    }}
+                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                  <a
+                    href={CHROME_STORE_URL}
+                    className="inline-flex items-center gap-2.5 bg-(--kw-fg) text-(--kw-bg) px-7 py-4 text-[14px] font-semibold hover:bg-(--kw-fg)/90 transition-colors group"
                   >
-                    <span className="inline-block rounded-full border border-(--kw-fg)/12 bg-(--kw-bg-card)/95 px-4 py-1.5 text-[12px] font-semibold text-(--kw-fg)/90 whitespace-nowrap shadow-[0_10px_28px_-20px_rgba(0,0,0,0.55),0_2px_10px_-8px_rgba(0,0,0,0.35)]">
-                      {p.name}
-                    </span>
-                  </div>
-                );
-              })}
-
-              {/* Centre pill — Knoww. Always visible as the anchor; rings
-                  and pills appear around it during the reveal. */}
-              <div className="absolute left-1/2 top-[55%] -translate-x-1/2 -translate-y-1/2">
-                <span className="relative inline-flex items-center gap-3 rounded-full border-[3px] border-(--kw-accent) bg-(--kw-bg-card)/92 px-8 py-4 shadow-[0_0_0_16px_color-mix(in_srgb,var(--kw-accent)_9%,transparent),0_24px_60px_-24px_rgba(13,159,110,0.55)]">
-                  <span className="w-8 h-8 bg-(--kw-fg) text-(--kw-bg) flex items-center justify-center rounded-[4px]">
-                    <KnowwMark size="sm" />
-                  </span>
-                  <span className="font-bold text-[26px] tracking-tight">
-                    Knoww
-                  </span>
-                </span>
-              </div>
-            </div>
-
-            {/* Mobile fallback — flowing pill grid, no orbit crowding. */}
-            <div className="md:hidden rounded-[28px] border border-(--kw-fg)/12 bg-(--kw-bg-card)/70 p-6 sm:p-8">
-              <div className="flex justify-center mb-6">
-                <span className="relative inline-flex items-center gap-2 px-5 py-2.5 rounded-full border-2 border-(--kw-accent) bg-(--kw-bg-card) shadow-[0_0_0_5px_color-mix(in_srgb,var(--kw-accent)_14%,transparent)]">
-                  <span className="w-5 h-5 bg-(--kw-accent)/15 border border-(--kw-accent)/40 flex items-center justify-center rounded-[3px]">
-                    <KnowwMark size="sm" />
-                  </span>
-                  <span className="font-bold text-[15px] tracking-tight">
-                    Knoww
-                  </span>
-                </span>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {COVERAGE_PILLS.map((p) => (
-                  <span
-                    key={p.name}
-                    className="inline-block px-3 py-1.5 rounded-full border border-(--kw-fg)/20 bg-(--kw-bg-card) text-[12px] font-mono text-(--kw-fg)/80"
+                    <Download className="w-4 h-4" />
+                    Install Knoww — Free
+                    <ArrowUpRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                  </a>
+                  <Link
+                    href="/markets"
+                    className="inline-flex items-center gap-2 text-[14px] font-medium text-(--kw-fg)/70 hover:text-(--kw-fg) px-5 py-4 border-b border-(--kw-fg)/20 hover:border-(--kw-fg) transition-colors"
                   >
-                    {p.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="kw-reveal mt-8 flex justify-center md:mt-0">
-            <div className="flex items-center gap-3 text-center">
-              <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-(--kw-accent)" />
-              <span className="kw-editorial text-[15px] md:text-[17px] text-(--kw-fg)/70">
-                And growing — every site where opinions live is a candidate for
-                the layer.
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* HOW IT WORKS */}
-      <section
-        id="how"
-        className="border-b border-(--kw-fg)/10 bg-(--kw-fg) text-(--kw-bg)"
-      >
-        <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32">
-          <div className="flex items-baseline justify-between border-b border-(--kw-bg)/15 pb-5 mb-8">
-            <h2 className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-bg)/75">
-              § IV. Installation to position, in about a minute
-            </h2>
-            <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-bg)/70">
-              P. 04 / 04
-            </span>
-          </div>
-
-          <h3 className="kw-reveal text-4xl md:text-5xl font-bold tracking-[-0.035em] leading-[1] mb-8 max-w-[820px]">
-            Three steps. Claim to position, without leaving the page.
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
-            {[
-              {
-                n: "01",
-                roman: "i",
-                time: "~30s",
-                title: "Install",
-                desc: "Add Knoww from the Chrome Web Store. One permission prompt, one click.",
-              },
-              {
-                n: "02",
-                roman: "ii",
-                time: "Passive",
-                title: "Browse",
-                desc: "Keep doing what you were doing. A small indicator appears when a market is near.",
-              },
-              {
-                n: "03",
-                roman: "iii",
-                time: "~5s",
-                title: "Trade",
-                desc: "Open the panel, pick a side, confirm. Your position is live on-chain.",
-              },
-            ].map((s, i) => (
-              <div
-                key={s.n}
-                className={`kw-reveal py-6 px-6 ${i !== 2 ? "md:border-r border-(--kw-bg)/15" : ""} ${i !== 0 ? "border-t md:border-t-0 border-(--kw-bg)/15" : ""}`}
-              >
-                <div className="flex items-end justify-between mb-8">
-                  <span
-                    aria-hidden
-                    className="kw-editorial italic text-[76px] md:text-[88px] leading-[0.75] tracking-[-0.04em] text-(--kw-bg)"
-                  >
-                    {s.roman}
-                  </span>
-                  <span className="sr-only">Step {s.n}:</span>
-                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-accent-inv)">
-                    {s.time}
-                  </span>
+                    Or explore markets without installing
+                  </Link>
                 </div>
-                <h3 className="text-2xl font-bold mb-3 tracking-[-0.02em]">
-                  {s.title}
-                </h3>
-                <p className="text-[14px] leading-[1.6] text-(--kw-bg)/75">
-                  {s.desc}
-                </p>
               </div>
-            ))}
-          </div>
 
-          <div className="mt-8 pt-6 border-t border-(--kw-bg)/15 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-            <p className="text-(--kw-bg)/70 text-[14px] max-w-[540px]">
-              Self-custody throughout. Your keys, your funds, your trades —
-              Knoww never touches any of them.
-            </p>
-            <a
-              href={CHROME_STORE_URL}
-              className="inline-flex items-center gap-2.5 bg-(--kw-bg) text-(--kw-fg) px-6 py-3.5 text-[14px] font-semibold hover:bg-(--kw-bg)/85 transition-colors group w-fit"
-            >
-              <Download className="w-4 h-4" />
-              Install Knoww
-              <ArrowUpRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-            </a>
-          </div>
-        </div>
-      </section>
-
-      {/* FINAL CTA */}
-      <section className="border-b border-(--kw-fg)/10">
-        <div className="w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32">
-          <div className="max-w-[860px]">
-            <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60 mb-6 block">
-              § V — Install
-            </span>
-            <h2 className="text-[48px] sm:text-[64px] md:text-[80px] font-bold tracking-[-0.035em] leading-[0.94] mb-8">
-              Start reading
-              <br />
-              the market,
-              <br />
-              <span className="italic kw-editorial">not around it.</span>
-            </h2>
-
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-              <a
-                href={CHROME_STORE_URL}
-                className="inline-flex items-center gap-2.5 bg-(--kw-fg) text-(--kw-bg) px-8 py-5 text-[15px] font-semibold hover:bg-(--kw-fg)/90 transition-colors group"
-              >
-                <Download className="w-4 h-4" />
-                Install Knoww — Free
-                <ArrowUpRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-              </a>
+              {/* Hero artifact visibility + placement (CSS can't read physical
+                inches, so we approximate by viewport + orientation):
+                  • Hidden by default (phones, small tablets in portrait).
+                  • portrait ≥820px → 11"-and-larger tablets (Air 11"=820, Pro
+                    11"=834, 12.9"=1024) show it, stacked below the heading
+                    (natural for tall/narrow portrait screens).
+                  • landscape ≥1024px → tablets rotated horizontal (11"=1194,
+                    mini=1133, 10.2"=1080) show it side-by-side with the heading
+                    so it never gets pushed below and clipped; phones (≤932) stay
+                    hidden.
+                  • xl (≥1280px) → desktop side-by-side, as before. */}
+              <div className="@container hidden col-span-12 mt-10 min-w-0 min-[820px]:portrait:block lg:landscape:col-span-5 lg:landscape:mt-0 lg:landscape:block xl:col-span-5 xl:mt-0 xl:block">
+                <TweetOverlayHero />
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+
+        {/* Redesigned prediction-layer narrative */}
+        <ProblemSection />
+        <SolutionSection />
+        <ExtensionSection />
+        <HowItWorks />
+        <RadarBlock />
+        <AgentSection />
+        <WhyNowSection />
+        <UseCasesSection />
+        <TractionSection />
+        <FinalCTASection chromeStoreUrl={CHROME_STORE_URL} />
+      </main>
 
       {/* FOOTER */}
       <footer className="border-t border-(--kw-fg)/10 bg-(--kw-bg-alt)">
-        {/* Publication-style issue line — editorial flourish at the top of the
-            footer, in Fraunces italic to echo the typographic system. */}
         <div className="border-b border-(--kw-fg)/10">
           <div className="max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-3 flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/65">
             <span className="flex items-baseline gap-3">
@@ -685,7 +229,7 @@ export default function LandingPageClient() {
               <span className="font-bold text-[14px]">Knoww</span>
             </div>
             <p className="text-[12px] text-(--kw-fg)/60 leading-[1.55] max-w-[220px]">
-              A prediction market layer for the{" "}
+              The prediction-market layer for the{" "}
               <span className="kw-editorial text-(--kw-fg)/80">
                 open internet
               </span>
@@ -711,6 +255,14 @@ export default function LandingPageClient() {
                   className="hover:text-(--kw-fg)/60 transition-colors"
                 >
                   Extension
+                </a>
+              </li>
+              <li>
+                <a
+                  href="#agent"
+                  className="hover:text-(--kw-fg)/60 transition-colors"
+                >
+                  Agent
                 </a>
               </li>
             </ul>
@@ -808,69 +360,4 @@ function TickerBar() {
       </div>
     </div>
   );
-}
-
-/**
- * Counts up a number from zero to `target` when it scrolls into view.
- * Uses IntersectionObserver against the viewport (the landing container
- * is fixed, so children's viewport positions update with inner scroll).
- */
-function CountUp({
-  target,
-  decimals = 0,
-  duration = 1400,
-}: {
-  target: number;
-  decimals?: number;
-  duration?: number;
-}) {
-  const [displayed, setDisplayed] = useState<string>(
-    decimals === 0 ? "0" : `0.${"0".repeat(decimals)}`
-  );
-  const ref = useRef<HTMLSpanElement>(null);
-  const hasRun = useRef(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const format = (v: number) =>
-      decimals === 0 ? String(Math.round(v)) : v.toFixed(decimals);
-
-    const animate = () => {
-      const start = performance.now();
-      const tick = (now: number) => {
-        const t = Math.min((now - start) / duration, 1);
-        const eased = 1 - (1 - t) ** 3; // cubic ease-out
-        setDisplayed(format(target * eased));
-        if (t < 1) requestAnimationFrame(tick);
-        else setDisplayed(format(target));
-      };
-      requestAnimationFrame(tick);
-    };
-
-    // Honor reduced-motion preferences by skipping straight to the end.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setDisplayed(format(target));
-      hasRun.current = true;
-      return;
-    }
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && !hasRun.current) {
-            hasRun.current = true;
-            animate();
-            io.disconnect();
-          }
-        }
-      },
-      { threshold: 0.35 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [target, decimals, duration]);
-
-  return <span ref={ref}>{displayed}</span>;
 }

@@ -105,6 +105,88 @@ export const REDDIT_POSTS: RedditPost[] = [
       more: 34,
     },
   },
+  {
+    subreddit: "r/CryptoCurrency",
+    subInitial: "C",
+    subColor: "linear-gradient(135deg, #f7931a, #b45309)",
+    user: "u/satoshi_lite",
+    time: "3h",
+    title: "BTC back above $120K — is $150K EOY in play?",
+    body: ["On-chain accumulation is ", { hl: "back to April highs" }, "."],
+    upvotes: "9.7k",
+    comments: "1.1k",
+    market: {
+      title: "Bitcoin above $150K by Dec 31",
+      icon: {
+        type: "letter",
+        letter: "₿",
+        bg: "linear-gradient(135deg, #f7931a, #b45309)",
+      },
+      cat: "CRYPTO",
+      match: 88,
+      options: [
+        { label: "Above", pct: 31, hue: "blue" },
+        { label: "Below", pct: 69, hue: "purple" },
+      ],
+      more: 4,
+    },
+  },
+  {
+    subreddit: "r/nfl",
+    subInitial: "N",
+    subColor: "linear-gradient(135deg, #16a34a, #065f46)",
+    user: "u/gridiron_guru",
+    time: "5h",
+    title: "Way-too-early Super Bowl LX odds dropped",
+    body: ["Chiefs and Eagles ", { hl: "headline the futures board" }, "."],
+    upvotes: "6.3k",
+    comments: "3.1k",
+    market: {
+      title: "Super Bowl LX Champion",
+      icon: {
+        type: "letter",
+        letter: "SB",
+        bg: "linear-gradient(135deg, #16a34a, #065f46)",
+      },
+      cat: "SPORTS",
+      match: 79,
+      options: [
+        { label: "Chiefs", pct: 27, hue: "blue" },
+        { label: "Eagles", pct: 15, hue: "purple" },
+      ],
+      more: 12,
+    },
+  },
+  {
+    subreddit: "r/technology",
+    subInitial: "T",
+    subColor: "linear-gradient(135deg, #ef4444, #b91c1c)",
+    user: "u/range_anxiety",
+    time: "7h",
+    title: "Tesla reaffirms 2026 robotaxi rollout",
+    body: [
+      "Wide launch promised next year — ",
+      { hl: "Street stays doubtful" },
+      ".",
+    ],
+    upvotes: "4.4k",
+    comments: "2.8k",
+    market: {
+      title: "Tesla Robotaxi launches in 2026",
+      icon: {
+        type: "letter",
+        letter: "T",
+        bg: "linear-gradient(135deg, #ef4444, #b91c1c)",
+      },
+      cat: "TECH",
+      match: 73,
+      options: [
+        { label: "Yes", pct: 38, hue: "blue" },
+        { label: "No", pct: 62, hue: "purple" },
+      ],
+      more: 5,
+    },
+  },
 ];
 
 const RD_ICONS = {
@@ -242,8 +324,10 @@ export function RedditItem({
           {renderBody(p.body, active && phase >= 1)}
         </p>
 
-        {active && !closed && (
-          <div className={`kwt-pm-card${phase === 2 ? " kwt-in" : ""}`}>
+        {!closed && (
+          <div
+            className={`kwt-pm-card${active && phase === 2 ? " kwt-in" : ""}`}
+          >
             <div className="kwt-pm-head">
               <div className="kwt-pm-icon">
                 {p.market.icon.type === "seal" ? (

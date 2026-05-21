@@ -97,6 +97,87 @@ export const BLOOMBERG_ARTICLES: BloombergArticle[] = [
       more: 34,
     },
   },
+  {
+    section: "MARKETS",
+    headline: "Bitcoin Rebounds Past $120K as Year-End Targets Firm",
+    lede: [
+      "On-chain demand has returned, putting ",
+      { hl: "$150K back within reach" },
+      " by December.",
+    ],
+    byline: "Olga Kharif",
+    time: "21m ago",
+    ticker: { symbol: "BTC", delta: "+3.4%", dir: "up" },
+    market: {
+      title: "Bitcoin above $150K by Dec 31",
+      icon: {
+        type: "letter",
+        letter: "₿",
+        bg: "linear-gradient(135deg, #f7931a, #b45309)",
+      },
+      cat: "CRYPTO",
+      match: 88,
+      options: [
+        { label: "Above", pct: 31, hue: "blue" },
+        { label: "Below", pct: 69, hue: "purple" },
+      ],
+      more: 4,
+    },
+  },
+  {
+    section: "BUSINESS OF SPORTS",
+    headline: "Chiefs Lead Early Super Bowl LX Futures",
+    lede: [
+      "Sportsbooks open with Kansas City ahead, ",
+      { hl: "Philadelphia a close second" },
+      ".",
+    ],
+    byline: "Randall Williams",
+    time: "44m ago",
+    ticker: { symbol: "SBLX", delta: "+0.6 vol", dir: "up" },
+    market: {
+      title: "Super Bowl LX Champion",
+      icon: {
+        type: "letter",
+        letter: "SB",
+        bg: "linear-gradient(135deg, #16a34a, #065f46)",
+      },
+      cat: "SPORTS",
+      match: 79,
+      options: [
+        { label: "Chiefs", pct: 27, hue: "blue" },
+        { label: "Eagles", pct: 15, hue: "purple" },
+      ],
+      more: 12,
+    },
+  },
+  {
+    section: "TECHNOLOGY",
+    headline: "Tesla Reaffirms 2026 Robotaxi Timeline; Street Doubts Linger",
+    lede: [
+      "Executives promised a wide rollout next year, but ",
+      { hl: "analysts remain skeptical" },
+      ".",
+    ],
+    byline: "Dana Hull",
+    time: "1h ago",
+    ticker: { symbol: "TSLA", delta: "−1.1%", dir: "down" },
+    market: {
+      title: "Tesla Robotaxi launches in 2026",
+      icon: {
+        type: "letter",
+        letter: "T",
+        bg: "linear-gradient(135deg, #ef4444, #b91c1c)",
+      },
+      cat: "TECH",
+      match: 73,
+      options: [
+        { label: "Yes", pct: 38, hue: "blue" },
+        { label: "No", pct: 62, hue: "purple" },
+      ],
+      more: 5,
+    },
+  },
 ];
 
 export function BloombergItem({
@@ -132,8 +213,8 @@ export function BloombergItem({
 
       <p className="kwt-bb-lede">{renderBody(a.lede, active && phase >= 1)}</p>
 
-      {active && !closed && (
-        <div className={`kwt-pm-card${phase === 2 ? " kwt-in" : ""}`}>
+      {!closed && (
+        <div className={`kwt-pm-card${active && phase === 2 ? " kwt-in" : ""}`}>
           <div className="kwt-pm-head">
             <div className="kwt-pm-icon">
               {a.market.icon.type === "seal" ? (

@@ -101,6 +101,90 @@ export const BLUESKY_POSTS: BlueskyPost[] = [
       more: 34,
     },
   },
+  {
+    name: "Glassnode",
+    handle: "glassnode.bsky.social",
+    time: "26m",
+    initials: "GN",
+    avatar: "linear-gradient(135deg, #f7931a, #1d9bf0)",
+    body: [
+      "BTC back over $120K — ",
+      { hl: "$150K by year-end is live again" },
+      ".",
+    ],
+    stats: { reply: "318", repost: "1.2K", like: "6.7K" },
+    market: {
+      title: "Bitcoin above $150K by Dec 31",
+      icon: {
+        type: "letter",
+        letter: "₿",
+        bg: "linear-gradient(135deg, #f7931a, #b45309)",
+      },
+      cat: "CRYPTO",
+      match: 88,
+      options: [
+        { label: "Above", pct: 31, hue: "blue" },
+        { label: "Below", pct: 69, hue: "purple" },
+      ],
+      more: 4,
+    },
+  },
+  {
+    name: "Adam Schefter",
+    handle: "schefter.bsky.social",
+    time: "50m",
+    initials: "AS",
+    avatar: "linear-gradient(135deg, #c8102e, #7a0c1f)",
+    body: [
+      "Early Super Bowl LX futures — ",
+      { hl: "Chiefs out front, Eagles close" },
+      ".",
+    ],
+    stats: { reply: "540", repost: "1.6K", like: "9.3K" },
+    market: {
+      title: "Super Bowl LX Champion",
+      icon: {
+        type: "letter",
+        letter: "SB",
+        bg: "linear-gradient(135deg, #16a34a, #065f46)",
+      },
+      cat: "SPORTS",
+      match: 79,
+      options: [
+        { label: "Chiefs", pct: 27, hue: "blue" },
+        { label: "Eagles", pct: 15, hue: "purple" },
+      ],
+      more: 12,
+    },
+  },
+  {
+    name: "Sawyer Merritt",
+    handle: "sawyermerritt.bsky.social",
+    time: "2h",
+    initials: "SM",
+    avatar: "linear-gradient(135deg, #ef4444, #6366f1)",
+    body: [
+      "Tesla reaffirms robotaxi goes wide in 2026. ",
+      { hl: "Markets skeptical" },
+      ".",
+    ],
+    stats: { reply: "276", repost: "740", like: "4.0K" },
+    market: {
+      title: "Tesla Robotaxi launches in 2026",
+      icon: {
+        type: "letter",
+        letter: "T",
+        bg: "linear-gradient(135deg, #ef4444, #b91c1c)",
+      },
+      cat: "TECH",
+      match: 73,
+      options: [
+        { label: "Yes", pct: 38, hue: "blue" },
+        { label: "No", pct: 62, hue: "purple" },
+      ],
+      more: 5,
+    },
+  },
 ];
 
 const BS_ICONS = {
@@ -214,8 +298,10 @@ export function BlueskyItem({
           {renderBody(p.body, active && phase >= 1)}
         </p>
 
-        {active && !closed && (
-          <div className={`kwt-pm-card${phase === 2 ? " kwt-in" : ""}`}>
+        {!closed && (
+          <div
+            className={`kwt-pm-card${active && phase === 2 ? " kwt-in" : ""}`}
+          >
             <div className="kwt-pm-head">
               <div className="kwt-pm-icon">
                 {p.market.icon.type === "seal" ? (

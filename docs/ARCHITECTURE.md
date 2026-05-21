@@ -22,7 +22,7 @@ There is also one active scheduled runtime path:
 
 - End users browsing prediction markets on the web app
 - Traders connecting Polygon wallets and placing Polymarket orders
-- Extension users reading social, community, editorial, finance, sports, and prediction-native sites such as X/Twitter, LinkedIn, Reddit, Farcaster, Bluesky, Discord, Hacker News, Stack Overflow, Quora, Product Hunt, Lemmy, Kalshi, Manifold, Metaculus, TradingView, and crypto/news sites and discovering related markets inline
+- Extension users reading social, community, editorial, finance, sports, and prediction-native sites such as X/Twitter, LinkedIn, Reddit, Farcaster, Bluesky, Discord, Hacker News, Stack Overflow, Quora, Product Hunt, Lemmy, Kalshi, Manifold, and crypto/news sites and discovering related markets inline
 
 ### Problems it solves
 
@@ -38,8 +38,8 @@ There is also one active scheduled runtime path:
 | `apps/web` | Next.js 15 App Router frontend, deployed to Cloudflare Workers via OpenNext |
 | `apps/extension` | MV3 browser extension with content scripts, service worker, and offscreen trading runtime |
 | `apps/agent` | Shared paper-trading engine, D1 repository, search/LLM orchestration, and settlement logic consumed by the web admin surface |
-| `packages/logger` | Shared structured logger used by both runtime surfaces |
-| `packages/shared-types` | Shared constants, contract addresses, ABIs, and Polymarket endpoint definitions |
+| `packages/logger` | Shared structured logger used by the web app, extension, and agent package |
+| `packages/shared-types` | Shared constants, contract addresses, ABIs, trading helpers, and Polymarket endpoint definitions used across the monorepo |
 
 ## 2. Component Map
 
@@ -100,8 +100,8 @@ flowchart LR
 | Extension platform and host config | `apps/extension/src/supported-hosts.ts`, `apps/extension/src/content/platform-registry.ts`, `apps/extension/src/content/platforms/*` | Defines match patterns, platform adapters, and site-specific extraction/injection behavior for supported social and editorial surfaces | Content runtime, background worker |
 | Extension offscreen runtimes | `apps/extension/src/offscreen/offscreen.ts`, `apps/extension/src/offscreen/scoring-runtime.ts`, `apps/extension/src/offscreen/trading-runtime.ts`, `apps/extension/src/background/trading-handler.ts` | Splits heavy scoring and trading work out of the MV3 service worker, loading runtime-specific modules only when needed | Background worker, relayer, CLOB, Polygon RPC, local scoring pipeline |
 | Extension options and preferences | `apps/extension/src/options.tsx`, `apps/extension/src/content/preferences.ts`, `apps/extension/src/types/settings.ts` | Manages per-user platform/source toggles, analytics preferences, theme overrides, and debug settings | Chrome storage, content runtime, background worker |
-| Shared logger package | `packages/logger/src/index.ts` | Provides the structured logger used across the web app and extension instead of ad hoc console logging | Web app routes/libs, extension background/content runtimes |
-| Shared market/contracts package | `packages/shared-types/src/*` | Single source of truth for Polymarket endpoints, contract addresses, auth constants, slippage helpers, crypto helpers, ABIs, and shared types | Web app and extension |
+| Shared logger package | `packages/logger/src/index.ts` | Provides the structured logger used across the web app, extension, and agent package instead of ad hoc console logging | Web app routes/libs, extension background/content runtimes, `apps/agent` |
+| Shared market/contracts package | `packages/shared-types/src/*` | Single source of truth for Polymarket endpoints, contract addresses, auth constants, slippage helpers, crypto helpers, trading helpers, ABIs, and shared types | Web app, extension, and agent package |
 | Deployment config | `apps/web/custom-worker.ts`, `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts`, `apps/web/next.config.ts` | Packages the Next.js app for Cloudflare Workers, wires the custom Worker entrypoint, and configures the R2-backed incremental cache plus cron schedule | Cloudflare Workers, R2 |
 
 ### Important page surfaces

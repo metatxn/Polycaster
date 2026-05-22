@@ -256,18 +256,14 @@ export function SolutionSection() {
 const PLATFORMS: Array<{ n: string; soon?: boolean }> = [
   { n: "X / Twitter" },
   { n: "Reddit" },
-  { n: "YouTube" },
   { n: "News sites" },
   { n: "Crypto media" },
   { n: "Finance sites" },
   { n: "Google Search" },
-  { n: "Telegram Web" },
   { n: "Discord Web" },
-  { n: "Farcaster" },
   { n: "Substack" },
   { n: "Hacker News" },
   { n: "Bloomberg" },
-  { n: "TradingView" },
   { n: "More coming soon", soon: true },
 ];
 

@@ -820,8 +820,8 @@ Request body
 
 | Field           | Type     | Required | Validation                                                        |
 | --------------- | -------- | -------- | ----------------------------------------------------------------- |
-| `walletAddress` | `string` | Yes      | Must exist, be a string, and be parseable by `viem.getAddress()`. |
-| `chainId`       | `number` | Yes      | Must exist and be a number.                                       |
+| `walletAddress` | `string` | Yes      | Must be a valid Ethereum address.                                 |
+| `chainId`       | `number` | Yes      | Must equal Polygon chain ID `137`.                                |
 
 Success `200`
 
@@ -834,7 +834,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Missing walletAddress or chainId" }` or `{ error: "Invalid request payload" }`
+- `400`: `{ error: "Invalid request payload", details: formattedZodError }` or `{ error: "Invalid request payload" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: Not used.
@@ -842,7 +842,7 @@ Errors
 
 Rate limiting
 
-- No explicit rate limiter
+- `30` requests/minute/IP
 
 Example
 
@@ -876,11 +876,11 @@ Request body
 
 | Field            | Type     | Required | Validation                                |
 | ---------------- | -------- | -------- | ----------------------------------------- |
-| `challengeToken` | `string` | Yes      | Must be present.                          |
-| `chainId`        | `number` | Yes      | Must be present.                          |
+| `challengeToken` | `string` | Yes      | Min length `1`.                           |
+| `chainId`        | `number` | Yes      | Must equal Polygon chain ID `137`.        |
 | `message`        | `string` | Yes      | Must match the challenge payload.         |
-| `signature`      | `string` | Yes      | Must verify against `walletAddress`.      |
-| `walletAddress`  | `string` | Yes      | Must be parseable by `viem.getAddress()`. |
+| `signature`      | `string` | Yes      | Must be a `0x`-prefixed 65-byte hex signature and verify against `walletAddress`. |
+| `walletAddress`  | `string` | Yes      | Must be a valid Ethereum address.         |
 
 Success `200`
 
@@ -891,7 +891,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Missing message, signature, challengeToken, walletAddress, or chainId" }`, `{ error: "Malformed signature" }`, or `{ error: "Invalid request payload" }`
+- `400`: `{ error: "Invalid request payload", details: formattedZodError }` or `{ error: "Invalid request payload" }`
 - `401`: `{ error: "Invalid or expired challenge" }` or `{ error: "Invalid signature" }`
 - `404`: Not used.
 - `500`: Not used.
@@ -899,7 +899,7 @@ Errors
 
 Rate limiting
 
-- No explicit rate limiter
+- `30` requests/minute/IP
 
 Example
 

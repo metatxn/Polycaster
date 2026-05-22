@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, PointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   BLOOMBERG_ARTICLES,
@@ -119,6 +119,51 @@ export function TweetOverlayHero() {
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const tablistRef = useRef<HTMLDivElement | null>(null);
   const flipPendingRef = useRef(false);
+
+  // Pointer-reactive 3D tilt + sheen. The card rotates toward the cursor and a
+  // glassy highlight tracks the pointer. Gated to fine pointers / non-reduced
+  // motion (set in the effect below); the card rect is cached on enter so the
+  // per-move handler only writes compositor-friendly custom properties.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const rectRef = useRef<DOMRect | null>(null);
+  const tiltRef = useRef(false);
+
+  useEffect(() => {
+    tiltRef.current =
+      window.matchMedia("(pointer: fine)").matches &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }, []);
+
+  const handleTiltEnter = () => {
+    if (!tiltRef.current) return;
+    rectRef.current = rootRef.current?.getBoundingClientRect() ?? null;
+  };
+
+  const handleTiltMove = (event: PointerEvent<HTMLDivElement>) => {
+    const el = rootRef.current;
+    if (!tiltRef.current || !el) return;
+    // Cached on enter; recompute lazily if a move arrives first (or after a
+    // scroll/resize invalidated it).
+    const rect = rectRef.current ?? el.getBoundingClientRect();
+    rectRef.current = rect;
+    const px = (event.clientX - rect.left) / rect.width;
+    const py = (event.clientY - rect.top) / rect.height;
+    const max = 5; // degrees
+    el.style.setProperty("--kwt-ry", `${(px - 0.5) * max * 2}deg`);
+    el.style.setProperty("--kwt-rx", `${(py - 0.5) * -max * 2}deg`);
+    el.style.setProperty("--kwt-mx", `${px * 100}%`);
+    el.style.setProperty("--kwt-my", `${py * 100}%`);
+    el.style.setProperty("--kwt-tilt", "1");
+  };
+
+  const handleTiltLeave = () => {
+    const el = rootRef.current;
+    rectRef.current = null;
+    if (!el) return;
+    el.style.setProperty("--kwt-rx", "0deg");
+    el.style.setProperty("--kwt-ry", "0deg");
+    el.style.setProperty("--kwt-tilt", "0");
+  };
 
   const selectPlatform = (nextPlatform: Platform) => {
     flipPendingRef.current = false;
@@ -241,8 +286,16 @@ export function TweetOverlayHero() {
         : `Match found · ${activePost?.market.match ?? 0}% confidence`;
 
   return (
-    <div className="kwt-root" data-platform={platform}>
+    <div
+      ref={rootRef}
+      className="kwt-root"
+      data-platform={platform}
+      onPointerEnter={handleTiltEnter}
+      onPointerMove={handleTiltMove}
+      onPointerLeave={handleTiltLeave}
+    >
       <div className="kwt-card">
+        <span className="kwt-sheen" aria-hidden="true" />
         <div
           ref={tablistRef}
           className="kwt-tabs"

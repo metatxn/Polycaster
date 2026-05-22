@@ -4,7 +4,7 @@ import Link from "next/link";
 import { KnowwMark } from "@/components/knoww-mark";
 import {
   KW_PAGE_CLASS,
-  KwThemeToggle,
+  KwThemeDropdown,
   useKwTheme,
 } from "@/components/kw-theme";
 
@@ -82,13 +82,13 @@ function Section({
 }
 
 export default function PrivacyClient() {
-  const { theme, toggleTheme } = useKwTheme();
+  const { colorScheme, setTheme, theme } = useKwTheme();
 
   return (
     <div
       className={`${KW_PAGE_CLASS} fixed inset-0 z-60 overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans`}
       data-theme={theme}
-      style={{ colorScheme: theme }}
+      style={{ colorScheme }}
     >
       {/* ── Header ───────────────────────────────────────────────────── */}
       <header className="border-b border-(--kw-fg)/10 bg-(--kw-bg)">
@@ -112,7 +112,7 @@ export default function PrivacyClient() {
             >
               ← Back to home
             </Link>
-            <KwThemeToggle theme={theme} onToggle={toggleTheme} />
+            <KwThemeDropdown theme={theme} onThemeChange={setTheme} />
           </div>
         </div>
       </header>

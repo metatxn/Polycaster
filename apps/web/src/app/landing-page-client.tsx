@@ -2,10 +2,11 @@
 
 import { ArrowUpRight, Download } from "lucide-react";
 import Link from "next/link";
+import { CursorGlow } from "@/components/cursor-glow";
 import { KnowwMark } from "@/components/knoww-mark";
 import {
   KW_PAGE_CLASS,
-  KwThemeToggle,
+  KwThemeDropdown,
   useKwTheme,
 } from "@/components/kw-theme";
 import {
@@ -37,13 +38,14 @@ const TICKER = [
 ];
 
 export default function LandingPageClient() {
-  const { theme, toggleTheme } = useKwTheme();
+  const { colorScheme, setTheme, theme } = useKwTheme();
 
   return (
     <div
       className={`${KW_PAGE_CLASS} kw-landing fixed inset-0 z-60 overflow-x-hidden overflow-y-auto bg-(--kw-bg) text-(--kw-fg) font-sans`}
       data-theme={theme}
-      style={{ colorScheme: theme }}
+      data-scheme={colorScheme}
+      style={{ colorScheme }}
     >
       <a
         href="#content"
@@ -51,6 +53,7 @@ export default function LandingPageClient() {
       >
         Skip to content
       </a>
+      <CursorGlow />
       <TickerBar />
 
       <header className="border-b border-(--kw-fg)/10 bg-(--kw-bg)">
@@ -95,7 +98,7 @@ export default function LandingPageClient() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <KwThemeToggle theme={theme} onToggle={toggleTheme} />
+            <KwThemeDropdown theme={theme} onThemeChange={setTheme} />
             <a
               href={CHROME_STORE_URL}
               className="inline-flex items-center gap-2 bg-(--kw-fg) text-(--kw-bg) px-4 py-2 text-[13px] font-medium hover:bg-(--kw-fg)/90 transition-colors whitespace-nowrap"

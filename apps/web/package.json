@@ -4,7 +4,8 @@
   "license": "AGPL-3.0-or-later",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack --port 8000",
+    "dev": "next dev --port 8000",
+    "dev:turbo": "next dev --turbopack --port 8000",
     "build": "next build",
     "start": "next start",
     "soak": "node scripts/soak-memory.mjs",

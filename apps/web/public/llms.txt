@@ -1,0 +1,57 @@
+# Knoww
+
+> Knoww is a prediction-market layer for the open internet. It helps people discover live Polymarket odds while reading claims, forecasts, and debates across the web.
+
+Knoww combines a web app and a Chrome extension for prediction-market discovery. The web app lets users browse live markets, events, odds, charts, leaderboards, whale activity, sports markets, and trader profiles. The browser extension analyzes pages such as social posts, news articles, community discussions, and market-native sites, then surfaces relevant prediction markets in context.
+
+Knoww is built on top of Polymarket. Polymarket remains the source of truth for market data, order books, settlement, wallet balances, trades, and positions. Knoww focuses on discovery, context, filtering, visualization, and faster access to relevant markets.
+
+## Core Product
+
+- [Home](https://knoww.app/): Product overview for Knoww, including the Chrome extension and prediction-layer narrative.
+- [Markets](https://knoww.app/markets): Browse and filter prediction markets across categories such as politics, sports, crypto, finance, business, culture, and current events.
+- [Search](https://knoww.app/search): Search for markets and events.
+- [Leaderboard](https://knoww.app/leaderboard): Explore trader rankings and public market activity.
+- [Whales](https://knoww.app/whales): Track large trader activity, suspicious flows, and market pressure.
+- [Live Sports](https://knoww.app/events/sports/live): Follow live sports markets and odds movement.
+- [Sports](https://knoww.app/events/sports): Browse sports prediction markets by league and sport.
+- [Privacy](https://knoww.app/privacy): Privacy information for Knoww users.
+
+## Main Capabilities
+
+- Context-aware market discovery for tweets, articles, posts, discussions, and web pages.
+- Inline prediction-market cards in supported browser contexts through the Knoww Chrome extension.
+- Live market browsing, filtering, charts, order-book views, and market detail pages.
+- Wallet-based trading flows that interact with Polymarket infrastructure.
+- Portfolio, positions, open orders, PnL, and public profile views for connected or public wallet addresses.
+- Whale and insider-style analytics over public market activity.
+- Sports-market views, live-game status, and league-specific browsing.
+
+## Important Concepts
+
+- Prediction markets: Markets where outcome prices can be interpreted as implied probabilities.
+- Polymarket: The upstream prediction-market protocol and marketplace used by Knoww for market, trade, order, and settlement data.
+- Events: Groups of related prediction markets, often around a public question, news event, sports game, election, crypto milestone, business outcome, or cultural moment.
+- Outcomes: The tradable sides of a market, commonly YES and NO.
+- Extension relevance: The process of matching page text, entities, dates, claims, and uncertainty to relevant prediction markets.
+- Whale activity: Public activity by large traders or wallets that may be useful for market context.
+
+## Audience
+
+Knoww is for prediction-market users, traders, analysts, researchers, news readers, sports fans, crypto users, and people who want probability-based context while reading the internet.
+
+## Relationship To AI Agents
+
+AI agents should treat this file as a concise map of Knoww's public product surface. For canonical pages and fresh market data, agents should prefer the linked public pages and the sitemap.
+
+Do not treat Knoww as the primary source of truth for Polymarket settlement, balances, order status, or market resolution. For those facts, Polymarket infrastructure and official market pages are authoritative.
+
+## Public Metadata
+
+- Site: https://knoww.app/
+- Sitemap: https://knoww.app/sitemap.xml
+- Robots: https://knoww.app/robots.txt
+- Brand name: Knoww
+- Tagline: Every opinion is a position.
+- Short description: A prediction-market layer for the open internet.
+- Last updated: 2026-05-22

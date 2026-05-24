@@ -390,6 +390,12 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
 
+    if (msg?.type === "KNOWW_OPEN_EXTENSION_SETTINGS") {
+      chrome.runtime.openOptionsPage();
+      sendResponse({ ok: true, data: null } as BackgroundResponse);
+      return true;
+    }
+
     // Offscreen doc requests: forward signing to content script tab
     if (msg?.type === "offscreen:forward-signing") {
       if (msg.tabId && msg.id && msg.method) {
@@ -830,8 +836,12 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
-chrome.action.onClicked.addListener(() => {
-  chrome.runtime.openOptionsPage();
+chrome.action.onClicked.addListener((tab) => {
+  if (typeof tab.id !== "number") return;
+
+  chrome.tabs.sendMessage(tab.id, { type: "KNOWW_OPEN_EXTENSION" }, () => {
+    void chrome.runtime.lastError;
+  });
 });
 
 chrome.runtime.onInstalled.addListener((details) => {

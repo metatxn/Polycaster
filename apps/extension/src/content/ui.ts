@@ -1596,6 +1596,7 @@ function persistWelcomeSeen(): void {
 // per-origin so it survives page navigations and reloads.
 
 const STACK_MINIMIZED_STORAGE_KEY = "knoww-stack-minimized";
+const STACK_DISMISSED_STORAGE_KEY = "knoww-stack-dismissed";
 const STACK_EXPANDED_SESSION_KEY = "knoww-stack-expanded";
 const NOTIFICATION_STACK_VIEWPORT_MARGIN = 12;
 
@@ -1633,11 +1634,35 @@ function readPersistedStackMinimized(): Promise<boolean> {
   });
 }
 
+function readPersistedStackDismissed(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage?.local.get(STACK_DISMISSED_STORAGE_KEY, (result) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(result?.[STACK_DISMISSED_STORAGE_KEY]));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 function persistStackMinimized(value: boolean): void {
   try {
     chrome.storage?.local.set({ [STACK_MINIMIZED_STORAGE_KEY]: value });
   } catch {
     // Non-fatal; the UI state stays consistent for the current session.
+  }
+}
+
+function persistStackDismissed(value: boolean): void {
+  try {
+    chrome.storage?.local.set({ [STACK_DISMISSED_STORAGE_KEY]: value });
+  } catch {
+    // Non-fatal; the current page still follows the user's action.
   }
 }
 
@@ -2112,6 +2137,18 @@ function createNotificationStack(): HTMLElement {
   const headerRight = document.createElement("div");
   headerRight.className = "knoww-stack-header-right";
 
+  const settingsBtn = document.createElement("button");
+  settingsBtn.className = "knoww-stack-settings";
+  settingsBtn.type = "button";
+  settingsBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 5 15.08a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8.92 5a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+    </svg>
+  `;
+  settingsBtn.title = "Settings";
+  settingsBtn.setAttribute("aria-label", "Open extension settings");
+
   const searchToggle = document.createElement("button");
   searchToggle.className = "knoww-search-toggle";
   searchToggle.id = "knoww-search-toggle";
@@ -2145,6 +2182,7 @@ function createNotificationStack(): HTMLElement {
   closeBtn.title = "Close";
   closeBtn.setAttribute("aria-label", "Close markets panel");
 
+  headerRight.appendChild(settingsBtn);
   headerRight.appendChild(searchToggle);
   headerRight.appendChild(minimizeToggle);
   headerRight.appendChild(closeBtn);
@@ -2349,8 +2387,17 @@ function createNotificationStack(): HTMLElement {
 
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    persistStackDismissed(true);
     container.style.setProperty("display", "none", "important");
     void window.KNOWW_ANALYTICS?.track("notification_stack_closed");
+  });
+
+  settingsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    chrome.runtime.sendMessage({ type: "KNOWW_OPEN_EXTENSION_SETTINGS" });
+    void window.KNOWW_ANALYTICS?.track("extension_settings_opened", {
+      surface: "notification_stack",
+    });
   });
 
   // When minimized, clicking the title row (logo + "Markets" label) expands
@@ -2919,6 +2966,107 @@ function isCardStillAvailable(
   return true;
 }
 
+function isCardInViewport(cardElement: HTMLElement): boolean {
+  const rect = cardElement.getBoundingClientRect();
+  const width = Math.max(0, rect.width);
+  const height = Math.max(0, rect.height);
+  if (width === 0 || height === 0) return false;
+
+  const visibleWidth = Math.max(
+    0,
+    Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0)
+  );
+  const visibleHeight = Math.max(
+    0,
+    Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0)
+  );
+  const visibleRatio = (visibleWidth * visibleHeight) / (width * height);
+
+  return visibleRatio >= 0.25;
+}
+
+interface ClassifiedInjectedMarketEntry {
+  entry: InjectedMarketEntry;
+  status: "active" | "scrolled-out";
+}
+
+function classifyInjectedMarketEntry(
+  marketData: InjectedMarketEntry,
+  now: number
+): ClassifiedInjectedMarketEntry {
+  const isCardAvailable = isCardStillAvailable(
+    marketData.cardRef,
+    marketData.market.title
+  );
+  const cardElement = marketData.cardRef?.deref?.();
+  const currentlyInViewport =
+    !!cardElement && isCardAvailable && isCardInViewport(cardElement);
+
+  if (currentlyInViewport) {
+    marketData.isInViewport = true;
+    marketData.lastVisibleAt = now;
+  }
+
+  const isVisible =
+    currentlyInViewport ||
+    (typeof marketData.isInViewport === "boolean"
+      ? marketData.isInViewport
+      : true);
+  const lastVisibleAt = marketData.lastVisibleAt ?? marketData.timestamp;
+  const recentlyVisible = now - lastVisibleAt <= SCROLLED_OUT_GRACE_MS;
+  const status =
+    isCardAvailable && (isVisible || recentlyVisible)
+      ? "active"
+      : "scrolled-out";
+
+  return { entry: marketData, status };
+}
+
+function selectRepresentativeMarketEntries(markets: InjectedMarketEntry[]): {
+  activeMarkets: InjectedMarketEntry[];
+  scrolledOutMarkets: InjectedMarketEntry[];
+} {
+  const now = Date.now();
+  const representatives = new Map<string, ClassifiedInjectedMarketEntry>();
+
+  for (const marketData of markets) {
+    if (!marketData?.market?.id) continue;
+
+    const classified = classifyInjectedMarketEntry(marketData, now);
+    const current = representatives.get(marketData.market.id);
+
+    if (!current) {
+      representatives.set(marketData.market.id, classified);
+      continue;
+    }
+
+    if (current.status !== "active" && classified.status === "active") {
+      representatives.set(marketData.market.id, classified);
+      continue;
+    }
+
+    if (
+      current.status === classified.status &&
+      classified.entry.timestamp > current.entry.timestamp
+    ) {
+      representatives.set(marketData.market.id, classified);
+    }
+  }
+
+  const selected = Array.from(representatives.values()).sort(
+    (a, b) => a.entry.timestamp - b.entry.timestamp
+  );
+
+  return {
+    activeMarkets: selected
+      .filter((marketData) => marketData.status === "active")
+      .map((marketData) => marketData.entry),
+    scrolledOutMarkets: selected
+      .filter((marketData) => marketData.status === "scrolled-out")
+      .map((marketData) => marketData.entry),
+  };
+}
+
 /**
  * Switch the notification stack content area between the empty state
  * and the items list. Only one is visible at a time.
@@ -3221,44 +3369,13 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
     return;
   }
 
-  // Deduplicate by market id (keep most recent entry)
-  const dedupedMarkets: InjectedMarketEntry[] = [];
-  const seenMarketIds = new Set<string>();
-  for (let i = markets.length - 1; i >= 0; i--) {
-    const entry = markets[i];
-    if (!entry?.market?.id || seenMarketIds.has(entry.market.id)) continue;
-    seenMarketIds.add(entry.market.id);
-    dedupedMarkets.push(entry);
-  }
-  dedupedMarkets.reverse();
-
   log(
-    `🔍 [NotificationFilter] Checking availability for ${dedupedMarkets.length} unique markets:`
+    `🔍 [NotificationFilter] Checking availability for ${markets.length} tracked entries:`
   );
 
-  // Split into active (in DOM) vs recently scrolled out (not in DOM anymore)
-  const activeMarkets: InjectedMarketEntry[] = [];
-  const scrolledOutMarkets: InjectedMarketEntry[] = [];
-
-  dedupedMarkets.forEach((marketData) => {
-    const now = Date.now();
-    const isCardAvailable = isCardStillAvailable(
-      marketData.cardRef,
-      marketData.market.title
-    );
-    const isVisible =
-      typeof marketData.isInViewport === "boolean"
-        ? marketData.isInViewport
-        : true;
-    const lastVisibleAt = marketData.lastVisibleAt ?? marketData.timestamp;
-    const recentlyVisible = now - lastVisibleAt <= SCROLLED_OUT_GRACE_MS;
-
-    if (isCardAvailable && (isVisible || recentlyVisible)) {
-      activeMarkets.push(marketData);
-    } else {
-      scrolledOutMarkets.push(marketData);
-    }
-  });
+  // Deduplicate by market id (prefer visible active cards).
+  const { activeMarkets, scrolledOutMarkets } =
+    selectRepresentativeMarketEntries(markets);
 
   // Keep bounded lists for readability (platform-aware caps)
   const caps = resolveNotificationCaps();
@@ -3298,7 +3415,9 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
 
   log(`\n📊 [NotificationFilter] SUMMARY:`);
   log(`   • Total markets tracked: ${markets.length}`);
-  log(`   • Unique markets tracked: ${dedupedMarkets.length}`);
+  log(
+    `   • Unique markets tracked: ${activeMarkets.length + scrolledOutMarkets.length}`
+  );
   log(`   • Active markets: ${activeMarkets.length}`);
   log(`   • Scrolled-out markets: ${scrolledOutMarkets.length}`);
   log(`   • Displayed in stack: ${totalDisplayed}`);
@@ -3338,7 +3457,7 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
   // Trending section — always appended at the bottom when available.
   // Collect real market IDs so we can skip duplicates.
   const realMarketIds = new Set<string>();
-  for (const entry of dedupedMarkets) {
+  for (const entry of [...activeMarkets, ...scrolledOutMarkets]) {
     realMarketIds.add(entry.market.id);
   }
   if (showTrendingSection) {
@@ -3399,14 +3518,18 @@ function updateNotificationStackTheme(): void {
   }
 }
 
-/**
- * Initialize the notification stack
- */
-function initNotificationStack(): void {
-  const { log } = window.KNOWW_UTILS;
-
+function openNotificationStack(
+  log: (...args: unknown[]) => void,
+  created = false
+): void {
   if (!notificationStackContainer) {
     createNotificationStack();
+    created = true;
+  } else {
+    notificationStackContainer.style.removeProperty("display");
+  }
+
+  if (created) {
     void window.KNOWW_ANALYTICS?.track("notification_stack_opened");
     log("Notification stack initialized");
   }
@@ -3475,6 +3598,38 @@ function initNotificationStack(): void {
     // ============================================
     setupDraggable(log);
   }
+}
+
+/**
+ * Initialize the notification stack
+ */
+function initNotificationStack(): void {
+  const { log } = window.KNOWW_UTILS;
+
+  void readPersistedStackDismissed().then((dismissed) => {
+    if (dismissed) return;
+    createNotificationStack();
+    openNotificationStack(log, true);
+  });
+}
+
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener(
+    (
+      message: { type?: string },
+      _sender: chrome.runtime.MessageSender,
+      sendResponse: (response: { success: boolean }) => void
+    ) => {
+      if (message?.type !== "KNOWW_OPEN_EXTENSION") {
+        return false;
+      }
+
+      persistStackDismissed(false);
+      openNotificationStack(window.KNOWW_UTILS.log);
+      sendResponse({ success: true });
+      return true;
+    }
+  );
 }
 
 // ============================================

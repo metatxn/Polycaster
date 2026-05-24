@@ -16,7 +16,7 @@
       "32": "icons/icon-32.png",
       "48": "icons/icon-48.png"
     },
-    "default_title": "Knoww Settings"
+    "default_title": "Knoww"
   },
   "permissions": ["storage", "offscreen", "scripting"],
   "host_permissions": ["__GENERATED_BY_WEBPACK_BUILD__"],

@@ -145,6 +145,112 @@ test("notification panel theme refresh runs when settings change", () => {
   );
 });
 
+test("notification stack close persists until explicitly reopened", () => {
+  const uiSource = readSource("src/content/ui.ts");
+
+  assert.equal(
+    /const STACK_DISMISSED_STORAGE_KEY = "knoww-stack-dismissed";/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(/function readPersistedStackDismissed/.test(uiSource), true);
+  assert.equal(/function persistStackDismissed/.test(uiSource), true);
+  assert.equal(
+    /persistStackDismissed\(true\);[\s\S]*notification_stack_closed/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /readPersistedStackDismissed\(\)\.then\(\(dismissed\) => \{[\s\S]*if \(dismissed\) return;[\s\S]*createNotificationStack\(\);/.test(
+      uiSource
+    ),
+    true
+  );
+});
+
+test("notification stack exposes settings and action-open controls", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const backgroundSource = readSource("src/background.ts");
+
+  assert.equal(/KNOWW_OPEN_EXTENSION/.test(uiSource), true);
+  assert.equal(/KNOWW_OPEN_EXTENSION_SETTINGS/.test(uiSource), true);
+  assert.equal(
+    /settingsBtn\.className = "knoww-stack-settings";/.test(uiSource),
+    true
+  );
+  assert.equal(
+    /chrome\.runtime\.sendMessage\(\{ type: "KNOWW_OPEN_EXTENSION_SETTINGS" \}\)/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /msg\?\.type === "KNOWW_OPEN_EXTENSION_SETTINGS"[\s\S]*chrome\.runtime\.openOptionsPage\(\)/.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /chrome\.tabs\.sendMessage\([^)]*type: "KNOWW_OPEN_EXTENSION"/s.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /chrome\.action\.onClicked\.addListener\(\(\) => \{\s*chrome\.runtime\.openOptionsPage\(\);\s*\}\);/.test(
+      backgroundSource
+    ),
+    false
+  );
+});
+
+test("notification stack dedupe prefers visible duplicate market cards", () => {
+  const uiSource = readSource("src/content/ui.ts");
+
+  assert.equal(/function isCardInViewport/.test(uiSource), true);
+  assert.equal(/function classifyInjectedMarketEntry/.test(uiSource), true);
+  assert.equal(
+    /function selectRepresentativeMarketEntries/.test(uiSource),
+    true
+  );
+  assert.equal(
+    /if \(current\.status !== "active" && classified\.status === "active"\)/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /const \{ activeMarkets, scrolledOutMarkets \} =\s*selectRepresentativeMarketEntries\(markets\);/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /Deduplicate by market id \(prefer visible active cards\)/.test(uiSource),
+    true
+  );
+});
+
+test("scrolled-to card highlight uses a short soft pulse", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-market-card\.knoww-highlight\s*\{[^}]*animation:\s*knoww-highlight-pulse\s+700ms\s+ease-out\s*!important;/.test(
+      css
+    ),
+    true
+  );
+  assert.equal(/knoww-highlight-pulse\s+2s\s+ease/.test(css), false);
+  assert.equal(/rgba\(29,\s*155,\s*240,\s*0\.7\)/.test(css), false);
+  assert.equal(/0 0 0 12px/.test(css), false);
+  assert.equal(
+    /box-shadow:\s*0 0 0 4px rgba\(29,\s*155,\s*240,\s*0\.12\)/.test(css),
+    true
+  );
+});
+
 test("notification panel see all expands the in-page list", () => {
   const css = readInlineCss();
   const uiSource = readSource("src/content/ui.ts");

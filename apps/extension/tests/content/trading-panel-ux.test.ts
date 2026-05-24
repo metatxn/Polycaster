@@ -85,3 +85,20 @@ test("order summary uses clearer decision labels", () => {
   assert.equal(/"Potential Return"/.test(source), false);
   assert.equal(/`Profit if \$\{opts\.outcomeName\}`/.test(source), false);
 });
+
+test("installed wallet buttons reset Reddit host button and image styles", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-tp-wallet-item\s*\{[^}]*height:\s*auto\s*!important;[^}]*min-height:\s*46px\s*!important;[^}]*box-sizing:\s*border-box\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-wallet-item-icon\s*\{[^}]*display:\s*block\s*!important;[^}]*margin:\s*0\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+});

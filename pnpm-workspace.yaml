@@ -5,6 +5,12 @@ packages:
 minimumReleaseAge: 10080
 minimumReleaseAgeIgnoreMissingTime: true
 minimumReleaseAgeExclude:
+  - "@protobufjs/eventemitter"
+  - "@protobufjs/fetch"
+  - "@protobufjs/inquire"
+  - "@protobufjs/utf8"
+  - "protobufjs"
+  - "qs"
   - "ws"
 
 catalog:

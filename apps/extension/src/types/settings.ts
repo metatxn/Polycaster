@@ -70,6 +70,7 @@ export interface UserSettings {
   relevanceThreshold: number;
   cooldownPosts: number;
   showNotificationStack: boolean;
+  notificationPanelSurface: "sidebar" | "floating";
   aiExtractionEnabled: boolean;
   personalizationEnabled: boolean;
   themeOverride: "auto" | "dark" | "light" | "dim";
@@ -140,6 +141,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   relevanceThreshold: 0.3,
   cooldownPosts: 4,
   showNotificationStack: true,
+  notificationPanelSurface: "floating",
   aiExtractionEnabled: true,
   personalizationEnabled: true,
   themeOverride: "auto",

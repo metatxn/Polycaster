@@ -1061,7 +1061,8 @@ function injectInlineStyles(): void {
 
       /* Search toggle button */
       .knoww-search-toggle,
-      .knoww-stack-settings {
+      .knoww-stack-settings,
+      .knoww-stack-sidebar {
         width: 28px !important;
         height: 28px !important;
         border-radius: 50% !important;
@@ -1076,7 +1077,8 @@ function injectInlineStyles(): void {
       }
 
       .knoww-search-toggle:hover,
-      .knoww-stack-settings:hover {
+      .knoww-stack-settings:hover,
+      .knoww-stack-sidebar:hover {
         background: rgba(29, 155, 240, 0.1) !important;
         color: var(--knoww-accent, rgb(29, 155, 240)) !important;
       }
@@ -1087,7 +1089,8 @@ function injectInlineStyles(): void {
       }
 
       .knoww-search-toggle svg,
-      .knoww-stack-settings svg {
+      .knoww-stack-settings svg,
+      .knoww-stack-sidebar svg {
         width: 16px !important;
         height: 16px !important;
       }
@@ -1534,40 +1537,6 @@ function injectInlineStyles(): void {
       .knoww-notification-arrow svg {
         width: 16px !important;
         height: 16px !important;
-      }
-
-      /* Highlight animation for scrolled-to cards */
-      .knoww-market-card.knoww-highlight {
-        animation: knoww-highlight-pulse 700ms ease-out !important;
-      }
-
-      @keyframes knoww-highlight-pulse {
-        0% {
-          box-shadow: 0 0 0 0 rgba(29, 155, 240, 0.22);
-        }
-        55% {
-          box-shadow: 0 0 0 4px rgba(29, 155, 240, 0.12);
-        }
-        100% {
-          box-shadow: 0 0 0 0 rgba(29, 155, 240, 0);
-        }
-      }
-
-      /* LinkedIn-specific highlight uses LinkedIn blue */
-      .knoww-platform-linkedin .knoww-market-card.knoww-highlight {
-        animation: knoww-highlight-pulse-linkedin 700ms ease-out !important;
-      }
-
-      @keyframes knoww-highlight-pulse-linkedin {
-        0% {
-          box-shadow: 0 0 0 0 rgba(10, 102, 194, 0.22);
-        }
-        55% {
-          box-shadow: 0 0 0 4px rgba(10, 102, 194, 0.12);
-        }
-        100% {
-          box-shadow: 0 0 0 0 rgba(10, 102, 194, 0);
-        }
       }
 
       /* Toast notification for scroll errors */

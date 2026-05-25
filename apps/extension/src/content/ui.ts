@@ -1546,6 +1546,7 @@ const MAX_TRENDING_DISPLAY = 2;
 const MAX_EXPANDED_TRENDING_DISPLAY = 10;
 let trendingFetchTimer: ReturnType<typeof setTimeout> | null = null;
 let trendingShuffleTimer: ReturnType<typeof setInterval> | null = null;
+let trendingFetchInFlight = false;
 let trendingPool: Market[] = [];
 let visibleTrending: Market[] = [];
 
@@ -1589,6 +1590,50 @@ function persistWelcomeSeen(): void {
   }
 }
 
+function disconnectNotificationStackLifecyclePort(): void {
+  if (notificationStackLifecycleTimer) {
+    clearInterval(notificationStackLifecycleTimer);
+    notificationStackLifecycleTimer = null;
+  }
+
+  if (notificationStackLifecyclePort) {
+    try {
+      notificationStackLifecyclePort.disconnect();
+    } catch {
+      // The port may already be disconnected if the background worker restarted.
+    }
+    notificationStackLifecyclePort = null;
+  }
+}
+
+function ensureNotificationStackLifecyclePort(): void {
+  if (notificationStackLifecyclePort) return;
+
+  try {
+    const port = chrome.runtime.connect({ name: NOTIFICATION_STACK_PORT_NAME });
+    notificationStackLifecyclePort = port;
+    port.postMessage({ type: "KNOWW_NOTIFICATION_STACK_ALIVE" });
+    notificationStackLifecycleTimer = setInterval(() => {
+      try {
+        port.postMessage({ type: "KNOWW_NOTIFICATION_STACK_ALIVE" });
+      } catch {
+        disconnectNotificationStackLifecyclePort();
+      }
+    }, NOTIFICATION_STACK_LIFECYCLE_PING_MS);
+    port.onDisconnect.addListener(() => {
+      if (notificationStackLifecyclePort === port) {
+        notificationStackLifecyclePort = null;
+      }
+      if (notificationStackLifecycleTimer) {
+        clearInterval(notificationStackLifecycleTimer);
+        notificationStackLifecycleTimer = null;
+      }
+    });
+  } catch {
+    notificationStackLifecyclePort = null;
+  }
+}
+
 // ─── Minimize / expand state ───────────────────────────────────────────
 //
 // The notification stack can be collapsed to just its header when users
@@ -1599,6 +1644,8 @@ const STACK_MINIMIZED_STORAGE_KEY = "knoww-stack-minimized";
 const STACK_DISMISSED_STORAGE_KEY = "knoww-stack-dismissed";
 const STACK_EXPANDED_SESSION_KEY = "knoww-stack-expanded";
 const NOTIFICATION_STACK_VIEWPORT_MARGIN = 12;
+const NOTIFICATION_STACK_PORT_NAME = "knoww-notification-stack";
+const NOTIFICATION_STACK_LIFECYCLE_PING_MS = 20_000;
 
 const STACK_MINIMIZE_ICON_HTML = `
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1617,6 +1664,9 @@ type StackFilter = "all" | "active" | "seen" | "trending";
 let cachedStackMinimized = false;
 let cachedStackExpanded = readPersistedStackExpanded();
 let cachedStackFilter: StackFilter = "all";
+let notificationStackLifecyclePort: chrome.runtime.Port | null = null;
+let notificationStackLifecycleTimer: ReturnType<typeof setInterval> | null =
+  null;
 
 function readPersistedStackMinimized(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -1753,6 +1803,14 @@ function clampNotificationStackToViewport(container: HTMLElement): void {
   container.style.setProperty("left", `${nextLeft}px`, "important");
   container.style.setProperty("top", `${nextTop}px`, "important");
   container.style.setProperty("right", "auto", "important");
+}
+
+function resetNotificationStackToPreferredPosition(
+  container: HTMLElement
+): void {
+  container.style.removeProperty("left");
+  container.style.removeProperty("top");
+  container.style.removeProperty("right");
 }
 
 function formatSeeAllLabel(
@@ -2149,6 +2207,22 @@ function createNotificationStack(): HTMLElement {
   settingsBtn.title = "Settings";
   settingsBtn.setAttribute("aria-label", "Open extension settings");
 
+  const sidebarBtn = document.createElement("button");
+  sidebarBtn.className = "knoww-stack-sidebar";
+  sidebarBtn.type = "button";
+  sidebarBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2"/>
+      <path d="M15 4v16"/>
+      <path d="m10 9 3 3-3 3"/>
+    </svg>
+  `;
+  sidebarBtn.title = "Move to browser sidebar";
+  sidebarBtn.setAttribute(
+    "aria-label",
+    "Move markets panel to browser sidebar"
+  );
+
   const searchToggle = document.createElement("button");
   searchToggle.className = "knoww-search-toggle";
   searchToggle.id = "knoww-search-toggle";
@@ -2183,6 +2257,7 @@ function createNotificationStack(): HTMLElement {
   closeBtn.setAttribute("aria-label", "Close markets panel");
 
   headerRight.appendChild(settingsBtn);
+  headerRight.appendChild(sidebarBtn);
   headerRight.appendChild(searchToggle);
   headerRight.appendChild(minimizeToggle);
   headerRight.appendChild(closeBtn);
@@ -2388,14 +2463,50 @@ function createNotificationStack(): HTMLElement {
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     persistStackDismissed(true);
+    disconnectNotificationStackLifecyclePort();
     container.style.setProperty("display", "none", "important");
     void window.KNOWW_ANALYTICS?.track("notification_stack_closed");
   });
 
+  const showInvalidatedRuntimeMessage = () => {
+    showScrollToast("Extension updated. Refresh this page to reconnect Knoww.");
+  };
+
   settingsBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    chrome.runtime.sendMessage({ type: "KNOWW_OPEN_EXTENSION_SETTINGS" });
+    void window.KNOWW_UTILS.safeSendMessage({
+      type: "KNOWW_OPEN_EXTENSION_SETTINGS",
+    }).then((response?: { ok?: boolean; error?: string }) => {
+      if (/Extension context invalidated/i.test(response?.error || "")) {
+        showInvalidatedRuntimeMessage();
+      }
+    });
     void window.KNOWW_ANALYTICS?.track("extension_settings_opened", {
+      surface: "notification_stack",
+    });
+  });
+
+  const openSidePanelFromNotificationStack = () => {
+    void window.KNOWW_UTILS.safeSendMessage({
+      type: "KNOWW_OPEN_EXTENSION_SIDEPANEL",
+    }).then((response?: { ok?: boolean; error?: string }) => {
+      if (response?.ok !== true) {
+        if (/Extension context invalidated/i.test(response?.error || "")) {
+          showInvalidatedRuntimeMessage();
+          return;
+        }
+        showScrollToast(
+          response?.error ||
+            "This browser does not support Knoww in the sidebar."
+        );
+      }
+    });
+  };
+
+  sidebarBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openSidePanelFromNotificationStack();
+    void window.KNOWW_ANALYTICS?.track("extension_sidepanel_opened", {
       surface: "notification_stack",
     });
   });
@@ -2851,6 +2962,21 @@ function truncateText(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 3)}...`;
 }
 
+function showScrollToast(message: string): void {
+  const existing = document.querySelector(".knoww-scroll-toast");
+  existing?.remove();
+
+  const toast = document.createElement("div");
+  toast.className = "knoww-scroll-toast";
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add("knoww-toast-hide");
+    setTimeout(() => toast.remove(), 350);
+  }, 2600);
+}
+
 /**
  * Scroll to a market card in the feed.
  * If the card has been removed from the DOM (host site virtualization / GC),
@@ -2925,14 +3051,6 @@ function scrollToMarket(
     behavior: "smooth",
     block: "center",
   });
-
-  targetCard.classList.add("knoww-highlight");
-
-  setTimeout(() => {
-    if (targetCard) {
-      targetCard.classList.remove("knoww-highlight");
-    }
-  }, 2000);
 }
 
 /**
@@ -3233,6 +3351,8 @@ function shuffleTrending(): void {
 async function fetchAndCacheTrending(): Promise<void> {
   const { log } = window.KNOWW_UTILS;
 
+  if (trendingFetchInFlight) return;
+  trendingFetchInFlight = true;
   log("🔥 [Trending] Fetching trending markets...");
 
   try {
@@ -3250,6 +3370,8 @@ async function fetchAndCacheTrending(): Promise<void> {
     updateNotificationStack(currentMarkets);
   } catch (e) {
     log("🔥 [Trending] Failed to fetch trending markets:", e);
+  } finally {
+    trendingFetchInFlight = false;
   }
 }
 
@@ -3278,14 +3400,23 @@ function stopTrendingShuffleTimer(): void {
 
 function getVisibleTrendingMarkets(
   realMarketIds: Set<string>,
-  expandedTrending: boolean
+  expandedTrending: boolean,
+  limitOverride?: number
 ): Market[] {
-  const source = expandedTrending ? trendingPool : visibleTrending;
-  const limit = expandedTrending
-    ? MAX_EXPANDED_TRENDING_DISPLAY
-    : MAX_TRENDING_DISPLAY;
+  const requestedLimit =
+    typeof limitOverride === "number" && limitOverride > 0
+      ? Math.floor(limitOverride)
+      : undefined;
+  const limit =
+    requestedLimit ??
+    (expandedTrending ? MAX_EXPANDED_TRENDING_DISPLAY : MAX_TRENDING_DISPLAY);
+  const cappedLimit = Math.min(limit, MAX_EXPANDED_TRENDING_DISPLAY);
+  const source =
+    expandedTrending || cappedLimit > MAX_TRENDING_DISPLAY
+      ? trendingPool
+      : visibleTrending;
 
-  return source.filter((m) => !realMarketIds.has(m.id)).slice(0, limit);
+  return source.filter((m) => !realMarketIds.has(m.id)).slice(0, cappedLimit);
 }
 
 /**
@@ -3326,7 +3457,9 @@ function appendTrendingSection(
  * to discover feed-relevant markets first.
  */
 function startTrendingFetchTimer(): void {
-  cancelTrendingFetchTimer();
+  if (trendingPool.length > 0 || trendingFetchTimer || trendingFetchInFlight) {
+    return;
+  }
 
   trendingFetchTimer = setTimeout(() => {
     trendingFetchTimer = null;
@@ -3522,6 +3655,8 @@ function openNotificationStack(
   log: (...args: unknown[]) => void,
   created = false
 ): void {
+  ensureNotificationStackLifecyclePort();
+
   if (!notificationStackContainer) {
     createNotificationStack();
     created = true;
@@ -3603,6 +3738,172 @@ function openNotificationStack(
 /**
  * Initialize the notification stack
  */
+function setNotificationStackVisibility(visible: boolean): void {
+  if (visible) {
+    persistStackDismissed(false);
+    ensureNotificationStackLifecyclePort();
+    openNotificationStack(window.KNOWW_UTILS.log);
+    if (notificationStackContainer) {
+      resetNotificationStackToPreferredPosition(notificationStackContainer);
+    }
+    return;
+  }
+
+  persistStackDismissed(true);
+  disconnectNotificationStackLifecyclePort();
+  if (notificationStackContainer) {
+    notificationStackContainer.style.setProperty(
+      "display",
+      "none",
+      "important"
+    );
+  }
+}
+
+function summarizeSnapshotMarket(
+  market: Market,
+  status: "active" | "seen" | "trending"
+): Record<string, string> {
+  const parsed = parseMultiOutcomeData(market);
+  let outcomes = parsed.outcomes;
+  let prices = parsed.prices;
+
+  if (!parsed.isMultiOutcome && market.markets?.length) {
+    const firstMarket =
+      market.markets[parsed.firstActiveMarketIndex] ?? market.markets[0];
+    if (firstMarket.outcomePrices) {
+      prices = parseGammaPriceArray(firstMarket.outcomePrices);
+    }
+    if (firstMarket.outcomes) {
+      outcomes = parseGammaStringArray(firstMarket.outcomes);
+    }
+  }
+
+  let leadingIdx = 0;
+  let leadingPriceDecimal = toDecimal(prices[0]) ?? new Decimal(0);
+  for (let i = 1; i < prices.length; i++) {
+    const candidatePrice = toDecimal(prices[i]) ?? new Decimal(0);
+    if (candidatePrice.gt(leadingPriceDecimal)) {
+      leadingIdx = i;
+      leadingPriceDecimal = candidatePrice;
+    }
+  }
+  const priceCents = Decimal.max(
+    0,
+    Decimal.min(99, leadingPriceDecimal.mul(100))
+  )
+    .toDecimalPlaces(0, Decimal.ROUND_HALF_UP)
+    .toString();
+  const priceSideLabel =
+    outcomes[leadingIdx] || (outcomes.length === 2 ? "Yes" : "Top");
+
+  return {
+    id: market.id,
+    title: market.title || "Untitled market",
+    source: market.source || "polymarket",
+    imageUrl: market.image || "",
+    volume: formatMarketVolume(market) || "",
+    category: market.category || market.tags?.[0]?.label || "",
+    priceCents,
+    priceSideLabel,
+    status,
+    url: buildMarketUrl(market),
+  };
+}
+
+function summarizeNotificationMarket(
+  entry: InjectedMarketEntry,
+  status: "active" | "seen"
+): Record<string, string> {
+  return summarizeSnapshotMarket(entry.market, status);
+}
+
+function getNotificationStackSnapshot(
+  trendingLimit?: number
+): Record<string, unknown> {
+  startTrendingFetchTimer();
+  const markets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+  const { activeMarkets, scrolledOutMarkets } =
+    selectRepresentativeMarketEntries(markets);
+  const realMarketIds = new Set<string>();
+  for (const entry of [...activeMarkets, ...scrolledOutMarkets]) {
+    realMarketIds.add(entry.market.id);
+  }
+  const trendingMarkets = getVisibleTrendingMarkets(
+    realMarketIds,
+    false,
+    trendingLimit
+  );
+  return {
+    platform: window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown",
+    active: activeMarkets
+      .slice(-8)
+      .reverse()
+      .map((entry) => summarizeNotificationMarket(entry, "active")),
+    seen: scrolledOutMarkets
+      .slice(-8)
+      .reverse()
+      .map((entry) => summarizeNotificationMarket(entry, "seen")),
+    trending: trendingMarkets.map((market) =>
+      summarizeSnapshotMarket(market, "trending")
+    ),
+  };
+}
+
+async function searchNotificationStackMarkets(
+  query: string
+): Promise<Record<string, string>[]> {
+  const events = await window.KNOWW_API.searchPolymarketEvents(query, []);
+  return events
+    .slice(0, 5)
+    .map((market) => summarizeSnapshotMarket(market, "trending"));
+}
+
+function focusNotificationStackMarket(marketId: string): boolean {
+  const markets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+  const { activeMarkets, scrolledOutMarkets } =
+    selectRepresentativeMarketEntries(markets);
+  const injectedEntry = [...activeMarkets, ...scrolledOutMarkets].find(
+    (entry) => entry.market.id === marketId
+  );
+
+  if (injectedEntry) {
+    void window.KNOWW_ANALYTICS?.track("notification_sidepanel_item_clicked", {
+      marketId,
+      source: injectedEntry.market.source || "polymarket",
+    });
+    scrollToMarket(
+      injectedEntry.cardRef as WeakRef<HTMLElement> | null,
+      injectedEntry.market.id,
+      injectedEntry.market,
+      injectedEntry.postKey
+    );
+    window.KNOWW_PREFERENCES?.recordClick(injectedEntry.market);
+    return true;
+  }
+
+  const trendingMarket = [...visibleTrending, ...trendingPool].find(
+    (market) => market.id === marketId
+  );
+  if (trendingMarket) {
+    void window.KNOWW_ANALYTICS?.track(
+      "notification_sidepanel_trending_clicked",
+      {
+        marketSlug: trendingMarket.slug || trendingMarket.id,
+      }
+    );
+    window.open(
+      buildMarketUrl(trendingMarket),
+      "_blank",
+      "noopener,noreferrer"
+    );
+    window.KNOWW_PREFERENCES?.recordClick(trendingMarket);
+    return true;
+  }
+
+  return false;
+}
+
 function initNotificationStack(): void {
   const { log } = window.KNOWW_UTILS;
 
@@ -3616,18 +3917,54 @@ function initNotificationStack(): void {
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener(
     (
-      message: { type?: string },
+      message: {
+        type?: string;
+        marketId?: string;
+        query?: string;
+        visible?: boolean;
+        trendingLimit?: number;
+      },
       _sender: chrome.runtime.MessageSender,
-      sendResponse: (response: { success: boolean }) => void
+      sendResponse: (response: { success: boolean; data?: unknown }) => void
     ) => {
-      if (message?.type !== "KNOWW_OPEN_EXTENSION") {
-        return false;
+      if (message?.type === "KNOWW_OPEN_EXTENSION") {
+        setNotificationStackVisibility(true);
+        sendResponse({ success: true });
+        return true;
       }
 
-      persistStackDismissed(false);
-      openNotificationStack(window.KNOWW_UTILS.log);
-      sendResponse({ success: true });
-      return true;
+      if (message?.type === "KNOWW_SET_NOTIFICATION_STACK_VISIBILITY") {
+        setNotificationStackVisibility(message.visible !== false);
+        sendResponse({ success: true });
+        return true;
+      }
+
+      if (message?.type === "KNOWW_GET_NOTIFICATION_STACK_SNAPSHOT") {
+        sendResponse({
+          success: true,
+          data: getNotificationStackSnapshot(message.trendingLimit),
+        });
+        return true;
+      }
+
+      if (message?.type === "KNOWW_FOCUS_NOTIFICATION_MARKET") {
+        sendResponse({
+          success:
+            typeof message.marketId === "string" &&
+            focusNotificationStackMarket(message.marketId),
+        });
+        return true;
+      }
+
+      if (message?.type === "KNOWW_SEARCH_NOTIFICATION_MARKETS") {
+        const query = typeof message.query === "string" ? message.query : "";
+        void searchNotificationStackMarkets(query)
+          .then((data) => sendResponse({ success: true, data }))
+          .catch(() => sendResponse({ success: false, data: [] }));
+        return true;
+      }
+
+      return false;
     }
   );
 }

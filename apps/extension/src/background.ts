@@ -30,6 +30,7 @@ import type {
   ScoringPrewarmMessage,
 } from "./types/chrome-messages";
 import { TRADING_SESSION_DISCONNECTED_MESSAGE } from "./types/chrome-messages";
+import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
 // ── Programmatic content script registration ──
 // Instead of declaring content_scripts in manifest.json (which would
@@ -38,6 +39,315 @@ import { TRADING_SESSION_DISCONNECTED_MESSAGE } from "./types/chrome-messages";
 const CONTENT_SCRIPT_ID = "knoww-content";
 const TRADING_CREDS_STORAGE_PREFIX = "knoww_clob_creds_";
 const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
+const SETTINGS_STORAGE_KEY = "knowwSettings";
+const CONTENT_SCRIPT_REINJECT_SETTLE_MS = 500;
+
+type ChromeSidePanelApi = {
+  open: (options: { tabId?: number; windowId?: number }) => Promise<void>;
+  close?: (options: { tabId?: number; windowId?: number }) => Promise<void>;
+  setPanelBehavior?: (behavior: {
+    openPanelOnActionClick: boolean;
+  }) => Promise<void>;
+};
+
+let lastSidePanelTabId: number | undefined;
+let lastSidePanelWindowId: number | undefined;
+let cachedNotificationPanelSurface:
+  | UserSettings["notificationPanelSurface"]
+  | undefined;
+let lastFocusedWindowId: number | undefined;
+const activeTabIdsByWindowId = new Map<number, number>();
+
+function getSidePanelApi(): ChromeSidePanelApi | undefined {
+  return (chrome as typeof chrome & { sidePanel?: ChromeSidePanelApi })
+    .sidePanel;
+}
+
+function mergeUserSettings(stored?: Partial<UserSettings>): UserSettings {
+  return {
+    ...DEFAULT_USER_SETTINGS,
+    ...(stored || {}),
+    platforms: {
+      ...DEFAULT_USER_SETTINGS.platforms,
+      ...(stored?.platforms || {}),
+    },
+    sources: {
+      ...DEFAULT_USER_SETTINGS.sources,
+      ...(stored?.sources || {}),
+      kalshi: DEFAULT_USER_SETTINGS.sources.kalshi,
+    },
+  };
+}
+
+async function readUserSettings(): Promise<UserSettings> {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(
+      { [SETTINGS_STORAGE_KEY]: DEFAULT_USER_SETTINGS },
+      (result) => {
+        resolve(
+          mergeUserSettings(
+            result[SETTINGS_STORAGE_KEY] as Partial<UserSettings> | undefined
+          )
+        );
+      }
+    );
+  });
+}
+
+function applySidePanelActionBehavior(
+  surface: UserSettings["notificationPanelSurface"]
+): void {
+  const sidePanel = getSidePanelApi();
+  if (!sidePanel?.setPanelBehavior) return;
+
+  sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: surface === "sidebar" })
+    .catch(() => {
+      // Older Chrome versions can support sidePanel.open without this helper.
+    });
+}
+
+async function refreshNotificationPanelSurfaceCache(): Promise<
+  UserSettings["notificationPanelSurface"]
+> {
+  const settings = await readUserSettings();
+  cachedNotificationPanelSurface = settings.notificationPanelSurface;
+  applySidePanelActionBehavior(settings.notificationPanelSurface);
+  return settings.notificationPanelSurface;
+}
+
+function updateNotificationPanelSurfaceFromSettings(
+  settings: Partial<UserSettings> | undefined
+): void {
+  const merged = mergeUserSettings(settings);
+  cachedNotificationPanelSurface = merged.notificationPanelSurface;
+  applySidePanelActionBehavior(merged.notificationPanelSurface);
+}
+
+function resolveSidePanelContext(tab?: chrome.tabs.Tab): {
+  tabId?: number;
+  windowId?: number;
+} {
+  return {
+    ...(typeof tab?.id === "number" ? { tabId: tab.id } : {}),
+    ...(typeof tab?.windowId === "number" ? { windowId: tab.windowId } : {}),
+  };
+}
+
+function rememberActiveTab(tabId?: number, windowId?: number): void {
+  if (typeof windowId === "number") lastFocusedWindowId = windowId;
+  if (typeof tabId === "number") lastSidePanelTabId = tabId;
+  if (typeof tabId === "number" && typeof windowId === "number") {
+    activeTabIdsByWindowId.set(windowId, tabId);
+  }
+}
+
+async function openKnowwSidePanel(context: {
+  tabId?: number;
+  windowId?: number;
+}): Promise<void> {
+  const sidePanel = getSidePanelApi();
+  if (!sidePanel) throw new Error("Chrome side panel API is unavailable.");
+
+  if (typeof context.tabId === "number") {
+    rememberActiveTab(context.tabId, context.windowId);
+    await sidePanel.open({ tabId: context.tabId });
+    return;
+  }
+
+  if (typeof context.windowId === "number") {
+    lastSidePanelWindowId = context.windowId;
+    await sidePanel.open({ windowId: context.windowId });
+    return;
+  }
+
+  throw new Error("No active tab or window found for side panel.");
+}
+
+async function closeKnowwSidePanel(context: {
+  tabId?: number;
+  windowId?: number;
+}): Promise<void> {
+  const sidePanel = getSidePanelApi();
+  if (!sidePanel?.close) {
+    throw new Error("Closing side panels requires Chrome 141 or newer.");
+  }
+
+  const tabId = context.tabId ?? lastSidePanelTabId;
+  const windowId = context.windowId ?? lastSidePanelWindowId;
+
+  if (typeof tabId === "number") {
+    await sidePanel.close({ tabId });
+    return;
+  }
+
+  if (typeof windowId === "number") {
+    await sidePanel.close({ windowId });
+    return;
+  }
+
+  throw new Error("No side panel context is available to close.");
+}
+
+function sendOpenFloatingPanel(tabId: number): void {
+  chrome.tabs.sendMessage(tabId, { type: "KNOWW_OPEN_EXTENSION" }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+function queryTabsActiveTabId(windowId?: number): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    try {
+      const queryInfo =
+        typeof windowId === "number"
+          ? { active: true, windowId }
+          : { active: true, currentWindow: true };
+      chrome.tabs.query(queryInfo, (tabs) => {
+        if (chrome.runtime.lastError) {
+          resolve(undefined);
+          return;
+        }
+        const activeTab = tabs.find((tab) => typeof tab.id === "number");
+        rememberActiveTab(activeTab?.id, activeTab?.windowId);
+        resolve(activeTab?.id);
+      });
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+function queryLastFocusedActiveTabId(): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    try {
+      chrome.windows.getLastFocused({ populate: true }, (window) => {
+        if (chrome.runtime.lastError || typeof window?.id !== "number") {
+          resolve(undefined);
+          return;
+        }
+
+        lastFocusedWindowId = window.id;
+        const activeTab = window.tabs?.find(
+          (tab) => tab.active && typeof tab.id === "number"
+        );
+        rememberActiveTab(activeTab?.id, window.id);
+        resolve(activeTab?.id);
+      });
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+async function queryActiveTabId(
+  windowId?: number
+): Promise<number | undefined> {
+  if (typeof windowId === "number") {
+    return (
+      (await queryTabsActiveTabId(windowId)) ??
+      activeTabIdsByWindowId.get(windowId)
+    );
+  }
+
+  const focusedTabId = await queryLastFocusedActiveTabId();
+  if (typeof focusedTabId === "number") return focusedTabId;
+
+  const trackedWindowId = lastFocusedWindowId ?? lastSidePanelWindowId;
+  if (typeof trackedWindowId === "number") {
+    const trackedTabId =
+      (await queryTabsActiveTabId(trackedWindowId)) ??
+      activeTabIdsByWindowId.get(trackedWindowId);
+    if (typeof trackedTabId === "number") return trackedTabId;
+  }
+
+  return await queryTabsActiveTabId();
+}
+
+async function resolveContentTargetTabId(
+  msg: { tabId?: number },
+  sender: chrome.runtime.MessageSender
+): Promise<number | undefined> {
+  if (typeof msg.tabId === "number") return msg.tabId;
+  if (typeof sender.tab?.id === "number") return sender.tab.id;
+
+  const activeTabId = await queryActiveTabId(
+    sender.tab?.windowId ?? lastSidePanelWindowId
+  );
+  if (typeof activeTabId === "number") {
+    lastSidePanelTabId = activeTabId;
+    return activeTabId;
+  }
+
+  return lastSidePanelTabId;
+}
+
+function isRecoverableContentScriptError(error?: string): boolean {
+  return /Receiving end does not exist|Could not establish connection|Extension context invalidated/i.test(
+    error || ""
+  );
+}
+
+async function reinjectContentScript(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content.js"],
+  });
+  await new Promise((resolve) =>
+    setTimeout(resolve, CONTENT_SCRIPT_REINJECT_SETTLE_MS)
+  );
+}
+
+function sendMessageToContentTab(
+  tabId: number,
+  contentMessage: Record<string, unknown>,
+  sendResponse: (response: BackgroundResponse) => void,
+  recovered = false
+): void {
+  chrome.tabs.sendMessage(tabId, contentMessage, (response) => {
+    const runtimeError = chrome.runtime.lastError?.message;
+    if (runtimeError) {
+      if (!recovered && isRecoverableContentScriptError(runtimeError)) {
+        void reinjectContentScript(tabId)
+          .then(() =>
+            sendMessageToContentTab(tabId, contentMessage, sendResponse, true)
+          )
+          .catch((error) => {
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            } as BackgroundResponse);
+          });
+        return;
+      }
+
+      sendResponse({
+        ok: false,
+        error: runtimeError,
+      } as BackgroundResponse);
+      return;
+    }
+    sendResponse({ ok: true, data: response } as BackgroundResponse);
+  });
+}
+
+function forwardToResolvedContentTab(
+  msg: { tabId?: number },
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: BackgroundResponse) => void,
+  contentMessage: Record<string, unknown>
+): void {
+  void resolveContentTargetTabId(msg, sender).then((tabId) => {
+    if (typeof tabId !== "number") {
+      sendResponse({
+        ok: false,
+        error: "No active content tab is available.",
+      } as BackgroundResponse);
+      return;
+    }
+
+    sendMessageToContentTab(tabId, contentMessage, sendResponse);
+  });
+}
 
 async function registerContentScripts(): Promise<void> {
   try {
@@ -324,6 +634,18 @@ function forwardToOffscreen(
     });
 }
 
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "knoww-notification-stack") return;
+
+  rememberActiveTab(port.sender?.tab?.id, port.sender?.tab?.windowId);
+  port.onMessage.addListener((message: unknown) => {
+    const msg = message as { type?: string };
+    if (msg?.type === "KNOWW_NOTIFICATION_STACK_ALIVE") {
+      rememberActiveTab(port.sender?.tab?.id, port.sender?.tab?.windowId);
+    }
+  });
+});
+
 async function sendOffscreenMessage(
   offscreenType:
     | "offscreen:trading"
@@ -380,6 +702,10 @@ chrome.runtime.onMessage.addListener(
       value?: unknown;
       token?: string;
       tokenId?: string;
+      marketId?: string;
+      query?: string;
+      trendingLimit?: number;
+      visible?: boolean;
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -393,6 +719,88 @@ chrome.runtime.onMessage.addListener(
     if (msg?.type === "KNOWW_OPEN_EXTENSION_SETTINGS") {
       chrome.runtime.openOptionsPage();
       sendResponse({ ok: true, data: null } as BackgroundResponse);
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_OPEN_EXTENSION_SIDEPANEL") {
+      void openKnowwSidePanel({
+        ...(typeof sender.tab?.id === "number" ? { tabId: sender.tab.id } : {}),
+        ...(typeof sender.tab?.windowId === "number"
+          ? { windowId: sender.tab.windowId }
+          : {}),
+      })
+        .then(() => {
+          if (typeof sender.tab?.id === "number") {
+            chrome.tabs.sendMessage(
+              sender.tab.id,
+              {
+                type: "KNOWW_SET_NOTIFICATION_STACK_VISIBILITY",
+                visible: false,
+              },
+              () => {
+                void chrome.runtime.lastError;
+              }
+            );
+          }
+          sendResponse({ ok: true, data: null } as BackgroundResponse);
+        })
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_CLOSE_EXTENSION_SIDEPANEL") {
+      void closeKnowwSidePanel({
+        ...(typeof msg.tabId === "number" ? { tabId: msg.tabId } : {}),
+        ...(typeof sender.tab?.windowId === "number"
+          ? { windowId: sender.tab.windowId }
+          : {}),
+      })
+        .then(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        )
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_SET_NOTIFICATION_STACK_VISIBILITY") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_SET_NOTIFICATION_STACK_VISIBILITY",
+        visible: msg.visible,
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_GET_NOTIFICATION_STACK_SNAPSHOT") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_GET_NOTIFICATION_STACK_SNAPSHOT",
+        trendingLimit: msg.trendingLimit,
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_FOCUS_NOTIFICATION_MARKET") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_FOCUS_NOTIFICATION_MARKET",
+        marketId: msg.marketId,
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_SEARCH_NOTIFICATION_MARKETS") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_SEARCH_NOTIFICATION_MARKETS",
+        query: msg.query,
+      });
       return true;
     }
 
@@ -836,12 +1244,60 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
+void refreshNotificationPanelSurfaceCache();
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  rememberActiveTab(activeInfo.tabId, activeInfo.windowId);
+});
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  lastFocusedWindowId = windowId;
+  void queryActiveTabId(windowId);
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync") return;
+
+  const settingsChange = changes[SETTINGS_STORAGE_KEY];
+  if (!settingsChange) return;
+
+  updateNotificationPanelSurfaceFromSettings(
+    settingsChange.newValue as Partial<UserSettings> | undefined
+  );
+});
+
 chrome.action.onClicked.addListener((tab) => {
   if (typeof tab.id !== "number") return;
 
-  chrome.tabs.sendMessage(tab.id, { type: "KNOWW_OPEN_EXTENSION" }, () => {
-    void chrome.runtime.lastError;
-  });
+  const openFloatingPanel = () => sendOpenFloatingPanel(tab.id as number);
+  const openSidePanel = () => {
+    void openKnowwSidePanel(resolveSidePanelContext(tab)).catch(() => {
+      openFloatingPanel();
+    });
+  };
+
+  if (cachedNotificationPanelSurface === "sidebar") {
+    openSidePanel();
+    return;
+  }
+
+  if (cachedNotificationPanelSurface === "floating") {
+    openFloatingPanel();
+    return;
+  }
+
+  void refreshNotificationPanelSurfaceCache()
+    .then((surface) => {
+      if (surface === "sidebar") {
+        openSidePanel();
+        return;
+      }
+      openFloatingPanel();
+    })
+    .catch(() => {
+      openFloatingPanel();
+    });
 });
 
 chrome.runtime.onInstalled.addListener((details) => {

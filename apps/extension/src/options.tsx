@@ -562,6 +562,7 @@ function OptionsApp() {
           properties: {
             analyticsEnabled: settings.usageAnalyticsEnabled,
             notificationStackEnabled: settings.showNotificationStack,
+            notificationPanelSurface: settings.notificationPanelSurface,
             aiExtractionEnabled: settings.aiExtractionEnabled,
             personalizationEnabled: settings.personalizationEnabled,
           },
@@ -875,6 +876,28 @@ function OptionsApp() {
               setSettings((prev) => ({ ...prev, showNotificationStack: v }))
             }
           />
+        </SettingRow>
+
+        <Divider />
+
+        <SettingRow
+          label="Notification Panel Placement"
+          description="Choose whether Markets opens in Chrome's sidebar or floats on the page"
+        >
+          <select
+            id="notification-panel-surface"
+            value={settings.notificationPanelSurface}
+            onChange={(e) =>
+              setSettings((prev) => ({
+                ...prev,
+                notificationPanelSurface: (e.target as HTMLSelectElement)
+                  .value as UserSettings["notificationPanelSurface"],
+              }))
+            }
+          >
+            <option value="sidebar">Browser sidebar</option>
+            <option value="floating">Floating page panel</option>
+          </select>
         </SettingRow>
 
         <Divider />

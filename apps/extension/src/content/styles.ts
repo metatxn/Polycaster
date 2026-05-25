@@ -1060,7 +1060,9 @@ function injectInlineStyles(): void {
       }
 
       /* Search toggle button */
-      .knoww-search-toggle {
+      .knoww-search-toggle,
+      .knoww-stack-settings,
+      .knoww-stack-sidebar {
         width: 28px !important;
         height: 28px !important;
         border-radius: 50% !important;
@@ -1074,7 +1076,9 @@ function injectInlineStyles(): void {
         transition: all 0.15s ease !important;
       }
 
-      .knoww-search-toggle:hover {
+      .knoww-search-toggle:hover,
+      .knoww-stack-settings:hover,
+      .knoww-stack-sidebar:hover {
         background: rgba(29, 155, 240, 0.1) !important;
         color: var(--knoww-accent, rgb(29, 155, 240)) !important;
       }
@@ -1084,7 +1088,9 @@ function injectInlineStyles(): void {
         color: var(--knoww-accent, rgb(29, 155, 240)) !important;
       }
 
-      .knoww-search-toggle svg {
+      .knoww-search-toggle svg,
+      .knoww-stack-settings svg,
+      .knoww-stack-sidebar svg {
         width: 16px !important;
         height: 16px !important;
       }
@@ -1531,52 +1537,6 @@ function injectInlineStyles(): void {
       .knoww-notification-arrow svg {
         width: 16px !important;
         height: 16px !important;
-      }
-
-      /* Highlight animation for scrolled-to cards */
-      .knoww-market-card.knoww-highlight {
-        animation: knoww-highlight-pulse 2s ease !important;
-      }
-
-      @keyframes knoww-highlight-pulse {
-        0% {
-          box-shadow: 0 0 0 0 rgba(29, 155, 240, 0.7);
-        }
-        25% {
-          box-shadow: 0 0 0 8px rgba(29, 155, 240, 0.4);
-        }
-        50% {
-          box-shadow: 0 0 0 12px rgba(29, 155, 240, 0.2);
-        }
-        75% {
-          box-shadow: 0 0 0 8px rgba(29, 155, 240, 0.1);
-        }
-        100% {
-          box-shadow: 0 0 0 0 rgba(29, 155, 240, 0);
-        }
-      }
-
-      /* LinkedIn-specific highlight uses LinkedIn blue */
-      .knoww-platform-linkedin .knoww-market-card.knoww-highlight {
-        animation: knoww-highlight-pulse-linkedin 2s ease !important;
-      }
-
-      @keyframes knoww-highlight-pulse-linkedin {
-        0% {
-          box-shadow: 0 0 0 0 rgba(10, 102, 194, 0.7);
-        }
-        25% {
-          box-shadow: 0 0 0 8px rgba(10, 102, 194, 0.4);
-        }
-        50% {
-          box-shadow: 0 0 0 12px rgba(10, 102, 194, 0.2);
-        }
-        75% {
-          box-shadow: 0 0 0 8px rgba(10, 102, 194, 0.1);
-        }
-        100% {
-          box-shadow: 0 0 0 0 rgba(10, 102, 194, 0);
-        }
       }
 
       /* Toast notification for scroll errors */

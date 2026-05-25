@@ -145,6 +145,185 @@ test("notification panel theme refresh runs when settings change", () => {
   );
 });
 
+test("notification stack close persists until explicitly reopened", () => {
+  const uiSource = readSource("src/content/ui.ts");
+
+  assert.equal(
+    /const STACK_DISMISSED_STORAGE_KEY = "knoww-stack-dismissed";/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(/function readPersistedStackDismissed/.test(uiSource), true);
+  assert.equal(/function persistStackDismissed/.test(uiSource), true);
+  assert.equal(
+    /persistStackDismissed\(true\);[\s\S]*notification_stack_closed/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /readPersistedStackDismissed\(\)\.then\(\(dismissed\) => \{[\s\S]*if \(dismissed\) return;[\s\S]*createNotificationStack\(\);/.test(
+      uiSource
+    ),
+    true
+  );
+});
+
+test("notification stack exposes settings and action-open controls", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const backgroundSource = readSource("src/background.ts");
+
+  assert.equal(/KNOWW_OPEN_EXTENSION/.test(uiSource), true);
+  assert.equal(/KNOWW_OPEN_EXTENSION_SETTINGS/.test(uiSource), true);
+  assert.equal(
+    /settingsBtn\.className = "knoww-stack-settings";/.test(uiSource),
+    true
+  );
+  assert.equal(
+    /safeSendMessage\(\{\s*type:\s*"KNOWW_OPEN_EXTENSION_SETTINGS"/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /msg\?\.type === "KNOWW_OPEN_EXTENSION_SETTINGS"[\s\S]*chrome\.runtime\.openOptionsPage\(\)/.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /chrome\.tabs\.sendMessage\([^)]*type: "KNOWW_OPEN_EXTENSION"/s.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /chrome\.action\.onClicked\.addListener\(\(\) => \{\s*chrome\.runtime\.openOptionsPage\(\);\s*\}\);/.test(
+      backgroundSource
+    ),
+    false
+  );
+});
+
+test("notification stack icon reopen restores preferred top-right position", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const resetSource = extractFunctionSource(
+    uiSource,
+    "resetNotificationStackToPreferredPosition"
+  );
+  const visibilitySource = extractFunctionSource(
+    uiSource,
+    "setNotificationStackVisibility"
+  );
+
+  assert.equal(/style\.removeProperty\("left"\)/.test(resetSource), true);
+  assert.equal(/style\.removeProperty\("top"\)/.test(resetSource), true);
+  assert.equal(/style\.removeProperty\("right"\)/.test(resetSource), true);
+  assert.equal(
+    /resetNotificationStackToPreferredPosition\(notificationStackContainer\)/.test(
+      visibilitySource
+    ),
+    true
+  );
+});
+
+test("notification stack snapshot includes trending and supports sidepanel focus", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const snapshotSource = extractFunctionSource(
+    uiSource,
+    "getNotificationStackSnapshot"
+  );
+  const timerSource = extractFunctionSource(
+    uiSource,
+    "startTrendingFetchTimer"
+  );
+  const fetchSource = extractFunctionSource(uiSource, "fetchAndCacheTrending");
+  const focusSource = extractFunctionSource(
+    uiSource,
+    "focusNotificationStackMarket"
+  );
+
+  assert.equal(/startTrendingFetchTimer\(\)/.test(snapshotSource), true);
+  assert.equal(/trendingFetchInFlight\s*=\s*false/.test(uiSource), true);
+  assert.equal(/trendingFetchInFlight/.test(timerSource), true);
+  assert.equal(/trendingFetchTimer/.test(timerSource), true);
+  assert.equal(/trendingPool\.length > 0/.test(timerSource), true);
+  assert.equal(/cancelTrendingFetchTimer\(\)/.test(timerSource), false);
+  assert.equal(
+    /finally\s*\{[\s\S]*trendingFetchInFlight\s*=\s*false/.test(fetchSource),
+    true
+  );
+  assert.equal(/getVisibleTrendingMarkets/.test(snapshotSource), true);
+  assert.equal(/trendingLimit/.test(snapshotSource), true);
+  assert.equal(/trending:\s*trendingMarkets\.map/.test(snapshotSource), true);
+  assert.equal(
+    /summarizeSnapshotMarket\(market,\s*"trending"\)/.test(snapshotSource),
+    true
+  );
+  assert.equal(/selectRepresentativeMarketEntries/.test(focusSource), true);
+  assert.equal(/scrollToMarket\(/.test(focusSource), true);
+  assert.equal(/visibleTrending/.test(focusSource), true);
+  assert.equal(/trendingPool/.test(focusSource), true);
+  assert.equal(/KNOWW_FOCUS_NOTIFICATION_MARKET/.test(uiSource), true);
+});
+
+test("notification stack supports sidepanel search requests", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const searchSource = extractFunctionSource(
+    uiSource,
+    "searchNotificationStackMarkets"
+  );
+
+  assert.equal(
+    /searchPolymarketEvents\(query,\s*\[\]\)/.test(searchSource),
+    true
+  );
+  assert.equal(
+    /summarizeSnapshotMarket\(market,\s*"trending"\)/.test(searchSource),
+    true
+  );
+  assert.equal(/url:\s*buildMarketUrl\(market\)/.test(uiSource), true);
+  assert.equal(/KNOWW_SEARCH_NOTIFICATION_MARKETS/.test(uiSource), true);
+});
+
+test("notification stack dedupe prefers visible duplicate market cards", () => {
+  const uiSource = readSource("src/content/ui.ts");
+
+  assert.equal(/function isCardInViewport/.test(uiSource), true);
+  assert.equal(/function classifyInjectedMarketEntry/.test(uiSource), true);
+  assert.equal(
+    /function selectRepresentativeMarketEntries/.test(uiSource),
+    true
+  );
+  assert.equal(
+    /if \(current\.status !== "active" && classified\.status === "active"\)/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /const \{ activeMarkets, scrolledOutMarkets \} =\s*selectRepresentativeMarketEntries\(markets\);/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /Deduplicate by market id \(prefer visible active cards\)/.test(uiSource),
+    true
+  );
+});
+
+test("notification click scrolls to cards without any highlight pulse", () => {
+  const css = readInlineCss();
+  const uiSource = readSource("src/content/ui.ts");
+
+  assert.equal(/\.knoww-market-card\.knoww-highlight/.test(css), false);
+  assert.equal(/knoww-highlight-pulse/.test(css), false);
+  assert.equal(/classList\.add\("knoww-highlight"\)/.test(uiSource), false);
+  assert.equal(/classList\.remove\("knoww-highlight"\)/.test(uiSource), false);
+});
+
 test("notification panel see all expands the in-page list", () => {
   const css = readInlineCss();
   const uiSource = readSource("src/content/ui.ts");
@@ -274,19 +453,19 @@ test("expanded trending tab can show more trending markets", () => {
     true
   );
   assert.equal(
-    /function getVisibleTrendingMarkets\(\s*realMarketIds:\s*Set<string>,\s*expandedTrending:\s*boolean\s*\):\s*Market\[\]/.test(
+    /function getVisibleTrendingMarkets\(\s*realMarketIds:\s*Set<string>,\s*expandedTrending:\s*boolean,\s*limitOverride\?:\s*number\s*\):\s*Market\[\]/.test(
       uiSource
     ),
     true
   );
   assert.equal(
-    /expandedTrending\s*\?\s*trendingPool\s*:\s*visibleTrending/.test(uiSource),
+    /expandedTrending\s*\|\|\s*cappedLimit > MAX_TRENDING_DISPLAY/.test(
+      uiSource
+    ),
     true
   );
   assert.equal(
-    /expandedTrending\s*\?\s*MAX_EXPANDED_TRENDING_DISPLAY\s*:\s*MAX_TRENDING_DISPLAY/.test(
-      uiSource
-    ),
+    /Math\.min\(limit,\s*MAX_EXPANDED_TRENDING_DISPLAY\)/.test(uiSource),
     true
   );
   assert.equal(

@@ -1617,7 +1617,9 @@
 }
 
 /* Search toggle button */
-.knoww-search-toggle {
+.knoww-search-toggle,
+.knoww-stack-settings,
+.knoww-stack-sidebar {
   width: 28px !important;
   height: 28px !important;
   border-radius: 50% !important;
@@ -1631,7 +1633,9 @@
   transition: all 0.15s ease !important;
 }
 
-.knoww-search-toggle:hover {
+.knoww-search-toggle:hover,
+.knoww-stack-settings:hover,
+.knoww-stack-sidebar:hover {
   background: rgba(29, 155, 240, 0.1) !important;
   color: var(--knoww-accent, rgb(29, 155, 240)) !important;
 }
@@ -1641,7 +1645,9 @@
   color: var(--knoww-accent, rgb(29, 155, 240)) !important;
 }
 
-.knoww-search-toggle svg {
+.knoww-search-toggle svg,
+.knoww-stack-settings svg,
+.knoww-stack-sidebar svg {
   width: 16px !important;
   height: 16px !important;
 }
@@ -2457,52 +2463,6 @@
 .knoww-notification-arrow svg {
   width: 16px !important;
   height: 16px !important;
-}
-
-/* Highlight animation for scrolled-to cards */
-.knoww-market-card.knoww-highlight {
-  animation: knoww-highlight-pulse 2s ease !important;
-}
-
-@keyframes knoww-highlight-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(29, 155, 240, 0.7);
-  }
-  25% {
-    box-shadow: 0 0 0 8px rgba(29, 155, 240, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 12px rgba(29, 155, 240, 0.2);
-  }
-  75% {
-    box-shadow: 0 0 0 8px rgba(29, 155, 240, 0.1);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(29, 155, 240, 0);
-  }
-}
-
-/* LinkedIn-specific highlight uses LinkedIn blue */
-.knoww-platform-linkedin .knoww-market-card.knoww-highlight {
-  animation: knoww-highlight-pulse-linkedin 2s ease !important;
-}
-
-@keyframes knoww-highlight-pulse-linkedin {
-  0% {
-    box-shadow: 0 0 0 0 rgba(10, 102, 194, 0.7);
-  }
-  25% {
-    box-shadow: 0 0 0 8px rgba(10, 102, 194, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 12px rgba(10, 102, 194, 0.2);
-  }
-  75% {
-    box-shadow: 0 0 0 8px rgba(10, 102, 194, 0.1);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(10, 102, 194, 0);
-  }
 }
 
 /* Toast notification for scroll errors */
@@ -3754,6 +3714,8 @@
   justify-content: flex-start !important;
   gap: 10px !important;
   width: 100% !important;
+  height: auto !important;
+  min-height: 46px !important;
   padding: 10px 14px !important;
   border: 1px solid var(--knoww-border, rgba(255, 255, 255, 0.12)) !important;
   border-radius: 10px !important;
@@ -3767,6 +3729,7 @@
     border-color 0.15s !important;
   text-align: left !important;
   line-height: 1.3 !important;
+  box-sizing: border-box !important;
 }
 .knoww-tp-wallet-item:hover {
   background: var(--knoww-card-bg, rgba(255, 255, 255, 0.08)) !important;
@@ -3776,8 +3739,10 @@
   transform: scale(0.98) !important;
 }
 .knoww-tp-wallet-item-icon {
+  display: block !important;
   width: 28px !important;
   height: 28px !important;
+  margin: 0 !important;
   border-radius: 6px !important;
   flex-shrink: 0 !important;
   object-fit: contain !important;
@@ -5683,6 +5648,8 @@
 
 /* Header buttons — uniform ghost outline shared by search/chevron/close */
 #knoww-notification-stack .knoww-search-toggle,
+#knoww-notification-stack .knoww-stack-settings,
+#knoww-notification-stack .knoww-stack-sidebar,
 #knoww-notification-stack .knoww-stack-minimize,
 #knoww-notification-stack .knoww-stack-close {
   width: 26px !important;
@@ -5703,6 +5670,8 @@
 }
 
 #knoww-notification-stack .knoww-search-toggle:hover,
+#knoww-notification-stack .knoww-stack-settings:hover,
+#knoww-notification-stack .knoww-stack-sidebar:hover,
 #knoww-notification-stack .knoww-stack-minimize:hover,
 #knoww-notification-stack .knoww-stack-close:hover {
   background: var(--kse-control-hover) !important;
@@ -5717,6 +5686,8 @@
 }
 
 #knoww-notification-stack .knoww-search-toggle svg,
+#knoww-notification-stack .knoww-stack-settings svg,
+#knoww-notification-stack .knoww-stack-sidebar svg,
 #knoww-notification-stack .knoww-stack-minimize svg,
 #knoww-notification-stack .knoww-stack-close svg {
   width: 12px !important;

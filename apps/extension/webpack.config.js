@@ -152,6 +152,7 @@ module.exports = (_env, argv) => {
       offscreen: "./src/offscreen/offscreen.ts",
       content: "./src/content/index.ts",
       options: "./src/options.tsx",
+      sidepanel: "./src/sidepanel.ts",
       "page-bridge": "./src/page-bridge.ts",
     },
     output: {
@@ -302,6 +303,7 @@ module.exports = (_env, argv) => {
             },
           },
           { from: "options.html", to: "options.html" },
+          { from: "sidepanel.html", to: "sidepanel.html" },
           { from: "styles.css", to: "styles.css" },
           { from: "icons", to: "icons" },
           { from: "src/content/knoww-inline.css", to: "knoww-inline.css" },

@@ -22,7 +22,6 @@ import {
   http,
   parseUnits,
 } from "viem";
-import { polygon } from "viem/chains";
 import { useConnection, useWalletClient } from "wagmi";
 import {
   Dialog,
@@ -34,6 +33,7 @@ import { PUSD_ADDRESS as POLYGON_PUSD_ADDRESS } from "@/constants/contracts";
 import { fetchBridgeQuote, useBridge } from "@/hooks/use-bridge";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { type TokenBalance, useWalletTokens } from "@/hooks/use-wallet-tokens";
+import { polygon } from "@/lib/chains";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 
 import { AmountInput } from "./deposit/amount-input";

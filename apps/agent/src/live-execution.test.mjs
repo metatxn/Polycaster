@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LiveExecutionAdapter } from "./live-execution.ts";
+import {
+  createUnifiedLiveClobClient,
+  deriveUnifiedLiveApiCreds,
+  LiveExecutionAdapter,
+} from "./live-execution.ts";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -341,3 +345,135 @@ test("blocks real live execution when daily order cap is reached", async () => {
   assert.match(fill.reason ?? "", /daily order cap/i);
   assert.equal(calls.postOrder, 0);
 });
+
+test("deriveUnifiedLiveApiCreds derives credentials through the unified SDK signer", async () => {
+  const walletClient = { account: "wallet-client" };
+  const signer = { signer: "viem-signer" };
+  const calls = [];
+
+  const creds = await deriveUnifiedLiveApiCreds(walletClient, {
+    createViemSigner: (input) => {
+      calls.push(["createViemSigner", input]);
+      return signer;
+    },
+    createSecureClient: async (input) => {
+      calls.push(["createSecureClient", input]);
+      return {
+        appCredentials: {
+          apiKey: "api-key",
+          apiSecret: "api-secret",
+          apiPassphrase: "api-passphrase",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(creds, {
+    apiKey: "api-key",
+    apiSecret: "api-secret",
+    apiPassphrase: "api-passphrase",
+  });
+  assert.deepEqual(calls, [
+    ["createViemSigner", walletClient],
+    ["createSecureClient", { signer }],
+  ]);
+});
+
+test("createUnifiedLiveClobClient adapts the unified SDK client for live CLOB execution", async () => {
+  const walletClient = { account: "wallet-client" };
+  const signer = { signer: "viem-signer" };
+  const unifiedClient = { client: "unified-sdk-client" };
+  const legacyClient = { client: "legacy-adapter-client" };
+  const calls = [];
+
+  const client = await createUnifiedLiveClobClient(
+    {
+      config: {
+        ...getLiveExecutionConfigForTest(),
+        clobHost: "https://clob.polymarket.com",
+      },
+      walletClient,
+      funderAddress: "0x0000000000000000000000000000000000000002",
+      creds: {
+        apiKey: "api-key",
+        apiSecret: "api-secret",
+        apiPassphrase: "api-passphrase",
+      },
+    },
+    {
+      createViemSigner: (input) => {
+        calls.push(["createViemSigner", input]);
+        return signer;
+      },
+      createSecureClient: async (input) => {
+        calls.push(["createSecureClient", input]);
+        return { client: unifiedClient };
+      },
+      adaptClient: (input) => {
+        calls.push(["adaptClient", input]);
+        return legacyClient;
+      },
+    }
+  );
+
+  assert.equal(client, legacyClient);
+  assert.deepEqual(calls, [
+    ["createViemSigner", walletClient],
+    [
+      "createSecureClient",
+      {
+        signer,
+        wallet: "0x0000000000000000000000000000000000000002",
+        credentials: {
+          apiKey: "api-key",
+          apiSecret: "api-secret",
+          apiPassphrase: "api-passphrase",
+        },
+      },
+    ],
+    ["adaptClient", unifiedClient],
+  ]);
+});
+
+test("createUnifiedLiveClobClient rejects non-production CLOB hosts", async () => {
+  await assert.rejects(
+    () =>
+      createUnifiedLiveClobClient(
+        {
+          config: {
+            ...getLiveExecutionConfigForTest(),
+            clobHost: "https://example.test",
+          },
+          walletClient: {},
+          funderAddress: "0x0000000000000000000000000000000000000002",
+          creds: {
+            apiKey: "api-key",
+            apiSecret: "api-secret",
+            apiPassphrase: "api-passphrase",
+          },
+        },
+        {
+          createViemSigner: () => ({}),
+          createSecureClient: async () => ({ client: {} }),
+          adaptClient: () => ({}),
+        }
+      ),
+    /production CLOB host/
+  );
+});
+
+function getLiveExecutionConfigForTest() {
+  return {
+    enabled: true,
+    dryRun: false,
+    confirmedReal: true,
+    privateKey:
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    funderAddress: null,
+    maxLiveNotionalUsd: "5",
+    clobHost: "https://clob.polymarket.com",
+    chainId: 137,
+    rpcUrl: "https://polygon-rpc.com",
+    orderType: "FOK",
+  };
+}

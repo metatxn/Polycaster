@@ -1,6 +1,6 @@
 /**
  * Trading Handler — processes trading-related messages in the offscreen document.
- * Uses ClobClient + a viem bridge wallet client for order operations.
+ * Uses the Polymarket unified SDK + a viem bridge wallet client for order operations.
  * Supports: limit (GTC/GTD), market (FAK/FOK), split, merge, and balance queries.
  */
 
@@ -45,10 +45,13 @@ import {
   getClobPostOrderError,
   getPolymarketSignatureType,
   normalizeTradingWalletMode,
-  POLYGON_CHAIN_ID,
   POLYMARKET_API,
   syncClobBalanceAllowance,
 } from "@knoww/shared-types/polymarket";
+import {
+  fetchUnifiedClobMarket,
+  type LegacyClobOrderRequest,
+} from "@knoww/shared-types/polymarket-unified";
 import {
   derivePolymarketDepositWallet,
   derivePolymarketSafe,
@@ -60,7 +63,6 @@ import {
   parseApprovalAmountRaw,
   planPusdAutoWrap,
 } from "@knoww/shared-types/trading";
-import { ClobClient } from "@polymarket/clob-client-v2";
 import {
   type Address,
   createPublicClient,
@@ -101,6 +103,7 @@ import {
   executeViaRelayer,
 } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
+import { createExtensionLegacyClobClient } from "./unified-clob-client";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
@@ -122,6 +125,20 @@ type ClobOpenOrder = {
   price?: string | number;
   original_size?: string | number;
   size_matched?: string | number;
+};
+type ExtensionLegacyClobClient = ClobBalanceAllowanceClient & {
+  getOpenOrders(): Promise<unknown>;
+  getClobMarketInfo(conditionId: string): Promise<unknown>;
+  createMarketOrder(order: LegacyClobOrderRequest): Promise<unknown>;
+  createOrder(
+    order: LegacyClobOrderRequest & {
+      price: number;
+      size: number;
+      expiration: number;
+    },
+    options?: unknown
+  ): Promise<unknown>;
+  postOrder(order: unknown, orderType?: string): Promise<unknown>;
 };
 // Memoize the public CLOB builder-fee endpoint per builder code. The rates
 // are effectively static (set by Polymarket per builder), so caching for the
@@ -148,6 +165,12 @@ function getBuilderFeeRates(
   builderFeeRatesCache.set(builderCode, pending);
   return pending;
 }
+
+const unifiedMarketInfoClient = {
+  getClobMarketInfo(conditionId: string) {
+    return fetchUnifiedClobMarket(conditionId);
+  },
+};
 
 function ok(data: unknown): TradingSuccessResponse {
   return { ok: true, data };
@@ -343,30 +366,19 @@ async function handlePlaceOrder(
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
 
-  const creds = {
-    key: msg.credentials.apiKey,
-    secret: msg.credentials.apiSecret,
-    passphrase: msg.credentials.apiPassphrase,
-  };
-
   const builderCode = process.env.POLY_BUILDER_CODE;
-  const signatureType: number = getPolymarketSignatureType(msg.walletMode);
   const funderAddress =
     normalizeTradingWalletMode(msg.walletMode) === "eoa"
       ? ownerAddress
       : (getAddress(msg.proxyAddress) as Address);
 
-  const client = new ClobClient({
-    host: CLOB_HOST,
-    chain: POLYGON_CHAIN_ID,
-    signer: walletClient as unknown as WalletClient,
-    creds,
-    signatureType,
+  const client = (await createExtensionLegacyClobClient({
+    walletClient: walletClient as unknown as WalletClient,
     funderAddress,
-    ...(builderCode ? { builderConfig: { builderCode } } : {}),
-  });
+    credentials: msg.credentials,
+    builderCode,
+  })) as ExtensionLegacyClobClient;
 
-  const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
   const orderType = msg.orderType || "GTC";
   const preflight = await buildClobOrderPreflightPlan({
     side: msg.side,
@@ -450,12 +462,11 @@ async function handlePlaceOrder(
   if (preflight.isMarketOrder) {
     const marketAmount =
       msg.side === "SELL" ? msg.size : (msg.amount ?? msg.size);
-    const marketOrder: Record<string, unknown> = {
+    const marketOrder: LegacyClobOrderRequest = {
       tokenID: msg.tokenId,
       amount: marketAmount,
       side: msg.side,
       // feeRateBps removed (V2: protocol-determined at match time)
-      orderType,
     };
     if (msg.price && msg.price > 0) {
       marketOrder.price = msg.price;
@@ -469,11 +480,8 @@ async function handlePlaceOrder(
       msgAmount: msg.amount,
     });
 
-    const order = await client.createMarketOrder(
-      marketOrder as any,
-      orderOptions
-    );
-    const response = await client.postOrder(order, orderType as any);
+    const order = await client.createMarketOrder(marketOrder);
+    const response = await client.postOrder(order, orderType);
 
     const errorMsg = getClobPostOrderError(response);
     if (errorMsg) {
@@ -498,21 +506,22 @@ async function handlePlaceOrder(
       tokenID: msg.tokenId,
       price: msg.price,
       size: msg.size,
-      side: msg.side as any,
+      side: msg.side,
       // feeRateBps removed (V2: protocol-determined at match time)
-      expiration: orderType === "GTD" ? msg.expiration : 0,
+      expiration: orderType === "GTD" ? (msg.expiration ?? 0) : 0,
     },
-    orderOptions
+    undefined
   );
 
+  const signedOrder = order as Record<string, unknown>;
   logInfo("trading.place-order.signed", {
-    tokenID: order.tokenId,
-    side: order.side,
-    size: order.size,
-    price: order.price,
+    tokenID: signedOrder.tokenId,
+    side: signedOrder.side,
+    size: signedOrder.size,
+    price: signedOrder.price,
   });
 
-  const response = await client.postOrder(order, orderType as any);
+  const response = await client.postOrder(order, orderType);
 
   logInfo("trading.place-order.clob-response", {
     txHash: (response as Record<string, unknown>)?.transactionHash,
@@ -646,23 +655,9 @@ async function handleGetOrderBook(
 async function handleGetOrderPreflight(
   msg: TradingGetOrderPreflightMessage
 ): Promise<TradingResponse> {
-  // Mirror handlePlaceOrder's ClobClient construction (creds + builderConfig)
-  // when credentials are available, so the fee preview uses the same fee
-  // schedule (including builder-taker fees) the authoritative pre-flight will.
+  // Mirror handlePlaceOrder's builder fee schedule so the fee preview matches
+  // the authoritative pre-flight performed before posting.
   const builderCode = process.env.POLY_BUILDER_CODE;
-  const creds = msg.credentials
-    ? {
-        key: msg.credentials.apiKey,
-        secret: msg.credentials.apiSecret,
-        passphrase: msg.credentials.apiPassphrase,
-      }
-    : undefined;
-  const client = new ClobClient({
-    host: CLOB_HOST,
-    chain: POLYGON_CHAIN_ID,
-    ...(creds ? { creds } : {}),
-    ...(builderCode ? { builderConfig: { builderCode } } : {}),
-  });
   const preflight = await buildClobOrderPreflightPlan({
     side: msg.side,
     orderType: msg.orderType || "GTC",
@@ -670,7 +665,7 @@ async function handleGetOrderPreflight(
     size: msg.size,
     price: msg.price,
     conditionId: msg.conditionId,
-    marketInfoClient: client,
+    marketInfoClient: unifiedMarketInfoClient,
     builderCode,
     getBuilderFeeRates,
     isMarketableBuy: msg.isMarketableBuy,

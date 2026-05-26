@@ -1,13 +1,16 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import { getPolymarketSignatureType } from "@knoww/shared-types/polymarket";
+import {
+  createUnifiedPolymarketSecureClient,
+  createUnifiedPolymarketViemSigner,
+  type UnifiedPolymarketSecureClient,
+} from "@knoww/shared-types/polymarket-unified";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 
 const log = createLogger("notifications");
 
-import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
@@ -30,11 +33,10 @@ interface RawNotification {
 }
 
 /**
- * Extended ClobClient interface with notification methods
- * These methods exist in the SDK but TypeScript doesn't resolve them correctly
+ * Narrow authenticated client surface used by this hook.
  */
-interface ClobClientWithNotificationMethods {
-  getNotifications(): Promise<RawNotification[]>;
+interface UnifiedNotificationClient {
+  fetchNotifications(): Promise<RawNotification[]>;
   dropNotifications(params?: DropNotificationParams): Promise<void>;
 }
 
@@ -86,11 +88,7 @@ export function useNotifications() {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
   const { credentials, hasCredentials } = useClobCredentials();
-  const {
-    proxyAddress,
-    isDeployed: hasProxyWallet,
-    walletMode,
-  } = useProxyWallet();
+  const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -122,28 +120,19 @@ export function useNotifications() {
       throw new Error("No wallet provider found");
     }
 
-    const [{ ClobClient }, signer] = await Promise.all([
-      import("@polymarket/clob-client-v2"),
-      getViemWalletClient(walletClient, address as `0x${string}` | undefined),
-    ]);
+    const viemWalletClient = await getViemWalletClient(
+      walletClient,
+      address as `0x${string}` | undefined
+    );
 
-    const creds = {
-      key: credentials.apiKey,
-      secret: credentials.apiSecret,
-      passphrase: credentials.apiPassphrase,
-    };
+    const { client } = await createUnifiedPolymarketSecureClient({
+      signer: createUnifiedPolymarketViemSigner(viemWalletClient),
+      wallet: proxyAddress,
+      credentials,
+    });
 
-    return new ClobClient({
-      host: CLOB_BASE_URL,
-      chain: POLYMARKET_CHAIN_ID,
-      signer,
-      creds,
-      signatureType: getPolymarketSignatureType(
-        walletMode
-      ) as unknown as number,
-      funderAddress: proxyAddress,
-    }) as InstanceType<typeof ClobClient> & ClobClientWithNotificationMethods;
-  }, [address, credentials, proxyAddress, walletMode, walletClient]);
+    return client as UnifiedPolymarketSecureClient & UnifiedNotificationClient;
+  }, [address, credentials, proxyAddress, walletClient]);
 
   /**
    * Fetch notifications from the CLOB API
@@ -158,7 +147,7 @@ export function useNotifications() {
 
     try {
       const client = await getAuthenticatedClient();
-      const rawData = await client.getNotifications();
+      const rawData = await client.fetchNotifications();
 
       // SDK types claim Notification[] but the API may return null or an
       // error envelope; harden the boundary before iterating.

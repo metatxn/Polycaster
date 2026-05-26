@@ -49,7 +49,7 @@ type OperationResult = { success: boolean; txHash?: string; error?: string };
 
 async function createCtfPublicClient() {
   const { createPublicClient, http } = await import("viem");
-  const { polygon } = await import("viem/chains");
+  const { polygon } = await import("@/lib/chains");
   const { getRpcUrl } = await import("@/lib/rpc");
 
   return createPublicClient({
@@ -82,7 +82,7 @@ export function useCtfOperations() {
         throw new Error("Wallet not connected");
       }
 
-      const { polygon } = await import("viem/chains");
+      const { polygon } = await import("@/lib/chains");
 
       if (isEoaMode) {
         const hash = await walletClient.sendTransaction({
@@ -126,7 +126,7 @@ export function useCtfOperations() {
         }
 
         if (isEoaMode) {
-          const { polygon } = await import("viem/chains");
+          const { polygon } = await import("@/lib/chains");
           const { getPublicClient } = await import("@/lib/rpc");
           const hash = await walletClient.sendTransaction({
             account: address as `0x${string}`,

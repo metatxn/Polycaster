@@ -10,3 +10,22 @@
 - All monetary calculations must use Decimal.js, not floating point
 - Verify idempotency keys on all payment-related mutations
 - Check that refund logic handles partial amounts correctly
+
+## Secret and env file policy
+
+Never read, print, summarize, modify, or infer contents from secret files.
+
+Do not open files matching:
+
+- `.env`
+- `.env.*`
+- `*.env`
+- `*.pem`
+- `*.key`
+- `*.p12`
+- `*.crt`
+- `secrets.*`
+- `.dev.vars`
+- files containing API keys, private keys, tokens, passwords, seed phrases, or credentials
+
+If a task requires environment variable names, inspect only safe examples like `.env.example`, `.env.sample`, or documentation. Never inspect real secret values.

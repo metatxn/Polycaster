@@ -108,6 +108,10 @@ pnpm lint           # Lint the monorepo
 pnpm lint:web       # Lint the web app only
 pnpm lint:ext       # Lint the extension only
 pnpm format         # Format the monorepo
+pnpm test           # Run the web Vitest suite plus node-based tests
+pnpm test:watch     # Run the web Vitest suite in watch mode
+pnpm test:coverage  # Run the web Vitest suite with coverage
+pnpm test:e2e       # Run the Playwright smoke test
 pnpm typecheck      # Type-check all workspace packages
 pnpm typecheck:web  # Type-check the web app only
 pnpm typecheck:ext  # Type-check the extension only
@@ -119,7 +123,7 @@ pnpm release:ext    # Bump, build, and zip the extension release
 
 Additional package-level scripts live in the workspace packages:
 
-- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`
+- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`, `test`, `test:node`, `test:watch`, `test:coverage`, `test:e2e`
 - `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `benchmark:embeddings`, `format`, `version:bump`, `zip`, `release`
 - `apps/agent/package.json`: `build`, `typecheck`, `lint`, `format`, `test`
 

@@ -1,4 +1,4 @@
-import { POLYMARKET_API } from "./polymarket.ts";
+import { POLYMARKET_API, type TradingSide } from "./polymarket.ts";
 
 export type ClobHeaders = Record<string, string>;
 
@@ -21,11 +21,31 @@ export type ClobFetch = (
   init?: ClobFetchInit
 ) => Promise<ClobFetchResponse>;
 
+export interface UnifiedClobOrderBookClient {
+  fetchOrderBook(request: { tokenId: string }): Promise<unknown>;
+  fetchOrderBooks?(request: Array<{ tokenId: string }>): Promise<unknown>;
+  fetchMarketInfo?(request: { conditionId: string }): Promise<unknown>;
+  fetchPrice?(request: {
+    tokenId: string;
+    side: TradingSide;
+  }): Promise<unknown>;
+  fetchPriceHistory?(request: {
+    tokenId: string;
+    startTs?: number;
+    endTs?: number;
+    fidelity?: number;
+  }): Promise<unknown>;
+  fetchBuilderFeeRates?(request: { builderCode: string }): Promise<unknown>;
+}
+
 export interface ClobRequestOptions {
   host?: string;
   fetchImpl?: ClobFetch;
   headers?: ClobHeaders;
   requestInit?: ClobFetchInit;
+  unifiedClient?: UnifiedClobOrderBookClient;
+  useUnifiedSdk?: boolean;
+  priceSide?: TradingSide;
 }
 
 export interface ClobOrderBookLevel {
@@ -81,6 +101,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeClobHost(host?: string): string {
   return (host || POLYMARKET_API.CLOB.BASE).replace(/\/+$/, "");
+}
+
+function canUseUnifiedSdkForPublicRead(options?: ClobRequestOptions): boolean {
+  if (options?.useUnifiedSdk === false) return false;
+  if (options?.fetchImpl || options?.headers || options?.requestInit) {
+    return false;
+  }
+
+  return (
+    normalizeClobHost(options?.host) ===
+    normalizeClobHost(POLYMARKET_API.CLOB.BASE)
+  );
 }
 
 function encodeQuery(params?: Record<string, ClobQueryValue>): string {
@@ -175,6 +207,30 @@ function optionalNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function buildUnifiedPriceHistoryRequest(
+  tokenId: string,
+  params: ClobPriceHistoryParams
+): {
+  tokenId: string;
+  startTs?: number;
+  endTs?: number;
+  fidelity?: number;
+} {
+  const request: {
+    tokenId: string;
+    startTs?: number;
+    endTs?: number;
+    fidelity?: number;
+  } = { tokenId };
+  const startTs = optionalNumber(params.startTs);
+  const endTs = optionalNumber(params.endTs);
+  const fidelity = optionalNumber(params.fidelity);
+  if (startTs !== undefined) request.startTs = startTs;
+  if (endTs !== undefined) request.endTs = endTs;
+  if (fidelity !== undefined) request.fidelity = fidelity;
+  return request;
+}
+
 export function buildClobPublicUrl(
   path: string,
   params?: Record<string, ClobQueryValue>,
@@ -194,13 +250,13 @@ export function normalizeClobOrderBook(raw: unknown): ClobOrderBook {
 
   return {
     market: optionalString(data.market),
-    asset_id: optionalString(data.asset_id),
+    asset_id: optionalString(data.asset_id ?? data.tokenId),
     hash: optionalString(data.hash),
     timestamp: optionalString(data.timestamp),
     bids: normalizeLevels(data.bids),
     asks: normalizeLevels(data.asks),
-    min_order_size: optionalString(data.min_order_size),
-    tick_size: optionalString(data.tick_size),
+    min_order_size: optionalString(data.min_order_size ?? data.minOrderSize),
+    tick_size: optionalString(data.tick_size ?? data.tickSize),
     spread: optionalNumber(data.spread),
     midpoint: optionalNumber(data.midpoint),
   };
@@ -234,6 +290,18 @@ export async function fetchClobOrderBook(
   tokenId: string,
   options?: ClobRequestOptions
 ): Promise<ClobOrderBook> {
+  if (canUseUnifiedSdkForPublicRead(options)) {
+    if (options?.unifiedClient) {
+      const data = await options.unifiedClient.fetchOrderBook({ tokenId });
+      return normalizeClobOrderBook(data);
+    }
+
+    const { fetchUnifiedClobOrderBook } = await import(
+      "./polymarket-unified.ts"
+    );
+    return fetchUnifiedClobOrderBook(tokenId);
+  }
+
   const data = await fetchClobJson("book", { token_id: tokenId }, options);
   return normalizeClobOrderBook(data);
 }
@@ -243,6 +311,20 @@ export async function fetchClobOrderBooks(
   options?: ClobRequestOptions
 ): Promise<ClobOrderBook[]> {
   if (tokenIds.length === 0) return [];
+
+  if (canUseUnifiedSdkForPublicRead(options)) {
+    if (options?.unifiedClient?.fetchOrderBooks) {
+      const data = await options.unifiedClient.fetchOrderBooks(
+        tokenIds.map((tokenId) => ({ tokenId }))
+      );
+      return Array.isArray(data) ? data.map(normalizeClobOrderBook) : [];
+    }
+
+    const { fetchUnifiedClobOrderBooks } = await import(
+      "./polymarket-unified.ts"
+    );
+    return fetchUnifiedClobOrderBooks(tokenIds);
+  }
 
   const data = await fetchClobJson<unknown>(
     "books?token_ids",
@@ -263,6 +345,21 @@ export function fetchClobMarket<T = unknown>(
   conditionId: string,
   options?: ClobRequestOptions
 ): Promise<T> {
+  if (
+    options?.useUnifiedSdk === true &&
+    canUseUnifiedSdkForPublicRead(options)
+  ) {
+    if (options?.unifiedClient?.fetchMarketInfo) {
+      return options.unifiedClient.fetchMarketInfo({
+        conditionId,
+      }) as Promise<T>;
+    }
+
+    return import("./polymarket-unified.ts").then(
+      ({ fetchUnifiedClobMarket }) => fetchUnifiedClobMarket<T>(conditionId)
+    );
+  }
+
   return fetchClobJson<T>(
     `markets/${encodeURIComponent(conditionId)}`,
     undefined,
@@ -281,6 +378,19 @@ export function fetchClobPrice<T = unknown>(
   tokenId: string,
   options?: ClobRequestOptions
 ): Promise<T> {
+  if (options?.priceSide && canUseUnifiedSdkForPublicRead(options)) {
+    if (options?.unifiedClient?.fetchPrice) {
+      return options.unifiedClient.fetchPrice({
+        tokenId,
+        side: options.priceSide,
+      }) as Promise<T>;
+    }
+
+    return import("./polymarket-unified.ts").then(({ fetchUnifiedClobPrice }) =>
+      fetchUnifiedClobPrice<T>(tokenId, options.priceSide as TradingSide)
+    );
+  }
+
   return fetchClobJson<T>("price", { token_id: tokenId }, options);
 }
 
@@ -289,6 +399,21 @@ export function fetchClobPriceHistory<T = ClobPriceHistoryResponse>(
   params: ClobPriceHistoryParams = {},
   options?: ClobRequestOptions
 ): Promise<T> {
+  if (canUseUnifiedSdkForPublicRead(options)) {
+    if (options?.unifiedClient?.fetchPriceHistory) {
+      return options.unifiedClient
+        .fetchPriceHistory(buildUnifiedPriceHistoryRequest(tokenId, params))
+        .then((data) => ({
+          history: Array.isArray(data) ? data : [],
+        })) as Promise<T>;
+    }
+
+    return import("./polymarket-unified.ts").then(
+      ({ fetchUnifiedClobPriceHistory }) =>
+        fetchUnifiedClobPriceHistory<T>(tokenId, params)
+    );
+  }
+
   return fetchClobJson<T>(
     "prices-history",
     {
@@ -342,6 +467,20 @@ export async function fetchClobBuilderFeeRates(
     return { maker: 0, taker: 0 };
   }
 
+  if (canUseUnifiedSdkForPublicRead(options)) {
+    if (options?.unifiedClient?.fetchBuilderFeeRates) {
+      const data = await options.unifiedClient.fetchBuilderFeeRates({
+        builderCode,
+      });
+      return normalizeClobBuilderFeeRates(data);
+    }
+
+    const { fetchUnifiedClobBuilderFeeRates } = await import(
+      "./polymarket-unified.ts"
+    );
+    return fetchUnifiedClobBuilderFeeRates(builderCode);
+  }
+
   const data = await fetchClobJson<BuilderFeesResponse>(
     `fees/builder-fees/${encodeURIComponent(builderCode)}`,
     undefined,
@@ -354,4 +493,11 @@ export async function fetchClobBuilderFeeRates(
     taker:
       (data.builder_taker_fee_rate_bps ?? 0) / CLOB_BUILDER_FEES_BPS_DIVISOR,
   };
+}
+
+function normalizeClobBuilderFeeRates(raw: unknown): ClobBuilderFeeRates {
+  if (!isRecord(raw)) return { maker: 0, taker: 0 };
+  const maker = optionalNumber(raw.maker) ?? 0;
+  const taker = optionalNumber(raw.taker) ?? 0;
+  return { maker, taker };
 }

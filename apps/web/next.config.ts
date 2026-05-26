@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -11,14 +12,22 @@ const nextConfig: NextConfig = {
     // external: ["pino-pretty", "lokijs", "encoding"],
   },
   serverExternalPackages: ["pino-pretty", "lokijs", "encoding"],
-  webpack: (config, { webpack }) => {
-    // @polymarket/clob-client-v2 uses `node:crypto` (createHash) in an
-    // optional orderbook-hash helper. Rewrite the prefixed import to the
-    // bare `crypto` specifier so webpack's polyfill resolution applies for
-    // browser bundles.
-    config.plugins.push(
-      new webpack.NormalModuleReplacementPlugin(/^node:crypto$/, "crypto")
-    );
+  webpack(config) {
+    config.resolve = config.resolve ?? {};
+    config.resolve.alias = {
+      ...(config.resolve.alias ?? {}),
+      "@wagmi/core/chains": path.resolve(__dirname, "src/lib/chains.ts"),
+      "@wagmi/core/tempo": path.resolve(__dirname, "src/lib/wagmi-tempo.ts"),
+      "@wagmi/connectors$": path.resolve(
+        __dirname,
+        "src/lib/wagmi-connectors.ts"
+      ),
+      porto$: path.resolve(__dirname, "src/lib/porto-unsupported.ts"),
+      "porto/internal$": path.resolve(
+        __dirname,
+        "src/lib/porto-internal-unsupported.ts"
+      ),
+    };
     return config;
   },
   async rewrites() {

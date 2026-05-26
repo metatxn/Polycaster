@@ -51,7 +51,7 @@ export function SplitSharesModal({
 
     const fetchPusdBalance = async () => {
       const [{ createPublicClient, erc20Abi, formatUnits, http }, { polygon }] =
-        await Promise.all([import("viem"), import("viem/chains")]);
+        await Promise.all([import("viem"), import("@/lib/chains")]);
       const { getRpcUrl } = await import("@/lib/rpc");
       const publicClient = createPublicClient({
         chain: polygon,

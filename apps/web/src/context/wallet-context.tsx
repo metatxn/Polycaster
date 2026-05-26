@@ -10,12 +10,12 @@ import {
   useMemo,
 } from "react";
 import { createPublicClient, http, type PublicClient } from "viem";
-import { polygon } from "viem/chains";
 import {
   type UseWalletClientReturnType,
   useConnection,
   useWalletClient,
 } from "wagmi";
+import { polygon } from "@/lib/chains";
 import { getRpcUrl } from "@/lib/rpc";
 
 /**

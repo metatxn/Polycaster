@@ -133,7 +133,7 @@ function getPolygonRpcUrl(): string {
  */
 async function createClient() {
   const { createPublicClient, http } = await import("viem");
-  const { polygon } = await import("viem/chains");
+  const { polygon } = await import("@/lib/chains");
 
   return createPublicClient({
     chain: polygon,

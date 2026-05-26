@@ -1,6 +1,5 @@
 "use client";
 
-import { polygon } from "@reown/appkit/networks";
 import { createAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
@@ -13,6 +12,7 @@ import { EventFilterProvider } from "@/context/event-filter-context";
 import { OnboardingProvider } from "@/context/onboarding-context";
 import { TradingProvider } from "@/context/trading-context";
 import { WalletProvider } from "@/context/wallet-context";
+import { polygon } from "@/lib/chains";
 
 // All available themes for next-themes
 const ALL_THEMES = [

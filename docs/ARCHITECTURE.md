@@ -38,6 +38,8 @@ There is also one active scheduled runtime path:
 | `apps/web` | Next.js 15 App Router frontend, deployed to Cloudflare Workers via OpenNext |
 | `apps/extension` | MV3 browser extension with content scripts, service worker, and offscreen trading runtime |
 | `apps/agent` | Shared paper-trading engine, D1 repository, search/LLM orchestration, and settlement logic consumed by the web admin surface |
+| `apps/agent/migrations` | Versioned SQL migrations for the agent-owned D1 schema |
+| `apps/web/e2e`, `apps/extension/tests` | Browser and node-based regression coverage for the web app and extension |
 | `packages/logger` | Shared structured logger used by the web app, extension, and agent package |
 | `packages/shared-types` | Shared constants, contract addresses, ABIs, trading helpers, and Polymarket endpoint definitions used across the monorepo |
 
@@ -284,7 +286,7 @@ Persistence inside this repo currently falls into four buckets:
 
 ### 4.1 Agent-owned D1 schema
 
-The application-owned schema lives inside `apps/agent/src/repository.ts` and is bound in `apps/web/src/lib/agent/repository.ts` through the `AGENT_DB` Cloudflare D1 binding.
+The application-owned schema lives inside `apps/agent/src/repository.ts`, its versioned SQL migrations live in `apps/agent/migrations/*.sql`, and the repository is bound in `apps/web/src/lib/agent/repository.ts` through the `AGENT_DB` Cloudflare D1 binding.
 
 | Table | Defined in | Purpose | Keys / indexes | Relationships |
 | --- | --- | --- | --- | --- |
@@ -532,6 +534,6 @@ Where to see it:
 
 - Treat `apps/web` as a combined frontend and BFF, not as a frontend talking to an internal backend.
 - Treat Polymarket as the main source of truth for market and trading data.
-- If you are looking for business tables or migrations, there are currently none in the repo.
+- If you are looking for business tables or migrations, start with `apps/agent/src/repository.ts` and `apps/agent/migrations/*.sql`.
 - Be careful with secrets: the code intentionally routes sensitive operations through server-side proxies.
 - If you change a protocol constant, contract address, or API endpoint, check `packages/shared-types` first so both the web app and extension stay in sync.

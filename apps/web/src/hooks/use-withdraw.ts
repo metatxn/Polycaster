@@ -584,7 +584,7 @@ export function useWithdraw() {
     setState("submitting");
 
     if (isEoaMode) {
-      const { polygon } = await import("viem/chains");
+      const { polygon } = await import("@/lib/chains");
       const { getPublicClient } = await import("@/lib/rpc");
       let lastHash: `0x${string}` | null = null;
       for (const tx of transactions) {

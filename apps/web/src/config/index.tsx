@@ -1,9 +1,10 @@
 import { createLogger } from "@knoww/logger";
-import { type AppKitNetwork, polygon } from "@reown/appkit/networks";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { cookieStorage, createStorage, http } from "wagmi";
+import { polygon } from "@/lib/chains";
 
 const log = createLogger("config");
+type AppKitNetwork = typeof polygon;
 
 // Get projectId from https://dashboard.reown.com2
 export const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;

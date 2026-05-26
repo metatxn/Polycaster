@@ -22,7 +22,6 @@
     "@knoww/logger": "workspace:*",
     "@knoww/shared-types": "workspace:*",
     "@openrouter/ai-sdk-provider": "2.9.0",
-    "@polymarket/clob-client-v2": "catalog:",
     "ai": "6.0.174",
     "decimal.js": "catalog:",
     "viem": "catalog:",

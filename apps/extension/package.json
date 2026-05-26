@@ -20,7 +20,6 @@
     "@huggingface/transformers": "4.2.0",
     "@knoww/logger": "workspace:*",
     "@knoww/shared-types": "workspace:*",
-    "@polymarket/clob-client-v2": "catalog:",
     "@walletconnect/universal-provider": "2.23.9",
     "decimal.js": "catalog:",
     "minisearch": "7.2.0",

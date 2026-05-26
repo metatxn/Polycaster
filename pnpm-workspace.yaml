@@ -12,10 +12,13 @@ minimumReleaseAgeExclude:
   - "protobufjs"
   - "qs"
   - "ws"
+  - "@polymarket/client"
+  - "@polymarket/types"
+  - "@polymarket/bindings"
 
 catalog:
   "@biomejs/biome": "2.4.15"
-  "@polymarket/clob-client-v2": "1.0.6"
+  "@polymarket/client": "0.0.0-canary-20260520141050"
   "@types/react": "19.2.14"
   "@types/react-dom": "19.2.3"
   "decimal.js": "^10.6.0"

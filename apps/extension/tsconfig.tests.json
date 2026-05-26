@@ -9,6 +9,7 @@
     "sourceMap": false
   },
   "include": [
+    "src/background/unified-clob-client.ts",
     "src/content/scoring-policy.ts",
     "src/background/score-markets-core.ts",
     "src/types/**/*.ts",

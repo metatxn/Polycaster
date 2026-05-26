@@ -17,10 +17,12 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import posthog from "posthog-js";
 import { useEffect } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -68,6 +70,9 @@ export function SellPositionModal({
           unrealized_pnl: position.unrealizedPnl,
         });
       }
+      toast.success("Sell order filled", {
+        description: `Estimated proceeds: ${formatCurrency(result.estimatedProceeds)}.`,
+      });
       onSellSuccess?.();
       onOpenChange(false);
     },
@@ -123,6 +128,10 @@ export function SellPositionModal({
             <TrendingDown className="h-5 w-5 text-red-600 dark:text-red-400" />
             Sell Position
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Sell shares from this position using a market order or modify the
+            order details.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 pt-2">

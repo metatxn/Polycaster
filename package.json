@@ -29,6 +29,13 @@
     "typescript": "catalog:"
   },
   "pnpm": {
+    "packageExtensions": {
+      "@metamask/connect-multichain@0.12.1": {
+        "dependencies": {
+          "debug": "^4.4.3"
+        }
+      }
+    },
     "peerDependencyRules": {
       "allowedVersions": {
         "typescript": "6"

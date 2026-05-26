@@ -73,6 +73,7 @@ export interface TradingContext {
   credentials: ApiKeyCreds | null;
   error: string | null;
   orderBook: OrderBook | null;
+  orderBookError: string | null;
   minOrderSize: number;
   tickSize: number;
   usdcAllowance: number;
@@ -99,6 +100,7 @@ function createDisconnectedContext(): TradingContext {
     credentials: null,
     error: null,
     orderBook: null,
+    orderBookError: null,
     minOrderSize: 1,
     tickSize: 0.01,
     usdcAllowance: 0,
@@ -649,10 +651,22 @@ export const TradingService = {
         const rawTick = parseFloat(data.tick_size ?? "0.01");
         const tickSize =
           Number.isFinite(rawTick) && rawTick > 0 ? rawTick : 0.01;
-        update({ orderBook: data, minOrderSize, tickSize });
+        update({
+          orderBook: data,
+          orderBookError: null,
+          minOrderSize,
+          tickSize,
+        });
       }
       return data;
-    } catch {
+    } catch (err) {
+      if (options?.syncContext !== false) {
+        update({
+          orderBook: { bids: [], asks: [] },
+          orderBookError:
+            err instanceof Error ? err.message : "Failed to fetch order book",
+        });
+      }
       return null;
     }
   },

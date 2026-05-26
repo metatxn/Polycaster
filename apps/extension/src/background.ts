@@ -6,11 +6,18 @@
 
 import { logWarn } from "@knoww/logger";
 import { fetchClobOrderBook } from "@knoww/shared-types/clob";
-import { RELAYER_API_HOST } from "@knoww/shared-types/polymarket";
+import {
+  POLYMARKET_API,
+  RELAYER_API_HOST,
+} from "@knoww/shared-types/polymarket";
 import {
   flushAnalyticsQueue,
   queueAnalyticsEvent,
 } from "./background/analytics";
+import {
+  fetchPortfolioOpenOrders,
+  type PortfolioClobOpenOrder,
+} from "./background/clob-open-orders";
 import {
   clearExtensionAccessToken,
   getExtensionAccessToken,
@@ -29,7 +36,10 @@ import type {
   ScoreMarketsSuccessResponse,
   ScoringPrewarmMessage,
 } from "./types/chrome-messages";
-import { TRADING_SESSION_DISCONNECTED_MESSAGE } from "./types/chrome-messages";
+import {
+  TRADING_CREDENTIALS_UPDATED_MESSAGE,
+  TRADING_SESSION_DISCONNECTED_MESSAGE,
+} from "./types/chrome-messages";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
 // ── Programmatic content script registration ──
@@ -48,6 +58,12 @@ type ChromeSidePanelApi = {
   setPanelBehavior?: (behavior: {
     openPanelOnActionClick: boolean;
   }) => Promise<void>;
+};
+
+type StoredClobCredentials = {
+  apiKey: string;
+  apiSecret: string;
+  apiPassphrase: string;
 };
 
 let lastSidePanelTabId: number | undefined;
@@ -476,6 +492,47 @@ async function clearCachedTradingCredentials(): Promise<void> {
   });
 }
 
+function getTradingCredentialsStorageKey(address: string): string {
+  return `${TRADING_CREDS_STORAGE_PREFIX}${address.toLowerCase()}`;
+}
+
+function isStoredClobCredentials(
+  value: unknown
+): value is StoredClobCredentials {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as StoredClobCredentials).apiKey === "string" &&
+    typeof (value as StoredClobCredentials).apiSecret === "string" &&
+    typeof (value as StoredClobCredentials).apiPassphrase === "string"
+  );
+}
+
+async function getCachedTradingCredentials(
+  address: string
+): Promise<StoredClobCredentials | null> {
+  const key = getTradingCredentialsStorageKey(address);
+  const value = await new Promise<unknown>((resolve) => {
+    chrome.storage.session.get(key, (result) => {
+      resolve(result[key]);
+    });
+  });
+  return isStoredClobCredentials(value) ? value : null;
+}
+
+async function hasCachedTradingCredentials(address: string): Promise<boolean> {
+  return (await getCachedTradingCredentials(address)) !== null;
+}
+
+function broadcastTradingCredentialsUpdated(address: string): void {
+  chrome.runtime.sendMessage(
+    { type: TRADING_CREDENTIALS_UPDATED_MESSAGE, address },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
+}
+
 async function broadcastTradingSessionDisconnected(): Promise<void> {
   const tabs = await chrome.tabs.query({});
 
@@ -498,6 +555,13 @@ async function broadcastTradingSessionDisconnected(): Promise<void> {
           );
         })
     )
+  );
+
+  chrome.runtime.sendMessage(
+    { type: TRADING_SESSION_DISCONNECTED_MESSAGE },
+    () => {
+      void chrome.runtime.lastError;
+    }
   );
 }
 
@@ -704,8 +768,10 @@ chrome.runtime.onMessage.addListener(
       tokenId?: string;
       marketId?: string;
       query?: string;
+      walletUuid?: string;
       trendingLimit?: number;
       visible?: boolean;
+      address?: string;
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -804,6 +870,87 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (msg?.type === "KNOWW_GET_PORTFOLIO_WALLETS") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_GET_PORTFOLIO_WALLETS",
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_CONNECT_PORTFOLIO_WALLET") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
+        walletUuid: msg.walletUuid,
+      });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_GET_PORTFOLIO_TRADING_STATUS" &&
+      typeof msg.address === "string"
+    ) {
+      void hasCachedTradingCredentials(msg.address)
+        .then((hasCredentials) => {
+          sendResponse({
+            ok: true,
+            data: { hasCredentials },
+          } as BackgroundResponse);
+        })
+        .catch(() => {
+          sendResponse({
+            ok: true,
+            data: { hasCredentials: false },
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_ENABLE_PORTFOLIO_TRADING" &&
+      typeof msg.address === "string"
+    ) {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_ENABLE_PORTFOLIO_TRADING",
+        address: msg.address,
+      });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_GET_PORTFOLIO_OPEN_ORDERS" &&
+      typeof msg.address === "string"
+    ) {
+      const address = msg.address;
+      void (async () => {
+        const credentials = await getCachedTradingCredentials(address);
+        if (!credentials) {
+          sendResponse({
+            ok: true,
+            data: { orders: [], count: 0 },
+          } as BackgroundResponse);
+          return;
+        }
+
+        const orders: PortfolioClobOpenOrder[] = await fetchPortfolioOpenOrders(
+          {
+            address,
+            credentials,
+            limit: 5,
+          }
+        );
+        sendResponse({
+          ok: true,
+          data: { orders, count: orders.length },
+        } as BackgroundResponse);
+      })().catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        } as BackgroundResponse);
+      });
+      return true;
+    }
+
     // Offscreen doc requests: forward signing to content script tab
     if (msg?.type === "offscreen:forward-signing") {
       if (msg.tabId && msg.id && msg.method) {
@@ -842,7 +989,13 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
     if (msg?.type === "creds:set" && typeof msg.key === "string") {
-      chrome.storage.session.set({ [msg.key]: msg.value }, () => {
+      const key = msg.key;
+      chrome.storage.session.set({ [key]: msg.value }, () => {
+        if (key.startsWith(TRADING_CREDS_STORAGE_PREFIX)) {
+          broadcastTradingCredentialsUpdated(
+            key.slice(TRADING_CREDS_STORAGE_PREFIX.length)
+          );
+        }
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
       return true;
@@ -856,6 +1009,12 @@ chrome.runtime.onMessage.addListener(
     if (msg?.type === "auth:get-token") {
       getExtensionAccessToken().then((token) => {
         sendResponse({ ok: true, data: token } as BackgroundResponse);
+      });
+      return true;
+    }
+    if (msg?.type === "KNOWW_GET_PORTFOLIO_SESSION") {
+      getExtensionAccessToken().then((token) => {
+        sendResponse({ ok: true, data: { token } } as BackgroundResponse);
       });
       return true;
     }
@@ -928,7 +1087,12 @@ chrome.runtime.onMessage.addListener(
       const { tokenId } = msg;
       (async () => {
         try {
-          const data = await fetchClobOrderBook(tokenId);
+          const data = await fetchClobOrderBook(tokenId, {
+            host: POLYMARKET_API.CLOB.BASE,
+            // TODO: Move this back to the SDK path once unified SDK public reads
+            // support extension order-book fetching reliably.
+            useUnifiedSdk: false,
+          });
           sendResponse({ ok: true, data } as BackgroundResponse);
         } catch (e) {
           sendResponse({

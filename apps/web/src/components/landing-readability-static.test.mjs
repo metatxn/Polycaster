@@ -44,7 +44,8 @@ test("decorative hero mock feeds do not add document headings", () => {
 
 test("decorative hero mock is hidden from assistive tech", () => {
   assert.match(heroMock, /aria-hidden="true"/);
-  assert.match(heroMock, /\binert\b/);
+  assert.doesNotMatch(heroMock, /\binert\b/);
+  assert.match(heroMock, /tabIndex=\{-1\}/);
 });
 
 test("landing narrative copy uses the upgraded readability classes", () => {
@@ -99,5 +100,17 @@ test("hero mock card uses compact laptop fit constraints", () => {
   assert.match(
     globals,
     /@media \(min-width: 1280px\) and \(max-width: 1535px\)\s*\{[\s\S]*?\.kwt-card\s*\{[\s\S]*?height:\s*min\(656px,\s*calc\(100svh - 161px\)\);/s
+  );
+});
+
+test("active hero mock highlights promote highlighted text contrast", () => {
+  assert.match(globals, /\.kwt-hl\s*\{[\s\S]*?transition:\s*color 0\.12s/s);
+  assert.doesNotMatch(
+    globals,
+    /\.kwt-hl\s*\{[\s\S]*?transition:\s*color 0\.4s/s
+  );
+  assert.match(
+    globals,
+    /\.kwt-hl\.on\s*\{[\s\S]*?color:\s*var\(--kwt-x-text\);/s
   );
 });

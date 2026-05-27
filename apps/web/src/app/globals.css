@@ -2251,7 +2251,10 @@ body:not(:has(.kw-landing))
 .kwt-hl {
   position: relative;
   display: inline-block;
-  transition: color 0.4s;
+  transition: color 0.12s ease-out;
+}
+.kwt-hl.on {
+  color: var(--kwt-x-text);
 }
 /* Soft claim highlight. Keep it behind the words instead of underlining them so
    the source text remains readable while the match animation runs. */

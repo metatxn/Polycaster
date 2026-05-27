@@ -241,7 +241,7 @@ export function TweetOverlayHero() {
         : `Match found · ${activePost?.market.match ?? 0}% confidence`;
 
   return (
-    <div className="kwt-root" data-platform={platform} aria-hidden="true" inert>
+    <div className="kwt-root" data-platform={platform} aria-hidden="true">
       <div className="kwt-card">
         <div
           ref={tablistRef}
@@ -255,8 +255,9 @@ export function TweetOverlayHero() {
             role="tab"
             aria-selected={platform === "x"}
             aria-controls="kwt-panel-x"
-            tabIndex={platform === "x" ? 0 : -1}
+            tabIndex={-1}
             className={`kwt-tab${platform === "x" ? " kwt-tab-active" : ""}`}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => selectPlatform("x")}
             onKeyDown={(event) => handlePlatformKeyDown(event, "x")}
           >
@@ -269,8 +270,9 @@ export function TweetOverlayHero() {
             role="tab"
             aria-selected={platform === "reddit"}
             aria-controls="kwt-panel-reddit"
-            tabIndex={platform === "reddit" ? 0 : -1}
+            tabIndex={-1}
             className={`kwt-tab${platform === "reddit" ? " kwt-tab-active" : ""}`}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => selectPlatform("reddit")}
             onKeyDown={(event) => handlePlatformKeyDown(event, "reddit")}
           >
@@ -285,8 +287,9 @@ export function TweetOverlayHero() {
             role="tab"
             aria-selected={platform === "bluesky"}
             aria-controls="kwt-panel-bluesky"
-            tabIndex={platform === "bluesky" ? 0 : -1}
+            tabIndex={-1}
             className={`kwt-tab${platform === "bluesky" ? " kwt-tab-active" : ""}`}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => selectPlatform("bluesky")}
             onKeyDown={(event) => handlePlatformKeyDown(event, "bluesky")}
           >
@@ -301,8 +304,9 @@ export function TweetOverlayHero() {
             role="tab"
             aria-selected={platform === "bloomberg"}
             aria-controls="kwt-panel-bloomberg"
-            tabIndex={platform === "bloomberg" ? 0 : -1}
+            tabIndex={-1}
             className={`kwt-tab${platform === "bloomberg" ? " kwt-tab-active" : ""}`}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => selectPlatform("bloomberg")}
             onKeyDown={(event) => handlePlatformKeyDown(event, "bloomberg")}
           >

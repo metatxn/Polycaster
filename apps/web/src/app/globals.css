@@ -745,6 +745,7 @@ html.softpop {
   --kw-accent-inv: #3dd07f;
   --kw-danger-text: #b91c1c;
   --kw-danger-bright: #f87171;
+  --kw-cursor-glow-opacity: 0.2;
 
   /* Paper-grain noise — barely-there texture that keeps sections from
    * reading as flat rectangles. The SVG uses fractalNoise + an alpha
@@ -752,6 +753,10 @@ html.softpop {
   background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 200px 200px;
   background-attachment: local;
+}
+.kw-page :focus-visible {
+  outline: 2px solid var(--kw-accent-text);
+  outline-offset: 2px;
 }
 .kw-page[data-theme="dark"],
 .kw-page[data-theme="midnight"],
@@ -767,6 +772,7 @@ html.softpop {
   --kw-accent-inv: #066d4c;
   --kw-danger-text: #fca5a5;
   --kw-danger-bright: #f87171;
+  --kw-cursor-glow-opacity: 0.32;
   background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 .kw-page[data-theme="midnight"] {
@@ -820,7 +826,7 @@ html.softpop {
   --kw-bg-card: #f8fff9;
   --kw-fg: #102616;
   --kw-accent: #16a34a;
-  --kw-accent-text: #15803d;
+  --kw-accent-text: #166534;
   --kw-accent-inv: #bbf7d0;
 }
 .kw-page[data-theme="lavender"] {
@@ -847,57 +853,59 @@ html.softpop {
   filter: blur(40px);
 }
 
-/* Ambient cursor glow — a soft accent halo that follows the pointer across the
-   whole landing (positioned via translate3d from CursorGlow). Fixed to the
-   viewport so it tracks the cursor as the page scrolls; `soft-light` blends it
-   over content as atmospheric lighting without harming text legibility. */
+/* Ambient cursor glow — a subtle accent halo that follows the pointer across
+   the landing. It sits behind page content so text never gets washed out. */
 .kw-cursor-glow {
   position: fixed;
   top: 0;
   left: 0;
   /* Wider than tall + two offset blobs → reads as a diffuse light bloom
      rather than a hard disc tracking the cursor. */
-  width: 760px;
-  height: 560px;
-  margin: -280px 0 0 -380px;
-  z-index: 35;
+  width: 560px;
+  height: 420px;
+  margin: -210px 0 0 -280px;
+  z-index: 0;
   pointer-events: none;
   opacity: 0;
   will-change: transform;
-  transition: opacity 0.5s ease;
+  transition: opacity 0.45s ease;
   /* Smooth full falloff (`transparent 100%`, no hard ring) on two offset
      radials of differing size — an organic, asymmetric wash of light. */
   background:
     radial-gradient(
       closest-side at 44% 40%,
-      color-mix(in srgb, var(--kw-accent) 16%, transparent),
+      color-mix(in srgb, var(--kw-accent) 8%, transparent),
       transparent 100%
     ),
     radial-gradient(
       closest-side at 62% 64%,
-      color-mix(in srgb, var(--kw-accent) 9%, transparent),
+      color-mix(in srgb, var(--kw-accent) 5%, transparent),
       transparent 100%
     );
-  filter: blur(72px);
+  filter: blur(64px);
 }
-/* Light themes wash out an additive accent bloom against their bright
-   surfaces, so the light needs a denser, more saturated mix to read with the
-   same presence the dark themes get for free. */
 [data-scheme="light"] .kw-cursor-glow {
-  width: 820px;
-  height: 600px;
-  margin: -300px 0 0 -410px;
+  width: 600px;
+  height: 440px;
+  margin: -220px 0 0 -300px;
   background:
     radial-gradient(
       closest-side at 44% 40%,
-      color-mix(in srgb, var(--kw-accent) 28%, transparent),
+      color-mix(in srgb, var(--kw-accent) 9%, transparent),
       transparent 100%
     ),
     radial-gradient(
       closest-side at 62% 64%,
-      color-mix(in srgb, var(--kw-accent) 16%, transparent),
+      color-mix(in srgb, var(--kw-accent) 5%, transparent),
       transparent 100%
     );
+}
+
+.kw-landing > header,
+.kw-landing > main,
+.kw-landing > footer {
+  position: relative;
+  z-index: 1;
 }
 
 /* Editorial display serif for italic accents. Falls back to Georgia
@@ -1230,13 +1238,6 @@ body:not(:has(.kw-landing))
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     animation: none !important;
   }
-  .kwt-card {
-    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
-    transform: none !important;
-    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
-    transition: none !important;
-  }
-  .kwt-sheen,
   .kw-cursor-glow {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     display: none !important;
@@ -1264,7 +1265,7 @@ body:not(:has(.kw-landing))
    * These match the specificity of the base .kw-page rules and sit later in
    * source order, so they win on the `.kw-page.kw-landing` element. */
   --kw-accent: #22c55e;
-  --kw-accent-text: #15803d;
+  --kw-accent-text: #166534;
   --kw-accent-glow: color-mix(in srgb, var(--kw-accent) 60%, transparent);
   --kw-accent-soft: color-mix(in srgb, var(--kw-accent) 20%, transparent);
 }
@@ -1315,7 +1316,7 @@ body:not(:has(.kw-landing))
 }
 .kw-landing[data-theme="forest"] {
   --kw-accent: #16a34a;
-  --kw-accent-text: #15803d;
+  --kw-accent-text: #166534;
   --kw-accent-inv: #bbf7d0;
 }
 .kw-landing[data-theme="lavender"] {
@@ -1636,8 +1637,6 @@ body:not(:has(.kw-landing))
   --kwt-frame: color-mix(in oklch, var(--kwt-accent) 9%, transparent);
   position: relative;
   isolation: isolate;
-  /* Depth for the pointer-reactive 3D tilt (vars set in TweetOverlayHero). */
-  perspective: 1400px;
 }
 
 /* Aurora background — drifts slowly to give the card cinematic depth. */
@@ -1794,11 +1793,6 @@ body:not(:has(.kw-landing))
   color: var(--kwt-x-text);
   box-shadow: var(--kwt-card-shadow);
   position: relative;
-  /* Pointer-reactive 3D tilt — rotates toward the cursor, eases back on
-     leave. Custom props default to 0 so the card sits flat until hovered. */
-  transform: rotateX(var(--kwt-rx, 0deg)) rotateY(var(--kwt-ry, 0deg));
-  transform-style: preserve-3d;
-  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
   backdrop-filter: blur(28px) saturate(160%);
   -webkit-backdrop-filter: blur(28px) saturate(160%);
   /* Lock the card to a fixed vertical envelope so platform swaps and PM
@@ -1814,24 +1808,6 @@ body:not(:has(.kw-landing))
   display: flex;
   flex-direction: column;
   min-height: 656px;
-}
-/* Glassy sheen that tracks the pointer across the card. Clipped by the card's
-   overflow + radius; `soft-light` keeps it subtle on both light and dark
-   palettes. Fades in only while the card is hovered (--kwt-tilt → 1). */
-.kwt-sheen {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  pointer-events: none;
-  border-radius: 14px;
-  background: radial-gradient(
-    260px circle at var(--kwt-mx, 50%) var(--kwt-my, 50%),
-    color-mix(in oklch, var(--kwt-accent) 55%, white) 0%,
-    transparent 60%
-  );
-  mix-blend-mode: soft-light;
-  opacity: calc(var(--kwt-tilt, 0) * 0.7);
-  transition: opacity 0.4s ease;
 }
 /* 2xl (matches the 3-post breakpoint in useTweetLimit). At this width
    X tops out at ~757px and Reddit at ~660px; 780 covers both with a
@@ -1851,6 +1827,20 @@ body:not(:has(.kw-landing))
   .kwt-card {
     min-height: 0;
     height: min(656px, calc(100svh - 188px));
+  }
+}
+/* Compact laptop viewports (14" MacBook class and below) keep the hero card
+   side-by-side, but the full desktop card can exceed the first viewport. Match
+   the reduced hero padding and let the feed clip inside the card instead. */
+@media (min-width: 1280px) and (max-width: 1535px) {
+  .kw-hero-inner {
+    padding-top: 2.5rem;
+    padding-bottom: 2.5rem;
+  }
+
+  .kwt-card {
+    min-height: 0;
+    height: min(656px, calc(100svh - 161px));
   }
 }
 /* Status footer pins to the bottom; any spare space sits between the
@@ -2263,16 +2253,15 @@ body:not(:has(.kw-landing))
   display: inline-block;
   transition: color 0.4s;
 }
-/* Highlighter pen-stroke: tapered ends (mimics pen-tip lift-off) and a
-   vertical gradient (pressure variation), plus a faint underline that
-   lands a beat after the fill. Feels hand-marked, not rectangle-filled. */
+/* Soft claim highlight. Keep it behind the words instead of underlining them so
+   the source text remains readable while the match animation runs. */
 .kwt-hl::before {
   content: "";
   position: absolute;
   left: -4px;
   right: -4px;
-  bottom: -1px;
-  top: 55%;
+  bottom: 8%;
+  top: 12%;
   background:
     linear-gradient(
       90deg,
@@ -2293,35 +2282,10 @@ body:not(:has(.kw-landing))
     transform 0.65s cubic-bezier(0.6, 0.05, 0.2, 1),
     opacity 0.3s;
   z-index: -1;
-  border-radius: 1px;
-}
-.kwt-hl::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -2px;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--kwt-accent) 22%,
-    var(--kwt-accent) 78%,
-    transparent 100%
-  );
-  opacity: 0;
-  transform: scaleX(0);
-  transform-origin: left;
-  transition:
-    transform 0.5s cubic-bezier(0.6, 0.05, 0.2, 1) 0.15s,
-    opacity 0.4s ease 0.15s;
+  border-radius: 3px;
 }
 .kwt-hl.on::before {
   transform: scaleX(1);
-}
-.kwt-hl.on::after {
-  transform: scaleX(1);
-  opacity: 0.5;
 }
 
 /* Scan beam */

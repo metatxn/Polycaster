@@ -209,7 +209,7 @@ export function BloombergItem({
         <span className="kwt-bb-section">{a.section}</span>
       </header>
 
-      <h3 className="kwt-bb-headline">{a.headline}</h3>
+      <div className="kwt-bb-headline">{a.headline}</div>
 
       <p className="kwt-bb-lede">{renderBody(a.lede, active && phase >= 1)}</p>
 

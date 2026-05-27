@@ -89,15 +89,15 @@ export function ProblemSection() {
             <h2 className="text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:text-5xl">
               The internet runs on opinions.
               <br />
-              <span className="text-(--kw-fg)/55">Knoww adds</span>{" "}
+              <span className="text-(--kw-fg)/65">Knoww adds</span>{" "}
               <span className="text-(--kw-accent-text)">probabilities.</span>
             </h2>
-            <p className="mt-6 max-w-[52ch] text-[15px] leading-[1.6] text-(--kw-fg)/70">
+            <p className="mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
               Every day, people debate elections, crypto, sports, AI, wars,
               rates, launches, and public figures. But most online discussion is
               driven by vibes, bias, and engagement farming.
             </p>
-            <p className="mt-4 max-w-[52ch] text-[15px] leading-[1.6] text-(--kw-fg)/70">
+            <p className="mt-4 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
               Prediction markets have better signal — they just live in another
               tab. Users have to leave the platform, search manually, parse
               market wording, then act.{" "}
@@ -159,7 +159,7 @@ export function ProblemSection() {
                 </span>
               </div>
               <div className="flex flex-1 items-center justify-between rounded-[10px] border border-(--kw-fg)/10 bg-(--kw-fg)/3 px-3 py-2.5">
-                <span className="font-mono text-[11px] text-(--kw-fg)/55">
+                <span className="font-mono text-[11px] text-(--kw-fg)/70">
                   VOL
                 </span>
                 <span className="font-mono font-medium text-(--kw-fg)">
@@ -200,7 +200,7 @@ function FeatureCard({
       <h3 className="mb-2 text-lg font-semibold tracking-[-0.018em]">
         {title}
       </h3>
-      <p className="text-[14px] leading-[1.6] text-(--kw-fg)/65">{desc}</p>
+      <p className="text-[15px] leading-[1.6] text-(--kw-fg)/75">{desc}</p>
     </div>
   );
 }
@@ -217,7 +217,7 @@ export function SolutionSection() {
             to the{" "}
             <span className="kw-editorial italic">moment of intent.</span>
           </h2>
-          <p className="kw-reveal text-[15px] leading-[1.6] text-(--kw-fg)/70 md:col-span-5">
+          <p className="kw-reveal text-base leading-[1.6] text-(--kw-fg)/80 md:col-span-5">
             Curiosity, disagreement, fear, greed. The reasons people open a
             market start with a feed — not a search bar. Knoww lives where that
             intent appears.
@@ -292,23 +292,23 @@ function ExtensionPopup() {
         <Search className="h-3.5 w-3.5 text-(--kw-fg)/50" />
       </div>
       <div className="px-4 py-4">
-        <div className="flex justify-between py-1.5 font-mono text-[12px] text-(--kw-fg)/55">
+        <div className="flex justify-between py-1.5 font-mono text-[12px] text-(--kw-fg)/70">
           <span>Scanning page context</span>
           <span className="text-(--kw-fg)">0.42s</span>
         </div>
         <div className="my-2 h-1 overflow-hidden rounded-full bg-(--kw-fg)/10">
           <div className="kw-bar-fill h-full w-[91%] rounded-full" />
         </div>
-        <div className="flex justify-between py-1.5 font-mono text-[12px] text-(--kw-fg)/55">
+        <div className="flex justify-between py-1.5 font-mono text-[12px] text-(--kw-fg)/70">
           <span>Relevant markets found</span>
           <span className="text-(--kw-fg)">3</span>
         </div>
-        <div className="flex justify-between py-1.5 font-mono text-[12px] text-(--kw-fg)/55">
+        <div className="flex justify-between py-1.5 font-mono text-[12px] text-(--kw-fg)/70">
           <span>Best match confidence</span>
           <span className="text-(--kw-accent-text)">91%</span>
         </div>
         <div className="-mx-4 mt-3 border-t border-(--kw-fg)/10 px-4 pt-3">
-          <div className="mb-2 font-mono text-[10px] tracking-[0.08em] text-(--kw-fg)/40">
+          <div className="mb-2 font-mono text-[10px] tracking-[0.08em] text-(--kw-fg)/70">
             TOP MATCH
           </div>
           <div className="text-[13px] leading-[1.4] text-(--kw-fg)">
@@ -342,7 +342,7 @@ export function ExtensionSection() {
               <br />
               <span className="text-(--kw-accent-text)">Infinite markets.</span>
             </h2>
-            <p className="mt-6 max-w-[52ch] text-[15px] leading-[1.6] text-(--kw-fg)/70">
+            <p className="mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
               Wherever the internet debates uncertainty, Knoww is there. Reading
               news, scrolling feeds, watching analysis, tracking narratives —
               the extension detects context and surfaces relevant markets.
@@ -353,7 +353,7 @@ export function ExtensionSection() {
                   key={p.n}
                   className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] transition-colors ${
                     p.soon
-                      ? "border-dashed border-(--kw-fg)/15 text-(--kw-fg)/40"
+                      ? "border-dashed border-(--kw-fg)/15 text-(--kw-fg)/65"
                       : "border-(--kw-fg)/10 bg-(--kw-fg)/3 text-(--kw-fg)/80 hover:border-(--kw-fg)/20"
                   }`}
                 >
@@ -433,7 +433,7 @@ export function HowItWorks() {
                 </span>
                 <h3 className="text-lg font-semibold">{s.t}</h3>
               </div>
-              <p className="mt-2 text-[13.5px] leading-[1.55] text-(--kw-fg)/65">
+              <p className="mt-2 text-[14px] leading-[1.55] text-(--kw-fg)/75">
                 {s.d}
               </p>
             </div>
@@ -499,7 +499,7 @@ export function RadarBlock() {
               {RADAR_CATS.map((c) => (
                 <span
                   key={c.l}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--kw-fg)/55"
+                  className="absolute -translate-x-1/2 -translate-y-1/2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--kw-fg)/70"
                   style={{ left: `${c.x}%`, top: `${c.y}%` }}
                 >
                   {c.l}
@@ -519,7 +519,7 @@ export function RadarBlock() {
               the internet for{" "}
               <span className="text-(--kw-accent-text)">uncertainty</span>.
             </h2>
-            <p className="kw-reveal mt-6 max-w-[52ch] text-[15px] leading-[1.6] text-(--kw-fg)/70">
+            <p className="kw-reveal mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
               Politics, crypto, sports, AI, macro, policy, culture — every
               domain has a hidden market. The radar shows what Knoww just found.
             </p>
@@ -529,7 +529,7 @@ export function RadarBlock() {
                   key={d.l}
                   className="flex justify-between rounded-[8px] border border-(--kw-fg)/10 bg-(--kw-fg)/2 px-3 py-2 font-mono text-[12px]"
                 >
-                  <span className="text-(--kw-fg)/55">{d.l}</span>
+                  <span className="text-(--kw-fg)/70">{d.l}</span>
                   <span className="text-(--kw-accent-text)">{d.v}</span>
                 </div>
               ))}
@@ -576,7 +576,7 @@ function AgentDashboard() {
   const conf = useTickingNumber(78, 4);
   return (
     <div className="overflow-hidden rounded-[18px] border border-(--kw-fg)/15 bg-(--kw-bg-card)/60 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.45)]">
-      <div className="flex items-center justify-between border-b border-(--kw-fg)/10 px-4 py-3.5 font-mono text-[11.5px] uppercase tracking-[0.06em] text-(--kw-fg)/55">
+      <div className="flex items-center justify-between border-b border-(--kw-fg)/10 px-4 py-3.5 font-mono text-[11.5px] uppercase tracking-[0.06em] text-(--kw-fg)/70">
         <span>Knoww Agent · Live Monitor</span>
         <span className="flex items-center gap-2 text-(--kw-accent-text)">
           <span className="kw-signal-dot h-1.5 w-1.5" />
@@ -593,8 +593,8 @@ function AgentDashboard() {
             <div className="mb-1 mt-2.5 text-[15px] font-medium">
               Incumbent-party win 2028 — odds shifted +3.2% in 14m
             </div>
-            <div className="text-[13px] text-(--kw-fg)/60">
-              <span className="font-mono text-[11px] text-(--kw-fg)/40">
+            <div className="text-[14px] text-(--kw-fg)/75">
+              <span className="font-mono text-[11px] text-(--kw-fg)/70">
                 REASON
               </span>{" "}
               New policy statement from leading 2028 candidate referenced across
@@ -615,7 +615,7 @@ function AgentDashboard() {
             </div>
           </div>
 
-          <div className="mt-3 font-mono text-[12px] text-(--kw-fg)/45">
+          <div className="mt-3 font-mono text-[12px] text-(--kw-fg)/65">
             {[
               {
                 t: "14:02:11 · Crypto narrative pivot detected",
@@ -659,12 +659,12 @@ function AgentDashboard() {
               key={row.k}
               className="mb-2 flex justify-between rounded-[10px] border border-(--kw-fg)/10 bg-(--kw-fg)/2 px-3 py-2.5 font-mono text-[12px]"
             >
-              <span className="text-(--kw-fg)/55">{row.k}</span>
+              <span className="text-(--kw-fg)/70">{row.k}</span>
               <span className={row.c}>{row.v}</span>
             </div>
           ))}
           <div className="flex justify-between rounded-[10px] border border-(--kw-fg)/10 bg-(--kw-fg)/2 px-3 py-2.5 font-mono text-[12px]">
-            <span className="text-(--kw-fg)/55">CONFIDENCE</span>
+            <span className="text-(--kw-fg)/70">CONFIDENCE</span>
             <span className="text-(--kw-accent-text)">{conf}%</span>
           </div>
           <div className="mt-1 h-1 overflow-hidden rounded-full bg-(--kw-fg)/10">
@@ -675,16 +675,16 @@ function AgentDashboard() {
           </div>
 
           <div className="mt-3.5 rounded-[10px] border border-(--kw-fg)/10 bg-(--kw-fg)/2 p-3">
-            <div className="mb-1.5 font-mono text-[10px] tracking-[0.08em] text-(--kw-fg)/40">
+            <div className="mb-1.5 font-mono text-[10px] tracking-[0.08em] text-(--kw-fg)/70">
               EXECUTION LIMIT
             </div>
             <div className="text-[13px]">≤ $250 per signal · max 3/day</div>
           </div>
           <div className="mt-2 rounded-[10px] border border-(--kw-fg)/10 bg-(--kw-fg)/2 p-3">
-            <div className="mb-1.5 font-mono text-[10px] tracking-[0.08em] text-(--kw-fg)/40">
+            <div className="mb-1.5 font-mono text-[10px] tracking-[0.08em] text-(--kw-fg)/70">
               REASONING
             </div>
-            <div className="text-[12px] leading-[1.45] text-(--kw-fg)/60">
+            <div className="text-[13px] leading-[1.5] text-(--kw-fg)/75">
               Signal corroborated across 3 sources. Volume in matching market up
               18%. Suggesting watch, not act.
             </div>
@@ -710,7 +710,7 @@ export function AgentSection() {
               </span>{" "}
               for you.
             </h2>
-            <p className="kw-reveal mt-6 max-w-[52ch] text-[15px] leading-[1.6] text-(--kw-fg)/70">
+            <p className="kw-reveal mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
               Knoww is building an agent layer that monitors markets, tracks
               narratives, detects odds movement, analyzes events, and helps
               users act inside{" "}
@@ -752,11 +752,11 @@ export function WhyNowSection() {
           <h2 className="kw-reveal text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:col-span-7 md:text-5xl">
             Prediction markets are ready.
             <br />
-            <span className="text-(--kw-fg)/55">Discovery is still </span>
+            <span className="text-(--kw-fg)/65">Discovery is still </span>
             <span className="text-(--kw-danger-text)">broken</span>
-            <span className="text-(--kw-fg)/55">.</span>
+            <span className="text-(--kw-fg)/65">.</span>
           </h2>
-          <p className="kw-reveal text-[15px] leading-[1.6] text-(--kw-fg)/70 md:col-span-5">
+          <p className="kw-reveal text-base leading-[1.6] text-(--kw-fg)/80 md:col-span-5">
             People don’t start with a market. They start with curiosity,
             disagreement, fear, or a live event. Knoww captures intent at the
             source.
@@ -783,7 +783,7 @@ export function WhyNowSection() {
                   <span className="w-5 font-mono text-[11px] text-(--kw-fg)/35">
                     0{i + 1}
                   </span>
-                  <span className="text-(--kw-fg)/60">{s}</span>
+                  <span className="text-(--kw-fg)/75">{s}</span>
                 </div>
               ))}
             </div>
@@ -871,7 +871,7 @@ export function UseCasesSection() {
               signal before consensus.
             </span>
           </h2>
-          <p className="kw-reveal text-[15px] leading-[1.6] text-(--kw-fg)/70 md:col-span-5">
+          <p className="kw-reveal text-base leading-[1.6] text-(--kw-fg)/80 md:col-span-5">
             Knoww isn’t a niche product — it’s a layer. Anyone who reads,
             debates, or trades on the internet has something to gain.
           </p>
@@ -920,7 +920,7 @@ export function TractionSection() {
             <span className="text-(--kw-accent-text)">across the internet</span>
             .
           </h2>
-          <p className="kw-reveal text-[15px] leading-[1.6] text-(--kw-fg)/70 md:col-span-5">
+          <p className="kw-reveal text-base leading-[1.6] text-(--kw-fg)/80 md:col-span-5">
             We shipped the foundation. Now we’re hardening, expanding coverage,
             and opening the doors.
           </p>
@@ -931,13 +931,13 @@ export function TractionSection() {
               key={m.label}
               className="kw-reveal rounded-[16px] border border-(--kw-fg)/10 bg-(--kw-bg-card)/50 p-5"
             >
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-(--kw-fg)/55">
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-(--kw-fg)/70">
                 {m.label}
               </div>
               <div className="mt-2 text-[32px] font-medium tracking-tight">
                 {m.v}
               </div>
-              <div className="mt-1 font-mono text-[12px] text-(--kw-fg)/40">
+              <div className="mt-1 font-mono text-[12px] text-(--kw-fg)/70">
                 {m.sub}
               </div>
             </div>
@@ -978,7 +978,7 @@ export function FinalCTASection({
               It’ll be priced.
             </span>
           </h2>
-          <p className="mx-auto mt-5 max-w-[60ch] text-[15px] leading-[1.6] text-(--kw-fg)/70">
+          <p className="mx-auto mt-5 max-w-[60ch] text-base leading-[1.6] text-(--kw-fg)/80">
             Join Knoww and get real-time prediction markets wherever the
             internet debates what happens next.
           </p>

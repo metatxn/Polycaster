@@ -80,8 +80,8 @@ flowchart LR
 
 | Module | Key paths | Responsibility | Talks to |
 | --- | --- | --- | --- |
-| Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, preconnects to upstream APIs, and serves the main pages | Hooks, contexts, server-cache, API routes |
-| Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/leaderboard/*`, `apps/web/src/components/notifications/*`, `apps/web/src/components/portfolio/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*` | Houses reusable UI primitives plus feature-level views for comments, deposits, leaderboard, portfolio, notifications, price alerts, and trading flows | App shell, hooks, contexts, wallet state |
+| Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/landing-page-client.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, and serves both the marketing landing experience and the main market-browsing pages | Hooks, contexts, server-cache, API routes |
+| Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/landing/*`, `apps/web/src/components/leaderboard/*`, `apps/web/src/components/notifications/*`, `apps/web/src/components/portfolio/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*` | Houses reusable UI primitives plus feature-level views for landing-page storytelling, comments, deposits, leaderboard, portfolio, notifications, price alerts, and trading flows | App shell, hooks, contexts, wallet state |
 | Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
 | Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/extension-auth.ts`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, extension CORS/session helpers, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
@@ -102,6 +102,7 @@ flowchart LR
 | Extension platform and host config | `apps/extension/src/supported-hosts.ts`, `apps/extension/src/content/platform-registry.ts`, `apps/extension/src/content/platforms/*` | Defines match patterns, platform adapters, and site-specific extraction/injection behavior for supported social and editorial surfaces | Content runtime, background worker |
 | Extension offscreen runtimes | `apps/extension/src/offscreen/offscreen.ts`, `apps/extension/src/offscreen/scoring-runtime.ts`, `apps/extension/src/offscreen/trading-runtime.ts`, `apps/extension/src/background/trading-handler.ts` | Splits heavy scoring and trading work out of the MV3 service worker, loading runtime-specific modules only when needed | Background worker, relayer, CLOB, Polygon RPC, local scoring pipeline |
 | Extension options and preferences | `apps/extension/src/options.tsx`, `apps/extension/src/content/preferences.ts`, `apps/extension/src/types/settings.ts` | Manages per-user platform/source toggles, analytics preferences, theme overrides, and debug settings | Chrome storage, content runtime, background worker |
+| Extension sidepanel | `apps/extension/src/sidepanel.ts` | Renders the extension-owned sidepanel UI for snapshot markets, search, portfolio, and wallet-session controls outside the in-page injection flow | Background worker, Knoww API, Chrome extension runtime |
 | Shared logger package | `packages/logger/src/index.ts` | Provides the structured logger used across the web app, extension, and agent package instead of ad hoc console logging | Web app routes/libs, extension background/content runtimes, `apps/agent` |
 | Shared market/contracts package | `packages/shared-types/src/*` | Single source of truth for Polymarket endpoints, contract addresses, auth constants, slippage helpers, crypto helpers, trading helpers, ABIs, and shared types | Web app, extension, and agent package |
 | Deployment config | `apps/web/custom-worker.ts`, `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts`, `apps/web/next.config.ts` | Packages the Next.js app for Cloudflare Workers, wires the custom Worker entrypoint, and configures the R2-backed incremental cache plus cron schedule | Cloudflare Workers, R2 |
@@ -110,7 +111,8 @@ flowchart LR
 
 | Page | Key path | Purpose |
 | --- | --- | --- |
-| Home | `apps/web/src/app/page.tsx` | SSR first page of events using edge fetches from Polymarket |
+| Home | `apps/web/src/app/page.tsx`, `apps/web/src/app/landing-page-client.tsx` | Public marketing landing page for the product and extension |
+| Markets home | `apps/web/src/app/home-content.tsx` | Main market-browsing experience with persisted view-mode state |
 | Event listing by tag | `apps/web/src/app/events/[tag]/page.tsx` | Category/tag-driven event browsing |
 | Event detail | `apps/web/src/app/events/detail/[slug]/page.tsx` | Event-level market list and event metadata view |
 | Sports hub | `apps/web/src/app/events/sports/page.tsx` | Sports-specific event and market discovery landing page |

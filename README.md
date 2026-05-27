@@ -97,6 +97,8 @@ In development, the extension targets `http://localhost:8000` by default. Use `D
 
 ## Scripts
 
+Root workspace scripts:
+
 ```bash
 pnpm dev:web        # Run the Next.js web app on port 8000
 pnpm dev:ext        # Run the extension build in watch mode
@@ -108,10 +110,6 @@ pnpm lint           # Lint the monorepo
 pnpm lint:web       # Lint the web app only
 pnpm lint:ext       # Lint the extension only
 pnpm format         # Format the monorepo
-pnpm test           # Run the web Vitest suite plus node-based tests
-pnpm test:watch     # Run the web Vitest suite in watch mode
-pnpm test:coverage  # Run the web Vitest suite with coverage
-pnpm test:e2e       # Run the Playwright smoke test
 pnpm typecheck      # Type-check all workspace packages
 pnpm typecheck:web  # Type-check the web app only
 pnpm typecheck:ext  # Type-check the extension only
@@ -121,11 +119,22 @@ pnpm deploy         # Deploy the web app to Cloudflare
 pnpm release:ext    # Bump, build, and zip the extension release
 ```
 
-Additional package-level scripts live in the workspace packages:
+Package-level scripts live in the workspace packages:
 
 - `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`, `test`, `test:node`, `test:watch`, `test:coverage`, `test:e2e`
 - `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `benchmark:embeddings`, `format`, `version:bump`, `zip`, `release`
 - `apps/agent/package.json`: `build`, `typecheck`, `lint`, `format`, `test`
+
+Common test commands:
+
+```bash
+pnpm --filter @knoww/web test           # Web Vitest suite + node-based tests
+pnpm --filter @knoww/web test:watch     # Web Vitest watch mode
+pnpm --filter @knoww/web test:coverage  # Web coverage run
+pnpm --filter @knoww/web test:e2e       # Web Playwright smoke test
+pnpm --filter @knoww/extension test     # Extension scoring tests
+pnpm --filter @knoww/agent test         # Agent node tests
+```
 
 ## Documentation
 

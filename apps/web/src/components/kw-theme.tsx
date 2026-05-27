@@ -100,15 +100,15 @@ export function KwThemeDropdown({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label="Select theme"
-          className="inline-flex h-9 min-w-[124px] items-center gap-2 border border-(--kw-fg)/15 bg-(--kw-bg) px-3 text-[12px] font-medium text-(--kw-fg) transition-colors hover:border-(--kw-fg)/40 hover:bg-(--kw-fg)/5"
+          aria-label={`${activeTheme?.label ?? "Theme"} theme. Open theme picker.`}
+          className="inline-flex h-9 min-w-9 items-center gap-2 border border-(--kw-fg)/15 bg-(--kw-bg) px-2 text-[12px] font-medium text-(--kw-fg) transition-colors hover:border-(--kw-fg)/40 hover:bg-(--kw-fg)/5 sm:min-w-[124px] sm:px-3"
         >
           <Palette className="h-3.5 w-3.5 shrink-0" />
           <span
             className="h-3.5 w-3.5 shrink-0 rounded-full border border-(--kw-fg)/20"
             style={{ backgroundColor: activeTheme?.preview }}
           />
-          <span className="min-w-0 truncate">
+          <span className="hidden min-w-0 truncate sm:inline">
             {activeTheme?.label ?? "Theme"}
           </span>
         </button>

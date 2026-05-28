@@ -7,8 +7,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import posthog from "posthog-js";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
-import { EditorialHero } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
+import { ProductHero } from "@/components/product-hero";
 import { type SearchEvent, useSearch } from "@/hooks/use-search";
 import { formatVolume } from "@/lib/formatters";
 
@@ -214,33 +215,32 @@ function SearchContent() {
     !showResults && lastSearchedMarkets.length > 0;
 
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
+    <div className="kw-app min-h-screen bg-(--kwm-bg) relative overflow-x-hidden selection:bg-(--kwm-ink)/15">
       <Navbar />
       <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24">
         <div className="max-w-4xl mx-auto">
-          <EditorialHero
+          <ProductHero
             breadcrumbs={[
               { label: "Markets", href: "/markets" },
               { label: "Search" },
             ]}
-            title={<span>Search</span>}
-            subtitle="Every market on Polymarket — searchable by name, candidate, ticker, or theme."
           />
 
-          {/* Search Input — editorial underline field, no shell */}
+          {/* Search Input — DeFi terminal field with mono caret */}
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
-            className="mb-12"
+            className="mb-10"
           >
             <label
               htmlFor="search-input"
-              className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-2"
+              className="block font-mono text-[10px] uppercase tracking-[0.14em] mb-2"
+              style={{ color: "var(--kwm-ink-3)" }}
             >
-              §&nbsp;&nbsp;Query
+              Query
             </label>
             <div className="relative max-w-2xl">
               <input
@@ -252,7 +252,12 @@ function SearchContent() {
                 onChange={handleInputChange}
                 autoComplete="off"
                 spellCheck={false}
-                className="w-full border-0 border-b-2 border-foreground/80 bg-transparent rounded-none px-0 pt-1 pb-3 pr-10 text-2xl sm:text-3xl font-editorial italic text-foreground placeholder:font-editorial placeholder:italic placeholder:text-muted-foreground/50 focus:outline-none focus:border-foreground transition-colors"
+                className="w-full rounded-md px-3 h-10 pr-10 text-[14px] focus:outline-none focus:ring-1 transition-colors"
+                style={{
+                  background: "var(--kwm-bg-2)",
+                  border: "1px solid var(--kwm-hl-2)",
+                  color: "var(--kwm-ink)",
+                }}
               />
               {query && (
                 <button
@@ -405,11 +410,20 @@ function SearchContent() {
 
                 {/* No Results */}
                 {!isLoading && !isTyping && !hasResults && (
-                  <div className="py-12 border-y border-border/40">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+                  <div
+                    className="py-10 border-y"
+                    style={{ borderColor: "var(--kwm-hl)" }}
+                  >
+                    <p
+                      className="font-mono text-[10px] uppercase tracking-[0.14em] mb-2"
+                      style={{ color: "var(--kwm-ink-3)" }}
+                    >
                       No matches
                     </p>
-                    <p className="font-editorial italic text-xl leading-snug text-foreground max-w-md">
+                    <p
+                      className="text-[14px] leading-snug max-w-md"
+                      style={{ color: "var(--kwm-ink)" }}
+                    >
                       Nothing on Polymarket matches "{query}". Try a different
                       term or browse by category.
                     </p>
@@ -591,12 +605,18 @@ function SearchContent() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="py-10 max-w-md"
+              className="py-8 max-w-md"
             >
-              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+              <p
+                className="font-mono text-[10px] uppercase tracking-[0.14em] mb-2"
+                style={{ color: "var(--kwm-ink-3)" }}
+              >
                 Try searching
               </p>
-              <p className="font-editorial italic text-xl leading-snug text-foreground">
+              <p
+                className="text-[14px] leading-snug"
+                style={{ color: "var(--kwm-ink)" }}
+              >
                 An event name, a candidate, a ticker, or a topic — type at least
                 two characters to see markets.
               </p>
@@ -604,6 +624,7 @@ function SearchContent() {
           )}
         </div>
       </main>
+      <ProductFooter context="Search" />
     </div>
   );
 }

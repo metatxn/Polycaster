@@ -144,13 +144,13 @@ CommentListProps) {
           className
         )}
       >
-        <div className="rounded-full bg-muted/50 p-4 mb-4">
-          <MessageSquareOff className="h-8 w-8 text-muted-foreground/50" />
+        <div className="rounded-full bg-(--kwm-bg-3) p-4 mb-4">
+          <MessageSquareOff className="h-8 w-8 text-(--kwm-ink-dim)" />
         </div>
-        <p className="text-sm text-muted-foreground font-medium">
+        <p className="text-sm text-(--kwm-ink-3) font-medium">
           No comments yet
         </p>
-        <p className="text-xs text-muted-foreground/70 mt-1">
+        <p className="text-xs text-(--kwm-ink-dim) mt-1">
           Be the first to share your thoughts here
         </p>
       </motion.div>
@@ -182,7 +182,7 @@ CommentListProps) {
               // onReply={handleReply}
             />
             {index < commentTree.length - 1 && (
-              <div className="border-b border-border/30 mt-4" />
+              <div className="border-b border-(--kwm-hl) mt-4" />
             )}
           </motion.div>
         ))}
@@ -194,8 +194,8 @@ CommentListProps) {
       {/* Loading more indicator */}
       {isFetchingNextPage && (
         <div className="flex items-center justify-center py-4">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin text-(--kwm-ink-3)" />
+          <span className="ml-2 text-sm text-(--kwm-ink-3)">
             Loading more comments...
           </span>
         </div>
@@ -203,7 +203,7 @@ CommentListProps) {
 
       {/* End of comments */}
       {!hasNextPage && allComments.length > 10 && (
-        <p className="text-center text-xs text-muted-foreground/50 py-4">
+        <p className="text-center text-xs text-(--kwm-ink-dim) py-4">
           You&apos;ve reached the end of comments
         </p>
       )}

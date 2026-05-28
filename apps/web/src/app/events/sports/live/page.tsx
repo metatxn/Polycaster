@@ -9,12 +9,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
-import { EditorialFooter } from "@/components/editorial-footer";
-import {
-  EditorialHero,
-  HeroLiveDot,
-  HeroRefreshButton,
-} from "@/components/editorial-hero";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { LeagueRail, LeagueRailMobile } from "@/components/league-rail";
 import {
@@ -26,6 +20,12 @@ import {
 } from "@/components/live-sportsbook";
 import { MarketSearch } from "@/components/market-search";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
+import {
+  ProductHero,
+  ProductLiveDot,
+  ProductRefreshButton,
+} from "@/components/product-hero";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBestPrices, useOrderBookStore } from "@/hooks/use-orderbook-store";
 import { usePaginatedEvents } from "@/hooks/use-paginated-events";
@@ -560,19 +560,18 @@ export default function LiveMarketsPage() {
       : "Offline";
 
   return (
-    <div className="min-h-screen flex flex-col bg-background relative overflow-x-clip selection:bg-foreground/15">
+    <div className="kw-app min-h-screen flex flex-col bg-(--kwm-bg) relative overflow-x-clip selection:bg-(--kwm-ink)/15">
       <Navbar />
       <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-12">
-        <EditorialHero
+        <ProductHero
           breadcrumbs={[
             { label: "Markets", href: "/markets" },
             { label: "Live" },
           ]}
-          title="Sports Live"
           belowSlot={
-            <div className="mt-5 flex items-center gap-3">
+            <div className="mt-3 flex items-center gap-3">
               <MarketSearch
                 className="w-full sm:max-w-sm"
                 tagSlug="sports"
@@ -583,17 +582,15 @@ export default function LiveMarketsPage() {
           }
           rightSlot={
             <>
-              <HeroLiveDot
+              <ProductLiveDot
                 isLive={isConnected}
                 liveLabel={feedLabel}
                 offlineLabel={feedLabel}
               />
               {lastMessageAt && (
-                <span className="text-muted-foreground tabular-nums">
-                  · {timeAgo(lastMessageAt)}
-                </span>
+                <span className="tabular-nums">· {timeAgo(lastMessageAt)}</span>
               )}
-              <HeroRefreshButton
+              <ProductRefreshButton
                 onRefresh={reconnect}
                 isFetching={connectionState === "reconnecting"}
                 label="Reconnect"
@@ -786,7 +783,7 @@ export default function LiveMarketsPage() {
         )}
       </main>
 
-      <EditorialFooter context="Live Sports" />
+      <ProductFooter context="Live Sports" />
     </div>
   );
 }

@@ -203,14 +203,14 @@ CommentItemProps) {
       <div
         className={cn(
           "flex gap-3",
-          depth > 0 && "pl-4 border-l border-border/40 ml-4"
+          depth > 0 && "pl-4 border-l border-(--kwm-hl) ml-4"
         )}
       >
         {/* Minimize/Expand toggle button */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-foreground self-start mt-1.5"
+          className="h-6 w-6 p-0 shrink-0 text-(--kwm-ink-3) hover:text-(--kwm-ink) self-start mt-1.5"
           onClick={() => setIsMinimized(!isMinimized)}
           title={isMinimized ? "Expand comment" : "Minimize comment"}
         >
@@ -231,7 +231,7 @@ CommentItemProps) {
                 src={avatarUrl || undefined}
                 alt={displayName || "User"}
               />
-              <AvatarFallback className="bg-foreground/5 border border-border/60 font-mono text-xs font-semibold text-foreground">
+              <AvatarFallback className="bg-(--kwm-bg-3) border border-(--kwm-hl-2) font-mono text-xs font-semibold text-(--kwm-ink)">
                 {displayName?.charAt(0).toUpperCase() || "?"}
               </AvatarFallback>
             </Avatar>
@@ -254,25 +254,25 @@ CommentItemProps) {
             {profileAddress ? (
               <Link
                 href={`/profile/${profileAddress}`}
-                className="font-semibold text-sm text-foreground hover:underline decoration-foreground/40 underline-offset-4 transition-colors"
+                className="font-semibold text-sm text-(--kwm-ink) hover:underline decoration-(--kwm-hl) underline-offset-4 transition-colors"
               >
                 {displayName}
               </Link>
             ) : (
-              <span className="font-semibold text-sm text-foreground">
+              <span className="font-semibold text-sm text-(--kwm-ink)">
                 {displayName}
               </span>
             )}
 
             {/* Badges — editorial mono-caps outline */}
             {isMod && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] font-semibold text-foreground border border-border/60">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] font-semibold text-(--kwm-ink) border border-(--kwm-hl-2)">
                 <Shield className="h-2.5 w-2.5" />
                 Mod
               </span>
             )}
             {isCreator && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] font-semibold text-foreground border border-foreground/60 bg-foreground/5">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] font-semibold text-(--kwm-ink) border border-(--kwm-hl-2) bg-(--kwm-bg-3)">
                 <Sparkles className="h-2.5 w-2.5" />
                 Creator
               </span>
@@ -296,7 +296,7 @@ CommentItemProps) {
                     className={cn(
                       "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
                       lead.isYes
-                        ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                        ? "border-(--kwm-up-border) text-(--kwm-up)"
                         : "border-red-600/40 text-red-700 dark:text-red-300"
                     )}
                   >
@@ -309,9 +309,9 @@ CommentItemProps) {
                       <button
                         type="button"
                         className={cn(
-                          "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums cursor-pointer hover:bg-foreground/5 transition-colors",
+                          "inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums cursor-pointer hover:bg-(--kwm-bg-3) transition-colors",
                           lead.isYes
-                            ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                            ? "border-(--kwm-up-border) text-(--kwm-up)"
                             : "border-red-600/40 text-red-700 dark:text-red-300"
                         )}
                       >
@@ -328,14 +328,14 @@ CommentItemProps) {
                           key={idx}
                           className="flex items-center justify-between gap-3 text-xs"
                         >
-                          <span className="text-foreground/80">
+                          <span className="text-(--kwm-ink-2)">
                             {pos.marketName || pos.outcomeLabel}
                           </span>
                           <span
                             className={cn(
                               "px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold border tabular-nums",
                               pos.isYes
-                                ? "border-emerald-600/40 text-emerald-700 dark:text-emerald-300"
+                                ? "border-(--kwm-up-border) text-(--kwm-up)"
                                 : "border-red-600/40 text-red-700 dark:text-red-300"
                             )}
                           >
@@ -354,27 +354,27 @@ CommentItemProps) {
               (profileAddress ? (
                 <Link
                   href={`/profile/${profileAddress}`}
-                  className="text-[10px] text-muted-foreground/70 font-mono tabular-nums hover:text-foreground hover:underline decoration-foreground/40 underline-offset-4 transition-colors"
+                  className="text-[10px] text-(--kwm-ink-dim) font-mono tabular-nums hover:text-(--kwm-ink) hover:underline decoration-(--kwm-hl) underline-offset-4 transition-colors"
                 >
                   {shortAddress}
                 </Link>
               ) : (
-                <span className="text-[10px] text-muted-foreground/70 font-mono tabular-nums">
+                <span className="text-[10px] text-(--kwm-ink-dim) font-mono tabular-nums">
                   {shortAddress}
                 </span>
               ))}
 
-            <span className="text-xs text-muted-foreground">{timeAgo}</span>
+            <span className="text-xs text-(--kwm-ink-3)">{timeAgo}</span>
 
             {/* Minimized indicator */}
             {isMinimized && (
               <button
                 type="button"
                 onClick={() => setIsMinimized(false)}
-                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors cursor-pointer"
               >
                 <ChevronRight className="h-3 w-3" />
-                <span className="text-muted-foreground/70">
+                <span className="text-(--kwm-ink-dim)">
                   {totalReplies > 0
                     ? `${totalReplies + 1} comments hidden`
                     : "comment hidden"}
@@ -394,7 +394,7 @@ CommentItemProps) {
                 className="overflow-hidden"
               >
                 {/* Comment body */}
-                <p className="text-sm mt-1.5 text-foreground/90 whitespace-pre-wrap wrap-break-word leading-relaxed">
+                <p className="text-sm mt-1.5 text-(--kwm-ink-2) whitespace-pre-wrap wrap-break-word leading-relaxed">
                   {comment.body}
                 </p>
 
@@ -406,7 +406,7 @@ CommentItemProps) {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+                        className="h-7 px-2 text-xs text-(--kwm-ink-3) hover:text-(--kwm-ink) gap-1"
                       >
                         <ThumbsUp className="h-3.5 w-3.5" />
                         {comment.reactionCount}
@@ -420,7 +420,7 @@ CommentItemProps) {
                       variant="ghost"
                       size="sm"
                       className={cn(
-                        "h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 transition-opacity",
+                        "h-7 px-2 text-xs text-(--kwm-ink-3) hover:text-(--kwm-ink) gap-1 transition-opacity",
                         activeReplyId === comment.id
                           ? "opacity-100 text-primary"
                           : "opacity-0 group-hover:opacity-100"
@@ -446,7 +446,7 @@ CommentItemProps) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1 ml-auto"
+                      className="h-7 px-2 text-xs text-(--kwm-ink-3) hover:text-(--kwm-ink) gap-1 ml-auto"
                       onClick={() => setShowReplies(!showReplies)}
                     >
                       {showReplies ? (

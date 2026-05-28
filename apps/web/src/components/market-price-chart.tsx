@@ -20,7 +20,6 @@ import {
 } from "lightweight-charts";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -189,22 +188,84 @@ async function fetchPriceHistoryBatch(
 }
 
 /**
- * Pick theme-appropriate chart colors by reading CSS custom properties.
- * The app uses Tailwind's dark-class strategy; we recompute on theme flip.
+ * Coerce any browser-computed CSS color (oklch, color-mix, hsl, named) to
+ * a concrete `rgb()` / `rgba()` string. `lightweight-charts`'s built-in
+ * color parser can't read `oklch()` — Chromium now returns oklch verbatim
+ * from `getComputedStyle()` instead of auto-converting — so we round-trip
+ * through a 1×1 canvas, which understands every modern CSS color space.
  */
-function readThemeColors() {
+function toRgbString(input: string): string | null {
+  if (typeof document === "undefined") return null;
+  if (!input) return null;
+  if (/^rgba?\(/.test(input)) return input;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = input;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    if (a === 255) return `rgb(${r}, ${g}, ${b})`;
+    return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a `var(--kwm-*)` custom property to a concrete `rgb()` / `rgba()`
+ * string lightweight-charts can render. Done via a hidden probe element:
+ * setting `color: var(--kwm-…)` then reading the computed `color` lets the
+ * browser resolve `color-mix()` / nested vars for us. The result is then
+ * canvas-coerced so `oklch()` (returned verbatim in modern Chromium)
+ * becomes rgb. `scope` should be a `.kw-app` ancestor of the chart so the
+ * active theme family (Midnight/Ocean/Slate/…) is in scope.
+ */
+function resolveKwmColor(
+  scope: HTMLElement | null,
+  varName: string,
+  fallback: string
+): string {
+  if (typeof window === "undefined") return fallback;
+  const host = scope ?? document.body;
+  const probe = document.createElement("span");
+  probe.style.color = `var(${varName})`;
+  probe.style.display = "none";
+  host.appendChild(probe);
+  const resolved = getComputedStyle(probe).color;
+  host.removeChild(probe);
+  return toRgbString(resolved) ?? toRgbString(fallback) ?? fallback;
+}
+
+/**
+ * Pick theme-appropriate chart colors by resolving the `--kwm-*` design
+ * tokens. Tracks the active theme family because the probe inherits the
+ * scope's variable cascade.
+ */
+function readThemeColors(scope: HTMLElement | null) {
   if (typeof window === "undefined") {
     return {
       text: "#6b7280",
       grid: "rgba(148, 163, 184, 0.15)",
       crosshair: "rgba(148, 163, 184, 0.5)",
+      ink: "#111827",
     };
   }
-  const isDark = document.documentElement.classList.contains("dark");
   return {
-    text: isDark ? "rgb(148, 163, 184)" : "rgb(100, 116, 139)",
-    grid: isDark ? "rgba(148, 163, 184, 0.12)" : "rgba(148, 163, 184, 0.2)",
-    crosshair: isDark ? "rgba(148, 163, 184, 0.6)" : "rgba(100, 116, 139, 0.6)",
+    text: resolveKwmColor(scope, "--kwm-ink-3", "rgb(100, 116, 139)"),
+    // Grid uses --kwm-hl-2 (full border opacity) instead of --kwm-hl so
+    // vertical rules read clearly against the panel background; --kwm-hl
+    // is alpha-tinted (70%) and disappeared into the dark themes.
+    grid: resolveKwmColor(scope, "--kwm-hl-2", "rgba(148, 163, 184, 0.3)"),
+    crosshair: resolveKwmColor(
+      scope,
+      "--kwm-ink-3",
+      "rgba(148, 163, 184, 0.6)"
+    ),
+    ink: resolveKwmColor(scope, "--kwm-ink", "rgb(17, 24, 39)"),
   };
 }
 
@@ -577,7 +638,7 @@ export function MarketPriceChart({
     const container = containerRef.current;
     if (!container) return;
 
-    const colors = readThemeColors();
+    const colors = readThemeColors(container);
     const chart = createChart(container, {
       width: container.clientWidth,
       height: container.clientHeight,
@@ -586,23 +647,33 @@ export function MarketPriceChart({
         background: { color: "transparent" },
         textColor: colors.text,
         attributionLogo: false,
+        // Match the design's mono-caps treatment for axis labels. The
+        // canvas-rendered axes pick up the same Geist Mono variable the
+        // rest of the .kw-app surface uses.
+        fontFamily:
+          "var(--font-geist-mono), ui-monospace, 'JetBrains Mono', monospace",
+        fontSize: 10,
       },
       grid: {
-        // Polymarket-style: horizontal gridlines only, no vertical rules.
-        vertLines: { visible: false },
+        // Design wants a true grid backdrop — both axes drawn at the same
+        // subtle `--kwm-hl` tone so the plot reads as a charting surface
+        // rather than a free-floating line.
+        vertLines: { color: colors.grid },
         horzLines: { color: colors.grid },
       },
       rightPriceScale: {
         borderVisible: false,
-        // Reserve ~10% headroom at the top so the floating legend pill
-        // (top-left of the plot) never overlaps the current-price dashed
-        // line. With top:0.02 a high current price like 73% mapped to the
-        // very top of the canvas and the horizontal price-line cut
-        // through the legend text.
-        // Extra top headroom so the highest axis label (e.g. 70%) has
-        // room to render without clipping against the top edge of the
-        // plot. Bottom stays tight — 0% sits at the baseline anyway.
-        scaleMargins: { top: 0.16, bottom: 0.04 },
+        // Top headroom — just enough for the highest tick label (e.g.
+        // 24%) to render without clipping against the canvas top edge.
+        // The persistent legend now lives outside the canvas as a sibling,
+        // so we no longer need the big 0.16 reserve the old in-canvas
+        // legend required. Bottom stays tight — 0% sits at the baseline.
+        scaleMargins: { top: 0.1, bottom: 0.04 },
+        // Constrain the price-scale gutter so lightweight-charts thins
+        // its automatic tick labels (the 6/8/10/12/14/16/18/20/22/24/26%
+        // ladder collapses to 4-5 round numbers). The library picks the
+        // tick count from the available pixel height per label.
+        minimumWidth: 40,
       },
       timeScale: {
         borderVisible: false,
@@ -650,13 +721,13 @@ export function MarketPriceChart({
           // badge that can overlap bottom-aligned market labels on short
           // ranges like 30M and 1H.
           labelVisible: false,
-          labelBackgroundColor: colors.text,
+          labelBackgroundColor: colors.ink,
         },
         horzLine: {
           color: colors.crosshair,
           width: 1,
           style: 2 satisfies LineStyle,
-          labelBackgroundColor: colors.text,
+          labelBackgroundColor: colors.ink,
         },
       },
       localization: {
@@ -684,9 +755,11 @@ export function MarketPriceChart({
     // price auto-fit, so re-emit labels if hovering.
     chart.timeScale().subscribeVisibleLogicalRangeChange(updateHoverLabels);
 
-    // React to Tailwind dark-class flips so colors stay correct across themes.
+    // React to theme-family class flips on <html> (Light/Dark/Midnight/Ocean/
+    // Slate/Sunset/Forest/Lavender/SoftPop). Re-resolves every --kwm-* token
+    // inside the chart's `.kw-app` ancestor so the active theme cascades in.
     const themeObserver = new MutationObserver(() => {
-      const next = readThemeColors();
+      const next = readThemeColors(container);
       chart.applyOptions({
         layout: { textColor: next.text },
         grid: {
@@ -696,11 +769,11 @@ export function MarketPriceChart({
         crosshair: {
           vertLine: {
             color: next.crosshair,
-            labelBackgroundColor: next.text,
+            labelBackgroundColor: next.ink,
           },
           horzLine: {
             color: next.crosshair,
-            labelBackgroundColor: next.text,
+            labelBackgroundColor: next.ink,
           },
         },
       });
@@ -986,34 +1059,34 @@ export function MarketPriceChart({
   ];
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {/* Persistent top-left legend — rendered ABOVE the plot as a sibling
           (not an overlay) so it can't collide with grid lines or axis
           labels at the top of the chart. Mirrors Polymarket's resting-
           state identity row. */}
       {legendItems.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs font-medium">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 font-(family-name:--font-geist-mono) text-[10px] tracking-widest uppercase">
           {legendItems.map((item) => (
             <div key={item.key} className="flex items-center gap-1.5">
               <span
-                className="h-2 w-2 rounded-full shrink-0"
+                className="h-1.5 w-1.5 rounded-full shrink-0"
                 style={{ backgroundColor: item.color }}
               />
-              <span className="text-foreground">{item.name}</span>
-              <span className="text-muted-foreground tabular-nums">
+              <span className="text-(--kwm-ink) font-medium">{item.name}</span>
+              <span className="text-(--kwm-ink-3) tabular-nums">
                 {item.pct}
               </span>
             </div>
           ))}
         </div>
       )}
-      <div className="w-full min-h-[200px] h-[220px] sm:h-[300px] md:h-[360px] lg:h-[400px] max-h-[60vh] relative">
+      <div className="w-full min-h-[180px] h-[200px] sm:h-[240px] md:h-[280px] lg:h-[300px] max-h-[55vh] relative">
         {isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <Loader2 className="h-8 w-8 animate-spin text-(--kwm-ink-3)" />
           </div>
         ) : error ? (
-          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+          <div className="absolute inset-0 flex items-center justify-center text-(--kwm-ink-3) font-(family-name:--font-geist-mono) text-xs tracking-widest uppercase">
             Failed to load price history
           </div>
         ) : null}
@@ -1059,41 +1132,62 @@ export function MarketPriceChart({
         <div
           ref={tooltipRef}
           role="tooltip"
-          className="pointer-events-none absolute z-10 hidden rounded-lg border border-border bg-background/95 p-3 shadow-xl backdrop-blur-sm"
+          className="pointer-events-none absolute z-10 hidden rounded-md border border-(--kwm-hl-2) bg-(--kwm-panel)/95 px-2.5 py-1.5 backdrop-blur-sm font-(family-name:--font-geist-mono) text-[10px] tracking-widest uppercase text-(--kwm-ink-2) shadow-[0_8px_24px_-12px_rgba(0,0,0,0.35)]"
           style={{ display: "none" }}
         />
       </div>
 
-      {/* Time Range Selectors + Both-outcomes toggle */}
-      <div className="flex items-center justify-center gap-2">
-        {timeRanges.map((range) => (
-          <Button
-            key={range}
-            type="button"
-            variant={timeRange === range ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setTimeRange(range)}
-            className="h-8 px-3"
-          >
-            {range}
-          </Button>
-        ))}
+      {/* Time-range segmented control + Both-outcomes toggle.
+          Mirrors the trade ticket's `.tk-tabs` mono-caps treatment: a single
+          connected pill bar with thin internal dividers; active state is a
+          subtle `--kwm-bg-3` fill rather than the loud shadcn primary pill. */}
+      <div className="flex items-center justify-center gap-2 flex-wrap">
+        <div
+          role="tablist"
+          aria-label="Time range"
+          className="inline-flex border border-(--kwm-hl) rounded-md overflow-hidden"
+        >
+          {timeRanges.map((range, i) => {
+            const isActive = timeRange === range;
+            return (
+              <button
+                key={range}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setTimeRange(range)}
+                className={cn(
+                  "px-3 py-1.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase cursor-pointer transition-colors",
+                  i > 0 && "border-l border-(--kwm-hl)",
+                  isActive
+                    ? "text-(--kwm-ink) bg-(--kwm-bg-3) shadow-[inset_0_-2px_0_var(--kwm-ink)]"
+                    : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-3)/60"
+                )}
+              >
+                {range}
+              </button>
+            );
+          })}
+        </div>
         {/* Only offer the toggle when:
             - the caller hasn't suppressed it (per-candidate charts do),
             - and there's more than one outcome to toggle to. */}
         {!hideBothToggle &&
           (priceHistories?.length ?? tokens.length ?? outcomes.length) > 1 && (
-            <Button
+            <button
               type="button"
-              variant={showBothOutcomes ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setShowBothOutcomes((v) => !v)}
-              className="h-8 px-3 ml-2"
               aria-pressed={showBothOutcomes}
               title="Show both outcomes"
+              onClick={() => setShowBothOutcomes((v) => !v)}
+              className={cn(
+                "px-3 py-1.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase cursor-pointer transition-colors border rounded-md",
+                showBothOutcomes
+                  ? "text-(--kwm-ink) bg-(--kwm-bg-3) border-(--kwm-hl-2) shadow-[inset_0_-2px_0_var(--kwm-ink)]"
+                  : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-3)/60 border-(--kwm-hl)"
+              )}
             >
               Both
-            </Button>
+            </button>
           )}
       </div>
     </div>

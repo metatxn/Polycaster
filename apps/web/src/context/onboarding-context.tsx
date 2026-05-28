@@ -290,9 +290,15 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
     >
       {children}
 
-      {/* Single global onboarding dialog */}
+      {/* Single global onboarding dialog. The Radix default close button
+          is hidden — the redesigned onboarding renders its own X in the
+          header so the chrome stays inside the panel design system. */}
       <Dialog open={showOnboarding} onOpenChange={setShowOnboarding}>
-        <DialogContent className="sm:max-w-md p-0 gap-0">
+        <DialogContent
+          showCloseButton={false}
+          overlayClassName="bg-black/60 backdrop-blur-md"
+          className="sm:max-w-md p-0 gap-0 rounded-md overflow-hidden border border-white/10 shadow-[0_40px_80px_-30px_rgba(0,0,0,0.55)]"
+        >
           <DialogHeader className="sr-only">
             <DialogTitle>Set Up Trading Account</DialogTitle>
             <DialogDescription>
@@ -300,7 +306,11 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
               deployment, and approvals — to start placing orders on Polymarket.
             </DialogDescription>
           </DialogHeader>
-          <TradingOnboarding onComplete={handleComplete} onSkip={handleSkip} />
+          <TradingOnboarding
+            onComplete={handleComplete}
+            onSkip={handleSkip}
+            onClose={handleSkip}
+          />
         </DialogContent>
       </Dialog>
     </OnboardingContext.Provider>

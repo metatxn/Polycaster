@@ -5,15 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection } from "wagmi";
 import { ChromeHeader } from "@/components/app-layout";
-import { EditorialFooter } from "@/components/editorial-footer";
-import {
-  EditorialHero,
-  HeroDataAge,
-  HeroRefreshButton,
-} from "@/components/editorial-hero";
 import { FilterChip } from "@/components/event-filter-bar";
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
+import {
+  ProductDataAge,
+  ProductHero,
+  ProductRefreshButton,
+} from "@/components/product-hero";
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -256,22 +256,20 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
   }, [isLoading, hasMore, allTraders.length]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden selection:bg-foreground/15">
+    <div className="kw-app min-h-screen flex flex-col bg-(--kwm-bg) relative overflow-x-hidden selection:bg-(--kwm-ink)/15">
       <Navbar />
       <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
-        <EditorialHero
+        <ProductHero
           breadcrumbs={[
             { label: "Markets", href: "/markets" },
             { label: "Leaderboard" },
           ]}
-          title={<span>Leaderboard</span>}
-          subtitle="Who's making money on Polymarket — and who's losing it. Ranked by realised P&L, refreshed every minute."
           rightSlot={
             <>
-              <HeroDataAge dataAgeMs={dataAgeMs} />
-              <HeroRefreshButton
+              <ProductDataAge dataAgeMs={dataAgeMs} />
+              <ProductRefreshButton
                 onRefresh={() => refetch()}
                 isFetching={isFetching}
               />
@@ -279,10 +277,13 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
           }
         />
 
-        {/* Category row — italic Fraunces anchors the active category,
-            mono sans keeps the rest in editorial voice. Icons removed
-            so the typography itself carries the weight. */}
-        <div className="flex items-baseline gap-5 sm:gap-6 overflow-x-auto scrollbar-hide mb-3 -mt-2 pb-2 border-b border-border/40">
+        {/* Category row — DeFi tabs. Active category gets a green
+            underline; mono micro-caps across the board so the rhythm
+            stays consistent with the rest of the product surface. */}
+        <div
+          className="flex items-center gap-5 sm:gap-6 overflow-x-auto scrollbar-hide mb-4 -mt-1 pb-2 border-b"
+          style={{ borderColor: "var(--kwm-hl)" }}
+        >
           {CATEGORIES.map((cat) => {
             const isActive = category === cat.value;
             return (
@@ -291,20 +292,26 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
                 type="button"
                 onClick={() => handleCategoryChange(cat.value)}
                 className={cn(
-                  "shrink-0 whitespace-nowrap transition-colors",
-                  isActive
-                    ? "font-editorial italic text-lg sm:text-xl leading-none text-foreground"
-                    : "font-mono text-[11px] uppercase tracking-[0.14em] leading-none text-muted-foreground hover:text-foreground"
+                  "shrink-0 whitespace-nowrap py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] leading-none transition-colors relative"
                 )}
+                style={{
+                  color: isActive ? "var(--kwm-up)" : "var(--kwm-ink-3)",
+                }}
               >
                 {cat.label}
+                {isActive && (
+                  <span
+                    className="absolute left-0 right-0 bottom-[-9px] h-px"
+                    style={{ background: "var(--kwm-up)" }}
+                  />
+                )}
               </button>
             );
           })}
         </div>
 
         {/* Filters Row */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6 py-1">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6 py-1 kwm-pills">
           <div className="flex items-center gap-1">
             <FilterChip
               label="Period"
@@ -397,7 +404,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
         )}
       </main>
 
-      <EditorialFooter />
+      <ProductFooter context="Leaderboard" />
     </div>
   );
 }

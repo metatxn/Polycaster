@@ -86,26 +86,22 @@ export function MarketSearch({
   // Debounce the search query by 300ms
   const debouncedQuery = useDebouncedValue(query, 300);
 
-  // When scoped by tag, ask upstream for more results so post-filter
-  // still yields enough matches — most queries return a few on-topic
-  // hits per page.
-  const fetchLimit = tagSlug ? 30 : 8;
-  const { data, isLoading } = useSearch(debouncedQuery, fetchLimit);
+  // Scoping is handled server-side via the `tagSlug` arg: our /api/search
+  // route fans out to a tag-scoped events endpoint in parallel with the
+  // public-search call and merges the results. So we can ask for fewer
+  // results and trust they're already on-topic.
+  const fetchLimit = 8;
+  const { data, isLoading } = useSearch(debouncedQuery, fetchLimit, tagSlug);
 
   // Show loading state while typing (before debounce completes)
   const isTyping = query !== debouncedQuery && query.length >= 2;
 
-  // Scope filter: when a tagSlug is provided, only surface events
-  // whose tag list includes that slug. Keeps /events/politics from
-  // returning crypto hits and vice-versa. Upstream doesn't support a
-  // tag filter on the search endpoint, so this is client-side.
+  // Already scoped server-side — just slice to the display cap. We keep
+  // the variable name for downstream references.
   const scopedEvents = useMemo(() => {
     if (!data?.events) return [];
-    if (!tagSlug) return data.events.slice(0, 8);
-    return data.events
-      .filter((e) => e.tags?.some((t) => t.slug === tagSlug))
-      .slice(0, 8);
-  }, [data?.events, tagSlug]);
+    return data.events.slice(0, 8);
+  }, [data?.events]);
 
   const effectivePlaceholder =
     placeholder ??

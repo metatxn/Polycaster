@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -510,15 +511,30 @@ export function AgentDashboardClient() {
   );
 
   return (
-    <div className="min-h-screen">
+    <div className="kw-app min-h-screen">
       <Navbar />
       <main className="px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-40 xl:pb-8 max-w-7xl mx-auto">
-        <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <header
+          className="mb-6 pb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between border-b"
+          style={{ borderColor: "var(--kwm-hl)" }}
+        >
           <div>
-            <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl tracking-tight">
+            <div
+              className="font-mono text-[10px] uppercase tracking-[0.14em] mb-2"
+              style={{ color: "var(--kwm-ink-3)" }}
+            >
+              Knoww › Agent
+            </div>
+            <h1
+              className="text-[15px] font-semibold tracking-tight"
+              style={{ color: "var(--kwm-ink)" }}
+            >
               Paper Agent
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
+            <p
+              className="mt-1 text-[12px] leading-snug max-w-2xl"
+              style={{ color: "var(--kwm-ink-3)" }}
+            >
               Manual paper runs with a 3-model quorum, deterministic risk gates,
               and an auditable simulated ledger.
             </p>
@@ -1164,6 +1180,7 @@ export function AgentDashboardClient() {
           </section>
         </div>
       </main>
+      <ProductFooter context="Agent" />
     </div>
   );
 }

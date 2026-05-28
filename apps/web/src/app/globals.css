@@ -3243,3 +3243,1115 @@ body:not(:has(.kw-landing))
   content-visibility: auto;
   contain-intrinsic-block-size: auto 65px;
 }
+
+/* =====================================================================
+ * KNOWW · PRODUCT APP (DeFi/trading surface)
+ * ---------------------------------------------------------------------
+ * Scoped under `.kw-app` so editorial pages (landing, privacy, terms)
+ * keep their warm cream/serif system. Every product route (markets,
+ * leaderboard, portfolio, whales, search, agent, events, profile) wraps
+ * its root in `.kw-app` to inherit this token system.
+ *
+ * Tokens derive from the active theme's existing variables
+ * (--background, --foreground, --card, --muted, --muted-foreground,
+ * --border) so Light, Sunset, Forest, Lavender, Dark, Midnight, Ocean,
+ * Slate, and Soft Pop all flow into product surfaces without further
+ * configuration. Only the signal colors (up/down) and the typography
+ * stack are constant across themes — green/red are universal trading
+ * conventions and Geist is the DeFi/financial type-system choice.
+ *
+ * Inner namespace `kwm-*` (tokens and helpers) is preserved from the
+ * original markets handoff to avoid churn — the `m` no longer reads
+ * literally as "markets" but as "knoww-mono/numeric" inside the system.
+ *
+ * Source: design package `Knoww Explore Markets.html` +
+ * `explore-markets.css` (Claude Design handoff, 2026-05-20).
+ * ===================================================================== */
+.kw-app {
+  /* Surface — map to existing theme tokens */
+  --kwm-bg: var(--background);
+  --kwm-bg-2: color-mix(in oklch, var(--background) 92%, var(--foreground));
+  --kwm-bg-3: color-mix(in oklch, var(--background) 86%, var(--foreground));
+  --kwm-panel: var(--card);
+  --kwm-panel-2: color-mix(in oklch, var(--card) 90%, var(--foreground));
+  --kwm-hover: color-mix(in oklch, var(--card) 85%, var(--foreground));
+
+  /* Ink — map to existing theme tokens */
+  --kwm-ink: var(--foreground);
+  --kwm-ink-2: color-mix(in oklch, var(--foreground) 80%, var(--background));
+  --kwm-ink-3: var(--muted-foreground);
+  --kwm-ink-dim: color-mix(
+    in oklch,
+    var(--muted-foreground) 75%,
+    var(--background)
+  );
+
+  /* Hairlines — derive from border so they match the theme weight */
+  --kwm-hl: color-mix(in oklch, var(--border) 70%, transparent);
+  --kwm-hl-2: var(--border);
+  --kwm-hl-3: color-mix(in oklch, var(--border) 130%, var(--foreground));
+
+  /* Signal colors — stay constant across themes. Green = up, red = down
+     are universal financial conventions. */
+  --kwm-up: #16a34a;
+  --kwm-up-soft: color-mix(in oklch, var(--kwm-up) 10%, transparent);
+  --kwm-up-border: color-mix(in oklch, var(--kwm-up) 30%, transparent);
+  --kwm-down: #dc2626;
+  --kwm-down-soft: color-mix(in oklch, var(--kwm-down) 10%, transparent);
+  --kwm-accent: #2563eb;
+  --kwm-warn: #d97706;
+  --kwm-warn-soft: color-mix(in oklch, var(--kwm-warn) 10%, transparent);
+  --kwm-warn-border: color-mix(in oklch, var(--kwm-warn) 30%, transparent);
+  --kwm-down-border: color-mix(in oklch, var(--kwm-down) 30%, transparent);
+  --kwm-accent-soft: color-mix(in oklch, var(--kwm-accent) 12%, transparent);
+
+  background: var(--kwm-bg);
+  color: var(--kwm-ink);
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "ss02", "cv11", "tnum";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Dark-family themes get the brighter DeFi signal palette so green/red
+   pop against near-black backgrounds. Light themes use deeper greens
+   and reds so they retain WCAG AA contrast against off-white. */
+.dark .kw-app,
+.midnight .kw-app,
+.ocean .kw-app,
+.slate .kw-app,
+.softpop .kw-app {
+  --kwm-up: #4ade80;
+  --kwm-down: #f87171;
+  --kwm-accent: #60a5fa;
+  --kwm-warn: #fbbf24;
+}
+
+/* Middle-dot separator between adjacent stat items in a row — used by
+   the event-detail header so values like volume / date / markets /
+   days-left read as distinct without the hard-stop feel of a vertical
+   bar. Matches the existing dot already used inside grouped sub-values
+   (e.g. `48 open · 2 closed`), so the row has one consistent separator
+   grammar from the design handoff. Inserts before every child after the
+   first via `::before` so the rule works regardless of conditional
+   rendering. Tracks every theme via `--kwm-ink-dim`. */
+.kw-app .kwm-stat-row > *:not(:first-child)::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--kwm-ink-dim);
+  font-weight: 400;
+}
+
+/* Neutralize editorial type inside product surfaces. If any descendant
+   uses the editorial font/italic (e.g. legacy `font-editorial italic`
+   classes from the editorial component library), fall back to the
+   product type system so the surface stays coherent. */
+.kw-app .font-editorial,
+.kw-app [class*="font-editorial"] {
+  font-family:
+    var(--font-geist), ui-sans-serif, system-ui, sans-serif !important;
+  font-style: normal !important;
+}
+/* Same treatment for ::placeholder pseudo-elements — Tailwind
+   `placeholder:font-editorial` compiles to a pseudo-selector that the
+   class match above can't reach. */
+.kw-app input::placeholder,
+.kw-app textarea::placeholder {
+  font-family:
+    var(--font-geist), ui-sans-serif, system-ui, sans-serif !important;
+  font-style: normal !important;
+}
+
+/* Typography helpers (used inline in markets-view.tsx) */
+.kw-app .kwm-mono {
+  font-family:
+    var(--font-geist-mono), ui-monospace, "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.kw-app .kwm-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+}
+
+/* Pulse dot — green LIVE indicator */
+.kw-app .kwm-pulse {
+  width: 6px;
+  height: 6px;
+  background: var(--kwm-up);
+  border-radius: 999px;
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6);
+  animation: kwm-pulse 2s infinite;
+}
+@keyframes kwm-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(74, 222, 128, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+  }
+}
+
+/* Top of Book — outcome row progress fill */
+.kw-app .kwm-track {
+  height: 3px;
+  background: rgba(231, 234, 240, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+.kw-app .kwm-track .kwm-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--kwm-up);
+  opacity: 0.85;
+  border-radius: 2px;
+}
+.kw-app .kwm-track.kwm-down .kwm-fill {
+  background: var(--kwm-down);
+}
+
+/* Hairline divider for utility bar / filter pills */
+.kw-app .kwm-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--kwm-hl);
+}
+
+/* ============ Filter pills — terminal-style ============
+ * Overrides the editorial FilterChip's stripped-down look (text only)
+ * with the DeFi pill aesthetic from the design package:
+ * bordered, padded, rounded, mono caps. Green tint on active.
+ * Targets `<FilterChip>` button via the .kwm-pills wrapper class. */
+.kw-app .kwm-pills > div > button[type="button"],
+.kw-app .kwm-pills > button[type="button"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--kwm-hl);
+  border-radius: 6px;
+  background: var(--kwm-bg-2);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-2);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.kw-app .kwm-pills > div > button[type="button"]:hover,
+.kw-app .kwm-pills > button[type="button"]:hover {
+  background: var(--kwm-bg-3);
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-2);
+}
+/* Active state — FilterChip appends an absolute-positioned underline
+   span when isActive. Use :has() to detect it and apply the green
+   tint, then hide the underline since the border now carries state. */
+.kw-app .kwm-pills > div > button[type="button"]:has(> span.absolute),
+.kw-app .kwm-pills > button[type="button"]:has(> span.absolute) {
+  color: var(--kwm-up);
+  border-color: var(--kwm-up-border);
+  background: var(--kwm-up-soft);
+}
+.kw-app .kwm-pills > div > button[type="button"] > span.absolute,
+.kw-app .kwm-pills > button[type="button"] > span.absolute {
+  display: none;
+}
+/* Label span — dimmer, with a trailing colon (LABEL: VALUE). */
+.kw-app .kwm-pills button[type="button"] > span.font-mono {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.kw-app .kwm-pills button[type="button"] > span.font-mono::after {
+  content: ":";
+}
+.kw-app .kwm-pills button[type="button"]:has(> span.absolute) > span.font-mono {
+  opacity: 0.85;
+}
+/* Value span — normalize weight so it doesn't break the mono rhythm. */
+.kw-app .kwm-pills button[type="button"] > span:not(.absolute):not(.font-mono) {
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+/* Leading icon (first svg) — tint with ink-3 normally, green on active. */
+.kw-app .kwm-pills button[type="button"] > svg:first-of-type {
+  width: 12px;
+  height: 12px;
+  opacity: 1;
+  color: var(--kwm-ink-3);
+}
+.kw-app
+  .kwm-pills
+  button[type="button"]:has(> span.absolute)
+  > svg:first-of-type {
+  color: var(--kwm-up);
+}
+/* Chevron — slightly smaller and dimmer. */
+.kw-app .kwm-pills button[type="button"] > svg:last-of-type {
+  width: 10px;
+  height: 10px;
+  opacity: 0.6;
+  margin-left: 2px;
+}
+
+/* Clear-filters button (red X) — let it stay distinct from the pill row. */
+.kw-app .kwm-pills > button[type="button"][title="Clear all filters"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--kwm-down);
+  height: 32px;
+  width: 32px;
+  padding: 0;
+}
+.kw-app .kwm-pills > button[type="button"][title="Clear all filters"]:hover {
+  background: var(--kwm-down-soft);
+  border-color: transparent;
+}
+
+/* =====================================================================
+ * KNOWW · SETUP TRADING (onboarding modal)
+ * ---------------------------------------------------------------------
+ * Scoped under `.kw-onboarding`. The modal is portaled out of the page
+ * tree by Radix Dialog so we wrap the modal content in
+ * `.kw-app .kw-onboarding` to inherit the kwm token system.
+ *
+ * Source: design package `Knoww Setup Trading.html` + `setup-trading.css`
+ * (Claude Design handoff, 2026-05-27, chat7).
+ * ===================================================================== */
+.kw-onboarding {
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  color: var(--kwm-ink);
+  background: var(--kwm-panel);
+}
+
+/* Header */
+.kw-onboarding .kwo-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+  flex-wrap: wrap;
+}
+.kw-onboarding .kwo-eyebrow .kwo-sec {
+  color: var(--kwm-ink-2);
+}
+.kw-onboarding .kwo-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--kwm-up);
+  box-shadow: 0 0 0 0 color-mix(in oklch, var(--kwm-up) 50%, transparent);
+  animation: kwo-pulse 2s infinite;
+}
+@keyframes kwo-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--kwm-up) 50%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in oklch, var(--kwm-up) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--kwm-up) 0%, transparent);
+  }
+}
+.kw-onboarding .kwo-net {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--kwm-hl);
+  border-radius: 999px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--kwm-ink-2);
+  background: color-mix(in oklch, var(--kwm-ink) 4%, transparent);
+  text-transform: uppercase;
+}
+.kw-onboarding .kwo-net-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--kwm-up);
+}
+.kw-onboarding .kwo-title {
+  margin: 10px 0 0;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--kwm-ink);
+  line-height: 1.2;
+}
+.kw-onboarding .kwo-sub {
+  margin: 6px 0 0;
+  color: var(--kwm-ink-3);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 44ch;
+}
+.kw-onboarding .kwo-x {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--kwm-hl);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--kwm-ink-2);
+  cursor: pointer;
+}
+.kw-onboarding .kwo-x:hover {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-2);
+}
+
+/* Inline thin stepper */
+.kw-onboarding .kwo-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kw-onboarding .kwo-sb-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.kw-onboarding .kwo-sb-bullet {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--kwm-hl-2);
+  color: var(--kwm-ink-dim);
+  background: transparent;
+  flex-shrink: 0;
+}
+.kw-onboarding .kwo-sb-num {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+.kw-onboarding .kwo-sb-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+  white-space: nowrap;
+}
+.kw-onboarding .kwo-sb-line {
+  flex: 1;
+  height: 1px;
+  background: var(--kwm-hl-2);
+  min-width: 8px;
+}
+.kw-onboarding .kwo-sb-line.on {
+  background: var(--kwm-up);
+  opacity: 0.7;
+}
+.kw-onboarding .kwo-sb-node.done .kwo-sb-bullet {
+  background: var(--kwm-up);
+  border-color: var(--kwm-up);
+  color: var(--kwm-bg);
+}
+.kw-onboarding .kwo-sb-node.done .kwo-sb-label {
+  color: var(--kwm-up);
+}
+.kw-onboarding .kwo-sb-node.now .kwo-sb-bullet {
+  border-color: var(--kwm-ink);
+  color: var(--kwm-ink);
+  background: color-mix(in oklch, var(--kwm-ink) 6%, transparent);
+}
+.kw-onboarding .kwo-sb-node.now .kwo-sb-label {
+  color: var(--kwm-ink);
+}
+
+/* Step rows */
+.kw-onboarding .kwo-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px dashed var(--kwm-hl);
+}
+.kw-onboarding .kwo-step:last-child {
+  border-bottom: none;
+}
+.kw-onboarding .kwo-rail {
+  position: absolute;
+  left: -22px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+}
+.kw-onboarding .kwo-step.done .kwo-rail {
+  background: var(--kwm-up);
+  opacity: 0.55;
+}
+.kw-onboarding .kwo-step.now .kwo-rail {
+  background: var(--kwm-ink);
+}
+.kw-onboarding .kwo-icon {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--kwm-hl-2);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--kwm-ink-2);
+  background: color-mix(in oklch, var(--kwm-ink) 2.5%, transparent);
+  flex-shrink: 0;
+}
+.kw-onboarding .kwo-step.done .kwo-icon {
+  color: var(--kwm-up);
+  border-color: var(--kwm-up-border);
+  background: var(--kwm-up-soft);
+}
+.kw-onboarding .kwo-step.now .kwo-icon {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-3);
+  background: color-mix(in oklch, var(--kwm-ink) 6%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--kwm-ink) 4%, transparent);
+}
+.kw-onboarding .kwo-step.locked .kwo-icon {
+  color: var(--kwm-ink-dim);
+  background: transparent;
+}
+.kw-onboarding .kwo-body {
+  min-width: 0;
+}
+.kw-onboarding .kwo-step-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kwm-ink);
+  font-weight: 600;
+}
+.kw-onboarding .kwo-step.locked .kwo-step-title {
+  color: var(--kwm-ink-3);
+}
+.kw-onboarding .kwo-step.now .kwo-step-title {
+  color: var(--kwm-ink);
+}
+.kw-onboarding .kwo-step.now .kwo-step-title .kwo-idx {
+  color: var(--kwm-ink-2);
+}
+.kw-onboarding .kwo-step.done .kwo-step-title {
+  color: var(--kwm-ink-2);
+}
+.kw-onboarding .kwo-step-title .kwo-idx {
+  color: var(--kwm-ink-3);
+}
+.kw-onboarding .kwo-step-desc {
+  margin-top: 4px;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--kwm-ink-3);
+  line-height: 1.45;
+}
+.kw-onboarding .kwo-tag {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--kwm-up);
+  padding: 1px 6px;
+  border: 1px solid var(--kwm-up-border);
+  border-radius: 999px;
+  text-transform: uppercase;
+  margin-left: 4px;
+  vertical-align: 2px;
+}
+.kw-onboarding .kwo-step-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-dim);
+}
+.kw-onboarding .kwo-step.done .kwo-step-state {
+  color: var(--kwm-up);
+}
+.kw-onboarding .kwo-ck {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--kwm-hl-2);
+  color: var(--kwm-ink-dim);
+}
+.kw-onboarding .kwo-step.done .kwo-ck {
+  background: var(--kwm-up);
+  color: var(--kwm-bg);
+  border-color: var(--kwm-up);
+}
+.kw-onboarding .kwo-step.locked .kwo-ck {
+  border-style: dashed;
+}
+
+/* Sign / Approve button */
+.kw-onboarding .kwo-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--kwm-ink);
+  color: var(--kwm-bg);
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.kw-onboarding .kwo-go:hover {
+  opacity: 0.92;
+}
+.kw-onboarding .kwo-go:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.kw-onboarding .kwo-arr {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* Inline approve form */
+.kw-onboarding .kwo-approve-form {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--kwm-hl);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.kw-onboarding .kwo-af-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+.kw-onboarding .kwo-af-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kw-onboarding .kwo-af-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+}
+.kw-onboarding .kwo-af-input {
+  display: inline-flex;
+  align-items: stretch;
+  background: color-mix(in oklch, var(--kwm-ink) 3%, transparent);
+  border: 1px solid var(--kwm-hl-2);
+  border-radius: 4px;
+  overflow: hidden;
+  height: 36px;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.kw-onboarding .kwo-af-input:focus-within {
+  border-color: var(--kwm-hl-3);
+  background: color-mix(in oklch, var(--kwm-ink) 5%, transparent);
+}
+.kw-onboarding .kwo-af-input input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0 12px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--kwm-ink);
+  width: 100%;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.kw-onboarding .kwo-af-unit {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--kwm-ink-3);
+  border-left: 1px solid var(--kwm-hl);
+  background: color-mix(in oklch, var(--kwm-ink) 2%, transparent);
+}
+.kw-onboarding .kwo-af-help {
+  margin: 0;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--kwm-ink-3);
+  line-height: 1.5;
+  max-width: 56ch;
+}
+
+/* Skip link footer */
+.kw-onboarding .kwo-skip {
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+  cursor: pointer;
+  text-decoration: none;
+  position: relative;
+}
+.kw-onboarding .kwo-skip::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 4px;
+  height: 1px;
+  background: var(--kwm-hl-2);
+  transition: background 0.15s;
+}
+.kw-onboarding .kwo-skip:hover {
+  color: var(--kwm-ink);
+}
+.kw-onboarding .kwo-skip:hover::after {
+  background: var(--kwm-ink);
+}
+
+/* Wallet mode picker (compact chips when more than one option) */
+.kw-onboarding .kwo-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.kw-onboarding .kwo-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--kwm-hl-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--kwm-ink-3);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+.kw-onboarding .kwo-mode-chip:hover {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-3);
+}
+.kw-onboarding .kwo-mode-chip.on {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-ink);
+  background: color-mix(in oklch, var(--kwm-ink) 6%, transparent);
+}
+
+/* Error row */
+.kw-onboarding .kwo-error {
+  margin-top: 6px;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--kwm-down);
+  line-height: 1.45;
+}
+
+/* =====================================================================
+ * KNOWW · TRADE TICKET (event-detail right-rail trading panel)
+ * ---------------------------------------------------------------------
+ * Mirrors the `Knoww Market Detail` design package's `.tk-*` classes.
+ * Theme-safe via `--kwm-*` tokens inside `.kw-app`. Rules are composed
+ * via Tailwind `@apply` so design styling stays expressed in utility
+ * vocabulary; raw CSS only appears for pseudo-element content + custom
+ * properties Tailwind doesn't model. Apply by wrapping the trade form
+ * in `.kw-ticket`.
+ * ===================================================================== */
+.kw-app .kw-ticket {
+  @apply font-(family-name:--font-geist) text-(--kwm-ink);
+}
+
+/* Subject — outcome flag + name + meta (NEG RISK · pct · "Yes to win") */
+.kw-app .kw-ticket .tk-subject {
+  @apply flex items-center gap-2.5 pb-3 border-b border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-flag {
+  background: var(--tk-flag-color, var(--kwm-accent));
+  @apply w-[30px] h-[30px] rounded-[5px] border border-(--kwm-hl-2) shrink-0 relative overflow-hidden;
+}
+.kw-app .kw-ticket .tk-flag::before {
+  content: "";
+  @apply absolute inset-0 bg-[linear-gradient(135deg,rgba(0,0,0,0.10),rgba(255,255,255,0.10))];
+}
+.kw-app .kw-ticket .tk-subject-info {
+  @apply min-w-0;
+}
+.kw-app .kw-ticket .tk-subject-info .nm {
+  @apply text-base font-medium text-(--kwm-ink) tracking-[-0.01em];
+}
+.kw-app .kw-ticket .tk-subject-info .meta {
+  @apply flex items-center gap-1.5 mt-0.5 font-(family-name:--font-geist-mono) text-[10px] tracking-[0.10em] uppercase text-(--kwm-ink-3);
+}
+.kw-app .kw-ticket .tk-subject-info .meta .neg {
+  @apply text-(--kwm-warn) border border-(--kwm-warn-border) bg-(--kwm-warn-soft) px-1.5 py-0.5 rounded-[3px];
+}
+.kw-app .kw-ticket .tk-subject-info .meta .pct {
+  @apply text-(--kwm-ink);
+}
+
+/* Tabs — Market / Limit */
+.kw-app .kw-ticket .tk-tabs {
+  @apply grid grid-cols-2 mt-3 border border-(--kwm-hl) rounded-md overflow-hidden;
+}
+.kw-app .kw-ticket .tk-tab {
+  @apply bg-transparent border-0 px-3 py-1.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
+}
+.kw-app .kw-ticket .tk-tab.on {
+  @apply text-(--kwm-ink) bg-(--kwm-bg-3);
+}
+.kw-app .kw-ticket .tk-tab + .tk-tab {
+  @apply border-l border-(--kwm-hl);
+}
+
+/* Side — Buy / Sell */
+.kw-app .kw-ticket .tk-side {
+  @apply grid grid-cols-2 mt-2 border border-(--kwm-hl) rounded-md overflow-hidden;
+}
+.kw-app .kw-ticket .tk-side button {
+  @apply bg-transparent border-0 px-3 py-2 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
+}
+.kw-app .kw-ticket .tk-side button + button {
+  @apply border-l border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-side button.on.buy {
+  @apply text-(--kwm-up) bg-(--kwm-up-soft) shadow-[inset_0_-2px_0_var(--kwm-up)];
+}
+.kw-app .kw-ticket .tk-side button.on.sell {
+  @apply text-(--kwm-down) bg-(--kwm-down-soft) shadow-[inset_0_-2px_0_var(--kwm-down)];
+}
+
+/* Prices — YES / NO tile pair */
+.kw-app .kw-ticket .tk-prices {
+  @apply grid grid-cols-2 gap-2 mt-2.5;
+}
+.kw-app .kw-ticket .tk-price {
+  @apply relative grid grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 items-baseline px-3 py-2 border border-(--kwm-hl-2) rounded-md bg-(--kwm-bg-2) cursor-pointer text-left transition-[border-color,background-color] duration-150;
+}
+.kw-app .kw-ticket .tk-price:hover {
+  @apply border-(--kwm-hl-3);
+}
+.kw-app .kw-ticket .tk-price.on.yes {
+  @apply border-(--kwm-up-border) bg-(--kwm-up-soft);
+}
+.kw-app .kw-ticket .tk-price.on.no {
+  @apply border-(--kwm-down-border) bg-(--kwm-down-soft);
+}
+.kw-app .kw-ticket .tk-price .lbl {
+  @apply font-(family-name:--font-geist-mono) text-[10px] tracking-[0.16em] uppercase text-(--kwm-ink-3) col-start-1 row-start-1;
+}
+.kw-app .kw-ticket .tk-price.on.yes .lbl {
+  @apply text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-price.on.no .lbl {
+  @apply text-(--kwm-down);
+}
+.kw-app .kw-ticket .tk-price .v {
+  @apply text-[20px] font-medium tracking-[-0.025em] text-(--kwm-ink) leading-none col-start-1 row-start-2;
+}
+.kw-app .kw-ticket .tk-price .v .cent {
+  @apply text-[11px] text-(--kwm-ink-3) ml-px;
+}
+.kw-app .kw-ticket .tk-price .delta {
+  @apply font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-ink-dim) col-start-2 row-start-2 text-right self-end;
+}
+.kw-app .kw-ticket .tk-price.on .delta {
+  color: inherit;
+}
+
+/* Limit-mode block — bid/ask refs + ± stepper + queue status */
+.kw-app .kw-ticket .tk-limit {
+  @apply mt-3 p-3 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2) flex flex-col gap-2;
+}
+.kw-app .kw-ticket .tk-limit-head {
+  @apply flex justify-between items-center gap-2 text-xs text-(--kwm-ink-2);
+}
+.kw-app .kw-ticket .tk-limit-head .lbl-row {
+  @apply text-(--kwm-ink) font-medium whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-limit-head .bidask {
+  @apply inline-flex gap-2.5 font-(family-name:--font-geist-mono) text-[11px];
+}
+.kw-app .kw-ticket .tk-limit-head .ba {
+  @apply inline-flex items-baseline gap-1;
+}
+.kw-app .kw-ticket .tk-limit-head .ba-l {
+  @apply text-(--kwm-ink-dim) text-[9px] tracking-[0.14em] uppercase;
+}
+.kw-app .kw-ticket .tk-limit-head .ba-v {
+  @apply font-medium;
+}
+.kw-app .kw-ticket .tk-limit-head .ba-v.up {
+  @apply text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-limit-head .ba-v.down {
+  @apply text-(--kwm-down);
+}
+.kw-app .kw-ticket .tk-limit-input {
+  @apply grid grid-cols-[auto_1fr_auto] items-stretch border border-(--kwm-hl-2) rounded-md bg-(--kwm-bg) overflow-hidden;
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn {
+  @apply bg-transparent border-0 w-[38px] font-(family-name:--font-geist-mono) text-sm text-(--kwm-ink-2) cursor-pointer transition-colors duration-150;
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn:first-child {
+  @apply border-r border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn:last-child {
+  @apply border-l border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn:hover {
+  @apply bg-(--kwm-bg-3) text-(--kwm-ink);
+}
+.kw-app .kw-ticket .tk-limit-input .lim-val {
+  @apply flex items-center justify-center text-lg font-medium tracking-[-0.02em] text-(--kwm-ink) tabular-nums px-1 py-2;
+}
+.kw-app .kw-ticket .tk-limit-input .lim-unit {
+  @apply font-(family-name:--font-geist-mono) text-xs text-(--kwm-ink-3) ml-0.5;
+}
+.kw-app .kw-ticket .tk-limit-status {
+  @apply flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] font-(family-name:--font-geist-mono) text-[10px] tracking-[0.04em] border border-(--kwm-hl) bg-(--kwm-bg) text-(--kwm-ink-2);
+}
+.kw-app .kw-ticket .tk-limit-status .dot {
+  @apply w-1.5 h-1.5 rounded-full bg-(--kwm-ink-3) shrink-0;
+}
+.kw-app .kw-ticket .tk-limit-status .tick {
+  @apply ml-auto text-(--kwm-ink-dim) text-[9px] tracking-[0.14em] uppercase;
+}
+.kw-app .kw-ticket .tk-limit-status.ok {
+  @apply border-(--kwm-up-border) bg-(--kwm-up-soft) text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-limit-status.ok .dot {
+  @apply bg-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-limit-status.warn {
+  @apply border-(--kwm-warn-border) bg-(--kwm-warn-soft) text-(--kwm-warn);
+}
+.kw-app .kw-ticket .tk-limit-status.warn .dot {
+  @apply bg-(--kwm-warn);
+}
+.kw-app .kw-ticket .tk-limit-status.info {
+  @apply border-[color-mix(in_oklch,var(--kwm-accent)_35%,transparent)] bg-(--kwm-accent-soft) text-(--kwm-accent);
+}
+.kw-app .kw-ticket .tk-limit-status.info .dot {
+  @apply bg-(--kwm-accent);
+}
+.kw-app .kw-ticket .tk-limit-status.muted {
+  @apply text-(--kwm-ink-3);
+}
+.kw-app .kw-ticket .tk-limit-status.muted .dot {
+  @apply bg-(--kwm-ink-dim);
+}
+
+/* Execution info row — Avg Price + Slippage (MARKET orders only) */
+.kw-app .kw-ticket .tk-summary-row {
+  @apply flex justify-between items-baseline mt-2 py-1.5 border-t border-dashed border-(--kwm-hl) font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-ink-3) tracking-[0.04em];
+}
+.kw-app .kw-ticket .tk-summary-row .num {
+  @apply text-(--kwm-ink);
+}
+.kw-app .kw-ticket .tk-summary-row .dim {
+  @apply text-(--kwm-ink-dim);
+}
+
+/* Shares stepper */
+.kw-app .kw-ticket .tk-shares-lbl {
+  @apply mt-2 flex justify-between items-center font-(family-name:--font-geist-mono) text-[10px] tracking-[0.16em] uppercase text-(--kwm-ink-dim);
+}
+.kw-app .kw-ticket .tk-shares-lbl .max {
+  @apply text-(--kwm-accent) cursor-pointer tracking-[0.12em];
+}
+.kw-app .kw-ticket .tk-stepper {
+  @apply grid grid-cols-[auto_auto_1fr_auto_auto] items-stretch mt-2 border border-(--kwm-hl-2) rounded-md overflow-hidden;
+}
+.kw-app .kw-ticket .tk-step-btn {
+  @apply bg-transparent border-0 px-2.5 h-9 min-w-9 font-(family-name:--font-geist-mono) text-[11px] text-(--kwm-ink-2) cursor-pointer border-r border-(--kwm-hl) tracking-[0.05em];
+}
+.kw-app .kw-ticket .tk-step-btn:hover {
+  @apply bg-(--kwm-bg-3) text-(--kwm-ink);
+}
+.kw-app .kw-ticket .tk-step-btn:last-child {
+  @apply border-r-0 border-l border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-step-input {
+  @apply bg-transparent border-0 outline-0 text-center text-lg font-medium tracking-[-0.02em] text-(--kwm-ink) w-full px-2 tabular-nums border-r border-(--kwm-hl);
+}
+
+/* Allow-partial-fill / Expiration toggle row */
+.kw-app .kw-ticket .tk-toggle {
+  @apply flex items-center justify-between gap-3 mt-2.5 pl-3 pr-2.5 py-[7px] border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2);
+}
+.kw-app .kw-ticket .tk-toggle .info {
+  @apply min-w-0 inline-flex items-baseline gap-2 flex-wrap;
+}
+.kw-app .kw-ticket .tk-toggle .info .l {
+  @apply text-xs text-(--kwm-ink) whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-toggle .info .s {
+  @apply font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-ink-dim) tracking-[0.04em];
+}
+.kw-app .kw-ticket .tk-switch {
+  @apply relative w-9 h-5 rounded-full bg-(--kwm-bg) border border-(--kwm-hl-2) cursor-pointer shrink-0 transition-[background-color,border-color] duration-150;
+}
+.kw-app .kw-ticket .tk-switch::after {
+  content: "";
+  @apply absolute top-px left-px w-4 h-4 rounded-full bg-(--kwm-ink-2) transition-[transform,background-color] duration-150;
+}
+.kw-app .kw-ticket .tk-switch.on {
+  @apply bg-(--kwm-up-soft) border-(--kwm-up-border);
+}
+.kw-app .kw-ticket .tk-switch.on::after {
+  @apply bg-(--kwm-up) translate-x-4;
+}
+
+/* Summary — Return + Profit */
+.kw-app .kw-ticket .tk-summary {
+  @apply mt-2.5 pt-2 border-t border-(--kwm-hl) flex flex-col gap-1;
+}
+.kw-app .kw-ticket .tk-sum-row {
+  @apply flex justify-between items-baseline gap-3 text-xs;
+}
+.kw-app .kw-ticket .tk-sum-row .l {
+  @apply text-(--kwm-ink-3) whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-sum-row .v {
+  @apply font-(family-name:--font-geist-mono) font-medium text-(--kwm-ink) text-[13px] whitespace-nowrap text-right;
+}
+.kw-app .kw-ticket .tk-sum-row .v.up {
+  @apply text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-sum-row .v.up .ret {
+  @apply text-(--kwm-up) ml-1.5 text-[11px];
+}
+.kw-app .kw-ticket .tk-sum-row.profit .v {
+  @apply text-(--kwm-up) text-[15px];
+}
+
+/* CTA — main action button */
+.kw-app .kw-ticket .tk-cta {
+  @apply mt-2.5 w-full p-[13px] border border-(--kwm-hl-2) bg-(--kwm-bg-2) text-(--kwm-ink-dim) font-(family-name:--font-geist-mono) text-xs tracking-[0.12em] uppercase rounded-md cursor-pointer font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-cta .ic {
+  @apply font-(family-name:--font-geist-mono);
+}
+.kw-app .kw-ticket .tk-cta.ready {
+  @apply bg-(--kwm-ink) text-(--kwm-bg) border-(--kwm-ink);
+}
+.kw-app .kw-ticket .tk-cta.ready:hover {
+  @apply brightness-110;
+}
+.kw-app .kw-ticket .tk-cta.deposit {
+  @apply bg-(--kwm-warn) text-(--kwm-bg) border-(--kwm-warn);
+}
+.kw-app .kw-ticket .tk-cta.deposit:hover {
+  filter: brightness(1.08);
+}
+.kw-app .kw-ticket .tk-cta:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+.kw-app .kw-ticket .tk-terms {
+  @apply mt-2.5 text-center text-[10px] text-(--kwm-ink-dim);
+}
+.kw-app .kw-ticket .tk-terms a {
+  @apply text-(--kwm-ink-3) border-b border-(--kwm-hl);
+}
+
+/* Warning banner — design's `.tk-warn`. Three tones via modifier:
+   base = amber (warn), `.error` = red (destructive), `.info` = neutral
+   (informational). Mono micro-caps for the message column. */
+.kw-app .kw-ticket .tk-warn {
+  @apply mt-3 px-3 py-2.5 border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-start gap-2.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.04em] text-(--kwm-warn) leading-snug;
+}
+.kw-app .kw-ticket .tk-warn.error {
+  @apply border-[color-mix(in_oklch,var(--kwm-down)_30%,transparent)] bg-(--kwm-down-soft) text-(--kwm-down);
+}
+.kw-app .kw-ticket .tk-warn.info {
+  @apply border-(--kwm-hl-2) bg-[color-mix(in_oklch,var(--kwm-ink)_3%,transparent)] text-(--kwm-ink-2);
+}
+.kw-app .kw-ticket .tk-warn .ic {
+  @apply shrink-0 mt-px;
+}
+.kw-app .kw-ticket .tk-warn .body {
+  @apply min-w-0 flex-1;
+}
+.kw-app .kw-ticket .tk-warn .body .sub {
+  @apply block mt-0.5 text-(--kwm-ink-3) text-[10px] tracking-[0.04em];
+}
+
+/* Balance context strip — design's `.tk-warn-bal`. Slim amber strip
+   showing the shortfall, sits above the merged Deposit CTA. */
+.kw-app .kw-ticket .tk-warn-bal {
+  @apply mt-3 px-2.5 py-[7px] border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-center justify-between gap-2 font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-warn) tracking-[0.04em];
+}
+.kw-app .kw-ticket .tk-warn-bal .h {
+  @apply text-(--kwm-warn) font-medium;
+}
+.kw-app .kw-ticket .tk-warn-bal .dim {
+  @apply text-[color-mix(in_oklch,var(--kwm-warn)_70%,var(--kwm-ink-3))];
+}
+
+/* Expiration block sits directly under tk-toggle; keep it tight. */
+.kw-app .kw-ticket .tk-expire {
+  @apply mt-1;
+}

@@ -261,7 +261,7 @@ export function EventFilterBar({
 
   return (
     <div className={cn("relative", className)}>
-      <div className="flex items-center gap-2 py-3 overflow-x-auto scrollbar-hide">
+      <div className="kwm-pills flex items-center gap-2 py-3 overflow-x-auto scrollbar-hide">
         {/* Created At Filter */}
         <FilterChip
           icon={Clock}

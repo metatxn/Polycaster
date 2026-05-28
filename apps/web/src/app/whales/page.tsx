@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
 import {
   type InsiderSensitivity,
   type InsiderSortMode,
@@ -189,7 +190,7 @@ export default function WhalesPage() {
   const isLoading = activeTab === "whales" ? whalesLoading : insidersLoading;
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden">
+    <div className="kw-app min-h-screen relative overflow-x-hidden">
       <Navbar />
       <ChromeHeader />
 
@@ -293,6 +294,7 @@ export default function WhalesPage() {
           </div>
         )}
       </main>
+      <ProductFooter context="Whales" />
     </div>
   );
 }

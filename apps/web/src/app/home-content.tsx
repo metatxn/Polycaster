@@ -23,6 +23,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { ChromeHeader } from "@/components/app-layout";
 import { EventCard } from "@/components/event-card";
 import {
   EventFilterBar,
@@ -113,14 +114,13 @@ function DesktopFilterChips() {
   } = useFilterBarState();
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="kwm-pills flex items-center gap-2">
       {/* Created At Filter */}
       <FilterChip
         icon={Clock}
-        label="Created"
+        label="End"
         value={dateRangeLabel}
         isActive={isDateActive}
-        compact
       >
         <DropdownMenuContent align="start" className="w-36">
           <DropdownMenuCheckboxItem
@@ -154,10 +154,9 @@ function DesktopFilterChips() {
       {/* Liquidity Filter */}
       <FilterChip
         icon={Droplets}
-        label="Liquidity"
+        label="Liq"
         value={liquidityLabel}
         isActive={isLiquidityActive}
-        compact
       >
         <DropdownMenuContent align="start" className="w-36">
           {LIQUIDITY_PRESETS.map((preset) => (
@@ -172,13 +171,14 @@ function DesktopFilterChips() {
         </DropdownMenuContent>
       </FilterChip>
 
-      {/* Status Filter */}
+      {/* Status Filter — when default ("Active"), show value only to match
+          design's standalone "ACTIVE" chip; otherwise show the dimension. */}
       <FilterChip
         icon={Activity}
         label="Status"
         value={statusLabel || "All"}
         isActive={isStatusActive}
-        compact
+        compact={statusLabel === "Active" || statusLabel === "All"}
       >
         <DropdownMenuContent align="start" className="w-36">
           {STATUS_OPTIONS.map((option) => (
@@ -196,10 +196,9 @@ function DesktopFilterChips() {
       {/* Tags Filter */}
       <FilterChip
         icon={Tag}
-        label="Tags"
+        label="Cat"
         value={tagsLabel}
         isActive={isTagsActive}
-        compact
       >
         <DropdownMenuContent
           align="start"
@@ -224,10 +223,11 @@ function DesktopFilterChips() {
         </DropdownMenuContent>
       </FilterChip>
 
-      {/* Volume Filter */}
+      {/* Volume window filter — matches design's standalone time-window
+          chip (just "24H"), so keep compact and let the value carry it. */}
       <FilterChip
         icon={SlidersHorizontal}
-        label="Volume"
+        label="Window"
         value={volumeWindowLabel}
         isActive={isVolumeActive}
         compact
@@ -377,6 +377,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     fetchNextPage: fetchNextAllPaginated,
     hasNextPage: hasNextAllPaginated,
     isFetchingNextPage: isFetchingNextAllPaginated,
+    dataUpdatedAt: updatedAtAll,
   } = usePaginatedEvents({
     limit: 20,
     order: volumeOrderField,
@@ -398,6 +399,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextTrending,
     fetchNextPage: fetchNextTrending,
     isFetchingNextPage: isFetchingNextTrending,
+    dataUpdatedAt: updatedAtTrending,
   } = useTrendingEvents(20, serverFilterParams, viewMode === "trending", true);
 
   const {
@@ -407,6 +409,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextNew,
     fetchNextPage: fetchNextNew,
     isFetchingNextPage: isFetchingNextNew,
+    dataUpdatedAt: updatedAtNew,
   } = useNewEvents(20, serverFilterParams, viewMode === "new", true);
 
   const {
@@ -416,6 +419,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
     hasNextPage: hasNextBreaking,
     fetchNextPage: fetchNextBreaking,
     isFetchingNextPage: isFetchingNextBreaking,
+    dataUpdatedAt: updatedAtBreaking,
   } = useBreakingEvents(20, serverFilterParams, viewMode === "breaking", true);
 
   // Wrap view mode changes in startTransition for non-blocking UI updates
@@ -445,6 +449,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           hasMore: hasNextAllPaginated ?? initialData?.hasMore ?? false,
           fetchMore: fetchNextAllPaginated,
           isFetchingMore: isFetchingNextAllPaginated,
+          dataUpdatedAt: updatedAtAll,
         };
       }
       case "trending": {
@@ -464,6 +469,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           hasMore: hasMoreTrending,
           fetchMore: fetchNextTrending,
           isFetchingMore: isFetchingNextTrending,
+          dataUpdatedAt: updatedAtTrending,
         };
       }
       case "new": {
@@ -481,6 +487,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           hasMore: hasMoreNew,
           fetchMore: fetchNextNew,
           isFetchingMore: isFetchingNextNew,
+          dataUpdatedAt: updatedAtNew,
         };
       }
       case "breaking": {
@@ -499,6 +506,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           hasMore: hasMoreBreaking,
           fetchMore: fetchNextBreaking,
           isFetchingMore: isFetchingNextBreaking,
+          dataUpdatedAt: updatedAtBreaking,
         };
       }
       default:
@@ -509,6 +517,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           hasMore: false,
           fetchMore: () => {},
           isFetchingMore: false,
+          dataUpdatedAt: undefined as number | undefined,
         };
     }
   };
@@ -555,8 +564,9 @@ export function HomeContent({ initialData }: HomeContentProps) {
   }, [loadMoreElement, currentData.hasMore, currentData.isFetchingMore]);
 
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
+    <div className="kw-app min-h-screen bg-(--kwm-bg) relative overflow-x-hidden selection:bg-(--kwm-ink)/15">
       <Navbar />
+      <ChromeHeader />
 
       {/* Main Content - Added bottom padding for mobile nav, pt aligned with 60px grid */}
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
@@ -569,7 +579,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-5 sm:mb-6 lg:hidden"
+          className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-5 sm:mb-6 xl:hidden"
         >
           {/* Left: Editorial title — matches the Fraunces italic used
               on sibling pages, just one notch smaller since /markets
@@ -612,8 +622,9 @@ export function HomeContent({ initialData }: HomeContentProps) {
           </nav>
         </motion.div>
 
-        {/* Mobile/Tablet Filter Rows (below lg) */}
-        <div className="lg:hidden">
+        {/* Mobile/Tablet Filter Rows (below xl) — kept in sync with the
+            terminal-view's `xl:block` mount so they don't overlap. */}
+        <div className="xl:hidden">
           {/* Tab Pills Row + Search */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -698,7 +709,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 the isTransitioning prop — so we hide the card skeletons
                 there to avoid a duplicate. */}
           {currentData.isLoading && !currentData.error && (
-            <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5">
+            <div className="xl:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5">
               {[...Array(10)].map((_, i) => (
                 <motion.div
                   key={`skeleton-${i}`}
@@ -721,14 +732,14 @@ export function HomeContent({ initialData }: HomeContentProps) {
           {/* Desktop loading: render the terminal view with its own
                 table-shaped skeleton so tab switches don't reveal cards. */}
           {currentData.isLoading && !currentData.error && (
-            <div className="hidden lg:block">
+            <div className="hidden xl:block">
               <MarketsView
                 events={desktopEvents}
                 viewMode={viewMode}
                 onViewChange={handleQuickCategoryClick}
                 advancedFilters={<DesktopFilterChips />}
-                search={<MarketSearch className="w-56 xl:w-64" />}
                 isTransitioning={!hasDesktopFallback}
+                dataUpdatedAt={currentData.dataUpdatedAt}
               />
             </div>
           )}
@@ -738,18 +749,18 @@ export function HomeContent({ initialData }: HomeContentProps) {
                 tables don't fit. */}
           {!currentData.isLoading && currentData.events.length > 0 && (
             <>
-              <div className="hidden lg:block">
+              <div className="hidden xl:block">
                 <MarketsView
                   events={currentData.events}
                   viewMode={viewMode}
                   onViewChange={handleQuickCategoryClick}
                   advancedFilters={<DesktopFilterChips />}
-                  search={<MarketSearch className="w-56 xl:w-64" />}
                   isTransitioning={isPending}
+                  dataUpdatedAt={currentData.dataUpdatedAt}
                 />
               </div>
               <div
-                className={`lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
+                className={`xl:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5 transition-opacity duration-200 ${
                   isPending ? "opacity-70" : "opacity-100"
                 }`}
               >
@@ -769,7 +780,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                     scroll. */}
               {currentData.isFetchingMore && (
                 <>
-                  <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
+                  <div className="xl:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5 mt-3 sm:mt-5">
                     {[...Array(20)].map((_, i) => (
                       <div
                         key={`loading-${i}`}
@@ -783,7 +794,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                       </div>
                     ))}
                   </div>
-                  <div className="hidden lg:block border-x border-b border-border rounded-b-sm -mt-px">
+                  <div className="hidden xl:block border-x border-b border-(--kwm-hl-2) rounded-b-sm -mt-px">
                     <ProTableSkeleton rows={5} />
                   </div>
                 </>

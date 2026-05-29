@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 interface PaginatedEvent {
   id: string;
@@ -91,24 +92,22 @@ export function usePaginatedEvents({
   fullMarkets = false,
 }: UsePaginatedEventsParams = {}) {
   return useInfiniteQuery({
-    queryKey: [
-      "events",
-      "paginated",
-      seriesId ? `series:${seriesId}` : tagSlug || "all",
+    queryKey: qk.events.paginated({
+      scope: seriesId ? `series:${seriesId}` : tagSlug || "all",
       limit,
       closed,
       order,
       ascending,
       fullMarkets,
-      filters?.volume24hrMin ?? null,
-      filters?.volumeWeeklyMin ?? null,
-      filters?.liquidityMin ?? null,
-      filters?.live ?? null,
-      filters?.startDateFrom ?? null,
-      filters?.startDateTo ?? null,
-      filters?.endDateFrom ?? null,
-      filters?.endDateTo ?? null,
-    ],
+      volume24hrMin: filters?.volume24hrMin ?? null,
+      volumeWeeklyMin: filters?.volumeWeeklyMin ?? null,
+      liquidityMin: filters?.liquidityMin ?? null,
+      live: filters?.live ?? null,
+      startDateFrom: filters?.startDateFrom ?? null,
+      startDateTo: filters?.startDateTo ?? null,
+      endDateFrom: filters?.endDateFrom ?? null,
+      endDateTo: filters?.endDateTo ?? null,
+    }),
     queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: limit.toString(),

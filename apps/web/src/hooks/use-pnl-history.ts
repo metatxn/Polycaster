@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 
 /**
  * P&L data point
@@ -108,7 +109,11 @@ export function usePnLHistory(options: UsePnLHistoryOptions = {}) {
   const userAddress = options.userAddress || address;
 
   return useQuery<PnLHistoryResponse, Error>({
-    queryKey: ["pnlHistory", userAddress, options.interval, options.fidelity],
+    queryKey: qk.pnl.history(
+      userAddress ?? "",
+      options.interval ?? "",
+      options.fidelity ?? ""
+    ),
     queryFn: () => {
       if (!userAddress) throw new Error("Address not available");
       return fetchPnLHistory(userAddress, options);

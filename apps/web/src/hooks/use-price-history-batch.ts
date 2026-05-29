@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 /**
  * Hook: useBatchPriceHistory
@@ -61,7 +62,7 @@ export function useBatchPriceHistory(
   const startTs = Math.floor(Date.now() / 1000) - lookbackDays * 24 * 60 * 60;
 
   return useQuery({
-    queryKey: ["price-history-batch", normalized, lookbackDays, fidelity],
+    queryKey: qk.market.priceHistoryBatch(normalized, lookbackDays, fidelity),
     enabled: enabled && normalized.length > 0,
     staleTime: STALE_TIME_MS,
     queryFn: async () => {

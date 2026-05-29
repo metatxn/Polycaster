@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { qk } from "@/lib/query-keys";
 
 export interface Holder {
   proxyWallet: string;
@@ -54,7 +55,7 @@ async function fetchTopHolders(
  */
 export function useTopHolders(conditionId: string | undefined, enabled = true) {
   return useQuery({
-    queryKey: ["topHolders", conditionId],
+    queryKey: qk.profile.topHolders(conditionId ?? ""),
     queryFn: () => fetchTopHolders(conditionId as string),
     enabled: !!conditionId && enabled,
     staleTime: 5 * 60 * 1000, // 5 minutes

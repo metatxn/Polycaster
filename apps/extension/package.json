@@ -33,7 +33,7 @@
   "devDependencies": {
     "@fontsource/fraunces": "^5.2.9",
     "@fontsource/jetbrains-mono": "^5.2.8",
-    "@types/chrome": "0.1.40",
+    "@types/chrome": "0.1.42",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "buffer": "6.0.3",
@@ -42,7 +42,7 @@
     "process": "0.11.10",
     "ts-loader": "9.5.7",
     "typescript": "catalog:",
-    "webpack": "5.106.2",
+    "webpack": "5.107.1",
     "webpack-cli": "7.0.2"
   }
 }

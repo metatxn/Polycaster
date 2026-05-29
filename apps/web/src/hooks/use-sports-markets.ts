@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 interface Market {
   id: string;
@@ -41,7 +42,7 @@ interface SportsMarketsResponse {
 
 export function useSportsMarkets(sportTag?: string) {
   return useQuery({
-    queryKey: ["sports-markets", sportTag],
+    queryKey: qk.sports.bySport(sportTag ?? ""),
     queryFn: async () => {
       const url = sportTag
         ? `/api/sports/markets?limit=20&sport=${sportTag}`

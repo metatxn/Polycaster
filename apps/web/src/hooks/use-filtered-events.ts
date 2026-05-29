@@ -5,6 +5,7 @@ import type {
   VolumeWindow,
 } from "@/context/event-filter-context";
 import { useEventFilters } from "@/context/event-filter-context";
+import { qk } from "@/lib/query-keys";
 
 // Extended event interface with all filterable fields
 export interface FilterableEvent {
@@ -209,7 +210,7 @@ export function useFilteredEvents({
 
   // Fetch events from API
   const query = useInfiniteQuery({
-    queryKey: ["filtered-events", serverParams, filters.volumeWindow],
+    queryKey: qk.events.filtered(serverParams, filters.volumeWindow),
     queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         ...serverParams,
@@ -301,7 +302,7 @@ export function useFilteredEventsWithViewMode(
 
   // Fetch events from the appropriate endpoint
   const query = useInfiniteQuery({
-    queryKey: ["filtered-events", viewMode, baseLimit, filters.volumeWindow],
+    queryKey: qk.events.filtered({ viewMode, baseLimit }, filters.volumeWindow),
     queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: baseLimit.toString(),

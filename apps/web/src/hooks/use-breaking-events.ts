@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 import type { EventFilterParams } from "./use-paginated-events";
 
 interface BreakingEvent {
@@ -53,7 +54,7 @@ export function useBreakingEvents(
   fullMarkets = false
 ) {
   return useInfiniteQuery({
-    queryKey: ["breaking-events", limit, fullMarkets, filters],
+    queryKey: qk.events.breaking(limit, fullMarkets, filters),
     queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: limit.toString(),

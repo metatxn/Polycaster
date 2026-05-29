@@ -92,14 +92,14 @@ interface DetailRowProps {
 
 function DetailRow({ label, children, muted }: DetailRowProps) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-2.5 border-b border-border/40">
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground shrink-0">
+    <div className="flex items-baseline justify-between gap-4 py-2 border-b border-(--kwm-hl) last:border-b-0">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) shrink-0">
         {label}
       </span>
       <span
         className={cn(
           "font-mono text-xs tabular-nums text-right min-w-0 truncate",
-          muted ? "text-muted-foreground" : "text-foreground"
+          muted ? "text-(--kwm-ink-dim)" : "text-(--kwm-ink)"
         )}
       >
         {children}
@@ -114,31 +114,47 @@ interface AccentNoteProps {
   children: React.ReactNode;
 }
 
+/**
+ * Accent note — bordered+tinted callout for advisories. Theme-safe via
+ * the `--kwm-*` signal tokens so all 9 themes get correct contrast.
+ */
 function AccentNote({ color, caption, children }: AccentNoteProps) {
-  const borderClass = {
-    blue: "border-blue-500",
-    amber: "border-amber-500",
-    emerald: "border-emerald-500",
-    red: "border-red-500",
-  }[color];
-  const captionClass = {
-    blue: "text-blue-500",
-    amber: "text-amber-500",
-    emerald: "text-emerald-500",
-    red: "text-red-500",
+  const palette = {
+    blue: {
+      border: "border-(--kwm-accent)/40",
+      bg: "bg-(--kwm-accent-soft)",
+      text: "text-(--kwm-accent)",
+    },
+    amber: {
+      border: "border-(--kwm-warn-border)",
+      bg: "bg-(--kwm-warn-soft)",
+      text: "text-(--kwm-warn)",
+    },
+    emerald: {
+      border: "border-(--kwm-up-border)",
+      bg: "bg-(--kwm-up-soft)",
+      text: "text-(--kwm-up)",
+    },
+    red: {
+      border: "border-(--kwm-down)/40",
+      bg: "bg-(--kwm-down-soft)",
+      text: "text-(--kwm-down)",
+    },
   }[color];
 
   return (
-    <div className={cn("border-l-2 pl-3 py-2", borderClass)}>
+    <div
+      className={cn("px-3 py-2 border rounded-md", palette.border, palette.bg)}
+    >
       <p
         className={cn(
           "font-mono text-[10px] uppercase tracking-[0.14em] mb-1",
-          captionClass
+          palette.text
         )}
       >
         {caption}
       </p>
-      <p className="text-sm text-foreground leading-snug">{children}</p>
+      <p className="text-sm text-(--kwm-ink) leading-snug">{children}</p>
     </div>
   );
 }
@@ -395,457 +411,470 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="sm:max-w-[440px] max-h-[calc(100dvh-32px)] p-0 gap-0 overflow-hidden bg-background border-border/60 rounded-none flex flex-col"
+        overlayClassName="bg-black/60 backdrop-blur-md"
+        className="sm:max-w-[440px] max-h-[calc(100dvh-32px)] p-0 gap-0 overflow-hidden rounded-md border border-white/10 shadow-[0_40px_80px_-30px_rgba(0,0,0,0.55)] flex flex-col bg-(--kwm-panel)"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
-        {/* Header */}
-        <div className="relative flex items-center justify-between px-5 pt-5 pb-4 border-b border-border/40 shrink-0">
-          <div className="w-6 flex items-center justify-start">
-            {showSuccess ? null : (
-              <button
-                type="button"
-                onClick={handleClose}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Go back"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <div className="flex flex-col items-center justify-center flex-1 min-w-0 gap-1">
-            <DialogTitle className="font-editorial italic text-2xl leading-none text-foreground">
-              Withdraw
-            </DialogTitle>
-            <DialogDescription className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-              Balance · ${usdcBalance.toFixed(2)}
-            </DialogDescription>
-          </div>
-          <div className="w-6 flex items-center justify-end">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="px-5 py-5 flex-1 min-h-0 overflow-y-auto">
-          <AnimatePresence mode="wait">
-            {showSuccess ? (
-              <motion.div
-                key="success"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex flex-col"
-              >
-                {/* Editorial success headline */}
-                <div className="flex flex-col items-center py-8 border-y border-border/40 mb-5">
-                  <span
-                    className={cn(
-                      "font-mono text-[10px] uppercase tracking-[0.14em] mb-3",
-                      state === "bridge_complete"
-                        ? "text-emerald-500"
-                        : "text-blue-500"
-                    )}
-                  >
-                    {state === "bridge_complete"
-                      ? "Withdrawal Complete"
-                      : "Sent to Bridge"}
-                  </span>
-                  <span className="text-xl font-semibold leading-snug text-foreground text-center max-w-[300px]">
-                    {state === "bridge_complete"
-                      ? `Your ${selectedTokenConfig.symbol} landed on ${selectedChain.name}.`
-                      : `${amount} pUSD routed to ${selectedChain.name} — arriving shortly.`}
-                  </span>
-                </div>
-
-                {/* Tracking strip */}
-                {state !== "bridge_complete" && bridgeTracking.status ? (
-                  <div className="flex items-center justify-center gap-2 border-y border-border/40 py-3 mb-5">
-                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                      {bridgeTracking.status === "DEPOSIT_DETECTED" &&
-                        "Deposit detected"}
-                      {bridgeTracking.status === "PROCESSING" &&
-                        "Bridge processing"}
-                      {bridgeTracking.status === "ORIGIN_TX_CONFIRMED" &&
-                        "Origin confirmed"}
-                      {bridgeTracking.status === "SUBMITTED" &&
-                        `Submitting · ${selectedChain.code}`}
-                    </span>
-                  </div>
-                ) : null}
-
-                {state !== "bridge_complete" && !bridgeTracking.status ? (
-                  <div className="flex items-center justify-center gap-2 border-y border-border/40 py-3 mb-5">
-                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                      Waiting for Bridge
-                    </span>
-                  </div>
-                ) : null}
-
-                {/* Explorer link */}
-                {txHash ? (
-                  <a
-                    href={`${CHAIN_EXPLORER_URLS.polygon}${txHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground hover:text-muted-foreground transition-colors mb-5"
-                  >
-                    <span className="underline underline-offset-4 decoration-border">
-                      View on {CHAIN_EXPLORER_NAMES.polygon}
-                    </span>
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                ) : null}
-
-                {/* Close CTA */}
+        <div className="kw-app flex flex-col flex-1 min-h-0 bg-(--kwm-panel) text-(--kwm-ink)">
+          {/* Header — mono-caps eyebrow + clean sans balance title,
+              matching the deposit modal and onboarding chrome. */}
+          <div className="relative flex items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-(--kwm-hl) shrink-0">
+            <div className="w-7 flex items-center justify-start">
+              {showSuccess ? null : (
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="w-full h-12 bg-foreground text-background font-mono text-[11px] uppercase tracking-[0.18em] hover:bg-foreground/90 transition-colors"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors"
+                  aria-label="Go back"
                 >
-                  {state === "bridge_complete" ? "Done" : "Close"}
+                  <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.4} />
                 </button>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="form"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex flex-col"
+              )}
+            </div>
+            <div className="flex flex-col items-center justify-center flex-1 min-w-0 gap-0.5">
+              <span className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+                <span className="text-(--kwm-ink-2)">§</span>
+                <span>Withdraw</span>
+                <span className="text-(--kwm-ink-dim)">·</span>
+                <span className="text-(--kwm-ink-3)">
+                  {showSuccess ? "Sent" : "Form"}
+                </span>
+              </span>
+              <DialogTitle className="font-(family-name:--font-geist) text-[15px] font-semibold tracking-tight text-(--kwm-ink) leading-tight truncate max-w-full">
+                ${usdcBalance.toFixed(2)}{" "}
+                <span className="font-normal text-(--kwm-ink-3) text-[12px]">
+                  balance
+                </span>
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                Withdraw funds from your Polymarket trading wallet.
+              </DialogDescription>
+            </div>
+            <div className="w-7 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors"
+                aria-label="Close"
               >
-                {/* Recipient Address — underline input */}
-                <div className="mb-6">
-                  <label
-                    htmlFor="recipient-address"
-                    className="block font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-2"
-                  >
-                    Recipient Address
-                  </label>
-                  <div className="flex items-center gap-3 border-b border-border/60 focus-within:border-foreground transition-colors">
-                    <input
-                      id="recipient-address"
-                      type="text"
-                      value={recipientAddress}
-                      onChange={(e) => setRecipientAddress(e.target.value)}
-                      placeholder={
-                        selectedChain.id === "solana"
-                          ? "Solana address"
-                          : "0x..."
-                      }
-                      className="flex-1 min-w-0 h-10 bg-transparent border-none focus:outline-none font-mono text-sm text-foreground placeholder:text-muted-foreground/70"
-                    />
-                    {selectedChain.id !== "solana" && address ? (
-                      <button
-                        type="button"
-                        onClick={handleUseConnected}
-                        className="shrink-0 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground hover:text-muted-foreground transition-colors"
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        <span className="underline underline-offset-4 decoration-border">
-                          Use Connected
-                        </span>
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
+                <X className="h-3.5 w-3.5" strokeWidth={1.4} />
+              </button>
+            </div>
+          </div>
 
-                {/* Amount — large italic with underline input */}
-                <div className="mb-5">
-                  <div className="flex items-baseline justify-between mb-2">
-                    <label
-                      htmlFor="withdraw-amount"
-                      className="block font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
-                    >
-                      Amount · {selectedTokenConfig.symbol}
-                    </label>
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-                      Balance · {usdcBalance.toFixed(2)} pUSD
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-2 border-b border-border/60 focus-within:border-foreground transition-colors">
-                    <input
-                      id="withdraw-amount"
-                      type="text"
-                      value={amount}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9.]/g, "");
-                        const val = raw.replace(/\.(?=.*\.)/g, "");
-                        setAmount(val);
-                      }}
-                      placeholder="0.00"
-                      className="flex-1 min-w-0 h-12 bg-transparent border-none focus:outline-none font-editorial italic text-3xl text-foreground tabular-nums placeholder:text-muted-foreground/40"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleMaxAmount}
-                      className="shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground hover:text-muted-foreground transition-colors underline underline-offset-4 decoration-border"
-                    >
-                      Max
-                    </button>
-                  </div>
-                  <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-                    ${amountNum > 0 ? amountNum.toFixed(2) : "0.00"}
-                  </p>
-                </div>
-
-                {/* Percent strip */}
-                <div className="flex items-center gap-6 sm:gap-8 py-3 border-y border-border/40 mb-6">
-                  {[25, 50, 75, 100].map((percent) => (
-                    <button
-                      key={percent}
-                      type="button"
-                      onClick={() => handlePercentage(percent)}
-                      className="font-mono text-[11px] uppercase tracking-[0.14em] leading-none text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {percent === 100 ? "Max" : `${percent}`}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Token + Chain pickers — hairline dropdowns */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="flex flex-col gap-2">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                      Receive Token
-                    </span>
-                    <DropdownMenu
-                      open={tokenDropdownOpen}
-                      onOpenChange={setTokenDropdownOpen}
-                    >
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className="w-full flex items-center justify-between h-10 border-b border-border/60 hover:border-foreground transition-colors"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            {selectedTokenDisplay.icon ? (
-                              <Image
-                                src={selectedTokenDisplay.icon}
-                                alt={selectedTokenConfig.symbol}
-                                width={20}
-                                height={20}
-                                className="rounded-full shrink-0"
-                              />
-                            ) : null}
-                            <span className="text-sm font-medium text-foreground truncate">
-                              {selectedTokenConfig.symbol}
-                            </span>
-                          </div>
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="start"
-                        className="w-(--radix-dropdown-menu-trigger-width) min-w-(--radix-dropdown-menu-trigger-width) bg-popover border-border/60 rounded-none"
-                      >
-                        {availableTokens.map((tokenId) => {
-                          const config = WITHDRAW_TOKEN_CONFIGS[tokenId];
-                          const display = TOKEN_DISPLAY[tokenId];
-                          const isActive = selectedTokenId === tokenId;
-                          return (
-                            <DropdownMenuItem
-                              key={tokenId}
-                              onClick={() => setSelectedTokenId(tokenId)}
-                              className="flex items-center gap-2 cursor-pointer rounded-none focus:bg-muted/60"
-                            >
-                              {display.icon ? (
-                                <Image
-                                  src={display.icon}
-                                  alt={config.symbol}
-                                  width={18}
-                                  height={18}
-                                  className="rounded-full shrink-0"
-                                />
-                              ) : (
-                                <span className="w-[18px] h-[18px] shrink-0 rounded-full bg-muted flex items-center justify-center font-mono text-[8px] uppercase tracking-widest text-foreground/80">
-                                  {display.fallback.slice(0, 2)}
-                                </span>
-                              )}
-                              <div className="flex flex-col min-w-0">
-                                <span
-                                  className={cn(
-                                    "text-sm font-medium leading-none",
-                                    isActive
-                                      ? "text-foreground"
-                                      : "text-foreground/90"
-                                  )}
-                                >
-                                  {config.symbol}
-                                </span>
-                                <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground truncate mt-1">
-                                  {config.name}
-                                </span>
-                              </div>
-                              {isActive ? (
-                                <Check className="h-3.5 w-3.5 text-foreground ml-auto shrink-0" />
-                              ) : null}
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                      {isCrossChain ? "Destination" : "Chain"}
-                    </span>
-                    <DropdownMenu
-                      open={chainDropdownOpen}
-                      onOpenChange={setChainDropdownOpen}
-                    >
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className="w-full flex items-center justify-between h-10 border-b border-border/60 hover:border-foreground transition-colors"
-                        >
-                          <span className="text-sm font-medium text-foreground truncate">
-                            {selectedChain.name}
-                          </span>
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="start"
-                        className="w-(--radix-dropdown-menu-trigger-width) min-w-(--radix-dropdown-menu-trigger-width) bg-popover border-border/60 rounded-none"
-                      >
-                        {WITHDRAW_CHAINS.map((chain) => {
-                          const isActive = selectedChain.id === chain.id;
-                          return (
-                            <DropdownMenuItem
-                              key={chain.id}
-                              onClick={() => setSelectedChain(chain)}
-                              className="flex items-center justify-between cursor-pointer rounded-none focus:bg-muted/60"
-                            >
-                              <span className="text-sm font-medium text-foreground truncate">
-                                {chain.name}
-                              </span>
-                              {isActive ? (
-                                <Check className="h-3.5 w-3.5 text-foreground shrink-0" />
-                              ) : null}
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-
-                {/* Info note */}
-                <div className="mb-5">
-                  <AccentNote color="blue" caption="Polymarket Bridge">
-                    {isCrossChain
-                      ? `pUSD converts to ${selectedTokenConfig.symbol} and routes to ${selectedChain.name} — typically 10–30 minutes.`
-                      : `pUSD converts to ${selectedTokenConfig.symbol} on Polygon.`}
-                  </AccentNote>
-                </div>
-
-                {/* High-impact warning */}
-                {highImpactPercent !== null ? (
-                  <div className="mb-5">
-                    <AccentNote
-                      color="amber"
-                      caption={`Output Differs · ${highImpactPercent.toFixed(2)}%`}
-                    >
-                      Bridge quote shows more than 10bp swap impact — confirm
-                      the estimated receive amount before proceeding.
-                    </AccentNote>
-                  </div>
-                ) : null}
-
-                {/* Large-withdrawal advisory */}
-                {isLargeWithdrawal ? (
-                  <div className="mb-5">
-                    <AccentNote color="amber" caption="Large Withdrawal">
-                      Polymarket recommends splitting withdrawals over $
-                      {LARGE_WITHDRAWAL_THRESHOLD_USD.toLocaleString()} into
-                      smaller portions for better routing and execution.
-                    </AccentNote>
-                  </div>
-                ) : null}
-
-                {/* Summary — hairline detail rows */}
-                <div className="border-t border-border/40 mb-5">
-                  <DetailRow label="You Receive">
-                    {isLoadingQuote ? (
-                      <Loader2 className="h-3 w-3 animate-spin inline" />
-                    ) : (
-                      `${estimatedReceive} ${selectedTokenConfig.symbol}`
-                    )}
-                  </DetailRow>
-                  <DetailRow label="Destination">
-                    {selectedChain.name}
-                  </DetailRow>
-                  <DetailRow label="Fee" muted>
-                    {isLoadingQuote ? (
-                      <Loader2 className="h-3 w-3 animate-spin inline" />
-                    ) : (
-                      (totalFeeUsd ?? "Free · Gasless")
-                    )}
-                  </DetailRow>
-                  <DetailRow label="Est. Time" muted>
-                    {isLoadingQuote ? (
-                      <Loader2 className="h-3 w-3 animate-spin inline" />
-                    ) : (
-                      estimatedTime
-                    )}
-                  </DetailRow>
-                </div>
-
-                {/* Error */}
-                {error ? (
-                  <div className="mb-5">
-                    <AccentNote color="red" caption="Withdrawal Failed">
-                      {error}
-                    </AccentNote>
-                  </div>
-                ) : null}
-
-                {/* Withdraw button — decisive emerald */}
-                <button
-                  type="button"
-                  onClick={handleWithdraw}
-                  disabled={!canProceed || isWithdrawing}
-                  className={cn(
-                    "w-full h-12 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors",
-                    isWithdrawing
-                      ? "bg-emerald-500/60 text-white cursor-wait"
-                      : canProceed
-                        ? "bg-emerald-500 text-white hover:bg-emerald-600"
-                        : "bg-muted text-muted-foreground cursor-not-allowed"
-                  )}
+          {/* Content */}
+          <div className="px-5 py-5 flex-1 min-h-0 overflow-y-auto">
+            <AnimatePresence mode="wait">
+              {showSuccess ? (
+                <motion.div
+                  key="success"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col"
                 >
-                  {getButtonLabel()}
-                </button>
+                  {/* Success headline — clean Geist sans (no italic) */}
+                  <div className="flex flex-col items-center py-6 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2) mb-4">
+                    <span
+                      className={cn(
+                        "font-mono text-[10px] uppercase tracking-[0.14em] mb-2",
+                        state === "bridge_complete"
+                          ? "text-(--kwm-up)"
+                          : "text-(--kwm-accent)"
+                      )}
+                    >
+                      {state === "bridge_complete"
+                        ? "Withdrawal Complete"
+                        : "Sent to Bridge"}
+                    </span>
+                    <span className="text-lg font-semibold leading-snug text-(--kwm-ink) text-center max-w-[300px] tracking-tight">
+                      {state === "bridge_complete"
+                        ? `Your ${selectedTokenConfig.symbol} landed on ${selectedChain.name}.`
+                        : `${amount} pUSD routed to ${selectedChain.name} — arriving shortly.`}
+                    </span>
+                  </div>
 
-                {state === "pending" && txHash ? (
-                  <div className="flex justify-center mt-4">
+                  {/* Tracking strip */}
+                  {state !== "bridge_complete" && bridgeTracking.status ? (
+                    <div className="flex items-center justify-center gap-2 border border-(--kwm-hl) rounded-md py-2.5 mb-4 bg-(--kwm-bg-2)">
+                      <Loader2 className="h-3 w-3 animate-spin text-(--kwm-accent)" />
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+                        {bridgeTracking.status === "DEPOSIT_DETECTED" &&
+                          "Deposit detected"}
+                        {bridgeTracking.status === "PROCESSING" &&
+                          "Bridge processing"}
+                        {bridgeTracking.status === "ORIGIN_TX_CONFIRMED" &&
+                          "Origin confirmed"}
+                        {bridgeTracking.status === "SUBMITTED" &&
+                          `Submitting · ${selectedChain.code}`}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {state !== "bridge_complete" && !bridgeTracking.status ? (
+                    <div className="flex items-center justify-center gap-2 border border-(--kwm-hl) rounded-md py-2.5 mb-4 bg-(--kwm-bg-2)">
+                      <Loader2 className="h-3 w-3 animate-spin text-(--kwm-accent)" />
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+                        Waiting for Bridge
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {/* Explorer link */}
+                  {txHash ? (
                     <a
                       href={`${CHAIN_EXPLORER_URLS.polygon}${txHash}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground hover:text-muted-foreground transition-colors"
+                      className="inline-flex items-center justify-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-2) hover:text-(--kwm-ink) transition-colors mb-4"
                     >
-                      <span className="underline underline-offset-4 decoration-border">
-                        Track on {CHAIN_EXPLORER_NAMES.polygon}
+                      <span className="underline underline-offset-4 decoration-(--kwm-hl)">
+                        View on {CHAIN_EXPLORER_NAMES.polygon}
                       </span>
                       <ExternalLink className="h-3 w-3" />
                     </a>
+                  ) : null}
+
+                  {/* Close CTA */}
+                  <button
+                    type="button"
+                    onClick={handleClose}
+                    className="w-full h-11 rounded-md bg-(--kwm-ink) text-(--kwm-bg) font-mono text-[11px] uppercase tracking-[0.18em] font-semibold hover:opacity-90 transition-colors"
+                  >
+                    {state === "bridge_complete" ? "Done" : "Close"}
+                  </button>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="form"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col"
+                >
+                  {/* Recipient Address — bordered input card */}
+                  <div className="mb-4">
+                    <label
+                      htmlFor="recipient-address"
+                      className="block font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-2"
+                    >
+                      Recipient Address
+                    </label>
+                    <div className="flex items-center gap-3 px-3 h-10 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2) focus-within:border-(--kwm-hl-3) transition-colors">
+                      <input
+                        id="recipient-address"
+                        type="text"
+                        value={recipientAddress}
+                        onChange={(e) => setRecipientAddress(e.target.value)}
+                        placeholder={
+                          selectedChain.id === "solana"
+                            ? "Solana address"
+                            : "0x..."
+                        }
+                        className="flex-1 min-w-0 h-full bg-transparent border-none focus:outline-none font-mono text-sm text-(--kwm-ink) placeholder:text-(--kwm-ink-dim)"
+                      />
+                      {selectedChain.id !== "solana" && address ? (
+                        <button
+                          type="button"
+                          onClick={handleUseConnected}
+                          className="shrink-0 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink) hover:opacity-80 transition-opacity"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-(--kwm-up)" />
+                          Use Connected
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                ) : null}
-              </motion.div>
-            )}
-          </AnimatePresence>
+
+                  {/* Amount — clean Geist sans large display */}
+                  <div className="mb-3">
+                    <div className="flex items-baseline justify-between mb-2">
+                      <label
+                        htmlFor="withdraw-amount"
+                        className="block font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)"
+                      >
+                        Amount · {selectedTokenConfig.symbol}
+                      </label>
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) tabular-nums">
+                        Balance · {usdcBalance.toFixed(2)} pUSD
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2 px-3.5 py-3 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2) focus-within:border-(--kwm-hl-3) transition-colors">
+                      <input
+                        id="withdraw-amount"
+                        type="text"
+                        value={amount}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/[^0-9.]/g, "");
+                          const val = raw.replace(/\.(?=.*\.)/g, "");
+                          setAmount(val);
+                        }}
+                        placeholder="0.00"
+                        className="flex-1 min-w-0 h-10 bg-transparent border-none focus:outline-none font-(family-name:--font-geist) text-3xl font-semibold tracking-tight text-(--kwm-ink) tabular-nums placeholder:text-(--kwm-ink-dim)"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleMaxAmount}
+                        className="shrink-0 h-7 px-2 rounded-sm font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-3) transition-colors"
+                      >
+                        Max
+                      </button>
+                    </div>
+                    <p className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-dim) tabular-nums">
+                      ${amountNum > 0 ? amountNum.toFixed(2) : "0.00"}
+                    </p>
+                  </div>
+
+                  {/* Percent strip — small ghost buttons */}
+                  <div className="grid grid-cols-4 gap-2 mb-4">
+                    {[25, 50, 75, 100].map((percent) => (
+                      <button
+                        key={percent}
+                        type="button"
+                        onClick={() => handlePercentage(percent)}
+                        className="h-8 px-3 rounded-md border border-(--kwm-hl) font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-2) transition-colors"
+                      >
+                        {percent === 100 ? "Max" : `${percent}`}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Token + Chain pickers — bordered dropdowns */}
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="flex flex-col gap-2">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+                        Receive Token
+                      </span>
+                      <DropdownMenu
+                        open={tokenDropdownOpen}
+                        onOpenChange={setTokenDropdownOpen}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="w-full flex items-center justify-between gap-2 h-10 px-3 rounded-md border border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) transition-colors"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {selectedTokenDisplay.icon ? (
+                                <Image
+                                  src={selectedTokenDisplay.icon}
+                                  alt={selectedTokenConfig.symbol}
+                                  width={20}
+                                  height={20}
+                                  className="rounded-full shrink-0"
+                                />
+                              ) : null}
+                              <span className="text-sm font-medium text-(--kwm-ink) truncate">
+                                {selectedTokenConfig.symbol}
+                              </span>
+                            </div>
+                            <ChevronDown className="h-3.5 w-3.5 text-(--kwm-ink-3)" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="start"
+                          className="kw-app w-(--radix-dropdown-menu-trigger-width) min-w-(--radix-dropdown-menu-trigger-width) bg-(--kwm-panel) border border-(--kwm-hl-2) rounded-md p-1 shadow-[0_20px_40px_-20px_rgba(0,0,0,0.55)]"
+                        >
+                          {availableTokens.map((tokenId) => {
+                            const config = WITHDRAW_TOKEN_CONFIGS[tokenId];
+                            const display = TOKEN_DISPLAY[tokenId];
+                            const isActive = selectedTokenId === tokenId;
+                            return (
+                              <DropdownMenuItem
+                                key={tokenId}
+                                onClick={() => setSelectedTokenId(tokenId)}
+                                className="flex items-center gap-2 cursor-pointer rounded-sm focus:bg-(--kwm-bg-3) text-(--kwm-ink)"
+                              >
+                                {display.icon ? (
+                                  <Image
+                                    src={display.icon}
+                                    alt={config.symbol}
+                                    width={18}
+                                    height={18}
+                                    className="rounded-full shrink-0"
+                                  />
+                                ) : (
+                                  <span className="w-[18px] h-[18px] shrink-0 rounded-full bg-(--kwm-bg-3) flex items-center justify-center font-mono text-[8px] uppercase tracking-widest text-(--kwm-ink-2)">
+                                    {display.fallback.slice(0, 2)}
+                                  </span>
+                                )}
+                                <div className="flex flex-col min-w-0">
+                                  <span
+                                    className={cn(
+                                      "text-sm font-medium leading-none",
+                                      isActive
+                                        ? "text-(--kwm-ink)"
+                                        : "text-(--kwm-ink-2)"
+                                    )}
+                                  >
+                                    {config.symbol}
+                                  </span>
+                                  <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-(--kwm-ink-3) truncate mt-1">
+                                    {config.name}
+                                  </span>
+                                </div>
+                                {isActive ? (
+                                  <Check className="h-3.5 w-3.5 text-(--kwm-ink) ml-auto shrink-0" />
+                                ) : null}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+                        {isCrossChain ? "Destination" : "Chain"}
+                      </span>
+                      <DropdownMenu
+                        open={chainDropdownOpen}
+                        onOpenChange={setChainDropdownOpen}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="w-full flex items-center justify-between gap-2 h-10 px-3 rounded-md border border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) transition-colors"
+                          >
+                            <span className="text-sm font-medium text-(--kwm-ink) truncate">
+                              {selectedChain.name}
+                            </span>
+                            <ChevronDown className="h-3.5 w-3.5 text-(--kwm-ink-3)" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="start"
+                          className="kw-app w-(--radix-dropdown-menu-trigger-width) min-w-(--radix-dropdown-menu-trigger-width) bg-(--kwm-panel) border border-(--kwm-hl-2) rounded-md p-1 shadow-[0_20px_40px_-20px_rgba(0,0,0,0.55)]"
+                        >
+                          {WITHDRAW_CHAINS.map((chain) => {
+                            const isActive = selectedChain.id === chain.id;
+                            return (
+                              <DropdownMenuItem
+                                key={chain.id}
+                                onClick={() => setSelectedChain(chain)}
+                                className="flex items-center justify-between cursor-pointer rounded-sm focus:bg-(--kwm-bg-3) text-(--kwm-ink)"
+                              >
+                                <span className="text-sm font-medium text-(--kwm-ink) truncate">
+                                  {chain.name}
+                                </span>
+                                {isActive ? (
+                                  <Check className="h-3.5 w-3.5 text-(--kwm-ink) shrink-0" />
+                                ) : null}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+
+                  {/* Info note */}
+                  <div className="mb-3">
+                    <AccentNote color="blue" caption="Polymarket Bridge">
+                      {isCrossChain
+                        ? `pUSD converts to ${selectedTokenConfig.symbol} and routes to ${selectedChain.name} — typically 10–30 minutes.`
+                        : `pUSD converts to ${selectedTokenConfig.symbol} on Polygon.`}
+                    </AccentNote>
+                  </div>
+
+                  {/* High-impact warning */}
+                  {highImpactPercent !== null ? (
+                    <div className="mb-3">
+                      <AccentNote
+                        color="amber"
+                        caption={`Output Differs · ${highImpactPercent.toFixed(2)}%`}
+                      >
+                        Bridge quote shows more than 10bp swap impact — confirm
+                        the estimated receive amount before proceeding.
+                      </AccentNote>
+                    </div>
+                  ) : null}
+
+                  {/* Large-withdrawal advisory */}
+                  {isLargeWithdrawal ? (
+                    <div className="mb-3">
+                      <AccentNote color="amber" caption="Large Withdrawal">
+                        Polymarket recommends splitting withdrawals over $
+                        {LARGE_WITHDRAWAL_THRESHOLD_USD.toLocaleString()} into
+                        smaller portions for better routing and execution.
+                      </AccentNote>
+                    </div>
+                  ) : null}
+
+                  {/* Summary — bordered card with hairline detail rows */}
+                  <div className="mb-4 px-3.5 py-1 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
+                    <DetailRow label="You Receive">
+                      {isLoadingQuote ? (
+                        <Loader2 className="h-3 w-3 animate-spin inline" />
+                      ) : (
+                        `${estimatedReceive} ${selectedTokenConfig.symbol}`
+                      )}
+                    </DetailRow>
+                    <DetailRow label="Destination">
+                      {selectedChain.name}
+                    </DetailRow>
+                    <DetailRow label="Fee" muted>
+                      {isLoadingQuote ? (
+                        <Loader2 className="h-3 w-3 animate-spin inline" />
+                      ) : (
+                        (totalFeeUsd ?? "Free · Gasless")
+                      )}
+                    </DetailRow>
+                    <DetailRow label="Est. Time" muted>
+                      {isLoadingQuote ? (
+                        <Loader2 className="h-3 w-3 animate-spin inline" />
+                      ) : (
+                        estimatedTime
+                      )}
+                    </DetailRow>
+                  </div>
+
+                  {/* Error */}
+                  {error ? (
+                    <div className="mb-3">
+                      <AccentNote color="red" caption="Withdrawal Failed">
+                        {error}
+                      </AccentNote>
+                    </div>
+                  ) : null}
+
+                  {/* Withdraw CTA — green when actionable */}
+                  <button
+                    type="button"
+                    onClick={handleWithdraw}
+                    disabled={!canProceed || isWithdrawing}
+                    className={cn(
+                      "w-full h-11 rounded-md font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors",
+                      isWithdrawing
+                        ? "bg-(--kwm-up-soft) text-(--kwm-up) cursor-wait border border-(--kwm-up-border)"
+                        : canProceed
+                          ? "bg-(--kwm-up) text-(--kwm-bg) hover:opacity-90"
+                          : "bg-(--kwm-bg-3) text-(--kwm-ink-dim) cursor-not-allowed border border-(--kwm-hl)"
+                    )}
+                  >
+                    {getButtonLabel()}
+                  </button>
+
+                  {state === "pending" && txHash ? (
+                    <div className="flex justify-center mt-3">
+                      <a
+                        href={`${CHAIN_EXPLORER_URLS.polygon}${txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-2) hover:text-(--kwm-ink) transition-colors"
+                      >
+                        <span className="underline underline-offset-4 decoration-(--kwm-hl)">
+                          Track on {CHAIN_EXPLORER_NAMES.polygon}
+                        </span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  ) : null}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

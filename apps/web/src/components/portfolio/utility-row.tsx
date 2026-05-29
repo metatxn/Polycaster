@@ -49,28 +49,28 @@ export function PortfolioUtilityRow({
 
   return (
     <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.08em] text-muted-foreground/90">
+      <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         <Link
           href="/markets"
-          className="flex items-center gap-1 hover:text-foreground transition-colors"
+          className="flex items-center gap-1 hover:text-(--kwm-ink) transition-colors"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
           <span>Markets</span>
         </Link>
-        <span className="text-border/80">&rsaquo;</span>
-        <span className="text-foreground">Portfolio</span>
+        <span className="text-(--kwm-ink-dim)">&rsaquo;</span>
+        <span className="text-(--kwm-ink)">Portfolio</span>
       </div>
 
-      <div className="flex items-center gap-5 flex-wrap font-mono text-[11px] uppercase tracking-[0.14em]">
+      <div className="flex items-center gap-2 flex-wrap font-mono text-[11px] uppercase tracking-[0.14em]">
         {proxyAddress && (
           <button
             type="button"
             onClick={handleCopy}
-            className="group inline-flex items-center gap-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
+            className="group inline-flex items-center gap-2 h-7 px-2.5 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
           >
             <span>{formatAddress(proxyAddress)}</span>
             {copied ? (
-              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+              <Check className="h-3 w-3 text-(--kwm-up)" />
             ) : (
               <Copy className="h-3 w-3 opacity-60 group-hover:opacity-100" />
             )}
@@ -81,22 +81,18 @@ export function PortfolioUtilityRow({
             <button
               type="button"
               onClick={onDeposit}
-              className="group inline-flex items-center gap-2 py-1 font-semibold text-foreground transition-colors"
+              className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-(--kwm-ink) bg-(--kwm-ink) text-(--kwm-bg) font-semibold hover:brightness-110 transition-[filter,background]"
             >
               <ArrowDownToLine className="h-3 w-3" />
-              <span className="border-b-2 border-foreground pb-0.5 group-hover:border-foreground/60 transition-colors">
-                Deposit
-              </span>
+              <span>Deposit</span>
             </button>
             <button
               type="button"
               onClick={onWithdraw}
-              className="group inline-flex items-center gap-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
+              className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-(--kwm-hl-2) bg-(--kwm-bg-2) text-(--kwm-ink) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3) transition-colors"
             >
               <ArrowUpFromLine className="h-3 w-3" />
-              <span className="border-b border-border/60 pb-0.5 group-hover:border-foreground transition-colors">
-                Withdraw
-              </span>
+              <span>Withdraw</span>
             </button>
           </>
         )}
@@ -104,7 +100,7 @@ export function PortfolioUtilityRow({
           type="button"
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="inline-flex items-center gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors disabled:opacity-50"
         >
           <RefreshCw
             className={cn("h-3 w-3", isRefreshing && "animate-spin")}

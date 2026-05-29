@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 interface Event {
   id: string;
@@ -70,7 +71,7 @@ async function fetchEventsList(
  */
 export function useEventsList(params: UseEventsListParams = {}) {
   return useQuery({
-    queryKey: ["events", "list", params],
+    queryKey: qk.events.list(params),
     queryFn: () => fetchEventsList(params),
     staleTime: 60 * 1000, // 1 minute
     refetchOnWindowFocus: false,

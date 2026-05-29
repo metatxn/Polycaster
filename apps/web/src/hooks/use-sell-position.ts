@@ -15,11 +15,9 @@ import {
   useOrderBook as useOrderBookFromStore,
   useOrderBookStore,
 } from "@/hooks/use-orderbook-store";
-import {
-  PROXY_WALLET_QUERY_KEY,
-  useProxyWallet,
-} from "@/hooks/use-proxy-wallet";
+import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
+import { qk } from "@/lib/query-keys";
 import { clearBalanceCache } from "@/lib/rpc";
 import { calculateSlippage, roundDownToTick } from "@/lib/slippage";
 
@@ -77,7 +75,7 @@ export function useSellPosition({
   // arrives so the modal has data to render immediately on open. Once the
   // WebSocket delivers the first `book` event, live updates take over.
   const { isLoading: isLoadingOrderBook } = useQuery<OrderBookData | null>({
-    queryKey: ["orderBook", tokenId],
+    queryKey: qk.orderBook(tokenId),
     queryFn: async (): Promise<OrderBookData | null> => {
       if (!tokenId) return null;
       try {
@@ -231,30 +229,30 @@ export function useSellPosition({
 
           await Promise.all([
             queryClient.invalidateQueries({
-              queryKey: [PROXY_WALLET_QUERY_KEY],
+              queryKey: qk.proxyWallet.all(),
               exact: false,
             }),
             queryClient.invalidateQueries({
-              queryKey: ["usdcBalance"],
+              queryKey: qk.wallet.allUsdcBalances(),
               exact: false,
             }),
             queryClient.invalidateQueries({
-              queryKey: ["userPositions"],
+              queryKey: qk.positions.all(),
               exact: false,
             }),
             queryClient.invalidateQueries({
-              queryKey: ["openOrders"],
+              queryKey: qk.orders.all(),
               exact: false,
             }),
           ]);
 
           await Promise.all([
             queryClient.refetchQueries({
-              queryKey: [PROXY_WALLET_QUERY_KEY],
+              queryKey: qk.proxyWallet.all(),
               exact: false,
             }),
             queryClient.refetchQueries({
-              queryKey: ["usdcBalance"],
+              queryKey: qk.wallet.allUsdcBalances(),
               exact: false,
             }),
           ]);
@@ -263,15 +261,15 @@ export function useSellPosition({
             clearBalanceCache(proxyAddress);
             await Promise.all([
               queryClient.refetchQueries({
-                queryKey: ["userPositions"],
+                queryKey: qk.positions.all(),
                 exact: false,
               }),
               queryClient.refetchQueries({
-                queryKey: [PROXY_WALLET_QUERY_KEY],
+                queryKey: qk.proxyWallet.all(),
                 exact: false,
               }),
               queryClient.refetchQueries({
-                queryKey: ["usdcBalance"],
+                queryKey: qk.wallet.allUsdcBalances(),
                 exact: false,
               }),
             ]);

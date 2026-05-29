@@ -96,12 +96,21 @@ export function ActivityLedger({
 
   return (
     <section className="flex flex-col">
-      <header className="flex items-baseline justify-between flex-wrap gap-3 pb-3">
-        <h2 className="font-editorial italic text-xl sm:text-2xl text-foreground">
-          Activity Ledger
-        </h2>
+      <header className="flex items-end justify-between flex-wrap gap-3 pb-3 border-b border-(--kwm-hl)">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+            § Activity Ledger
+          </span>
+          <span className="text-(--kwm-ink-dim)">·</span>
+          <span className="font-(family-name:--font-geist) text-[18px] font-semibold tracking-tight text-(--kwm-ink) tabular-nums leading-none">
+            {filtered.length}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) translate-y-[-2px]">
+            {filtered.length === 1 ? "trade" : "trades"}
+          </span>
+        </div>
 
-        <div className="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+        <div className="flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) tabular-nums">
           {/* Side filter */}
           <div className="inline-flex items-center gap-1">
             <span>Side</span>
@@ -116,7 +125,7 @@ export function ActivityLedger({
                   onClick={() => onSideFilterChange(side)}
                   className={cn(
                     "relative inline-grid place-items-center px-1.5 py-1 transition-colors",
-                    isActive ? "text-foreground" : "hover:text-foreground"
+                    isActive ? "text-(--kwm-ink)" : "hover:text-(--kwm-ink)"
                   )}
                 >
                   <span
@@ -140,33 +149,29 @@ export function ActivityLedger({
               );
             })}
           </div>
-
-          <span className="text-muted-foreground text-right min-w-22 tabular-nums">
-            {filtered.length} {filtered.length === 1 ? "trade" : "trades"}
-          </span>
         </div>
       </header>
 
       {marketFilterLabel && (
-        <div className="mb-3 inline-flex items-center self-start gap-2 px-2.5 py-1 border border-border/70 rounded-sm font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="mb-3 inline-flex items-center self-start gap-2 px-2.5 py-1 border border-(--kwm-hl-2)/70 rounded-sm font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
           <span>Filtered by market:</span>
-          <span className="text-foreground normal-case font-sans font-medium tracking-normal">
+          <span className="text-(--kwm-ink) normal-case font-sans font-medium tracking-normal">
             {marketFilterLabel}
           </span>
           <button
             type="button"
             onClick={() => onMarketFilterChange(null)}
             aria-label="Clear market filter"
-            className="text-muted-foreground hover:text-foreground transition-colors"
+            className="text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
           >
             ×
           </button>
         </div>
       )}
 
-      <div className="border-y border-border/60">
+      <div className="border-y border-(--kwm-hl-2)">
         {/* Column headers */}
-        <div className="hidden sm:grid grid-cols-[84px_minmax(0,1fr)_52px_minmax(0,1.5fr)_80px_64px_96px] gap-3 px-3 py-2 border-b border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="hidden sm:grid grid-cols-[84px_minmax(0,1fr)_52px_minmax(0,1.5fr)_80px_64px_96px] gap-3 px-3 py-2 border-b border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
           <HeaderCell
             label="Time"
             column="time"
@@ -195,7 +200,7 @@ export function ActivityLedger({
 
         {/* Rows */}
         {filtered.length === 0 ? (
-          <p className="py-10 px-3 text-center font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <p className="py-10 px-3 text-center font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
             No trades match these filters
           </p>
         ) : (
@@ -216,18 +221,18 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
   const marketHref = `/events/detail/${activity.market.eventSlug || activity.market.slug}`;
 
   return (
-    <div className="px-3 py-3 sm:py-2 border-b border-border/30 text-sm hover:bg-muted/40 transition-colors">
+    <div className="px-3 py-3 sm:py-2 border-b border-(--kwm-hl) text-sm hover:bg-(--kwm-bg-2) transition-colors">
       {/* Desktop: 7-column grid */}
       <div className="hidden sm:grid grid-cols-[84px_minmax(0,1fr)_52px_minmax(0,1.5fr)_80px_64px_96px] gap-3 items-center">
-        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+        <span className="font-mono text-[11px] tabular-nums text-(--kwm-ink-3)">
           {formatTimeAgo(activity.timestamp)}
         </span>
 
         <Link
           href={`/profile/${activity.trader.address}`}
-          className="flex items-center gap-2 min-w-0 hover:text-foreground group/wallet"
+          className="flex items-center gap-2 min-w-0 hover:text-(--kwm-ink) group/wallet"
         >
-          <div className="relative w-5 h-5 shrink-0 rounded-sm overflow-hidden bg-muted">
+          <div className="relative w-5 h-5 shrink-0 rounded-sm overflow-hidden bg-(--kwm-bg-3)">
             {activity.trader.profileImage ? (
               <Image
                 src={activity.trader.profileImage}
@@ -238,12 +243,12 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
                 unoptimized={isAnimatedImageUrl(activity.trader.profileImage)}
               />
             ) : (
-              <span className="w-full h-full flex items-center justify-center font-mono text-[8px] font-semibold text-foreground/40">
+              <span className="w-full h-full flex items-center justify-center font-mono text-[8px] font-semibold text-(--kwm-ink)/40">
                 {activity.trader.address.slice(2, 4).toUpperCase()}
               </span>
             )}
           </div>
-          <span className="truncate text-foreground font-medium">
+          <span className="truncate text-(--kwm-ink) font-medium">
             {display}
           </span>
         </Link>
@@ -253,7 +258,7 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
             "inline-flex items-center justify-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] rounded-sm w-fit",
             isBuy
               ? "bg-foreground text-background"
-              : "bg-background border border-foreground/60 text-foreground"
+              : "bg-(--kwm-panel) border border-(--kwm-ink)/60 text-(--kwm-ink)"
           )}
         >
           {activity.trade.side}
@@ -261,26 +266,26 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
 
         <Link
           href={marketHref}
-          className="truncate text-foreground/85 hover:text-foreground transition-colors"
+          className="truncate text-(--kwm-ink)/85 hover:text-(--kwm-ink) transition-colors"
           title={activity.market.title}
         >
           <span className="truncate block">{activity.market.title}</span>
           {activity.trade.outcome && (
-            <span className="block font-mono text-[10px] tabular-nums text-muted-foreground">
+            <span className="block font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
               {activity.trade.outcome}
             </span>
           )}
         </Link>
 
-        <span className="text-right font-mono tabular-nums text-foreground/80">
+        <span className="text-right font-mono tabular-nums text-(--kwm-ink-2)">
           {activity.trade.size.toFixed(0)}
         </span>
 
-        <span className="text-right font-mono tabular-nums text-foreground/80">
+        <span className="text-right font-mono tabular-nums text-(--kwm-ink-2)">
           {(activity.trade.price * 100).toFixed(0)}¢
         </span>
 
-        <span className="text-right font-mono tabular-nums font-semibold text-foreground">
+        <span className="text-right font-mono tabular-nums font-semibold text-(--kwm-ink)">
           {formatCurrencyCompact(activity.trade.usdcAmount)}
         </span>
       </div>
@@ -289,7 +294,7 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
       <div className="sm:hidden flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) tabular-nums">
               {formatTimeAgo(activity.timestamp)}
             </span>
             <span
@@ -297,13 +302,13 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
                 "inline-flex items-center justify-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] rounded-sm w-fit",
                 isBuy
                   ? "bg-foreground text-background"
-                  : "bg-background border border-foreground/60 text-foreground"
+                  : "bg-(--kwm-panel) border border-(--kwm-ink)/60 text-(--kwm-ink)"
               )}
             >
               {activity.trade.side}
             </span>
           </div>
-          <span className="font-mono tabular-nums font-semibold text-foreground">
+          <span className="font-mono tabular-nums font-semibold text-(--kwm-ink)">
             {formatCurrencyCompact(activity.trade.usdcAmount)}
           </span>
         </div>
@@ -312,7 +317,7 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
           href={`/profile/${activity.trader.address}`}
           className="flex items-center gap-2 min-w-0 group/wallet"
         >
-          <div className="relative w-5 h-5 shrink-0 rounded-sm overflow-hidden bg-muted">
+          <div className="relative w-5 h-5 shrink-0 rounded-sm overflow-hidden bg-(--kwm-bg-3)">
             {activity.trader.profileImage ? (
               <Image
                 src={activity.trader.profileImage}
@@ -323,12 +328,12 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
                 unoptimized={isAnimatedImageUrl(activity.trader.profileImage)}
               />
             ) : (
-              <span className="w-full h-full flex items-center justify-center font-mono text-[8px] font-semibold text-foreground/40">
+              <span className="w-full h-full flex items-center justify-center font-mono text-[8px] font-semibold text-(--kwm-ink)/40">
                 {activity.trader.address.slice(2, 4).toUpperCase()}
               </span>
             )}
           </div>
-          <span className="truncate text-foreground font-medium">
+          <span className="truncate text-(--kwm-ink) font-medium">
             {display}
           </span>
         </Link>
@@ -338,14 +343,14 @@ function ActivityRowItem({ activity }: { activity: WhaleActivity }) {
           className="block min-w-0"
           title={activity.market.title}
         >
-          <span className="block truncate text-foreground/85 hover:text-foreground transition-colors">
+          <span className="block truncate text-(--kwm-ink)/85 hover:text-(--kwm-ink) transition-colors">
             {activity.market.title}
           </span>
-          <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
             {activity.trade.outcome && (
               <span className="tabular-nums">
                 {activity.trade.outcome}{" "}
-                <span className="text-foreground/80">
+                <span className="text-(--kwm-ink-2)">
                   @ {(activity.trade.price * 100).toFixed(0)}¢
                 </span>
               </span>
@@ -382,9 +387,9 @@ function HeaderCell({
       type="button"
       onClick={() => onSort(column)}
       className={cn(
-        "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+        "inline-flex items-center gap-1 transition-colors hover:text-(--kwm-ink)",
         align === "right" && "justify-end",
-        isActive && "text-foreground"
+        isActive && "text-(--kwm-ink)"
       )}
     >
       <span>{label}</span>

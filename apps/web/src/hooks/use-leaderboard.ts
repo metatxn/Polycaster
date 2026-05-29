@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 /**
  * Leaderboard Hook
@@ -89,8 +90,7 @@ export function useLeaderboard(options: UseLeaderboardOptions = {}) {
   } = options;
 
   return useQuery({
-    queryKey: [
-      "leaderboard",
+    queryKey: qk.leaderboard({
       category,
       timePeriod,
       orderBy,
@@ -98,7 +98,7 @@ export function useLeaderboard(options: UseLeaderboardOptions = {}) {
       offset,
       user,
       userName,
-    ],
+    }),
     queryFn: () =>
       fetchLeaderboard({
         category,

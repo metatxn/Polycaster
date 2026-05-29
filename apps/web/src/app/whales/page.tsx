@@ -272,7 +272,7 @@ export default function WhalesPage() {
             />
 
             {isLoading && activities.length === 0 && (
-              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                 Fetching whale tape…
               </p>
             )}
@@ -287,7 +287,7 @@ export default function WhalesPage() {
             />
 
             {isLoading && sortedInsiders.length === 0 && (
-              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                 Scanning for suspicious activity…
               </p>
             )}

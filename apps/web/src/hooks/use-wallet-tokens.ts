@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 import { useTokenPrices } from "./use-token-prices";
 
 /**
@@ -294,7 +295,7 @@ export function useWalletTokens(options?: UseWalletTokensOptions) {
   } = useTokenPrices({ enabled });
 
   const query = useQuery({
-    queryKey: ["wallet-tokens", address],
+    queryKey: qk.wallet.tokens(address ?? ""),
     queryFn: () => {
       if (!address) {
         throw new Error("No address provided");

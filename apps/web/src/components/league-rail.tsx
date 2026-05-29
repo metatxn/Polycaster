@@ -85,9 +85,7 @@ function CountBadge({
     <span
       className={cn(
         "shrink-0 font-mono text-[12px] tabular-nums leading-none",
-        isLive
-          ? "text-emerald-600 dark:text-emerald-400"
-          : "text-muted-foreground/80"
+        isLive ? "text-(--kwm-up)" : "text-(--kwm-ink-3)"
       )}
     >
       {count}
@@ -152,8 +150,8 @@ function RailGroup({
         className={cn(
           "flex items-center justify-between gap-2 px-3 py-2 text-[14px] transition-colors",
           groupActive
-            ? "text-foreground bg-accent/40 font-medium"
-            : "text-muted-foreground/90 hover:text-foreground hover:bg-accent/20"
+            ? "text-(--kwm-ink) bg-(--kwm-bg-3) font-medium"
+            : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-2)"
         )}
       >
         <span className="truncate">{group.label}</span>
@@ -176,8 +174,8 @@ function RailGroup({
           className={cn(
             "w-full flex items-center justify-between gap-2 px-3 py-2 text-[14px] transition-colors",
             groupActive
-              ? "text-foreground bg-accent/40 font-medium"
-              : "text-muted-foreground/90 hover:text-foreground hover:bg-accent/20"
+              ? "text-(--kwm-ink) bg-(--kwm-bg-3) font-medium"
+              : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-2)"
           )}
         >
           <span className="flex items-center gap-2 min-w-0">
@@ -205,8 +203,8 @@ function RailGroup({
                 className={cn(
                   "flex items-center justify-between gap-2 pl-9 pr-3 py-1.5 text-[13px] transition-colors",
                   isActive
-                    ? "text-foreground bg-accent/40 font-medium"
-                    : "text-muted-foreground/90 hover:text-foreground hover:bg-accent/20"
+                    ? "text-(--kwm-ink) bg-(--kwm-bg-3) font-medium"
+                    : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-2)"
                 )}
               >
                 <span className="truncate">{league.label}</span>
@@ -278,10 +276,13 @@ export function LeagueRail({
   return (
     <aside
       aria-label="Sport categories"
-      className={cn("min-w-0 border border-border/60 bg-background", className)}
+      className={cn(
+        "min-w-0 border border-(--kwm-hl-2) bg-(--kwm-panel)",
+        className
+      )}
     >
-      <div className="px-3 py-2.5 border-b border-border/40">
-        <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/80">
+      <div className="px-3 py-2.5 border-b border-(--kwm-hl)">
+        <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
           Sports
         </p>
       </div>
@@ -293,12 +294,12 @@ export function LeagueRail({
           className={cn(
             "flex items-center justify-between gap-2 px-3 py-2 text-[14px] transition-colors",
             isLiveActive
-              ? "text-foreground bg-accent/40 font-medium"
-              : "text-muted-foreground/90 hover:text-foreground hover:bg-accent/20"
+              ? "text-(--kwm-ink) bg-(--kwm-bg-3) font-medium"
+              : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-2)"
           )}
         >
           <span className="flex items-center gap-2">
-            <Radio className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <Radio className="h-3.5 w-3.5 text-(--kwm-up)" />
             <span>Live</span>
           </span>
           <CountBadge count={data?.live} isLive />
@@ -374,7 +375,7 @@ export function LeagueRailMobile({
         }
       }}
       className={cn(
-        "w-full px-3 py-2 text-[13px] bg-background border border-border/60 text-foreground appearance-none",
+        "w-full px-3 py-2 text-[13px] bg-(--kwm-bg-2) border border-(--kwm-hl) text-(--kwm-ink) appearance-none",
         className
       )}
     >

@@ -626,11 +626,11 @@ export default function LiveMarketsPage() {
             >
               {/* Error */}
               {error && (
-                <div className="border-l-2 border-red-600 dark:border-red-400 pl-3 py-2 mb-6">
-                  <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-red-600 dark:text-red-400 mb-1">
+                <div className="border-l-2 border-(--kwm-down) pl-3 py-2 mb-6">
+                  <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-down) mb-1">
                     Feed Error
                   </p>
-                  <p className="text-sm text-foreground leading-snug">
+                  <p className="text-sm text-(--kwm-ink) leading-snug">
                     {error?.message || "Unable to load live markets"}
                   </p>
                 </div>
@@ -665,14 +665,14 @@ export default function LiveMarketsPage() {
 
               {/* No live events */}
               {!error && !isLoading && liveEventCount === 0 && (
-                <div className="py-16 text-center border-y border-border/40">
-                  <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 mb-3">
+                <div className="py-16 text-center border-y border-(--kwm-hl)">
+                  <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) mb-3">
                     No Live Events
                   </p>
-                  <p className="font-editorial italic text-xl text-foreground max-w-md mx-auto leading-snug">
+                  <p className="font-editorial italic text-xl text-(--kwm-ink) max-w-md mx-auto leading-snug">
                     Nothing live right now.
                   </p>
-                  <p className="text-sm text-muted-foreground mt-3 max-w-md mx-auto">
+                  <p className="text-sm text-(--kwm-ink-3) mt-3 max-w-md mx-auto">
                     Check back when games tip off, or browse the upcoming
                     schedule below.
                   </p>
@@ -731,14 +731,14 @@ export default function LiveMarketsPage() {
                 />
               </ErrorBoundary>
             ) : (
-              <div className="border-y border-border/40 py-10 text-center">
-                <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 mb-2">
+              <div className="border-y border-(--kwm-hl) py-10 text-center">
+                <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) mb-2">
                   Trade Panel
                 </p>
-                <p className="font-editorial italic text-lg text-foreground max-w-[260px] mx-auto leading-snug">
+                <p className="font-editorial italic text-lg text-(--kwm-ink) max-w-[260px] mx-auto leading-snug">
                   Pick a market to open the ticket.
                 </p>
-                <p className="text-xs text-muted-foreground mt-2 max-w-[240px] mx-auto">
+                <p className="text-xs text-(--kwm-ink-3) mt-2 max-w-[240px] mx-auto">
                   Tap any event or price on the left and the order book opens
                   here.
                 </p>
@@ -749,17 +749,17 @@ export default function LiveMarketsPage() {
 
         {/* Mobile: bottom sheet trade bar */}
         {selectedMarket && tradingOutcomes.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border/60 lg:hidden z-50">
+          <div className="fixed bottom-0 left-0 right-0 bg-(--kwm-bg)/95 backdrop-blur-md border-t border-(--kwm-hl-2) lg:hidden z-50">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex-1 min-w-0">
-                <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+                <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
                   {tradingOutcomes[selectedOutcomeIndex]?.name} ·{" "}
                   {Math.round(
                     (tradingOutcomes[selectedOutcomeIndex]?.price ?? 0) * 100
                   )}
                   ¢
                 </p>
-                <p className="text-sm font-medium text-foreground truncate mt-0.5">
+                <p className="text-sm font-medium text-(--kwm-ink) truncate mt-0.5">
                   {selectedMarket.marketTitle}
                 </p>
               </div>
@@ -767,13 +767,13 @@ export default function LiveMarketsPage() {
                 <button
                   type="button"
                   onClick={handleCloseTradePanel}
-                  className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 hover:text-foreground transition-colors underline underline-offset-4 decoration-border"
+                  className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors underline underline-offset-4 decoration-(--kwm-hl)"
                 >
                   Dismiss
                 </button>
                 <a
                   href={`/events/detail/${selectedMarket.eventSlug || selectedMarket.eventId}`}
-                  className="inline-flex items-center h-10 px-4 bg-foreground text-background font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-foreground/90 transition-colors"
+                  className="inline-flex items-center h-10 px-4 rounded-md bg-(--kwm-ink) text-(--kwm-bg) font-mono text-[12px] uppercase tracking-[0.08em] hover:opacity-90 transition-opacity"
                 >
                   Trade
                 </a>

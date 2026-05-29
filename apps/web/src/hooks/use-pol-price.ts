@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 interface PolPriceResponse {
   price: number;
@@ -11,7 +12,7 @@ interface PolPriceResponse {
 
 export function usePolPrice() {
   return useQuery<PolPriceResponse>({
-    queryKey: ["pol-price"],
+    queryKey: qk.wallet.polPrice(),
     queryFn: async () => {
       const response = await fetch("/api/price/pol");
       if (!response.ok) {

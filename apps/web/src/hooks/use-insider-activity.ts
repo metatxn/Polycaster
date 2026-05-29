@@ -8,6 +8,7 @@ import type {
 } from "@/lib/insider/archetypes/types";
 import type { WalletFunding } from "@/lib/insider/funding-source";
 import type { SafeOwners } from "@/lib/insider/safe-owner";
+import { qk } from "@/lib/query-keys";
 
 export interface SuspicionFactor {
   name: string;
@@ -192,14 +193,13 @@ export function useInsiderActivity(options: UseInsiderActivityOptions = {}) {
   } = options;
 
   return useQuery<SuspiciousActivityResponse, Error>({
-    queryKey: [
-      "insiderActivity",
+    queryKey: qk.whales.insiders({
       maxAccountAge,
       minUsdValue,
       minShares,
       minScore,
       limit,
-    ],
+    }),
     queryFn: () =>
       fetchInsiderActivity({
         maxAccountAge,

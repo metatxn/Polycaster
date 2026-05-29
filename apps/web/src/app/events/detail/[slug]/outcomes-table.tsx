@@ -257,12 +257,6 @@ function MarketExpandedContent({
                   Position
                 </TabsTrigger>
               )}
-              {hasHistory && (
-                <TabsTrigger value="history" className={tabTriggerClass}>
-                  <History className="h-3.5 w-3.5 mr-2 inline-block" />
-                  History
-                </TabsTrigger>
-              )}
               <TabsTrigger value="orderbook" className={tabTriggerClass}>
                 <BookOpen className="h-3.5 w-3.5 mr-2 inline-block" />
                 Order Book
@@ -272,6 +266,12 @@ function MarketExpandedContent({
                 <TabsTrigger value="graph" className={tabTriggerClass}>
                   <LineChart className="h-3.5 w-3.5 mr-2 inline-block" />
                   Graph
+                </TabsTrigger>
+              )}
+              {hasHistory && (
+                <TabsTrigger value="history" className={tabTriggerClass}>
+                  <History className="h-3.5 w-3.5 mr-2 inline-block" />
+                  History
                 </TabsTrigger>
               )}
               {/* Top Holders Tab */}
@@ -793,7 +793,7 @@ function OutcomeTradeButton({
     >
       <span
         className={cn(
-          "shrink-0 border-l-[3px] pl-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] xl:text-[11px]",
+          "shrink-0 border-l-[3px] pl-2 font-mono text-[10px] font-semibold uppercase tracking-widest xl:text-[11px]",
           selected ? "border-(--kwm-bg)/70" : accentClassName
         )}
       >

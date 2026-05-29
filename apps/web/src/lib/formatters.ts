@@ -32,7 +32,11 @@ export function formatPrice(price: string | number) {
 export function formatCurrency(value: number, showSign = false): string {
   const absValue = Math.abs(value);
   const sign = value < 0 ? "-" : value > 0 && showSign ? "+" : "";
-  return `${sign}$${absValue.toFixed(2)}`;
+  const formatted = absValue.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${sign}$${formatted}`;
 }
 
 /**

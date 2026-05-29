@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { TokenPricesResponse } from "@/app/api/price/tokens/route";
+import { qk } from "@/lib/query-keys";
 
 /**
  * Default/fallback prices for when API is unavailable
@@ -128,7 +129,7 @@ export function useTokenPrices(
   const { enabled = true } = options ?? {};
 
   const query = useQuery({
-    queryKey: TOKEN_PRICES_QUERY_KEY,
+    queryKey: qk.tokenPrices(),
     queryFn: fetchTokenPrices,
     enabled,
     // Match the server-side cache duration

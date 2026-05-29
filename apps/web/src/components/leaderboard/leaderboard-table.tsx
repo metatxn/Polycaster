@@ -29,7 +29,7 @@ interface LeaderboardTableProps {
  *  without resorting to gradient badges. */
 function rankAccentClass(rank: number): string {
   if (rank === 1) return "after:bg-yellow-500/70";
-  if (rank === 2) return "after:bg-muted-foreground/50";
+  if (rank === 2) return "after:bg-(--kwm-ink-3)/60";
   if (rank === 3) return "after:bg-amber-600/70";
   return "after:bg-transparent";
 }
@@ -51,6 +51,12 @@ function displayName(trader: LeaderboardTrader): string {
     return formatAddress(trader.proxyWallet);
   }
   return trader.userName;
+}
+
+/** True when the visible display name IS the wallet, so we don't render the
+ *  same shortened address twice (display name + address subtitle). */
+function nameIsAddress(trader: LeaderboardTrader): boolean {
+  return !trader.userName || isRawAddressLike(trader.userName);
 }
 
 function getInitials(name: string | null, _address: string) {
@@ -80,10 +86,10 @@ function CopyButton({ text }: { text: string }) {
         <button
           type="button"
           onClick={handleCopy}
-          className="p-1 text-muted-foreground/70 hover:text-foreground transition-colors"
+          className="p-1 text-(--kwm-ink-3)/70 hover:text-(--kwm-ink) transition-colors"
         >
           {copied ? (
-            <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+            <Check className="h-3 w-3 text-(--kwm-up)" />
           ) : (
             <Copy className="h-3 w-3" />
           )}
@@ -112,7 +118,7 @@ export function LeaderboardTable({
         {[...Array(10)].map((_, i) => (
           <div
             key={`skeleton-${i}`}
-            className="flex items-center gap-4 px-3 py-4 border-b border-border/40"
+            className="flex items-center gap-4 px-3 py-4 border-b border-(--kwm-hl)"
           >
             <Skeleton className="h-5 w-8" />
             <Skeleton className="h-9 w-9 rounded-sm" />
@@ -129,11 +135,11 @@ export function LeaderboardTable({
 
   if (traders.length === 0) {
     return (
-      <div className="text-center py-16 border-t border-border/40">
-        <p className="font-editorial italic text-xl text-muted-foreground mb-2">
+      <div className="text-center py-16 border-t border-(--kwm-hl)">
+        <p className="font-editorial italic text-xl text-(--kwm-ink-3) mb-2">
           No traders found
         </p>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-(--kwm-ink-3)">
           Try adjusting your filters.
         </p>
       </div>
@@ -145,13 +151,13 @@ export function LeaderboardTable({
       {/* Desktop Table — editorial hairline rows */}
       <div className="hidden md:block">
         {/* Column headers */}
-        <div className="grid grid-cols-[64px_minmax(0,1fr)_160px_160px_64px] items-center gap-3 px-3 py-2.5 border-y border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="grid grid-cols-[64px_minmax(0,1fr)_160px_160px_64px] items-center gap-3 px-3 py-2.5 border-y border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
           <span className="text-left">Rank</span>
           <span>Trader</span>
           <span
             className={cn(
               "text-right tabular-nums",
-              orderBy === "VOL" && "text-foreground font-semibold"
+              orderBy === "VOL" && "text-(--kwm-ink) font-semibold"
             )}
           >
             Volume
@@ -159,7 +165,7 @@ export function LeaderboardTable({
           <span
             className={cn(
               "text-right tabular-nums",
-              orderBy === "PNL" && "text-foreground font-semibold"
+              orderBy === "PNL" && "text-(--kwm-ink) font-semibold"
             )}
           >
             P&L
@@ -191,9 +197,9 @@ export function LeaderboardTable({
                 }
               }}
               className={cn(
-                "leaderboard-row group w-full grid grid-cols-[64px_minmax(0,1fr)_160px_160px_64px] items-center gap-3 px-3 py-3.5 border-b border-border/40 text-left transition-colors",
-                "hover:bg-muted/40 cursor-pointer focus:outline-none focus-visible:bg-muted/40",
-                isHighlighted && "bg-muted/30"
+                "leaderboard-row group w-full grid grid-cols-[64px_minmax(0,1fr)_160px_160px_64px] items-center gap-3 px-3 py-3.5 border-b border-(--kwm-hl) text-left transition-colors",
+                "hover:bg-(--kwm-bg-2) cursor-pointer focus:outline-none focus-visible:bg-(--kwm-bg-2)",
+                isHighlighted && "bg-(--kwm-bg-2)"
               )}
             >
               <div
@@ -205,7 +211,7 @@ export function LeaderboardTable({
               >
                 <span
                   className={cn(
-                    "font-mono tabular-nums text-foreground",
+                    "font-mono tabular-nums text-(--kwm-ink)",
                     rank <= 3 ? "text-xl font-semibold" : "text-sm"
                   )}
                 >
@@ -214,7 +220,7 @@ export function LeaderboardTable({
               </div>
 
               <div className="flex items-center gap-3 min-w-0">
-                <Avatar className="h-9 w-9 rounded-sm border border-border/50 shrink-0">
+                <Avatar className="h-9 w-9 rounded-sm border border-(--kwm-hl) shrink-0">
                   {trader.profileImage && (
                     <AvatarImage
                       src={trader.profileImage}
@@ -222,29 +228,31 @@ export function LeaderboardTable({
                       className="rounded-sm"
                     />
                   )}
-                  <AvatarFallback className="rounded-sm bg-muted font-mono text-[10px] uppercase tracking-[0.1em] text-foreground/80">
+                  <AvatarFallback className="rounded-sm bg-(--kwm-bg-3) font-mono text-[10px] uppercase tracking-widest text-(--kwm-ink-2)">
                     {getInitials(trader.userName, trader.proxyWallet)}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex flex-col min-w-0">
                   <div className="flex items-center gap-1">
-                    <span className="truncate text-sm font-medium text-foreground">
+                    <span className="truncate text-sm font-medium text-(--kwm-ink)">
                       {displayName(trader)}
                     </span>
                     {trader.verifiedBadge && (
-                      <BadgeCheck className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                      <BadgeCheck className="h-3.5 w-3.5 text-(--kwm-accent) shrink-0" />
                     )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                      {formatAddress(trader.proxyWallet)}
-                    </span>
-                    <CopyButton text={trader.proxyWallet} />
-                  </div>
+                  {!nameIsAddress(trader) && (
+                    <div className="flex items-center gap-1">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
+                        {formatAddress(trader.proxyWallet)}
+                      </span>
+                      <CopyButton text={trader.proxyWallet} />
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="text-right font-mono tabular-nums text-sm text-foreground">
+              <div className="text-right font-mono tabular-nums text-sm text-(--kwm-ink)">
                 {formatCurrency(trader.vol)}
               </div>
 
@@ -252,12 +260,9 @@ export function LeaderboardTable({
                 <span
                   className={cn(
                     "font-mono tabular-nums text-sm font-semibold whitespace-nowrap",
-                    isProfitable
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-red-600 dark:text-red-400"
+                    isProfitable ? "text-(--kwm-up)" : "text-(--kwm-down)"
                   )}
                 >
-                  {isProfitable ? "+" : ""}
                   {formatCurrency(trader.pnl)}
                 </span>
               </div>
@@ -271,7 +276,7 @@ export function LeaderboardTable({
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center justify-center w-7 h-7 text-muted-foreground hover:text-foreground transition-colors"
+                        className="inline-flex items-center justify-center w-7 h-7 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                       </Link>
@@ -279,7 +284,7 @@ export function LeaderboardTable({
                     <TooltipContent>@{trader.xUsername}</TooltipContent>
                   </Tooltip>
                 ) : (
-                  <span className="text-muted-foreground/60">—</span>
+                  <span className="text-(--kwm-ink-3)/60">—</span>
                 )}
               </div>
             </motion.div>
@@ -288,7 +293,7 @@ export function LeaderboardTable({
       </div>
 
       {/* Mobile List — same hairline rows, no cards */}
-      <div className="md:hidden border-t border-border/40">
+      <div className="md:hidden border-t border-(--kwm-hl)">
         {traders.map((trader, index) => {
           const rank = Number.parseInt(trader.rank, 10);
           const isHighlighted =
@@ -313,9 +318,9 @@ export function LeaderboardTable({
                 }
               }}
               className={cn(
-                "leaderboard-row group w-full flex items-start gap-3 px-2 py-3 border-b border-border/40 text-left cursor-pointer",
-                "active:bg-muted/40 focus:outline-none focus-visible:bg-muted/40",
-                isHighlighted && "bg-muted/30"
+                "leaderboard-row group w-full flex items-start gap-3 px-2 py-3 border-b border-(--kwm-hl) text-left cursor-pointer",
+                "active:bg-(--kwm-bg-2) focus:outline-none focus-visible:bg-(--kwm-bg-2)",
+                isHighlighted && "bg-(--kwm-bg-2)"
               )}
             >
               <div
@@ -327,7 +332,7 @@ export function LeaderboardTable({
               >
                 <span
                   className={cn(
-                    "font-mono tabular-nums text-foreground block",
+                    "font-mono tabular-nums text-(--kwm-ink) block",
                     rank <= 3 ? "text-lg font-semibold" : "text-sm"
                   )}
                 >
@@ -335,7 +340,7 @@ export function LeaderboardTable({
                 </span>
               </div>
 
-              <Avatar className="h-10 w-10 rounded-sm border border-border/50 shrink-0">
+              <Avatar className="h-10 w-10 rounded-sm border border-(--kwm-hl) shrink-0">
                 {trader.profileImage && (
                   <AvatarImage
                     src={trader.profileImage}
@@ -343,7 +348,7 @@ export function LeaderboardTable({
                     className="rounded-sm"
                   />
                 )}
-                <AvatarFallback className="rounded-sm bg-muted font-mono text-[11px] uppercase tracking-[0.1em] text-foreground/80">
+                <AvatarFallback className="rounded-sm bg-(--kwm-bg-3) font-mono text-[11px] uppercase tracking-widest text-(--kwm-ink-2)">
                   {getInitials(trader.userName, trader.proxyWallet)}
                 </AvatarFallback>
               </Avatar>
@@ -354,28 +359,27 @@ export function LeaderboardTable({
                     {displayName(trader)}
                   </span>
                   {trader.verifiedBadge && (
-                    <BadgeCheck className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                    <BadgeCheck className="h-3.5 w-3.5 text-(--kwm-accent) shrink-0" />
                   )}
                 </div>
-                <div className="flex items-center gap-1 mb-2">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                    {formatAddress(trader.proxyWallet)}
-                  </span>
-                  <CopyButton text={trader.proxyWallet} />
-                </div>
+                {!nameIsAddress(trader) && (
+                  <div className="flex items-center gap-1 mb-2">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
+                      {formatAddress(trader.proxyWallet)}
+                    </span>
+                    <CopyButton text={trader.proxyWallet} />
+                  </div>
+                )}
                 <div className="flex items-center gap-4 font-mono tabular-nums text-xs">
-                  <span className="text-foreground">
+                  <span className="text-(--kwm-ink)">
                     {formatCurrency(trader.vol)}
                   </span>
                   <span
                     className={cn(
                       "font-semibold",
-                      isProfitable
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-red-600 dark:text-red-400"
+                      isProfitable ? "text-(--kwm-up)" : "text-(--kwm-down)"
                     )}
                   >
-                    {isProfitable ? "+" : ""}
                     {formatCurrency(trader.pnl)}
                   </span>
                 </div>
@@ -387,7 +391,7 @@ export function LeaderboardTable({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="shrink-0 inline-flex items-center justify-center w-7 h-7 text-muted-foreground hover:text-foreground transition-colors"
+                  className="shrink-0 inline-flex items-center justify-center w-7 h-7 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </Link>

@@ -1,6 +1,6 @@
 import { formatOrderExpiration } from "@knoww/shared-types/orders";
 import { motion } from "framer-motion";
-import { Coins, Loader2, X } from "lucide-react";
+import { Coins, Loader2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -264,7 +264,7 @@ export function OrdersTable({
                   type="button"
                   onClick={() => onCancel(order.id)}
                   disabled={isCancelling}
-                  className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60 disabled:opacity-50"
                 >
                   {isCancelling ? (
                     <>
@@ -272,10 +272,7 @@ export function OrdersTable({
                       <span>Cancelling</span>
                     </>
                   ) : (
-                    <>
-                      <X className="h-3 w-3" />
-                      <span>Cancel</span>
-                    </>
+                    <span>Cancel</span>
                   )}
                 </button>
               </div>
@@ -387,10 +384,7 @@ export function OrdersTable({
                       <span>Cancelling</span>
                     </>
                   ) : (
-                    <>
-                      <X className="h-3 w-3" />
-                      <span>Cancel</span>
-                    </>
+                    <span>Cancel</span>
                   )}
                 </button>
               </div>

@@ -43,18 +43,76 @@ interface DetailRowProps {
 
 function DetailRow({ label, children, muted }: DetailRowProps) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-2.5 border-b border-border/40">
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground shrink-0">
+    <div className="flex items-baseline justify-between gap-4 py-2 border-b border-(--kwm-hl) last:border-b-0">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) shrink-0">
         {label}
       </span>
       <span
         className={cn(
           "font-mono text-xs tabular-nums text-right min-w-0 truncate",
-          muted ? "text-muted-foreground" : "text-foreground"
+          muted ? "text-(--kwm-ink-dim)" : "text-(--kwm-ink)"
         )}
       >
         {children}
       </span>
+    </div>
+  );
+}
+
+/**
+ * Accent note — small bordered+tinted callout used for advisories
+ * (info / warn / error / success). Theme-safe via the `--kwm-*` signal
+ * tokens.
+ */
+function AccentNote({
+  tone,
+  caption,
+  children,
+}: {
+  tone: "info" | "warn" | "error" | "success";
+  caption: string;
+  children: React.ReactNode;
+}) {
+  const palette = {
+    info: {
+      border: "border-(--kwm-accent)/40",
+      bg: "bg-(--kwm-accent-soft)",
+      text: "text-(--kwm-accent)",
+    },
+    warn: {
+      border: "border-(--kwm-warn-border)",
+      bg: "bg-(--kwm-warn-soft)",
+      text: "text-(--kwm-warn)",
+    },
+    error: {
+      border: "border-(--kwm-down)/40",
+      bg: "bg-(--kwm-down-soft)",
+      text: "text-(--kwm-down)",
+    },
+    success: {
+      border: "border-(--kwm-up-border)",
+      bg: "bg-(--kwm-up-soft)",
+      text: "text-(--kwm-up)",
+    },
+  }[tone];
+
+  return (
+    <div
+      className={cn(
+        "mt-4 px-3 py-2 border rounded-md",
+        palette.border,
+        palette.bg
+      )}
+    >
+      <p
+        className={cn(
+          "font-mono text-[10px] uppercase tracking-[0.14em] mb-1 tabular-nums",
+          palette.text
+        )}
+      >
+        {caption}
+      </p>
+      <p className="text-sm text-(--kwm-ink) leading-snug">{children}</p>
     </div>
   );
 }
@@ -100,38 +158,38 @@ export function Confirmation({
       {selectedMethod === "bridge" && selectedBridgeAsset ? (
         <>
           {/* Headline */}
-          <div className="flex flex-col items-center py-6 border-y border-border/40 mb-5">
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+          <div className="flex flex-col items-center py-5 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-2">
               {selectedBridgeAsset.chainName}
             </span>
-            <span className="text-2xl font-semibold leading-none text-foreground">
+            <span className="text-2xl font-semibold leading-none text-(--kwm-ink) tracking-tight">
               Deposit {selectedBridgeAsset.token.symbol}
             </span>
           </div>
 
           {isProcessing ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin text-(--kwm-ink-3)" />
             </div>
           ) : bridgeAddress ? (
             <>
               {/* Address block */}
-              <div className="border-y border-border/40 py-4 mb-5">
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-2">
+              <div className="mt-4 px-3.5 py-3 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-2">
                   Send {selectedBridgeAsset.token.symbol} to
                 </p>
                 <div className="flex items-start gap-3">
-                  <code className="flex-1 font-mono text-xs break-all text-foreground leading-relaxed">
+                  <code className="flex-1 font-mono text-xs break-all text-(--kwm-ink) leading-relaxed">
                     {bridgeAddress}
                   </code>
                   <button
                     type="button"
                     onClick={onCopy}
-                    className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                    className="shrink-0 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
                     aria-label="Copy address"
                   >
                     {copied ? (
-                      <Check className="h-4 w-4 text-emerald-500" />
+                      <Check className="h-4 w-4 text-(--kwm-up)" />
                     ) : (
                       <Copy className="h-4 w-4" />
                     )}
@@ -143,40 +201,37 @@ export function Confirmation({
               <button
                 type="button"
                 onClick={onCopy}
-                className="w-full h-12 bg-foreground text-background font-mono text-[11px] uppercase tracking-[0.18em] hover:bg-foreground/90 transition-colors"
+                className="mt-4 w-full h-11 rounded-md bg-(--kwm-ink) text-(--kwm-bg) font-mono text-[11px] uppercase tracking-[0.18em] font-semibold hover:opacity-90 transition-colors"
               >
                 {copied ? "Address Copied" : "Copy Deposit Address"}
               </button>
 
-              {/* Min warning — border-l accent */}
-              <div className="border-l-2 border-amber-500 pl-3 py-2 mt-5">
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-500 mb-1 tabular-nums">
-                  Minimum · ${selectedBridgeAsset.minCheckoutUsd}
-                </p>
-                <p className="text-sm text-foreground leading-snug">
-                  Assets will be converted to pUSD on Polygon — Polymarket's V2
-                  trading token.
-                </p>
-              </div>
+              <AccentNote
+                tone="warn"
+                caption={`Minimum · $${selectedBridgeAsset.minCheckoutUsd}`}
+              >
+                Assets will be converted to pUSD on Polygon — Polymarket's V2
+                trading token.
+              </AccentNote>
             </>
           ) : (
-            <div className="py-12 text-center text-sm text-muted-foreground">
+            <div className="py-12 text-center text-sm text-(--kwm-ink-3)">
               Failed to get deposit address. Please try again.
             </div>
           )}
         </>
       ) : selectedToken ? (
         <>
-          {/* Headline amount */}
-          <div className="flex flex-col items-center py-6 border-y border-border/40 mb-5">
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+          {/* Headline amount — clean Geist sans (no italic Fraunces) */}
+          <div className="flex flex-col items-center py-5 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-2">
               You Deposit
             </span>
-            <div className="flex items-baseline gap-0.5">
-              <span className="font-editorial italic text-4xl leading-none text-muted-foreground">
+            <div className="flex items-baseline gap-0.5 font-(family-name:--font-geist) font-semibold tracking-tight">
+              <span className="text-3xl leading-none text-(--kwm-ink-3)">
                 $
               </span>
-              <span className="font-editorial italic text-5xl leading-none text-foreground tabular-nums">
+              <span className="text-4xl leading-none text-(--kwm-ink) tabular-nums">
                 {Number.parseFloat(amount || "0").toFixed(2)}
               </span>
             </div>
@@ -184,19 +239,14 @@ export function Confirmation({
 
           {/* Bridge advisory */}
           {selectedToken.symbol !== "pUSD" && (
-            <div className="border-l-2 border-blue-500 pl-3 py-2 mb-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-blue-500 mb-1">
-                Auto-Conversion
-              </p>
-              <p className="text-sm text-foreground leading-snug">
-                Your {selectedToken.symbol} routes through Polymarket Bridge and
-                lands as pUSD on Polygon.
-              </p>
-            </div>
+            <AccentNote tone="info" caption="Auto-Conversion">
+              Your {selectedToken.symbol} routes through Polymarket Bridge and
+              lands as pUSD on Polygon.
+            </AccentNote>
           )}
 
           {/* Route detail */}
-          <div className="border-t border-border/40">
+          <div className="mt-4 px-3.5 py-1 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
             <DetailRow label="Source">
               Wallet · {address ? formatAddress(address) : "—"}
             </DetailRow>
@@ -206,7 +256,7 @@ export function Confirmation({
           </div>
 
           {/* Breakdown */}
-          <div className="mt-5 border-t border-border/40">
+          <div className="mt-3 px-3.5 py-1 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
             <DetailRow label="You Send">
               {amount} {selectedToken.symbol}
             </DetailRow>
@@ -258,81 +308,61 @@ export function Confirmation({
 
           {/* Error */}
           {depositError && (
-            <div className="border-l-2 border-red-500 pl-3 py-2 mt-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-red-500 mb-1">
-                Transaction Failed
-              </p>
-              <p className="text-sm text-foreground leading-snug">
-                {depositError.length > 150
-                  ? `${depositError.slice(0, 150)}…`
-                  : depositError}
-              </p>
-            </div>
+            <AccentNote tone="error" caption="Transaction Failed">
+              {depositError.length > 150
+                ? `${depositError.slice(0, 150)}…`
+                : depositError}
+            </AccentNote>
           )}
 
           {/* No bridge address */}
           {!bridgeAddress && !isProcessing && (
-            <div className="border-l-2 border-amber-500 pl-3 py-2 mt-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-500 mb-1">
-                Bridge Address Missing
-              </p>
-              <p className="text-sm text-foreground leading-snug">
-                Go back and try again.
-              </p>
-            </div>
+            <AccentNote tone="warn" caption="Bridge Address Missing">
+              Go back and try again.
+            </AccentNote>
           )}
 
           {/* Bridge pending */}
           {isOnChainConfirmed && isConfirming && !isConfirmed && (
-            <div className="border-l-2 border-blue-500 pl-3 py-2 mt-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-blue-500 mb-1">
-                On-Chain Confirmed
-              </p>
-              <p className="text-sm text-foreground leading-snug">
-                Waiting for the bridge to credit pUSD to your Polymarket wallet.
-              </p>
-            </div>
+            <AccentNote tone="info" caption="On-Chain Confirmed">
+              Waiting for the bridge to credit pUSD to your Polymarket wallet.
+            </AccentNote>
           )}
 
           {/* Done */}
           {isConfirmed && (
-            <div className="border-l-2 border-emerald-500 pl-3 py-2 mt-5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-emerald-500 mb-1">
-                Deposit Complete
-              </p>
-              <p className="text-sm text-foreground leading-snug">
-                pUSD has been credited to your Polymarket wallet.
-              </p>
-            </div>
+            <AccentNote tone="success" caption="Deposit Complete">
+              pUSD has been credited to your Polymarket wallet.
+            </AccentNote>
           )}
 
           {/* Bridge tracking */}
           {(isOnChainConfirmed || isConfirmed) &&
           depositTransactions &&
           depositTransactions.length > 0 ? (
-            <div className="mt-5 border-t border-border/40">
-              <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <div className="mt-4 px-3.5 py-2 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
+              <div className="flex items-center justify-between py-1.5 border-b border-(--kwm-hl)">
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                   Bridge Status
                 </span>
                 {isLoadingDepositStatus ? (
-                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                  <Loader2 className="h-3 w-3 animate-spin text-(--kwm-ink-3)" />
                 ) : null}
               </div>
               {depositTransactions.slice(0, 3).map((tx, index) => {
                 const statusDisplay = getDepositStatusDisplay(tx.status);
                 const toneClass =
                   statusDisplay.tone === "success"
-                    ? "text-emerald-500"
+                    ? "text-(--kwm-up)"
                     : statusDisplay.tone === "error"
-                      ? "text-red-500"
+                      ? "text-(--kwm-down)"
                       : statusDisplay.tone === "warn"
-                        ? "text-amber-500"
-                        : "text-blue-500";
+                        ? "text-(--kwm-warn)"
+                        : "text-(--kwm-accent)";
                 return (
                   <div
                     key={`${tx.fromAmountBaseUnit}-${tx.createdTimeMs || index}`}
-                    className="flex items-center justify-between py-2 border-b border-border/40"
+                    className="flex items-center justify-between py-2 border-b border-(--kwm-hl) last:border-b-0"
                   >
                     <span
                       className={cn(
@@ -342,7 +372,7 @@ export function Confirmation({
                     >
                       {statusDisplay.text}
                     </span>
-                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                    <span className="font-mono text-xs tabular-nums text-(--kwm-ink-3)">
                       {(Number(tx.fromAmountBaseUnit) / 1e6).toFixed(2)} USDC
                     </span>
                   </div>
@@ -352,14 +382,14 @@ export function Confirmation({
           ) : null}
 
           {/* Terms */}
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground text-center mt-6 mb-4">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-dim) text-center mt-5 mb-3">
             By confirming you agree to our{" "}
-            <span className="text-foreground cursor-pointer underline underline-offset-4 decoration-border">
+            <span className="text-(--kwm-ink-3) cursor-pointer underline underline-offset-4 decoration-(--kwm-hl)">
               Terms
             </span>
           </p>
 
-          {/* Confirm — decisive emerald */}
+          {/* Confirm — green when actionable, neutral disabled */}
           <button
             type="button"
             onClick={onDeposit}
@@ -373,17 +403,17 @@ export function Confirmation({
               isConfirmed
             }
             className={cn(
-              "w-full h-12 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors",
+              "w-full h-11 rounded-md font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors",
               isConfirmed
-                ? "bg-emerald-500/20 text-emerald-500 cursor-default"
+                ? "bg-(--kwm-up-soft) text-(--kwm-up) cursor-default border border-(--kwm-up-border)"
                 : !bridgeAddress ||
                     !isWalletReady ||
                     isProcessing ||
                     isPending ||
                     isConfirming ||
                     isOnChainConfirmed
-                  ? "bg-muted text-muted-foreground cursor-not-allowed"
-                  : "bg-emerald-500 text-white hover:bg-emerald-600"
+                  ? "bg-(--kwm-bg-3) text-(--kwm-ink-dim) cursor-not-allowed border border-(--kwm-hl)"
+                  : "bg-(--kwm-up) text-(--kwm-bg) hover:opacity-90"
             )}
           >
             {isPending ? (

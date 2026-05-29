@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 export interface TagDetails {
   id: string;
@@ -50,7 +51,7 @@ async function fetchTagDetails(
  */
 export function useTagDetails(slug: string | undefined) {
   return useQuery({
-    queryKey: ["tag", "details", slug],
+    queryKey: qk.tags.details(slug ?? ""),
     queryFn: () => fetchTagDetails(slug),
     enabled: !!slug,
     staleTime: 60 * 60 * 1000, // 1 hour (tags rarely change)

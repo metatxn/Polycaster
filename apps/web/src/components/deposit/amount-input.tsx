@@ -42,13 +42,13 @@ export function AmountInput({
       exit={{ opacity: 0, x: -20 }}
       className="flex flex-col"
     >
-      {/* Amount Display — Fraunces italic tabular-nums */}
-      <div className="flex flex-col items-center py-8 border-y border-border/40">
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+      {/* Amount Display — clean Geist tabular-nums (no italic Fraunces) */}
+      <div className="flex flex-col items-center py-7 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2)">
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-3">
           You Deposit
         </span>
         <div className="flex items-baseline gap-1">
-          <span className="font-editorial italic text-5xl leading-none text-muted-foreground">
+          <span className="font-(family-name:--font-geist) text-4xl leading-none text-(--kwm-ink-3) font-medium tracking-tight">
             $
           </span>
           <input
@@ -59,101 +59,103 @@ export function AmountInput({
               onAmountChange(val);
             }}
             placeholder="0.00"
-            className="font-editorial italic text-5xl leading-none text-foreground bg-transparent border-none outline-none w-44 text-center tabular-nums placeholder:text-muted-foreground/40"
+            className="font-(family-name:--font-geist) text-4xl leading-none text-(--kwm-ink) bg-transparent border-none outline-none w-44 text-center tabular-nums placeholder:text-(--kwm-ink-dim) font-medium tracking-tight"
           />
         </div>
       </div>
 
-      {/* Percent strip — underline-active pattern */}
-      <div className="flex items-center justify-center gap-6 sm:gap-8 py-4">
+      {/* Percent strip — small ghost buttons */}
+      <div className="grid grid-cols-4 gap-2 mt-3">
         {PERCENTAGES.map((p) => (
           <button
             key={p.value}
             type="button"
             onClick={() => onPercentage(p.value)}
-            className="font-mono text-[11px] uppercase tracking-[0.14em] leading-none text-muted-foreground hover:text-foreground transition-colors"
+            className="h-8 px-3 rounded-md border border-(--kwm-hl) font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-2) transition-colors"
           >
             {p.label}
           </button>
         ))}
       </div>
 
-      {/* Token pair — hairline row */}
-      <div className="flex items-center justify-between gap-4 py-4 border-y border-border/40">
+      {/* Token pair — bordered card */}
+      <div className="flex items-center justify-between gap-4 mt-4 px-3.5 py-3 border border-(--kwm-hl) rounded-md">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
+          <div className="w-7 h-7 rounded-full bg-(--kwm-bg-3) flex items-center justify-center overflow-hidden shrink-0 border border-(--kwm-hl)">
             {selectedToken.logoUrl ? (
               <Image
                 src={selectedToken.logoUrl}
                 alt={selectedToken.symbol}
-                width={24}
-                height={24}
+                width={28}
+                height={28}
                 className="w-full h-full object-cover"
                 unoptimized
               />
             ) : (
-              <span className="font-mono text-[9px] uppercase text-foreground/80">
+              <span className="font-mono text-[9px] uppercase text-(--kwm-ink-2)">
                 {selectedToken.symbol.slice(0, 2)}
               </span>
             )}
           </div>
-          <div className="flex flex-col min-w-0 gap-1">
-            <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="flex flex-col min-w-0 gap-0.5">
+            <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-(--kwm-ink-dim)">
               You Send
             </span>
-            <span className="text-sm font-medium leading-none text-foreground truncate">
+            <span className="text-sm font-medium leading-snug text-(--kwm-ink) truncate">
               {selectedToken.symbol}
             </span>
           </div>
         </div>
-        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <ArrowRight className="h-3.5 w-3.5 text-(--kwm-ink-3) shrink-0" />
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
+          <div className="w-7 h-7 rounded-full bg-(--kwm-bg-3) flex items-center justify-center overflow-hidden shrink-0 border border-(--kwm-hl)">
             <Image
               src="/usdc-token.webp"
               alt="pUSD"
-              width={24}
-              height={24}
+              width={28}
+              height={28}
               className="w-full h-full object-cover"
             />
           </div>
-          <div className="flex flex-col min-w-0 gap-1">
-            <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="flex flex-col min-w-0 gap-0.5">
+            <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-(--kwm-ink-dim)">
               You Receive
             </span>
-            <span className="text-sm font-medium leading-none text-foreground">
+            <span className="text-sm font-medium leading-snug text-(--kwm-ink)">
               pUSD
             </span>
           </div>
         </div>
       </div>
 
-      {/* Minimum warning — hairline border-l accent instead of rounded panel */}
+      {/* Minimum warning — amber `.tk-warn`-style strip */}
       {isBelowMinimum && amount && (
-        <div className="border-l-2 border-amber-500 pl-3 py-2 mt-4">
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-500 mb-1">
+        <div className="mt-3 px-3 py-2 border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-warn) mb-1">
             Below Minimum
           </p>
-          <p className="text-sm text-foreground leading-snug">
+          <p className="text-sm text-(--kwm-ink) leading-snug">
             Minimum deposit is{" "}
-            <span className="tabular-nums">${selectedTokenMinDeposit}</span>.
-            You entered{" "}
+            <span className="tabular-nums font-medium">
+              ${selectedTokenMinDeposit}
+            </span>
+            . You entered{" "}
             <span className="tabular-nums">${enteredAmountUsd.toFixed(2)}</span>
             .
           </p>
         </div>
       )}
 
-      {/* Continue — squared decisive action */}
+      {/* Continue CTA — design's `.tk-cta.ready` pattern (filled ink) */}
       <button
         type="button"
         onClick={onContinue}
         disabled={!isValidAmount}
         className={cn(
-          "mt-6 w-full h-12 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors",
+          "mt-5 w-full h-11 rounded-md font-mono text-[11px] uppercase tracking-[0.18em] font-semibold transition-colors",
           isValidAmount
-            ? "bg-foreground text-background hover:bg-foreground/90"
-            : "bg-muted text-muted-foreground cursor-not-allowed"
+            ? "bg-(--kwm-ink) text-(--kwm-bg) hover:opacity-90"
+            : "bg-(--kwm-bg-3) text-(--kwm-ink-dim) cursor-not-allowed border border-(--kwm-hl)"
         )}
       >
         {isBelowMinimum

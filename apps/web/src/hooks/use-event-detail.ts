@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 /** Token data for a market outcome */
 interface MarketToken {
@@ -149,7 +150,7 @@ export function useEventDetail(
   initialData?: Event | null
 ) {
   return useQuery({
-    queryKey: ["events", "detail", slugOrId],
+    queryKey: qk.events.detail(slugOrId ?? ""),
     queryFn: () => fetchEventDetail(slugOrId),
     enabled: !!slugOrId,
     staleTime: 60 * 1000, // 1 minute

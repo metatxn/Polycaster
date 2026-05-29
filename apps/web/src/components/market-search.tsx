@@ -194,7 +194,7 @@ export function MarketSearch({
       <div className="relative group">
         <Search
           className={cn(
-            "absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70 transition-colors group-focus-within:text-foreground",
+            "absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-(--kwm-ink-3) transition-colors group-focus-within:text-(--kwm-ink)",
             variant === "boxed" ? "left-3.5" : "left-0"
           )}
         />
@@ -208,8 +208,8 @@ export function MarketSearch({
           className={cn(
             "w-full bg-transparent focus:outline-none text-sm transition-colors",
             variant === "boxed"
-              ? "h-10 pl-10 pr-10 bg-muted/30 border border-border/70 rounded-full focus:border-foreground/70 focus:bg-muted/50 placeholder:text-muted-foreground/60"
-              : "h-9 pl-6 pr-6 border-0 border-b border-border/70 focus:border-foreground placeholder:text-muted-foreground/60 placeholder:font-editorial placeholder:italic"
+              ? "h-10 pl-10 pr-10 bg-(--kwm-bg-2) border border-(--kwm-hl-2) rounded-full focus:border-(--kwm-hl-3) focus:bg-(--kwm-bg-3) placeholder:text-(--kwm-ink-3)"
+              : "h-9 pl-6 pr-6 border-0 border-b border-(--kwm-hl-2) focus:border-(--kwm-ink) placeholder:text-(--kwm-ink-dim) placeholder:font-editorial placeholder:italic"
           )}
         />
         {query && (
@@ -217,7 +217,7 @@ export function MarketSearch({
             type="button"
             onClick={handleClear}
             className={cn(
-              "absolute top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors",
+              "absolute top-1/2 -translate-y-1/2 p-0.5 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors",
               variant === "boxed" ? "right-3.5" : "right-0"
             )}
             aria-label="Clear search"
@@ -242,7 +242,7 @@ export function MarketSearch({
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.12 }}
             className={cn(
-              "absolute top-full bg-background border border-border/70 shadow-[0_12px_32px_-16px_rgb(0_0_0/0.18)] z-50 overflow-hidden max-h-[70vh] overflow-y-auto",
+              "absolute top-full bg-(--kwm-panel) border border-(--kwm-hl-2) shadow-[0_12px_32px_-16px_rgb(0_0_0/0.18)] z-50 overflow-hidden max-h-[70vh] overflow-y-auto",
               variant === "boxed"
                 ? "inset-x-0 mt-2 rounded-2xl"
                 : "right-0 w-[clamp(320px,24rem,90vw)]"
@@ -251,14 +251,14 @@ export function MarketSearch({
             {/* Loading State - show when typing or fetching */}
             {(isLoading || isTyping) && (
               <div className="flex items-center justify-center py-6">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/70" />
+                <Loader2 className="h-4 w-4 animate-spin text-(--kwm-ink-3)" />
               </div>
             )}
 
             {/* No Results */}
             {!isLoading && !isTyping && !hasResults && (
               <div className="py-6 px-4">
-                <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted-foreground text-center">
+                <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-(--kwm-ink-3) text-center">
                   {tagLabel
                     ? `No ${tagLabel.toLowerCase()} markets for "${query}"`
                     : `No markets for "${query}"`}
@@ -272,7 +272,7 @@ export function MarketSearch({
                 {/* Events Section */}
                 {scopedEvents.length > 0 && (
                   <div>
-                    <div className="px-3 pt-3 pb-1.5 text-[10px] font-mono font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    <div className="px-3 pt-3 pb-1.5 text-[10px] font-mono font-semibold uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                       {tagLabel ? `${tagLabel} Markets` : "Markets"}
                     </div>
                     <div className="divide-y divide-border/40">
@@ -281,10 +281,10 @@ export function MarketSearch({
                           type="button"
                           key={event.id}
                           onClick={() => handleEventClick(event)}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted/40 transition-colors text-left group"
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-(--kwm-bg-2) transition-colors text-left group"
                         >
                           {event.image ? (
-                            <div className="relative w-9 h-9 rounded-md overflow-hidden shrink-0 bg-muted ring-1 ring-border/50">
+                            <div className="relative w-9 h-9 rounded-md overflow-hidden shrink-0 bg-(--kwm-bg-3) ring-1 ring-(--kwm-hl)">
                               <Image
                                 src={event.image}
                                 alt={event.title}
@@ -294,8 +294,8 @@ export function MarketSearch({
                               />
                             </div>
                           ) : (
-                            <div className="w-9 h-9 rounded-md bg-muted flex items-center justify-center shrink-0 ring-1 ring-border/50">
-                              <span className="font-editorial italic text-base text-foreground/30 leading-none">
+                            <div className="w-9 h-9 rounded-md bg-(--kwm-bg-3) flex items-center justify-center shrink-0 ring-1 ring-(--kwm-hl)">
+                              <span className="font-editorial italic text-base text-(--kwm-ink-dim) leading-none">
                                 {(event.title || "M")
                                   .trim()
                                   .charAt(0)
@@ -305,14 +305,14 @@ export function MarketSearch({
                           )}
 
                           <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm line-clamp-1 leading-tight tracking-[-0.01em] group-hover:text-foreground transition-colors">
+                            <p className="font-medium text-sm line-clamp-1 leading-tight tracking-[-0.01em] group-hover:text-(--kwm-ink) transition-colors">
                               {event.title}
                             </p>
 
-                            <div className="flex items-center gap-2 mt-1 text-[10px] font-mono tabular-nums text-muted-foreground">
+                            <div className="flex items-center gap-2 mt-1 text-[10px] font-mono tabular-nums text-(--kwm-ink-3)">
                               {event.topOutcome && (
                                 <span className="inline-flex items-baseline gap-1 shrink-0">
-                                  <span className="text-foreground font-semibold">
+                                  <span className="text-(--kwm-ink) font-semibold">
                                     {Math.round(event.topOutcome.price * 100)}%
                                   </span>
                                   <span className="truncate max-w-[100px]">
@@ -323,7 +323,7 @@ export function MarketSearch({
                               {event.volume24hr !== undefined &&
                                 event.volume24hr > 0 && (
                                   <span className="inline-flex items-baseline gap-1 shrink-0">
-                                    <span className="text-foreground/80">
+                                    <span className="text-(--kwm-ink-2)">
                                       {formatVolume(event.volume24hr)}
                                     </span>
                                     <span className="uppercase tracking-[0.12em] text-[9px]">
@@ -334,7 +334,7 @@ export function MarketSearch({
                               {event.liquidity !== undefined &&
                                 event.liquidity > 0 && (
                                   <span className="inline-flex items-baseline gap-1 shrink-0">
-                                    <span className="text-foreground/80">
+                                    <span className="text-(--kwm-ink-2)">
                                       {formatVolume(event.liquidity)}
                                     </span>
                                     <span className="uppercase tracking-[0.12em] text-[9px]">
@@ -343,7 +343,7 @@ export function MarketSearch({
                                   </span>
                                 )}
                               {event.live && (
-                                <span className="inline-flex items-center gap-1 shrink-0 uppercase tracking-[0.14em] text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                <span className="inline-flex items-center gap-1 shrink-0 uppercase tracking-[0.14em] text-[9px] font-semibold text-(--kwm-up)">
                                   <span className="relative flex h-1 w-1">
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/75" />
                                     <span className="relative inline-flex rounded-full h-1 w-1 bg-emerald-500" />
@@ -364,8 +364,8 @@ export function MarketSearch({
                     would suggest navigating sideways when the user
                     wants to search deeper. */}
                 {!tagSlug && data?.tags && data.tags.length > 0 && (
-                  <div className="border-t border-border/40">
-                    <div className="px-3 pt-3 pb-1.5 text-[10px] font-mono font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  <div className="border-t border-(--kwm-hl)">
+                    <div className="px-3 pt-3 pb-1.5 text-[10px] font-mono font-semibold uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                       Categories
                     </div>
                     <div className="px-3 pb-3 flex flex-wrap gap-x-3 gap-y-1.5">
@@ -374,11 +374,11 @@ export function MarketSearch({
                           type="button"
                           key={tag.id}
                           onClick={() => handleTagClick(tag.slug)}
-                          className="inline-flex items-baseline gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          className="inline-flex items-baseline gap-1 text-xs text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
                         >
                           <span className="font-medium">{tag.label}</span>
                           {tag.event_count && (
-                            <span className="font-mono tabular-nums text-[10px] text-muted-foreground/70">
+                            <span className="font-mono tabular-nums text-[10px] text-(--kwm-ink-3)">
                               {tag.event_count}
                             </span>
                           )}
@@ -394,8 +394,8 @@ export function MarketSearch({
                 {!tagSlug &&
                   data?.pagination &&
                   data.pagination.totalResults > 8 && (
-                    <div className="px-3 py-2 border-t border-border/40 bg-muted/20">
-                      <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-center text-muted-foreground">
+                    <div className="px-3 py-2 border-t border-(--kwm-hl) bg-(--kwm-bg-2)">
+                      <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-center text-(--kwm-ink-3)">
                         Top 8 of {data.pagination.totalResults}
                       </p>
                     </div>

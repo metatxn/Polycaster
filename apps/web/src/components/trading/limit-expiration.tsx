@@ -225,7 +225,7 @@ export function LimitExpiration({
                     selected={customDate}
                     onSelect={handleCustomDateSelect}
                     disabled={(date) => date < minDate}
-                    initialFocus
+                    autoFocus
                   />
 
                   {/* Time Picker */}

@@ -88,19 +88,25 @@ export function WhaleLedger({
 
   return (
     <section className="flex flex-col">
-      <header className="flex items-baseline justify-between pb-3">
-        <h2 className="font-editorial italic text-xl sm:text-2xl text-foreground inline-flex items-center gap-2">
-          <WhaleIcon className="h-5 w-auto text-foreground/80 -translate-y-px" />
-          Whale Ledger
-        </h2>
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-          {filtered.length} {filtered.length === 1 ? "trader" : "traders"}
-        </span>
+      <header className="flex items-end justify-between pb-3 border-b border-(--kwm-hl)">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+            § Whale Ledger
+          </span>
+          <span className="text-(--kwm-ink-dim)">·</span>
+          <span className="font-(family-name:--font-geist) text-[18px] font-semibold tracking-tight text-(--kwm-ink) tabular-nums leading-none">
+            {filtered.length}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) translate-y-[-2px]">
+            {filtered.length === 1 ? "trader" : "traders"}
+          </span>
+        </div>
+        <WhaleIcon className="h-4 w-auto text-(--kwm-ink-dim)" />
       </header>
 
-      <div className="border-y border-border/60">
+      <div className="border-y border-(--kwm-hl-2)">
         {/* Column headers */}
-        <div className="hidden sm:grid grid-cols-[auto_minmax(0,1fr)_100px_100px_72px_72px_72px] gap-3 px-3 py-2 border-b border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="hidden sm:grid grid-cols-[auto_minmax(0,1fr)_100px_100px_72px_72px_72px] gap-3 px-3 py-2 border-b border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
           <span className="w-6 text-right">#</span>
           <span>Wallet</span>
           <HeaderCell
@@ -166,17 +172,17 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
   return (
     <Link
       href={`/profile/${row.address}`}
-      className="group block px-3 py-3 sm:py-2.5 hover:bg-muted/40 transition-colors text-sm"
+      className="group block px-3 py-3 sm:py-2.5 hover:bg-(--kwm-bg-2) transition-colors text-sm"
     >
       {/* Desktop: 7-column hairline grid. Mobile falls through to the
           stacked block below. */}
       <div className="hidden sm:grid grid-cols-[auto_minmax(0,1fr)_100px_100px_72px_72px_72px] gap-3 items-center">
-        <span className="w-6 font-mono text-[11px] tabular-nums text-muted-foreground text-right">
+        <span className="w-6 font-mono text-[11px] tabular-nums text-(--kwm-ink-3) text-right">
           {index + 1}
         </span>
 
         <div className="flex items-center gap-2 min-w-0">
-          <div className="relative w-6 h-6 shrink-0 rounded-sm overflow-hidden bg-muted">
+          <div className="relative w-6 h-6 shrink-0 rounded-sm overflow-hidden bg-(--kwm-bg-3)">
             {row.profileImage ? (
               <Image
                 src={row.profileImage}
@@ -187,17 +193,17 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
                 unoptimized={isAnimatedImageUrl(row.profileImage)}
               />
             ) : (
-              <span className="w-full h-full flex items-center justify-center font-mono text-[9px] font-semibold text-foreground/40">
+              <span className="w-full h-full flex items-center justify-center font-mono text-[9px] font-semibold text-(--kwm-ink)/40">
                 {row.address.slice(2, 4).toUpperCase()}
               </span>
             )}
           </div>
           <div className="min-w-0 flex items-baseline gap-2">
-            <span className="truncate font-medium text-foreground group-hover:text-foreground">
+            <span className="truncate font-medium text-(--kwm-ink) group-hover:text-(--kwm-ink)">
               {display}
             </span>
             {hasRealName && (
-              <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+              <span className="shrink-0 font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
                 {formatAddress(row.address)}
               </span>
             )}
@@ -215,25 +221,25 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
               title={`Net ${row.netDirection === "buy" ? "buyer" : "seller"} · ${Math.round(
                 row.convictionRatio * 100
               )}% one-sided`}
-              className="shrink-0 inline-flex items-center gap-0.5 px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-foreground/60 text-foreground rounded-sm"
+              className="shrink-0 inline-flex items-center gap-0.5 px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-(--kwm-ink)/60 text-(--kwm-ink) rounded-sm"
             >
               <span aria-hidden>{row.netDirection === "buy" ? "↑" : "↓"}</span>
               <span>Directional</span>
             </span>
           )}
-          <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground/0 group-hover:text-muted-foreground transition-colors" />
+          <ExternalLink className="h-3 w-3 shrink-0 text-(--kwm-ink-3)/0 group-hover:text-(--kwm-ink-3) transition-colors" />
         </div>
 
-        <span className="text-right font-mono tabular-nums font-semibold text-foreground">
+        <span className="text-right font-mono tabular-nums font-semibold text-(--kwm-ink)">
           {formatCurrencyCompact(row.totalVolume)}
         </span>
 
         <div className="text-right font-mono tabular-nums text-[11px] leading-tight">
-          <div className="text-foreground">
+          <div className="text-(--kwm-ink)">
             <span className="font-semibold">{buyPct}</span>
-            <span className="text-muted-foreground/80">/{sellPct}</span>
+            <span className="text-(--kwm-ink-3)">/{sellPct}</span>
           </div>
-          <div className="mt-0.5 h-0.5 bg-muted rounded-full overflow-hidden ml-auto w-full">
+          <div className="mt-0.5 h-0.5 bg-(--kwm-bg-3) rounded-full overflow-hidden ml-auto w-full">
             <div
               className="h-full bg-foreground/70"
               style={{ width: `${buyPct}%` }}
@@ -241,15 +247,15 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
           </div>
         </div>
 
-        <span className="text-right font-mono tabular-nums text-foreground/80">
+        <span className="text-right font-mono tabular-nums text-(--kwm-ink-2)">
           {row.tradeCount}
         </span>
 
-        <span className="text-right font-mono tabular-nums text-foreground/80">
+        <span className="text-right font-mono tabular-nums text-(--kwm-ink-2)">
           {row.marketCount}
         </span>
 
-        <span className="text-right font-mono tabular-nums text-[11px] text-muted-foreground">
+        <span className="text-right font-mono tabular-nums text-[11px] text-(--kwm-ink-3)">
           {formatTimeAgo(row.lastActiveTimestamp)}
         </span>
       </div>
@@ -257,10 +263,10 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
       {/* Mobile: stacked rows — identity, flags, then compact metric strip */}
       <div className="sm:hidden flex flex-col gap-2">
         <div className="flex items-start gap-3">
-          <span className="w-5 pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground shrink-0">
+          <span className="w-5 pt-0.5 font-mono text-[11px] tabular-nums text-(--kwm-ink-3) shrink-0">
             {index + 1}
           </span>
-          <div className="relative w-8 h-8 shrink-0 rounded-sm overflow-hidden bg-muted">
+          <div className="relative w-8 h-8 shrink-0 rounded-sm overflow-hidden bg-(--kwm-bg-3)">
             {row.profileImage ? (
               <Image
                 src={row.profileImage}
@@ -271,23 +277,23 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
                 unoptimized={isAnimatedImageUrl(row.profileImage)}
               />
             ) : (
-              <span className="w-full h-full flex items-center justify-center font-mono text-[10px] font-semibold text-foreground/40">
+              <span className="w-full h-full flex items-center justify-center font-mono text-[10px] font-semibold text-(--kwm-ink)/40">
                 {row.address.slice(2, 4).toUpperCase()}
               </span>
             )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate font-medium text-foreground">
+              <span className="truncate font-medium text-(--kwm-ink)">
                 {display}
               </span>
-              <span className="shrink-0 font-mono tabular-nums text-sm font-semibold text-foreground">
+              <span className="shrink-0 font-mono tabular-nums text-sm font-semibold text-(--kwm-ink)">
                 {formatCurrencyCompact(row.totalVolume)}
               </span>
             </div>
             <div className="mt-0.5 flex items-center gap-2 flex-wrap">
               {hasRealName && (
-                <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+                <span className="font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
                   {formatAddress(row.address)}
                 </span>
               )}
@@ -297,7 +303,7 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
                 </span>
               )}
               {isDirectional && (
-                <span className="inline-flex items-center gap-0.5 px-1.5 h-[16px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-foreground/60 text-foreground rounded-sm">
+                <span className="inline-flex items-center gap-0.5 px-1.5 h-[16px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-(--kwm-ink)/60 text-(--kwm-ink) rounded-sm">
                   <span aria-hidden>
                     {row.netDirection === "buy" ? "↑" : "↓"}
                   </span>
@@ -309,11 +315,11 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
         </div>
 
         <div className="ml-8 flex items-center gap-3 font-mono text-[10px] tabular-nums">
-          <span className="text-foreground">
+          <span className="text-(--kwm-ink)">
             <span className="font-semibold">{buyPct}</span>
-            <span className="text-muted-foreground/80">/{sellPct}</span>
+            <span className="text-(--kwm-ink-3)">/{sellPct}</span>
           </span>
-          <div className="flex-1 h-[3px] bg-muted overflow-hidden">
+          <div className="flex-1 h-[3px] bg-(--kwm-bg-3) overflow-hidden">
             <div
               className="h-full bg-foreground/70"
               style={{ width: `${buyPct}%` }}
@@ -321,9 +327,9 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
           </div>
         </div>
 
-        <div className="ml-8 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        <div className="ml-8 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
           <span>
-            <span className="tabular-nums normal-case text-foreground font-semibold">
+            <span className="tabular-nums normal-case text-(--kwm-ink) font-semibold">
               {row.tradeCount}
             </span>{" "}
             trades
@@ -332,7 +338,7 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
             ·
           </span>
           <span>
-            <span className="tabular-nums normal-case text-foreground font-semibold">
+            <span className="tabular-nums normal-case text-(--kwm-ink) font-semibold">
               {row.marketCount}
             </span>{" "}
             markets
@@ -340,7 +346,7 @@ function WhaleRowItem({ row, index }: { row: WhaleRow; index: number }) {
           <span aria-hidden className="text-border/80">
             ·
           </span>
-          <span className="normal-case tabular-nums text-muted-foreground">
+          <span className="normal-case tabular-nums text-(--kwm-ink-3)">
             {formatTimeAgo(row.lastActiveTimestamp)}
           </span>
         </div>
@@ -368,9 +374,9 @@ function HeaderCell({
       type="button"
       onClick={() => onSort(column)}
       className={cn(
-        "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+        "inline-flex items-center gap-1 transition-colors hover:text-(--kwm-ink)",
         align === "right" && "justify-end",
-        isActive && "text-foreground"
+        isActive && "text-(--kwm-ink)"
       )}
     >
       <span>{label}</span>
@@ -390,7 +396,7 @@ function HeaderCell({
 function EmptyRow({ query }: { query: string }) {
   return (
     <div className="py-10 px-3 text-center">
-      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {query
           ? `No whales match "${query}"`
           : "No whale activity in this window"}

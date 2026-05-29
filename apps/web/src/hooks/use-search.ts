@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 export interface TopOutcome {
   name: string;
@@ -98,7 +99,7 @@ async function fetchSearchResults(
 
 export function useSearch(query: string, limit = 10, tagSlug?: string) {
   return useQuery({
-    queryKey: ["search", query, limit, tagSlug ?? null],
+    queryKey: qk.search(query, limit, tagSlug ?? null),
     queryFn: () => fetchSearchResults(query, limit, tagSlug),
     enabled: query.trim().length >= 2, // Only search with 2+ characters
     staleTime: 30 * 1000, // 30 seconds

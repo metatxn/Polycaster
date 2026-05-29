@@ -80,7 +80,7 @@ function EditorialDropdown<T extends string>({
   return (
     <DropdownMenuContent
       align="start"
-      className="min-w-36 rounded-none border border-border/60 bg-popover/95 backdrop-blur-sm p-0 shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+      className="min-w-36 rounded-none border border-(--kwm-hl-2) bg-(--kwm-panel) backdrop-blur-sm p-0 shadow-[0_1px_0_rgba(0,0,0,0.04)]"
     >
       {options.map((option) => {
         const isActive = selected === option.value;
@@ -89,8 +89,8 @@ function EditorialDropdown<T extends string>({
             key={option.value}
             onSelect={() => onSelect(option.value)}
             className={cn(
-              "rounded-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] focus:bg-foreground/5 focus:text-foreground",
-              isActive ? "text-foreground" : "text-muted-foreground"
+              "rounded-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] focus:bg-foreground/5 focus:text-(--kwm-ink)",
+              isActive ? "text-(--kwm-ink)" : "text-(--kwm-ink-3)"
             )}
           >
             <span
@@ -342,7 +342,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
           </div>
 
           {allTraders.length > 0 && (
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) tabular-nums">
               1–{allTraders.length}
             </span>
           )}
@@ -354,13 +354,13 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-destructive mb-3">
               Failed to load leaderboard
             </p>
-            <p className="font-editorial text-lg leading-snug text-foreground mb-4 max-w-md">
+            <p className="font-editorial text-lg leading-snug text-(--kwm-ink) mb-4 max-w-md">
               {error.message || "Something went wrong"}
             </p>
             <button
               type="button"
               onClick={() => refetch()}
-              className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground hover:text-destructive transition-colors underline underline-offset-4 decoration-border"
+              className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink) hover:text-destructive transition-colors underline underline-offset-4 decoration-border"
             >
               Try again
             </button>
@@ -391,7 +391,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
         {allTraders.length > 0 && (
           <>
             <div ref={sentinelRef} aria-hidden className="h-1" />
-            <div className="flex items-center justify-center py-8 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+            <div className="flex items-center justify-center py-8 font-mono text-[10px] uppercase tracking-[0.2em] text-(--kwm-ink-3)/70">
               {isLoading && page > 1 ? (
                 <span>Loading more…</span>
               ) : hasMore ? (

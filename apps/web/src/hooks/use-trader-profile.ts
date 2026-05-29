@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 /**
  * Trader Profile Hook
@@ -43,7 +44,7 @@ async function fetchTraderProfile(address: string): Promise<TraderProfile> {
 
 export function useTraderProfile(address?: string) {
   return useQuery({
-    queryKey: ["traderProfile", address],
+    queryKey: qk.profile.trader(address ?? ""),
     queryFn: () => fetchTraderProfile(address as string),
     enabled: !!address && address.startsWith("0x"),
     staleTime: 60 * 1000, // 1 minute

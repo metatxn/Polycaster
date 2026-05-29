@@ -89,10 +89,10 @@ export function TopNav() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`px-2.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] transition-colors ${
+                  className={`px-2.5 py-1 border-b-2 font-mono text-[13px] font-medium uppercase tracking-[0.08em] transition-colors ${
                     isActive
-                      ? "text-foreground"
-                      : "text-muted-foreground/90 hover:text-foreground"
+                      ? "text-(--kwm-ink) border-(--kwm-ink)"
+                      : "text-(--kwm-ink-2) border-transparent hover:text-(--kwm-ink) hover:border-(--kwm-ink-3)/40"
                   }`}
                 >
                   {link.label}
@@ -147,8 +147,8 @@ export function TopNav() {
 
       {/* Row 2 — category strip. Horizontal scroll on narrow widths so
           all 12 categories remain reachable without dropdowns. */}
-      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide border-t border-border/40 px-1 py-2">
-        <span className="shrink-0 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/80 pr-2">
+      <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide border-t border-(--kwm-hl-2) px-1 py-2">
+        <span className="shrink-0 font-mono text-[11px] uppercase tracking-[0.08em] text-(--kwm-ink-3) pr-2">
           §
         </span>
         {CATEGORIES.map((cat, i) => {
@@ -157,10 +157,10 @@ export function TopNav() {
             <div key={cat.href} className="flex items-center">
               <Link
                 href={cat.href}
-                className={`shrink-0 px-2 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] transition-colors rounded-sm ${
+                className={`shrink-0 px-2 py-1.5 font-mono text-[11px] font-normal uppercase tracking-[0.08em] transition-colors rounded-sm ${
                   isActive
-                    ? "text-foreground bg-accent/40"
-                    : "text-muted-foreground/90 hover:text-foreground hover:bg-accent/30"
+                    ? "text-(--kwm-ink) bg-accent/40"
+                    : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-accent/30"
                 }`}
               >
                 {cat.label}
@@ -168,7 +168,7 @@ export function TopNav() {
               {i < CATEGORIES.length - 1 && (
                 <span
                   aria-hidden="true"
-                  className="text-muted-foreground/40 px-0.5 select-none"
+                  className="text-(--kwm-ink-3)/75 px-0.5 select-none"
                 >
                   ·
                 </span>

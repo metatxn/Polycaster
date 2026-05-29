@@ -431,24 +431,24 @@ function SectionHeader({
   rightMeta?: string;
 }) {
   return (
-    <div className="flex items-center gap-3 px-7 pt-6 pb-3.5">
+    <div className="flex items-center gap-3 px-7 pt-7 pb-3.5">
       <span
         aria-hidden="true"
-        className="font-(family-name:--font-geist-mono) text-[14px]"
+        className="font-(family-name:--font-geist-mono) text-[16px] font-semibold"
         style={{ color: "var(--kwm-ink-dim)" }}
       >
         §
       </span>
       <h2
-        className="m-0 font-(family-name:--font-geist-mono) text-[12px] font-medium uppercase tracking-[0.14em]"
-        style={{ color: "var(--kwm-ink-2)" }}
+        className="m-0 font-(family-name:--font-geist-mono) text-[13px] font-semibold uppercase tracking-[0.18em]"
+        style={{ color: "var(--kwm-ink)" }}
       >
         {title}
       </h2>
       <span className="flex-1 h-px" style={{ background: "var(--kwm-hl)" }} />
       {rightMeta && (
         <span
-          className="font-(family-name:--font-geist-mono) text-[12px] tracking-[0.08em]"
+          className="font-(family-name:--font-geist-mono) text-[11px] uppercase tracking-[0.14em] tabular-nums"
           style={{ color: "var(--kwm-ink-3)" }}
         >
           {rightMeta}

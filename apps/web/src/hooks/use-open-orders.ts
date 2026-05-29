@@ -3,6 +3,7 @@
 import { createLogger } from "@knoww/logger";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 
 const log = createLogger("open-orders");
 
@@ -161,7 +162,7 @@ export function useOpenOrders(options: UseOpenOrdersOptions = {}) {
   const userAddress = options.userAddress || address;
 
   return useQuery({
-    queryKey: ["openOrders", userAddress, options.market],
+    queryKey: qk.orders.list(userAddress ?? "", options.market),
     queryFn: async () => {
       if (!userAddress) {
         return {
@@ -324,16 +325,16 @@ export function useCancelOrder() {
     },
     onMutate: async (orderId: string) => {
       // Cancel any outgoing refetches to prevent overwriting optimistic update
-      await queryClient.cancelQueries({ queryKey: ["openOrders"] });
+      await queryClient.cancelQueries({ queryKey: qk.orders.all() });
 
       // Snapshot previous values for all open orders queries
       const previousData = queryClient.getQueriesData({
-        queryKey: ["openOrders"],
+        queryKey: qk.orders.all(),
       });
 
       // Optimistically remove the order from all cached queries
       queryClient.setQueriesData(
-        { queryKey: ["openOrders"] },
+        { queryKey: qk.orders.all() },
         (old: { orders?: OpenOrder[]; count?: number } | undefined) => {
           if (!old?.orders) return old;
           const filteredOrders = old.orders.filter(
@@ -360,7 +361,7 @@ export function useCancelOrder() {
     },
     onSettled: () => {
       // Refetch to ensure server state is synced
-      queryClient.invalidateQueries({ queryKey: ["openOrders"] });
+      queryClient.invalidateQueries({ queryKey: qk.orders.all() });
     },
   });
 }
@@ -399,14 +400,14 @@ export function useCancelAllOrders() {
     },
     onSuccess: () => {
       // Invalidate all open orders queries
-      queryClient.invalidateQueries({ queryKey: ["openOrders"] });
+      queryClient.invalidateQueries({ queryKey: qk.orders.all() });
 
       if (address) {
-        queryClient.invalidateQueries({ queryKey: ["openOrders", address] });
+        queryClient.invalidateQueries({ queryKey: qk.orders.list(address) });
       }
       if (proxyAddress) {
         queryClient.invalidateQueries({
-          queryKey: ["openOrders", proxyAddress],
+          queryKey: qk.orders.list(proxyAddress),
         });
       }
     },

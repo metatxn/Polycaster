@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Decimal from "decimal.js";
+import { qk } from "@/lib/query-keys";
 
 export interface WhaleTrader {
   address: string;
@@ -97,13 +98,12 @@ export function useWhaleActivity(options: UseWhaleActivityOptions = {}) {
   } = options;
 
   return useQuery<WhaleActivityResponse, Error>({
-    queryKey: [
-      "whaleActivity",
+    queryKey: qk.whales.activity({
       whaleCount,
       minTradeSize,
       tradesPerWhale,
       timePeriod,
-    ],
+    }),
     queryFn: () =>
       fetchWhaleActivity({
         whaleCount,

@@ -5651,6 +5651,7 @@
 #knoww-notification-stack .knoww-stack-settings,
 #knoww-notification-stack .knoww-stack-sidebar,
 #knoww-notification-stack .knoww-stack-minimize,
+#knoww-notification-stack .knoww-stack-popout,
 #knoww-notification-stack .knoww-stack-close {
   width: 26px !important;
   height: 26px !important;
@@ -5673,6 +5674,7 @@
 #knoww-notification-stack .knoww-stack-settings:hover,
 #knoww-notification-stack .knoww-stack-sidebar:hover,
 #knoww-notification-stack .knoww-stack-minimize:hover,
+#knoww-notification-stack .knoww-stack-popout:hover,
 #knoww-notification-stack .knoww-stack-close:hover {
   background: var(--kse-control-hover) !important;
   color: var(--kse-ink) !important;
@@ -5689,6 +5691,7 @@
 #knoww-notification-stack .knoww-stack-settings svg,
 #knoww-notification-stack .knoww-stack-sidebar svg,
 #knoww-notification-stack .knoww-stack-minimize svg,
+#knoww-notification-stack .knoww-stack-popout svg,
 #knoww-notification-stack .knoww-stack-close svg {
   width: 12px !important;
   height: 12px !important;

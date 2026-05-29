@@ -115,10 +115,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Both create and derive failed
+    // Both create and derive failed. Log only the failure-class flags —
+    // raw upstream credential-flow error strings may contain signed headers
+    // or credential-derivation internals.
     log.error("auth.both_failed", {
-      createError: result.createError,
-      deriveError: result.deriveError,
+      hasCreateError: Boolean(result.createError),
+      hasDeriveError: Boolean(result.deriveError),
     });
 
     // Provide helpful error message

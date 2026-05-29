@@ -180,8 +180,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      log.error("upstream.error", { body: errorText });
+      log.error("upstream.error", { status: response.status });
       return NextResponse.json(
         {
           success: false,

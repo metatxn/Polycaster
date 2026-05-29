@@ -86,7 +86,6 @@ async function getBuilderHmacHeaders(
     if (!res.ok) {
       log.error("signing.response.non2xx", {
         status: res.status,
-        body: await res.text().catch(() => ""),
       });
       return null;
     }
@@ -313,7 +312,6 @@ async function proxy(
         path: pathSegments.join("/"),
         status: upstream.status,
         type: submitType,
-        body: upstreamBody.slice(0, 500),
       });
       const apiKeyHeaders = getRelayerApiKeyHeaders();
       if (apiKeyHeaders) {
@@ -334,7 +332,6 @@ async function proxy(
       log.warn("safe.relayerKey.rejected.retryingHmac", {
         path: pathSegments.join("/"),
         status: upstream.status,
-        body: upstreamBody.slice(0, 500),
       });
       const hmacHeaders = await getBuilderHmacHeaders(
         "POST",
@@ -360,7 +357,6 @@ async function proxy(
         method,
         path: pathSegments.join("/"),
         status: upstream.status,
-        body: upstreamBody.slice(0, 500),
       });
     }
 

@@ -101,31 +101,18 @@ const ERC20_ABI = [
 ] as const;
 
 /**
- * Get the best Polygon RPC URL.
- * Uses proxy on client-side to hide API keys.
+ * Get the Polygon RPC URL for use in this client module.
+ *
+ * Always returns the server-side proxy. The proxy resolves the actual upstream
+ * provider (Alchemy / custom RPC) using server-only env vars so RPC credentials
+ * never end up in the browser bundle.
+ *
+ * Note: this hook is `"use client"`, so any branch that read `NEXT_PUBLIC_*`
+ * env values would have its build-time substitutions shipped to the browser
+ * even if the runtime never executes that branch.
  */
 function getPolygonRpcUrl(): string {
-  const isClient = typeof window !== "undefined";
-
-  if (isClient) {
-    // On client: Use the proxy (handles RPC selection server-side)
-    return "/api/rpc/polygon";
-  }
-
-  // On server: Use Alchemy directly
-  const alchemyKey =
-    process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-  if (alchemyKey) {
-    return `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`;
-  }
-
-  const customRpcUrl =
-    process.env.POLYGON_RPC_URL || process.env.NEXT_PUBLIC_POLYGON_RPC_URL;
-  if (customRpcUrl) {
-    return customRpcUrl;
-  }
-
-  return "https://polygon-rpc.com";
+  return "/api/rpc/polygon";
 }
 
 /**

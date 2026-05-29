@@ -19,6 +19,11 @@ import {
   type PortfolioClobOpenOrder,
 } from "./background/clob-open-orders";
 import {
+  checkAuthorizedSender,
+  checkCredsKey,
+  TRADING_CREDS_STORAGE_PREFIX,
+} from "./background/creds-guards";
+import {
   clearExtensionAccessToken,
   getExtensionAccessToken,
   getExtensionAuthorizationHeader,
@@ -47,7 +52,6 @@ import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 // require <all_urls> and load on every site), we register them only
 // for supported platforms via chrome.scripting.
 const CONTENT_SCRIPT_ID = "knoww-content";
-const TRADING_CREDS_STORAGE_PREFIX = "knoww_clob_creds_";
 const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
 const SETTINGS_STORAGE_KEY = "knowwSettings";
 const CONTENT_SCRIPT_REINJECT_SETTLE_MS = 500;
@@ -105,6 +109,27 @@ async function readUserSettings(): Promise<UserSettings> {
             result[SETTINGS_STORAGE_KEY] as Partial<UserSettings> | undefined
           )
         );
+      }
+    );
+  });
+}
+
+async function persistNotificationPanelSurface(
+  surface: UserSettings["notificationPanelSurface"]
+): Promise<void> {
+  const settings = await readUserSettings();
+  if (settings.notificationPanelSurface === surface) return;
+  await new Promise<void>((resolve) => {
+    chrome.storage.sync.set(
+      {
+        [SETTINGS_STORAGE_KEY]: {
+          ...settings,
+          notificationPanelSurface: surface,
+        },
+      },
+      () => {
+        void chrome.runtime.lastError;
+        resolve();
       }
     );
   });
@@ -772,6 +797,7 @@ chrome.runtime.onMessage.addListener(
       trendingLimit?: number;
       visible?: boolean;
       address?: string;
+      surface?: "sidebar" | "floating";
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -789,6 +815,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_OPEN_EXTENSION_SIDEPANEL") {
+      void persistNotificationPanelSurface("sidebar");
       void openKnowwSidePanel({
         ...(typeof sender.tab?.id === "number" ? { tabId: sender.tab.id } : {}),
         ...(typeof sender.tab?.windowId === "number"
@@ -826,6 +853,23 @@ chrome.runtime.onMessage.addListener(
           ? { windowId: sender.tab.windowId }
           : {}),
       })
+        .then(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        )
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_SET_NOTIFICATION_PANEL_SURFACE" &&
+      (msg.surface === "sidebar" || msg.surface === "floating")
+    ) {
+      void persistNotificationPanelSurface(msg.surface)
         .then(() =>
           sendResponse({ ok: true, data: null } as BackgroundResponse)
         )
@@ -977,8 +1021,27 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
-    // Credential storage — keep creds in session storage behind the SW boundary
+    // Credential storage — keep creds in session storage behind the SW boundary.
+    //
+    // Defense-in-depth on this handler family:
+    //   1. `sender.id !== chrome.runtime.id` reject — guards against future
+    //      regressions that add `externally_connectable` and would otherwise
+    //      expose credentials to web pages.
+    //   2. `creds:*` keys are locked to the TRADING_CREDS_STORAGE_PREFIX
+    //      namespace so a compromised content script cannot use this generic
+    //      key/value channel to read or overwrite unrelated entries (most
+    //      importantly the extension bearer at `knoww_extension_access_token`).
     if (msg?.type === "creds:get" && typeof msg.key === "string") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
       const k = msg.key;
       chrome.storage.session.get(k, (result) => {
         sendResponse({
@@ -989,30 +1052,58 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
     if (msg?.type === "creds:set" && typeof msg.key === "string") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
       const key = msg.key;
       chrome.storage.session.set({ [key]: msg.value }, () => {
-        if (key.startsWith(TRADING_CREDS_STORAGE_PREFIX)) {
-          broadcastTradingCredentialsUpdated(
-            key.slice(TRADING_CREDS_STORAGE_PREFIX.length)
-          );
-        }
+        broadcastTradingCredentialsUpdated(
+          key.slice(TRADING_CREDS_STORAGE_PREFIX.length)
+        );
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
       return true;
     }
     if (msg?.type === "creds:remove" && typeof msg.key === "string") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
       chrome.storage.session.remove(msg.key, () => {
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
       return true;
     }
     if (msg?.type === "auth:get-token") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
       getExtensionAccessToken().then((token) => {
         sendResponse({ ok: true, data: token } as BackgroundResponse);
       });
       return true;
     }
     if (msg?.type === "KNOWW_GET_PORTFOLIO_SESSION") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
       getExtensionAccessToken().then((token) => {
         sendResponse({ ok: true, data: { token } } as BackgroundResponse);
       });

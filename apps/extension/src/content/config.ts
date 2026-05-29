@@ -10,6 +10,8 @@ import {
   type UserSettings,
 } from "../types/settings";
 
+import { shouldAutoShowNotificationStack } from "./notification-surface";
+
 const log = createLogger("extension.config");
 
 // ============================================
@@ -201,9 +203,11 @@ function isSourceEnabled(sourceName: string): boolean {
  * Check if notification stack should be shown
  */
 function isNotificationStackEnabled(): boolean {
-  return (
+  return shouldAutoShowNotificationStack(
     USER_SETTINGS.showNotificationStack ??
-    DEFAULT_USER_SETTINGS.showNotificationStack
+      DEFAULT_USER_SETTINGS.showNotificationStack,
+    USER_SETTINGS.notificationPanelSurface ??
+      DEFAULT_USER_SETTINGS.notificationPanelSurface
   );
 }
 

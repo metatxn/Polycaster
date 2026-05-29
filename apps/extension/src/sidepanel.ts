@@ -477,6 +477,20 @@ async function closeSidePanel(): Promise<void> {
   });
 }
 
+async function switchToFloatingPanel(): Promise<void> {
+  // 1. Persist floating as the home surface (flips openPanelOnActionClick back).
+  await sendRuntimeMessage({
+    type: "KNOWW_SET_NOTIFICATION_PANEL_SURFACE",
+    surface: "floating",
+  });
+  // 2. Show the notification panel on the current page right away.
+  await setPagePanelVisibility(true);
+  // 3. Close this side panel last. A side panel reliably closes itself with
+  //    window.close() from its own page — unlike chrome.sidePanel.close, which
+  //    needs Chrome 141+ and the right tab/window context.
+  window.close();
+}
+
 function openPortfolioPage(): void {
   window.open(`${KNOWW_APP_URL}/portfolio`, "_blank", "noopener,noreferrer");
 }
@@ -1878,6 +1892,13 @@ function render(): void {
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 5 15.08a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8.92 5a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path>
             </svg>
           </button>
+          <button type="button" class="knoww-stack-popout" title="Move to floating panel" aria-label="Move markets panel to floating panel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+              <path d="M9 4v16"></path>
+              <path d="m11 9 3 3-3 3"></path>
+            </svg>
+          </button>
           <button type="button" class="knoww-search-toggle" id="knoww-search-toggle" title="Search markets" aria-label="Search markets">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <circle cx="11" cy="11" r="8"></circle>
@@ -2030,6 +2051,9 @@ function render(): void {
       button.setAttribute("aria-label", minimized ? "Expand" : "Minimize");
       button.setAttribute("aria-expanded", String(!minimized));
     });
+  root
+    .querySelector<HTMLButtonElement>(".knoww-stack-popout")
+    ?.addEventListener("click", () => void switchToFloatingPanel());
   root
     .querySelector<HTMLButtonElement>(".knoww-stack-close")
     ?.addEventListener("click", () => void closeSidePanel());

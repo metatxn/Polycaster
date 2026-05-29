@@ -244,7 +244,7 @@ export function useRelayerClient() {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       try {
-        const { polygon } = await import("viem/chains");
+        const { polygon } = await import("@/lib/chains");
         const { checkAllApprovals } = await import("@/lib/approvals");
         const signer = await getViemWalletClient(
           walletClient,

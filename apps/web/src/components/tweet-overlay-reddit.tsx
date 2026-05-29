@@ -319,7 +319,7 @@ export function RedditItem({
           </div>
         </header>
 
-        <h3 className="kwt-rd-title">{p.title}</h3>
+        <div className="kwt-rd-title">{p.title}</div>
         <p className="kwt-rd-text">
           {renderBody(p.body, active && phase >= 1)}
         </p>

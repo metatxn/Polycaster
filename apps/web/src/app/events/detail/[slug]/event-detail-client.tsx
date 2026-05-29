@@ -55,6 +55,7 @@ import { applyLiveTradingOutcomeQuotes } from "@/lib/trading-outcome-quotes";
 import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
 import { CandidateTicker } from "./candidate-ticker";
+import { FieldTiles } from "./field-tiles";
 import { HeaderSection } from "./header-section";
 import { MatchupOutcomes } from "./matchup-outcomes";
 import { OutcomesTable } from "./outcomes-table";
@@ -122,6 +123,20 @@ type PriceHistoryBatchResponse = {
     history: PriceHistoryPoint[];
   }>;
 };
+
+/**
+ * Per-outcome palette for the multi-series chart, the field tiles, and the
+ * outcomes table — single source of truth so a contender's color is the
+ * same everywhere on the page. 5 colors chosen to read on both light and
+ * dark themes; cycles for events with more than 5 outcomes.
+ */
+const CANDIDATE_PALETTE = [
+  "hsl(221, 83%, 53%)", // Blue
+  "hsl(25, 95%, 53%)", // Orange
+  "hsl(280, 70%, 55%)", // Purple
+  "hsl(142, 76%, 36%)", // Green
+  "hsl(340, 82%, 52%)", // Rose
+];
 
 const chartTimeRangeToStartTsOffset: Record<TimeRange, number> = {
   "30M": 30 * 60,
@@ -840,7 +855,6 @@ export default function EventDetailClient({
         ? (market.oneDayPriceChange ?? 0)
         : 0;
       const change = toDisplayPercentagePointChange(rawChange);
-      const colors = ["orange", "blue", "purple", "green"];
 
       const rawMinSize = market.orderMinSize ?? market.order_min_size;
       const orderMinSize =
@@ -863,7 +877,7 @@ export default function EventDetailClient({
         change,
         hasOneDayPriceChange,
         volume: market.volume || "0",
-        color: colors[idx % colors.length],
+        color: CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length],
         sportsMarketType: market.sportsMarketType,
         parentEventId:
           market.parentEventId !== undefined && market.parentEventId !== null
@@ -1502,7 +1516,7 @@ export default function EventDetailClient({
   // Loading state - AFTER all hooks
   if (loading) {
     return (
-      <div className="min-h-screen bg-background relative overflow-x-clip selection:bg-foreground/15">
+      <div className="kw-app min-h-screen bg-(--kwm-bg) relative overflow-x-clip selection:bg-(--kwm-ink)/15">
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-8 space-y-8">
@@ -1517,7 +1531,7 @@ export default function EventDetailClient({
   // Error state - AFTER all hooks
   if (error || !event) {
     return (
-      <div className="min-h-screen bg-background relative overflow-x-clip selection:bg-foreground/15">
+      <div className="kw-app min-h-screen bg-(--kwm-bg) relative overflow-x-clip selection:bg-(--kwm-ink)/15">
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 space-y-8">
@@ -1576,13 +1590,6 @@ export default function EventDetailClient({
   //   at 5 keeps the chart legend readable and matches the ticker —
   //   lower-ranked markets stay visible in the outcomes table below.
   const chartMarket = selectedMarket ?? sortedMarketData[0];
-  const CANDIDATE_PALETTE = [
-    "hsl(221, 83%, 53%)", // Blue
-    "hsl(25, 95%, 53%)", // Orange
-    "hsl(280, 70%, 55%)", // Purple
-    "hsl(142, 76%, 36%)", // Green
-    "hsl(340, 82%, 52%)", // Rose
-  ];
   const topChartMarkets = sortedMarketData.slice(0, 5);
   const matchupChartColors = ensureReadableSeriesColors(
     [
@@ -1727,7 +1734,7 @@ export default function EventDetailClient({
   const showSportsRail = Boolean(sportsRailActiveSlug);
 
   return (
-    <div className="min-h-screen bg-background relative selection:bg-foreground/15">
+    <div className="kw-app min-h-screen bg-(--kwm-bg) relative selection:bg-(--kwm-ink)/15">
       <Navbar />
       <ChromeHeader />
       <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 min-h-screen">
@@ -1812,13 +1819,36 @@ export default function EventDetailClient({
                 to the moneyline and a candidate-driven chart selector would
                 no longer match what the chart actually shows. The outcomes
                 table below still drives trading-panel selection. */}
-                {!isSingleMarketEvent && !chartLockedToMoneyline && (
-                  <CandidateTicker
-                    markets={topChartMarkets}
-                    selectedMarketId={selectedMarket?.id ?? ""}
-                    onSelectMarket={setSelectedMarketId}
-                  />
-                )}
+                {!isSingleMarketEvent &&
+                  !chartLockedToMoneyline &&
+                  (topChartMarkets.length >= 3 ? (
+                    /* New: Field tiles — only when the event has enough
+                       contenders for the grid to read as a "field". We
+                       re-assign palette colors here based on the
+                       *displayed* (post-sort) rank so a tile's color
+                       matches its chart-line color, which the chart
+                       also picks by post-sort index. */
+                    <FieldTiles
+                      markets={topChartMarkets.map((m, idx) => ({
+                        ...m,
+                        color:
+                          CANDIDATE_PALETTE[idx % CANDIDATE_PALETTE.length],
+                      }))}
+                      selectedMarketId={selectedMarket?.id ?? ""}
+                      onSelectMarket={setSelectedMarketId}
+                      totalOutcomes={openMarkets.length}
+                      isLive={isConnected}
+                    />
+                  ) : (
+                    /* Fall back to the horizontal candidate ticker for 2-
+                       outcome non-binary events, where a 2-tile grid
+                       would look sparse. */
+                    <CandidateTicker
+                      markets={topChartMarkets}
+                      selectedMarketId={selectedMarket?.id ?? ""}
+                      onSelectMarket={setSelectedMarketId}
+                    />
+                  ))}
 
                 {/* Chart */}
                 <Card>

@@ -14,7 +14,6 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { formatUnits } from "viem";
-import { mainnet, polygon } from "viem/chains";
 import {
   useBalance,
   useConnection,
@@ -25,6 +24,7 @@ import {
 import { DepositModal } from "@/components/deposit-modal";
 import { PUSD_DECIMALS } from "@/constants/contracts";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
+import { mainnet, polygon } from "@/lib/chains";
 import { cn } from "@/lib/utils";
 
 /**

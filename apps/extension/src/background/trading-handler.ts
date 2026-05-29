@@ -1,6 +1,6 @@
 /**
  * Trading Handler — processes trading-related messages in the offscreen document.
- * Uses ClobClient + a viem bridge wallet client for order operations.
+ * Uses the Polymarket unified SDK + a viem bridge wallet client for order operations.
  * Supports: limit (GTC/GTD), market (FAK/FOK), split, merge, and balance queries.
  */
 
@@ -20,6 +20,7 @@ import {
 import { POLYGON_CHAIN } from "@knoww/shared-types/chains";
 import {
   fetchClobBuilderFeeRates,
+  fetchClobMarket,
   fetchClobOrderBook,
 } from "@knoww/shared-types/clob";
 import {
@@ -45,10 +46,10 @@ import {
   getClobPostOrderError,
   getPolymarketSignatureType,
   normalizeTradingWalletMode,
-  POLYGON_CHAIN_ID,
   POLYMARKET_API,
   syncClobBalanceAllowance,
 } from "@knoww/shared-types/polymarket";
+import type { LegacyClobOrderRequest } from "@knoww/shared-types/polymarket-unified";
 import {
   derivePolymarketDepositWallet,
   derivePolymarketSafe,
@@ -60,7 +61,6 @@ import {
   parseApprovalAmountRaw,
   planPusdAutoWrap,
 } from "@knoww/shared-types/trading";
-import { ClobClient } from "@polymarket/clob-client-v2";
 import {
   type Address,
   createPublicClient,
@@ -95,12 +95,18 @@ import {
   createBridgeWalletClient,
 } from "./bridge-signer";
 import {
+  buildClobHmacHeaders,
+  type ClobApiCredentials,
+  fetchClobOpenOrders,
+} from "./clob-open-orders";
+import {
   deployDepositWallet,
   deployProxyWallet,
   executeViaDepositWallet,
   executeViaRelayer,
 } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
+import { createExtensionLegacyClobClient } from "./unified-clob-client";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
@@ -108,20 +114,21 @@ const publicClient = createPublicClient({
   chain: POLYGON_CHAIN,
   transport: http(POLYGON_RPC),
 });
-const CLOB_INITIAL_CURSOR = "MA==";
-const CLOB_END_CURSOR = "LTE=";
 
 type TradingResponse = TradingSuccessResponse | TradingErrorResponse;
-type ClobApiCredentials = {
-  apiKey: string;
-  apiSecret: string;
-  apiPassphrase: string;
-};
-type ClobOpenOrder = {
-  side?: string;
-  price?: string | number;
-  original_size?: string | number;
-  size_matched?: string | number;
+type ExtensionLegacyClobClient = ClobBalanceAllowanceClient & {
+  getOpenOrders(): Promise<unknown>;
+  getClobMarketInfo(conditionId: string): Promise<unknown>;
+  createMarketOrder(order: LegacyClobOrderRequest): Promise<unknown>;
+  createOrder(
+    order: LegacyClobOrderRequest & {
+      price: number;
+      size: number;
+      expiration: number;
+    },
+    options?: unknown
+  ): Promise<unknown>;
+  postOrder(order: unknown, orderType?: string): Promise<unknown>;
 };
 // Memoize the public CLOB builder-fee endpoint per builder code. The rates
 // are effectively static (set by Polymarket per builder), so caching for the
@@ -140,6 +147,9 @@ function getBuilderFeeRates(
   if (cached) return cached;
   const pending = fetchClobBuilderFeeRates(builderCode, {
     host: CLOB_HOST,
+    // TODO: Move this back to the SDK path once unified SDK exposes builder
+    // fee reads in the extension runtime.
+    useUnifiedSdk: false,
   }).catch((err) => {
     // Don't poison the cache on a transient failure — let the next call retry.
     builderFeeRatesCache.delete(builderCode);
@@ -148,6 +158,17 @@ function getBuilderFeeRates(
   builderFeeRatesCache.set(builderCode, pending);
   return pending;
 }
+
+const unifiedMarketInfoClient = {
+  getClobMarketInfo(conditionId: string) {
+    return fetchClobMarket(conditionId, {
+      host: CLOB_HOST,
+      // TODO: Move this back to the SDK path once unified SDK market-info reads
+      // are available in the extension runtime.
+      useUnifiedSdk: false,
+    });
+  },
+};
 
 function ok(data: unknown): TradingSuccessResponse {
   return { ok: true, data };
@@ -343,30 +364,19 @@ async function handlePlaceOrder(
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
 
-  const creds = {
-    key: msg.credentials.apiKey,
-    secret: msg.credentials.apiSecret,
-    passphrase: msg.credentials.apiPassphrase,
-  };
-
   const builderCode = process.env.POLY_BUILDER_CODE;
-  const signatureType: number = getPolymarketSignatureType(msg.walletMode);
   const funderAddress =
     normalizeTradingWalletMode(msg.walletMode) === "eoa"
       ? ownerAddress
       : (getAddress(msg.proxyAddress) as Address);
 
-  const client = new ClobClient({
-    host: CLOB_HOST,
-    chain: POLYGON_CHAIN_ID,
-    signer: walletClient as unknown as WalletClient,
-    creds,
-    signatureType,
+  const client = (await createExtensionLegacyClobClient({
+    walletClient: walletClient as unknown as WalletClient,
     funderAddress,
-    ...(builderCode ? { builderConfig: { builderCode } } : {}),
-  });
+    credentials: msg.credentials,
+    builderCode,
+  })) as ExtensionLegacyClobClient;
 
-  const orderOptions = msg.negRisk ? { negRisk: true } : undefined;
   const orderType = msg.orderType || "GTC";
   const preflight = await buildClobOrderPreflightPlan({
     side: msg.side,
@@ -379,7 +389,11 @@ async function handlePlaceOrder(
     builderCode,
     getBuilderFeeRates,
     isMarketableBuy: msg.isMarketableBuy,
-    getOpenOrders: () => clobGetOpenOrders(msg.address, msg.credentials),
+    getOpenOrders: () =>
+      fetchClobOpenOrders({
+        address: msg.address,
+        credentials: msg.credentials,
+      }),
     onOpenOrdersError: (err) =>
       logWarn("trading.open-orders-fetch-failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -450,12 +464,11 @@ async function handlePlaceOrder(
   if (preflight.isMarketOrder) {
     const marketAmount =
       msg.side === "SELL" ? msg.size : (msg.amount ?? msg.size);
-    const marketOrder: Record<string, unknown> = {
+    const marketOrder: LegacyClobOrderRequest = {
       tokenID: msg.tokenId,
       amount: marketAmount,
       side: msg.side,
       // feeRateBps removed (V2: protocol-determined at match time)
-      orderType,
     };
     if (msg.price && msg.price > 0) {
       marketOrder.price = msg.price;
@@ -469,11 +482,8 @@ async function handlePlaceOrder(
       msgAmount: msg.amount,
     });
 
-    const order = await client.createMarketOrder(
-      marketOrder as any,
-      orderOptions
-    );
-    const response = await client.postOrder(order, orderType as any);
+    const order = await client.createMarketOrder(marketOrder);
+    const response = await client.postOrder(order, orderType);
 
     const errorMsg = getClobPostOrderError(response);
     if (errorMsg) {
@@ -498,21 +508,22 @@ async function handlePlaceOrder(
       tokenID: msg.tokenId,
       price: msg.price,
       size: msg.size,
-      side: msg.side as any,
+      side: msg.side,
       // feeRateBps removed (V2: protocol-determined at match time)
-      expiration: orderType === "GTD" ? msg.expiration : 0,
+      expiration: orderType === "GTD" ? (msg.expiration ?? 0) : 0,
     },
-    orderOptions
+    undefined
   );
 
+  const signedOrder = order as Record<string, unknown>;
   logInfo("trading.place-order.signed", {
-    tokenID: order.tokenId,
-    side: order.side,
-    size: order.size,
-    price: order.price,
+    tokenID: signedOrder.tokenId,
+    side: signedOrder.side,
+    size: signedOrder.size,
+    price: signedOrder.price,
   });
 
-  const response = await client.postOrder(order, orderType as any);
+  const response = await client.postOrder(order, orderType);
 
   logInfo("trading.place-order.clob-response", {
     txHash: (response as Record<string, unknown>)?.transactionHash,
@@ -637,7 +648,14 @@ async function handleGetOrderBook(
   msg: TradingGetOrderBookMessage
 ): Promise<TradingResponse> {
   try {
-    return ok(await fetchClobOrderBook(msg.tokenId, { host: CLOB_HOST }));
+    return ok(
+      await fetchClobOrderBook(msg.tokenId, {
+        host: CLOB_HOST,
+        // TODO: Move this back to the SDK path once unified SDK public reads
+        // support extension order-book fetching reliably.
+        useUnifiedSdk: false,
+      })
+    );
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err));
   }
@@ -646,23 +664,9 @@ async function handleGetOrderBook(
 async function handleGetOrderPreflight(
   msg: TradingGetOrderPreflightMessage
 ): Promise<TradingResponse> {
-  // Mirror handlePlaceOrder's ClobClient construction (creds + builderConfig)
-  // when credentials are available, so the fee preview uses the same fee
-  // schedule (including builder-taker fees) the authoritative pre-flight will.
+  // Mirror handlePlaceOrder's builder fee schedule so the fee preview matches
+  // the authoritative pre-flight performed before posting.
   const builderCode = process.env.POLY_BUILDER_CODE;
-  const creds = msg.credentials
-    ? {
-        key: msg.credentials.apiKey,
-        secret: msg.credentials.apiSecret,
-        passphrase: msg.credentials.apiPassphrase,
-      }
-    : undefined;
-  const client = new ClobClient({
-    host: CLOB_HOST,
-    chain: POLYGON_CHAIN_ID,
-    ...(creds ? { creds } : {}),
-    ...(builderCode ? { builderConfig: { builderCode } } : {}),
-  });
   const preflight = await buildClobOrderPreflightPlan({
     side: msg.side,
     orderType: msg.orderType || "GTC",
@@ -670,7 +674,7 @@ async function handleGetOrderPreflight(
     size: msg.size,
     price: msg.price,
     conditionId: msg.conditionId,
-    marketInfoClient: client,
+    marketInfoClient: unifiedMarketInfoClient,
     builderCode,
     getBuilderFeeRates,
     isMarketableBuy: msg.isMarketableBuy,
@@ -694,106 +698,6 @@ async function handleGetOrderPreflight(
 // ── Post-split/merge: tell the CLOB about updated on-chain balances ──
 // Uses direct HTTP + HMAC auth to avoid any wallet/signer interaction.
 
-async function buildHmacHeaders(
-  address: string,
-  creds: ClobApiCredentials,
-  method: string,
-  requestPath: string,
-  body?: string
-): Promise<Record<string, string>> {
-  const ts = Math.floor(Date.now() / 1000);
-  // Polymarket signs the canonical path and optional body only; query params
-  // are intentionally excluded from the HMAC message.
-  const message = `${ts}${method}${requestPath}${body ?? ""}`;
-  const keyData = base64ToArrayBuffer(creds.apiSecret);
-  const cryptoKey = await globalThis.crypto.subtle.importKey(
-    "raw",
-    keyData,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sigBuf = await globalThis.crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(message)
-  );
-  const sig = arrayBufferToBase64(sigBuf)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-  return {
-    POLY_ADDRESS: address,
-    POLY_SIGNATURE: sig,
-    POLY_TIMESTAMP: String(ts),
-    POLY_API_KEY: creds.apiKey,
-    POLY_PASSPHRASE: creds.apiPassphrase,
-  };
-}
-
-function base64ToArrayBuffer(b64: string): ArrayBuffer {
-  const s = b64
-    .replace(/-/g, "+")
-    .replace(/_/g, "/")
-    .replace(/[^A-Za-z0-9+/=]/g, "");
-  const bin = atob(s);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes.buffer;
-}
-
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++)
-    binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
-async function clobGetOpenOrders(
-  address: string,
-  creds: ClobApiCredentials,
-  filters?: { market?: string; assetId?: string }
-): Promise<ClobOpenOrder[]> {
-  const endpoint = "/data/orders";
-  const headers = await buildHmacHeaders(address, creds, "GET", endpoint);
-  const results: ClobOpenOrder[] = [];
-  let nextCursor = CLOB_INITIAL_CURSOR;
-
-  while (nextCursor !== CLOB_END_CURSOR) {
-    const params = new URLSearchParams({ next_cursor: nextCursor });
-    if (filters?.market) params.set("market", filters.market);
-    if (filters?.assetId) params.set("asset_id", filters.assetId);
-    const res = await fetch(`${CLOB_HOST}${endpoint}?${params}`, {
-      method: "GET",
-      headers,
-    });
-    if (!res.ok) {
-      throw new Error(`Failed to fetch open orders: ${res.status}`);
-    }
-
-    const payload = (await res.json()) as {
-      data?: unknown;
-      error?: unknown;
-      next_cursor?: unknown;
-    };
-    if (payload.error) {
-      throw new Error(String(payload.error));
-    }
-    if (Array.isArray(payload.data)) {
-      results.push(...(payload.data as ClobOpenOrder[]));
-    }
-
-    const next =
-      typeof payload.next_cursor === "string"
-        ? payload.next_cursor
-        : CLOB_END_CURSOR;
-    if (next === nextCursor) break;
-    nextCursor = next;
-  }
-
-  return results;
-}
-
 async function clobUpdateBalanceAllowance(
   address: string,
   creds: ClobApiCredentials,
@@ -801,7 +705,7 @@ async function clobUpdateBalanceAllowance(
   signatureType: number = getPolymarketSignatureType()
 ): Promise<void> {
   const endpoint = "/balance-allowance/update";
-  const headers = await buildHmacHeaders(address, creds, "GET", endpoint);
+  const headers = await buildClobHmacHeaders(address, creds, "GET", endpoint);
   const params = new URLSearchParams({
     asset_type: target.asset_type,
     signature_type: String(signatureType),

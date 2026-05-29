@@ -1,5 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import {
+  Fraunces,
+  Geist,
+  Geist_Mono,
+  JetBrains_Mono,
+  Plus_Jakarta_Sans,
+} from "next/font/google";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import { MainContent } from "@/components/main-content";
@@ -27,6 +33,25 @@ const fraunces = Fraunces({
   subsets: ["latin"],
   weight: ["500", "600"],
   style: ["normal", "italic"],
+  display: "swap",
+});
+
+// DeFi/trading typography — scoped to product surfaces (markets, etc.).
+// Geist is the display/body face; Geist Mono carries every number, label,
+// and ticker so prices align across rows. Loaded globally so the variables
+// are available, but only consumed inside `.kw-app` so editorial
+// surfaces (landing, privacy, terms) keep their current type system.
+const geistSans = Geist({
+  variable: "--font-geist",
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
   display: "swap",
 });
 
@@ -126,7 +151,7 @@ export default async function RootLayout({
         />
       </head>
       <body
-        className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} font-sans antialiased`}
+        className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} ${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ContextProvider cookies={cookies}>
           <MainContent>{children}</MainContent>

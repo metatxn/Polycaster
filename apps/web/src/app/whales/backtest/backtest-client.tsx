@@ -78,31 +78,37 @@ export function BacktestClient() {
   }, [options]);
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden">
+    <div className="kw-app min-h-screen relative overflow-x-hidden bg-(--kwm-bg) text-(--kwm-ink) selection:bg-(--kwm-ink)/15">
       <Navbar />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8 max-w-6xl mx-auto">
         {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground mb-6">
+        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-(--kwm-ink-3) mb-6">
           <button
             type="button"
             onClick={() => router.push("/whales")}
-            className="flex items-center gap-1 hover:text-foreground transition-colors"
+            className="flex items-center gap-1 hover:text-(--kwm-ink) transition-colors"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
             <span>Whales</span>
           </button>
           <span className="text-border/80">&rsaquo;</span>
-          <span className="text-foreground">Insider Backtest</span>
+          <span className="text-(--kwm-ink)">Insider Backtest</span>
         </div>
 
-        {/* Hero */}
-        <header className="mb-8">
-          <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl lg:text-6xl leading-[1.02] tracking-tight text-foreground">
-            Insider Backtest
+        {/* Hero — upright Geist (matches the rest of the functional product
+            chrome; italic Fraunces is reserved for narrative empty states). */}
+        <header className="mb-8 pb-4 border-b border-(--kwm-hl)">
+          <div className="flex items-baseline gap-3 mb-1">
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+              § Insider Backtest
+            </span>
+          </div>
+          <h1 className="font-(family-name:--font-geist) font-semibold text-3xl sm:text-4xl leading-[1.05] tracking-tight text-(--kwm-ink)">
+            Replay the detector
           </h1>
-          <p className="mt-4 text-base sm:text-lg text-muted-foreground font-editorial leading-snug max-w-2xl">
-            Replay the current detector against resolved Polymarket markets.
+          <p className="mt-3 text-sm sm:text-base text-(--kwm-ink-3) leading-snug max-w-2xl">
+            Run the current detector against resolved Polymarket markets.
             Measure whether flagged trades actually win more often than the
             market base rate — and by how much.
           </p>
@@ -111,7 +117,7 @@ export function BacktestClient() {
         {/* Controls — editable so you can push harder configs without
             editing code. Specialist firings need roomy samples; the
             Phase 3/4 sweet spot has been 30 markets × $200 min trade. */}
-        <section className="border-y border-border/50 py-4 mb-8 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4">
+        <section className="border-y border-(--kwm-hl) py-4 mb-8 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4">
           <Control
             label="Window"
             value={`${options.minDaysAgo}-${options.maxDaysAgo}d`}
@@ -155,7 +161,7 @@ export function BacktestClient() {
             disabled={isRunning}
             onClick={run}
             className={cn(
-              "inline-flex items-center gap-2 px-4 py-2 bg-foreground text-background text-sm font-medium tracking-tight hover:opacity-90 transition-opacity disabled:opacity-60",
+              "inline-flex items-center gap-2 px-4 py-2 bg-(--kwm-ink) text-(--kwm-bg) text-sm font-medium tracking-tight hover:opacity-90 transition-opacity disabled:opacity-60",
               isRunning && "cursor-wait"
             )}
           >
@@ -166,22 +172,22 @@ export function BacktestClient() {
             )}
             {isRunning ? "Running backtest…" : "Run backtest"}
           </button>
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
             ~30-120s · paginates live against Polymarket
           </span>
         </div>
 
         {error && (
-          <div className="mb-10 p-4 border border-red-600/40 bg-red-50 dark:bg-red-950/30 text-sm">
-            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-red-700 dark:text-red-400 mb-1">
+          <div className="mb-10 p-4 border border-(--kwm-down)/40 bg-(--kwm-down-soft) text-sm">
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-down) mb-1">
               Backtest failed
             </div>
-            <code className="text-red-900 dark:text-red-200">{error}</code>
+            <code className="text-(--kwm-down)">{error}</code>
           </div>
         )}
 
         {isRunning && !result && (
-          <div className="py-24 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+          <div className="py-24 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
             Fetching resolved markets, trades, and trader histories…
           </div>
         )}
@@ -203,13 +209,13 @@ function Control({
 }) {
   return (
     <div>
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {label}
       </div>
-      <div className="mt-1 font-editorial italic text-2xl text-foreground">
+      <div className="mt-1 font-(family-name:--font-geist) font-semibold tracking-tight text-2xl text-(--kwm-ink)">
         {value}
       </div>
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {hint}
       </div>
     </div>
@@ -237,7 +243,7 @@ function NumberControl({
 }) {
   return (
     <div>
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {label}
       </div>
       <input
@@ -252,9 +258,9 @@ function NumberControl({
           if (!Number.isFinite(next)) return;
           onChange(Math.min(max, Math.max(min, next)));
         }}
-        className="mt-1 font-editorial italic text-2xl text-foreground bg-transparent border-b border-border/60 focus:border-foreground focus:outline-none w-full max-w-[7ch] tabular-nums disabled:opacity-60"
+        className="mt-1 font-(family-name:--font-geist) font-semibold tracking-tight text-2xl text-(--kwm-ink) bg-transparent border-b border-(--kwm-hl-2) focus:border-(--kwm-ink) focus:outline-none w-full max-w-[7ch] tabular-nums disabled:opacity-60"
       />
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {hint}
       </div>
     </div>
@@ -265,15 +271,15 @@ function Results({ result }: { result: BacktestResult }) {
   const lift = result.winRateLift;
   const liftColor =
     lift > 1.2
-      ? "text-emerald-600"
+      ? "text-(--kwm-up)"
       : lift < 0.9
-        ? "text-rose-600"
-        : "text-foreground";
+        ? "text-(--kwm-down)"
+        : "text-(--kwm-ink)";
 
   return (
     <>
       {/* Headline numbers */}
-      <section className="border-y border-border/50 py-6 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-6 mb-12">
+      <section className="border-y border-(--kwm-hl) py-6 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-6 mb-12">
         <HeadlineStat
           label="Markets scanned"
           value={result.marketsScanned.toString()}
@@ -300,8 +306,8 @@ function Results({ result }: { result: BacktestResult }) {
           hint={`base ${(result.baseline.meanProfitPerShare * 100).toFixed(1)}¢`}
           valueClassName={
             result.flagged.meanProfitPerShare > 0
-              ? "text-emerald-600"
-              : "text-rose-600"
+              ? "text-(--kwm-up)"
+              : "text-(--kwm-down)"
           }
         />
       </section>
@@ -309,17 +315,17 @@ function Results({ result }: { result: BacktestResult }) {
       {/* Per-archetype breakdown — Phase 2 */}
       {result.perArchetype && result.perArchetype.length > 0 && (
         <section className="mb-12">
-          <h2 className="font-editorial italic text-2xl text-foreground mb-4">
+          <h2 className="font-(family-name:--font-geist) font-semibold tracking-tight text-2xl text-(--kwm-ink) mb-4">
             Per-archetype
           </h2>
-          <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
+          <p className="text-sm text-(--kwm-ink-3) mb-4 max-w-2xl">
             Each archetype is an independent detector. The ensemble flags a
             trade if any of them fires. Per-archetype numbers show which pattern
             is actually catching edge vs. which is noise — precisely where to
             spend the next phase's effort.
           </p>
-          <div className="border-y border-border/50">
-            <div className="hidden sm:grid grid-cols-[minmax(0,1.5fr)_70px_80px_90px_80px_80px] gap-3 px-3 py-2 border-b border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <div className="border-y border-(--kwm-hl)">
+            <div className="hidden sm:grid grid-cols-[minmax(0,1.5fr)_70px_80px_90px_80px_80px] gap-3 px-3 py-2 border-b border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
               <span>Archetype</span>
               <span className="text-right">Flagged</span>
               <span className="text-right">Win %</span>
@@ -330,18 +336,18 @@ function Results({ result }: { result: BacktestResult }) {
             {result.perArchetype.map((a) => {
               const liftColor =
                 a.winRateLift > 1.2
-                  ? "text-emerald-600"
+                  ? "text-(--kwm-up)"
                   : a.winRateLift < 0.9
-                    ? "text-rose-600"
-                    : "text-foreground";
+                    ? "text-(--kwm-down)"
+                    : "text-(--kwm-ink)";
               const p5 = a.precisionAtK.find((p) => p.k === 5);
               const p20 = a.precisionAtK.find((p) => p.k === 20);
               return (
                 <div
                   key={a.archetype}
-                  className="grid grid-cols-[minmax(0,1.5fr)_70px_80px_90px_80px_80px] gap-3 px-3 py-3 border-b border-border/30 items-center text-sm"
+                  className="grid grid-cols-[minmax(0,1.5fr)_70px_80px_90px_80px_80px] gap-3 px-3 py-3 border-b border-(--kwm-hl) items-center text-sm"
                 >
-                  <span className="text-foreground">{a.label}</span>
+                  <span className="text-(--kwm-ink)">{a.label}</span>
                   <span className="text-right font-mono tabular-nums">
                     {a.flaggedCount}
                   </span>
@@ -360,12 +366,12 @@ function Results({ result }: { result: BacktestResult }) {
                       ? `${a.winRateLift.toFixed(2)}×`
                       : "—"}
                   </span>
-                  <span className="text-right font-mono tabular-nums text-muted-foreground">
+                  <span className="text-right font-mono tabular-nums text-(--kwm-ink-3)">
                     {p5 && p5.n > 0
                       ? `${(p5.precision * 100).toFixed(0)}%`
                       : "—"}
                   </span>
-                  <span className="text-right font-mono tabular-nums text-muted-foreground">
+                  <span className="text-right font-mono tabular-nums text-(--kwm-ink-3)">
                     {p20 && p20.n > 0
                       ? `${(p20.precision * 100).toFixed(0)}%`
                       : "—"}
@@ -379,16 +385,16 @@ function Results({ result }: { result: BacktestResult }) {
 
       {/* Precision@K */}
       <section className="mb-12">
-        <h2 className="font-editorial italic text-2xl text-foreground mb-4">
+        <h2 className="font-(family-name:--font-geist) font-semibold tracking-tight text-2xl text-(--kwm-ink) mb-4">
           Precision @ K
         </h2>
-        <p className="text-sm text-muted-foreground mb-4 max-w-xl">
+        <p className="text-sm text-(--kwm-ink-3) mb-4 max-w-xl">
           Of the top-K highest-scored flagged trades, what fraction actually won
           at resolution. This is the honest reading of "accuracy" when we have
           no human-labeled ground truth.
         </p>
-        <div className="border-y border-border/50">
-          <div className="grid grid-cols-[60px_1fr_80px] gap-3 px-3 py-2 border-b border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="border-y border-(--kwm-hl)">
+          <div className="grid grid-cols-[60px_1fr_80px] gap-3 px-3 py-2 border-b border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
             <span>K</span>
             <span>Precision</span>
             <span className="text-right">N</span>
@@ -396,23 +402,23 @@ function Results({ result }: { result: BacktestResult }) {
           {result.precisionAtK.map((row) => (
             <div
               key={row.k}
-              className="grid grid-cols-[60px_1fr_80px] gap-3 px-3 py-3 border-b border-border/30 items-center text-sm"
+              className="grid grid-cols-[60px_1fr_80px] gap-3 px-3 py-3 border-b border-(--kwm-hl) items-center text-sm"
             >
-              <span className="font-mono tabular-nums text-muted-foreground">
+              <span className="font-mono tabular-nums text-(--kwm-ink-3)">
                 {row.k}
               </span>
               <div className="flex items-center gap-3">
-                <span className="font-editorial italic text-lg text-foreground tabular-nums min-w-[3.5rem]">
+                <span className="font-(family-name:--font-geist) font-semibold text-lg text-(--kwm-ink) tabular-nums min-w-[3.5rem]">
                   {(row.precision * 100).toFixed(1)}%
                 </span>
                 <div className="flex-1 h-px bg-border/60 overflow-hidden max-w-xs">
                   <div
-                    className="h-full bg-foreground"
+                    className="h-full bg-(--kwm-ink)"
                     style={{ width: `${row.precision * 100}%` }}
                   />
                 </div>
               </div>
-              <span className="text-right font-mono tabular-nums text-muted-foreground">
+              <span className="text-right font-mono tabular-nums text-(--kwm-ink-3)">
                 {row.n}
               </span>
             </div>
@@ -422,11 +428,11 @@ function Results({ result }: { result: BacktestResult }) {
 
       {/* Per-market breakdown */}
       <section className="mb-12">
-        <h2 className="font-editorial italic text-2xl text-foreground mb-4">
+        <h2 className="font-(family-name:--font-geist) font-semibold tracking-tight text-2xl text-(--kwm-ink) mb-4">
           Per-market
         </h2>
-        <div className="border-y border-border/50">
-          <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_90px_80px_80px_96px] gap-3 px-3 py-2 border-b border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="border-y border-(--kwm-hl)">
+          <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_90px_80px_80px_96px] gap-3 px-3 py-2 border-b border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
             <span>Market</span>
             <span className="text-right">Volume</span>
             <span className="text-right">Flagged</span>
@@ -436,12 +442,12 @@ function Results({ result }: { result: BacktestResult }) {
           {result.perMarket.map((m) => (
             <div
               key={m.conditionId}
-              className="grid grid-cols-[minmax(0,1fr)_90px_80px_80px_96px] gap-3 px-3 py-2 border-b border-border/30 items-center text-sm hover:bg-muted/40 transition-colors"
+              className="grid grid-cols-[minmax(0,1fr)_90px_80px_80px_96px] gap-3 px-3 py-2 border-b border-(--kwm-hl) items-center text-sm hover:bg-(--kwm-bg-2) transition-colors"
             >
-              <span className="truncate text-foreground/85" title={m.question}>
+              <span className="truncate text-(--kwm-ink)/85" title={m.question}>
                 {m.question}
               </span>
-              <span className="text-right font-mono tabular-nums text-muted-foreground">
+              <span className="text-right font-mono tabular-nums text-(--kwm-ink-3)">
                 {formatCurrencyCompact(m.volumeUsd)}
               </span>
               <span className="text-right font-mono tabular-nums">
@@ -452,7 +458,7 @@ function Results({ result }: { result: BacktestResult }) {
                   ? `${(m.flagged.winRate * 100).toFixed(0)}%`
                   : "—"}
               </span>
-              <span className="text-right font-mono tabular-nums text-muted-foreground">
+              <span className="text-right font-mono tabular-nums text-(--kwm-ink-3)">
                 {m.baseline.count > 0
                   ? `${(m.baseline.winRate * 100).toFixed(0)}%`
                   : "—"}
@@ -464,30 +470,30 @@ function Results({ result }: { result: BacktestResult }) {
 
       {/* Top flagged */}
       <section className="mb-12">
-        <h2 className="font-editorial italic text-2xl text-foreground mb-3">
+        <h2 className="font-(family-name:--font-geist) font-semibold tracking-tight text-2xl text-(--kwm-ink) mb-3">
           Top flagged trades
         </h2>
-        <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
+        <p className="text-sm text-(--kwm-ink-3) mb-4 max-w-2xl">
           Four-tier sort:{" "}
           <span className="inline-flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full bg-violet-600" />
-            <span className="text-foreground font-medium">platinum</span>
+            <span className="text-(--kwm-ink) font-medium">platinum</span>
           </span>{" "}
           (specialist + funding + shared Safe-owner, Phase 5),{" "}
           <span className="inline-flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full bg-rose-600" />
-            <span className="text-foreground font-medium">gold</span>
+            <span className="text-(--kwm-ink) font-medium">gold</span>
           </span>{" "}
           (specialist + one stacking signal, Phase 4),{" "}
           <span className="inline-flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
-            <span className="text-foreground font-medium">silver</span>
+            <span className="text-(--kwm-ink) font-medium">silver</span>
           </span>{" "}
           (specialist or owner-cluster alone), baseline (other archetypes).
           Within each tier, trades are ordered by ensemble max score.
         </p>
-        <div className="border-y border-border/50">
-          <div className="hidden sm:grid grid-cols-[48px_130px_minmax(0,1fr)_150px_60px_72px_96px] gap-3 px-3 py-2 border-b border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="border-y border-(--kwm-hl)">
+          <div className="hidden sm:grid grid-cols-[48px_130px_minmax(0,1fr)_150px_60px_72px_96px] gap-3 px-3 py-2 border-b border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
             <span>Score</span>
             <span>Wallet</span>
             <span>Market</span>
@@ -505,28 +511,28 @@ function Results({ result }: { result: BacktestResult }) {
               <div
                 key={`${t.wallet}-${t.tradeTimestamp}-${i}`}
                 className={cn(
-                  "grid grid-cols-[48px_130px_minmax(0,1fr)_150px_60px_72px_96px] gap-3 px-3 py-2 border-b border-border/30 items-center text-sm transition-colors",
+                  "grid grid-cols-[48px_130px_minmax(0,1fr)_150px_60px_72px_96px] gap-3 px-3 py-2 border-b border-(--kwm-hl) items-center text-sm transition-colors",
                   isPlatinum
                     ? "bg-violet-50/70 dark:bg-violet-950/25 hover:bg-violet-100/80 dark:hover:bg-violet-950/40"
                     : isGold
                       ? "bg-rose-50/60 dark:bg-rose-950/20 hover:bg-rose-100/70 dark:hover:bg-rose-950/35"
                       : isSilver
                         ? "bg-amber-50/50 dark:bg-amber-950/15 hover:bg-amber-100/60 dark:hover:bg-amber-950/25"
-                        : "hover:bg-muted/40"
+                        : "hover:bg-(--kwm-bg-2)"
                 )}
               >
-                <span className="font-mono tabular-nums font-semibold text-foreground">
+                <span className="font-mono tabular-nums font-semibold text-(--kwm-ink)">
                   {t.score}
                 </span>
                 <Link
                   href={`/profile/${t.wallet}`}
-                  className="truncate text-foreground/85 hover:text-foreground"
+                  className="truncate text-(--kwm-ink)/85 hover:text-(--kwm-ink)"
                 >
                   {t.walletName ??
                     `${t.wallet.slice(0, 6)}…${t.wallet.slice(-4)}`}
                 </Link>
                 <span
-                  className="truncate text-foreground/85"
+                  className="truncate text-(--kwm-ink)/85"
                   title={t.marketQuestion}
                 >
                   {t.marketQuestion}
@@ -536,16 +542,16 @@ function Results({ result }: { result: BacktestResult }) {
                     <ArchetypeChip key={id} id={id} />
                   ))}
                 </span>
-                <span className="text-right font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                <span className="text-right font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                   {t.side}
                 </span>
-                <span className="text-right font-mono tabular-nums text-muted-foreground">
+                <span className="text-right font-mono tabular-nums text-(--kwm-ink-3)">
                   {formatCurrencyCompact(t.usdValue)}
                 </span>
                 <span
                   className={cn(
                     "text-right font-mono tabular-nums font-semibold",
-                    isWin ? "text-emerald-600" : "text-rose-600"
+                    isWin ? "text-(--kwm-up)" : "text-(--kwm-down)"
                   )}
                 >
                   {t.pnl.profit >= 0 ? "+" : ""}
@@ -557,7 +563,7 @@ function Results({ result }: { result: BacktestResult }) {
         </div>
       </section>
 
-      <footer className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground pt-6 border-t border-border/40">
+      <footer className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) pt-6 border-t border-(--kwm-hl)">
         Generated {new Date(result.generatedAt).toLocaleString()} · runtime{" "}
         {(result.runtimeMs / 1000).toFixed(1)}s
       </footer>
@@ -582,16 +588,16 @@ function ArchetypeChip({ id }: { id: string }) {
                 : id.toUpperCase();
   const tone =
     id === "account_loader"
-      ? "bg-muted-foreground/15 text-muted-foreground"
+      ? "bg-(--kwm-ink-3)/15 text-(--kwm-ink-3)"
       : id === "size_hider"
-        ? "bg-foreground text-background"
+        ? "bg-(--kwm-ink) text-(--kwm-bg)"
         : id === "category_specialist"
-          ? "bg-amber-500 text-background"
+          ? "bg-amber-500 text-(--kwm-bg)"
           : id === "funding_cluster"
-            ? "bg-rose-600 text-background"
+            ? "bg-rose-600 text-(--kwm-bg)"
             : id === "owner_cluster"
-              ? "bg-violet-600 text-background"
-              : "bg-background border border-foreground/60 text-foreground";
+              ? "bg-violet-600 text-(--kwm-bg)"
+              : "bg-(--kwm-panel) border border-(--kwm-ink)/60 text-(--kwm-ink)";
   return (
     <span
       className={cn(
@@ -617,18 +623,18 @@ function HeadlineStat({
 }) {
   return (
     <div>
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {label}
       </div>
       <div
         className={cn(
-          "mt-1 font-editorial italic text-3xl sm:text-4xl text-foreground tabular-nums",
+          "mt-1 font-(family-name:--font-geist) font-semibold tracking-tight text-3xl sm:text-4xl text-(--kwm-ink) tabular-nums",
           valueClassName
         )}
       >
         {value}
       </div>
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {hint}
       </div>
     </div>

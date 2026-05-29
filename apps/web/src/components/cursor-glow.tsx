@@ -40,7 +40,7 @@ export function CursorGlow() {
       y = event.clientY;
       if (!shown) {
         shown = true;
-        el.style.opacity = "1";
+        el.style.opacity = "var(--kw-cursor-glow-opacity, 0.32)";
       }
       if (!raf) raf = requestAnimationFrame(commit);
     };

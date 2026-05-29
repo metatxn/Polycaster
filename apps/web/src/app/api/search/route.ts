@@ -259,15 +259,36 @@ function withTopOutcomes(events: SearchEvent[]): SearchEvent[] {
   });
 }
 
+function eventMatchesQuery(event: SearchEvent, queryLower: string): boolean {
+  if (!queryLower) return true;
+  if ((event.title || "").toLowerCase().includes(queryLower)) return true;
+  return Boolean(
+    event.markets?.some((m) =>
+      (m.question || "").toLowerCase().includes(queryLower)
+    )
+  );
+}
+
 function mergeEvents(
   searchEvents: SearchEvent[],
   tagEvents: SearchEvent[],
-  limit: number
+  limit: number,
+  query: string
 ): SearchEvent[] {
   const seen = new Set<string>();
   const merged: SearchEvent[] = [];
+  const queryLower = query.trim().toLowerCase();
 
-  for (const event of [...searchEvents, ...tagEvents]) {
+  // Upstream `/events/keyset?tag_slug=…` doesn't accept a text query, so
+  // when a query is present the tag fetch will surface tag-top events
+  // that are irrelevant to what the user typed. Filter them down to
+  // events whose title or any market question contains the query text;
+  // public-search hits keep their upstream relevance score.
+  const filteredTagEvents = queryLower
+    ? tagEvents.filter((event) => eventMatchesQuery(event, queryLower))
+    : tagEvents;
+
+  for (const event of [...searchEvents, ...filteredTagEvents]) {
     if (event.closed === true || event.active === false) continue;
 
     const key = event.id || event.slug || event.title;
@@ -277,9 +298,17 @@ function mergeEvents(
     merged.push(event);
   }
 
-  return withTopOutcomes(merged)
-    .sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0))
-    .slice(0, limit);
+  // No query → sort by 24h volume so the tag landing shows the active
+  // top of the book. With a query → preserve the iteration order
+  // (public-search relevance first, then matching tag events), so the
+  // most relevant matches stay on top instead of being buried under
+  // higher-volume but less-relevant tag-top events.
+  const withOutcomes = withTopOutcomes(merged);
+  const ordered = queryLower
+    ? withOutcomes
+    : withOutcomes.sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0));
+
+  return ordered.slice(0, limit);
 }
 
 async function fetchJsonFromGamma(url: string): Promise<unknown> {
@@ -424,7 +453,7 @@ async function fetchAggregatedSearchData(
   ]);
 
   const tagEvents = tagResults.flat();
-  const events = mergeEvents(publicSearch.events, tagEvents, limit);
+  const events = mergeEvents(publicSearch.events, tagEvents, limit, query);
 
   return {
     events,

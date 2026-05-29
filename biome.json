@@ -13,6 +13,8 @@
       "!.next",
       "!dist",
       "!build",
+      "!**/.readability/**/*.html",
+      "!**/.readability/**/*.json",
       "!**/cloudflare-env.d.ts",
       "!.vscode",
       "!.wrangler",

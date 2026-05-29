@@ -27,18 +27,21 @@ export function HotMarketsList({
 }: HotMarketsListProps) {
   return (
     <section className="flex flex-col">
-      <header className="flex items-baseline justify-between pb-3">
-        <h2 className="font-editorial italic text-xl sm:text-2xl text-foreground">
-          Hot Markets
-        </h2>
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-          {markets.length}
-        </span>
+      <header className="flex items-end justify-between pb-3 border-b border-(--kwm-hl)">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+            § Hot Markets
+          </span>
+          <span className="text-(--kwm-ink-dim)">·</span>
+          <span className="font-(family-name:--font-geist) text-[18px] font-semibold tracking-tight text-(--kwm-ink) tabular-nums leading-none">
+            {markets.length}
+          </span>
+        </div>
       </header>
 
-      <div className="border-y border-border/60 divide-y divide-border/40">
+      <div className="border-y border-(--kwm-hl-2) divide-y divide-border/40">
         {markets.length === 0 ? (
-          <p className="py-10 px-3 text-center font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <p className="py-10 px-3 text-center font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
             No markets with whale flow in this window
           </p>
         ) : (
@@ -57,7 +60,7 @@ export function HotMarketsList({
         <button
           type="button"
           onClick={() => onMarketSelect(null)}
-          className="self-start mt-3 inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors"
+          className="self-start mt-3 inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.12em] text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
         >
           <span aria-hidden>×</span> Clear market filter
         </button>
@@ -82,10 +85,10 @@ function HotMarketRowItem({
     <div
       className={cn(
         "flex items-start gap-3 px-3 py-2.5 transition-colors",
-        isActive ? "bg-muted/60" : "hover:bg-muted/40"
+        isActive ? "bg-(--kwm-bg-3)/60" : "hover:bg-(--kwm-bg-2)"
       )}
     >
-      <div className="relative w-10 h-10 shrink-0 rounded-md overflow-hidden bg-muted">
+      <div className="relative w-10 h-10 shrink-0 rounded-md overflow-hidden bg-(--kwm-bg-3)">
         {row.image ? (
           <Image
             src={row.image}
@@ -96,32 +99,32 @@ function HotMarketRowItem({
             unoptimized={isAnimatedImageUrl(row.image)}
           />
         ) : (
-          <span className="w-full h-full flex items-center justify-center font-editorial italic text-base text-foreground/30">
+          <span className="w-full h-full flex items-center justify-center font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-dim)">
             {(row.title || "M").trim().charAt(0).toUpperCase()}
           </span>
         )}
       </div>
 
       <div className="flex-1 min-w-0">
-        <p className="font-medium text-sm leading-tight line-clamp-2 tracking-[-0.01em] text-foreground">
+        <p className="font-medium text-sm leading-tight line-clamp-2 tracking-[-0.01em] text-(--kwm-ink)">
           {row.title}
         </p>
 
-        <div className="mt-1.5 flex items-center gap-3 font-mono text-[10px] tabular-nums text-muted-foreground">
+        <div className="mt-1.5 flex items-center gap-3 font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
           <span className="inline-flex items-baseline gap-1">
-            <span className="text-foreground font-semibold">
+            <span className="text-(--kwm-ink) font-semibold">
               {formatCurrencyCompact(row.totalVolume)}
             </span>
             <span className="uppercase tracking-[0.12em] text-[9px]">vol</span>
           </span>
           <span className="inline-flex items-baseline gap-1">
-            <span className="text-foreground/80">{row.whaleCount}</span>
+            <span className="text-(--kwm-ink-2)">{row.whaleCount}</span>
             <span className="uppercase tracking-[0.12em] text-[9px]">
               {row.whaleCount === 1 ? "whale" : "whales"}
             </span>
           </span>
           <span className="inline-flex items-baseline gap-1">
-            <span className="text-foreground/80">{row.tradeCount}</span>
+            <span className="text-(--kwm-ink-2)">{row.tradeCount}</span>
             <span className="uppercase tracking-[0.12em] text-[9px]">
               {row.tradeCount === 1 ? "trade" : "trades"}
             </span>
@@ -129,14 +132,14 @@ function HotMarketRowItem({
         </div>
 
         <div className="mt-1.5 flex items-center gap-2 text-[10px] font-mono tabular-nums">
-          <span className="text-foreground font-semibold">{buyPct}%</span>
-          <div className="flex-1 h-0.5 bg-muted rounded-full overflow-hidden">
+          <span className="text-(--kwm-ink) font-semibold">{buyPct}%</span>
+          <div className="flex-1 h-0.5 bg-(--kwm-bg-3) rounded-full overflow-hidden">
             <div
               className="h-full bg-foreground/70"
               style={{ width: `${buyPct}%` }}
             />
           </div>
-          <span className="text-muted-foreground/80">{100 - buyPct}%</span>
+          <span className="text-(--kwm-ink-3)">{100 - buyPct}%</span>
         </div>
       </div>
     </div>
@@ -158,7 +161,7 @@ function HotMarketRowItem({
         </button>
         <Link
           href={href}
-          className="absolute top-2 right-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.14em] text-muted-foreground/80 hover:text-foreground transition-colors"
+          className="absolute top-2 right-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.14em] text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
           onClick={(e) => e.stopPropagation()}
         >
           Open

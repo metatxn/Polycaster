@@ -12,18 +12,20 @@ import { CTF_JSON_ABI } from "@knoww/shared-types/ctf";
 import {
   type ApiKeyCreds,
   assertClobPostOrderSuccess,
-  buildClobAuthViemTypedData,
-  buildClobL1Headers,
   CLOB_ORDER_TYPES,
   type ClobBalanceAllowanceClient,
   type ClobOrderType,
-  createOrDeriveClobApiKey,
-  getPolymarketSignatureType,
   POLYGON_CHAIN_ID,
   POLYMARKET_API,
   syncClobBalanceAllowance,
   TRADING_SIDES,
 } from "@knoww/shared-types/polymarket";
+import {
+  adaptUnifiedSecureClientForLegacyClob,
+  createUnifiedPolymarketSecureClient,
+  createUnifiedPolymarketViemSigner,
+  type UnifiedSdkTradingClient,
+} from "@knoww/shared-types/polymarket-unified";
 import {
   buildClobOrderPreflightPlan,
   buildPusdAutoWrapTransactions,
@@ -115,6 +117,18 @@ interface LiveWalletContext {
   publicClient: PublicClient;
 }
 
+type UnifiedLiveClobClientDeps = {
+  createSecureClient: typeof createUnifiedPolymarketSecureClient;
+  createViemSigner: typeof createUnifiedPolymarketViemSigner;
+  adaptClient: typeof adaptUnifiedSecureClientForLegacyClob;
+};
+
+const defaultUnifiedLiveClobClientDeps: UnifiedLiveClobClientDeps = {
+  createSecureClient: createUnifiedPolymarketSecureClient,
+  createViemSigner: createUnifiedPolymarketViemSigner,
+  adaptClient: adaptUnifiedSecureClientForLegacyClob,
+};
+
 export interface LiveExecutionRuntime {
   setupWallet(config: LiveExecutionConfig): Promise<LiveWalletContext>;
   deriveApiCreds(input: {
@@ -196,6 +210,46 @@ export function getLiveExecutionConfig(): LiveExecutionConfig {
     rpcUrl: getRpcUrl(),
     orderType: configuredLiveOrderType(),
   };
+}
+
+export async function deriveUnifiedLiveApiCreds(
+  walletClient: WalletClient,
+  deps: Pick<
+    UnifiedLiveClobClientDeps,
+    "createSecureClient" | "createViemSigner"
+  > = defaultUnifiedLiveClobClientDeps
+): Promise<ApiKeyCreds> {
+  const { appCredentials } = await deps.createSecureClient({
+    signer: deps.createViemSigner(walletClient),
+  });
+  return appCredentials;
+}
+
+export async function createUnifiedLiveClobClient(
+  input: {
+    config: LiveExecutionConfig;
+    walletClient: WalletClient;
+    creds: ApiKeyCreds;
+    funderAddress: Address;
+  },
+  deps: UnifiedLiveClobClientDeps = defaultUnifiedLiveClobClientDeps
+): Promise<LiveClobClient> {
+  if (
+    normalizeClobHost(input.config.clobHost) !==
+    normalizeClobHost(DEFAULT_CLOB_HOST)
+  ) {
+    throw new Error(
+      "Unified Polymarket SDK live execution requires the production CLOB host"
+    );
+  }
+  const { client } = await deps.createSecureClient({
+    signer: deps.createViemSigner(input.walletClient),
+    wallet: input.funderAddress,
+    credentials: input.creds,
+  });
+  return deps.adaptClient(
+    client as unknown as UnifiedSdkTradingClient
+  ) as LiveClobClient;
 }
 
 const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
@@ -353,43 +407,12 @@ const defaultRuntime: LiveExecutionRuntime = {
     };
   },
 
-  async deriveApiCreds({ clobHost, signerAddress, walletClient }) {
-    const auth = buildClobAuthViemTypedData({ address: signerAddress });
-    const signature = await walletClient.signTypedData({
-      account: signerAddress,
-      ...auth.typedData,
-    });
-    const result = await createOrDeriveClobApiKey(
-      clobHost,
-      buildClobL1Headers({
-        address: signerAddress,
-        signature,
-        timestamp: auth.timestamp,
-        nonce: auth.nonce,
-      })
-    );
-    if (!result.success || !result.data) {
-      throw new Error(
-        result.deriveError || result.createError || "CLOB API auth failed"
-      );
-    }
-    return result.data;
+  async deriveApiCreds({ walletClient }) {
+    return deriveUnifiedLiveApiCreds(walletClient);
   },
 
-  async createClobClient({ config, walletClient, creds, funderAddress }) {
-    const { ClobClient } = await import("@polymarket/clob-client-v2");
-    return new ClobClient({
-      host: config.clobHost,
-      chain: config.chainId,
-      signer: walletClient as never,
-      creds: {
-        key: creds.apiKey,
-        secret: creds.apiSecret,
-        passphrase: creds.apiPassphrase,
-      },
-      signatureType: getPolymarketSignatureType("eoa") as never,
-      funderAddress,
-    }) as LiveClobClient;
+  async createClobClient(input) {
+    return createUnifiedLiveClobClient(input);
   },
 
   readTradingWalletBalance,

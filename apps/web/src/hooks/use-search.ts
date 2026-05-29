@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 export interface TopOutcome {
   name: string;
@@ -64,7 +65,8 @@ export interface SearchResponse {
 
 async function fetchSearchResults(
   query: string,
-  limit = 10
+  limit = 10,
+  tagSlug?: string
 ): Promise<SearchResponse> {
   if (!query.trim()) {
     return {
@@ -78,6 +80,13 @@ async function fetchSearchResults(
   const params = new URLSearchParams();
   params.set("q", query);
   params.set("limit", String(limit));
+  // Server-side tag scoping. Upstream's /public-search doesn't accept a
+  // tag filter, but our API route fans out to /events/keyset?tag_slug=…
+  // in parallel and merges results — exactly what we want for in-page
+  // scoped searches like /events/politics.
+  if (tagSlug) {
+    params.set("tag_slugs", tagSlug);
+  }
 
   const response = await fetch(`/api/search?${params.toString()}`);
 
@@ -88,10 +97,10 @@ async function fetchSearchResults(
   return response.json();
 }
 
-export function useSearch(query: string, limit = 10) {
+export function useSearch(query: string, limit = 10, tagSlug?: string) {
   return useQuery({
-    queryKey: ["search", query, limit],
-    queryFn: () => fetchSearchResults(query, limit),
+    queryKey: qk.search(query, limit, tagSlug ?? null),
+    queryFn: () => fetchSearchResults(query, limit, tagSlug),
     enabled: query.trim().length >= 2, // Only search with 2+ characters
     staleTime: 30 * 1000, // 30 seconds
     placeholderData: (previousData) => previousData,

@@ -99,7 +99,7 @@ export function WhalePressureChart({
   if (!chart) {
     return (
       <div
-        className="border-b border-border/50 flex items-center justify-center text-[10px] font-mono uppercase tracking-[0.14em] text-muted-foreground/60"
+        className="border-b border-(--kwm-hl-2)/50 flex items-center justify-center text-[10px] font-mono uppercase tracking-[0.14em] text-(--kwm-ink-dim)"
         style={{ height }}
       >
         Not enough data for the selected window
@@ -110,13 +110,13 @@ export function WhalePressureChart({
   const netIsPositive = chart.finalNet >= 0;
 
   return (
-    <div className="border-b border-border/50 py-4 relative">
+    <div className="border-b border-(--kwm-hl-2)/50 py-4 relative">
       {/* Caption */}
       <div className="flex items-center justify-between px-1 pb-2 font-mono text-[10px] uppercase tracking-[0.14em]">
-        <span className="text-muted-foreground">
+        <span className="text-(--kwm-ink-3)">
           Pressure tape — bars per bucket · line traces net flow
         </span>
-        <div className="flex items-center gap-3 text-muted-foreground">
+        <div className="flex items-center gap-3 text-(--kwm-ink-3)">
           <LegendSwatch kind="bar-up" label="Buy" />
           <LegendSwatch kind="bar-down" label="Sell" />
           <LegendSwatch kind="line" label="Net" />
@@ -142,11 +142,11 @@ export function WhalePressureChart({
         <path
           d={chart.netArea}
           fill={`url(#${gradId})`}
-          className="text-foreground"
+          className="text-(--kwm-ink)"
         />
 
         {/* Per-bucket bars */}
-        <g className="text-foreground">
+        <g className="text-(--kwm-ink)">
           {chart.bars.map((b) => (
             <g key={b.key}>
               {b.buyH > 0 && (
@@ -193,14 +193,14 @@ export function WhalePressureChart({
           strokeWidth="1.25"
           strokeOpacity="0.95"
           vectorEffect="non-scaling-stroke"
-          className="text-foreground"
+          className="text-(--kwm-ink)"
         />
       </svg>
 
       {/* Final net readout pinned to the right edge */}
-      <div className="absolute right-1 bottom-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground flex items-baseline gap-1.5">
+      <div className="absolute right-1 bottom-1 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) flex items-baseline gap-1.5">
         <span>Net</span>
-        <span className="text-foreground tabular-nums font-semibold">
+        <span className="text-(--kwm-ink) tabular-nums font-semibold">
           {netIsPositive ? "+" : "−"}
           {formatCurrencyCompact(Math.abs(chart.finalNet))}
         </span>

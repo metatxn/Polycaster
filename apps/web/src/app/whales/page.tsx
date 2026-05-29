@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
 import {
   type InsiderSensitivity,
   type InsiderSortMode,
@@ -189,7 +190,7 @@ export default function WhalesPage() {
   const isLoading = activeTab === "whales" ? whalesLoading : insidersLoading;
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden">
+    <div className="kw-app min-h-screen relative overflow-x-hidden">
       <Navbar />
       <ChromeHeader />
 
@@ -271,7 +272,7 @@ export default function WhalesPage() {
             />
 
             {isLoading && activities.length === 0 && (
-              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                 Fetching whale tape…
               </p>
             )}
@@ -286,13 +287,14 @@ export default function WhalesPage() {
             />
 
             {isLoading && sortedInsiders.length === 0 && (
-              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+              <p className="py-20 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                 Scanning for suspicious activity…
               </p>
             )}
           </div>
         )}
       </main>
+      <ProductFooter context="Whales" />
     </div>
   );
 }

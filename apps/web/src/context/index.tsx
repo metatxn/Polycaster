@@ -1,11 +1,10 @@
 "use client";
 
-import { polygon } from "@reown/appkit/networks";
 import { createAppKit } from "@reown/appkit/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { QueryClientProvider } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { ThemeProvider } from "next-themes";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { type Config, cookieToInitialState, WagmiProvider } from "wagmi";
 import { networks, projectId, wagmiAdapter } from "@/config";
 import { AccentColorProvider } from "@/context/color-theme-context";
@@ -13,6 +12,21 @@ import { EventFilterProvider } from "@/context/event-filter-context";
 import { OnboardingProvider } from "@/context/onboarding-context";
 import { TradingProvider } from "@/context/trading-context";
 import { WalletProvider } from "@/context/wallet-context";
+import { polygon } from "@/lib/chains";
+import { getQueryClient } from "@/lib/query-client";
+
+/** Devtools are dev-only; the dynamic import + the NODE_ENV guard make sure
+ *  the package is never pulled into the production bundle. */
+const ReactQueryDevtools =
+  process.env.NODE_ENV === "production"
+    ? () => null
+    : dynamic(
+        () =>
+          import("@tanstack/react-query-devtools").then(
+            (m) => m.ReactQueryDevtools
+          ),
+        { ssr: false }
+      );
 
 // All available themes for next-themes
 const ALL_THEMES = [
@@ -26,17 +40,6 @@ const ALL_THEMES = [
   "forest",
   "lavender",
 ];
-
-// Set up queryClient with default options
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 60 * 1000, // 1 minute
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
-});
 
 if (!projectId) {
   throw new Error("Project ID is not defined in context");
@@ -85,6 +88,10 @@ function ContextProvider({
     wagmiAdapter.wagmiConfig as Config,
     cookies
   );
+
+  /** Lazy-init so each SSR render gets its own client; the browser side
+   *  reuses the singleton via `getQueryClient`. */
+  const [queryClient] = useState(getQueryClient);
 
   return (
     <WagmiProvider

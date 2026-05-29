@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 
 /**
  * Position data structure
@@ -159,14 +160,12 @@ export function useUserPositions(options: UseUserPositionsOptions = {}) {
   const userAddress = options.userAddress || address;
 
   return useQuery<PositionsResponse, Error>({
-    queryKey: [
-      "userPositions",
-      userAddress,
-      options.limit,
-      options.offset,
-      options.market,
-      options.active,
-    ],
+    queryKey: qk.positions.list(userAddress, {
+      limit: options.limit,
+      offset: options.offset,
+      market: options.market,
+      active: options.active,
+    }),
     queryFn: () => {
       if (!userAddress) throw new Error("Address not available");
       return fetchPositions(userAddress, options);
@@ -187,7 +186,7 @@ export function useMarketPositions(marketId: string) {
   const { address, isConnected } = useConnection();
 
   return useQuery<PositionsResponse, Error>({
-    queryKey: ["marketPositions", address, marketId],
+    queryKey: qk.positions.forMarket(address ?? "", marketId),
     queryFn: () => {
       if (!address) throw new Error("Address not available");
       return fetchPositions(address, { market: marketId, active: true });

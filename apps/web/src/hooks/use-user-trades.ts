@@ -2,6 +2,7 @@
 
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 
 /**
  * Trade data structure
@@ -159,16 +160,14 @@ export function useUserTrades(options: UseUserTradesOptions = {}) {
   const userAddress = options.userAddress || address;
 
   return useQuery<TradesResponse, Error>({
-    queryKey: [
-      "userTrades",
-      userAddress,
-      options.limit,
-      options.offset,
-      options.market,
-      options.type,
-      options.startDate,
-      options.endDate,
-    ],
+    queryKey: qk.user.trades(userAddress, {
+      limit: options.limit,
+      offset: options.offset,
+      market: options.market,
+      type: options.type,
+      startDate: options.startDate,
+      endDate: options.endDate,
+    }),
     queryFn: () => {
       if (!userAddress) throw new Error("Address not available");
       return fetchTrades(userAddress, options);
@@ -192,15 +191,12 @@ export function useUserTradesInfinite(
   const pageSize = options.limit || 50;
 
   return useInfiniteQuery<TradesResponse, Error>({
-    queryKey: [
-      "userTradesInfinite",
-      address,
-      pageSize,
-      options.market,
-      options.type,
-      options.startDate,
-      options.endDate,
-    ],
+    queryKey: qk.user.tradesInfinite(address, pageSize, {
+      market: options.market,
+      type: options.type,
+      startDate: options.startDate,
+      endDate: options.endDate,
+    }),
     queryFn: ({ pageParam }) => {
       if (!address) throw new Error("Address not available");
       return fetchTrades(address, {

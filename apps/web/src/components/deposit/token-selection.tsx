@@ -31,34 +31,32 @@ export function TokenSelection({
     >
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Loader2 className="h-5 w-5 animate-spin text-(--kwm-ink-3)" />
         </div>
       ) : walletTokens.length === 0 ? (
-        <div className="py-12 text-center border-y border-border/40">
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+        <div className="py-12 text-center border border-(--kwm-hl) rounded-md">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-3">
             No Supported Tokens
           </p>
-          <p className="text-sm text-foreground mb-5 max-w-[280px] mx-auto leading-relaxed">
+          <p className="text-sm text-(--kwm-ink) mb-5 max-w-[280px] mx-auto leading-relaxed">
             Your wallet is empty on Polygon — or we can't see it yet.
           </p>
           <button
             type="button"
             onClick={onRefresh}
-            className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground hover:text-muted-foreground transition-colors"
+            className="inline-flex items-center gap-2 px-3 h-8 rounded-md border border-(--kwm-hl) font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink) hover:border-(--kwm-hl-2) hover:bg-(--kwm-bg-2) transition-colors"
           >
             <RefreshCw className="h-3 w-3" />
-            <span className="underline underline-offset-4 decoration-border">
-              Retry
-            </span>
+            Retry
           </button>
         </div>
       ) : (
         <>
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground mb-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-3">
             Minimum varies by token · typically ${defaultMinDeposit}+
           </p>
 
-          <div className="border-t border-border/40">
+          <div className="flex flex-col gap-2">
             {walletTokens.map((token) => {
               const minDeposit = getMinDepositForToken(token.symbol);
               const isBelowMinimum = token.usdValue < minDeposit;
@@ -69,14 +67,14 @@ export function TokenSelection({
                   onClick={() => !isBelowMinimum && onSelectToken(token)}
                   disabled={isBelowMinimum}
                   className={cn(
-                    "group w-full flex items-center justify-between gap-4 py-3.5 border-b border-border/40 text-left transition-colors",
+                    "group w-full flex items-center justify-between gap-4 px-3.5 py-3 border border-(--kwm-hl) rounded-md text-left transition-colors",
                     isBelowMinimum
                       ? "cursor-not-allowed opacity-50"
-                      : "hover:border-foreground/60"
+                      : "hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-2)"
                   )}
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-(--kwm-bg-3) flex items-center justify-center overflow-hidden shrink-0 border border-(--kwm-hl)">
                       {token.logoUrl ? (
                         <Image
                           src={token.logoUrl}
@@ -87,23 +85,23 @@ export function TokenSelection({
                           unoptimized
                         />
                       ) : (
-                        <span className="font-mono text-[10px] uppercase tracking-widest text-foreground/80">
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-(--kwm-ink-2)">
                           {token.symbol.slice(0, 3)}
                         </span>
                       )}
                     </div>
-                    <div className="flex flex-col min-w-0 gap-1.5">
-                      <span className="text-[15px] font-medium leading-none text-foreground truncate">
+                    <div className="flex flex-col min-w-0 gap-0.5">
+                      <span className="text-[14px] font-medium leading-snug text-(--kwm-ink) truncate">
                         {token.symbol}
                       </span>
-                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) tabular-nums">
                         {token.balance.toFixed(5)}
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 shrink-0">
+                  <div className="flex items-center gap-3 shrink-0">
                     {isBelowMinimum && (
-                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-500 tabular-nums">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-warn) tabular-nums">
                         Min · ${minDeposit}
                       </span>
                     )}
@@ -111,8 +109,8 @@ export function TokenSelection({
                       className={cn(
                         "font-mono text-sm tabular-nums",
                         isBelowMinimum
-                          ? "text-muted-foreground"
-                          : "text-foreground"
+                          ? "text-(--kwm-ink-3)"
+                          : "text-(--kwm-ink)"
                       )}
                     >
                       ${token.usdValue.toFixed(2)}

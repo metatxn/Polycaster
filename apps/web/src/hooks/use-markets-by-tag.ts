@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 export interface Market {
   id: string;
@@ -85,7 +86,7 @@ async function fetchMarketsByTag(
  */
 export function useMarketsByTag(params: UseMarketsByTagParams) {
   return useQuery({
-    queryKey: ["markets", "by-tag", params],
+    queryKey: qk.tags.markets("", params),
     queryFn: () => fetchMarketsByTag(params),
     enabled: !!params.tag_id,
     staleTime: 60 * 1000, // 1 minute

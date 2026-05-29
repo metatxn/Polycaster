@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { useConnection } from "wagmi";
 import { ChromeHeader } from "@/components/app-layout";
 import { DepositModal } from "@/components/deposit-modal";
-import { EditorialHero } from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
 import { HistoryTable } from "@/components/portfolio/history-table";
 import { PortfolioLedgerHeader } from "@/components/portfolio/ledger-header";
@@ -25,6 +24,8 @@ import type {
   Trade,
 } from "@/components/portfolio/types";
 import { PortfolioUtilityRow } from "@/components/portfolio/utility-row";
+import { ProductFooter } from "@/components/product-footer";
+import { ProductHero } from "@/components/product-hero";
 import { WithdrawModal } from "@/components/withdraw-modal";
 import { useCtfOperations } from "@/hooks/use-ctf-operations";
 import { useCancelOrder, useOpenOrders } from "@/hooks/use-open-orders";
@@ -297,17 +298,15 @@ export default function PortfolioPage() {
   // Not connected state
   if (!isConnected) {
     return (
-      <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
+      <div className="kw-app min-h-screen bg-(--kwm-bg) relative overflow-x-hidden selection:bg-(--kwm-ink)/15">
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-8">
-          <EditorialHero
+          <ProductHero
             breadcrumbs={[
               { label: "Markets", href: "/markets" },
               { label: "Portfolio" },
             ]}
-            title={<span>Portfolio</span>}
-            subtitle="Connect a wallet to see every position, open order and realised dollar."
           />
 
           <motion.div
@@ -316,33 +315,40 @@ export default function PortfolioPage() {
             transition={{ duration: 0.4, delay: 0.1 }}
             className="flex flex-col items-start gap-5 py-10 max-w-md"
           >
-            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <p
+              className="font-mono text-[10px] uppercase tracking-[0.14em]"
+              style={{ color: "var(--kwm-ink-3)" }}
+            >
               Wallet · Not connected
             </p>
-            <p className="font-editorial italic text-2xl leading-snug text-foreground">
+            <p
+              className="text-base leading-snug"
+              style={{ color: "var(--kwm-ink)" }}
+            >
               Your positions live on-chain. Connect a wallet to pull them in.
             </p>
             <button
               type="button"
               onClick={() => open()}
-              className="group inline-flex items-center gap-2 pt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
+              className="inline-flex items-center gap-2 pt-1 px-3 h-8 rounded-md border font-mono text-[11px] uppercase tracking-[0.14em] transition-colors"
+              style={{
+                color: "var(--kwm-up)",
+                borderColor: "var(--kwm-up-border)",
+                background: "var(--kwm-up-soft)",
+              }}
             >
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/75" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-              </span>
-              <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
-                Connect wallet
-              </span>
+              <span className="kwm-pulse" />
+              <span>Connect wallet</span>
             </button>
           </motion.div>
         </main>
+        <ProductFooter context="Portfolio" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-foreground/15">
+    <div className="kw-app min-h-screen bg-(--kwm-bg) relative overflow-x-hidden selection:bg-(--kwm-ink)/15">
       <Navbar />
       <ChromeHeader />
       <motion.main
@@ -478,6 +484,8 @@ export default function PortfolioPage() {
         position={sellPosition}
         onSellSuccess={handleSellSuccess}
       />
+
+      <ProductFooter context="Portfolio" />
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { type Address, getAddress } from "viem";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 import {
   clearBalanceCache,
   clearDeploymentCache,
@@ -94,7 +95,7 @@ export function useProxyWallet() {
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: [PROXY_WALLET_QUERY_KEY, address, mode],
+    queryKey: qk.proxyWallet.byAddressMode(address, mode),
     queryFn: async () => {
       if (!address) throw new Error("No address");
       return fetchWalletData(address, mode);
@@ -120,12 +121,12 @@ export function useProxyWallet() {
 
     // Then invalidate and refetch the React Query cache
     await queryClient.invalidateQueries({
-      queryKey: [PROXY_WALLET_QUERY_KEY, address],
+      queryKey: qk.proxyWallet.byAddress(address),
     });
 
     // Force a refetch to get fresh data
     return queryClient.refetchQueries({
-      queryKey: [PROXY_WALLET_QUERY_KEY, address],
+      queryKey: qk.proxyWallet.byAddress(address),
     });
   }, [queryClient, address, query.data?.proxyAddress]);
 
@@ -140,11 +141,11 @@ export function useProxyWallet() {
 
     // Invalidate and refetch
     await queryClient.invalidateQueries({
-      queryKey: [PROXY_WALLET_QUERY_KEY, address],
+      queryKey: qk.proxyWallet.byAddress(address),
     });
 
     return queryClient.refetchQueries({
-      queryKey: [PROXY_WALLET_QUERY_KEY, address],
+      queryKey: qk.proxyWallet.byAddress(address),
     });
   }, [queryClient, address, query.data?.proxyAddress]);
 

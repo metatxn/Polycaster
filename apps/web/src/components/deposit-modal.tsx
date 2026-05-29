@@ -22,7 +22,6 @@ import {
   http,
   parseUnits,
 } from "viem";
-import { polygon } from "viem/chains";
 import { useConnection, useWalletClient } from "wagmi";
 import {
   Dialog,
@@ -34,6 +33,7 @@ import { PUSD_ADDRESS as POLYGON_PUSD_ADDRESS } from "@/constants/contracts";
 import { fetchBridgeQuote, useBridge } from "@/hooks/use-bridge";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { type TokenBalance, useWalletTokens } from "@/hooks/use-wallet-tokens";
+import { polygon } from "@/lib/chains";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 
 import { AmountInput } from "./deposit/amount-input";
@@ -609,116 +609,145 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     return true;
   }, [amount, selectedToken, isBelowMinimum]);
 
+  // Eyebrow label that traces the wizard's current step — mirrors the
+  // onboarding modal's `§ SET UP TRADING · 02 / 04` pattern so users
+  // always know where they are in the flow.
+  const stepEyebrow = (() => {
+    const labels: Record<DepositStep, string> = {
+      method: "Method",
+      token: "Token",
+      "bridge-select": "Bridge",
+      amount: "Amount",
+      confirm: "Confirm",
+    };
+    return labels[step] ?? "Method";
+  })();
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="sm:max-w-[440px] max-h-[calc(100dvh-32px)] p-0 gap-0 overflow-hidden bg-background border-border/60 rounded-none flex flex-col"
+        overlayClassName="bg-black/60 backdrop-blur-md"
+        className="sm:max-w-[440px] max-h-[calc(100dvh-32px)] p-0 gap-0 overflow-hidden rounded-md border border-white/10 shadow-[0_40px_80px_-30px_rgba(0,0,0,0.55)] flex flex-col bg-(--kwm-panel)"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
-        <div className="relative flex items-center justify-between px-5 pt-5 pb-4 border-b border-border/40 shrink-0">
-          <div className="w-6 flex items-center justify-start">
-            {step !== "method" && (
+        <div className="kw-app flex flex-col flex-1 min-h-0 bg-(--kwm-panel) text-(--kwm-ink)">
+          {/* Header — mono-caps eyebrow + clean sans title, matching the
+              `.kw-onboarding` modal grammar. Back button on the left,
+              close on the right. */}
+          <div className="relative flex items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-(--kwm-hl) shrink-0">
+            <div className="w-7 flex items-center justify-start">
+              {step !== "method" && (
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors"
+                  aria-label="Go back"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.4} />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-col items-center justify-center flex-1 min-w-0 gap-0.5">
+              <span className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+                <span className="text-(--kwm-ink-2)">§</span>
+                <span>Deposit</span>
+                <span className="text-(--kwm-ink-dim)">·</span>
+                <span className="text-(--kwm-ink-3)">{stepEyebrow}</span>
+              </span>
+              <DialogTitle className="font-(family-name:--font-geist) text-[15px] font-semibold tracking-tight text-(--kwm-ink) leading-tight truncate max-w-full">
+                ${polymarketBalance?.toFixed(2) || "0.00"}{" "}
+                <span className="font-normal text-(--kwm-ink-3) text-[12px]">
+                  balance
+                </span>
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                Deposit funds into your Polymarket trading wallet.
+              </DialogDescription>
+            </div>
+            <div className="w-7 flex items-center justify-end">
               <button
                 type="button"
-                onClick={handleBack}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Go back"
+                onClick={() => onOpenChange(false)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors"
+                aria-label="Close"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <X className="h-3.5 w-3.5" strokeWidth={1.4} />
               </button>
-            )}
+            </div>
           </div>
-          <div className="flex flex-col items-center justify-center flex-1 min-w-0 gap-1">
-            <DialogTitle className="font-editorial italic text-2xl leading-none text-foreground">
-              Deposit
-            </DialogTitle>
-            <DialogDescription className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-              Balance · ${polymarketBalance?.toFixed(2) || "0.00"}
-            </DialogDescription>
-          </div>
-          <div className="w-6 flex items-center justify-end">
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
 
-        <div className="px-5 py-5 flex-1 min-h-0 overflow-y-auto">
-          <AnimatePresence mode="wait">
-            {step === "method" && (
-              <MethodSelection
-                isConnected={isConnected}
-                address={address}
-                walletTokens={walletTokens}
-                onSelectMethod={handleSelectMethod}
-              />
-            )}
-            {step === "token" && (
-              <TokenSelection
-                isLoading={loadingTokens}
-                walletTokens={walletTokens}
-                defaultMinDeposit={defaultMinDeposit}
-                onRefresh={refreshTokens}
-                onSelectToken={handleSelectToken}
-                getMinDepositForToken={getMinDepositForToken}
-              />
-            )}
-            {step === "bridge-select" && (
-              <BridgeSelection
-                isLoading={loadingBridge}
-                searchQuery={searchQuery}
-                filteredBridgeAssets={filteredBridgeAssets}
-                isProcessing={isProcessing}
-                onSearchChange={setSearchQuery}
-                onSelectAsset={handleSelectBridgeAsset}
-              />
-            )}
-            {step === "amount" && selectedToken && (
-              <AmountInput
-                amount={amount}
-                selectedToken={selectedToken}
-                isBelowMinimum={isBelowMinimum}
-                selectedTokenMinDeposit={selectedTokenMinDeposit}
-                enteredAmountUsd={enteredAmountUsd}
-                isValidAmount={isValidAmount}
-                onAmountChange={setAmount}
-                onPercentage={handlePercentage}
-                onContinue={() => setStep("confirm")}
-              />
-            )}
-            {step === "confirm" && (
-              <Confirmation
-                selectedMethod={selectedMethod}
-                selectedBridgeAsset={selectedBridgeAsset}
-                selectedToken={selectedToken}
-                isProcessing={isProcessing}
-                bridgeAddress={bridgeAddress}
-                amount={amount}
-                address={address}
-                receiveAmount={receiveAmount}
-                depositError={depositError}
-                isPending={isPending}
-                isConfirming={isConfirming}
-                isOnChainConfirmed={isOnChainConfirmed}
-                isConfirmed={isConfirmed}
-                isWalletReady={Boolean(walletClient && address)}
-                copied={copied}
-                onCopy={handleCopy}
-                onDeposit={handleDeposit}
-                quote={quote}
-                isLoadingQuote={isLoadingQuoteLocal}
-                depositTransactions={depositTransactions}
-                isLoadingDepositStatus={isLoadingDepositStatus}
-              />
-            )}
-          </AnimatePresence>
+          <div className="px-5 py-5 flex-1 min-h-0 overflow-y-auto">
+            <AnimatePresence mode="wait">
+              {step === "method" && (
+                <MethodSelection
+                  isConnected={isConnected}
+                  address={address}
+                  walletTokens={walletTokens}
+                  onSelectMethod={handleSelectMethod}
+                />
+              )}
+              {step === "token" && (
+                <TokenSelection
+                  isLoading={loadingTokens}
+                  walletTokens={walletTokens}
+                  defaultMinDeposit={defaultMinDeposit}
+                  onRefresh={refreshTokens}
+                  onSelectToken={handleSelectToken}
+                  getMinDepositForToken={getMinDepositForToken}
+                />
+              )}
+              {step === "bridge-select" && (
+                <BridgeSelection
+                  isLoading={loadingBridge}
+                  searchQuery={searchQuery}
+                  filteredBridgeAssets={filteredBridgeAssets}
+                  isProcessing={isProcessing}
+                  onSearchChange={setSearchQuery}
+                  onSelectAsset={handleSelectBridgeAsset}
+                />
+              )}
+              {step === "amount" && selectedToken && (
+                <AmountInput
+                  amount={amount}
+                  selectedToken={selectedToken}
+                  isBelowMinimum={isBelowMinimum}
+                  selectedTokenMinDeposit={selectedTokenMinDeposit}
+                  enteredAmountUsd={enteredAmountUsd}
+                  isValidAmount={isValidAmount}
+                  onAmountChange={setAmount}
+                  onPercentage={handlePercentage}
+                  onContinue={() => setStep("confirm")}
+                />
+              )}
+              {step === "confirm" && (
+                <Confirmation
+                  selectedMethod={selectedMethod}
+                  selectedBridgeAsset={selectedBridgeAsset}
+                  selectedToken={selectedToken}
+                  isProcessing={isProcessing}
+                  bridgeAddress={bridgeAddress}
+                  amount={amount}
+                  address={address}
+                  receiveAmount={receiveAmount}
+                  depositError={depositError}
+                  isPending={isPending}
+                  isConfirming={isConfirming}
+                  isOnChainConfirmed={isOnChainConfirmed}
+                  isConfirmed={isConfirmed}
+                  isWalletReady={Boolean(walletClient && address)}
+                  copied={copied}
+                  onCopy={handleCopy}
+                  onDeposit={handleDeposit}
+                  quote={quote}
+                  isLoadingQuote={isLoadingQuoteLocal}
+                  depositTransactions={depositTransactions}
+                  isLoadingDepositStatus={isLoadingDepositStatus}
+                />
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

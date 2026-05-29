@@ -11,6 +11,22 @@ const ALLOWED_ORIGINS_WHITELIST = [
   "https://www.knoww.app",
 ];
 
+function isDevelopmentOrigin(origin: string): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+
+  try {
+    const url = new URL(origin);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function isAllowedOrigin(origin: string): boolean {
   const envSingle = process.env.ALLOWED_ORIGIN;
   if (envSingle && origin === envSingle) return true;
@@ -18,10 +34,15 @@ export function isAllowedOrigin(origin: string): boolean {
   const envList = process.env.ALLOWED_ORIGINS;
   if (envList) {
     const origins = envList.split(",").map((o) => o.trim());
+    if (process.env.NODE_ENV !== "production" && origins.includes("*")) {
+      return true;
+    }
     if (origins.includes(origin)) return true;
   }
 
-  return ALLOWED_ORIGINS_WHITELIST.includes(origin);
+  return (
+    ALLOWED_ORIGINS_WHITELIST.includes(origin) || isDevelopmentOrigin(origin)
+  );
 }
 
 /**

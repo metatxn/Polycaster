@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 interface Team {
   id: number;
@@ -28,7 +29,7 @@ export function useTeams(options: UseTeamsOptions = {}) {
   const { league, name, abbreviation, limit = 100 } = options;
 
   return useQuery({
-    queryKey: ["teams", { league, name, abbreviation, limit }],
+    queryKey: qk.sports.teams({ league, name, abbreviation, limit }),
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("limit", limit.toString());

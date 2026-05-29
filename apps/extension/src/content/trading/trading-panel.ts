@@ -710,6 +710,9 @@ function refreshDynamicUI(): void {
     } else if (!ctx.orderBook) {
       posIndicator.textContent = "Loading order book...";
       posIndicator.className = "knoww-tp-order-position muted";
+    } else if (ctx.orderBookError) {
+      posIndicator.textContent = "Order book unavailable";
+      posIndicator.className = "knoww-tp-order-position muted";
     } else {
       posIndicator.textContent = "Order book is empty";
       posIndicator.className = "knoww-tp-order-position muted";
@@ -1815,6 +1818,10 @@ function addLimitPrice(
     const info = getOrderPositionInfo(currentPrice, bestBid, bestAsk);
     section.appendChild(
       el("div", `knoww-tp-order-position ${info.cls}`, info.label)
+    );
+  } else if (ctx.orderBookError) {
+    section.appendChild(
+      el("div", "knoww-tp-order-position muted", "Order book unavailable")
     );
   } else {
     section.appendChild(

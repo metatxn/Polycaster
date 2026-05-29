@@ -1,5 +1,6 @@
 "use client";
 
+import Decimal from "decimal.js";
 import {
   Archive,
   Loader2,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -510,15 +512,30 @@ export function AgentDashboardClient() {
   );
 
   return (
-    <div className="min-h-screen">
+    <div className="kw-app min-h-screen bg-(--kwm-bg) text-(--kwm-ink) selection:bg-(--kwm-ink)/15">
       <Navbar />
       <main className="px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-40 xl:pb-8 max-w-7xl mx-auto">
-        <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <header
+          className="mb-6 pb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between border-b"
+          style={{ borderColor: "var(--kwm-hl)" }}
+        >
           <div>
-            <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl tracking-tight">
+            <div
+              className="font-mono text-[10px] uppercase tracking-[0.14em] mb-2"
+              style={{ color: "var(--kwm-ink-3)" }}
+            >
+              Knoww › Agent
+            </div>
+            <h1
+              className="text-[15px] font-semibold tracking-tight"
+              style={{ color: "var(--kwm-ink)" }}
+            >
               Paper Agent
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
+            <p
+              className="mt-1 text-[12px] leading-snug max-w-2xl"
+              style={{ color: "var(--kwm-ink-3)" }}
+            >
               Manual paper runs with a 3-model quorum, deterministic risk gates,
               and an auditable simulated ledger.
             </p>
@@ -573,19 +590,19 @@ export function AgentDashboardClient() {
         </header>
 
         {error && (
-          <div className="mb-6 border border-red-600/40 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-900 dark:text-red-100">
+          <div className="mb-6 border border-(--kwm-down)/40 bg-(--kwm-down-soft) px-4 py-3 text-sm text-(--kwm-down)">
             {error}
           </div>
         )}
 
         {status && (
-          <section className="mb-6 border-y border-border/60 py-4">
+          <section className="mb-6 border-y border-(--kwm-hl-2) py-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="font-mono text-xs uppercase tracking-[0.14em]">
                   Agent Status
                 </h2>
-                <p className="mt-2 text-sm text-muted-foreground">
+                <p className="mt-2 text-sm text-(--kwm-ink-3)">
                   {status?.llm?.ready
                     ? "LLM panel is configured for paper runs."
                     : `Missing ${status.llm.missing.join(", ")}. Runs will default to HOLD.`}
@@ -612,7 +629,7 @@ export function AgentDashboardClient() {
             <div className="mt-3 flex flex-wrap gap-2">
               {status.llm.models.map((model) => (
                 <span
-                  className="border border-border/60 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+                  className="border border-(--kwm-hl-2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)"
                   key={model}
                 >
                   {model}
@@ -620,7 +637,7 @@ export function AgentDashboardClient() {
               ))}
               {status.search.providers.map((provider) => (
                 <span
-                  className="border border-border/60 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+                  className="border border-(--kwm-hl-2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)"
                   key={provider.provider}
                 >
                   {provider?.provider}:{" "}
@@ -638,7 +655,10 @@ export function AgentDashboardClient() {
           <Metric label="Trades" value={metrics?.tradeCount ?? 0} />
           <Metric label="Holds" value={metrics?.holdCount ?? 0} />
           <Metric label="Blocked" value={metrics?.blockedCount ?? 0} />
-          <Metric label="Notional" value={`$${metrics?.notionalUsd ?? "0"}`} />
+          <Metric
+            label="Notional"
+            value={`$${new Decimal(metrics?.notionalUsd ?? 0).toFixed(2)}`}
+          />
         </section>
 
         <CalibrationPanel
@@ -661,7 +681,7 @@ export function AgentDashboardClient() {
 
         <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-8">
           <section className="space-y-6">
-            <div className="border-y border-border/60 py-4">
+            <div className="border-y border-(--kwm-hl-2) py-4">
               <h2 className="font-mono text-xs uppercase tracking-[0.14em] mb-4">
                 Watchlist
               </h2>
@@ -863,16 +883,19 @@ export function AgentDashboardClient() {
 
             <div className="space-y-2">
               {watchlist.map((item) => (
-                <div key={item.id} className="border-b border-border/60 py-3">
+                <div
+                  key={item.id}
+                  className="border-b border-(--kwm-hl-2) py-3"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-sm font-medium">{item.question}</div>
-                      <div className="mt-1 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                      <div className="mt-1 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
                         <span
                           className={
                             item.active
-                              ? "text-emerald-700"
-                              : "text-muted-foreground"
+                              ? "text-(--kwm-up)"
+                              : "text-(--kwm-ink-3)"
                           }
                         >
                           {item.active ? "Active" : "Archived"}
@@ -922,13 +945,13 @@ export function AgentDashboardClient() {
                       </Button>
                     </div>
                   </div>
-                  <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground break-all">
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) break-all">
                     {item.tokenId}
                   </div>
                 </div>
               ))}
               {watchlist.length === 0 && (
-                <div className="py-8 text-sm text-muted-foreground">
+                <div className="py-8 text-sm text-(--kwm-ink-3)">
                   No watchlist items.
                 </div>
               )}
@@ -979,14 +1002,14 @@ export function AgentDashboardClient() {
                   {selectedRun.items.map((item) => (
                     <article
                       key={`${selectedRun.id}-${item.watchlistItem.id}`}
-                      className="border-y border-border/60 py-4"
+                      className="border-y border-(--kwm-hl-2) py-4"
                     >
                       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                         <div>
                           <h3 className="font-medium">
                             {item.watchlistItem.question}
                           </h3>
-                          <div className="mt-1 text-xs text-muted-foreground">
+                          <div className="mt-1 text-xs text-(--kwm-ink-3)">
                             Price {item.evidence.market.price} · Liquidity $
                             {item.evidence.market.liquidityUsd} ·{" "}
                             {item.evidence.market.marketType ?? "unknown"} ·{" "}
@@ -1011,7 +1034,7 @@ export function AgentDashboardClient() {
                           </div>
                         </div>
                       </div>
-                      <p className="mt-3 text-sm text-muted-foreground">
+                      <p className="mt-3 text-sm text-(--kwm-ink-3)">
                         {item.decision.reason}
                       </p>
                       <RelatedMarkets
@@ -1028,14 +1051,14 @@ export function AgentDashboardClient() {
                       />
                       <div className="mt-4 grid gap-3 md:grid-cols-3">
                         {item.votes.length === 0 && (
-                          <div className="border border-border/60 p-3 text-xs text-muted-foreground md:col-span-3">
+                          <div className="border border-(--kwm-hl-2) p-3 text-xs text-(--kwm-ink-3) md:col-span-3">
                             No model votes were requested for this item.
                           </div>
                         )}
                         {item.votes.map((vote) => (
                           <div
                             key={vote.provider}
-                            className="border border-border/60 p-3"
+                            className="border border-(--kwm-hl-2) p-3"
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex items-center gap-1.5 min-w-0">
@@ -1045,7 +1068,7 @@ export function AgentDashboardClient() {
                                     outcomeYes={item.resolution.outcomeYes}
                                   />
                                 )}
-                                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground truncate">
+                                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) truncate">
                                   {vote.provider}
                                 </div>
                               </div>
@@ -1059,7 +1082,7 @@ export function AgentDashboardClient() {
                               {typeof vote.fairProbability === "number" &&
                                 typeof vote.marketImpliedProbability ===
                                   "number" && (
-                                  <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                                  <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
                                     fair{" "}
                                     {(vote.fairProbability * 100).toFixed(0)}%
                                     {" vs "}mkt{" "}
@@ -1071,7 +1094,7 @@ export function AgentDashboardClient() {
                                 )}
                             </div>
                             {vote.resolutionView && (
-                              <blockquote className="mt-2 border-l-2 border-border/60 pl-2 text-[11px] italic text-muted-foreground">
+                              <blockquote className="mt-2 border-l-2 border-(--kwm-hl-2) pl-2 text-[11px] italic text-(--kwm-ink-3)">
                                 {vote.resolutionView}
                               </blockquote>
                             )}
@@ -1090,12 +1113,12 @@ export function AgentDashboardClient() {
                               items={vote.missingEvidence}
                               tone="missing"
                             />
-                            <p className="mt-2 text-xs text-muted-foreground line-clamp-4">
+                            <p className="mt-2 text-xs text-(--kwm-ink-3) line-clamp-4">
                               {vote.reasoning}
                             </p>
                             {vote.debug && vote.debug.status !== "ok" && (
-                              <details className="mt-3 border-t border-border/60 pt-2 text-xs text-muted-foreground">
-                                <summary className="cursor-pointer font-mono uppercase tracking-[0.1em]">
+                              <details className="mt-3 border-t border-(--kwm-hl-2) pt-2 text-xs text-(--kwm-ink-3)">
+                                <summary className="cursor-pointer font-mono uppercase tracking-widest">
                                   Debug {vote.debug.status}
                                 </summary>
                                 <dl className="mt-2 space-y-1">
@@ -1164,17 +1187,20 @@ export function AgentDashboardClient() {
           </section>
         </div>
       </main>
+      <ProductFooter context="Agent" />
     </div>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="border-y border-border/60 py-3">
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+    <div className="border-y border-(--kwm-hl-2) py-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {label}
       </div>
-      <div className="mt-1 font-editorial italic text-2xl">{value}</div>
+      <div className="mt-1 font-(family-name:--font-geist) font-semibold text-2xl">
+        {value}
+      </div>
     </div>
   );
 }
@@ -1204,9 +1230,9 @@ function LiveOrdersPanel({
         ? "LIVE"
         : "LIVE (unconfirmed)";
   const modeClass = !config.enabled
-    ? "border-border/60 text-muted-foreground"
+    ? "border-(--kwm-hl-2) text-(--kwm-ink-3)"
     : config.dryRun
-      ? "border-amber-600/70 text-amber-700 dark:text-amber-400"
+      ? "border-amber-600/70 text-(--kwm-warn) dark:text-amber-400"
       : config.confirmedReal
         ? "border-rose-600/70 text-rose-700 dark:text-rose-400"
         : "border-rose-600/70 text-rose-700 dark:text-rose-400";
@@ -1235,13 +1261,13 @@ function LiveOrdersPanel({
   );
 
   return (
-    <section className="border-y border-border/60 py-4 mb-8">
+    <section className="border-y border-(--kwm-hl-2) py-4 mb-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-mono text-xs uppercase tracking-[0.14em]">
             Live Orders
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-(--kwm-ink-3)">
             EIP-712 signed audit trail · dry-run signs but does not submit ·
             Polymarket CLOB chain {config.chainId}
           </p>
@@ -1265,20 +1291,20 @@ function LiveOrdersPanel({
           {config.enabled &&
             !config.dryRun &&
             !config.hasCredentialEncryptionKey && (
-              <span className="font-mono uppercase tracking-[0.12em] px-2 py-1 border border-amber-600/70 text-amber-700 dark:text-amber-400">
+              <span className="font-mono uppercase tracking-[0.12em] px-2 py-1 border border-amber-600/70 text-(--kwm-warn) dark:text-amber-400">
                 CREDS NOT CACHED
               </span>
             )}
-          <span className="text-muted-foreground">
+          <span className="text-(--kwm-ink-3)">
             cap{" "}
-            <span className="font-mono text-foreground">
+            <span className="font-mono text-(--kwm-ink)">
               ${config.maxLiveNotionalUsd}
             </span>
           </span>
           {(config.dailyOrderCap || config.dailyNotionalCap) && (
-            <span className="text-muted-foreground">
+            <span className="text-(--kwm-ink-3)">
               daily{" "}
-              <span className="font-mono text-foreground">
+              <span className="font-mono text-(--kwm-ink)">
                 {config.dailyOrderCap ?? "∞"} / $
                 {config.dailyNotionalCap ?? "∞"}
               </span>
@@ -1297,7 +1323,7 @@ function LiveOrdersPanel({
         <CountTile label="Canceled" value={counts.canceled} />
       </dl>
       {orders.length === 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="mt-3 text-xs text-(--kwm-ink-3)">
           No live orders yet. Set <code>AGENT_EXECUTION_MODE=live</code> on a
           run to start producing signed audit rows.
         </p>
@@ -1321,11 +1347,13 @@ function LiveOrdersPanel({
 
 function CountTile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="border border-border/60 px-2 py-1">
-      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+    <div className="border border-(--kwm-hl-2) px-2 py-1">
+      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
         {label}
       </div>
-      <div className="font-editorial italic text-lg">{value}</div>
+      <div className="font-(family-name:--font-geist) font-semibold text-lg">
+        {value}
+      </div>
     </div>
   );
 }
@@ -1339,47 +1367,47 @@ function LiveOrderRow({
 }) {
   const statusClass =
     order.status === "FILLED"
-      ? "border-emerald-600/70 text-emerald-700 dark:text-emerald-400"
+      ? "border-emerald-600/70 text-(--kwm-up) dark:text-(--kwm-up)"
       : order.status === "PARTIALLY_FILLED"
         ? "border-teal-600/70 text-teal-700 dark:text-teal-400"
         : order.status === "FAILED" || order.status === "CANCELED"
           ? "border-rose-600/70 text-rose-700 dark:text-rose-400"
           : order.status === "POSTED" || order.status === "OPEN"
             ? "border-sky-600/70 text-sky-700 dark:text-sky-400"
-            : "border-amber-600/70 text-amber-700 dark:text-amber-400";
+            : "border-amber-600/70 text-(--kwm-warn) dark:text-amber-400";
   return (
-    <details className="border border-border/60 px-3 py-2">
+    <details className="border border-(--kwm-hl-2) px-3 py-2">
       <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-xs">
         <span
           className={`font-mono uppercase tracking-[0.12em] px-2 py-0.5 border ${statusClass}`}
         >
           {order.status}
         </span>
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
           {order.side}
         </span>
         <span className="font-medium line-clamp-1">{question}</span>
-        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+        <span className="ml-auto font-mono text-[10px] text-(--kwm-ink-3)">
           ${order.requestedSizeUsd} @ {order.price}
         </span>
       </summary>
-      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-(--kwm-ink-3)">
         <dt>Idempotency key</dt>
-        <dd className="font-mono text-foreground break-all">
+        <dd className="font-mono text-(--kwm-ink) break-all">
           {order.idempotencyKey}
         </dd>
         <dt>Created</dt>
-        <dd className="font-mono text-foreground">
+        <dd className="font-mono text-(--kwm-ink)">
           {new Date(order.createdAt).toLocaleString()}
         </dd>
         <dt>Filled</dt>
-        <dd className="font-mono text-foreground">
+        <dd className="font-mono text-(--kwm-ink)">
           ${order.filledNotionalUsd} / {order.filledShares} shares
         </dd>
         {order.averageFillPrice && (
           <>
             <dt>Avg fill</dt>
-            <dd className="font-mono text-foreground">
+            <dd className="font-mono text-(--kwm-ink)">
               {order.averageFillPrice}
             </dd>
           </>
@@ -1387,7 +1415,7 @@ function LiveOrderRow({
         {order.lastSyncedAt && (
           <>
             <dt>Last sync</dt>
-            <dd className="font-mono text-foreground">
+            <dd className="font-mono text-(--kwm-ink)">
               {new Date(order.lastSyncedAt).toLocaleString()}
             </dd>
           </>
@@ -1395,7 +1423,7 @@ function LiveOrderRow({
         {order.orderId && (
           <>
             <dt>Order ID</dt>
-            <dd className="font-mono text-foreground break-all">
+            <dd className="font-mono text-(--kwm-ink) break-all">
               {order.orderId}
             </dd>
           </>
@@ -1410,7 +1438,7 @@ function LiveOrderRow({
         )}
       </dl>
       {order.signedOrderHash && (
-        <div className="mt-2 border-t border-border/60 pt-2 font-mono text-[10px] text-muted-foreground">
+        <div className="mt-2 border-t border-(--kwm-hl-2) pt-2 font-mono text-[10px] text-(--kwm-ink-3)">
           <span className="font-sans">signed-order sha256:</span>{" "}
           <span className="break-all">{order.signedOrderHash}</span>
         </div>
@@ -1438,49 +1466,53 @@ function PositionsPanel({
   const realized = portfolio ? Number.parseFloat(portfolio.realizedPnlUsd) : 0;
   const realizedClass =
     realized > 0
-      ? "text-emerald-700 dark:text-emerald-400"
+      ? "text-(--kwm-up) dark:text-(--kwm-up)"
       : realized < 0
         ? "text-rose-700 dark:text-rose-400"
-        : "text-foreground";
+        : "text-(--kwm-ink)";
   return (
-    <section className="border-y border-border/60 py-4 mb-8">
+    <section className="border-y border-(--kwm-hl-2) py-4 mb-8">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h2 className="font-mono text-xs uppercase tracking-[0.14em]">
             Positions
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-(--kwm-ink-3)">
             Lifecycle state per market · close on contradicting vote, time-exit,
             or resolution
           </p>
         </div>
         <div className="flex gap-4 text-xs">
           <span>
-            <span className="font-mono uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="font-mono uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Open
             </span>{" "}
-            <span className="font-editorial italic text-lg">{open.length}</span>
+            <span className="font-(family-name:--font-geist) font-semibold text-lg">
+              {open.length}
+            </span>
           </span>
           <span>
-            <span className="font-mono uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="font-mono uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Closed
             </span>{" "}
-            <span className="font-editorial italic text-lg">
+            <span className="font-(family-name:--font-geist) font-semibold text-lg">
               {closed.length}
             </span>
           </span>
           <span>
-            <span className="font-mono uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="font-mono uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Realized P&amp;L
             </span>{" "}
-            <span className={`font-editorial italic text-lg ${realizedClass}`}>
+            <span
+              className={`font-(family-name:--font-geist) font-semibold text-lg ${realizedClass}`}
+            >
               {realized < 0 ? "-" : ""}${Math.abs(realized).toFixed(2)}
             </span>
           </span>
         </div>
       </div>
       {positions.length === 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="mt-3 text-xs text-(--kwm-ink-3)">
           No positions yet. The agent will open one the next time a run produces
           an approved BUY decision on a watchlist item.
         </p>
@@ -1515,39 +1547,39 @@ function PositionCard({
       : null;
   const pnlClass =
     realized === null
-      ? "text-muted-foreground"
+      ? "text-(--kwm-ink-3)"
       : realized > 0
-        ? "text-emerald-700 dark:text-emerald-400"
+        ? "text-(--kwm-up) dark:text-(--kwm-up)"
         : realized < 0
           ? "text-rose-700 dark:text-rose-400"
-          : "text-foreground";
+          : "text-(--kwm-ink)";
   return (
-    <div className="border border-border/60 p-3">
+    <div className="border border-(--kwm-hl-2) p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium text-sm line-clamp-2">{question}</div>
         <span
           className={`font-mono text-[10px] uppercase tracking-[0.12em] px-2 py-0.5 border ${
             position.status === "OPEN"
-              ? "border-amber-600/70 text-amber-700 dark:text-amber-400"
-              : "border-border/60 text-muted-foreground"
+              ? "border-amber-600/70 text-(--kwm-warn) dark:text-amber-400"
+              : "border-(--kwm-hl-2) text-(--kwm-ink-3)"
           }`}
         >
           {position.status}
         </span>
       </div>
-      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-(--kwm-ink-3)">
         <dt>Entry</dt>
-        <dd className="text-right font-mono text-foreground">
+        <dd className="text-right font-mono text-(--kwm-ink)">
           {position.shares} @ {position.entryPrice}
         </dd>
         <dt>Notional</dt>
-        <dd className="text-right font-mono text-foreground">
+        <dd className="text-right font-mono text-(--kwm-ink)">
           ${position.entryNotionalUsd}
         </dd>
         {position.status === "CLOSED" && (
           <>
             <dt>Exit</dt>
-            <dd className="text-right font-mono text-foreground">
+            <dd className="text-right font-mono text-(--kwm-ink)">
               {position.exitPrice}
               {position.closeReason ? ` · ${position.closeReason}` : ""}
             </dd>
@@ -1574,13 +1606,13 @@ function CalibrationPanel({
 }) {
   const models = calibration?.models ?? [];
   return (
-    <section className="border-y border-border/60 py-4 mb-8">
+    <section className="border-y border-(--kwm-hl-2) py-4 mb-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-mono text-xs uppercase tracking-[0.14em]">
             Calibration
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-(--kwm-ink-3)">
             Per-model Brier score over resolved markets · lower is better · 0.25
             is no-skill
           </p>
@@ -1600,7 +1632,7 @@ function CalibrationPanel({
         </Button>
       </div>
       {models.length === 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="mt-3 text-xs text-(--kwm-ink-3)">
           No resolved markets yet. Once watchlist items pass their end time,
           click Refresh resolutions to fetch outcomes from Polymarket.
         </p>
@@ -1609,16 +1641,16 @@ function CalibrationPanel({
           {models.map((model) => (
             <div
               key={model.provider}
-              className="border border-border/60 px-3 py-2"
+              className="border border-(--kwm-hl-2) px-3 py-2"
             >
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground truncate">
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) truncate">
                 {model.provider}
               </div>
               <div className="mt-1 flex items-baseline justify-between gap-2">
-                <span className="font-editorial italic text-xl">
+                <span className="font-(family-name:--font-geist) font-semibold text-xl">
                   {model.brierMean.toFixed(3)}
                 </span>
-                <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
                   n={model.count}
                 </span>
               </div>
@@ -1655,8 +1687,8 @@ function EvidenceUsed({
   const total = news.length + search.length + social.length;
   if (total === 0) return null;
   return (
-    <details className="mt-3 border-y border-border/60 py-2">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+    <details className="mt-3 border-y border-(--kwm-hl-2) py-2">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
         Evidence used · {total} ({social.length} social,{" "}
         {news.length + newsLikeSearch.length} news, {search.length} search)
       </summary>
@@ -1664,12 +1696,12 @@ function EvidenceUsed({
         {social.map((entry, index) => (
           <div
             key={`social-${index}`}
-            className="border-l-2 border-border/60 pl-2"
+            className="border-l-2 border-(--kwm-hl-2) pl-2"
           >
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               {entry.source ?? "watchlist-note"}
             </div>
-            <div className="mt-0.5 text-muted-foreground line-clamp-4">
+            <div className="mt-0.5 text-(--kwm-ink-3) line-clamp-4">
               {entry.text}
             </div>
           </div>
@@ -1677,9 +1709,9 @@ function EvidenceUsed({
         {search.map((entry, index) => (
           <div
             key={`search-${entry.provider}-${index}`}
-            className="border-l-2 border-border/60 pl-2"
+            className="border-l-2 border-(--kwm-hl-2) pl-2"
           >
-            <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               <span>
                 {entry.provider} · {entry.kind}
               </span>
@@ -1699,7 +1731,7 @@ function EvidenceUsed({
               {entry.title || entry.url}
             </a>
             {entry.excerpt && (
-              <p className="mt-1 line-clamp-3 text-muted-foreground">
+              <p className="mt-1 line-clamp-3 text-(--kwm-ink-3)">
                 {entry.excerpt}
               </p>
             )}
@@ -1708,9 +1740,9 @@ function EvidenceUsed({
         {news.map((entry, index) => (
           <div
             key={`news-${index}`}
-            className="border-l-2 border-border/60 pl-2"
+            className="border-l-2 border-(--kwm-hl-2) pl-2"
           >
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               news
             </div>
             <a
@@ -1767,33 +1799,33 @@ function SearchDiagnostics({
   const query = diagnostics?.query ?? search[0]?.query ?? null;
   const providers = diagnostics?.providers ?? [];
   return (
-    <details className="mt-3 border-y border-border/60 py-2">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+    <details className="mt-3 border-y border-(--kwm-hl-2) py-2">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
         Search debug · {diagnostics?.mode ?? "unknown"} · {search.length}{" "}
         evidence results
       </summary>
       <div className="mt-2 space-y-2 text-xs">
         <div className="grid gap-2 sm:grid-cols-4">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Mode
             </div>
             <div>{diagnostics?.mode ?? "unknown"}</div>
           </div>
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Enabled
             </div>
             <div>{diagnostics?.enabled ? "yes" : "no"}</div>
           </div>
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Max results
             </div>
             <div>{diagnostics?.maxResults ?? "unknown"}</div>
           </div>
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Timeout
             </div>
             <div>{diagnostics ? `${diagnostics.timeoutMs}ms` : "unknown"}</div>
@@ -1801,38 +1833,36 @@ function SearchDiagnostics({
         </div>
         {query && (
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Query
             </div>
-            <div className="mt-0.5 break-words text-muted-foreground">
+            <div className="mt-0.5 wrap-break-word text-(--kwm-ink-3)">
               {query}
             </div>
           </div>
         )}
         {providers.length > 0 && (
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Providers
             </div>
             <div className="mt-1 grid gap-2 sm:grid-cols-3">
               {providers.map((entry) => (
                 <div
                   key={entry.provider}
-                  className="border border-border/60 px-2 py-1.5"
+                  className="border border-(--kwm-hl-2) px-2 py-1.5"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-[10px] uppercase tracking-[0.12em]">
                       {entry.provider}
                     </span>
-                    <span className="text-muted-foreground">
-                      {entry.status}
-                    </span>
+                    <span className="text-(--kwm-ink-3)">{entry.status}</span>
                   </div>
-                  <div className="mt-1 text-muted-foreground">
+                  <div className="mt-1 text-(--kwm-ink-3)">
                     {entry.resultCount} results · {entry.durationMs}ms
                   </div>
                   {entry.errorMessage && (
-                    <div className="mt-1 line-clamp-2 text-muted-foreground">
+                    <div className="mt-1 line-clamp-2 text-(--kwm-ink-3)">
                       {entry.errorMessage}
                     </div>
                   )}
@@ -1843,14 +1873,14 @@ function SearchDiagnostics({
         )}
         {search.length > 0 && (
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               Evidence results
             </div>
             <div className="mt-1 space-y-1">
               {search.map((entry, index) => (
                 <div
                   key={`${entry.provider}-${entry.url}-${index}`}
-                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground"
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-(--kwm-ink-3)"
                 >
                   <span className="font-mono text-[10px] uppercase tracking-[0.12em]">
                     {entry.provider} · {entry.kind}
@@ -1877,7 +1907,7 @@ function ResolutionBadge({
     <span
       className={`font-mono text-[10px] uppercase tracking-[0.12em] px-2 py-1 border ${
         won
-          ? "border-emerald-600/70 text-emerald-700 dark:text-emerald-400"
+          ? "border-emerald-600/70 text-(--kwm-up) dark:text-(--kwm-up)"
           : "border-rose-600/70 text-rose-700 dark:text-rose-400"
       }`}
     >
@@ -1902,7 +1932,7 @@ function VoteCorrectness({
       <span
         role="img"
         aria-label="undecided"
-        className="inline-block h-2 w-2 rounded-full bg-muted-foreground"
+        className="inline-block h-2 w-2 rounded-full bg-(--kwm-ink-3)"
         title={`fair ${fairProbability.toFixed(2)} vs outcome ${outcomeYes}`}
       />
     );
@@ -1927,10 +1957,10 @@ function EdgeChip({ pct }: { pct: number }) {
   const rounded = Math.round(pct * 10) / 10;
   const tone =
     Math.abs(pct) < 1
-      ? "text-muted-foreground border-border/60"
+      ? "text-(--kwm-ink-3) border-(--kwm-hl-2)"
       : pct > 0
-        ? "text-emerald-700 border-emerald-700/40"
-        : "text-red-700 border-red-700/40";
+        ? "text-(--kwm-up) border-emerald-700/40"
+        : "text-(--kwm-down) border-red-700/40";
   const sign = pct > 0 ? "+" : "";
   return (
     <span
@@ -1960,10 +1990,10 @@ function EvidenceList({
         : "border-amber-600/50 bg-amber-50/40 dark:bg-amber-950/20";
   return (
     <details className={`mt-2 border-l-2 pl-2 ${toneClass}`}>
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
         {label} · {items.length}
       </summary>
-      <ul className="mt-1 list-disc pl-4 text-[11px] text-muted-foreground space-y-0.5">
+      <ul className="mt-1 list-disc pl-4 text-[11px] text-(--kwm-ink-3) space-y-0.5">
         {items.map((entry, index) => (
           <li key={`${label}-${index}`}>{entry}</li>
         ))}
@@ -1975,7 +2005,7 @@ function EvidenceList({
 function DebugRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[80px_1fr] gap-2">
-      <dt className="font-mono uppercase tracking-[0.1em]">{label}</dt>
+      <dt className="font-mono uppercase tracking-widest">{label}</dt>
       <dd className="break-all">{value}</dd>
     </div>
   );
@@ -1984,8 +2014,8 @@ function DebugRow({ label, value }: { label: string; value: string }) {
 function DebugBlock({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="font-mono uppercase tracking-[0.1em]">{label}</dt>
-      <dd className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words border border-border/60 p-2">
+      <dt className="font-mono uppercase tracking-widest">{label}</dt>
+      <dd className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap wrap-break-word border border-(--kwm-hl-2) p-2">
         {value}
       </dd>
     </div>
@@ -2007,22 +2037,22 @@ function RelatedMarkets({
 }) {
   if (markets.length === 0) return null;
   return (
-    <div className="mt-3 border-y border-border/60 py-2">
-      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+    <div className="mt-3 border-y border-(--kwm-hl-2) py-2">
+      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
         Related market context · {markets.length}
       </div>
       <div className="mt-2 grid gap-2 md:grid-cols-3">
         {markets.map((market, index) => (
           <div
-            className="border border-border/60 p-2 text-xs"
+            className="border border-(--kwm-hl-2) p-2 text-xs"
             key={`${market.question}-${market.outcomeLabel}-${index}`}
           >
-            <div className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               <span>{market.selected ? "Selected" : market.eventType}</span>
               <span>{market.price ?? "n/a"}</span>
             </div>
             <div className="mt-1 line-clamp-2">{market.question}</div>
-            <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               {market.outcomeLabel} · {market.marketType}
               {market.eventEndTime
                 ? ` · ${new Date(market.eventEndTime).toLocaleDateString()}`
@@ -2045,11 +2075,11 @@ function StatusPill({
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border border-border/60 px-3 py-2">
-      <span className="font-mono uppercase tracking-[0.12em] text-muted-foreground">
+    <div className="flex items-center justify-between gap-3 border border-(--kwm-hl-2) px-3 py-2">
+      <span className="font-mono uppercase tracking-[0.12em] text-(--kwm-ink-3)">
         {label}
       </span>
-      <span className={ready ? "text-emerald-700" : "text-amber-700"}>
+      <span className={ready ? "text-(--kwm-up)" : "text-(--kwm-warn)"}>
         {value}
       </span>
     </div>

@@ -9,6 +9,7 @@ export * from "./crypto";
 export * from "./ctf";
 export * from "./orders";
 export * from "./polymarket";
+export * from "./polymarket-unified";
 export * from "./relayer";
 export * from "./slippage";
 export * from "./trading";

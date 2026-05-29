@@ -97,20 +97,25 @@ export function InteractiveLineChart({
       const max = Math.max(...pnlValues);
       const range = max - min || 1;
 
-      const padding = range * 0.1;
-      const adjMin = min - padding;
-      const adjMax = max + padding;
-      const adjRange = adjMax - adjMin;
+      // Reserve pixel space at top and bottom of the chart so the peak/trough
+      // labels can always sit OUTSIDE the line without overlapping it. Without
+      // this, when max sits at the top the chart line hugs y=0 and the label
+      // has nowhere to go but on top of the line.
+      const TOP_RESERVE = 22;
+      const BOTTOM_RESERVE = 22;
+      const plotHeight = Math.max(height - TOP_RESERVE - BOTTOM_RESERVE, 1);
 
       const pts = data.map((d, i) => {
         const x = data.length === 1 ? 50 : (i / (data.length - 1)) * 100;
-        const y = height - ((d.pnl - adjMin) / adjRange) * height;
+        const y = TOP_RESERVE + (1 - (d.pnl - min) / range) * plotHeight;
         return { x, y, data: d };
       });
 
       // Zero anchor — only meaningful when the series crosses it.
       const hasZero = min < 0 && max > 0;
-      const zY = hasZero ? height - ((0 - adjMin) / adjRange) * height : 0;
+      const zY = hasZero
+        ? TOP_RESERVE + (1 - (0 - min) / range) * plotHeight
+        : 0;
       const zRatio = hasZero ? zY / height : 0;
 
       const peak = pnlValues.indexOf(max);
@@ -346,41 +351,53 @@ export function InteractiveLineChart({
         </span>
       )}
 
-      {/* Peak marker — small upward triangle + inline mono label */}
-      {peakPt && (
-        <div
-          className="pointer-events-none absolute"
-          style={{
-            left: `${peakPt.x}%`,
-            top: peakPt.y,
-            transform: "translate(-50%, -100%)",
-          }}
-        >
-          <div className="flex flex-col items-center gap-1 -mt-1">
-            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-500 tabular-nums whitespace-nowrap">
-              ▲ {formatCurrency(peakPt.data.pnl)}
-            </span>
-          </div>
-        </div>
-      )}
+      {/* Peak marker — sits ABOVE the line in the reserved top space.
+          Horizontal anchor flips from center → left/right near the side
+          edges so the label never bleeds past the panel. */}
+      {peakPt &&
+        (() => {
+          const xAlign =
+            peakPt.x < 15 ? "left" : peakPt.x > 85 ? "right" : "center";
+          const tx =
+            xAlign === "left" ? "0%" : xAlign === "right" ? "-100%" : "-50%";
+          return (
+            <div
+              className="pointer-events-none absolute"
+              style={{
+                left: `${peakPt.x}%`,
+                top: peakPt.y,
+                transform: `translate(${tx}, calc(-100% - 6px))`,
+              }}
+            >
+              <span className="block font-mono text-[9px] uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-500 tabular-nums whitespace-nowrap">
+                ▲ {formatCurrency(peakPt.data.pnl)}
+              </span>
+            </div>
+          );
+        })()}
 
-      {/* Trough marker — downward triangle + inline mono label */}
-      {troughPt && (
-        <div
-          className="pointer-events-none absolute"
-          style={{
-            left: `${troughPt.x}%`,
-            top: troughPt.y,
-            transform: "translate(-50%, 0)",
-          }}
-        >
-          <div className="flex flex-col items-center gap-1 mt-1">
-            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-red-600 dark:text-red-500 tabular-nums whitespace-nowrap">
-              ▼ {formatCurrency(troughPt.data.pnl)}
-            </span>
-          </div>
-        </div>
-      )}
+      {/* Trough marker — sits BELOW the line in the reserved bottom space. */}
+      {troughPt &&
+        (() => {
+          const xAlign =
+            troughPt.x < 15 ? "left" : troughPt.x > 85 ? "right" : "center";
+          const tx =
+            xAlign === "left" ? "0%" : xAlign === "right" ? "-100%" : "-50%";
+          return (
+            <div
+              className="pointer-events-none absolute"
+              style={{
+                left: `${troughPt.x}%`,
+                top: troughPt.y,
+                transform: `translate(${tx}, 6px)`,
+              }}
+            >
+              <span className="block font-mono text-[9px] uppercase tracking-[0.12em] text-red-600 dark:text-red-500 tabular-nums whitespace-nowrap">
+                ▼ {formatCurrency(troughPt.data.pnl)}
+              </span>
+            </div>
+          );
+        })()}
 
       {/* Hover dot */}
       {hoveredPoint && (

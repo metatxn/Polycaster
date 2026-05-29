@@ -3,7 +3,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Clock, Heart, Users } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,69 +99,73 @@ export function CommentsSection({
 
   const content = (
     <>
-      {/* Section header — editorial */}
-      <div className="flex items-center justify-between gap-4 mb-4 pb-3 border-b border-border/40">
-        <div className="flex items-baseline gap-2">
-          <span className="text-muted-foreground/60">§</span>
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.18em] text-foreground">
-            Comments
-          </h3>
-        </div>
+      {/* Section header — page-level divider matching the FieldTiles /
+          All Outcomes pattern: `§ TITLE ──── controls`. Sort + Holders
+          live in the right metadata slot as mono-caps outline pills. */}
+      <div className="flex items-center gap-3 mb-4">
+        <span
+          aria-hidden="true"
+          className="font-(family-name:--font-geist-mono) text-(--kwm-ink-dim) text-[14px] leading-none"
+        >
+          §
+        </span>
+        <h3 className="m-0 font-(family-name:--font-geist-mono) text-[11px] font-medium uppercase tracking-[0.18em] text-(--kwm-ink-2)">
+          Comments
+        </h3>
+        <span aria-hidden="true" className="flex-1 h-px bg-(--kwm-hl)" />
 
-        <div className="flex items-center gap-3">
-          {/* Sort dropdown */}
-          <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] hover:bg-foreground/5"
-              >
-                {sortBy === "most_liked" ? (
-                  <Heart className="h-3 w-3" />
-                ) : (
-                  <Clock className="h-3 w-3" />
-                )}
-                {currentSortLabel}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {SORT_OPTIONS.map((option) => (
-                <DropdownMenuItem
-                  key={option.value}
-                  onClick={() => setSortBy(option.value)}
-                  className="gap-2"
-                >
-                  <option.icon className="h-4 w-4" />
-                  {option.label}
-                  {sortBy === option.value && (
-                    <Check className="h-4 w-4 ml-auto text-foreground" />
-                  )}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Holders only toggle */}
-          <div className="flex items-center gap-2">
-            <label
-              htmlFor="holders-filter"
-              className={cn(
-                "flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] cursor-pointer transition-colors",
-                holdersOnly
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
+        {/* Sort dropdown — mono-caps outline pill matching the chart's
+            Both toggle. */}
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-(--kwm-hl) font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-(--kwm-bg-3)/60 transition-colors cursor-pointer"
             >
-              <Users className="h-3 w-3" />
-              <span className="hidden sm:inline">Holders</span>
-            </label>
-            <Switch
-              id="holders-filter"
-              checked={holdersOnly}
-              onCheckedChange={setHoldersOnly}
-            />
-          </div>
+              {sortBy === "most_liked" ? (
+                <Heart className="h-3 w-3" />
+              ) : (
+                <Clock className="h-3 w-3" />
+              )}
+              {currentSortLabel}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {SORT_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={option.value}
+                onClick={() => setSortBy(option.value)}
+                className="gap-2"
+              >
+                <option.icon className="h-4 w-4" />
+                {option.label}
+                {sortBy === option.value && (
+                  <Check className="h-4 w-4 ml-auto text-(--kwm-ink)" />
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Holders-only toggle — same mono-caps treatment, label + switch. */}
+        <div className="flex items-center gap-1.5">
+          <label
+            htmlFor="holders-filter"
+            className={cn(
+              "flex items-center gap-1.5 font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.14em] cursor-pointer transition-colors",
+              holdersOnly
+                ? "text-(--kwm-ink)"
+                : "text-(--kwm-ink-3) hover:text-(--kwm-ink)"
+            )}
+          >
+            <Users className="h-3 w-3" />
+            <span className="hidden sm:inline">Holders</span>
+          </label>
+          <Switch
+            id="holders-filter"
+            checked={holdersOnly}
+            onCheckedChange={setHoldersOnly}
+          />
         </div>
       </div>
 
@@ -190,20 +193,20 @@ export function CommentsSection({
           >
             <div className="flex flex-wrap items-center gap-2">
               {holdersOnly && (
-                <span className="inline-flex items-center gap-1.5 px-2 py-1 border border-border/60 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-foreground">
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 border border-(--kwm-hl-2) rounded-md font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.14em] font-semibold text-(--kwm-ink)">
                   <Users className="h-2.5 w-2.5" />
                   Holders only
                   <button
                     type="button"
                     onClick={() => setHoldersOnly(false)}
-                    className="ml-1 text-muted-foreground hover:text-foreground"
+                    className="ml-1 text-(--kwm-ink-3) hover:text-(--kwm-ink) cursor-pointer"
                   >
                     ×
                   </button>
                 </span>
               )}
               {sortBy !== "latest" && (
-                <span className="inline-flex items-center gap-1.5 px-2 py-1 border border-border/60 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-foreground">
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 border border-(--kwm-hl-2) rounded-md font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.14em] font-semibold text-(--kwm-ink)">
                   {sortBy === "most_liked" ? (
                     <Heart className="h-2.5 w-2.5" />
                   ) : (
@@ -213,7 +216,7 @@ export function CommentsSection({
                   <button
                     type="button"
                     onClick={() => setSortBy("latest")}
-                    className="ml-1 text-muted-foreground hover:text-foreground"
+                    className="ml-1 text-(--kwm-ink-3) hover:text-(--kwm-ink) cursor-pointer"
                   >
                     ×
                   </button>
@@ -225,7 +228,7 @@ export function CommentsSection({
                   setHoldersOnly(false);
                   setSortBy("latest");
                 }}
-                className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border hover:decoration-foreground/60"
+                className="font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors underline underline-offset-4 decoration-(--kwm-hl) hover:decoration-(--kwm-ink) cursor-pointer"
               >
                 Clear all
               </button>
@@ -258,7 +261,7 @@ export function CommentsSection({
   }
 
   return (
-    <div className={cn("border-t border-border/40 pt-6", className)}>
+    <div className={cn("border-t border-(--kwm-hl) pt-6", className)}>
       {content}
     </div>
   );

@@ -1062,7 +1062,8 @@ function injectInlineStyles(): void {
       /* Search toggle button */
       .knoww-search-toggle,
       .knoww-stack-settings,
-      .knoww-stack-sidebar {
+      .knoww-stack-sidebar,
+      .knoww-stack-popout {
         width: 28px !important;
         height: 28px !important;
         border-radius: 50% !important;
@@ -1078,7 +1079,8 @@ function injectInlineStyles(): void {
 
       .knoww-search-toggle:hover,
       .knoww-stack-settings:hover,
-      .knoww-stack-sidebar:hover {
+      .knoww-stack-sidebar:hover,
+      .knoww-stack-popout:hover {
         background: rgba(29, 155, 240, 0.1) !important;
         color: var(--knoww-accent, rgb(29, 155, 240)) !important;
       }
@@ -1090,7 +1092,8 @@ function injectInlineStyles(): void {
 
       .knoww-search-toggle svg,
       .knoww-stack-settings svg,
-      .knoww-stack-sidebar svg {
+      .knoww-stack-sidebar svg,
+      .knoww-stack-popout svg {
         width: 16px !important;
         height: 16px !important;
       }

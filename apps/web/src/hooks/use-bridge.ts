@@ -18,6 +18,7 @@ import {
 } from "@knoww/shared-types/bridge";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
+import { qk } from "@/lib/query-keys";
 import { useProxyWallet } from "./use-proxy-wallet";
 
 export type {
@@ -38,29 +39,6 @@ function getBridgeOptions(): BridgeRequestOptions {
     builderCode: process.env.NEXT_PUBLIC_POLY_BUILDER_CODE,
   };
 }
-
-/**
- * Query keys for React Query
- */
-export const BRIDGE_QUERY_KEYS = {
-  supportedAssets: ["bridge-supported-assets"] as const,
-  depositAddresses: (address: string) =>
-    ["bridge-deposit-addresses", address] as const,
-  depositStatus: (address: string) =>
-    ["bridge-deposit-status", address] as const,
-  quote: (params: QuoteRequest) =>
-    [
-      "bridge-quote",
-      params.fromChainId,
-      params.fromTokenAddress,
-      params.fromAmountBaseUnit,
-      params.recipientAddress,
-      params.toChainId,
-      params.toTokenAddress,
-    ] as const,
-  withdrawalAddresses: (address: string, toChainId: string) =>
-    ["bridge-withdrawal-addresses", address, toChainId] as const,
-};
 
 async function fetchSupportedAssets(): Promise<SupportedAsset[]> {
   return fetchSharedSupportedAssets(getBridgeOptions());
@@ -109,14 +87,14 @@ export function useBridge() {
 
   // Query for supported assets (auto-fetches, cached globally)
   const supportedAssetsQuery = useQuery({
-    queryKey: BRIDGE_QUERY_KEYS.supportedAssets,
+    queryKey: qk.bridge.supportedAssets(),
     queryFn: fetchSupportedAssets,
     staleTime: 5 * 60 * 1000, // 5 minutes - supported assets don't change often
   });
 
   // Query for deposit addresses (cached per address)
   const depositAddressesQuery = useQuery({
-    queryKey: BRIDGE_QUERY_KEYS.depositAddresses(proxyAddress || ""),
+    queryKey: qk.bridge.depositAddresses(proxyAddress || ""),
     queryFn: () => {
       if (!proxyAddress) {
         throw new Error(
@@ -134,10 +112,7 @@ export function useBridge() {
     mutationFn: createDepositAddresses,
     onSuccess: (data, walletAddress) => {
       // Cache the result
-      queryClient.setQueryData(
-        BRIDGE_QUERY_KEYS.depositAddresses(walletAddress),
-        data
-      );
+      queryClient.setQueryData(qk.bridge.depositAddresses(walletAddress), data);
     },
   });
 
@@ -200,7 +175,7 @@ export function useBridge() {
 
       // If we already have cached data for this address, return it
       const cached = queryClient.getQueryData<DepositAddress[]>(
-        BRIDGE_QUERY_KEYS.depositAddresses(targetAddress)
+        qk.bridge.depositAddresses(targetAddress)
       );
       if (cached) {
         return cached;
@@ -231,7 +206,7 @@ export function useBridge() {
   const clearDepositAddresses = useCallback(() => {
     if (proxyAddress) {
       queryClient.removeQueries({
-        queryKey: BRIDGE_QUERY_KEYS.depositAddresses(proxyAddress),
+        queryKey: qk.bridge.depositAddresses(proxyAddress),
       });
     }
   }, [proxyAddress, queryClient]);

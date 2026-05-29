@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 import { useProxyWallet } from "./use-proxy-wallet";
 
 /**
@@ -52,7 +53,7 @@ export function usePortfolioValue(options: UsePortfolioValueOptions = {}) {
   const userAddress = options.userAddress || proxyAddress;
 
   return useQuery({
-    queryKey: ["portfolio-value", userAddress],
+    queryKey: qk.wallet.portfolioValue(userAddress ?? ""),
     queryFn: async (): Promise<PortfolioValueResponse> => {
       if (!userAddress) {
         throw new Error("No wallet address available");

@@ -1,20 +1,19 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowLeft, BadgeCheck, Check, Copy, ExternalLink } from "lucide-react";
+import { ArrowLeft, Check, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
-import { EditorialFooter } from "@/components/editorial-footer";
-import {
-  EditorialHero,
-  HeroDataAge,
-  HeroRefreshButton,
-} from "@/components/editorial-hero";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
+import {
+  ProductDataAge,
+  ProductHero,
+  ProductRefreshButton,
+} from "@/components/product-hero";
 import { PullStat, PullStatGrid, TrendGlyph } from "@/components/pull-stat";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -28,17 +27,6 @@ import { cn } from "@/lib/utils";
 
 function formatAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
-function getInitials(name: string | null, _address: string) {
-  if (name && name.length > 0) {
-    const parts = name.split(/[\s-]+/);
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return name.slice(0, 2).toUpperCase();
-  }
-  return "0x";
 }
 
 function CopyButton({ text, label }: { text: string; label?: string }) {
@@ -140,7 +128,7 @@ export default function ProfilePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="kw-app min-h-screen flex flex-col bg-(--kwm-bg)">
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
@@ -169,14 +157,14 @@ export default function ProfilePage() {
             <Skeleton className="h-64 rounded-none" />
           </div>
         </main>
-        <EditorialFooter />
+        <ProductFooter context="Profile" />
       </div>
     );
   }
 
   if (error || !profile || isEmptyTrader) {
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="kw-app min-h-screen flex flex-col bg-(--kwm-bg)">
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8 flex items-center justify-center">
@@ -203,7 +191,7 @@ export default function ProfilePage() {
             </button>
           </div>
         </main>
-        <EditorialFooter />
+        <ProductFooter context="Profile" />
       </div>
     );
   }
@@ -211,13 +199,13 @@ export default function ProfilePage() {
   const isProfitable = profile.totalPnl >= 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="kw-app min-h-screen flex flex-col bg-(--kwm-bg)">
       <Navbar />
       <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
         <div className="max-w-4xl mx-auto">
-          <EditorialHero
+          <ProductHero
             breadcrumbs={[
               { label: "Leaderboard", href: "/leaderboard" },
               { label: "Trader" },
@@ -225,36 +213,10 @@ export default function ProfilePage() {
                 label: profile.userName || formatAddress(profile.proxyWallet),
               },
             ]}
-            title={
-              <>
-                <Avatar className="h-12 w-12 sm:h-16 sm:w-16 lg:h-20 lg:w-20 rounded-sm border border-border/60 shrink-0">
-                  {profile.profileImage && (
-                    <AvatarImage
-                      src={profile.profileImage}
-                      alt={profile.userName || "Trader"}
-                    />
-                  )}
-                  <AvatarFallback className="rounded-sm bg-muted font-mono text-sm sm:text-base lg:text-lg uppercase tracking-widest text-foreground/80">
-                    {getInitials(profile.userName, profile.proxyWallet)}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="truncate">
-                  {profile.userName || formatAddress(profile.proxyWallet)}
-                </span>
-                {profile.verifiedBadge && (
-                  <BadgeCheck className="h-6 w-6 sm:h-8 sm:w-8 text-sky-600 dark:text-sky-400 shrink-0" />
-                )}
-              </>
-            }
-            subtitle={
-              profile.bio ? (
-                <p className="line-clamp-2">{profile.bio}</p>
-              ) : undefined
-            }
             rightSlot={
               <>
-                <HeroDataAge dataAgeMs={dataAgeMs} />
-                <HeroRefreshButton
+                <ProductDataAge dataAgeMs={dataAgeMs} />
+                <ProductRefreshButton
                   onRefresh={() => refetch()}
                   isFetching={isFetching}
                 />
@@ -435,7 +397,7 @@ export default function ProfilePage() {
         </div>
       </main>
 
-      <EditorialFooter />
+      <ProductFooter context="Profile" />
     </div>
   );
 }

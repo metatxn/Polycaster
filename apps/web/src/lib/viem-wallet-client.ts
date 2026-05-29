@@ -4,7 +4,7 @@ import {
   custom,
   type WalletClient,
 } from "viem";
-import { polygon } from "viem/chains";
+import { polygon } from "@/lib/chains";
 
 type Eip1193Provider = Parameters<typeof custom>[0];
 type RequestProvider = {

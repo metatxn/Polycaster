@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 import type {
   Comment,
   CommentsQueryParams,
@@ -158,12 +159,13 @@ export function useComments(
   } = options;
 
   return useInfiniteQuery({
-    queryKey: [
-      "comments",
-      entityType,
-      entityId,
-      { limit, order, ascending, holdersOnly, getReports },
-    ],
+    queryKey: qk.comments(entityType, entityId, {
+      limit,
+      order,
+      ascending,
+      holdersOnly,
+      getReports,
+    }),
     queryFn: async ({ pageParam = 0 }) => {
       const response = await fetchComments({
         parent_entity_type: entityType,

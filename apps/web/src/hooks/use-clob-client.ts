@@ -16,11 +16,16 @@ import {
   type ClobBalanceAllowanceClient,
   type ClobBalanceAllowanceTarget,
   type ClobOrderType,
-  getPolymarketSignatureType,
   syncClobBalanceAllowance,
   TRADING_SIDES,
   type TradingSide,
 } from "@knoww/shared-types/polymarket";
+import {
+  adaptUnifiedSecureClientForLegacyClob,
+  createUnifiedPolymarketSecureClient,
+  createUnifiedPolymarketViemSigner,
+  type UnifiedSdkTradingClient,
+} from "@knoww/shared-types/polymarket-unified";
 import {
   buildClobOrderPreflightPlan,
   buildPusdAutoWrapTransactions,
@@ -30,10 +35,6 @@ import {
   planPusdAutoWrap,
 } from "@knoww/shared-types/trading";
 import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
-import type {
-  OrderType as SdkOrderType,
-  Side as SdkSide,
-} from "@polymarket/clob-client-v2";
 import { useCallback, useMemo, useState } from "react";
 import type { Address } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
@@ -47,7 +48,7 @@ import {
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
-import { CLOB_BASE_URL, POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
+import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { checkAllApprovals } from "@/lib/approvals";
 import {
   executeViaDepositWallet,
@@ -98,7 +99,6 @@ export interface CreateOrderParams {
 
 // Module-level config to avoid hook dependencies
 const CLOB_HOST = CLOB_BASE_URL;
-const CHAIN_ID = POLYMARKET_CHAIN_ID;
 const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
   DEFAULT_APPROVAL_AMOUNT
 );
@@ -174,31 +174,24 @@ export function useClobClient() {
     if (!proxyAddress) throw new Error("Trading wallet not found");
     if (isEoaMode && !address) throw new Error("Wallet not connected");
 
-    const [{ ClobClient }, signer] = await Promise.all([
-      import("@polymarket/clob-client-v2"),
-      getViemWalletClient(walletClient, address as `0x${string}` | undefined),
-    ]);
-
-    const creds = {
-      key: credentials.apiKey,
-      secret: credentials.apiSecret,
-      passphrase: credentials.apiPassphrase,
-    };
+    const signer = await getViemWalletClient(
+      walletClient,
+      address as `0x${string}` | undefined
+    );
 
     const builderCode = process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
 
-    return new ClobClient({
-      host: CLOB_HOST,
-      chain: CHAIN_ID,
-      signer,
-      creds,
-      signatureType: getPolymarketSignatureType(
-        walletMode
-      ) as unknown as number,
-      funderAddress: isEoaMode ? address : proxyAddress,
-      ...(builderCode ? { builderConfig: { builderCode } } : {}),
+    const { client } = await createUnifiedPolymarketSecureClient({
+      signer: createUnifiedPolymarketViemSigner(signer),
+      wallet: isEoaMode ? address : proxyAddress,
+      credentials,
     });
-  }, [credentials, proxyAddress, isEoaMode, walletMode, address, walletClient]);
+
+    return adaptUnifiedSecureClientForLegacyClob(
+      client as unknown as UnifiedSdkTradingClient,
+      { builderCode }
+    );
+  }, [credentials, proxyAddress, isEoaMode, address, walletClient]);
 
   /**
    * Check if the client can be used. All signing should route through the active
@@ -218,7 +211,7 @@ export function useClobClient() {
   const readConditionalBalanceRaw = useCallback(
     async (tokenId: string, owner: string): Promise<bigint> => {
       const { createPublicClient, http } = await import("viem");
-      const { polygon } = await import("viem/chains");
+      const { polygon } = await import("@/lib/chains");
 
       const publicClient = createPublicClient({
         chain: polygon,
@@ -266,7 +259,7 @@ export function useClobClient() {
       const { createPublicClient, erc20Abi, formatUnits, http } = await import(
         "viem"
       );
-      const { polygon } = await import("viem/chains");
+      const { polygon } = await import("@/lib/chains");
 
       const publicClient = createPublicClient({
         chain: polygon,
@@ -324,7 +317,7 @@ export function useClobClient() {
       if (!address) throw new Error("Wallet not connected");
 
       if (isEoaMode) {
-        const { polygon } = await import("viem/chains");
+        const { polygon } = await import("@/lib/chains");
         const { getPublicClient } = await import("@/lib/rpc");
         const publicClient = getPublicClient();
 
@@ -380,7 +373,7 @@ export function useClobClient() {
       let hasRequiredPusdAllowance = true;
       if (required) {
         const [{ createPublicClient, formatUnits, http }, { polygon }] =
-          await Promise.all([import("viem"), import("viem/chains")]);
+          await Promise.all([import("viem"), import("@/lib/chains")]);
         const client = createPublicClient({
           chain: polygon,
           transport: http(getRpcUrl()),
@@ -437,7 +430,7 @@ export function useClobClient() {
 
       const [{ createPublicClient, http }, { polygon }] = await Promise.all([
         import("viem"),
-        import("viem/chains"),
+        import("@/lib/chains"),
       ]);
       const client = createPublicClient({
         chain: polygon,
@@ -643,7 +636,7 @@ export function useClobClient() {
             {
               tokenID: params.tokenId,
               amount: marketAmount,
-              side: params.side as SdkSide,
+              side: params.side,
               // feeRateBps removed (V2: protocol-determined at match time)
               ...(params.price > 0 ? { price: params.price } : {}),
             },
@@ -655,10 +648,7 @@ export function useClobClient() {
           await syncBalanceAllowance();
 
           didPostOrder = true;
-          const response = await client.postOrder(
-            order,
-            params.orderType as SdkOrderType | undefined
-          );
+          const response = await client.postOrder(order, params.orderType);
           assertClobPostOrderSuccess(response);
           return { success: true, order: response };
         }
@@ -668,7 +658,7 @@ export function useClobClient() {
             tokenID: params.tokenId,
             price: params.price,
             size: params.size,
-            side: params.side as SdkSide,
+            side: params.side,
             // feeRateBps removed (V2: protocol-determined at match time)
             expiration:
               params.orderType === OrderType.GTD ? params.expiration : 0,
@@ -681,10 +671,7 @@ export function useClobClient() {
         await syncBalanceAllowance();
 
         didPostOrder = true;
-        const response = await client.postOrder(
-          order,
-          params.orderType as SdkOrderType | undefined
-        );
+        const response = await client.postOrder(order, params.orderType);
         assertClobPostOrderSuccess(response);
         return { success: true, order: response };
       } catch (err) {
@@ -823,7 +810,7 @@ export function useClobClient() {
 
         const [{ createPublicClient, http }, { polygon }] = await Promise.all([
           import("viem"),
-          import("viem/chains"),
+          import("@/lib/chains"),
         ]);
         const approvalAmountRaw = parseApprovalAmountRaw(approvalAmount);
 
@@ -918,7 +905,7 @@ export function useClobClient() {
 
       try {
         const { createPublicClient, http, formatUnits } = await import("viem");
-        const { polygon } = await import("viem/chains");
+        const { polygon } = await import("@/lib/chains");
 
         const ERC20_ABI = [
           {
@@ -968,7 +955,7 @@ export function useClobClient() {
       if (!targetAddress) throw new Error("No wallet address");
 
       const { createPublicClient, http, formatUnits } = await import("viem");
-      const { polygon } = await import("viem/chains");
+      const { polygon } = await import("@/lib/chains");
 
       const ERC20_BALANCE_ABI = [
         {
@@ -1011,7 +998,7 @@ export function useClobClient() {
 
       try {
         const { createPublicClient, http, formatUnits } = await import("viem");
-        const { polygon } = await import("viem/chains");
+        const { polygon } = await import("@/lib/chains");
 
         const client = createPublicClient({
           chain: polygon,

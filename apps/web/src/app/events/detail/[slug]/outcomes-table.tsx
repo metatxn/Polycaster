@@ -22,7 +22,7 @@ import { OrderBookInline } from "@/components/order-book-summary";
 import { SellPositionModal } from "@/components/portfolio/sell-position-modal";
 import type { Position as PortfolioPosition } from "@/components/portfolio/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -227,7 +227,7 @@ function MarketExpandedContent({
   // expansion's first paint.
   if (!isExpanded) {
     return (
-      <div className="grid grid-rows-[0fr] opacity-0 border-b border-border/50" />
+      <div className="grid grid-rows-[0fr] opacity-0 border-b border-(--kwm-hl)" />
     );
   }
 
@@ -236,18 +236,18 @@ function MarketExpandedContent({
   // the bottom-border accent carry the active signal. Hover/focus get a
   // subtle bg tint instead.
   const tabTriggerClass =
-    "h-auto flex-none px-4 py-3 rounded-none border border-transparent border-b-2 data-[state=active]:border-b-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium whitespace-nowrap hover:bg-muted/20 focus-visible:bg-muted/20 focus-visible:ring-0 focus-visible:outline-none focus-visible:border-transparent data-[state=active]:focus-visible:border-b-primary";
+    "h-auto flex-none px-4 py-3 rounded-none border border-transparent border-b-2 data-[state=active]:border-b-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs sm:text-sm font-medium whitespace-nowrap hover:bg-(--kwm-bg-2) focus-visible:bg-(--kwm-bg-2) focus-visible:ring-0 focus-visible:outline-none focus-visible:border-transparent data-[state=active]:focus-visible:border-b-primary";
 
   return (
     <div
       className={cn(
-        "grid transition-[grid-template-rows,opacity,background-color] duration-300 ease-in-out border-b border-border/50 bg-muted/5",
+        "grid transition-[grid-template-rows,opacity,background-color] duration-300 ease-in-out border-b border-(--kwm-hl) bg-(--kwm-bg-2)",
         "grid-rows-[1fr] opacity-100"
       )}
     >
       <div className="overflow-hidden">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="flex items-center justify-between px-2 sm:px-6 border-b border-border/50 overflow-x-auto no-scrollbar">
+          <div className="flex items-center justify-between px-2 sm:px-6 border-b border-(--kwm-hl) overflow-x-auto no-scrollbar">
             <TabsList className="h-auto p-0 bg-transparent gap-0 shrink-0 flex">
               {/* Position tab — only positions and open orders. Trade history
                   lives in its own tab below. */}
@@ -255,12 +255,6 @@ function MarketExpandedContent({
                 <TabsTrigger value="position" className={tabTriggerClass}>
                   <User className="h-3.5 w-3.5 mr-2 inline-block" />
                   Position
-                </TabsTrigger>
-              )}
-              {hasHistory && (
-                <TabsTrigger value="history" className={tabTriggerClass}>
-                  <History className="h-3.5 w-3.5 mr-2 inline-block" />
-                  History
                 </TabsTrigger>
               )}
               <TabsTrigger value="orderbook" className={tabTriggerClass}>
@@ -272,6 +266,12 @@ function MarketExpandedContent({
                 <TabsTrigger value="graph" className={tabTriggerClass}>
                   <LineChart className="h-3.5 w-3.5 mr-2 inline-block" />
                   Graph
+                </TabsTrigger>
+              )}
+              {hasHistory && (
+                <TabsTrigger value="history" className={tabTriggerClass}>
+                  <History className="h-3.5 w-3.5 mr-2 inline-block" />
+                  History
                 </TabsTrigger>
               )}
               {/* Top Holders Tab */}
@@ -291,7 +291,7 @@ function MarketExpandedContent({
             <TabsContent value="position" className="m-0 px-6 py-4 space-y-6">
               {userPositions.length > 0 && (
                 <div className="space-y-2">
-                  <div className="hidden md:grid md:grid-cols-[minmax(80px,1fr)_120px_120px_120px_120px_140px_112px] items-center gap-4 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
+                  <div className="hidden md:grid md:grid-cols-[minmax(80px,1fr)_120px_120px_120px_120px_140px_112px] items-center gap-4 text-[10px] text-(--kwm-ink-3) uppercase font-bold tracking-wider">
                     <span>Outcome</span>
                     <span className="text-right">Qty</span>
                     <span className="text-right">Avg Price</span>
@@ -309,8 +309,8 @@ function MarketExpandedContent({
                         className={cn(
                           "font-bold",
                           position.outcome.toLowerCase() === "yes"
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-rose-600 dark:text-rose-400"
+                            ? "text-(--kwm-up)"
+                            : "text-(--kwm-down)"
                         )}
                       >
                         {position.outcome}
@@ -331,8 +331,8 @@ function MarketExpandedContent({
                         className={cn(
                           "text-right font-bold tabular-nums",
                           position.unrealizedPnl >= 0
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-rose-600 dark:text-rose-400"
+                            ? "text-(--kwm-up)"
+                            : "text-(--kwm-down)"
                         )}
                       >
                         ${Math.abs(position.unrealizedPnl).toFixed(2)}
@@ -345,7 +345,7 @@ function MarketExpandedContent({
                       <Button
                         size="sm"
                         variant="destructive"
-                        className="col-span-2 md:col-span-1 md:justify-self-end shrink-0 w-full md:w-auto font-bold shadow-lg shadow-rose-500/20 transition-[background-color,transform] duration-150 active:scale-95"
+                        className="col-span-2 md:col-span-1 md:justify-self-end shrink-0 w-full md:w-auto font-bold shadow-[0_8px_24px_-12px_color-mix(in_oklch,var(--kwm-down)_30%,transparent)] transition-[background-color,transform] duration-150 active:scale-95"
                         onClick={(e) => {
                           e.stopPropagation();
                           onSellPosition(position);
@@ -362,12 +362,12 @@ function MarketExpandedContent({
               {marketOpenOrders.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-[11px] uppercase font-bold tracking-wider text-muted-foreground">
+                    <h4 className="text-[11px] uppercase font-bold tracking-wider text-(--kwm-ink-3)">
                       Open Orders
                     </h4>
                   </div>
-                  <div className="rounded-md border border-border/50 overflow-hidden">
-                    <div className="hidden md:grid md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_176px_92px] items-center gap-4 px-4 py-2 bg-muted/20 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <div className="rounded-md border border-(--kwm-hl) overflow-hidden">
+                    <div className="hidden md:grid md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_176px_92px] items-center gap-4 px-4 py-2 bg-(--kwm-bg-2) text-[10px] font-bold uppercase tracking-wider text-(--kwm-ink-3)">
                       <span>Side</span>
                       <span>Outcome</span>
                       <span className="text-right">Price</span>
@@ -383,14 +383,14 @@ function MarketExpandedContent({
                       return (
                         <div
                           key={order.id}
-                          className="grid grid-cols-[80px_minmax(80px,1fr)_92px] md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_176px_92px] items-center gap-4 px-4 py-2.5 border-t border-border/40 text-xs font-mono tabular-nums"
+                          className="grid grid-cols-[80px_minmax(80px,1fr)_92px] md:grid-cols-[80px_minmax(80px,1fr)_100px_140px_120px_176px_92px] items-center gap-4 px-4 py-2.5 border-t border-(--kwm-hl) text-xs font-mono tabular-nums"
                         >
                           <span
                             className={cn(
                               "uppercase font-bold tracking-wider",
                               order.side === "BUY"
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : "text-rose-600 dark:text-rose-400"
+                                ? "text-(--kwm-up)"
+                                : "text-(--kwm-down)"
                             )}
                           >
                             {order.side}
@@ -399,23 +399,23 @@ function MarketExpandedContent({
                             className={cn(
                               "font-semibold",
                               outcomeName === "Yes"
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : "text-rose-600 dark:text-rose-400"
+                                ? "text-(--kwm-up)"
+                                : "text-(--kwm-down)"
                             )}
                           >
                             {outcomeName}
                           </span>
-                          <span className="hidden md:block text-right text-foreground">
+                          <span className="hidden md:block text-right text-(--kwm-ink)">
                             {(order.price * 100).toFixed(1)}¢
                           </span>
-                          <span className="hidden md:block text-right text-foreground">
+                          <span className="hidden md:block text-right text-(--kwm-ink)">
                             {order.filledSize.toFixed(1)} /{" "}
                             {order.size.toFixed(1)}
                           </span>
-                          <span className="hidden md:block text-right text-foreground">
+                          <span className="hidden md:block text-right text-(--kwm-ink)">
                             ${(order.size * order.price).toFixed(2)}
                           </span>
-                          <span className="hidden md:block text-right text-[10px] text-muted-foreground whitespace-nowrap">
+                          <span className="hidden md:block text-right text-[10px] text-(--kwm-ink-3) whitespace-nowrap">
                             {formatOrderExpiration(order.expiration)}
                           </span>
                           <button
@@ -425,7 +425,7 @@ function MarketExpandedContent({
                               cancelOrder(order.id);
                             }}
                             disabled={isCancelling}
-                            className="ml-auto inline-flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-rose-500 transition-colors disabled:opacity-50"
+                            className="ml-auto inline-flex items-center gap-1 text-[11px] uppercase tracking-wider text-(--kwm-ink-3) hover:text-(--kwm-down) transition-colors disabled:opacity-50"
                           >
                             {isCancelling ? (
                               <Loader2 className="h-3 w-3 animate-spin" />
@@ -445,13 +445,13 @@ function MarketExpandedContent({
 
           {hasHistory && (
             <TabsContent value="history" className="m-0 px-6 py-4">
-              <div className="rounded-md border border-border/50 divide-y divide-border/40">
+              <div className="rounded-md border border-(--kwm-hl) divide-y divide-(--kwm-hl)">
                 {marketTrades.map((trade) => {
                   const verb = trade.side === "BUY" ? "Bought" : "Sold";
                   const outcomeColor =
                     trade.outcome.toLowerCase() === "yes"
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-rose-600 dark:text-rose-400";
+                      ? "text-(--kwm-up)"
+                      : "text-(--kwm-down)";
                   return (
                     <div
                       key={trade.id}
@@ -462,15 +462,15 @@ function MarketExpandedContent({
                         <span className={cn("font-semibold", outcomeColor)}>
                           {trade.size.toFixed(2)} {trade.outcome}
                         </span>{" "}
-                        <span className="text-muted-foreground">at</span>{" "}
-                        <span className="text-foreground">
+                        <span className="text-(--kwm-ink-3)">at</span>{" "}
+                        <span className="text-(--kwm-ink)">
                           {(trade.price * 100).toFixed(1)}¢
                         </span>{" "}
-                        <span className="text-muted-foreground">
+                        <span className="text-(--kwm-ink-3)">
                           (${trade.usdcAmount.toFixed(2)})
                         </span>
                       </span>
-                      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-(--kwm-ink-3)">
                         {formatRelativeTime(trade.timestamp)}
                       </span>
                     </div>
@@ -502,7 +502,7 @@ function MarketExpandedContent({
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 lg:divide-x divide-border/50">
                 <div>
-                  <div className="px-4 py-2 border-y border-border/50 bg-muted/20 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-400">
+                  <div className="px-4 py-2 border-y border-(--kwm-hl) bg-(--kwm-bg-2) text-[10px] font-bold uppercase tracking-[0.14em] text-(--kwm-up)">
                     Yes book
                   </div>
                   <OrderBook
@@ -516,7 +516,7 @@ function MarketExpandedContent({
                   />
                 </div>
                 <div>
-                  <div className="px-4 py-2 border-y border-border/50 bg-muted/20 text-[10px] font-bold uppercase tracking-[0.14em] text-rose-600 dark:text-rose-400">
+                  <div className="px-4 py-2 border-y border-(--kwm-hl) bg-(--kwm-bg-2) text-[10px] font-bold uppercase tracking-[0.14em] text-(--kwm-down)">
                     No book
                   </div>
                   <OrderBook
@@ -565,14 +565,14 @@ function MarketExpandedContent({
           <TabsContent value="resolution" className="m-0 p-6">
             <div className="space-y-5 text-sm max-w-2xl">
               <div className="flex gap-3">
-                <div className="h-8 w-8 border border-border/60 flex items-center justify-center shrink-0">
-                  <Info className="h-4 w-4 text-foreground" />
+                <div className="h-8 w-8 border border-(--kwm-hl-2) flex items-center justify-center shrink-0">
+                  <Info className="h-4 w-4 text-(--kwm-ink)" />
                 </div>
                 <div>
                   <h4 className="font-mono text-[11px] uppercase tracking-[0.16em] font-semibold mb-1">
                     Resolution Source
                   </h4>
-                  <p className="text-muted-foreground leading-relaxed">
+                  <p className="text-(--kwm-ink-3) leading-relaxed">
                     Official announcement or verified news reports from
                     established media organizations will be used to resolve this
                     market.
@@ -580,14 +580,14 @@ function MarketExpandedContent({
                 </div>
               </div>
               <div className="flex gap-3">
-                <div className="h-8 w-8 border border-border/60 flex items-center justify-center shrink-0">
-                  <History className="h-4 w-4 text-foreground" />
+                <div className="h-8 w-8 border border-(--kwm-hl-2) flex items-center justify-center shrink-0">
+                  <History className="h-4 w-4 text-(--kwm-ink)" />
                 </div>
                 <div>
                   <h4 className="font-mono text-[11px] uppercase tracking-[0.16em] font-semibold mb-1">
                     Resolution Rules
                   </h4>
-                  <p className="text-muted-foreground leading-relaxed">
+                  <p className="text-(--kwm-ink-3) leading-relaxed">
                     This market will resolve based on the first official
                     reporting of the outcome. If no official outcome is reached
                     by the expiration date, it may be extended or resolved based
@@ -624,7 +624,7 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
 
   if (error || !holdersData || holdersData.length === 0) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
+      <div className="p-8 text-center text-(--kwm-ink-3)">
         <Users className="h-8 w-8 mx-auto mb-2 opacity-20" />
         <p>No holder data available for this market.</p>
       </div>
@@ -639,7 +639,7 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
 
   if (allHolders.length === 0) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
+      <div className="p-8 text-center text-(--kwm-ink-3)">
         <Users className="h-8 w-8 mx-auto mb-2 opacity-20" />
         <p>No holder data available for this market.</p>
       </div>
@@ -647,22 +647,22 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
   }
 
   return (
-    <div className="p-0 overflow-hidden border-t border-border/50">
+    <div className="p-0 overflow-hidden border-t border-(--kwm-hl)">
       <div className="max-h-[400px] overflow-y-auto overflow-x-auto no-scrollbar">
         <div className="min-w-[320px]">
           <table className="w-full text-sm">
-            <thead className="bg-background sticky top-0 z-10 border-b border-border/50">
+            <thead className="bg-(--kwm-panel) sticky top-0 z-10 border-b border-(--kwm-hl)">
               <tr>
-                <th className="px-2 sm:px-4 py-3 text-left font-bold text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/20 w-10 sm:w-16">
+                <th className="px-2 sm:px-4 py-3 text-left font-bold text-[10px] uppercase tracking-wider text-(--kwm-ink-3) bg-(--kwm-bg-2) w-10 sm:w-16">
                   Rank
                 </th>
-                <th className="px-2 sm:px-4 py-3 text-left font-bold text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/20">
+                <th className="px-2 sm:px-4 py-3 text-left font-bold text-[10px] uppercase tracking-wider text-(--kwm-ink-3) bg-(--kwm-bg-2)">
                   Holder
                 </th>
-                <th className="px-2 sm:px-4 py-3 text-left font-bold text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/20">
+                <th className="px-2 sm:px-4 py-3 text-left font-bold text-[10px] uppercase tracking-wider text-(--kwm-ink-3) bg-(--kwm-bg-2)">
                   Outcome
                 </th>
-                <th className="px-2 sm:px-4 py-3 text-right font-bold text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/20">
+                <th className="px-2 sm:px-4 py-3 text-right font-bold text-[10px] uppercase tracking-wider text-(--kwm-ink-3) bg-(--kwm-bg-2)">
                   Shares
                 </th>
               </tr>
@@ -673,13 +673,13 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
                   key={`${holder.proxyWallet}-${holder.asset}`}
                   className="hover:bg-accent/20 transition-colors"
                 >
-                  <td className="px-2 sm:px-4 py-3 text-muted-foreground font-mono text-xs">
+                  <td className="px-2 sm:px-4 py-3 text-(--kwm-ink-3) font-mono text-xs">
                     {idx + 1}
                   </td>
                   <td className="px-2 sm:px-4 py-3">
                     <div className="flex items-center gap-1.5 sm:gap-2">
                       {holder.profileImageOptimized ? (
-                        <div className="relative h-5 w-5 sm:h-6 sm:w-6 rounded-full overflow-hidden border border-border/50 shrink-0">
+                        <div className="relative h-5 w-5 sm:h-6 sm:w-6 rounded-full overflow-hidden border border-(--kwm-hl) shrink-0">
                           <Image
                             src={holder.profileImageOptimized}
                             alt={holder.pseudonym || "Holder"}
@@ -689,7 +689,7 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
                           />
                         </div>
                       ) : (
-                        <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-sm bg-foreground/5 flex items-center justify-center font-mono text-[8px] sm:text-[10px] font-semibold text-foreground border border-border/60 shrink-0">
+                        <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-sm bg-(--kwm-ink)/5 flex items-center justify-center font-mono text-[8px] sm:text-[10px] font-semibold text-(--kwm-ink) border border-(--kwm-hl-2) shrink-0">
                           {(holder.pseudonym || "0x").slice(0, 2).toUpperCase()}
                         </div>
                       )}
@@ -707,7 +707,7 @@ function TopHoldersContent({ conditionId }: { conditionId: string }) {
                       className={cn(
                         "inline-flex items-center px-1.5 sm:px-2 py-0.5 font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-semibold border",
                         holder.outcomeIndex === 0
-                          ? "text-emerald-700 dark:text-emerald-300 border-emerald-600/40"
+                          ? "text-(--kwm-up) border-(--kwm-up-border)"
                           : "text-red-700 dark:text-red-300 border-red-600/40"
                       )}
                     >
@@ -747,8 +747,8 @@ function SortButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-foreground transition-colors",
-        active && "text-foreground",
+        "inline-flex items-center gap-1 uppercase tracking-[0.14em] hover:text-(--kwm-ink) transition-colors",
+        active && "text-(--kwm-ink)",
         className
       )}
       aria-label={`Sort by ${label}${
@@ -787,14 +787,14 @@ function OutcomeTradeButton({
       className={cn(
         "flex min-h-11 min-w-0 items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left transition-colors active:scale-[0.98]",
         selected
-          ? "border-foreground bg-foreground text-background"
-          : "border-border/60 bg-muted/20 hover:border-foreground/50 hover:bg-muted/40"
+          ? "border-(--kwm-ink) bg-(--kwm-ink) text-(--kwm-bg)"
+          : "border-(--kwm-hl-2) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)"
       )}
     >
       <span
         className={cn(
-          "shrink-0 border-l-[3px] pl-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] xl:text-[11px]",
-          selected ? "border-background/70" : accentClassName
+          "shrink-0 border-l-[3px] pl-2 font-mono text-[10px] font-semibold uppercase tracking-widest xl:text-[11px]",
+          selected ? "border-(--kwm-bg)/70" : accentClassName
         )}
       >
         {label}
@@ -905,68 +905,99 @@ export function OutcomesTable({
       open={isOutcomeTableExpanded}
       onOpenChange={setIsOutcomeTableExpanded}
     >
-      <Card className="py-0 gap-0 border-border/50 shadow-sm overflow-visible *:data-[slot=card-header]:rounded-t-xl">
-        <CollapsibleTrigger asChild>
-          <CardHeader className="py-2.5 px-4 bg-muted/20 border-b border-border/50 cursor-pointer hover:bg-muted/30 transition-colors">
-            <div className="flex items-center gap-2">
-              {isConnected && (
-                <span
-                  className="relative flex h-1.5 w-1.5"
-                  role="status"
-                  title="Live"
-                >
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-                </span>
+      {/* Section divider — sits OUTSIDE the panel, mirrors the FieldTiles
+          `§ TITLE ──── meta` page-level pattern so the page reads as a
+          stack of named sections. The whole bar is the collapsible
+          trigger; chevron rotates to indicate state. */}
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="group flex w-full items-center gap-3 pt-3 pb-2 cursor-pointer text-left"
+        >
+          <span
+            aria-hidden="true"
+            className="font-(family-name:--font-geist-mono) text-(--kwm-ink-dim) text-[14px] leading-none"
+          >
+            §
+          </span>
+          <h3 className="m-0 font-(family-name:--font-geist-mono) text-[11px] font-medium uppercase tracking-[0.18em] text-(--kwm-ink-2)">
+            All Outcomes
+          </h3>
+          <span aria-hidden="true" className="flex-1 h-px bg-(--kwm-hl)" />
+          {isConnected && (
+            <span
+              className="inline-flex items-center gap-1.5 font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.16em] text-(--kwm-up)"
+              role="status"
+              title="Live"
+            >
+              <span className="kwm-pulse" aria-hidden="true" />
+              Live
+            </span>
+          )}
+          {!isConnected && (
+            <span
+              className={cn(
+                "relative inline-flex rounded-full h-1.5 w-1.5",
+                connectionState === "connecting" ||
+                  connectionState === "reconnecting"
+                  ? "bg-(--kwm-warn) animate-pulse"
+                  : "bg-(--kwm-ink-dim)"
               )}
-              {!isConnected && (
-                <span
-                  className={cn(
-                    "relative inline-flex rounded-full h-1.5 w-1.5",
-                    connectionState === "connecting" ||
-                      connectionState === "reconnecting"
-                      ? "bg-amber-500 animate-pulse"
-                      : "bg-muted-foreground/50"
-                  )}
-                  role="status"
-                  title={
-                    connectionState === "connecting"
-                      ? "Connecting"
-                      : connectionState === "reconnecting"
-                        ? "Reconnecting"
-                        : "Offline"
-                  }
-                />
-              )}
-              <CardTitle className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                Outcome
-              </CardTitle>
-              <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground">
+              role="status"
+              title={
+                connectionState === "connecting"
+                  ? "Connecting"
+                  : connectionState === "reconnecting"
+                    ? "Reconnecting"
+                    : "Offline"
+              }
+            />
+          )}
+          {/* Counts — open vs settled, mono-caps with middle-dot separator
+              when both are present (matches the FieldTiles `5 OF 48 · LIVE`
+              grammar). Settled side is suppressed when zero. */}
+          <span className="inline-flex items-center gap-1.5 font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.16em] text-(--kwm-ink-dim)">
+            <span className="tabular-nums">
+              <span className="text-(--kwm-ink-2)">
                 {sortedMarketData.length}
-              </span>
-              <div className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-accent/50 transition-colors">
-                {isOutcomeTableExpanded ? (
-                  <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                )}
-                <span className="sr-only">
-                  {isOutcomeTableExpanded ? "Collapse" : "Expand"} outcomes
+              </span>{" "}
+              Open
+            </span>
+            {closedMarkets.length > 0 && (
+              <>
+                <span aria-hidden="true" className="text-(--kwm-ink-dim)">
+                  ·
                 </span>
-              </div>
-            </div>
-          </CardHeader>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
+                <span className="tabular-nums">
+                  <span className="text-(--kwm-ink-2)">
+                    {closedMarkets.length}
+                  </span>{" "}
+                  Settled
+                </span>
+              </>
+            )}
+          </span>
+          {isOutcomeTableExpanded ? (
+            <ChevronUp className="h-3.5 w-3.5 text-(--kwm-ink-3) group-hover:text-(--kwm-ink) transition-colors" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 text-(--kwm-ink-3) group-hover:text-(--kwm-ink) transition-colors" />
+          )}
+          <span className="sr-only">
+            {isOutcomeTableExpanded ? "Collapse" : "Expand"} outcomes
+          </span>
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <Card className="py-0 gap-0 rounded-md border-(--kwm-hl-2) shadow-none overflow-hidden">
           <CardContent className="p-0">
             {/* Desktop column headers — aligned with row data columns so
                 PROB sits directly above the % values and the range label above the
                 change chip. Mirrors the row's inner grid + min-widths. */}
             {sortedMarketData.length > 0 && (
-              <div className="hidden lg:grid lg:grid-cols-[1fr_auto] items-center gap-4 pl-[11px] pr-4 py-1.5 border-b border-border/50 bg-muted/10 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+              <div className="hidden lg:grid lg:grid-cols-[1fr_auto] items-center gap-4 pl-[11px] pr-4 py-1.5 border-b border-(--kwm-hl) bg-(--kwm-bg-2) font-(family-name:--font-geist-mono) text-[10px] font-bold uppercase tracking-[0.14em] text-(--kwm-ink-3)">
                 <div className="grid grid-cols-[1fr_auto] items-center gap-4">
                   <span className="pl-[44px]">Market</span>
-                  <div className="flex items-center justify-end gap-3 pr-4 border-r border-border/50 h-6">
+                  <div className="flex items-center justify-end gap-3 pr-4 border-r border-(--kwm-hl) h-6">
                     <SortButton
                       label="Prob"
                       active={sortKey === "prob"}
@@ -986,7 +1017,7 @@ export function OutcomesTable({
                 <span className="w-[210px] text-center">Trade</span>
               </div>
             )}
-            <div className="divide-y divide-border/50">
+            <div className="divide-y divide-(--kwm-hl)">
               {displayMarkets.map((market) => {
                 const isMarketClosed = false;
                 const isExpanded = expandedOrderBookMarketId === market.id;
@@ -1023,10 +1054,10 @@ export function OutcomesTable({
                       className={cn(
                         "relative w-full flex flex-col lg:grid lg:grid-cols-[1fr_auto] transition-[background-color,border-color] duration-150 border-l-[3px]",
                         selectedMarketId === market.id
-                          ? "bg-foreground/3 border-l-foreground"
-                          : "hover:bg-foreground/2 border-l-transparent",
+                          ? "bg-(--kwm-bg-3) border-l-(--kwm-ink)"
+                          : "hover:bg-(--kwm-bg-3)/60 border-l-transparent",
                         isExpanded &&
-                          "sticky top-0 z-20 bg-card/95 supports-backdrop-filter:bg-card/80 backdrop-blur shadow-sm"
+                          "sticky top-0 z-20 bg-(--kwm-panel)/95 supports-backdrop-filter:bg-(--kwm-panel)/80 backdrop-blur"
                       )}
                     >
                       {/* Left Side: Market Info (Clickable to expand) */}
@@ -1056,19 +1087,19 @@ export function OutcomesTable({
                             <div className="flex items-start gap-3 min-w-0">
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="font-semibold text-[13px] leading-tight text-foreground group-hover:underline decoration-foreground/40 underline-offset-4 transition-colors">
+                                  <h3 className="font-semibold text-[13px] leading-tight text-(--kwm-ink) group-hover:underline decoration-(--kwm-ink)/40 underline-offset-4 transition-colors">
                                     {market.groupItemTitle}
                                   </h3>
                                   {userPositions.length > 0 && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground border border-border/60 tabular-nums shrink-0">
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-(--kwm-ink) border border-(--kwm-hl-2) tabular-nums shrink-0">
                                       <User className="h-2.5 w-2.5" />
                                       {totalPositionSize.toFixed(1)}
                                     </span>
                                   )}
                                 </div>
                                 <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] tabular-nums text-muted-foreground">
-                                    <span className="text-muted-foreground/60">
+                                  <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] tabular-nums text-(--kwm-ink-3)">
+                                    <span className="text-(--kwm-ink-dim)">
                                       Vol
                                     </span>{" "}
                                     {formatVolume(market.volume)}
@@ -1088,7 +1119,7 @@ export function OutcomesTable({
                                 {market.yesProbability}%
                               </span>
                               {market.change === 0 ? (
-                                <span className="font-mono text-[10px] font-bold mt-1.5 text-muted-foreground/60 tabular-nums">
+                                <span className="font-mono text-[10px] font-bold mt-1.5 text-(--kwm-ink-dim) tabular-nums">
                                   —
                                 </span>
                               ) : (
@@ -1096,8 +1127,8 @@ export function OutcomesTable({
                                   className={cn(
                                     "font-mono text-[10px] font-bold mt-1.5 px-1.5 py-0.5 rounded tabular-nums inline-flex items-center gap-0.5",
                                     market.change > 0
-                                      ? "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400"
-                                      : "text-rose-600 bg-rose-500/10 dark:text-rose-400"
+                                      ? "text-(--kwm-up) bg-(--kwm-up-soft)"
+                                      : "text-(--kwm-down) bg-(--kwm-down-soft)"
                                   )}
                                 >
                                   <span aria-hidden="true">
@@ -1116,19 +1147,19 @@ export function OutcomesTable({
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <h3 className="font-semibold text-[13px] xl:text-sm leading-tight line-clamp-2 group-hover:underline decoration-foreground/40 underline-offset-4 transition-colors">
+                                <h3 className="font-semibold text-[13px] xl:text-sm leading-tight line-clamp-2 group-hover:underline decoration-(--kwm-ink)/40 underline-offset-4 transition-colors">
                                   {market.groupItemTitle}
                                 </h3>
                                 {userPositions.length > 0 && (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground border border-border/60 tabular-nums shrink-0">
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-(--kwm-ink) border border-(--kwm-hl-2) tabular-nums shrink-0">
                                     <User className="h-2.5 w-2.5" />
                                     {totalPositionSize.toFixed(1)}
                                   </span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
-                                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] tabular-nums text-muted-foreground">
-                                  <span className="text-muted-foreground/60">
+                                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] tabular-nums text-(--kwm-ink-3)">
+                                  <span className="text-(--kwm-ink-dim)">
                                     Vol
                                   </span>{" "}
                                   {formatVolume(market.volume)}
@@ -1144,12 +1175,12 @@ export function OutcomesTable({
                           </div>
 
                           {/* Column 2: Percentage + Change */}
-                          <div className="flex items-center justify-end gap-3 pr-4 border-r border-border/50 h-8">
+                          <div className="flex items-center justify-end gap-3 pr-4 border-r border-(--kwm-hl) h-8">
                             <span className="font-mono text-xl xl:text-2xl font-bold tabular-nums min-w-[50px] xl:min-w-[55px] text-right">
                               {market.yesProbability}%
                             </span>
                             {market.change === 0 ? (
-                              <span className="font-mono text-xs xl:text-sm font-bold min-w-[60px] xl:min-w-[70px] text-center text-muted-foreground/60 tabular-nums shrink-0">
+                              <span className="font-mono text-xs xl:text-sm font-bold min-w-[60px] xl:min-w-[70px] text-center text-(--kwm-ink-dim) tabular-nums shrink-0">
                                 —
                               </span>
                             ) : (
@@ -1157,8 +1188,8 @@ export function OutcomesTable({
                                 className={cn(
                                   "flex items-center justify-center gap-0.5 font-mono text-xs xl:text-sm font-bold min-w-[60px] xl:min-w-[70px] px-2 py-0.5 rounded shrink-0",
                                   market.change > 0
-                                    ? "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400"
-                                    : "text-rose-600 bg-rose-500/10 dark:text-rose-400"
+                                    ? "text-(--kwm-up) bg-(--kwm-up-soft)"
+                                    : "text-(--kwm-down) bg-(--kwm-down-soft)"
                                 )}
                               >
                                 <span aria-hidden="true">
@@ -1183,7 +1214,7 @@ export function OutcomesTable({
                               selectedMarketId === market.id &&
                               selectedOutcomeIndex === 0
                             }
-                            accentClassName="border-emerald-600 dark:border-emerald-400"
+                            accentClassName="border-(--kwm-up)"
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
                               setSelectedMarketId(market.id);
@@ -1198,7 +1229,7 @@ export function OutcomesTable({
                               selectedMarketId === market.id &&
                               selectedOutcomeIndex === 1
                             }
-                            accentClassName="border-rose-600 dark:border-rose-400"
+                            accentClassName="border-(--kwm-down)"
                             onClick={() => {
                               setExpandedOrderBookMarketId(market.id);
                               setSelectedMarketId(market.id);
@@ -1218,12 +1249,12 @@ export function OutcomesTable({
                         aria-hidden="true"
                       >
                         <span
-                          className="bg-emerald-500/80 transition-[width] duration-300"
+                          className="bg-(--kwm-up) transition-[width] duration-300"
                           style={{
                             width: `${Math.max(0, Math.min(100, market.yesProbability))}%`,
                           }}
                         />
-                        <span className="flex-1 bg-rose-500/40" />
+                        <span className="flex-1 bg-(--kwm-down)/40" />
                       </div>
                     </div>
 
@@ -1245,24 +1276,24 @@ export function OutcomesTable({
 
               {/* Closed Markets Section */}
               {closedMarkets.length > 0 && (
-                <div className="border-t border-border/50">
+                <div className="border-t border-(--kwm-hl)">
                   <button
                     type="button"
                     onClick={() => setShowClosedMarkets(!showClosedMarkets)}
                     className="w-full px-6 py-3 flex items-center justify-between bg-muted/30 hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-muted-foreground">
+                      <span className="text-sm font-medium text-(--kwm-ink-3)">
                         Closed Markets
                       </span>
-                      <span className="px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground border border-border/60 tabular-nums">
+                      <span className="px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-(--kwm-ink-3) border border-(--kwm-hl-2) tabular-nums">
                         {closedMarkets.length}
                       </span>
                     </div>
                     {showClosedMarkets ? (
-                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      <ChevronUp className="h-4 w-4 text-(--kwm-ink-3)" />
                     ) : (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      <ChevronDown className="h-4 w-4 text-(--kwm-ink-3)" />
                     )}
                   </button>
 
@@ -1282,27 +1313,27 @@ export function OutcomesTable({
                         return (
                           <div
                             key={market.id}
-                            className="px-6 py-4 bg-muted/10 opacity-70"
+                            className="px-6 py-4 bg-(--kwm-bg-2) opacity-70"
                           >
                             <div className="flex items-center justify-between gap-4">
                               {/* Market Info */}
                               <div className="flex items-center gap-3 min-w-0 flex-1">
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
-                                    <h3 className="font-medium text-sm truncate text-muted-foreground">
+                                    <h3 className="font-medium text-sm truncate text-(--kwm-ink-3)">
                                       {market.groupItemTitle}
                                     </h3>
-                                    <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-muted text-muted-foreground shrink-0">
+                                    <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-muted text-(--kwm-ink-3) shrink-0">
                                       Closed
                                     </span>
                                     {userPositions.length > 0 && (
-                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground border border-border/60 tabular-nums shrink-0">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] font-semibold text-(--kwm-ink-3) border border-(--kwm-hl-2) tabular-nums shrink-0">
                                         <User className="h-2.5 w-2.5" />
                                         {totalPositionSize.toFixed(1)}
                                       </span>
                                     )}
                                   </div>
-                                  <span className="text-[10px] text-muted-foreground">
+                                  <span className="text-[10px] text-(--kwm-ink-3)">
                                     {formatVolume(market.volume)} Vol.
                                   </span>
                                 </div>
@@ -1311,10 +1342,10 @@ export function OutcomesTable({
                               {/* Result */}
                               <div className="flex items-center gap-3 shrink-0">
                                 <div className="text-right">
-                                  <span className="text-lg font-bold tabular-nums text-muted-foreground">
+                                  <span className="text-lg font-bold tabular-nums text-(--kwm-ink-3)">
                                     {market.yesProbability}%
                                   </span>
-                                  <span className="text-xs text-muted-foreground ml-1">
+                                  <span className="text-xs text-(--kwm-ink-3) ml-1">
                                     Yes
                                   </span>
                                 </div>
@@ -1329,8 +1360,8 @@ export function OutcomesTable({
               )}
             </div>
           </CardContent>
-        </CollapsibleContent>
-      </Card>
+        </Card>
+      </CollapsibleContent>
 
       {/* Sell Position Modal */}
       <SellPositionModal

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 /** Token data for a market outcome */
 interface MarketToken {
@@ -61,7 +62,7 @@ interface MarketDetailResponse {
  */
 export function useMarketDetail(slug: string | undefined) {
   return useQuery({
-    queryKey: ["market-detail", slug],
+    queryKey: qk.market.bySlug(slug ?? ""),
     queryFn: async () => {
       if (!slug) {
         throw new Error("Market slug is required");

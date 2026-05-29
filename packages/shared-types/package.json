@@ -16,6 +16,7 @@
     "./crypto": "./src/crypto.ts",
     "./orders": "./src/orders.ts",
     "./polymarket": "./src/polymarket.ts",
+    "./polymarket-unified": "./src/polymarket-unified.ts",
     "./relayer": "./src/relayer.ts",
     "./slippage": "./src/slippage.ts",
     "./trading": "./src/trading.ts",
@@ -31,6 +32,7 @@
     "typescript": "catalog:"
   },
   "dependencies": {
+    "@polymarket/client": "catalog:",
     "decimal.js": "catalog:",
     "viem": "catalog:"
   }

@@ -12,13 +12,14 @@ import {
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@/constants/contracts";
+import { qk } from "@/lib/query-keys";
 import {
   executeViaDepositWallet,
   executeViaRelayer,
 } from "@/lib/relayer-client";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import { useBridge } from "./use-bridge";
-import { PROXY_WALLET_QUERY_KEY, useProxyWallet } from "./use-proxy-wallet";
+import { useProxyWallet } from "./use-proxy-wallet";
 
 const log = createLogger("withdraw");
 
@@ -584,7 +585,7 @@ export function useWithdraw() {
     setState("submitting");
 
     if (isEoaMode) {
-      const { polygon } = await import("viem/chains");
+      const { polygon } = await import("@/lib/chains");
       const { getPublicClient } = await import("@/lib/rpc");
       let lastHash: `0x${string}` | null = null;
       for (const tx of transactions) {
@@ -775,7 +776,7 @@ export function useWithdraw() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: [PROXY_WALLET_QUERY_KEY, address],
+        queryKey: qk.proxyWallet.byAddress(address),
       });
     },
     onError: (err) => {

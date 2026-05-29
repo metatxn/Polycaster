@@ -6,11 +6,23 @@
 
 import { logWarn } from "@knoww/logger";
 import { fetchClobOrderBook } from "@knoww/shared-types/clob";
-import { RELAYER_API_HOST } from "@knoww/shared-types/polymarket";
+import {
+  POLYMARKET_API,
+  RELAYER_API_HOST,
+} from "@knoww/shared-types/polymarket";
 import {
   flushAnalyticsQueue,
   queueAnalyticsEvent,
 } from "./background/analytics";
+import {
+  fetchPortfolioOpenOrders,
+  type PortfolioClobOpenOrder,
+} from "./background/clob-open-orders";
+import {
+  checkAuthorizedSender,
+  checkCredsKey,
+  TRADING_CREDS_STORAGE_PREFIX,
+} from "./background/creds-guards";
 import {
   clearExtensionAccessToken,
   getExtensionAccessToken,
@@ -29,7 +41,10 @@ import type {
   ScoreMarketsSuccessResponse,
   ScoringPrewarmMessage,
 } from "./types/chrome-messages";
-import { TRADING_SESSION_DISCONNECTED_MESSAGE } from "./types/chrome-messages";
+import {
+  TRADING_CREDENTIALS_UPDATED_MESSAGE,
+  TRADING_SESSION_DISCONNECTED_MESSAGE,
+} from "./types/chrome-messages";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
 // ── Programmatic content script registration ──
@@ -37,7 +52,6 @@ import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 // require <all_urls> and load on every site), we register them only
 // for supported platforms via chrome.scripting.
 const CONTENT_SCRIPT_ID = "knoww-content";
-const TRADING_CREDS_STORAGE_PREFIX = "knoww_clob_creds_";
 const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
 const SETTINGS_STORAGE_KEY = "knowwSettings";
 const CONTENT_SCRIPT_REINJECT_SETTLE_MS = 500;
@@ -48,6 +62,12 @@ type ChromeSidePanelApi = {
   setPanelBehavior?: (behavior: {
     openPanelOnActionClick: boolean;
   }) => Promise<void>;
+};
+
+type StoredClobCredentials = {
+  apiKey: string;
+  apiSecret: string;
+  apiPassphrase: string;
 };
 
 let lastSidePanelTabId: number | undefined;
@@ -89,6 +109,27 @@ async function readUserSettings(): Promise<UserSettings> {
             result[SETTINGS_STORAGE_KEY] as Partial<UserSettings> | undefined
           )
         );
+      }
+    );
+  });
+}
+
+async function persistNotificationPanelSurface(
+  surface: UserSettings["notificationPanelSurface"]
+): Promise<void> {
+  const settings = await readUserSettings();
+  if (settings.notificationPanelSurface === surface) return;
+  await new Promise<void>((resolve) => {
+    chrome.storage.sync.set(
+      {
+        [SETTINGS_STORAGE_KEY]: {
+          ...settings,
+          notificationPanelSurface: surface,
+        },
+      },
+      () => {
+        void chrome.runtime.lastError;
+        resolve();
       }
     );
   });
@@ -476,6 +517,47 @@ async function clearCachedTradingCredentials(): Promise<void> {
   });
 }
 
+function getTradingCredentialsStorageKey(address: string): string {
+  return `${TRADING_CREDS_STORAGE_PREFIX}${address.toLowerCase()}`;
+}
+
+function isStoredClobCredentials(
+  value: unknown
+): value is StoredClobCredentials {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as StoredClobCredentials).apiKey === "string" &&
+    typeof (value as StoredClobCredentials).apiSecret === "string" &&
+    typeof (value as StoredClobCredentials).apiPassphrase === "string"
+  );
+}
+
+async function getCachedTradingCredentials(
+  address: string
+): Promise<StoredClobCredentials | null> {
+  const key = getTradingCredentialsStorageKey(address);
+  const value = await new Promise<unknown>((resolve) => {
+    chrome.storage.session.get(key, (result) => {
+      resolve(result[key]);
+    });
+  });
+  return isStoredClobCredentials(value) ? value : null;
+}
+
+async function hasCachedTradingCredentials(address: string): Promise<boolean> {
+  return (await getCachedTradingCredentials(address)) !== null;
+}
+
+function broadcastTradingCredentialsUpdated(address: string): void {
+  chrome.runtime.sendMessage(
+    { type: TRADING_CREDENTIALS_UPDATED_MESSAGE, address },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
+}
+
 async function broadcastTradingSessionDisconnected(): Promise<void> {
   const tabs = await chrome.tabs.query({});
 
@@ -498,6 +580,13 @@ async function broadcastTradingSessionDisconnected(): Promise<void> {
           );
         })
     )
+  );
+
+  chrome.runtime.sendMessage(
+    { type: TRADING_SESSION_DISCONNECTED_MESSAGE },
+    () => {
+      void chrome.runtime.lastError;
+    }
   );
 }
 
@@ -704,8 +793,11 @@ chrome.runtime.onMessage.addListener(
       tokenId?: string;
       marketId?: string;
       query?: string;
+      walletUuid?: string;
       trendingLimit?: number;
       visible?: boolean;
+      address?: string;
+      surface?: "sidebar" | "floating";
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -723,6 +815,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_OPEN_EXTENSION_SIDEPANEL") {
+      void persistNotificationPanelSurface("sidebar");
       void openKnowwSidePanel({
         ...(typeof sender.tab?.id === "number" ? { tabId: sender.tab.id } : {}),
         ...(typeof sender.tab?.windowId === "number"
@@ -772,6 +865,23 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (
+      msg?.type === "KNOWW_SET_NOTIFICATION_PANEL_SURFACE" &&
+      (msg.surface === "sidebar" || msg.surface === "floating")
+    ) {
+      void persistNotificationPanelSurface(msg.surface)
+        .then(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        )
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
     if (msg?.type === "KNOWW_SET_NOTIFICATION_STACK_VISIBILITY") {
       forwardToResolvedContentTab(msg, sender, sendResponse, {
         type: "KNOWW_SET_NOTIFICATION_STACK_VISIBILITY",
@@ -804,6 +914,87 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (msg?.type === "KNOWW_GET_PORTFOLIO_WALLETS") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_GET_PORTFOLIO_WALLETS",
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_CONNECT_PORTFOLIO_WALLET") {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
+        walletUuid: msg.walletUuid,
+      });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_GET_PORTFOLIO_TRADING_STATUS" &&
+      typeof msg.address === "string"
+    ) {
+      void hasCachedTradingCredentials(msg.address)
+        .then((hasCredentials) => {
+          sendResponse({
+            ok: true,
+            data: { hasCredentials },
+          } as BackgroundResponse);
+        })
+        .catch(() => {
+          sendResponse({
+            ok: true,
+            data: { hasCredentials: false },
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_ENABLE_PORTFOLIO_TRADING" &&
+      typeof msg.address === "string"
+    ) {
+      forwardToResolvedContentTab(msg, sender, sendResponse, {
+        type: "KNOWW_ENABLE_PORTFOLIO_TRADING",
+        address: msg.address,
+      });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_GET_PORTFOLIO_OPEN_ORDERS" &&
+      typeof msg.address === "string"
+    ) {
+      const address = msg.address;
+      void (async () => {
+        const credentials = await getCachedTradingCredentials(address);
+        if (!credentials) {
+          sendResponse({
+            ok: true,
+            data: { orders: [], count: 0 },
+          } as BackgroundResponse);
+          return;
+        }
+
+        const orders: PortfolioClobOpenOrder[] = await fetchPortfolioOpenOrders(
+          {
+            address,
+            credentials,
+            limit: 5,
+          }
+        );
+        sendResponse({
+          ok: true,
+          data: { orders, count: orders.length },
+        } as BackgroundResponse);
+      })().catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        } as BackgroundResponse);
+      });
+      return true;
+    }
+
     // Offscreen doc requests: forward signing to content script tab
     if (msg?.type === "offscreen:forward-signing") {
       if (msg.tabId && msg.id && msg.method) {
@@ -830,8 +1021,27 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
-    // Credential storage — keep creds in session storage behind the SW boundary
+    // Credential storage — keep creds in session storage behind the SW boundary.
+    //
+    // Defense-in-depth on this handler family:
+    //   1. `sender.id !== chrome.runtime.id` reject — guards against future
+    //      regressions that add `externally_connectable` and would otherwise
+    //      expose credentials to web pages.
+    //   2. `creds:*` keys are locked to the TRADING_CREDS_STORAGE_PREFIX
+    //      namespace so a compromised content script cannot use this generic
+    //      key/value channel to read or overwrite unrelated entries (most
+    //      importantly the extension bearer at `knoww_extension_access_token`).
     if (msg?.type === "creds:get" && typeof msg.key === "string") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
       const k = msg.key;
       chrome.storage.session.get(k, (result) => {
         sendResponse({
@@ -842,20 +1052,60 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
     if (msg?.type === "creds:set" && typeof msg.key === "string") {
-      chrome.storage.session.set({ [msg.key]: msg.value }, () => {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
+      const key = msg.key;
+      chrome.storage.session.set({ [key]: msg.value }, () => {
+        broadcastTradingCredentialsUpdated(
+          key.slice(TRADING_CREDS_STORAGE_PREFIX.length)
+        );
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
       return true;
     }
     if (msg?.type === "creds:remove" && typeof msg.key === "string") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
       chrome.storage.session.remove(msg.key, () => {
         sendResponse({ ok: true, data: null } as BackgroundResponse);
       });
       return true;
     }
     if (msg?.type === "auth:get-token") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
       getExtensionAccessToken().then((token) => {
         sendResponse({ ok: true, data: token } as BackgroundResponse);
+      });
+      return true;
+    }
+    if (msg?.type === "KNOWW_GET_PORTFOLIO_SESSION") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      getExtensionAccessToken().then((token) => {
+        sendResponse({ ok: true, data: { token } } as BackgroundResponse);
       });
       return true;
     }
@@ -928,7 +1178,12 @@ chrome.runtime.onMessage.addListener(
       const { tokenId } = msg;
       (async () => {
         try {
-          const data = await fetchClobOrderBook(tokenId);
+          const data = await fetchClobOrderBook(tokenId, {
+            host: POLYMARKET_API.CLOB.BASE,
+            // TODO: Move this back to the SDK path once unified SDK public reads
+            // support extension order-book fetching reliably.
+            useUnifiedSdk: false,
+          });
           sendResponse({ ok: true, data } as BackgroundResponse);
         } catch (e) {
           sendResponse({

@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 import type { EventFilterParams } from "./use-paginated-events";
 
 interface NewEvent {
@@ -53,7 +54,7 @@ export function useNewEvents(
   fullMarkets = false
 ) {
   return useInfiniteQuery({
-    queryKey: ["new-events", limit, fullMarkets, filters],
+    queryKey: qk.events.new(limit, fullMarkets, filters),
     queryFn: async ({ pageParam = "" }) => {
       const params = new URLSearchParams({
         limit: limit.toString(),

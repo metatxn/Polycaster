@@ -68,10 +68,10 @@ export function WhaleFilters({
   onWalletSearchChange,
 }: WhaleFiltersProps) {
   return (
-    <div className="border-y border-border/50">
+    <div className="border-y border-(--kwm-hl-2)/50">
       {/* Row 1: Tab switch + wallet search */}
-      <div className="flex items-center gap-1 py-2 border-b border-border/30">
-        <span className="shrink-0 pl-0.5 pr-3 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 self-center">
+      <div className="flex items-center gap-1 py-2 border-b border-(--kwm-hl)">
+        <span className="shrink-0 pl-0.5 pr-3 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) self-center">
           View
         </span>
         <TabPill
@@ -90,19 +90,19 @@ export function WhaleFilters({
         {/* Wallet / name search — underline input, same language as
             /events MarketSearch. Filters both ledgers on the page. */}
         <div className="relative w-56 hidden md:block">
-          <Search className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70" />
+          <Search className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-(--kwm-ink-3)" />
           <input
             type="text"
             placeholder="Filter by wallet or name…"
             value={walletSearch}
             onChange={(e) => onWalletSearchChange(e.target.value)}
-            className="w-full h-8 pl-6 pr-6 bg-transparent border-0 border-b border-border/70 focus:border-foreground focus:outline-none text-sm placeholder:text-muted-foreground/60 placeholder:font-editorial placeholder:italic transition-colors"
+            className="w-full h-8 pl-6 pr-6 bg-transparent border-0 border-b border-(--kwm-hl-2)/70 focus:border-(--kwm-ink) focus:outline-none text-sm placeholder:text-(--kwm-ink-dim) placeholder:font-editorial placeholder:italic transition-colors"
           />
           {walletSearch && (
             <button
               type="button"
               onClick={() => onWalletSearchChange("")}
-              className="absolute right-0 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground/70 hover:text-foreground transition-colors"
+              className="absolute right-0 top-1/2 -translate-y-1/2 p-0.5 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
               aria-label="Clear wallet filter"
             >
               <X className="h-3 w-3" />
@@ -113,7 +113,7 @@ export function WhaleFilters({
 
       {/* Row 2: cross-filters — time window, min trade, mode-specific */}
       <div className="flex items-center gap-1 py-2 overflow-x-auto scrollbar-hide">
-        <span className="shrink-0 pl-0.5 pr-3 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 self-center">
+        <span className="shrink-0 pl-0.5 pr-3 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) self-center">
           Filter
         </span>
 
@@ -234,8 +234,8 @@ function TabPill({
       className={cn(
         "relative inline-flex items-center px-3 py-1.5 text-[13px] whitespace-nowrap transition-colors active:scale-[0.97] shrink-0",
         isActive
-          ? "text-foreground font-semibold"
-          : "text-muted-foreground hover:text-foreground"
+          ? "text-(--kwm-ink) font-semibold"
+          : "text-(--kwm-ink-3) hover:text-(--kwm-ink)"
       )}
     >
       {label}
@@ -255,7 +255,7 @@ function InlineGroup({
 }) {
   return (
     <div className="inline-flex items-center gap-1 shrink-0">
-      <span className="hidden sm:inline font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/70 pr-1">
+      <span className="hidden sm:inline font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) pr-1">
         {label}
       </span>
       {children}
@@ -279,8 +279,8 @@ function MiniPill({
       className={cn(
         "relative inline-flex items-center px-2 py-1 text-[12px] font-mono tabular-nums transition-colors shrink-0",
         isActive
-          ? "text-foreground font-semibold"
-          : "text-muted-foreground hover:text-foreground"
+          ? "text-(--kwm-ink) font-semibold"
+          : "text-(--kwm-ink-3) hover:text-(--kwm-ink)"
       )}
     >
       {children}
@@ -305,15 +305,15 @@ function DropdownFilter({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="group inline-flex items-center gap-1.5 px-2 py-1 text-[13px] text-muted-foreground hover:text-foreground transition-colors shrink-0 border-b border-dotted border-border/60 hover:border-foreground/60"
+          className="group inline-flex items-center gap-1.5 px-2 py-1 text-[13px] text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors shrink-0 border-b border-dotted border-(--kwm-hl-2) hover:border-(--kwm-ink)/60"
         >
           <span className="hidden sm:inline font-mono text-[10px] uppercase tracking-[0.12em] opacity-70">
             {label}
           </span>
-          <span className="font-medium text-foreground">{value}</span>
+          <span className="font-medium text-(--kwm-ink)">{value}</span>
           <ChevronDown
             aria-hidden
-            className="h-3 w-3 text-muted-foreground/70 transition-transform group-data-[state=open]:rotate-180"
+            className="h-3 w-3 text-(--kwm-ink-3) transition-transform group-data-[state=open]:rotate-180"
           />
         </button>
       </DropdownMenuTrigger>

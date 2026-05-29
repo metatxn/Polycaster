@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 interface Sport {
   tag: string;
@@ -15,7 +16,7 @@ interface SportsListResponse {
 
 export function useSportsList() {
   return useQuery({
-    queryKey: ["sports-list"],
+    queryKey: qk.sports.list(),
     queryFn: async () => {
       const response = await fetch("/api/sports/list?limit=20");
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, Sparkles, Star } from "lucide-react";
+import { Sparkles, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ChromeHeader } from "@/components/app-layout";
@@ -12,6 +12,8 @@ import {
 import { EventFilterBar } from "@/components/event-filter-bar";
 import { MarketSearch } from "@/components/market-search";
 import { Navbar } from "@/components/navbar";
+import { ProductFooter } from "@/components/product-footer";
+import { ProductHero } from "@/components/product-hero";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -136,61 +138,41 @@ export function TagEventsContent({
 
   const error = eventsError?.message;
   const tagLabel = initialTag?.label ?? formatTagLabel(canonicalTagSlug);
-  const tagDescription = initialTag?.description;
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden">
+    <div className="kw-app min-h-screen relative overflow-x-hidden">
       <Navbar />
       <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
-        <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-[0.12em] text-muted-foreground mb-6 animate-in fade-in duration-500">
-          <button
-            type="button"
-            onClick={() => router.push("/markets")}
-            className="flex items-center gap-1 hover:text-foreground transition-colors"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            <span>Markets</span>
-          </button>
-          <span className="text-border/80">&rsaquo;</span>
-          <span className="text-foreground">{tagLabel}</span>
-        </div>
-
-        <div className="mb-6 animate-in fade-in slide-in-from-bottom-2 duration-700">
-          <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between md:gap-6">
-            <div className="min-w-0 md:flex-1 md:max-w-3xl">
-              <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[1.02] tracking-tight text-foreground wrap-break-word">
-                {tagLabel}
-              </h1>
-              {tagDescription && (
-                <p className="mt-4 text-base sm:text-lg text-muted-foreground font-editorial leading-snug max-w-2xl">
-                  {tagDescription}
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 flex-wrap md:flex-nowrap md:shrink-0 md:pb-1">
+        <ProductHero
+          breadcrumbs={[
+            { label: "Markets", href: "/markets" },
+            { label: tagLabel },
+          ]}
+          rightSlot={
+            <>
               <MarketSearch
-                className="hidden md:block w-56"
+                className="hidden md:block w-48"
                 tagSlug={canonicalTagSlug}
                 tagLabel={tagLabel}
               />
-              <div className="flex items-baseline gap-2 font-mono tabular-nums">
-                <span className="text-2xl font-semibold text-foreground">
+              <div className="flex items-baseline gap-1.5 tabular-nums">
+                <span
+                  className="text-[13px] font-semibold"
+                  style={{ color: "var(--kwm-ink)" }}
+                >
                   {events.length}
                 </span>
-                <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground max-w-[120px] truncate">
+                <span className="max-w-[120px] truncate">
                   {hasActiveFilters && allEvents.length > events.length
                     ? `of ${allEvents.length}`
-                    : `${tagLabel} markets`}
+                    : "markets"}
                 </span>
               </div>
-            </div>
-          </div>
-
-          <div className="mt-6 h-px bg-linear-to-r from-border/80 via-border/40 to-transparent" />
-        </div>
+            </>
+          }
+        />
 
         <EventFilterBar />
 
@@ -260,13 +242,25 @@ export function TagEventsContent({
 
           {!isLoading && events.length === 0 && !error && (
             <div className="text-center py-24">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-muted/50 mb-6">
-                <Star className="h-7 w-7 text-muted-foreground" />
+              <div
+                className="inline-flex items-center justify-center w-12 h-12 rounded-md mb-5"
+                style={{ background: "var(--kwm-bg-2)" }}
+              >
+                <Star
+                  className="h-5 w-5"
+                  style={{ color: "var(--kwm-ink-3)" }}
+                />
               </div>
-              <h3 className="font-editorial italic text-2xl font-medium mb-2">
+              <h3
+                className="text-[14px] font-semibold mb-1"
+                style={{ color: "var(--kwm-ink)" }}
+              >
                 No markets found
               </h3>
-              <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
+              <p
+                className="text-[12px] mb-5 max-w-sm mx-auto"
+                style={{ color: "var(--kwm-ink-3)" }}
+              >
                 {hasActiveFilters
                   ? "Try adjusting your filters to find more markets"
                   : `No active markets in ${tagLabel} right now`}
@@ -278,6 +272,7 @@ export function TagEventsContent({
           )}
         </div>
       </main>
+      <ProductFooter context={tagLabel} />
     </div>
   );
 }

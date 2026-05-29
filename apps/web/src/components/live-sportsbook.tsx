@@ -1191,20 +1191,22 @@ function PriceButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
         selected
-          ? "border-foreground"
-          : "border-border/60 hover:border-foreground/60",
+          ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
+          : isFavored
+            ? "border-(--kwm-hl-2) bg-(--kwm-up-soft) hover:border-(--kwm-up-border)"
+            : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)",
         className
       )}
     >
-      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {abbr}
       </span>
       <span
         className={cn(
-          "font-mono text-sm font-medium tabular-nums",
-          isFavored ? "text-emerald-700" : "text-foreground"
+          "font-mono text-sm tabular-nums text-(--kwm-ink)",
+          isFavored ? "font-semibold" : "font-medium"
         )}
       >
         {formatPrice(price)}
@@ -1231,16 +1233,16 @@ function SpreadCell({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
         selected
-          ? "border-foreground"
-          : "border-border/60 hover:border-foreground/60"
+          ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
+          : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)"
       )}
     >
-      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {abbr} {handicap}
       </span>
-      <span className="font-mono text-sm font-medium tabular-nums text-foreground">
+      <span className="font-mono text-sm font-medium tabular-nums text-(--kwm-ink)">
         {formatPrice(price)}
       </span>
     </button>
@@ -1265,16 +1267,16 @@ function TotalCell({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
         selected
-          ? "border-foreground"
-          : "border-border/60 hover:border-foreground/60"
+          ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
+          : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)"
       )}
     >
-      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {label} {line}
       </span>
-      <span className="font-mono text-sm font-medium tabular-nums text-foreground">
+      <span className="font-mono text-sm font-medium tabular-nums text-(--kwm-ink)">
         {formatPrice(price)}
       </span>
     </button>
@@ -1295,16 +1297,16 @@ function DrawButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 border bg-background whitespace-nowrap transition-colors",
+        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
         selected
-          ? "border-foreground"
-          : "border-border/60 hover:border-foreground/60"
+          ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
+          : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)"
       )}
     >
-      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-amber-700">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-warn)">
         Draw
       </span>
-      <span className="font-mono text-sm font-medium tabular-nums text-foreground">
+      <span className="font-mono text-sm font-medium tabular-nums text-(--kwm-ink)">
         {formatPrice(price)}
       </span>
     </button>
@@ -1315,7 +1317,7 @@ function MarketPositionsTable({ positions }: { positions: Position[] }) {
   return (
     <div className="overflow-x-auto no-scrollbar">
       <div className="min-w-[720px]">
-        <div className="grid grid-cols-[minmax(120px,1fr)_90px_110px_110px_110px_130px] items-center gap-4 border-b border-border/40 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        <div className="grid grid-cols-[minmax(120px,1fr)_90px_110px_110px_110px_130px] items-center gap-4 border-b border-(--kwm-hl) px-4 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
           <span>Outcome</span>
           <span className="text-right">Qty</span>
           <span className="text-right">Avg Price</span>
@@ -1335,10 +1337,10 @@ function MarketPositionsTable({ positions }: { positions: Position[] }) {
                   className={cn(
                     "min-w-0 truncate font-semibold",
                     position.outcome.toLowerCase() === "yes"
-                      ? "text-emerald-600 dark:text-emerald-400"
+                      ? "text-(--kwm-up)"
                       : position.outcome.toLowerCase() === "no"
                         ? "text-rose-600 dark:text-rose-400"
-                        : "text-foreground"
+                        : "text-(--kwm-ink)"
                   )}
                   title={position.outcome}
                 >
@@ -1360,7 +1362,7 @@ function MarketPositionsTable({ positions }: { positions: Position[] }) {
                   className={cn(
                     "text-right font-mono font-semibold tabular-nums",
                     isPositive
-                      ? "text-emerald-600 dark:text-emerald-400"
+                      ? "text-(--kwm-up)"
                       : "text-rose-600 dark:text-rose-400"
                   )}
                 >
@@ -1380,15 +1382,15 @@ function MarketPositionsTable({ positions }: { positions: Position[] }) {
 
 function MarketHistoryTable({ trades }: { trades: Trade[] }) {
   return (
-    <div className="divide-y divide-border/40 overflow-hidden rounded-sm border border-border/50">
+    <div className="divide-y divide-border/40 overflow-hidden rounded-sm border border-(--kwm-hl-2)/50">
       {trades.map((trade) => {
         const verb = trade.side === "BUY" ? "Bought" : "Sold";
         const outcomeColor =
           trade.outcome.toLowerCase() === "yes"
-            ? "text-emerald-600 dark:text-emerald-400"
+            ? "text-(--kwm-up)"
             : trade.outcome.toLowerCase() === "no"
               ? "text-rose-600 dark:text-rose-400"
-              : "text-foreground";
+              : "text-(--kwm-ink)";
         return (
           <div
             key={trade.id}
@@ -1399,15 +1401,15 @@ function MarketHistoryTable({ trades }: { trades: Trade[] }) {
               <span className={cn("font-semibold", outcomeColor)}>
                 {toDecimal(trade.size).toFixed(2)} {trade.outcome}
               </span>{" "}
-              <span className="text-muted-foreground">at</span>{" "}
-              <span className="text-foreground">
+              <span className="text-(--kwm-ink-3)">at</span>{" "}
+              <span className="text-(--kwm-ink)">
                 {formatCents(trade.price)}
               </span>{" "}
-              <span className="text-muted-foreground">
+              <span className="text-(--kwm-ink-3)">
                 ({formatUsd(trade.usdcAmount)})
               </span>
             </span>
-            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
               {formatActivityRelativeTime(trade.timestamp)}
             </span>
           </div>
@@ -1528,11 +1530,11 @@ function ExpandedMarketPanel({
   ];
 
   return (
-    <div className="border-t border-border/60 bg-muted/10">
+    <div className="border-t border-(--kwm-hl-2) bg-(--kwm-bg-3)/10">
       <div
         role="tablist"
         aria-label="Market details"
-        className="flex min-w-0 items-center border-b border-border/40 px-3"
+        className="flex min-w-0 items-center border-b border-(--kwm-hl) px-3"
       >
         {tabs.map((tab) => {
           const isActive = activeTab === tab.value;
@@ -1546,8 +1548,8 @@ function ExpandedMarketPanel({
               className={cn(
                 "relative inline-flex min-w-0 items-center gap-1 px-2 py-3 font-mono text-[11px] uppercase tracking-[0.06em] transition-colors shrink",
                 isActive
-                  ? "text-foreground"
-                  : "text-muted-foreground/90 hover:text-foreground"
+                  ? "text-(--kwm-ink)"
+                  : "text-(--kwm-ink-3) hover:text-(--kwm-ink)"
               )}
             >
               {tab.label}
@@ -1589,7 +1591,7 @@ function ExpandedMarketPanel({
               maxLevels={8}
             />
           ) : (
-            <p className="font-editorial italic text-base text-muted-foreground text-center py-8">
+            <p className="font-editorial italic text-base text-(--kwm-ink-3) text-center py-8">
               Order book data unavailable for this market.
             </p>
           )}
@@ -1611,7 +1613,7 @@ function ExpandedMarketPanel({
                         className="inline-block w-2 h-2 rounded-none"
                         style={{ backgroundColor: token.color }}
                       />
-                      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+                      <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
                         {token.name}
                       </span>
                     </div>
@@ -1626,7 +1628,7 @@ function ExpandedMarketPanel({
               />
             </div>
           ) : (
-            <p className="font-editorial italic text-base text-muted-foreground text-center py-8">
+            <p className="font-editorial italic text-base text-(--kwm-ink-3) text-center py-8">
               Chart data unavailable for this market.
             </p>
           )}
@@ -1859,41 +1861,39 @@ function SportEventRow({
       }}
       className={cn(
         "sportsbook-event-row border-y overflow-hidden transition-colors",
-        isExpanded ? "border-foreground" : "border-border/40"
+        isExpanded ? "border-(--kwm-ink)" : "border-(--kwm-hl)"
       )}
     >
       {/* Header bar — hairline, editorial */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/30">
-        <div className="flex items-baseline gap-4 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-(--kwm-hl)">
+        <div className="flex items-baseline gap-4 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
           {isLive ? (
-            <span className="inline-flex items-center gap-1.5 text-red-700 shrink-0">
+            <span className="inline-flex items-center gap-1.5 text-(--kwm-down) shrink-0">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500/70" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-down)/60" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-(--kwm-down)" />
               </span>
               <span>Live</span>
               {game?.period && (
-                <span className="text-muted-foreground/90 ml-1">
-                  · {game.period}
-                </span>
+                <span className="text-(--kwm-ink-3) ml-1">· {game.period}</span>
               )}
             </span>
           ) : (
-            <span className="inline-flex items-baseline gap-1.5 text-foreground shrink-0">
+            <span className="inline-flex items-baseline gap-1.5 text-(--kwm-ink) shrink-0">
               <span className="tabular-nums">
                 {gameStart
                   ? formatStartTime(gameStart, { includeDay: false })
                   : "Scheduled"}
               </span>
               {gameStart && (
-                <span className="text-muted-foreground/90">
+                <span className="text-(--kwm-ink-3)">
                   · {formatRelativeTime(gameStart)}
                 </span>
               )}
             </span>
           )}
           {seriesInfo && (
-            <span className="shrink-0 normal-case tracking-normal text-[12px] text-muted-foreground/90">
+            <span className="shrink-0 normal-case tracking-normal text-[12px] text-(--kwm-ink-3)">
               {seriesInfo}
             </span>
           )}
@@ -1913,10 +1913,10 @@ function SportEventRow({
           <span role="presentation" onClick={(e) => e.stopPropagation()}>
             <Link
               href={href}
-              className="inline-flex items-baseline gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 hover:text-foreground transition-colors"
+              className="inline-flex items-baseline gap-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
             >
               {marketCount > 0 && (
-                <span className="tabular-nums text-foreground">
+                <span className="tabular-nums text-(--kwm-ink)">
                   {marketCount}
                 </span>
               )}
@@ -1944,17 +1944,17 @@ function SportEventRow({
               )}
             >
               {isLive && !showInlineScore && (
-                <span className="w-6 text-center text-base font-bold tabular-nums text-foreground">
+                <span className="w-6 text-center text-base font-bold tabular-nums text-(--kwm-ink)">
                   {homeScore}
                 </span>
               )}
               <TeamAvatar name={teamNames[0]} />
               <div className="flex min-w-0 items-baseline gap-2">
-                <span className="min-w-0 truncate text-base font-semibold text-foreground">
+                <span className="min-w-0 truncate text-base font-semibold text-(--kwm-ink)">
                   {teamNames[0]}
                 </span>
                 {showInlineScore && homeScore && (
-                  <span className="shrink-0 font-mono text-sm font-bold tabular-nums text-foreground/80">
+                  <span className="shrink-0 font-mono text-sm font-bold tabular-nums text-(--kwm-ink-2)">
                     {homeScore}
                   </span>
                 )}
@@ -1980,7 +1980,7 @@ function SportEventRow({
                     }
                   />
                 ) : (
-                  <span className="text-sm text-muted-foreground/50">—</span>
+                  <span className="text-sm text-(--kwm-ink-dim)">—</span>
                 )}
               </div>
               <div className="hidden lg:flex w-[132px] justify-center">
@@ -1998,7 +1998,7 @@ function SportEventRow({
                     }
                   />
                 ) : (
-                  <span className="text-sm text-muted-foreground/50">—</span>
+                  <span className="text-sm text-(--kwm-ink-dim)">—</span>
                 )}
               </div>
               <div className="hidden lg:flex w-[122px] justify-center">
@@ -2016,7 +2016,7 @@ function SportEventRow({
                     }
                   />
                 ) : (
-                  <span className="text-sm text-muted-foreground/50">—</span>
+                  <span className="text-sm text-(--kwm-ink-dim)">—</span>
                 )}
               </div>
             </div>
@@ -2052,17 +2052,17 @@ function SportEventRow({
               )}
             >
               {isLive && !showInlineScore && (
-                <span className="w-6 text-center text-base font-bold tabular-nums text-foreground">
+                <span className="w-6 text-center text-base font-bold tabular-nums text-(--kwm-ink)">
                   {awayScore}
                 </span>
               )}
               <TeamAvatar name={teamNames[1]} />
               <div className="flex min-w-0 items-baseline gap-2">
-                <span className="min-w-0 truncate text-base font-semibold text-foreground">
+                <span className="min-w-0 truncate text-base font-semibold text-(--kwm-ink)">
                   {teamNames[1]}
                 </span>
                 {showInlineScore && awayScore && (
-                  <span className="shrink-0 font-mono text-sm font-bold tabular-nums text-foreground/80">
+                  <span className="shrink-0 font-mono text-sm font-bold tabular-nums text-(--kwm-ink-2)">
                     {awayScore}
                   </span>
                 )}
@@ -2088,7 +2088,7 @@ function SportEventRow({
                     }
                   />
                 ) : (
-                  <span className="text-sm text-muted-foreground/50">—</span>
+                  <span className="text-sm text-(--kwm-ink-dim)">—</span>
                 )}
               </div>
               <div className="hidden lg:flex w-[132px] justify-center">
@@ -2112,7 +2112,7 @@ function SportEventRow({
                     }
                   />
                 ) : (
-                  <span className="text-sm text-muted-foreground/50">—</span>
+                  <span className="text-sm text-(--kwm-ink-dim)">—</span>
                 )}
               </div>
               <div className="hidden lg:flex w-[122px] justify-center">
@@ -2130,7 +2130,7 @@ function SportEventRow({
                     }
                   />
                 ) : (
-                  <span className="text-sm text-muted-foreground/50">—</span>
+                  <span className="text-sm text-(--kwm-ink-dim)">—</span>
                 )}
               </div>
             </div>
@@ -2302,29 +2302,27 @@ function CompactEventRow({
       }}
       className={cn(
         "sportsbook-event-row border-y overflow-hidden transition-colors",
-        expandedMarket ? "border-foreground" : "border-border/40"
+        expandedMarket ? "border-(--kwm-ink)" : "border-(--kwm-hl)"
       )}
     >
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
-        <div className="flex items-baseline gap-3 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-(--kwm-hl)">
+        <div className="flex items-baseline gap-3 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
           {variant === "live" ? (
-            <span className="inline-flex items-center gap-1.5 text-red-700 shrink-0">
+            <span className="inline-flex items-center gap-1.5 text-(--kwm-down) shrink-0">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500/70" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-down)/60" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-(--kwm-down)" />
               </span>
               <span>Live</span>
               {game?.period && (
-                <span className="text-muted-foreground/90 ml-1">
-                  · {game.period}
-                </span>
+                <span className="text-(--kwm-ink-3) ml-1">· {game.period}</span>
               )}
             </span>
           ) : (
             (() => {
               const gameStart = getGameStartTime(event);
               return (
-                <span className="text-foreground tabular-nums shrink-0">
+                <span className="text-(--kwm-ink) tabular-nums shrink-0">
                   {gameStart
                     ? formatStartTime(gameStart, { includeDay: false })
                     : "Scheduled"}
@@ -2342,7 +2340,7 @@ function CompactEventRow({
         <span role="presentation" onClick={(e) => e.stopPropagation()}>
           <Link
             href={href}
-            className="inline-flex items-baseline gap-1 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 hover:text-foreground transition-colors"
+            className="inline-flex items-baseline gap-1 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
           >
             <span>Game View</span>
             <ChevronRight className="h-3 w-3 translate-y-px" />
@@ -2368,7 +2366,7 @@ function CompactEventRow({
                 {teamNames[0]}
               </span>
               {showInlineScore && homeScore && (
-                <span className="shrink-0 font-mono text-[13px] font-bold tabular-nums text-foreground/80">
+                <span className="shrink-0 font-mono text-[13px] font-bold tabular-nums text-(--kwm-ink-2)">
                   {homeScore}
                 </span>
               )}
@@ -2431,7 +2429,7 @@ function CompactEventRow({
                   {teamNames[1]}
                 </span>
                 {showInlineScore && awayScore && (
-                  <span className="shrink-0 font-mono text-[13px] font-bold tabular-nums text-foreground/80">
+                  <span className="shrink-0 font-mono text-[13px] font-bold tabular-nums text-(--kwm-ink-2)">
                     {awayScore}
                   </span>
                 )}
@@ -2514,28 +2512,28 @@ function LeagueSection({
   const isTennis = league === "tennis";
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-baseline justify-between pb-1">
-        <div className="flex items-center gap-2.5">
+    <div className="space-y-1.5">
+      <div className="flex items-end justify-between pb-1.5">
+        <div className="flex items-center gap-2.5 min-w-0">
           {leagueIcon && (
             <Image
               src={leagueIcon}
               alt={leagueDisplayName(league)}
-              width={20}
-              height={20}
-              className="rounded-full object-cover bg-muted"
+              width={22}
+              height={22}
+              className="rounded-full object-cover bg-(--kwm-bg-3) border border-(--kwm-hl)"
             />
           )}
-          <h3 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
+          <h3 className="font-(family-name:--font-geist) text-[15px] font-semibold tracking-tight text-(--kwm-ink) leading-none truncate">
             {leagueDisplayName(league)}
           </h3>
-          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
-            · {events.length}
+          <span className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-sm bg-(--kwm-bg-3) border border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) tabular-nums">
+            {events.length}
           </span>
         </div>
       </div>
       {isTennis ? (
-        <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+        <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-(--kwm-hl) bg-(--kwm-bg-2) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-2)">
           <span className="w-7" />
           <span>Player</span>
           <span className="w-[106px] text-center">Moneyline</span>
@@ -2543,7 +2541,7 @@ function LeagueSection({
           <span className="hidden lg:inline w-[122px] text-center">Total</span>
         </div>
       ) : (
-        <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+        <div className="event-grid-live hidden md:grid grid-cols-[auto_auto_1fr_auto] gap-3 px-4 py-2 border-y border-(--kwm-hl) bg-(--kwm-bg-2) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-2)">
           <span className="w-6 text-center">Score</span>
           <span className="w-7" />
           <span>Team</span>
@@ -2742,18 +2740,18 @@ function ScheduledLeagueSection({
               alt={leagueDisplayName(league)}
               width={20}
               height={20}
-              className="rounded-full object-cover bg-muted"
+              className="rounded-full object-cover bg-(--kwm-bg-3)"
             />
           )}
-          <h3 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
+          <h3 className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink)">
             {leagueDisplayName(league)}
           </h3>
-          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
+          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) tabular-nums">
             · {events.length}
           </span>
         </div>
       </div>
-      <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-border/40 font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">
+      <div className="event-grid-scheduled hidden md:grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-2 border-y border-(--kwm-hl) font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
         <span className="w-7" />
         <span>Team</span>
         <span className="w-[106px] text-center">Moneyline</span>
@@ -2763,7 +2761,7 @@ function ScheduledLeagueSection({
       <div className="-mt-px space-y-3">
         {groupedByDate.map((group) => (
           <div key={group.key} className="-mt-px">
-            <div className="px-4 py-2 border-y border-border/40 bg-muted/25 font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
+            <div className="px-4 py-2 border-y border-(--kwm-hl) bg-(--kwm-bg-2) font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink)">
               {group.label}
             </div>
             {group.events.map((event) => {
@@ -2890,17 +2888,21 @@ export function LiveSportsbook({
 
   return (
     <section className="space-y-6">
-      <header className="flex items-baseline justify-between gap-4 pb-3 border-b border-border/40">
-        <div className="flex items-baseline gap-3">
-          <span className="relative inline-flex h-1.5 w-1.5 translate-y-[-2px]">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500/70" />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+      <header className="flex items-end justify-between gap-4 pb-3 border-b border-(--kwm-hl)">
+        <div className="flex items-baseline gap-3 min-w-0">
+          <span className="relative inline-flex h-2 w-2 translate-y-[-2px] shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-down)/60" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-(--kwm-down)" />
           </span>
-          <h2 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-down)">
             Live
           </h2>
-          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
-            · {events.length} in progress
+          <span className="text-(--kwm-ink-dim)">·</span>
+          <span className="font-(family-name:--font-geist) text-[18px] font-semibold tracking-tight text-(--kwm-ink) tabular-nums leading-none">
+            {events.length}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) translate-y-[-2px]">
+            in progress
           </span>
         </div>
       </header>
@@ -2997,13 +2999,13 @@ export function ScheduledSportsbook({
 
   return (
     <section className="space-y-6">
-      <header className="flex items-baseline justify-between gap-4 pb-3 border-b border-border/40">
+      <header className="flex items-baseline justify-between gap-4 pb-3 border-b border-(--kwm-hl)">
         <div className="flex items-baseline gap-3">
-          <Calendar className="h-3 w-3 text-muted-foreground translate-y-px" />
-          <h2 className="font-mono text-[12px] uppercase tracking-[0.08em] text-foreground">
+          <Calendar className="h-3 w-3 text-(--kwm-ink-3) translate-y-px" />
+          <h2 className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink)">
             Upcoming
           </h2>
-          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90 tabular-nums">
+          <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) tabular-nums">
             · {events.length} scheduled
           </span>
         </div>

@@ -54,23 +54,29 @@ export function InsiderLedger({
 
   return (
     <section className="flex flex-col">
-      <header className="flex items-baseline justify-between flex-wrap gap-3 pb-3">
-        <div>
-          <h2 className="font-editorial italic text-xl sm:text-2xl text-foreground">
-            Suspicious Activity
-          </h2>
-          <p className="text-[11px] text-muted-foreground font-editorial italic mt-1">
+      <header className="flex items-end justify-between flex-wrap gap-3 pb-3 border-b border-(--kwm-hl)">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+              § Suspicious Activity
+            </span>
+            <span className="text-(--kwm-ink-dim)">·</span>
+            <span className="font-(family-name:--font-geist) text-[18px] font-semibold tracking-tight text-(--kwm-ink) tabular-nums leading-none">
+              {filtered.length}
+            </span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) translate-y-[-2px]">
+              {filtered.length === 1 ? "flag" : "flags"}
+            </span>
+          </div>
+          <p className="text-[11px] text-(--kwm-ink-3)">
             Young accounts buying into contrarian positions. Signal, not proof.
           </p>
         </div>
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-          {filtered.length} {filtered.length === 1 ? "flag" : "flags"}
-        </span>
       </header>
 
-      <div className="border-y border-border/60">
+      <div className="border-y border-(--kwm-hl-2)">
         {/* Column headers */}
-        <div className="hidden sm:grid grid-cols-[52px_84px_minmax(0,1fr)_minmax(0,1.5fr)_52px_96px_24px] gap-3 px-3 py-2 border-b border-border/40 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <div className="hidden sm:grid grid-cols-[52px_84px_minmax(0,1fr)_minmax(0,1.5fr)_52px_96px_24px] gap-3 px-3 py-2 border-b border-(--kwm-hl) font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
           <span>Risk</span>
           <span>Time</span>
           <span>Wallet / Age</span>
@@ -82,10 +88,10 @@ export function InsiderLedger({
 
         {filtered.length === 0 ? (
           <div className="py-10 px-3 text-center space-y-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
               No suspicious activity at the current sensitivity
             </p>
-            <p className="text-xs text-muted-foreground/80 font-editorial italic max-w-md mx-auto">
+            <p className="text-xs text-(--kwm-ink-3) max-w-md mx-auto">
               Live detector is gated on fresh-account / size-hiding / timing-
               cluster patterns. In quieter markets, try{" "}
               <strong>Aggressive</strong> in the filters above, or widen the
@@ -137,7 +143,7 @@ function InsiderRow({
               ? "bg-rose-50/60 dark:bg-rose-950/20 hover:bg-rose-100/70 dark:hover:bg-rose-950/35"
               : tier === 1
                 ? "bg-amber-50/50 dark:bg-amber-950/15 hover:bg-amber-100/60 dark:hover:bg-amber-950/25"
-                : "hover:bg-muted/40"
+                : "hover:bg-(--kwm-bg-2)"
         )}
       >
         {/* Desktop: 7-column grid */}
@@ -146,21 +152,23 @@ function InsiderRow({
             className={cn(
               "inline-flex items-center justify-center h-[22px] px-1.5 text-[10px] font-mono font-bold tabular-nums rounded-sm w-fit",
               risk === "CRITICAL" && "bg-foreground text-background",
-              risk === "HIGH" && "border border-foreground/80 text-foreground",
-              risk === "MEDIUM" && "border border-border text-muted-foreground",
+              risk === "HIGH" &&
+                "border border-(--kwm-ink)/80 text-(--kwm-ink)",
+              risk === "MEDIUM" &&
+                "border border-(--kwm-hl-2) text-(--kwm-ink-3)",
               risk === "LOW" &&
-                "border border-border/50 text-muted-foreground/70"
+                "border border-(--kwm-hl-2)/50 text-(--kwm-ink-3)"
             )}
           >
             {Math.round(activity.analysis.suspicionScore)}
           </span>
 
-          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+          <span className="font-mono text-[11px] tabular-nums text-(--kwm-ink-3)">
             {formatTimeAgo(activity.timestamp)}
           </span>
 
           <div className="flex items-center gap-2 min-w-0">
-            <div className="relative w-5 h-5 shrink-0 rounded-sm overflow-hidden bg-muted">
+            <div className="relative w-5 h-5 shrink-0 rounded-sm overflow-hidden bg-(--kwm-bg-3)">
               {activity.account.profileImage ? (
                 <Image
                   src={activity.account.profileImage}
@@ -173,16 +181,16 @@ function InsiderRow({
                   )}
                 />
               ) : (
-                <span className="w-full h-full flex items-center justify-center font-mono text-[8px] font-semibold text-foreground/40">
+                <span className="w-full h-full flex items-center justify-center font-mono text-[8px] font-semibold text-(--kwm-ink)/40">
                   {activity.account.address.slice(2, 4).toUpperCase()}
                 </span>
               )}
             </div>
             <div className="min-w-0">
-              <span className="block truncate font-medium text-foreground">
+              <span className="block truncate font-medium text-(--kwm-ink)">
                 {display}
               </span>
-              <span className="block font-mono text-[10px] tabular-nums text-muted-foreground">
+              <span className="block font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
                 {formatAccountAge(activity.account.accountAgeHours)} old ·{" "}
                 {activity.account.totalTrades} trades
               </span>
@@ -193,7 +201,7 @@ function InsiderRow({
               </span>
             )}
             {activity.analysis.isContrarian && (
-              <span className="shrink-0 inline-flex items-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-foreground/60 text-foreground rounded-sm">
+              <span className="shrink-0 inline-flex items-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-(--kwm-ink)/60 text-(--kwm-ink) rounded-sm">
                 Contra
               </span>
             )}
@@ -203,10 +211,10 @@ function InsiderRow({
           </div>
 
           <div className="min-w-0">
-            <span className="block truncate text-foreground/85">
+            <span className="block truncate text-(--kwm-ink)/85">
               {activity.market.title}
             </span>
-            <span className="block font-mono text-[10px] tabular-nums text-muted-foreground">
+            <span className="block font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
               {activity.trade.outcome} @{" "}
               {(activity.trade.price * 100).toFixed(0)}¢
             </span>
@@ -217,17 +225,17 @@ function InsiderRow({
               "justify-self-end inline-flex items-center justify-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] rounded-sm w-fit",
               isBuy
                 ? "bg-foreground text-background"
-                : "bg-background border border-foreground/60 text-foreground"
+                : "bg-(--kwm-panel) border border-(--kwm-ink)/60 text-(--kwm-ink)"
             )}
           >
             {activity.trade.side}
           </span>
 
-          <span className="text-right font-mono tabular-nums font-semibold text-foreground">
+          <span className="text-right font-mono tabular-nums font-semibold text-(--kwm-ink)">
             {formatCurrencyCompact(activity.trade.usdcAmount)}
           </span>
 
-          <span aria-hidden className="text-muted-foreground">
+          <span aria-hidden className="text-(--kwm-ink-3)">
             {isExpanded ? (
               <ChevronDown className="h-4 w-4" />
             ) : (
@@ -245,16 +253,16 @@ function InsiderRow({
                   "inline-flex items-center justify-center h-[20px] px-1.5 text-[10px] font-mono font-bold tabular-nums rounded-sm w-fit",
                   risk === "CRITICAL" && "bg-foreground text-background",
                   risk === "HIGH" &&
-                    "border border-foreground/80 text-foreground",
+                    "border border-(--kwm-ink)/80 text-(--kwm-ink)",
                   risk === "MEDIUM" &&
-                    "border border-border text-muted-foreground",
+                    "border border-(--kwm-hl-2) text-(--kwm-ink-3)",
                   risk === "LOW" &&
-                    "border border-border/50 text-muted-foreground/70"
+                    "border border-(--kwm-hl-2)/50 text-(--kwm-ink-3)"
                 )}
               >
                 {Math.round(activity.analysis.suspicionScore)}
               </span>
-              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) tabular-nums">
                 {formatTimeAgo(activity.timestamp)}
               </span>
               <span
@@ -262,17 +270,17 @@ function InsiderRow({
                   "inline-flex items-center justify-center px-1.5 h-[18px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] rounded-sm w-fit",
                   isBuy
                     ? "bg-foreground text-background"
-                    : "bg-background border border-foreground/60 text-foreground"
+                    : "bg-(--kwm-panel) border border-(--kwm-ink)/60 text-(--kwm-ink)"
                 )}
               >
                 {activity.trade.side}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-mono tabular-nums font-semibold text-foreground">
+              <span className="font-mono tabular-nums font-semibold text-(--kwm-ink)">
                 {formatCurrencyCompact(activity.trade.usdcAmount)}
               </span>
-              <span aria-hidden className="text-muted-foreground shrink-0">
+              <span aria-hidden className="text-(--kwm-ink-3) shrink-0">
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
@@ -283,7 +291,7 @@ function InsiderRow({
           </div>
 
           <div className="flex items-center gap-2 min-w-0">
-            <div className="relative w-6 h-6 shrink-0 rounded-sm overflow-hidden bg-muted">
+            <div className="relative w-6 h-6 shrink-0 rounded-sm overflow-hidden bg-(--kwm-bg-3)">
               {activity.account.profileImage ? (
                 <Image
                   src={activity.account.profileImage}
@@ -296,16 +304,16 @@ function InsiderRow({
                   )}
                 />
               ) : (
-                <span className="w-full h-full flex items-center justify-center font-mono text-[9px] font-semibold text-foreground/40">
+                <span className="w-full h-full flex items-center justify-center font-mono text-[9px] font-semibold text-(--kwm-ink)/40">
                   {activity.account.address.slice(2, 4).toUpperCase()}
                 </span>
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <span className="block truncate font-medium text-foreground">
+              <span className="block truncate font-medium text-(--kwm-ink)">
                 {display}
               </span>
-              <span className="block font-mono text-[10px] tabular-nums text-muted-foreground">
+              <span className="block font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
                 {formatAccountAge(activity.account.accountAgeHours)} old ·{" "}
                 {activity.account.totalTrades} trades
               </span>
@@ -322,7 +330,7 @@ function InsiderRow({
                 </span>
               )}
               {activity.analysis.isContrarian && (
-                <span className="inline-flex items-center px-1.5 h-[16px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-foreground/60 text-foreground rounded-sm">
+                <span className="inline-flex items-center px-1.5 h-[16px] text-[9px] font-mono font-semibold uppercase tracking-[0.14em] border border-(--kwm-ink)/60 text-(--kwm-ink) rounded-sm">
                   Contra
                 </span>
               )}
@@ -333,10 +341,10 @@ function InsiderRow({
           )}
 
           <div className="min-w-0">
-            <span className="block truncate text-foreground/85 text-[13px]">
+            <span className="block truncate text-(--kwm-ink)/85 text-[13px]">
               {activity.market.title}
             </span>
-            <span className="block font-mono text-[10px] tabular-nums text-muted-foreground">
+            <span className="block font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
               {activity.trade.outcome} @{" "}
               {(activity.trade.price * 100).toFixed(0)}¢
             </span>
@@ -395,9 +403,9 @@ function InsiderFactorBreakdown({
   const funding = activity.analysis.funding;
 
   return (
-    <div className="px-3 pb-4 pt-3 bg-muted/30 border-t border-border/30 space-y-4">
+    <div className="px-3 pb-4 pt-3 bg-(--kwm-bg-3)/30 border-t border-(--kwm-hl) space-y-4">
       {activity.analysis.reason && (
-        <p className="text-[13px] text-foreground/90 font-editorial italic leading-snug max-w-3xl">
+        <p className="text-[13px] text-(--kwm-ink)/90 leading-snug max-w-3xl">
           {activity.analysis.reason}
         </p>
       )}
@@ -406,22 +414,22 @@ function InsiderFactorBreakdown({
           Phase 4/5 structural signals with Polygonscan links. Only
           rendered when at least one is present. */}
       {(owner?.primaryOwner || funding?.firstFunderAddress) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border border-border/40 rounded-sm p-3 bg-background/60">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border border-(--kwm-hl) rounded-sm p-3 bg-(--kwm-panel)/60">
           {owner?.primaryOwner && (
             <div>
-              <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground mb-1">
+              <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-1">
                 Safe primary owner
               </div>
               <a
                 href={polygonscanUrl(owner.primaryOwner)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-mono text-xs text-foreground hover:underline tabular-nums"
+                className="font-mono text-xs text-(--kwm-ink) hover:underline tabular-nums"
               >
                 {shortAddr(owner.primaryOwner)} →
               </a>
               {owner.owners && owner.owners.length > 1 && (
-                <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+                <div className="text-[10px] text-(--kwm-ink-3) mt-0.5">
                   {owner.owners.length} owners total
                 </div>
               )}
@@ -429,18 +437,18 @@ function InsiderFactorBreakdown({
           )}
           {funding?.firstFunderAddress && (
             <div>
-              <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground mb-1">
+              <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-(--kwm-ink-3) mb-1">
                 First funded by
               </div>
               <a
                 href={polygonscanUrl(funding.firstFunderAddress)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-mono text-xs text-foreground hover:underline tabular-nums"
+                className="font-mono text-xs text-(--kwm-ink) hover:underline tabular-nums"
               >
                 {shortAddr(funding.firstFunderAddress)} →
               </a>
-              <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+              <div className="text-[10px] text-(--kwm-ink-3) mt-0.5">
                 {FUNDER_CATEGORY_LABEL[funding.firstFunderCategory] ?? "—"}
               </div>
             </div>
@@ -458,10 +466,10 @@ function InsiderFactorBreakdown({
             <div key={s.archetype}>
               <div className="flex items-baseline gap-2 mb-1.5">
                 <ArchetypeChip id={s.archetype} />
-                <span className="text-[11px] font-medium text-foreground">
+                <span className="text-[11px] font-medium text-(--kwm-ink)">
                   {ARCHETYPE_LABEL[s.archetype] ?? s.archetype}
                 </span>
-                <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                <span className="font-mono text-[10px] tabular-nums text-(--kwm-ink-3)">
                   score {s.score}/{s.threshold}
                 </span>
               </div>
@@ -475,27 +483,27 @@ function InsiderFactorBreakdown({
         </div>
       )}
 
-      <div className="flex items-center gap-4 pt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="flex items-center gap-4 pt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         <span>
           {activity.analysis.marketsInvolved}{" "}
           {activity.analysis.marketsInvolved === 1 ? "market" : "markets"}
         </span>
         <span>
           Sentiment:{" "}
-          <span className="text-foreground">
+          <span className="text-(--kwm-ink)">
             {activity.analysis.marketSentiment.toLowerCase()}
           </span>
         </span>
         <span className="flex-1" />
         <Link
           href={`/events/detail/${onOpenMarket}`}
-          className="inline-flex items-center gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1 px-2 py-1 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
         >
           Open market →
         </Link>
         <Link
           href={`/profile/${activity.account.address}`}
-          className="inline-flex items-center gap-1 px-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1 px-2 py-1 text-(--kwm-ink-3) hover:text-(--kwm-ink) transition-colors"
         >
           Open wallet →
         </Link>
@@ -526,18 +534,18 @@ function ArchetypeChip({ id }: { id: string }) {
                 : id.toUpperCase();
   const tone =
     id === "account_loader"
-      ? "bg-muted-foreground/15 text-muted-foreground"
+      ? "bg-(--kwm-ink-3)/15 text-(--kwm-ink-3)"
       : id === "size_hider"
         ? "bg-foreground text-background"
         : id === "timing_cluster"
-          ? "bg-background border border-foreground/60 text-foreground"
+          ? "bg-(--kwm-panel) border border-(--kwm-ink)/60 text-(--kwm-ink)"
           : id === "category_specialist"
             ? "bg-amber-500 text-background shadow-sm"
             : id === "funding_cluster"
               ? "bg-rose-600 text-background shadow-sm"
               : id === "owner_cluster"
                 ? "bg-violet-600 text-background shadow-sm"
-                : "bg-background border border-foreground/60 text-foreground";
+                : "bg-(--kwm-panel) border border-(--kwm-ink)/60 text-(--kwm-ink)";
   return (
     <span
       className={cn(
@@ -553,12 +561,12 @@ function ArchetypeChip({ id }: { id: string }) {
 function FactorRow({ factor }: { factor: SuspicionFactor }) {
   return (
     <div className="flex items-start gap-3 text-xs">
-      <span className="shrink-0 w-8 text-right font-mono tabular-nums font-semibold text-foreground">
+      <span className="shrink-0 w-8 text-right font-mono tabular-nums font-semibold text-(--kwm-ink)">
         +{factor.points}
       </span>
       <div className="flex-1 min-w-0">
-        <span className="font-semibold text-foreground">{factor.name}</span>
-        <span className="text-muted-foreground"> — {factor.description}</span>
+        <span className="font-semibold text-(--kwm-ink)">{factor.name}</span>
+        <span className="text-(--kwm-ink-3)"> — {factor.description}</span>
       </div>
     </div>
   );

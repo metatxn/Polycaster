@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 
 /**
  * User details from Polymarket
@@ -102,12 +103,10 @@ export function useUserDetails(options: UseUserDetailsOptions = {}) {
   const userAddress = options.userAddress || address;
 
   return useQuery<UserDetailsResponse, Error>({
-    queryKey: [
-      "userDetails",
-      userAddress,
-      options.timePeriod,
-      options.category,
-    ],
+    queryKey: qk.user.details(userAddress, {
+      timePeriod: options.timePeriod,
+      category: options.category,
+    }),
     queryFn: () => {
       if (!userAddress) throw new Error("Address not available");
       return fetchUserDetails(userAddress, options);

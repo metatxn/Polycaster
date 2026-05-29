@@ -33,7 +33,7 @@ export function WhalePullNumbers({
   const sellPct = 100 - buyPct;
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 border-y border-border/50 divide-x divide-border/40 md:divide-x">
+    <div className="grid grid-cols-2 md:grid-cols-4 border-y border-(--kwm-hl-2)/50 divide-x divide-border/40 md:divide-x">
       <PullStat
         label="Total Volume"
         value={formatCurrencyCompact(totalVolume)}
@@ -62,10 +62,10 @@ export function WhalePullNumbers({
         }
         caption={`${uniqueMarkets} markets`}
         valueClassName={cn(
-          "font-editorial italic tracking-[-0.005em]",
-          sentiment === "bullish" && "text-foreground",
-          sentiment === "bearish" && "text-foreground",
-          sentiment === "neutral" && "text-muted-foreground"
+          "font-(family-name:--font-geist) font-semibold tracking-tight",
+          sentiment === "bullish" && "text-(--kwm-up)",
+          sentiment === "bearish" && "text-(--kwm-down)",
+          sentiment === "neutral" && "text-(--kwm-ink-3)"
         )}
       />
     </div>
@@ -87,13 +87,13 @@ function PullStat({
 }) {
   return (
     <div className="px-4 py-4 sm:py-5 flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
         {label}
       </span>
       <div className="flex items-baseline gap-2">
         <span
           className={cn(
-            "text-2xl sm:text-3xl font-semibold tabular-nums text-foreground tracking-[-0.015em]",
+            "text-2xl sm:text-3xl font-semibold tabular-nums text-(--kwm-ink) tracking-[-0.015em]",
             valueClassName
           )}
         >
@@ -101,7 +101,7 @@ function PullStat({
         </span>
         {mark}
       </div>
-      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 tabular-nums">
+      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3) tabular-nums">
         {caption}
       </span>
     </div>
@@ -110,7 +110,7 @@ function PullStat({
 
 function TrendGlyph({ direction }: { direction: "up" | "down" }) {
   return (
-    <span aria-hidden className="text-xs font-mono text-muted-foreground/70">
+    <span aria-hidden className="text-xs font-mono text-(--kwm-ink-3)">
       {direction === "up" ? "↑" : "↓"}
     </span>
   );

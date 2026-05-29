@@ -70,41 +70,42 @@ export default function LandingPageClient() {
             </span>
           </div>
 
-          <nav className="hidden lg:flex items-center gap-8 text-[13px]">
+          <nav className="hidden lg:flex items-center gap-8 text-[14px] font-medium">
             <a
               href="#extension"
-              className="hover:text-(--kw-fg)/60 transition-colors"
+              className="inline-flex items-center py-1 hover:text-(--kw-fg)/60 transition-colors"
             >
               Extension
             </a>
             <a
               href="#how"
-              className="hover:text-(--kw-fg)/60 transition-colors"
+              className="inline-flex items-center py-1 hover:text-(--kw-fg)/60 transition-colors"
             >
               How it works
             </a>
             <a
               href="#agent"
-              className="hover:text-(--kw-fg)/60 transition-colors"
+              className="inline-flex items-center py-1 hover:text-(--kw-fg)/60 transition-colors"
             >
               Agent
             </a>
             <Link
               href="/markets"
-              className="hover:text-(--kw-fg)/60 transition-colors"
+              className="inline-flex items-center py-1 hover:text-(--kw-fg)/60 transition-colors"
             >
               Markets →
             </Link>
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <KwThemeDropdown theme={theme} onThemeChange={setTheme} />
             <a
               href={CHROME_STORE_URL}
-              className="inline-flex items-center gap-2 bg-(--kw-fg) text-(--kw-bg) px-4 py-2 text-[13px] font-medium hover:bg-(--kw-fg)/90 transition-colors whitespace-nowrap"
+              aria-label="Add to Chrome"
+              className="inline-flex items-center gap-2 bg-(--kw-fg) text-(--kw-bg) px-3 py-2 text-[14px] font-medium hover:bg-(--kw-fg)/90 transition-colors whitespace-nowrap sm:px-4"
             >
               <Download className="w-3.5 h-3.5" />
-              Add to Chrome
+              <span className="hidden sm:inline">Add to Chrome</span>
             </a>
           </div>
         </div>
@@ -115,7 +116,7 @@ export default function LandingPageClient() {
             no background grid. */}
         <section className="relative flex min-h-[calc(100svh-109px)] items-center border-b border-(--kw-fg)/10 overflow-hidden">
           <div className="kw-stage-glow" />
-          <div className="relative z-[1] w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 py-14 sm:px-8 md:py-20 min-[1024px]:max-[1279px]:landscape:py-8">
+          <div className="kw-hero-inner relative z-[1] w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 py-14 sm:px-8 md:py-20 min-[1024px]:max-[1279px]:landscape:py-8">
             {/* Top-align on landscape tablets so the CTA never gets pushed
               below the fold by the tall side-by-side card; desktop (xl) keeps
               the balanced vertical centering. */}
@@ -231,7 +232,7 @@ export default function LandingPageClient() {
               <KnowwMark size="sm" />
               <span className="font-bold text-[14px]">Knoww</span>
             </div>
-            <p className="text-[12px] text-(--kw-fg)/60 leading-[1.55] max-w-[220px]">
+            <p className="text-[12px] text-(--kw-fg)/70 leading-[1.55] max-w-[220px]">
               The prediction-market layer for the{" "}
               <span className="kw-editorial text-(--kw-fg)/80">
                 open internet
@@ -297,7 +298,7 @@ export default function LandingPageClient() {
             <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-(--kw-fg)/60 mb-4">
               Issue
             </div>
-            <p className="text-[12px] font-mono text-(--kw-fg)/60 leading-[1.6]">
+            <p className="text-[12px] font-mono text-(--kw-fg)/70 leading-[1.6]">
               № 01 · 2026
               <br />
               Set in Plus Jakarta Sans
@@ -306,7 +307,7 @@ export default function LandingPageClient() {
           </div>
         </div>
         <div className="border-t border-(--kw-fg)/10">
-          <div className="max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-4 flex items-center justify-between text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/60">
+          <div className="max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-4 flex items-center justify-between text-[11px] font-mono uppercase tracking-[0.15em] text-(--kw-fg)/70">
             <span>© 2026 Knoww</span>
             <span>Made for the prediction-literate</span>
           </div>
@@ -328,11 +329,11 @@ function TickerBar() {
           </span>
         </div>
         <div className="flex-1 min-w-0 overflow-hidden relative kw-ticker-track">
-          <div className="flex gap-12 animate-[ticker_60s_linear_infinite] whitespace-nowrap">
+          <div className="flex gap-12 animate-[ticker_60s_linear_infinite] whitespace-nowrap hover:[animation-play-state:paused] focus-within:[animation-play-state:paused] motion-reduce:animate-none">
             {items.map((t, i) => (
               <span
                 key={`${t.label}-${i}`}
-                className="text-[12px] font-mono flex items-center gap-2.5 py-2.5"
+                className="text-[13px] font-mono flex items-center gap-2.5 py-2.5"
               >
                 <span className="text-(--kw-bg)/70">{t.label}</span>
                 <span

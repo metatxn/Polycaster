@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 export interface Tag {
   id?: string;
@@ -49,7 +50,7 @@ async function fetchTags(): Promise<Tag[]> {
  */
 export function useTags() {
   return useQuery({
-    queryKey: ["tags"],
+    queryKey: qk.tags.all(),
     queryFn: fetchTags,
     staleTime: 60 * 60 * 1000, // 1 hour (tags rarely change)
     refetchOnWindowFocus: false,

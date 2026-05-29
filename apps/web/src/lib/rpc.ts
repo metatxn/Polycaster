@@ -14,7 +14,7 @@
 import { createLogger } from "@knoww/logger";
 import { readTradingWalletBalance } from "@knoww/shared-types/balances";
 import { createPublicClient, http, type PublicClient } from "viem";
-import { polygon } from "viem/chains";
+import { polygon } from "@/lib/chains";
 
 const log = createLogger("rpc");
 

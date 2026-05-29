@@ -14,7 +14,10 @@ import type {
   NestedMarket,
 } from "../types/market";
 import { setCspSafeImageSrc } from "./image-proxy";
+import { WalletBridge } from "./trading/bridge";
+import { ExtensionSession } from "./trading/extension-session";
 import { TradingPanel } from "./trading/trading-panel";
+import { TradingService } from "./trading/trading-service";
 import { escapeHtml, escapeSelectorValue } from "./utils";
 
 function clampGammaPrice(value: number): number {
@@ -3921,6 +3924,8 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         type?: string;
         marketId?: string;
         query?: string;
+        address?: string;
+        walletUuid?: string;
         visible?: boolean;
         trendingLimit?: number;
       },
@@ -3962,6 +3967,82 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
           .then((data) => sendResponse({ success: true, data }))
           .catch(() => sendResponse({ success: false, data: [] }));
         return true;
+      }
+
+      if (message?.type === "KNOWW_GET_PORTFOLIO_WALLETS") {
+        const waitForWallets = new Promise<void>((resolve) => {
+          const existing = WalletBridge.getDiscoveredWallets();
+          if (existing.length > 0) {
+            resolve();
+            return;
+          }
+          let unsubscribe = (): void => {};
+          const finish = () => {
+            unsubscribe();
+            resolve();
+          };
+          const timeoutId = setTimeout(finish, 700);
+          unsubscribe = WalletBridge.onWalletsChanged(() => {
+            clearTimeout(timeoutId);
+            finish();
+          });
+        });
+
+        void waitForWallets.then(() => {
+          sendResponse({
+            success: true,
+            data: { wallets: WalletBridge.getDiscoveredWallets() },
+          });
+        });
+        return true;
+      }
+
+      if (message?.type === "KNOWW_CONNECT_PORTFOLIO_WALLET") {
+        sendResponse({
+          success: true,
+          data: { status: "started" },
+        });
+        void TradingService.connectWallet(message.walletUuid)
+          .then(async () => {
+            const address = TradingService.getContext().address;
+            if (!address) return;
+            await ExtensionSession.ensureAuthorized(address);
+          })
+          .catch(() => {});
+        return false;
+      }
+
+      if (message?.type === "KNOWW_ENABLE_PORTFOLIO_TRADING") {
+        const requestedAddress =
+          typeof message.address === "string" ? message.address : "";
+        sendResponse({
+          success: true,
+          data: { status: "started" },
+        });
+        void (async () => {
+          if (!requestedAddress) {
+            throw new Error("Missing wallet address");
+          }
+
+          const currentAddress = TradingService.getContext().address;
+          if (
+            !currentAddress ||
+            currentAddress.toLowerCase() !== requestedAddress.toLowerCase()
+          ) {
+            await TradingService.connectWallet();
+          }
+
+          const connectedAddress = TradingService.getContext().address;
+          if (
+            !connectedAddress ||
+            connectedAddress.toLowerCase() !== requestedAddress.toLowerCase()
+          ) {
+            throw new Error("Connected wallet does not match portfolio wallet");
+          }
+
+          await TradingService.deriveCredentials();
+        })().catch(() => {});
+        return false;
       }
 
       return false;

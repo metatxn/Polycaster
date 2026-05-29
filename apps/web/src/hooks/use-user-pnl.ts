@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { qk } from "@/lib/query-keys";
 
 /**
  * P&L data structure
@@ -156,7 +157,11 @@ export function useUserPnL(options: UseUserPnLOptions = {}) {
   const userAddress = options.userAddress || address;
 
   return useQuery<PnLResponse, Error>({
-    queryKey: ["userPnL", userAddress, options.period, options.includeHistory],
+    queryKey: qk.pnl.user(
+      userAddress ?? "",
+      options.period ?? "",
+      options.includeHistory ?? false
+    ),
     queryFn: () => {
       if (!userAddress) throw new Error("Address not available");
       return fetchPnL(userAddress, options);
@@ -189,7 +194,7 @@ export function useUserPnLSummary() {
   const { address, isConnected } = useConnection();
 
   return useQuery<PnLResponse, Error>({
-    queryKey: ["userPnLSummary", address],
+    queryKey: qk.pnl.summary(address ?? ""),
     queryFn: () => {
       if (!address) throw new Error("Address not available");
       return fetchPnL(address, { period: "all", includeHistory: false });

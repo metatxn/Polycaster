@@ -7,6 +7,8 @@
 export const EXTENSION_AUTH_REQUIRED_ERROR = "Extension auth required";
 export const TRADING_SESSION_DISCONNECTED_MESSAGE =
   "trading:session-disconnected";
+export const TRADING_CREDENTIALS_UPDATED_MESSAGE =
+  "trading:credentials-updated";
 
 // ── Existing fetch messages ──
 

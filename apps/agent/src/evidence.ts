@@ -51,7 +51,7 @@ async function fetchPriceHistory(
         endTs: nowSec,
         fidelity: PRICE_HISTORY_FIDELITY_MINUTES,
       },
-      { host: getClobHost() }
+      { host: getClobHost(), fetchImpl: globalThis.fetch }
     );
     return Array.isArray(data.history) ? data.history : [];
   } catch (error) {

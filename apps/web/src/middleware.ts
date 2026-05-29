@@ -85,6 +85,18 @@ const SECURITY_HEADERS: Record<string, string> = {
   ].join("; "),
 };
 
+/**
+ * Paths that expose internal-only agent tooling (admin dashboard at /agent
+ * and its supporting /api/agent/* routes). These are gated to non-production
+ * builds — a single check here keeps the surface dark in production without
+ * needing per-route guards in each handler.
+ */
+function isAgentOnlyPath(pathname: string): boolean {
+  if (pathname === "/agent" || pathname.startsWith("/agent/")) return true;
+  if (pathname.startsWith("/api/agent/")) return true;
+  return false;
+}
+
 export function middleware(request: NextRequest) {
   const requestId = request.headers.get("cf-ray") || crypto.randomUUID();
   const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
@@ -96,6 +108,18 @@ export function middleware(request: NextRequest) {
     url.port = "";
 
     return applyGlobalHeaders(NextResponse.redirect(url, 301), requestId);
+  }
+
+  // Block agent tooling in production. Returns a 404 so the surface is
+  // indistinguishable from a non-existent route.
+  if (
+    process.env.NODE_ENV === "production" &&
+    isAgentOnlyPath(request.nextUrl.pathname)
+  ) {
+    return applyGlobalHeaders(
+      new NextResponse("Not Found", { status: 404 }),
+      requestId
+    );
   }
 
   return applyGlobalHeaders(NextResponse.next(), requestId);

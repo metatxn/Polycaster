@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { qk } from "@/lib/query-keys";
 
 /**
  * Public profile data structure from Polymarket
@@ -62,7 +63,7 @@ async function fetchPublicProfile(
  */
 export function usePublicProfile(address?: string) {
   return useQuery<PublicProfile | null, Error>({
-    queryKey: ["publicProfile", address],
+    queryKey: qk.profile.public(address ?? ""),
     queryFn: () => {
       if (!address) throw new Error("Address not available");
       return fetchPublicProfile(address);

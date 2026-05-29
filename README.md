@@ -97,6 +97,8 @@ In development, the extension targets `http://localhost:8000` by default. Use `D
 
 ## Scripts
 
+Root workspace scripts:
+
 ```bash
 pnpm dev:web        # Run the Next.js web app on port 8000
 pnpm dev:ext        # Run the extension build in watch mode
@@ -117,11 +119,22 @@ pnpm deploy         # Deploy the web app to Cloudflare
 pnpm release:ext    # Bump, build, and zip the extension release
 ```
 
-Additional package-level scripts live in the workspace packages:
+Package-level scripts live in the workspace packages:
 
-- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`
+- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`, `test`, `test:node`, `test:watch`, `test:coverage`, `test:e2e`
 - `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `benchmark:embeddings`, `format`, `version:bump`, `zip`, `release`
 - `apps/agent/package.json`: `build`, `typecheck`, `lint`, `format`, `test`
+
+Common test commands:
+
+```bash
+pnpm --filter @knoww/web test           # Web Vitest suite + node-based tests
+pnpm --filter @knoww/web test:watch     # Web Vitest watch mode
+pnpm --filter @knoww/web test:coverage  # Web coverage run
+pnpm --filter @knoww/web test:e2e       # Web Playwright smoke test
+pnpm --filter @knoww/extension test     # Extension scoring tests
+pnpm --filter @knoww/agent test         # Agent node tests
+```
 
 ## Documentation
 

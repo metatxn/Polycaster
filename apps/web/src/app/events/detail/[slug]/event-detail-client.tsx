@@ -1821,13 +1821,16 @@ export default function EventDetailClient({
                 table below still drives trading-panel selection. */}
                 {!isSingleMarketEvent &&
                   !chartLockedToMoneyline &&
-                  (topChartMarkets.length >= 3 ? (
-                    /* New: Field tiles — only when the event has enough
-                       contenders for the grid to read as a "field". We
-                       re-assign palette colors here based on the
-                       *displayed* (post-sort) rank so a tile's color
-                       matches its chart-line color, which the chart
-                       also picks by post-sort index. */
+                  (topChartMarkets.length >= 2 ? (
+                    /* Field tiles — used for any multi-outcome event (≥2
+                       contenders). Two-outcome events render as two
+                       half-width tiles, which still carry the full rich
+                       card (rank, 24h move, sparkline, payout, volume)
+                       instead of the sparse candidate ticker. We re-assign
+                       palette colors here based on the *displayed*
+                       (post-sort) rank so a tile's color matches its
+                       chart-line color, which the chart also picks by
+                       post-sort index. */
                     <FieldTiles
                       markets={topChartMarkets.map((m, idx) => ({
                         ...m,
@@ -1840,9 +1843,9 @@ export default function EventDetailClient({
                       isLive={isConnected}
                     />
                   ) : (
-                    /* Fall back to the horizontal candidate ticker for 2-
-                       outcome non-binary events, where a 2-tile grid
-                       would look sparse. */
+                    /* Safety fallback only — reachable for the degenerate
+                       0/1-contender case (single-market events are already
+                       handled by `isSingleMarketEvent` above). */
                     <CandidateTicker
                       markets={topChartMarkets}
                       selectedMarketId={selectedMarket?.id ?? ""}

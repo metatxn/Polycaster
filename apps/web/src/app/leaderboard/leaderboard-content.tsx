@@ -391,7 +391,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
         {allTraders.length > 0 && (
           <>
             <div ref={sentinelRef} aria-hidden className="h-1" />
-            <div className="flex items-center justify-center py-8 font-mono text-[10px] uppercase tracking-[0.2em] text-(--kwm-ink-3)/70">
+            <div className="flex items-center justify-center py-8 font-mono text-[10px] uppercase tracking-[0.2em] text-(--kwm-ink-3)">
               {isLoading && page > 1 ? (
                 <span>Loading more…</span>
               ) : hasMore ? (

@@ -297,7 +297,7 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
         <DialogContent
           showCloseButton={false}
           overlayClassName="bg-black/60 backdrop-blur-md"
-          className="sm:max-w-md p-0 gap-0 rounded-md overflow-hidden border border-white/10 shadow-[0_40px_80px_-30px_rgba(0,0,0,0.55)]"
+          className="sm:max-w-md p-0 gap-0 rounded-md overflow-hidden border border-border shadow-[0_40px_80px_-30px_rgba(0,0,0,0.55)]"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>Set Up Trading Account</DialogTitle>

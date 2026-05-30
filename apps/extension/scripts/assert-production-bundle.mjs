@@ -15,6 +15,15 @@ const forbiddenPathParts = new Set([
   "benchmark-rerank",
 ]);
 
+// Local-only artifacts that must never be copied into the shipped bundle.
+// Matched against the dist-relative path (forward-slash separated).
+const forbiddenPathPatterns = [
+  // Anything sourced from the dev/ design-preview folder.
+  /(^|\/)dev\//,
+  // *preview*.html design previews, wherever they land.
+  /[^/]*preview[^/]*\.html$/i,
+];
+
 const textExtensions = new Set([
   ".css",
   ".html",
@@ -74,6 +83,14 @@ async function main() {
       }
     }
 
+    for (const pattern of forbiddenPathPatterns) {
+      if (pattern.test(relativePath)) {
+        failures.push(
+          `${relativePath} matches forbidden path pattern ${pattern}`
+        );
+      }
+    }
+
     const markers = await fileContainsForbiddenContent(filePath);
     for (const marker of markers) {
       failures.push(`${relativePath} contains forbidden marker "${marker}"`);
@@ -82,7 +99,7 @@ async function main() {
 
   if (failures.length > 0) {
     process.stderr.write(
-      `Production extension bundle contains internal benchmark artifacts:\n${failures
+      `Production extension bundle contains files that must not ship:\n${failures
         .map((failure) => `- ${failure}`)
         .join("\n")}\n`
     );

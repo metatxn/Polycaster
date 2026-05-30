@@ -1868,10 +1868,10 @@ function SportEventRow({
       <div className="flex items-center justify-between px-4 py-2 border-b border-(--kwm-hl)">
         <div className="flex items-baseline gap-4 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
           {isLive ? (
-            <span className="inline-flex items-center gap-1.5 text-(--kwm-down) shrink-0">
+            <span className="inline-flex items-center gap-1.5 text-(--kwm-up) shrink-0">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-down)/60" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-(--kwm-down)" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-up)/60" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-(--kwm-up)" />
               </span>
               <span>Live</span>
               {game?.period && (
@@ -2308,10 +2308,10 @@ function CompactEventRow({
       <div className="flex items-center justify-between px-3 py-2 border-b border-(--kwm-hl)">
         <div className="flex items-baseline gap-3 min-w-0 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">
           {variant === "live" ? (
-            <span className="inline-flex items-center gap-1.5 text-(--kwm-down) shrink-0">
+            <span className="inline-flex items-center gap-1.5 text-(--kwm-up) shrink-0">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-down)/60" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-(--kwm-down)" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-up)/60" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-(--kwm-up)" />
               </span>
               <span>Live</span>
               {game?.period && (
@@ -2891,10 +2891,10 @@ export function LiveSportsbook({
       <header className="flex items-end justify-between gap-4 pb-3 border-b border-(--kwm-hl)">
         <div className="flex items-baseline gap-3 min-w-0">
           <span className="relative inline-flex h-2 w-2 translate-y-[-2px] shrink-0">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-down)/60" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-(--kwm-down)" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-up)/60" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-(--kwm-up)" />
           </span>
-          <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-down)">
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-up)">
             Live
           </h2>
           <span className="text-(--kwm-ink-dim)">·</span>

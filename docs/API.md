@@ -3455,48 +3455,6 @@ Content-Type: application/json
 }
 ```
 
-### GET `/api/wallet/balances`
-
-Description: Deprecated. Always returns `410 Gone`.
-
-Headers
-
-- Auth: none
-
-Request body
-
-- None
-
-Success
-
-- No `200/201` success path exists.
-
-Errors
-
-- `400`: Not used.
-- `401`: Not used.
-- `404`: Not used.
-- `500`: Not used.
-- `410`: `{ success: false, error: string, hint: string }`
-
-Rate limiting
-
-- No explicit rate limiter
-
-Example
-
-```http
-GET /api/wallet/balances HTTP/1.1
-```
-
-```json
-{
-  "success": false,
-  "error": "This endpoint has been deprecated. Use wagmi's useBalance hook or the frontend useClobClient hook instead.",
-  "hint": "Wallet operations require user wallet authentication which is now handled on the frontend."
-}
-```
-
 ### GET `/api/wallet/positions`
 
 Description: Deprecated. Always returns `410 Gone`.

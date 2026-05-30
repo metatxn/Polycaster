@@ -580,7 +580,7 @@ export function OrderBook({
                       >
                         <td className="relative px-2 sm:px-4 py-1">
                           <div
-                            className="absolute left-0 top-0 bottom-0 bg-rose-500/25 dark:bg-rose-500/30 transition-all duration-300"
+                            className="absolute left-0 top-0 bottom-0 bg-rose-500/40 dark:bg-rose-500/35 transition-all duration-300"
                             style={{
                               width: `${Math.min(depthPercent * 2, 100)}%`,
                             }}
@@ -660,7 +660,7 @@ export function OrderBook({
                       >
                         <td className="relative px-2 sm:px-4 py-1">
                           <div
-                            className="absolute left-0 top-0 bottom-0 bg-emerald-500/25 dark:bg-emerald-500/30 transition-all duration-300"
+                            className="absolute left-0 top-0 bottom-0 bg-emerald-500/40 dark:bg-emerald-500/35 transition-all duration-300"
                             style={{
                               width: `${Math.min(depthPercent * 2, 100)}%`,
                             }}

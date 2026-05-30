@@ -610,8 +610,7 @@ export function TradingForm(props: TradingFormProps) {
               <div className="tk-sum-row profit">
                 <span className="l">Profit</span>
                 <span className="v tabular-nums">
-                  +$
-                  {(calculations.potentialWin - calculations.total).toFixed(2)}
+                  ${(calculations.potentialWin - calculations.total).toFixed(2)}
                   {calculations.total > 0 && (
                     <span className="ret">({calculations.returnPercent}%)</span>
                   )}

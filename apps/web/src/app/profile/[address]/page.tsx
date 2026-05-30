@@ -74,7 +74,7 @@ function RankCaption({
   if (!hasData) return <>Not ranked</>;
   const pnlValue = pnl ?? 0;
   const volValue = volume ?? 0;
-  const sign = pnlValue >= 0 ? "+" : "−";
+  const sign = pnlValue < 0 ? "−" : "";
   const pnlStr = `${sign}${formatCurrencyCompact(Math.abs(pnlValue))}`;
   return (
     <>
@@ -257,7 +257,7 @@ export default function ProfilePage() {
             <PullStatGrid cols={4}>
               <PullStat
                 label="Total P&L"
-                value={formatCurrencyCompact(profile.totalPnl, true)}
+                value={formatCurrencyCompact(profile.totalPnl, false)}
                 valueClassName={cn(
                   isProfitable
                     ? "text-emerald-600 dark:text-emerald-400"

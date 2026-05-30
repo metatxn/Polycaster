@@ -54,6 +54,8 @@ interface PullStatProps {
   valueClassName?: string;
   /** Show a skeleton shimmer in place of the value. */
   isLoading?: boolean;
+  /** Promote this stat to the band's hero — larger value type. */
+  emphasis?: boolean;
 }
 
 export function PullStat({
@@ -63,6 +65,7 @@ export function PullStat({
   mark,
   valueClassName,
   isLoading = false,
+  emphasis = false,
 }: PullStatProps) {
   return (
     <div className="px-4 py-4 sm:py-5 flex flex-col gap-1">
@@ -72,14 +75,18 @@ export function PullStat({
       <div className="flex items-baseline gap-2">
         {isLoading ? (
           <span
-            className="h-8 w-24 rounded bg-muted-foreground/15 animate-pulse"
+            className={cn(
+              "rounded bg-muted-foreground/15 animate-pulse",
+              emphasis ? "h-10 w-28" : "h-8 w-24"
+            )}
             aria-hidden
           />
         ) : (
           <>
             <span
               className={cn(
-                "text-2xl sm:text-3xl font-semibold tabular-nums text-foreground tracking-[-0.015em]",
+                "font-semibold tabular-nums text-foreground tracking-[-0.015em]",
+                emphasis ? "text-3xl sm:text-4xl" : "text-2xl sm:text-3xl",
                 valueClassName
               )}
             >

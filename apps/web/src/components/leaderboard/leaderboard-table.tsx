@@ -212,7 +212,7 @@ export function LeaderboardTable({
                 <span
                   className={cn(
                     "font-mono tabular-nums text-(--kwm-ink)",
-                    rank <= 3 ? "text-xl font-semibold" : "text-sm"
+                    rank <= 3 ? "text-base font-semibold" : "text-sm"
                   )}
                 >
                   {rankDisplay}
@@ -333,7 +333,7 @@ export function LeaderboardTable({
                 <span
                   className={cn(
                     "font-mono tabular-nums text-(--kwm-ink) block",
-                    rank <= 3 ? "text-lg font-semibold" : "text-sm"
+                    rank <= 3 ? "text-base font-semibold" : "text-sm"
                   )}
                 >
                   {rankDisplay}

@@ -221,7 +221,7 @@ test("notification stack can move itself into the browser side panel", () => {
   assert.equal(/knoww-search-container/.test(sidepanelSource), true);
   assert.equal(/knoww-stack-minimize/.test(sidepanelSource), true);
   assert.equal(
-    /grid-template-columns:\s*40px minmax\(0,\s*1fr\) 64px/.test(
+    /grid-template-columns:\s*40px minmax\(0,\s*1fr\) 96px/.test(
       sidepanelSource
     ),
     true

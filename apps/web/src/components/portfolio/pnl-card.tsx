@@ -133,9 +133,7 @@ export function PortfolioPnlCard({
               }`}
             >
               {formatPercent(periodChangePercent)}
-              <span className="ml-1 text-muted-foreground/70">
-                {periodLabel}
-              </span>
+              <span className="ml-1 text-muted-foreground">{periodLabel}</span>
             </span>
           </div>
           <InteractiveLineChart data={data.data} height={chartHeight} />

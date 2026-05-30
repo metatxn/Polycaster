@@ -412,7 +412,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
       <DialogContent
         showCloseButton={false}
         overlayClassName="bg-black/60 backdrop-blur-md"
-        className="sm:max-w-[440px] max-h-[calc(100dvh-32px)] p-0 gap-0 overflow-hidden rounded-md border border-white/10 shadow-[0_40px_80px_-30px_rgba(0,0,0,0.55)] flex flex-col bg-(--kwm-panel)"
+        className="sm:max-w-[440px] max-h-[calc(100dvh-32px)] p-0 gap-0 overflow-hidden rounded-md border border-border shadow-[0_40px_80px_-30px_rgba(0,0,0,0.55)] flex flex-col bg-(--kwm-panel)"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
@@ -425,7 +425,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--kwm-ink) focus-visible:ring-offset-2 focus-visible:ring-offset-(--kwm-panel)"
                   aria-label="Go back"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.4} />
@@ -455,7 +455,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
               <button
                 type="button"
                 onClick={handleClose}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-(--kwm-hl) text-(--kwm-ink-2) hover:text-(--kwm-ink) hover:border-(--kwm-hl-2) transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--kwm-ink) focus-visible:ring-offset-2 focus-visible:ring-offset-(--kwm-panel)"
                 aria-label="Close"
               >
                 <X className="h-3.5 w-3.5" strokeWidth={1.4} />

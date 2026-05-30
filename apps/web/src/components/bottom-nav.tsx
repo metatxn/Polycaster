@@ -65,26 +65,34 @@ export function BottomNav() {
       <div className="flex items-stretch h-14">
         {visibleItems.map((item) => {
           const isActive = isItemActive(item);
+          const showsBalance =
+            item.showBalance && isConnected && hasProxyWallet;
+          const formattedBalance = usdcBalance.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
 
           return (
             <button
               key={item.href}
               type="button"
               onClick={() => router.push(item.href)}
+              aria-current={isActive ? "page" : undefined}
+              aria-label={
+                showsBalance
+                  ? `${item.label} · $${formattedBalance} balance`
+                  : undefined
+              }
               className={cn(
-                "relative flex-1 flex items-center justify-center font-mono text-[10px] uppercase tracking-[0.18em] transition-colors",
+                "relative flex-1 flex items-center justify-center font-mono text-[10px] uppercase tracking-[0.18em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 isActive
                   ? "text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {item.showBalance && isConnected && hasProxyWallet ? (
+              {showsBalance ? (
                 <span className="tabular-nums text-[11px] font-semibold normal-case tracking-normal">
-                  $
-                  {usdcBalance.toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  ${formattedBalance}
                 </span>
               ) : (
                 <span>{item.label}</span>

@@ -157,7 +157,7 @@ export function TopNav() {
             <div key={cat.href} className="flex items-center">
               <Link
                 href={cat.href}
-                className={`shrink-0 px-2 py-1.5 font-mono text-[11px] font-normal uppercase tracking-[0.08em] transition-colors rounded-sm ${
+                className={`shrink-0 px-2.5 py-2.5 font-mono text-[11px] font-normal uppercase tracking-[0.08em] transition-colors rounded-sm ${
                   isActive
                     ? "text-(--kwm-ink) bg-accent/40"
                     : "text-(--kwm-ink-3) hover:text-(--kwm-ink) hover:bg-accent/30"
@@ -168,7 +168,7 @@ export function TopNav() {
               {i < CATEGORIES.length - 1 && (
                 <span
                   aria-hidden="true"
-                  className="text-(--kwm-ink-3)/75 px-0.5 select-none"
+                  className="text-(--kwm-ink-3) px-0.5 select-none"
                 >
                   ·
                 </span>

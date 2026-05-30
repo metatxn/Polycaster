@@ -354,7 +354,7 @@ export function EventCard({
                         className={cn(
                           "font-mono tabular-nums shrink-0",
                           isLeader
-                            ? "text-foreground font-bold text-[12px] sm:text-[13px]"
+                            ? "text-foreground font-bold text-sm sm:text-base"
                             : "text-foreground/75 font-semibold"
                         )}
                       >

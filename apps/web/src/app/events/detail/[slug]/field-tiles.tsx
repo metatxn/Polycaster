@@ -199,7 +199,15 @@ function FieldTile({
       aria-pressed={isSelected}
       className={cn(
         "kwm-fld relative text-left rounded-md border transition-colors",
-        "flex flex-col gap-1 px-2.5 py-2 min-w-[170px] lg:min-w-0"
+        // `lg:w-full` is critical: in the lg 5-col grid each tile is a grid
+        // item child with no width, so it shrink-to-fits its content's
+        // min-content. `truncate` does NOT reduce min-content, so the
+        // longest-named contender (e.g. "Alexandria Ocasio-Cortez") forced
+        // its column wider than its 1fr track and overflowed the left
+        // column — clipped under the trading panel. Filling the track makes
+        // the inner truncate clamp instead. Below lg it stays a min-width
+        // scroll tile.
+        "flex flex-col gap-1 px-2.5 py-2 min-w-[170px] lg:min-w-0 lg:w-full"
       )}
       style={{
         borderColor: isSelected ? "var(--kwm-hl-3)" : "var(--kwm-hl)",
@@ -217,7 +225,7 @@ function FieldTile({
       {/* Top row: name + rank */}
       <div className="flex items-center justify-between gap-2 pl-1.5">
         <span
-          className="inline-flex items-center gap-2 text-[13px] font-medium truncate"
+          className="flex min-w-0 items-center gap-2 text-[13px] font-medium truncate"
           style={{ color: "var(--kwm-ink)", letterSpacing: "-0.005em" }}
         >
           <span
@@ -292,7 +300,7 @@ function FieldTile({
             <Spark data={history} color={market.color} width={64} height={20} />
           ) : (
             <span
-              className="block w-16 h-[1px]"
+              className="block w-16 h-px"
               style={{ background: "var(--kwm-hl)" }}
               aria-hidden="true"
             />

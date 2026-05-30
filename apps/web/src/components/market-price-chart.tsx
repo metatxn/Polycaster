@@ -1157,7 +1157,7 @@ export function MarketPriceChart({
                 aria-selected={isActive}
                 onClick={() => setTimeRange(range)}
                 className={cn(
-                  "px-3 py-1.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase cursor-pointer transition-colors",
+                  "px-3 py-2.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-(--kwm-ink)",
                   i > 0 && "border-l border-(--kwm-hl)",
                   isActive
                     ? "text-(--kwm-ink) bg-(--kwm-bg-3) shadow-[inset_0_-2px_0_var(--kwm-ink)]"

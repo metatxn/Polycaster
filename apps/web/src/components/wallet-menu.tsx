@@ -382,7 +382,7 @@ function ActionRow({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none"
+      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
       <span className="text-muted-foreground">{icon}</span>
       <span className="flex-1 text-[14px] text-foreground">{label}</span>

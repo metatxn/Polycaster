@@ -7,8 +7,8 @@ import {
   Plus_Jakarta_Sans,
 } from "next/font/google";
 import { headers } from "next/headers";
-import { Toaster } from "sonner";
 import { MainContent } from "@/components/main-content";
+import { ThemedToaster } from "@/components/themed-toaster";
 import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import ContextProvider from "@/context";
 import { DEFAULT_SEO_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/seo";
@@ -155,7 +155,7 @@ export default async function RootLayout({
       >
         <ContextProvider cookies={cookies}>
           <MainContent>{children}</MainContent>
-          <Toaster position="top-right" theme="dark" richColors closeButton />
+          <ThemedToaster />
         </ContextProvider>
       </body>
     </html>

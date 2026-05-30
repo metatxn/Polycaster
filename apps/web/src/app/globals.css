@@ -3280,10 +3280,14 @@ body:not(:has(.kw-landing))
   --kwm-ink: var(--foreground);
   --kwm-ink-2: color-mix(in oklch, var(--foreground) 80%, var(--background));
   --kwm-ink-3: var(--muted-foreground);
+  /* The faint tier fades toward the FOREGROUND (not the background) so it
+     stays legible — fading toward bg dropped real text (addresses, terms,
+     timestamps) to ~3:1. Toward-fg raises contrast in both light & dark
+     schemes while keeping a subtle step below --kwm-ink-3. */
   --kwm-ink-dim: color-mix(
     in oklch,
-    var(--muted-foreground) 75%,
-    var(--background)
+    var(--muted-foreground) 82%,
+    var(--foreground)
   );
 
   /* Hairlines — derive from border so they match the theme weight */
@@ -3291,15 +3295,18 @@ body:not(:has(.kw-landing))
   --kwm-hl-2: var(--border);
   --kwm-hl-3: color-mix(in oklch, var(--border) 130%, var(--foreground));
 
-  /* Signal colors — stay constant across themes. Green = up, red = down
-     are universal financial conventions. */
-  --kwm-up: #16a34a;
+  /* Signal colors — light-family values are deepened so the SAME token can
+     carry both fills (3:1 graphical bar) and small text and still clear
+     WCAG AA (4.5:1) on the off-white/white surfaces. Measured on white:
+     up #15803d ≈ 5.0:1, down #c81e1e ≈ 5.7:1, warn #b45309 ≈ 5.0:1.
+     Dark-family themes override these with brighter values below. */
+  --kwm-up: #15803d;
   --kwm-up-soft: color-mix(in oklch, var(--kwm-up) 10%, transparent);
   --kwm-up-border: color-mix(in oklch, var(--kwm-up) 30%, transparent);
-  --kwm-down: #dc2626;
+  --kwm-down: #c81e1e;
   --kwm-down-soft: color-mix(in oklch, var(--kwm-down) 10%, transparent);
   --kwm-accent: #2563eb;
-  --kwm-warn: #d97706;
+  --kwm-warn: #b45309;
   --kwm-warn-soft: color-mix(in oklch, var(--kwm-warn) 10%, transparent);
   --kwm-warn-border: color-mix(in oklch, var(--kwm-warn) 30%, transparent);
   --kwm-down-border: color-mix(in oklch, var(--kwm-down) 30%, transparent);
@@ -3325,6 +3332,24 @@ body:not(:has(.kw-landing))
   --kwm-down: #f87171;
   --kwm-accent: #60a5fa;
   --kwm-warn: #fbbf24;
+}
+
+/* Light-family contrast floor for hardcoded Tailwind accent utilities.
+   Components scattered across the app use `text-emerald-500`/`text-red-500`
+   directly for YES/NO prices, order-book rows, P&L sparklines, etc. The
+   default 500 ramp sits at ~2.5–3.8:1 on the off-white surfaces (fails AA).
+   We remap the underlying Tailwind color vars to the AA-safe 700-ish shades
+   ONLY for light-family themes (html without a dark-scheme class); the
+   dark-family themes keep Tailwind's brighter defaults, which already pass
+   on near-black. Fills and borders deepen slightly too — a net win for
+   the previously-faint depth bars. */
+html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
+  --color-emerald-500: #047857;
+  --color-green-500: #15803d;
+  --color-red-500: #c81e1e;
+  --color-rose-500: #be123c;
+  --color-amber-500: #b45309;
+  --color-orange-500: #b45309;
 }
 
 /* Middle-dot separator between adjacent stat items in a row — used by

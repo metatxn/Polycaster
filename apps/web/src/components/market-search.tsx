@@ -345,8 +345,8 @@ export function MarketSearch({
                               {event.live && (
                                 <span className="inline-flex items-center gap-1 shrink-0 uppercase tracking-[0.14em] text-[9px] font-semibold text-(--kwm-up)">
                                   <span className="relative flex h-1 w-1">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/75" />
-                                    <span className="relative inline-flex rounded-full h-1 w-1 bg-emerald-500" />
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-(--kwm-up) opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-1 w-1 bg-(--kwm-up)" />
                                   </span>
                                   Live
                                 </span>

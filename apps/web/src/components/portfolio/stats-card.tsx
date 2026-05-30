@@ -53,6 +53,7 @@ export function PortfolioStatsCard({
         />
         <PullStat
           label="Total P&L"
+          emphasis
           value={formatCurrency(totalPnl)}
           caption={
             totalInvested > 0

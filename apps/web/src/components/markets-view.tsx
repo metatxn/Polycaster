@@ -334,7 +334,7 @@ function Stat({ num, lbl }: { num: string; lbl: string }) {
         {num}
       </span>
       <span
-        className="text-[10px] uppercase tracking-[0.14em]"
+        className="font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.14em]"
         style={{ color: "var(--kwm-ink-3)" }}
       >
         {lbl}
@@ -700,7 +700,7 @@ function FootStat({ lbl, val }: { lbl: string; val: string }) {
   return (
     <div className="inline-flex items-center gap-2">
       <span
-        className="text-[10px] uppercase tracking-[0.14em]"
+        className="font-(family-name:--font-geist-mono) text-[10px] uppercase tracking-[0.14em]"
         style={{ color: "var(--kwm-ink-3)" }}
       >
         {lbl}
@@ -754,7 +754,7 @@ function BookHead() {
         color: "var(--kwm-ink-3)",
       }}
     >
-      <span>Market</span>
+      <span className="font-semibold text-(--kwm-ink-2)">Market</span>
       <span className="text-right">Leader</span>
       <span className="text-right">30D</span>
       <span className="text-right">

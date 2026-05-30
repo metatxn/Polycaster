@@ -76,6 +76,8 @@ type PortfolioOpenOrder = {
   market?: {
     title: string;
     outcome: string;
+    eventSlug?: string;
+    slug?: string;
     icon?: string;
   };
 };
@@ -168,6 +170,11 @@ let portfolioTableView: PortfolioTableView = "positions";
 let portfolioHistoryPage = 0;
 let latestPortfolioData: PortfolioData | null = null;
 let portfolioWallets: PortfolioWallet[] | null = null;
+// Inline two-step confirm for cancelling an open order: the first tap "arms"
+// the button (turns it into a red Confirm), a second tap commits, and a timer
+// auto-reverts it so a stray tap never reaches the live order book.
+let armedCancelButton: HTMLButtonElement | null = null;
+let cancelConfirmTimer: ReturnType<typeof setTimeout> | null = null;
 
 function sendRuntimeMessage(
   message: Record<string, unknown>
@@ -244,15 +251,15 @@ function formatDecimalMoney(value: Decimal.Value): string {
 }
 
 function formatSignedMoney(value: number | undefined): string {
+  // Positive P&L is signalled by colour, not a `+` prefix; losses keep the
+  // minus sign that Intl currency formatting already supplies.
   const safeValue = Number.isFinite(value) ? Number(value) : 0;
-  const prefix = safeValue > 0 ? "+" : "";
-  return `${prefix}${formatMoney(safeValue)}`;
+  return formatMoney(safeValue);
 }
 
 function formatPercent(value: number | undefined): string {
   const safeValue = Number.isFinite(value) ? Number(value) : 0;
-  const prefix = safeValue > 0 ? "+" : "";
-  return `${prefix}${safeValue.toFixed(1)}%`;
+  return `${safeValue.toFixed(1)}%`;
 }
 
 function formatCompactNumber(value: number | undefined): string {
@@ -694,6 +701,8 @@ type MarketByTokenResponse = {
   market?: {
     question?: string;
     outcome?: string;
+    eventSlug?: string;
+    slug?: string;
     icon?: string;
   };
 };
@@ -754,12 +763,101 @@ async function getPortfolioOpenOrders(
             market: {
               title: market.question || formatAddress(order.tokenId),
               outcome: market.outcome || "",
+              ...(market.eventSlug ? { eventSlug: market.eventSlug } : {}),
+              ...(market.slug ? { slug: market.slug } : {}),
               ...(market.icon ? { icon: market.icon } : {}),
             },
           }
         : order;
     }),
   };
+}
+
+async function cancelPortfolioOpenOrder(
+  ownerAddress: string,
+  orderId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const response = await sendRuntimeMessage({
+    type: "KNOWW_CANCEL_PORTFOLIO_OPEN_ORDER",
+    address: ownerAddress,
+    orderId,
+  });
+  if (response.ok === false) {
+    return { ok: false, error: response.error };
+  }
+  return { ok: true };
+}
+
+function disarmCancelOrder(): void {
+  if (cancelConfirmTimer !== null) {
+    clearTimeout(cancelConfirmTimer);
+    cancelConfirmTimer = null;
+  }
+  const button = armedCancelButton;
+  armedCancelButton = null;
+  if (button) {
+    button.classList.remove("is-armed");
+    const label = button.querySelector("[data-cancel-label]");
+    if (label) label.textContent = "Cancel";
+    button.setAttribute("aria-label", "Cancel order");
+  }
+}
+
+function armCancelOrder(button: HTMLButtonElement): void {
+  disarmCancelOrder();
+  armedCancelButton = button;
+  button.classList.add("is-armed");
+  const label = button.querySelector("[data-cancel-label]");
+  if (label) label.textContent = "Confirm";
+  button.setAttribute("aria-label", "Confirm cancel order");
+  cancelConfirmTimer = setTimeout(disarmCancelOrder, 3000);
+}
+
+function handleCancelOrderClick(button: HTMLButtonElement): void {
+  if (button.disabled) return;
+  if (button === armedCancelButton) {
+    void performOrderCancel(button);
+    return;
+  }
+  armCancelOrder(button);
+}
+
+async function performOrderCancel(button: HTMLButtonElement): Promise<void> {
+  const orderId = button.dataset.orderId;
+  const ownerAddress = button.dataset.ownerAddress;
+  if (!orderId || !ownerAddress) return;
+
+  if (cancelConfirmTimer !== null) {
+    clearTimeout(cancelConfirmTimer);
+    cancelConfirmTimer = null;
+  }
+  armedCancelButton = null;
+  button.disabled = true;
+  button.classList.remove("is-armed", "is-error");
+  button.classList.add("is-busy");
+  const label = button.querySelector("[data-cancel-label]");
+  // Keep the label short so it fits the fixed button width without overflow.
+  if (label) label.textContent = "…";
+
+  const result = await cancelPortfolioOpenOrder(ownerAddress, orderId);
+  if (result.ok) {
+    // Reload so the cancelled order disappears and any BUY collateral it was
+    // reserving is reflected back in the cash/positions figures.
+    await loadPortfolio(true);
+    return;
+  }
+
+  // Surface the failure on the button and keep the row so the user can retry.
+  button.classList.remove("is-busy");
+  button.classList.add("is-error");
+  button.disabled = false;
+  if (label) label.textContent = "Failed";
+  button.title = result.error || "Could not cancel order.";
+  cancelConfirmTimer = setTimeout(() => {
+    button.classList.remove("is-error");
+    if (label) label.textContent = "Cancel";
+    button.removeAttribute("title");
+  }, 4000);
 }
 
 async function resolvePortfolioAddress(ownerAddress: string): Promise<string> {
@@ -826,64 +924,122 @@ function renderPortfolioSummary(data: PortfolioData): string {
   const details = data.details.details;
   const totalPnl =
     details?.pnl ?? summary.totalPnl ?? summary.totalUnrealizedPnl;
-  const pnlClass = (totalPnl || 0) >= 0 ? "positive" : "negative";
+  const pnl = Number.isFinite(totalPnl) ? Number(totalPnl) : 0;
+  const direction = pnl > 0 ? "is-up" : pnl < 0 ? "is-down" : "is-flat";
+  const deltaClass = pnl > 0 ? "positive" : pnl < 0 ? "negative" : "flat";
+  const arrow =
+    pnl === 0
+      ? `<svg class="knoww-pf-delta-arrow" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5.1" width="8" height="1.8" rx="0.9"></rect></svg>`
+      : `<svg class="knoww-pf-delta-arrow" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 11 10.5H1z"></path></svg>`;
 
   return `
-    <div class="knoww-portfolio-account">
-      <div>
-        <div class="knoww-portfolio-kicker">Portfolio</div>
-        <div class="knoww-portfolio-address">${escapeHtml(
-          details?.userName || formatAddress(data.address)
-        )}</div>
+    <div class="knoww-pf-hero ${direction}">
+      <div class="knoww-pf-hero-top">
+        <div class="knoww-pf-id">
+          <span class="knoww-pf-kicker">Portfolio</span>
+          <span class="knoww-pf-name">${escapeHtml(
+            details?.userName || formatAddress(data.address)
+          )}</span>
+        </div>
+        <button type="button" class="knoww-portfolio-open" data-open-portfolio>
+          <span>Open</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"></path></svg>
+        </button>
       </div>
-      <button type="button" class="knoww-portfolio-open" data-open-portfolio>
-        Open
-      </button>
-    </div>
-    <div class="knoww-portfolio-summary">
-      <div class="knoww-portfolio-stat wide">
-        <span class="knoww-portfolio-stat-label">Position value</span>
-        <strong>${escapeHtml(formatMoney(summary.totalValue))}</strong>
-      </div>
-      <div class="knoww-portfolio-stat">
-        <span class="knoww-portfolio-stat-label">P/L</span>
-        <strong class="${pnlClass}">${escapeHtml(
-          formatSignedMoney(totalPnl)
+      <div class="knoww-pf-hero-value">
+        <span class="knoww-pf-hero-label">Position value</span>
+        <strong class="knoww-pf-hero-num">${escapeHtml(
+          formatMoney(summary.totalValue)
         )}</strong>
+        <div class="knoww-pf-delta ${deltaClass}">
+          ${arrow}
+          <span class="knoww-pf-delta-num">${escapeHtml(
+            formatSignedMoney(pnl)
+          )}</span>
+          <span class="knoww-pf-delta-label">All-time P/L</span>
+        </div>
       </div>
-      <div class="knoww-portfolio-stat">
-        <span class="knoww-portfolio-stat-label">Positions</span>
-        <strong>${escapeHtml(
-          formatCompactNumber(summary.positionCount)
-        )}</strong>
-      </div>
-      <div class="knoww-portfolio-stat">
-        <span class="knoww-portfolio-stat-label">Volume</span>
-        <strong>${escapeHtml(formatMoney(details?.volume))}</strong>
-      </div>
-      <div class="knoww-portfolio-stat">
-        <span class="knoww-portfolio-stat-label">Cash</span>
-        <strong>${escapeHtml(formatMoney(data.cashBalance))}</strong>
+      <div class="knoww-pf-strip">
+        <div class="knoww-pf-strip-cell">
+          <span class="knoww-pf-strip-label">Positions</span>
+          <strong>${escapeHtml(
+            formatCompactNumber(summary.positionCount)
+          )}</strong>
+        </div>
+        <div class="knoww-pf-strip-cell">
+          <span class="knoww-pf-strip-label">Volume</span>
+          <strong>${escapeHtml(formatMoney(details?.volume))}</strong>
+        </div>
+        <div class="knoww-pf-strip-cell">
+          <span class="knoww-pf-strip-label">Cash</span>
+          <strong>${escapeHtml(formatMoney(data.cashBalance))}</strong>
+        </div>
       </div>
     </div>
   `;
 }
 
+function renderPortfolioEmpty(
+  title: string,
+  sub: string,
+  iconPath: string
+): string {
+  return `
+    <div class="knoww-portfolio-empty">
+      <div class="knoww-pf-empty-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24">${iconPath}</svg>
+      </div>
+      <p class="knoww-pf-empty-title">${escapeHtml(title)}</p>
+      <span class="knoww-pf-empty-sub">${escapeHtml(sub)}</span>
+    </div>
+  `;
+}
+
+// Build the knoww.app event-detail URL for a market row. Mirrors the web app,
+// which links positions/trades to `/events/detail/{eventSlug || slug}` (the
+// market slug 308-redirects to the same page). Returns null when neither slug
+// is present, in which case the row renders as a non-interactive element.
+function portfolioMarketUrl(market: {
+  eventSlug?: string;
+  slug?: string;
+}): string | null {
+  const slug = market.eventSlug || market.slug;
+  return slug
+    ? `${KNOWW_APP_URL}/events/detail/${encodeURIComponent(slug)}`
+    : null;
+}
+
+// A market row is an anchor when it links somewhere (native new-tab open,
+// keyboard- and middle-click-friendly) and a plain div otherwise.
+function portfolioRowOpenTag(url: string | null, modifier = ""): string {
+  const className = `knoww-portfolio-row${modifier}`;
+  return url
+    ? `<a class="${className} is-link" href="${escapeHtml(
+        url
+      )}" target="_blank" rel="noopener noreferrer">`
+    : `<div class="${className}">`;
+}
+
+function portfolioRowCloseTag(url: string | null): string {
+  return url ? "</a>" : "</div>";
+}
+
 function renderCompactPositions(positions: PortfolioPosition[] = []): string {
   if (positions.length === 0) {
-    return `
-      <div class="knoww-portfolio-empty">
-        <span>No active positions.</span>
-      </div>
-    `;
+    return renderPortfolioEmpty(
+      "No active positions",
+      "Open trades will surface here as you take them.",
+      `<path d="M4 19V5M4 19h16M8 16v-5M13 16V8M18 16v-3"></path>`
+    );
   }
 
   return positions
     .slice(0, 5)
     .map((position) => {
       const pnlClass = position.unrealizedPnl >= 0 ? "positive" : "negative";
+      const url = portfolioMarketUrl(position.market);
       return `
-        <div class="knoww-portfolio-row">
+        ${portfolioRowOpenTag(url)}
           <div class="knoww-portfolio-row-icon">
             ${
               position.market.icon
@@ -907,7 +1063,7 @@ function renderCompactPositions(positions: PortfolioPosition[] = []): string {
               )})`
             )}</span>
           </div>
-        </div>
+        ${portfolioRowCloseTag(url)}
       `;
     })
     .join("");
@@ -929,11 +1085,11 @@ function renderCompactActivity(
   page = portfolioHistoryPage
 ): string {
   if (trades.length === 0) {
-    return `
-      <div class="knoww-portfolio-empty">
-        <span>No recent activity.</span>
-      </div>
-    `;
+    return renderPortfolioEmpty(
+      "No recent activity",
+      "Your fills, redeems and merges will appear here.",
+      `<circle cx="12" cy="12" r="8"></circle><path d="M12 8v4l3 2"></path>`
+    );
   }
 
   const start = page * PORTFOLIO_HISTORY_PAGE_SIZE;
@@ -943,8 +1099,9 @@ function renderCompactActivity(
       const side = trade.side || trade.type;
       const sideClass = side === "BUY" ? "positive" : "negative";
       const priceCents = new Decimal(trade.price).mul(100).toDecimalPlaces(0);
+      const url = portfolioMarketUrl(trade.market);
       return `
-        <div class="knoww-portfolio-row compact">
+        ${portfolioRowOpenTag(url, " compact")}
           <div class="knoww-portfolio-row-main">
             <div class="knoww-portfolio-row-title">${escapeHtml(
               trade.market.title
@@ -961,7 +1118,7 @@ function renderCompactActivity(
               `${formatCompactNumber(trade.size)} @ ${priceCents.toString()}¢`
             )}</span>
           </div>
-        </div>
+        ${portfolioRowCloseTag(url)}
       `;
     })
     .join("");
@@ -1006,13 +1163,16 @@ function renderPortfolioHistoryControls(trades: PortfolioTrade[] = []): string {
   `;
 }
 
-function renderCompactOpenOrders(orders: PortfolioOpenOrder[] = []): string {
+function renderCompactOpenOrders(
+  orders: PortfolioOpenOrder[] = [],
+  ownerAddress = ""
+): string {
   if (orders.length === 0) {
-    return `
-      <div class="knoww-portfolio-empty">
-        <span>No open orders.</span>
-      </div>
-    `;
+    return renderPortfolioEmpty(
+      "No open orders",
+      "Resting limit orders you place will live here.",
+      `<path d="M4 7h16M4 12h10M4 17h7"></path>`
+    );
   }
 
   return orders
@@ -1023,22 +1183,45 @@ function renderCompactOpenOrders(orders: PortfolioOpenOrder[] = []): string {
       const outcome = order.market?.outcome || "Outcome";
       const total = new Decimal(order.remainingSize).mul(order.price);
       const priceCents = new Decimal(order.price).mul(100).toDecimalPlaces(0);
+      const url = order.market ? portfolioMarketUrl(order.market) : null;
+      // The market-open link wraps only the row content so the Cancel button
+      // can sit beside it without nesting a button inside an anchor.
+      const linkOpen = url
+        ? `<a class="knoww-portfolio-order-link is-link" href="${escapeHtml(
+            url
+          )}" target="_blank" rel="noopener noreferrer">`
+        : `<div class="knoww-portfolio-order-link">`;
+      const linkClose = url ? "</a>" : "</div>";
       return `
-        <div class="knoww-portfolio-row compact">
-          <div class="knoww-portfolio-row-main">
-            <div class="knoww-portfolio-row-title">${escapeHtml(title)}</div>
-            <div class="knoww-portfolio-row-meta">${escapeHtml(
-              order.side
-            )} ${escapeHtml(outcome)} · ${escapeHtml(
-              formatCompactNumber(order.remainingSize)
-            )} open · ${escapeHtml(formatOrderExpiration(order.expiration))}</div>
-          </div>
-          <div class="knoww-portfolio-row-value">
-            <strong>${escapeHtml(formatDecimalMoney(total))}</strong>
-            <span class="${sideClass}">${escapeHtml(
-              `${priceCents.toString()}¢`
-            )}</span>
-          </div>
+        <div class="knoww-portfolio-row compact knoww-portfolio-order">
+          ${linkOpen}
+            <div class="knoww-portfolio-row-main">
+              <div class="knoww-portfolio-row-title">${escapeHtml(title)}</div>
+              <div class="knoww-portfolio-row-meta">${escapeHtml(
+                order.side
+              )} ${escapeHtml(outcome)} · ${escapeHtml(
+                formatCompactNumber(order.remainingSize)
+              )} open · ${escapeHtml(
+                formatOrderExpiration(order.expiration)
+              )}</div>
+            </div>
+            <div class="knoww-portfolio-row-value">
+              <strong>${escapeHtml(formatDecimalMoney(total))}</strong>
+              <span class="${sideClass}">${escapeHtml(
+                `${priceCents.toString()}¢`
+              )}</span>
+            </div>
+          ${linkClose}
+          <button
+            type="button"
+            class="knoww-portfolio-cancel"
+            data-cancel-order
+            data-order-id="${escapeHtml(order.id)}"
+            data-owner-address="${escapeHtml(ownerAddress)}"
+            aria-label="Cancel order"
+          >
+            <span data-cancel-label>Cancel</span>
+          </button>
         </div>
       `;
     })
@@ -1100,12 +1283,15 @@ function renderPortfolioTable(data: PortfolioData): string {
       >
         ${
           data.hasTradingCredentials
-            ? renderCompactOpenOrders(data.openOrders.orders || [])
-            : `
-              <div class="knoww-portfolio-empty">
-                <span>Enable trading to view open orders.</span>
-              </div>
-            `
+            ? renderCompactOpenOrders(
+                data.openOrders.orders || [],
+                data.ownerAddress
+              )
+            : renderPortfolioEmpty(
+                "Trading not enabled",
+                "Enable trading above to place and track open orders.",
+                `<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>`
+              )
         }
       </div>
       <div
@@ -1203,13 +1389,17 @@ function renderPortfolioWalletChoices(wallets: PortfolioWallet[] = []): string {
 
 function renderPortfolioSignedOut(): string {
   const wallets = portfolioWallets || [];
+  const hasError = Boolean(portfolioConnectError);
   return `
     <div class="knoww-portfolio-signed-out">
-      <span class="knoww-stack-empty-title">Connect wallet</span>
-      <span class="knoww-stack-empty-sub">${
-        portfolioConnectError
-          ? escapeHtml(portfolioConnectError)
-          : "Choose a wallet installed in the active supported browser page."
+      <div class="knoww-pf-empty-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M19 7V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1"></path><path d="M21 11h-5a2 2 0 0 0 0 4h5v-4Z"></path></svg>
+      </div>
+      <p class="knoww-pf-empty-title">Connect a wallet</p>
+      <span class="knoww-pf-empty-sub ${hasError ? "is-error" : ""}">${
+        hasError
+          ? escapeHtml(portfolioConnectError as string)
+          : "Choose a wallet on the active page to load your positions."
       }</span>
       ${renderPortfolioWalletChoices(wallets)}
     </div>
@@ -1441,12 +1631,35 @@ function render(): void {
         min-height: 0 !important;
       }
 
+      /* Markets rows harmonized with the Portfolio surface: hairline row
+         dividers + hover (hover lives in knoww-inline.css), bordered rounded
+         thumbnails, and one dominant KnowwMono tabular number with a legible
+         outcome name beneath. These rules are injected after knoww-inline.css
+         so they win on the shared .knoww-notification-* selectors. */
       #knoww-notification-stack.knoww-sidepanel-stack .knoww-notification-item {
         width: 100% !important;
-        grid-template-columns: 40px minmax(0, 1fr) 64px !important;
+        grid-template-columns: 40px minmax(0, 1fr) 96px !important;
         justify-items: stretch !important;
         text-align: left !important;
         border: 0 !important;
+        border-bottom: 1px solid var(--kse-hairline) !important;
+      }
+
+      #knoww-notification-stack.knoww-sidepanel-stack
+        .knoww-notification-item:last-child,
+      #knoww-notification-stack.knoww-sidepanel-stack
+        .knoww-notification-item:has(+ .knoww-stack-section-header) {
+        border-bottom: 0 !important;
+      }
+
+      #knoww-notification-stack.knoww-sidepanel-stack .knoww-notification-icon {
+        border-radius: 9px !important;
+        border: 1px solid var(--kse-hairline-2) !important;
+      }
+
+      #knoww-notification-stack.knoww-sidepanel-stack
+        .knoww-notification-icon img {
+        border-radius: 8px !important;
       }
 
       #knoww-notification-stack.knoww-sidepanel-stack .knoww-notification-content {
@@ -1461,8 +1674,38 @@ function render(): void {
       }
 
       #knoww-notification-stack.knoww-sidepanel-stack .knoww-notification-prices {
-        width: 64px !important;
+        width: 96px !important;
         justify-self: end !important;
+      }
+
+      #knoww-notification-stack.knoww-sidepanel-stack
+        .knoww-notification-price-num {
+        font-family: "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas",
+          monospace !important;
+        font-size: 21px !important;
+        font-weight: 500 !important;
+        letter-spacing: -0.01em !important;
+      }
+
+      #knoww-notification-stack.knoww-sidepanel-stack
+        .knoww-notification-price-cents {
+        font-family: "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas",
+          monospace !important;
+        font-size: 11px !important;
+        font-weight: 500 !important;
+      }
+
+      /* Outcome name: legible sentence-case sans, not the 8px uppercase label */
+      #knoww-notification-stack.knoww-sidepanel-stack
+        .knoww-notification-side-label {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+          sans-serif !important;
+        font-size: 10.5px !important;
+        font-weight: 500 !important;
+        letter-spacing: 0 !important;
+        text-transform: none !important;
+        max-width: 96px !important;
+        margin-top: 1px !important;
       }
 
       .knoww-sidepanel-empty {
@@ -1474,29 +1717,46 @@ function render(): void {
         min-height: 0 !important;
       }
 
+      #knoww-notification-stack.knoww-sidepanel-stack {
+        /* Wire the bundled @fontsource faces (declared in knoww-inline.css)
+           into the token names the panel references, so numbers render in
+           JetBrains Mono and editorial accents in Fraunces italic instead of
+           silently falling back to system fonts. */
+        --kse-font-mono: "KnowwMono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        --kse-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --kse-font-display: "KnowwEditorial", Georgia, "Times New Roman", serif;
+      }
+
       .knoww-sidepanel-tabs {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 6px;
-        padding: 8px 10px 4px;
+        gap: 4px;
+        padding: 10px 10px 6px;
       }
 
       .knoww-sidepanel-tab {
-        height: 30px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 6px;
-        background: rgba(255, 255, 255, 0.04);
-        color: rgba(255, 255, 255, 0.58);
+        height: 32px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.5);
         cursor: pointer;
         font: 600 10px/1 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
+        transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+      }
+
+      .knoww-sidepanel-tab:hover {
+        color: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.04);
       }
 
       .knoww-sidepanel-tab.is-active {
-        border-color: rgba(255, 255, 255, 0.24);
-        background: rgba(255, 255, 255, 0.1);
-        color: rgba(255, 255, 255, 0.92);
+        border-color: rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.09);
+        color: rgba(255, 255, 255, 0.95);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
       }
 
       .knoww-sidepanel-panel[hidden],
@@ -1505,58 +1765,246 @@ function render(): void {
       }
 
       .knoww-sidepanel-portfolio {
+        --pf-mono: var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        --pf-sans: var(--kse-font-sans, system-ui, sans-serif);
+        --pf-display: var(--kse-font-display, Georgia, "Times New Roman", serif);
+        --pf-pos: #34d399;
+        --pf-neg: #fb7185;
+        --pf-hi: rgba(255, 255, 255, 0.96);
+        --pf-mid: rgba(255, 255, 255, 0.58);
+        --pf-dim: rgba(255, 255, 255, 0.4);
+        --pf-line: rgba(255, 255, 255, 0.07);
+        --pf-line-2: rgba(255, 255, 255, 0.13);
+        --pf-surface: rgba(255, 255, 255, 0.022);
+        --pf-surface-2: rgba(255, 255, 255, 0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
         height: calc(100vh - 96px);
         overflow: auto;
-        padding: 10px;
+        padding: 12px 12px 24px;
       }
 
-      .knoww-portfolio-account,
-      .knoww-portfolio-summary,
-      .knoww-portfolio-table,
-      .knoww-portfolio-row {
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(255, 255, 255, 0.045);
+      /* ---- Hero ---- */
+      .knoww-pf-hero {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 16px;
+        padding: 15px 16px 0;
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.045),
+          rgba(255, 255, 255, 0.012)
+        );
       }
 
-      .knoww-portfolio-account {
+      .knoww-pf-hero::before {
+        content: "";
+        position: absolute;
+        inset: -50% -10% auto -12%;
+        height: 240px;
+        background: radial-gradient(
+          56% 100% at 26% 0%,
+          var(--pf-glow, transparent),
+          transparent 70%
+        );
+        pointer-events: none;
+      }
+
+      .knoww-pf-hero.is-up {
+        --pf-glow: rgba(52, 211, 153, 0.26);
+      }
+
+      .knoww-pf-hero.is-down {
+        --pf-glow: rgba(251, 113, 133, 0.24);
+      }
+
+      .knoww-pf-hero.is-flat {
+        --pf-glow: rgba(255, 255, 255, 0.06);
+      }
+
+      .knoww-pf-hero-top {
+        position: relative;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        border-radius: 8px;
-        padding: 12px;
       }
 
-      .knoww-portfolio-kicker,
-      .knoww-portfolio-stat-label,
-      .knoww-portfolio-row-meta {
-        color: rgba(255, 255, 255, 0.52);
-        font: 600 10px/1.4 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      .knoww-pf-id {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .knoww-pf-kicker {
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 600 16px/1.15 var(--pf-sans);
+        letter-spacing: -0.01em;
+        color: var(--pf-hi);
+      }
+
+      .knoww-pf-hero-value {
+        position: relative;
+        margin-top: 20px;
+      }
+
+      .knoww-pf-hero-label {
+        display: block;
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-hero-num {
+        display: block;
+        margin-top: 8px;
+        font: 500 34px/1 var(--pf-mono);
+        letter-spacing: -0.022em;
+        color: var(--pf-hi);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .knoww-pf-delta {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 11px;
+        font: 500 12px/1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .knoww-pf-delta.positive {
+        color: var(--pf-pos);
+      }
+
+      .knoww-pf-delta.negative {
+        color: var(--pf-neg);
+      }
+
+      .knoww-pf-delta.flat {
+        color: var(--pf-mid);
+      }
+
+      .knoww-pf-delta-arrow {
+        width: 9px;
+        height: 9px;
+        fill: currentColor;
+      }
+
+      .knoww-pf-hero.is-down .knoww-pf-delta-arrow {
+        transform: rotate(180deg);
+      }
+
+      .knoww-pf-delta-num {
+        color: inherit;
+      }
+
+      .knoww-pf-delta-label {
+        color: var(--pf-dim);
+        font-size: 9px;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
       }
 
-      .knoww-portfolio-address {
-        margin-top: 4px;
-        color: rgba(255, 255, 255, 0.92);
-        font: 600 15px/1.2 var(--kse-font-sans, system-ui, sans-serif);
+      .knoww-pf-strip {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin: 18px -16px 0;
+        border-top: 1px solid var(--pf-line);
       }
 
+      .knoww-pf-strip-cell {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+        padding: 13px 14px;
+        border-right: 1px solid var(--pf-line);
+      }
+
+      .knoww-pf-strip-cell:first-child {
+        padding-left: 16px;
+      }
+
+      .knoww-pf-strip-cell:last-child {
+        padding-right: 16px;
+        border-right: 0;
+      }
+
+      .knoww-pf-strip-label {
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-strip-cell strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 500 14px/1 var(--pf-mono);
+        color: var(--pf-hi);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---- Open button (also used in wallet/sign-in actions) ---- */
       .knoww-portfolio-open {
-        height: 30px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 6px;
-        background: rgba(255, 255, 255, 0.08);
-        color: rgba(255, 255, 255, 0.88);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.82);
         cursor: pointer;
-        padding: 0 10px;
-        font: 600 10px/1 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        padding: 0 12px;
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.14em;
         text-transform: uppercase;
+        white-space: nowrap;
+        transition: color 0.15s ease, background 0.15s ease,
+          border-color 0.15s ease;
+      }
+
+      .knoww-portfolio-open:hover {
+        border-color: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.09);
+        color: #fff;
+      }
+
+      .knoww-portfolio-open svg {
+        width: 11px;
+        height: 11px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
       .knoww-portfolio-open.primary {
-        border-color: rgba(54, 211, 153, 0.45);
-        background: rgba(54, 211, 153, 0.16);
-        color: rgba(236, 253, 245, 0.96);
+        border-color: rgba(52, 211, 153, 0.5);
+        background: rgba(52, 211, 153, 0.16);
+        color: #eafff5;
+      }
+
+      .knoww-portfolio-open.primary:hover {
+        border-color: rgba(52, 211, 153, 0.72);
+        background: rgba(52, 211, 153, 0.24);
+        color: #fff;
       }
 
       .knoww-portfolio-actions {
@@ -1566,6 +2014,7 @@ function render(): void {
         gap: 8px;
       }
 
+      /* ---- Wallets / sign-in ---- */
       .knoww-portfolio-wallets {
         display: grid;
         width: min(280px, 100%);
@@ -1577,26 +2026,27 @@ function render(): void {
         grid-template-columns: 28px minmax(0, 1fr);
         align-items: center;
         gap: 10px;
-        min-height: 42px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.06);
+        min-height: 44px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
         color: rgba(255, 255, 255, 0.9);
         cursor: pointer;
-        padding: 7px 10px;
+        padding: 7px 12px;
         text-align: left;
+        transition: border-color 0.15s ease, background 0.15s ease;
       }
 
       .knoww-portfolio-wallet:hover {
-        border-color: rgba(54, 211, 153, 0.45);
-        background: rgba(54, 211, 153, 0.12);
+        border-color: rgba(52, 211, 153, 0.45);
+        background: rgba(52, 211, 153, 0.1);
       }
 
       .knoww-portfolio-wallet img,
       .knoww-portfolio-wallet span {
         width: 28px;
         height: 28px;
-        border-radius: 6px;
+        border-radius: 8px;
       }
 
       .knoww-portfolio-wallet img {
@@ -1608,140 +2058,138 @@ function render(): void {
         place-items: center;
         background: rgba(255, 255, 255, 0.08);
         color: rgba(255, 255, 255, 0.8);
-        font-weight: 700;
+        font: 600 12px/1 var(--pf-mono);
       }
 
       .knoww-portfolio-wallet strong {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font: 700 12px/1.2 var(--kse-font-sans, system-ui, sans-serif);
+        font: 600 12px/1.2 var(--pf-sans);
       }
 
+      /* ---- Trading gate ---- */
       .knoww-portfolio-trading-gate {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
-        gap: 10px;
-        margin-top: 8px;
-        border: 1px solid rgba(54, 211, 153, 0.22);
-        border-radius: 8px;
-        background: rgba(54, 211, 153, 0.08);
-        padding: 10px 12px;
+        gap: 12px;
+        border: 1px solid rgba(52, 211, 153, 0.24);
+        border-radius: 14px;
+        background: linear-gradient(
+          180deg,
+          rgba(52, 211, 153, 0.11),
+          rgba(52, 211, 153, 0.03)
+        );
+        padding: 13px 14px;
       }
 
       .knoww-portfolio-trading-gate strong {
         display: block;
-        color: rgba(255, 255, 255, 0.94);
-        font: 700 12px/1.2 var(--kse-font-sans, system-ui, sans-serif);
+        color: rgba(255, 255, 255, 0.95);
+        font: 600 12px/1.2 var(--pf-sans);
       }
 
       .knoww-portfolio-trading-gate span {
         display: block;
-        margin-top: 3px;
-        color: rgba(255, 255, 255, 0.62);
-        font: 500 11px/1.35 var(--kse-font-sans, system-ui, sans-serif);
-      }
-
-      .knoww-portfolio-summary {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1px;
-        overflow: hidden;
-        border-radius: 8px;
-        margin-top: 8px;
-      }
-
-      .knoww-portfolio-stat {
-        min-width: 0;
-        padding: 10px;
-        background: rgba(0, 0, 0, 0.16);
-      }
-
-      .knoww-portfolio-stat.wide {
-        grid-column: span 2;
-      }
-
-      .knoww-portfolio-stat strong {
-        display: block;
         margin-top: 4px;
-        color: rgba(255, 255, 255, 0.94);
-        font: 700 18px/1.15 var(--kse-font-sans, system-ui, sans-serif);
+        color: var(--pf-mid);
+        font: 500 11px/1.4 var(--pf-sans);
       }
 
-      .knoww-portfolio-section {
-        margin-top: 12px;
-      }
-
+      /* ---- Table (tabs + panels) ---- */
       .knoww-portfolio-table {
-        overflow: hidden;
-        margin-top: 12px;
-        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
 
       .knoww-portfolio-table-tabs {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(0, 0, 0, 0.12);
+        gap: 2px;
+        padding: 3px;
+        border: 1px solid var(--pf-line);
+        border-radius: 11px;
+        background: rgba(0, 0, 0, 0.22);
       }
 
       .knoww-portfolio-table-tab {
-        display: grid;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
         min-width: 0;
-        gap: 4px;
         border: 0;
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
         background: transparent;
-        color: rgba(255, 255, 255, 0.52);
+        color: var(--pf-mid);
         cursor: pointer;
         padding: 8px 6px;
-        text-align: left;
-      }
-
-      .knoww-portfolio-table-tab:last-child {
-        border-right: 0;
+        transition: color 0.15s ease, background 0.15s ease;
       }
 
       .knoww-portfolio-table-tab span {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font: 700 10px/1 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
       .knoww-portfolio-table-tab strong {
-        color: rgba(255, 255, 255, 0.72);
-        font: 700 11px/1 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        flex: none;
+        min-width: 18px;
+        padding: 2px 5px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--pf-mid);
+        font: 500 10px/1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+      }
+
+      .knoww-portfolio-table-tab:hover {
+        color: var(--pf-hi);
       }
 
       .knoww-portfolio-table-tab.is-active {
         background: rgba(255, 255, 255, 0.08);
-        color: rgba(255, 255, 255, 0.94);
+        color: var(--pf-hi);
       }
 
       .knoww-portfolio-table-tab.is-active strong {
-        color: #36d399;
+        background: rgba(52, 211, 153, 0.16);
+        color: var(--pf-pos);
+      }
+
+      .knoww-portfolio-table-panel {
+        overflow: hidden;
+        border: 1px solid var(--pf-line);
+        border-radius: 14px;
+        background: var(--pf-surface);
       }
 
       .knoww-portfolio-table-panel[hidden] {
         display: none;
       }
 
+      /* ---- History pager ---- */
       .knoww-portfolio-history-controls {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        min-height: 36px;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 6px 8px;
+        min-height: 40px;
+        border-top: 1px solid var(--pf-line);
+        padding: 8px 12px;
       }
 
       .knoww-portfolio-history-controls span {
-        color: rgba(255, 255, 255, 0.52);
-        font: 700 10px/1 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        color: var(--pf-dim);
+        font: 500 9px/1 var(--pf-mono);
+        letter-spacing: 0.12em;
         text-transform: uppercase;
       }
 
@@ -1753,18 +2201,24 @@ function render(): void {
       .knoww-portfolio-history-button {
         display: grid;
         place-items: center;
-        width: 26px;
-        height: 24px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 6px;
-        background: rgba(255, 255, 255, 0.06);
+        width: 28px;
+        height: 26px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
         color: rgba(255, 255, 255, 0.82);
         cursor: pointer;
+        transition: background 0.13s ease, border-color 0.13s ease;
+      }
+
+      .knoww-portfolio-history-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.28);
       }
 
       .knoww-portfolio-history-button:disabled {
         cursor: default;
-        opacity: 0.38;
+        opacity: 0.34;
       }
 
       .knoww-portfolio-history-button svg {
@@ -1777,37 +2231,119 @@ function render(): void {
         stroke-width: 2;
       }
 
+      /* ---- Rows ---- */
       .knoww-portfolio-row {
         display: grid;
-        grid-template-columns: 34px minmax(0, 1fr) auto;
-        gap: 10px;
+        grid-template-columns: 32px minmax(0, 1fr) auto;
+        gap: 11px;
         align-items: center;
-        border-radius: 8px;
-        margin-top: 6px;
-        padding: 9px;
+        border-bottom: 1px solid var(--pf-line);
+        padding: 11px 12px;
+        color: inherit;
+        text-decoration: none;
+        transition: background 0.12s ease;
       }
 
-      .knoww-portfolio-table-panel .knoww-portfolio-row {
-        border-width: 0 0 1px;
-        border-radius: 0;
-        margin-top: 0;
-        background: transparent;
-      }
-
-      .knoww-portfolio-table-panel .knoww-portfolio-row:last-child {
+      .knoww-portfolio-row:last-child {
         border-bottom: 0;
+      }
+
+      /* Rows that open the market on knoww.app are anchors — only these get the
+         pointer + hover affordance so non-linked rows don't look clickable.
+         Open-order rows wrap their content in an inner .order-link instead so
+         the Cancel button can sit outside the anchor; :has lets the whole row
+         still highlight when that inner link is hovered/focused. */
+      .knoww-portfolio-row.is-link,
+      .knoww-portfolio-order-link.is-link {
+        cursor: pointer;
+      }
+
+      .knoww-portfolio-row.is-link:hover,
+      .knoww-portfolio-row:has(.knoww-portfolio-order-link.is-link:hover) {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .knoww-portfolio-row.is-link:focus-visible,
+      .knoww-portfolio-order-link.is-link:focus-visible {
+        outline: none;
+        background: rgba(255, 255, 255, 0.05);
+        box-shadow: inset 0 0 0 1px var(--pf-line-2);
       }
 
       .knoww-portfolio-row.compact {
         grid-template-columns: minmax(0, 1fr) auto;
       }
 
-      .knoww-portfolio-row-icon {
-        width: 34px;
-        height: 34px;
-        overflow: hidden;
-        border-radius: 6px;
+      /* Open-order row: [market link][cancel]. The link reuses the compact
+         two-column layout internally. */
+      .knoww-portfolio-order {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+      .knoww-portfolio-order-link {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 11px;
+        align-items: center;
+        min-width: 0;
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .knoww-portfolio-cancel {
+        flex: none;
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        /* Fixed width so swapping the label (Cancel → Confirm → … → Failed)
+           never changes the button size or shifts the row. */
+        min-width: 70px;
+        height: 24px;
+        padding: 0 10px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--pf-mid);
+        cursor: pointer;
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        transition: color 0.14s ease, background 0.14s ease,
+          border-color 0.14s ease;
+      }
+
+      .knoww-portfolio-cancel:hover {
+        color: var(--pf-hi);
+        border-color: rgba(255, 255, 255, 0.3);
         background: rgba(255, 255, 255, 0.08);
+      }
+
+      .knoww-portfolio-cancel.is-armed {
+        color: #fff;
+        border-color: rgba(251, 113, 133, 0.62);
+        background: rgba(251, 113, 133, 0.22);
+      }
+
+      .knoww-portfolio-cancel.is-busy {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .knoww-portfolio-cancel.is-error {
+        color: var(--pf-neg);
+        border-color: rgba(251, 113, 133, 0.5);
+        background: rgba(251, 113, 133, 0.12);
+      }
+
+      .knoww-portfolio-row-icon {
+        width: 32px;
+        height: 32px;
+        overflow: hidden;
+        border-radius: 9px;
+        border: 1px solid var(--pf-line);
+        background: rgba(255, 255, 255, 0.06);
       }
 
       .knoww-portfolio-row-icon img {
@@ -1821,8 +2357,9 @@ function render(): void {
         place-items: center;
         width: 100%;
         height: 100%;
-        color: rgba(255, 255, 255, 0.8);
-        font-weight: 700;
+        color: var(--pf-mid);
+        font: 600 12px/1 var(--pf-mono);
+        text-transform: uppercase;
       }
 
       .knoww-portfolio-row-main {
@@ -1831,39 +2368,133 @@ function render(): void {
 
       .knoww-portfolio-row-title {
         overflow: hidden;
-        color: rgba(255, 255, 255, 0.9);
+        color: rgba(255, 255, 255, 0.92);
         display: -webkit-box;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
-        font: 600 12px/1.25 var(--kse-font-sans, system-ui, sans-serif);
+        font: 600 12.5px/1.3 var(--pf-sans);
+      }
+
+      .knoww-portfolio-row-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-top: 4px;
+        color: var(--pf-dim);
+        font: 500 9.5px/1.2 var(--pf-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
 
       .knoww-portfolio-row-value {
         display: grid;
         gap: 3px;
         justify-items: end;
-        min-width: 76px;
+        min-width: 72px;
         text-align: right;
       }
 
       .knoww-portfolio-row-value strong {
-        color: rgba(255, 255, 255, 0.94);
-        font: 700 12px/1.2 var(--kse-font-sans, system-ui, sans-serif);
+        color: var(--pf-hi);
+        font: 500 12.5px/1.1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
       }
 
       .knoww-portfolio-row-value span {
-        font: 600 10px/1.2 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        color: var(--pf-mid);
+        font: 500 10px/1.1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
       }
 
+      /* ---- Empty / loading ---- */
       .knoww-portfolio-empty,
       .knoww-portfolio-loading,
       .knoww-portfolio-signed-out {
         display: grid;
-        gap: 8px;
+        gap: 7px;
         place-items: center;
-        min-height: 150px;
-        padding: 18px;
+        min-height: 168px;
+        padding: 30px 20px;
         text-align: center;
+      }
+
+      .knoww-portfolio-loading {
+        color: var(--pf-mid);
+        font: 500 11px/1.4 var(--pf-mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .knoww-portfolio-loading::before {
+        content: "";
+        width: 22px;
+        height: 22px;
+        margin-bottom: 4px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.12);
+        border-top-color: var(--pf-pos);
+        animation: knoww-pf-spin 0.8s linear infinite;
+      }
+
+      @keyframes knoww-pf-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .knoww-portfolio-loading::before {
+          animation: none;
+        }
+      }
+
+      .knoww-pf-empty-mark {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        margin-bottom: 4px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 13px;
+        background: var(--pf-surface-2);
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-empty-mark svg {
+        width: 19px;
+        height: 19px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .knoww-pf-empty-title {
+        margin: 0;
+        font: 500 17px/1.2 var(--pf-display);
+        font-style: italic;
+        letter-spacing: 0.01em;
+        color: rgba(255, 255, 255, 0.84);
+      }
+
+      .knoww-pf-empty-sub {
+        max-width: 230px;
+        color: var(--pf-dim);
+        font: 500 10px/1.5 var(--pf-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .knoww-pf-empty-sub.is-error {
+        color: var(--pf-neg);
+        letter-spacing: 0.01em;
+        text-transform: none;
+      }
+
+      .knoww-portfolio-signed-out .knoww-portfolio-wallets,
+      .knoww-portfolio-signed-out .knoww-portfolio-actions {
+        margin-top: 8px;
       }
 
       .positive {
@@ -2058,6 +2689,16 @@ function render(): void {
     .querySelector<HTMLButtonElement>(".knoww-stack-close")
     ?.addEventListener("click", () => void closeSidePanel());
   root.addEventListener("click", (event) => {
+    const cancelButton = (
+      event.target as Element | null
+    )?.closest<HTMLButtonElement>("[data-cancel-order]");
+    if (cancelButton) {
+      handleCancelOrderClick(cancelButton);
+      return;
+    }
+    // Any other click in the panel dismisses a pending cancel confirmation.
+    disarmCancelOrder();
+
     const historyPrev = (event.target as Element | null)?.closest(
       "[data-portfolio-history-prev]"
     );

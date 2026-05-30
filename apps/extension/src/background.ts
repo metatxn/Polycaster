@@ -15,6 +15,7 @@ import {
   queueAnalyticsEvent,
 } from "./background/analytics";
 import {
+  cancelClobOrder,
   fetchPortfolioOpenOrders,
   type PortfolioClobOpenOrder,
 } from "./background/clob-open-orders";
@@ -797,6 +798,7 @@ chrome.runtime.onMessage.addListener(
       trendingLimit?: number;
       visible?: boolean;
       address?: string;
+      orderId?: string;
       surface?: "sidebar" | "floating";
     };
 
@@ -986,6 +988,34 @@ chrome.runtime.onMessage.addListener(
           ok: true,
           data: { orders, count: orders.length },
         } as BackgroundResponse);
+      })().catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        } as BackgroundResponse);
+      });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_CANCEL_PORTFOLIO_OPEN_ORDER" &&
+      typeof msg.address === "string" &&
+      typeof msg.orderId === "string"
+    ) {
+      const address = msg.address;
+      const orderId = msg.orderId;
+      void (async () => {
+        const credentials = await getCachedTradingCredentials(address);
+        if (!credentials) {
+          sendResponse({
+            ok: false,
+            error: "Trading is not enabled for this wallet.",
+          } as BackgroundResponse);
+          return;
+        }
+
+        await cancelClobOrder({ address, credentials, orderId });
+        sendResponse({ ok: true, data: { orderId } } as BackgroundResponse);
       })().catch((error) => {
         sendResponse({
           ok: false,

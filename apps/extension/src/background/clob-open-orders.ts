@@ -140,3 +140,46 @@ export async function fetchClobOpenOrders(input: {
 }
 
 export const fetchPortfolioOpenOrders = fetchClobOpenOrders;
+
+// Cancel a single resting order via the CLOB `DELETE /order` endpoint. The L2
+// HMAC signature covers the method, path and JSON body — the same scheme the
+// official clob-client uses for cancelOrder. Throws when the order could not be
+// cancelled (the API reports failures in `not_canceled`).
+export async function cancelClobOrder(input: {
+  address: string;
+  credentials: ClobApiCredentials;
+  orderId: string;
+}): Promise<void> {
+  const endpoint = "/order";
+  const body = JSON.stringify({ orderID: input.orderId });
+  const headers = await buildClobHmacHeaders(
+    input.address,
+    input.credentials,
+    "DELETE",
+    endpoint,
+    body
+  );
+  const res = await fetch(`${CLOB_HOST}${endpoint}`, {
+    method: "DELETE",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body,
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to cancel order: ${res.status}`);
+  }
+
+  const payload = (await res.json()) as {
+    canceled?: unknown;
+    not_canceled?: unknown;
+    error?: unknown;
+  };
+  if (payload.error) {
+    throw new Error(String(payload.error));
+  }
+  if (payload.not_canceled && typeof payload.not_canceled === "object") {
+    const reason = (payload.not_canceled as Record<string, unknown>)[
+      input.orderId
+    ];
+    if (reason) throw new Error(String(reason));
+  }
+}

@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Knoww portfolio — design preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Static design preview for the side-panel Portfolio surface.
+      Markup mirrors the strings emitted by the render* functions in
+      src/sidepanel.ts; the <style> block below is copied verbatim from the
+      same file's injected stylesheet, so this matches the shipped extension.
+      Regenerate by re-running the preview generator after CSS changes.
+      The @font-face rules point KnowwEditorial/KnowwMono at the byte-identical
+      @fontsource bytes on jsDelivr so the preview works under file://.
+    -->
+    <style>
+      @font-face{font-family:"KnowwEditorial";font-style:italic;font-weight:500;font-display:swap;src:url("https://cdn.jsdelivr.net/npm/@fontsource/fraunces@5.2.9/files/fraunces-latin-500-italic.woff2") format("woff2");}
+      @font-face{font-family:"KnowwMono";font-style:normal;font-weight:500;font-display:swap;src:url("https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.2.8/files/jetbrains-mono-latin-500-normal.woff2") format("woff2");}
+      body{margin:0;background:#0a0a0c;padding:40px 32px 80px;font-family:system-ui;}
+      h1{font-family:"KnowwEditorial",Georgia,serif;font-style:italic;font-weight:500;color:rgba(255,255,255,0.9);font-size:26px;letter-spacing:0.01em;margin:0 0 4px;}
+      .sub{font-family:"KnowwMono",monospace;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:0 0 32px;}
+      .grid{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;}
+      .col{margin:0;display:flex;flex-direction:column;}
+      .lbl{font-family:"KnowwMono",monospace;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:0 0 12px 4px;}
+      .pv-panel{width:380px;border:1px solid rgba(255,255,255,0.08);border-radius:14px;overflow:hidden;background:#121212;display:flex;flex-direction:column;}
+      /* The portfolio area is `height: calc(100vh - 96px)` in production (it
+         fills the panel viewport); in the gallery let each card size to its
+         own content instead. */
+      .pv-panel .knoww-sidepanel-portfolio{height:auto;}
+    </style>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      /* The production stylesheet's global resets (html/body/#root and the
+         #knoww-notification-stack sizing/!important overrides) are omitted
+         here: they assume the panel IS the whole page, which would force each
+         preview card to 100vh and strip its border. Only the portfolio-surface
+         rules below are carried over, with the font-var declaration re-keyed
+         from the stack id to the .knoww-sidepanel-stack class so each card can
+         use it without duplicating an id. */
+      .knoww-sidepanel-stack {
+        /* Wire the bundled @fontsource faces (declared in knoww-inline.css)
+           into the token names the panel references, so numbers render in
+           JetBrains Mono and editorial accents in Fraunces italic instead of
+           silently falling back to system fonts. */
+        --kse-font-mono: "KnowwMono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        --kse-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --kse-font-display: "KnowwEditorial", Georgia, "Times New Roman", serif;
+      }
+
+      .knoww-sidepanel-tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        padding: 10px 10px 6px;
+      }
+
+      .knoww-sidepanel-tab {
+        height: 32px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.5);
+        cursor: pointer;
+        font: 600 10px/1 var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+      }
+
+      .knoww-sidepanel-tab:hover {
+        color: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .knoww-sidepanel-tab.is-active {
+        border-color: rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.09);
+        color: rgba(255, 255, 255, 0.95);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      }
+
+      .knoww-sidepanel-panel[hidden],
+      .knoww-sidepanel-portfolio-active .knoww-search-container {
+        display: none !important;
+      }
+
+      .knoww-sidepanel-portfolio {
+        --pf-mono: var(--kse-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        --pf-sans: var(--kse-font-sans, system-ui, sans-serif);
+        --pf-display: var(--kse-font-display, Georgia, "Times New Roman", serif);
+        --pf-pos: #34d399;
+        --pf-neg: #fb7185;
+        --pf-hi: rgba(255, 255, 255, 0.96);
+        --pf-mid: rgba(255, 255, 255, 0.58);
+        --pf-dim: rgba(255, 255, 255, 0.4);
+        --pf-line: rgba(255, 255, 255, 0.07);
+        --pf-line-2: rgba(255, 255, 255, 0.13);
+        --pf-surface: rgba(255, 255, 255, 0.022);
+        --pf-surface-2: rgba(255, 255, 255, 0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        height: calc(100vh - 96px);
+        overflow: auto;
+        padding: 12px 12px 24px;
+      }
+
+      /* ---- Hero ---- */
+      .knoww-pf-hero {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 16px;
+        padding: 15px 16px 0;
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.045),
+          rgba(255, 255, 255, 0.012)
+        );
+      }
+
+      .knoww-pf-hero::before {
+        content: "";
+        position: absolute;
+        inset: -50% -10% auto -12%;
+        height: 240px;
+        background: radial-gradient(
+          56% 100% at 26% 0%,
+          var(--pf-glow, transparent),
+          transparent 70%
+        );
+        pointer-events: none;
+      }
+
+      .knoww-pf-hero.is-up {
+        --pf-glow: rgba(52, 211, 153, 0.26);
+      }
+
+      .knoww-pf-hero.is-down {
+        --pf-glow: rgba(251, 113, 133, 0.24);
+      }
+
+      .knoww-pf-hero.is-flat {
+        --pf-glow: rgba(255, 255, 255, 0.06);
+      }
+
+      .knoww-pf-hero-top {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .knoww-pf-id {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .knoww-pf-kicker {
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 600 16px/1.15 var(--pf-sans);
+        letter-spacing: -0.01em;
+        color: var(--pf-hi);
+      }
+
+      .knoww-pf-hero-value {
+        position: relative;
+        margin-top: 20px;
+      }
+
+      .knoww-pf-hero-label {
+        display: block;
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-hero-num {
+        display: block;
+        margin-top: 8px;
+        font: 500 34px/1 var(--pf-mono);
+        letter-spacing: -0.022em;
+        color: var(--pf-hi);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .knoww-pf-delta {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 11px;
+        font: 500 12px/1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .knoww-pf-delta.positive {
+        color: var(--pf-pos);
+      }
+
+      .knoww-pf-delta.negative {
+        color: var(--pf-neg);
+      }
+
+      .knoww-pf-delta.flat {
+        color: var(--pf-mid);
+      }
+
+      .knoww-pf-delta-arrow {
+        width: 9px;
+        height: 9px;
+        fill: currentColor;
+      }
+
+      .knoww-pf-hero.is-down .knoww-pf-delta-arrow {
+        transform: rotate(180deg);
+      }
+
+      .knoww-pf-delta-num {
+        color: inherit;
+      }
+
+      .knoww-pf-delta-label {
+        color: var(--pf-dim);
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .knoww-pf-strip {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin: 18px -16px 0;
+        border-top: 1px solid var(--pf-line);
+      }
+
+      .knoww-pf-strip-cell {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+        padding: 13px 14px;
+        border-right: 1px solid var(--pf-line);
+      }
+
+      .knoww-pf-strip-cell:first-child {
+        padding-left: 16px;
+      }
+
+      .knoww-pf-strip-cell:last-child {
+        padding-right: 16px;
+        border-right: 0;
+      }
+
+      .knoww-pf-strip-label {
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-strip-cell strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 500 14px/1 var(--pf-mono);
+        color: var(--pf-hi);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---- Open button (also used in wallet/sign-in actions) ---- */
+      .knoww-portfolio-open {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.82);
+        cursor: pointer;
+        padding: 0 12px;
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        transition: color 0.15s ease, background 0.15s ease,
+          border-color 0.15s ease;
+      }
+
+      .knoww-portfolio-open:hover {
+        border-color: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.09);
+        color: #fff;
+      }
+
+      .knoww-portfolio-open svg {
+        width: 11px;
+        height: 11px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .knoww-portfolio-open.primary {
+        border-color: rgba(52, 211, 153, 0.5);
+        background: rgba(52, 211, 153, 0.16);
+        color: #eafff5;
+      }
+
+      .knoww-portfolio-open.primary:hover {
+        border-color: rgba(52, 211, 153, 0.72);
+        background: rgba(52, 211, 153, 0.24);
+        color: #fff;
+      }
+
+      .knoww-portfolio-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      /* ---- Wallets / sign-in ---- */
+      .knoww-portfolio-wallets {
+        display: grid;
+        width: min(280px, 100%);
+        gap: 8px;
+      }
+
+      .knoww-portfolio-wallet {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.9);
+        cursor: pointer;
+        padding: 7px 12px;
+        text-align: left;
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+
+      .knoww-portfolio-wallet:hover {
+        border-color: rgba(52, 211, 153, 0.45);
+        background: rgba(52, 211, 153, 0.1);
+      }
+
+      .knoww-portfolio-wallet img,
+      .knoww-portfolio-wallet span {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+      }
+
+      .knoww-portfolio-wallet img {
+        object-fit: cover;
+      }
+
+      .knoww-portfolio-wallet span {
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.8);
+        font: 600 12px/1 var(--pf-mono);
+      }
+
+      .knoww-portfolio-wallet strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 600 12px/1.2 var(--pf-sans);
+      }
+
+      /* ---- Trading gate ---- */
+      .knoww-portfolio-trading-gate {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid rgba(52, 211, 153, 0.24);
+        border-radius: 14px;
+        background: linear-gradient(
+          180deg,
+          rgba(52, 211, 153, 0.11),
+          rgba(52, 211, 153, 0.03)
+        );
+        padding: 13px 14px;
+      }
+
+      .knoww-portfolio-trading-gate strong {
+        display: block;
+        color: rgba(255, 255, 255, 0.95);
+        font: 600 12px/1.2 var(--pf-sans);
+      }
+
+      .knoww-portfolio-trading-gate span {
+        display: block;
+        margin-top: 4px;
+        color: var(--pf-mid);
+        font: 500 11px/1.4 var(--pf-sans);
+      }
+
+      /* ---- Table (tabs + panels) ---- */
+      .knoww-portfolio-table {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .knoww-portfolio-table-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 2px;
+        padding: 3px;
+        border: 1px solid var(--pf-line);
+        border-radius: 11px;
+        background: rgba(0, 0, 0, 0.22);
+      }
+
+      .knoww-portfolio-table-tab {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        min-width: 0;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--pf-mid);
+        cursor: pointer;
+        padding: 8px 6px;
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+
+      .knoww-portfolio-table-tab span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .knoww-portfolio-table-tab strong {
+        flex: none;
+        min-width: 18px;
+        padding: 2px 5px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--pf-mid);
+        font: 500 10px/1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+      }
+
+      .knoww-portfolio-table-tab:hover {
+        color: var(--pf-hi);
+      }
+
+      .knoww-portfolio-table-tab.is-active {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--pf-hi);
+      }
+
+      .knoww-portfolio-table-tab.is-active strong {
+        background: rgba(52, 211, 153, 0.16);
+        color: var(--pf-pos);
+      }
+
+      .knoww-portfolio-table-panel {
+        overflow: hidden;
+        border: 1px solid var(--pf-line);
+        border-radius: 14px;
+        background: var(--pf-surface);
+      }
+
+      .knoww-portfolio-table-panel[hidden] {
+        display: none;
+      }
+
+      /* ---- History pager ---- */
+      .knoww-portfolio-history-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 40px;
+        border-top: 1px solid var(--pf-line);
+        padding: 8px 12px;
+      }
+
+      .knoww-portfolio-history-controls span {
+        color: var(--pf-dim);
+        font: 500 9px/1 var(--pf-mono);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .knoww-portfolio-history-controls div {
+        display: flex;
+        gap: 6px;
+      }
+
+      .knoww-portfolio-history-button {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 26px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.82);
+        cursor: pointer;
+        transition: background 0.13s ease, border-color 0.13s ease;
+      }
+
+      .knoww-portfolio-history-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.28);
+      }
+
+      .knoww-portfolio-history-button:disabled {
+        cursor: default;
+        opacity: 0.34;
+      }
+
+      .knoww-portfolio-history-button svg {
+        width: 14px;
+        height: 14px;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2;
+      }
+
+      /* ---- Rows ---- */
+      .knoww-portfolio-row {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr) auto;
+        gap: 11px;
+        align-items: center;
+        border-bottom: 1px solid var(--pf-line);
+        padding: 11px 12px;
+        transition: background 0.12s ease;
+      }
+
+      .knoww-portfolio-row:last-child {
+        border-bottom: 0;
+      }
+
+      .knoww-portfolio-row:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .knoww-portfolio-row.compact {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+      .knoww-portfolio-row-icon {
+        width: 32px;
+        height: 32px;
+        overflow: hidden;
+        border-radius: 9px;
+        border: 1px solid var(--pf-line);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .knoww-portfolio-row-icon img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .knoww-portfolio-row-icon span {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        color: var(--pf-mid);
+        font: 600 12px/1 var(--pf-mono);
+        text-transform: uppercase;
+      }
+
+      .knoww-portfolio-row-main {
+        min-width: 0;
+      }
+
+      .knoww-portfolio-row-title {
+        overflow: hidden;
+        color: rgba(255, 255, 255, 0.92);
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        font: 600 12.5px/1.3 var(--pf-sans);
+      }
+
+      .knoww-portfolio-row-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-top: 4px;
+        color: var(--pf-dim);
+        font: 500 9.5px/1.2 var(--pf-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .knoww-portfolio-row-value {
+        display: grid;
+        gap: 3px;
+        justify-items: end;
+        min-width: 72px;
+        text-align: right;
+      }
+
+      .knoww-portfolio-row-value strong {
+        color: var(--pf-hi);
+        font: 500 12.5px/1.1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .knoww-portfolio-row-value span {
+        color: var(--pf-mid);
+        font: 500 10px/1.1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---- Empty / loading ---- */
+      .knoww-portfolio-empty,
+      .knoww-portfolio-loading,
+      .knoww-portfolio-signed-out {
+        display: grid;
+        gap: 7px;
+        place-items: center;
+        min-height: 168px;
+        padding: 30px 20px;
+        text-align: center;
+      }
+
+      .knoww-portfolio-loading {
+        color: var(--pf-mid);
+        font: 500 11px/1.4 var(--pf-mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .knoww-portfolio-loading::before {
+        content: "";
+        width: 22px;
+        height: 22px;
+        margin-bottom: 4px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.12);
+        border-top-color: var(--pf-pos);
+        animation: knoww-pf-spin 0.8s linear infinite;
+      }
+
+      @keyframes knoww-pf-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .knoww-portfolio-loading::before {
+          animation: none;
+        }
+      }
+
+      .knoww-pf-empty-mark {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        margin-bottom: 4px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 13px;
+        background: var(--pf-surface-2);
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-empty-mark svg {
+        width: 19px;
+        height: 19px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .knoww-pf-empty-title {
+        margin: 0;
+        font: 500 17px/1.2 var(--pf-display);
+        font-style: italic;
+        letter-spacing: 0.01em;
+        color: rgba(255, 255, 255, 0.84);
+      }
+
+      .knoww-pf-empty-sub {
+        max-width: 230px;
+        color: var(--pf-dim);
+        font: 500 10px/1.5 var(--pf-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .knoww-pf-empty-sub.is-error {
+        color: var(--pf-neg);
+        letter-spacing: 0.01em;
+        text-transform: none;
+      }
+
+      .knoww-portfolio-signed-out .knoww-portfolio-wallets,
+      .knoww-portfolio-signed-out .knoww-portfolio-actions {
+        margin-top: 8px;
+      }
+
+      .positive {
+        color: #36d399 !important;
+      }
+
+      .negative {
+        color: #fb7185 !important;
+      }
+    </style>
+
+  </head>
+  <body>
+    <h1>Portfolio surface</h1>
+    <p class="sub">side-panel · design preview · all states</p>
+    <div class="grid">
+      
+  <figure class="col">
+    <figcaption class="lbl">Positions</figcaption>
+    <div class="knoww-notification-stack knoww-sidepanel-stack pv-panel">
+      <div class="knoww-sidepanel-tabs" role="tablist">
+        <button type="button" class="knoww-sidepanel-tab">Markets</button>
+        <button type="button" class="knoww-sidepanel-tab is-active">Portfolio</button>
+      </div>
+      <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio">
+    
+  <div class="knoww-pf-hero is-up">
+    <div class="knoww-pf-hero-top">
+      <div class="knoww-pf-id"><span class="knoww-pf-kicker">Portfolio</span><span class="knoww-pf-name">satoshi.eth</span></div>
+      <button type="button" class="knoww-portfolio-open"><span>Open</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"></path></svg></button>
+    </div>
+    <div class="knoww-pf-hero-value">
+      <span class="knoww-pf-hero-label">Position value</span>
+      <strong class="knoww-pf-hero-num">$1,240.55</strong>
+      <div class="knoww-pf-delta positive"><svg class="knoww-pf-delta-arrow" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 11 10.5H1z"></path></svg><span class="knoww-pf-delta-num">$312.40</span><span class="knoww-pf-delta-label">All-time P/L</span></div>
+    </div>
+    <div class="knoww-pf-strip">
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Positions</span><strong>6</strong></div>
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Volume</span><strong>$14,204</strong></div>
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Cash</span><strong>$48.20</strong></div>
+    </div>
+  </div>
+    <div class="knoww-portfolio-table">
+      
+  <div class="knoww-portfolio-table-tabs" role="tablist">
+    <button type="button" class="knoww-portfolio-table-tab is-active"><span>Positions</span><strong>06</strong></button>
+    <button type="button" class="knoww-portfolio-table-tab "><span>Open orders</span><strong>02</strong></button>
+    <button type="button" class="knoww-portfolio-table-tab "><span>History</span><strong>41</strong></button>
+  </div>
+      <div class="knoww-portfolio-table-panel">
+        
+  <div class="knoww-portfolio-row">
+    <div class="knoww-portfolio-row-icon"><span>Y</span></div>
+    <div class="knoww-portfolio-row-main"><div class="knoww-portfolio-row-title">Will Bitcoin close above $100k on Dec 31, 2026?</div><div class="knoww-portfolio-row-meta">Yes · 420 shares</div></div>
+    <div class="knoww-portfolio-row-value"><strong>$612.40</strong><span class="positive">$182.30 (42.4%)</span></div>
+  </div>
+        
+  <div class="knoww-portfolio-row">
+    <div class="knoww-portfolio-row-icon"><span>N</span></div>
+    <div class="knoww-portfolio-row-main"><div class="knoww-portfolio-row-title">Fed cuts rates at the June 2026 FOMC meeting</div><div class="knoww-portfolio-row-meta">No · 310 shares</div></div>
+    <div class="knoww-portfolio-row-value"><strong>$248.00</strong><span class="negative">-$26.10 (-9.5%)</span></div>
+  </div>
+        
+  <div class="knoww-portfolio-row">
+    <div class="knoww-portfolio-row-icon"><span>Y</span></div>
+    <div class="knoww-portfolio-row-main"><div class="knoww-portfolio-row-title">Will an AI lab reach a $1T valuation before 2027?</div><div class="knoww-portfolio-row-meta">Yes · 180 shares</div></div>
+    <div class="knoww-portfolio-row-value"><strong>$380.15</strong><span class="positive">$156.20 (69.7%)</span></div>
+  </div>
+      </div>
+    </div></div>
+    </div>
+  </figure>
+
+  <figure class="col">
+    <figcaption class="lbl">History</figcaption>
+    <div class="knoww-notification-stack knoww-sidepanel-stack pv-panel">
+      <div class="knoww-sidepanel-tabs" role="tablist">
+        <button type="button" class="knoww-sidepanel-tab">Markets</button>
+        <button type="button" class="knoww-sidepanel-tab is-active">Portfolio</button>
+      </div>
+      <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio">
+    
+  <div class="knoww-pf-hero is-up">
+    <div class="knoww-pf-hero-top">
+      <div class="knoww-pf-id"><span class="knoww-pf-kicker">Portfolio</span><span class="knoww-pf-name">satoshi.eth</span></div>
+      <button type="button" class="knoww-portfolio-open"><span>Open</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"></path></svg></button>
+    </div>
+    <div class="knoww-pf-hero-value">
+      <span class="knoww-pf-hero-label">Position value</span>
+      <strong class="knoww-pf-hero-num">$1,240.55</strong>
+      <div class="knoww-pf-delta positive"><svg class="knoww-pf-delta-arrow" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 11 10.5H1z"></path></svg><span class="knoww-pf-delta-num">$312.40</span><span class="knoww-pf-delta-label">All-time P/L</span></div>
+    </div>
+    <div class="knoww-pf-strip">
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Positions</span><strong>6</strong></div>
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Volume</span><strong>$14,204</strong></div>
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Cash</span><strong>$48.20</strong></div>
+    </div>
+  </div>
+    <div class="knoww-portfolio-table">
+      
+  <div class="knoww-portfolio-table-tabs" role="tablist">
+    <button type="button" class="knoww-portfolio-table-tab "><span>Positions</span><strong>06</strong></button>
+    <button type="button" class="knoww-portfolio-table-tab "><span>Open orders</span><strong>02</strong></button>
+    <button type="button" class="knoww-portfolio-table-tab is-active"><span>History</span><strong>41</strong></button>
+  </div>
+      <div class="knoww-portfolio-table-panel">
+        
+  <div class="knoww-portfolio-row compact">
+    <div class="knoww-portfolio-row-main"><div class="knoww-portfolio-row-title">Will Bitcoin close above $100k on Dec 31, 2026?</div><div class="knoww-portfolio-row-meta">BUY Yes · May 24</div></div>
+    <div class="knoww-portfolio-row-value"><strong>$210.00</strong><span class="positive">420 @ 50¢</span></div>
+  </div>
+        
+  <div class="knoww-portfolio-row compact">
+    <div class="knoww-portfolio-row-main"><div class="knoww-portfolio-row-title">Fed cuts rates at the June 2026 FOMC meeting</div><div class="knoww-portfolio-row-meta">SELL No · May 22</div></div>
+    <div class="knoww-portfolio-row-value"><strong>$96.20</strong><span class="negative">155 @ 62¢</span></div>
+  </div>
+        
+  <div class="knoww-portfolio-row compact">
+    <div class="knoww-portfolio-row-main"><div class="knoww-portfolio-row-title">Will an AI lab reach a $1T valuation before 2027?</div><div class="knoww-portfolio-row-meta">BUY Yes · May 19</div></div>
+    <div class="knoww-portfolio-row-value"><strong>$144.00</strong><span class="positive">180 @ 80¢</span></div>
+  </div>
+        
+  <div class="knoww-portfolio-row compact">
+    <div class="knoww-portfolio-row-main"><div class="knoww-portfolio-row-title">US Presidential election popular vote margin</div><div class="knoww-portfolio-row-meta">REDEEM Yes · May 12</div></div>
+    <div class="knoww-portfolio-row-value"><strong>$512.00</strong><span class="positive">512 @ 100¢</span></div>
+  </div>
+        <div class="knoww-portfolio-history-controls">
+          <span>1-25 of 41</span>
+          <div>
+            <button type="button" class="knoww-portfolio-history-button" aria-label="Previous history page" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+            <button type="button" class="knoww-portfolio-history-button" aria-label="Next history page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    </div>
+  </figure>
+
+  <figure class="col">
+    <figcaption class="lbl">Empty · trading not enabled</figcaption>
+    <div class="knoww-notification-stack knoww-sidepanel-stack pv-panel">
+      <div class="knoww-sidepanel-tabs" role="tablist">
+        <button type="button" class="knoww-sidepanel-tab">Markets</button>
+        <button type="button" class="knoww-sidepanel-tab is-active">Portfolio</button>
+      </div>
+      <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio">
+    
+  <div class="knoww-pf-hero is-down">
+    <div class="knoww-pf-hero-top">
+      <div class="knoww-pf-id"><span class="knoww-pf-kicker">Portfolio</span><span class="knoww-pf-name">tagme</span></div>
+      <button type="button" class="knoww-portfolio-open"><span>Open</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"></path></svg></button>
+    </div>
+    <div class="knoww-pf-hero-value">
+      <span class="knoww-pf-hero-label">Position value</span>
+      <strong class="knoww-pf-hero-num">$0.00</strong>
+      <div class="knoww-pf-delta negative"><svg class="knoww-pf-delta-arrow" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5 11 10.5H1z"></path></svg><span class="knoww-pf-delta-num">-$35.74</span><span class="knoww-pf-delta-label">All-time P/L</span></div>
+    </div>
+    <div class="knoww-pf-strip">
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Positions</span><strong>0</strong></div>
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Volume</span><strong>$852.47</strong></div>
+      <div class="knoww-pf-strip-cell"><span class="knoww-pf-strip-label">Cash</span><strong>$1.40</strong></div>
+    </div>
+  </div>
+    
+  <div class="knoww-portfolio-trading-gate">
+    <div><strong>Enable trading</strong><span>Sign once to unlock market orders and open orders.</span></div>
+    <button type="button" class="knoww-portfolio-open primary">Enable</button>
+  </div>
+    <div class="knoww-portfolio-table">
+      
+  <div class="knoww-portfolio-table-tabs" role="tablist">
+    <button type="button" class="knoww-portfolio-table-tab is-active"><span>Positions</span><strong>00</strong></button>
+    <button type="button" class="knoww-portfolio-table-tab "><span>Open orders</span><strong>01</strong></button>
+    <button type="button" class="knoww-portfolio-table-tab "><span>History</span><strong>25</strong></button>
+  </div>
+      <div class="knoww-portfolio-table-panel">
+  <div class="knoww-portfolio-empty">
+    <div class="knoww-pf-empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 16v-5M13 16V8M18 16v-3"></path></svg></div>
+    <p class="knoww-pf-empty-title">No active positions</p>
+    <span class="knoww-pf-empty-sub">Open trades will surface here as you take them.</span>
+  </div></div>
+    </div></div>
+    </div>
+  </figure>
+
+  <figure class="col">
+    <figcaption class="lbl">Connect · wallets found</figcaption>
+    <div class="knoww-notification-stack knoww-sidepanel-stack pv-panel">
+      <div class="knoww-sidepanel-tabs" role="tablist">
+        <button type="button" class="knoww-sidepanel-tab">Markets</button>
+        <button type="button" class="knoww-sidepanel-tab is-active">Portfolio</button>
+      </div>
+      <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio">
+    <div class="knoww-portfolio-signed-out">
+      <div class="knoww-pf-empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1"></path><path d="M21 11h-5a2 2 0 0 0 0 4h5v-4Z"></path></svg></div>
+      <p class="knoww-pf-empty-title">Connect a wallet</p>
+      <span class="knoww-pf-empty-sub">Choose a wallet on the active page to load your positions.</span>
+      <div class="knoww-portfolio-wallets"><button type="button" class="knoww-portfolio-wallet"><span>M</span><strong>MetaMask</strong></button><button type="button" class="knoww-portfolio-wallet"><span>C</span><strong>Coinbase Wallet</strong></button><button type="button" class="knoww-portfolio-wallet"><span>R</span><strong>Rabby</strong></button></div>
+      <div class="knoww-portfolio-actions">
+        <button type="button" class="knoww-portfolio-open">Refresh wallets</button>
+        <button type="button" class="knoww-portfolio-open">Open portfolio</button>
+      </div>
+    </div></div>
+    </div>
+  </figure>
+
+  <figure class="col">
+    <figcaption class="lbl">Connect · none found</figcaption>
+    <div class="knoww-notification-stack knoww-sidepanel-stack pv-panel">
+      <div class="knoww-sidepanel-tabs" role="tablist">
+        <button type="button" class="knoww-sidepanel-tab">Markets</button>
+        <button type="button" class="knoww-sidepanel-tab is-active">Portfolio</button>
+      </div>
+      <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio">
+    <div class="knoww-portfolio-signed-out">
+      <div class="knoww-pf-empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1"></path><path d="M21 11h-5a2 2 0 0 0 0 4h5v-4Z"></path></svg></div>
+      <p class="knoww-pf-empty-title">Connect a wallet</p>
+      <span class="knoww-pf-empty-sub">Choose a wallet on the active page to load your positions.</span>
+      <div class="knoww-portfolio-actions">
+        <button type="button" class="knoww-portfolio-open primary">Find wallets</button>
+        <button type="button" class="knoww-portfolio-open">Open portfolio</button>
+      </div>
+    </div></div>
+    </div>
+  </figure>
+
+  <figure class="col">
+    <figcaption class="lbl">Connect · error</figcaption>
+    <div class="knoww-notification-stack knoww-sidepanel-stack pv-panel">
+      <div class="knoww-sidepanel-tabs" role="tablist">
+        <button type="button" class="knoww-sidepanel-tab">Markets</button>
+        <button type="button" class="knoww-sidepanel-tab is-active">Portfolio</button>
+      </div>
+      <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio">
+    <div class="knoww-portfolio-signed-out">
+      <div class="knoww-pf-empty-mark" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1"></path><path d="M21 11h-5a2 2 0 0 0 0 4h5v-4Z"></path></svg></div>
+      <p class="knoww-pf-empty-title">Connect a wallet</p>
+      <span class="knoww-pf-empty-sub is-error">No supported wallet detected on this page. Open Polymarket and retry.</span>
+      <div class="knoww-portfolio-actions">
+        <button type="button" class="knoww-portfolio-open primary">Find wallets</button>
+        <button type="button" class="knoww-portfolio-open">Open portfolio</button>
+      </div>
+    </div></div>
+    </div>
+  </figure>
+
+  <figure class="col">
+    <figcaption class="lbl">Loading</figcaption>
+    <div class="knoww-notification-stack knoww-sidepanel-stack pv-panel">
+      <div class="knoww-sidepanel-tabs" role="tablist">
+        <button type="button" class="knoww-sidepanel-tab">Markets</button>
+        <button type="button" class="knoww-sidepanel-tab is-active">Portfolio</button>
+      </div>
+      <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio"><div class="knoww-portfolio-loading">Connecting wallet...</div></div>
+    </div>
+  </figure>
+    </div>
+  </body>
+</html>

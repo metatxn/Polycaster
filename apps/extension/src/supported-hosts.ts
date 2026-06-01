@@ -217,6 +217,8 @@ export const API_HOST_PERMISSIONS: string[] = [
   // webpack.config.js reads this file with a regex and cannot resolve imports.
   "https://relayer-v2.polymarket.com/*",
   "https://user-pnl-api.polymarket.com/*",
+  // Polymarket Bridge — deposit/withdrawal address + status for native funding.
+  "https://bridge.polymarket.com/*",
 
   // Polygon RPC
   "https://polygon-bor-rpc.publicnode.com/*",

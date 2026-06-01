@@ -242,6 +242,42 @@ test("uses actual CLOB fill amounts instead of optimistic requested size", async
   assert.equal(record.averageFillPrice, "0.5");
 });
 
+test("surfaces partial CLOB fills as PARTIALLY_FILLED instead of FILLED", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps, calls } = createDeps(
+    {},
+    {
+      postOrderResponse: {
+        success: true,
+        orderID: "order-partial",
+        // Not "matched"/"filled"/"canceled", but with shares filled → the
+        // CLOB only partially filled this FAK order.
+        status: "live",
+        takingAmount: "2.5",
+        makingAmount: "5",
+      },
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest({ requestedSizeUsd: "5" }));
+  const record = await deps.getLiveOrderByIdempotencyKey("run-1:watch-1:BUY");
+
+  assert.equal(fill.status, "PARTIALLY_FILLED");
+  assert.equal(fill.notionalUsd, "2.5");
+  assert.equal(fill.shares, "5");
+  assert.equal(record.status, "PARTIALLY_FILLED");
+  assert.equal(record.filledNotionalUsd, "2.5");
+  assert.equal(record.filledShares, "5");
+  assert.equal(calls.postOrder, 1);
+});
+
 test("keeps unfilled CLOB orders open instead of treating post success as filled", async () => {
   restoreEnv();
   process.env.AGENT_LIVE_ENABLED = "true";

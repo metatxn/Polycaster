@@ -54,6 +54,27 @@ export default function PortfolioPage() {
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
 
+  // Deep-link support: `/portfolio?fund=deposit|withdraw` opens the matching
+  // funding modal on load. The browser-extension portfolio links here so its
+  // Deposit/Withdraw buttons land directly on the tested flows. The param is
+  // stripped afterwards so a refresh doesn't reopen the modal.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const fund = params.get("fund");
+    if (fund === "deposit") setShowDepositModal(true);
+    else if (fund === "withdraw") setShowWithdrawModal(true);
+    if (fund) {
+      params.delete("fund");
+      const qs = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${qs ? `?${qs}` : ""}`
+      );
+    }
+  }, []);
+
   // Sorting & Filtering state
   const [sortField, setSortField] = useState<SortField>("value");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");

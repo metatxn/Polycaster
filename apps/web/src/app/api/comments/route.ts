@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { sanitizeUpstreamBody } from "@/lib/upstream-error";
 import { isValidAddress } from "@/lib/validation";
 import type { Comment } from "@/types/comments";
 
@@ -131,7 +132,7 @@ export async function GET(request: NextRequest) {
       const errorText = await response.text();
       log.error("gamma.get_failed", {
         status: response.status,
-        body: errorText,
+        body: sanitizeUpstreamBody(errorText),
       });
       return NextResponse.json(
         {
@@ -265,7 +266,7 @@ export async function POST(request: NextRequest) {
       const errorText = await response.text();
       log.error("gamma.post_failed", {
         status: response.status,
-        body: errorText,
+        body: sanitizeUpstreamBody(errorText),
       });
 
       // Handle specific error cases

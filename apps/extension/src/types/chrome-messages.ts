@@ -101,7 +101,9 @@ export interface TradingPlaceOrderMessage {
   address: string;
   proxyAddress: string;
   walletMode?: TradingWalletMode;
-  credentials: { apiKey: string; apiSecret: string; apiPassphrase: string };
+  // Injected by the service worker before forwarding to offscreen — never sent
+  // by the content caller (see trading-credential-mediation).
+  credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   // Whether this BUY will execute as a taker (true) or rest as a maker
   // (false). Drives which builder fee rate the pre-flight uses for sizing
   // the required pUSD collateral. Omitted for SELLs and when unknown.
@@ -132,10 +134,6 @@ export interface TradingGetOrderPreflightMessage {
   amount?: number;
   orderType?: ClobOrderType;
   conditionId?: string;
-  // Optional: when present, the preflight client will mirror handlePlaceOrder's
-  // ClobClient (creds + builderConfig) so the fee preview matches the
-  // authoritative pre-flight performed before postOrder.
-  credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   // See TradingPlaceOrderMessage.isMarketableBuy. Threading the same flag here
   // keeps the panel preview and the place-order pre-flight consistent.
   isMarketableBuy?: boolean;
@@ -158,6 +156,7 @@ export interface TradingSplitPositionMessage {
   negRisk?: boolean;
   proxyAddress?: string;
   walletMode?: TradingWalletMode;
+  // Injected by the service worker before forwarding to offscreen.
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   yesTokenId?: string;
   noTokenId?: string;
@@ -171,6 +170,7 @@ export interface TradingMergePositionsMessage {
   negRisk?: boolean;
   proxyAddress?: string;
   walletMode?: TradingWalletMode;
+  // Injected by the service worker before forwarding to offscreen.
   credentials?: { apiKey: string; apiSecret: string; apiPassphrase: string };
   yesTokenId?: string;
   noTokenId?: string;

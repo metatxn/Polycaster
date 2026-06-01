@@ -348,6 +348,7 @@ function parseClobExecution(input: {
 
 function toFilledFill(input: {
   request: PaperOrderRequest;
+  status: "FILLED" | "PARTIALLY_FILLED";
   notionalUsd: Decimal;
   shares: Decimal;
   price: string;
@@ -358,7 +359,7 @@ function toFilledFill(input: {
     runId: input.request.runId,
     watchlistItemId: input.request.watchlistItemId,
     tokenId: input.request.tokenId,
-    status: "FILLED",
+    status: input.status,
     side: input.request.action,
     price: input.price,
     notionalUsd: input.notionalUsd.toDecimalPlaces(6).toString(),
@@ -710,7 +711,10 @@ function existingOrderToFill(
       runId: existing.runId,
       watchlistItemId: existing.watchlistItemId,
       tokenId: existing.tokenId,
-      status: "FILLED",
+      // Preserve the partial/full distinction on idempotent replay so the
+      // runner reduces vs closes the position consistently with the original.
+      status:
+        existing.status === "PARTIALLY_FILLED" ? "PARTIALLY_FILLED" : "FILLED",
       side: existing.side,
       price: existing.averageFillPrice ?? existing.price,
       notionalUsd: notional.toDecimalPlaces(6).toString(),
@@ -1060,12 +1064,18 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
       }
       return toFilledFill({
         request,
+        // A FAK order can fill only part of the requested size; surface that
+        // as PARTIALLY_FILLED so the runner reduces (not closes) the position.
+        status:
+          execution.status === "PARTIALLY_FILLED"
+            ? "PARTIALLY_FILLED"
+            : "FILLED",
         notionalUsd: execution.filledNotionalUsd,
         shares: execution.filledShares,
         price: execution.averageFillPrice ?? request.price,
-        reason: `live-${config.orderType.toLowerCase()}:submitted${
-          orderId ? `:${orderId}` : ""
-        }`,
+        reason: `live-${config.orderType.toLowerCase()}:${
+          execution.status === "PARTIALLY_FILLED" ? "partial" : "submitted"
+        }${orderId ? `:${orderId}` : ""}`,
       });
     } catch (error) {
       const message =

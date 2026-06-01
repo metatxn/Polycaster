@@ -33,9 +33,11 @@ const log = createLogger("api.relayer");
  *   3. Body size limit (16 KB — multiSend payloads can be larger than HMAC asks)
  *   4. Request timeout (30 s — relayer can be slower than signing server)
  *
- * Environment variables (server-only, NO NEXT_PUBLIC_ prefix):
+ * Environment variables consumed by this server route:
  *   POLY_RELAYER_API_KEY         – Polymarket V2 relayer API key
  *   POLY_RELAYER_API_KEY_ADDRESS – Address that owns the relayer key
+ *   POLY_BUILDER_CODE            – builder attribution code for relayer calls
+ *                                  (falls back to NEXT_PUBLIC_POLY_BUILDER_CODE)
  *   BUILDER_SIGNING_SERVER_URL   – signing server for SAFE/WALLET-CREATE
  *   INTERNAL_AUTH_TOKEN          – bearer token for the signing server
  *   EXTENSION_SESSION_SECRET     – extension session signing secret
@@ -109,6 +111,13 @@ function getRelayerApiKeyHeaders(): Record<string, string> | null {
     RELAYER_API_KEY: apiKey,
     RELAYER_API_KEY_ADDRESS: apiKeyAddress,
   };
+}
+
+function getBuilderCodeHeaders(): Record<string, string> {
+  const builderCode =
+    process.env.POLY_BUILDER_CODE ?? process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
+  const trimmedBuilderCode = builderCode?.trim();
+  return trimmedBuilderCode ? { "X-Builder-Code": trimmedBuilderCode } : {};
 }
 
 function getContentLength(request: NextRequest): number | null {
@@ -243,6 +252,7 @@ async function proxy(
       : null;
 
   const upstreamHeaders: Record<string, string> = {};
+  const builderCodeHeaders = getBuilderCodeHeaders();
   let usedBuilderHmac = false;
   if (method === "POST") {
     upstreamHeaders["Content-Type"] = "application/json";
@@ -277,6 +287,7 @@ async function proxy(
     }
     Object.assign(upstreamHeaders, apiKeyHeaders);
   }
+  Object.assign(upstreamHeaders, builderCodeHeaders);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -320,6 +331,7 @@ async function proxy(
           headers: {
             "Content-Type": "application/json",
             ...apiKeyHeaders,
+            ...builderCodeHeaders,
           },
           body: safeCreateBody,
           signal: controller.signal,
@@ -344,6 +356,7 @@ async function proxy(
           headers: {
             "Content-Type": "application/json",
             ...hmacHeaders,
+            ...builderCodeHeaders,
           },
           body: safeSubmitBody,
           signal: controller.signal,

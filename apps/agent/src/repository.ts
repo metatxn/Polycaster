@@ -109,6 +109,14 @@ export interface ClosePositionInput {
   closedRunId: string | null;
 }
 
+export interface ReducePositionInput {
+  /** Shares sold in this (partial) exit. Clamped to the remaining shares. */
+  soldShares: string;
+  exitPrice: string;
+  closeReason: PositionCloseReason;
+  closedRunId: string | null;
+}
+
 export interface AgentRepository {
   listWatchlist(): Promise<AgentWatchlistItem[]>;
   upsertWatchlistItem(
@@ -137,6 +145,10 @@ export interface AgentRepository {
   closePosition(
     id: string,
     input: ClosePositionInput
+  ): Promise<AgentPosition | null>;
+  reducePosition(
+    id: string,
+    input: ReducePositionInput
   ): Promise<AgentPosition | null>;
   getOpenPositionByWatchlistItem(
     watchlistItemId: string
@@ -176,19 +188,15 @@ const memory = {
   schedulerLocks: new Map<string, AgentSchedulerLock>(),
 };
 
-function computeRealizedPnl(position: AgentPosition): string {
-  if (
-    position.status !== "CLOSED" ||
-    !position.exitPrice ||
-    !position.exitNotionalUsd
-  ) {
-    return "0";
-  }
-  // Long position only (v1): realized = shares * (exitPrice - entryPrice)
-  return new Decimal(position.shares)
-    .mul(new Decimal(position.exitPrice).sub(position.entryPrice))
-    .toDecimalPlaces(6)
-    .toString();
+// Long position only (v1): realized = shares * (exitPrice - entryPrice).
+// Used for both full closes and partial reductions, so the caller passes the
+// exact share count that was sold in this tranche.
+function realizedTrancheUsd(
+  shares: string,
+  entryPrice: string,
+  exitPrice: string
+): Decimal {
+  return new Decimal(shares).mul(new Decimal(exitPrice).sub(entryPrice));
 }
 
 function aggregatePortfolio(positions: AgentPosition[]): PortfolioPnl {
@@ -202,8 +210,10 @@ function aggregatePortfolio(positions: AgentPosition[]): PortfolioPnl {
       openEntry = openEntry.add(position.entryNotionalUsd || "0");
     } else {
       closedCount += 1;
-      realized = realized.add(position.realizedPnlUsd ?? "0");
     }
+    // Realized P&L is booked on both closed positions and partial reductions of
+    // still-open positions, so it must be summed regardless of status.
+    realized = realized.add(position.realizedPnlUsd ?? "0");
   }
   return {
     openPositionCount: openCount,
@@ -242,9 +252,15 @@ function decimal(value: string): Decimal {
   return new Decimal(value || "0");
 }
 
+// A fill that moved real shares: full OR partial. Used for trade counts and
+// notional sums so partial fills are not silently dropped from metrics.
+function isExecutedFillStatus(status: PaperFill["status"]): boolean {
+  return status === "FILLED" || status === "PARTIALLY_FILLED";
+}
+
 function sumNotionalUsd(fills: PaperFill[]): string {
   return fills
-    .filter((fill) => fill.status === "FILLED")
+    .filter((fill) => isExecutedFillStatus(fill.status))
     .reduce((sum, fill) => sum.plus(decimal(fill.notionalUsd)), new Decimal(0))
     .toString();
 }
@@ -279,8 +295,9 @@ function countRun(detail: AgentRunDetail): AgentRunSummary {
     startedAt: detail.startedAt,
     completedAt: detail.completedAt,
     itemCount: detail.items.length,
-    tradeCount: detail.items.filter((item) => item.fill?.status === "FILLED")
-      .length,
+    tradeCount: detail.items.filter(
+      (item) => !!item.fill && isExecutedFillStatus(item.fill.status)
+    ).length,
     blockedCount: detail.items.filter((item) => item.fill?.status === "BLOCKED")
       .length,
   };
@@ -388,7 +405,8 @@ class MemoryAgentRepository implements AgentRepository {
     );
     return {
       runCount: runs.length,
-      tradeCount: fills.filter((fill) => fill.status === "FILLED").length,
+      tradeCount: fills.filter((fill) => isExecutedFillStatus(fill.status))
+        .length,
       holdCount: runs
         .flatMap((run) => run.items)
         .filter((item) => item.decision.action === "HOLD").length,
@@ -465,18 +483,76 @@ class MemoryAgentRepository implements AgentRepository {
     const existing = memory.positions.get(id);
     if (!existing || existing.status === "CLOSED") return existing ?? null;
     const exitNotional = new Decimal(existing.shares).mul(input.exitPrice);
+    // Add this final tranche to any realized P&L already booked from earlier
+    // partial reductions, so a partially-sold position closes with the correct
+    // cumulative realized P&L.
+    const realized = new Decimal(existing.realizedPnlUsd ?? "0").add(
+      realizedTrancheUsd(existing.shares, existing.entryPrice, input.exitPrice)
+    );
     const closed: AgentPosition = {
       ...existing,
       status: "CLOSED",
       exitPrice: input.exitPrice,
       exitNotionalUsd: exitNotional.toDecimalPlaces(6).toString(),
+      realizedPnlUsd: realized.toDecimalPlaces(6).toString(),
       closedAt: now(),
       closeReason: input.closeReason,
       closedRunId: input.closedRunId,
     };
-    closed.realizedPnlUsd = computeRealizedPnl(closed);
     memory.positions.set(id, closed);
     return closed;
+  }
+
+  async reducePosition(
+    id: string,
+    input: ReducePositionInput
+  ): Promise<AgentPosition | null> {
+    const existing = memory.positions.get(id);
+    if (!existing || existing.status === "CLOSED") return existing ?? null;
+    const soldShares = Decimal.min(
+      new Decimal(input.soldShares),
+      new Decimal(existing.shares)
+    );
+    const remainingShares = new Decimal(existing.shares).sub(soldShares);
+    const realized = new Decimal(existing.realizedPnlUsd ?? "0").add(
+      realizedTrancheUsd(
+        soldShares.toString(),
+        existing.entryPrice,
+        input.exitPrice
+      )
+    );
+    // Selling the whole remainder is a full close.
+    if (remainingShares.lte(0)) {
+      const closed: AgentPosition = {
+        ...existing,
+        status: "CLOSED",
+        shares: "0",
+        entryNotionalUsd: "0",
+        exitPrice: input.exitPrice,
+        exitNotionalUsd: soldShares
+          .mul(input.exitPrice)
+          .toDecimalPlaces(6)
+          .toString(),
+        realizedPnlUsd: realized.toDecimalPlaces(6).toString(),
+        closedAt: now(),
+        closeReason: input.closeReason,
+        closedRunId: input.closedRunId,
+      };
+      memory.positions.set(id, closed);
+      return closed;
+    }
+    // Keep the residual open with a proportionally reduced cost basis.
+    const reduced: AgentPosition = {
+      ...existing,
+      shares: remainingShares.toDecimalPlaces(6).toString(),
+      entryNotionalUsd: remainingShares
+        .mul(existing.entryPrice)
+        .toDecimalPlaces(6)
+        .toString(),
+      realizedPnlUsd: realized.toDecimalPlaces(6).toString(),
+    };
+    memory.positions.set(id, reduced);
+    return reduced;
   }
 
   async getOpenPositionByWatchlistItem(
@@ -1021,7 +1097,7 @@ class D1AgentRepository extends MemoryAgentRepository {
       .prepare(
         `SELECT r.id, r.status, r.started_at, r.completed_at,
         COUNT(i.id) AS item_count,
-        SUM(CASE WHEN json_extract(i.fill_json, '$.status') = 'FILLED' THEN 1 ELSE 0 END) AS trade_count,
+        SUM(CASE WHEN json_extract(i.fill_json, '$.status') IN ('FILLED', 'PARTIALLY_FILLED') THEN 1 ELSE 0 END) AS trade_count,
         SUM(CASE WHEN json_extract(i.fill_json, '$.status') = 'BLOCKED' THEN 1 ELSE 0 END) AS blocked_count
         FROM agent_runs r
         LEFT JOIN agent_run_items i ON i.run_id = r.id
@@ -1097,7 +1173,8 @@ class D1AgentRepository extends MemoryAgentRepository {
       .first<{ count: number }>();
     return {
       runCount: runCount?.count ?? 0,
-      tradeCount: fills.filter((fill) => fill.status === "FILLED").length,
+      tradeCount: fills.filter((fill) => isExecutedFillStatus(fill.status))
+        .length,
       holdCount: decisions.filter((decision) => decision.action === "HOLD")
         .length,
       blockedCount: fills.filter((fill) => fill.status === "BLOCKED").length,
@@ -1205,16 +1282,21 @@ class D1AgentRepository extends MemoryAgentRepository {
       .mul(input.exitPrice)
       .toDecimalPlaces(6)
       .toString();
+    // Add this final tranche to any realized P&L already booked from earlier
+    // partial reductions (see reducePosition).
+    const realized = new Decimal(existing.realizedPnlUsd ?? "0").add(
+      realizedTrancheUsd(existing.shares, existing.entryPrice, input.exitPrice)
+    );
     const closed: AgentPosition = {
       ...existing,
       status: "CLOSED",
       exitPrice: input.exitPrice,
       exitNotionalUsd: exitNotional,
+      realizedPnlUsd: realized.toDecimalPlaces(6).toString(),
       closedAt: now(),
       closeReason: input.closeReason,
       closedRunId: input.closedRunId,
     };
-    closed.realizedPnlUsd = computeRealizedPnl(closed);
     await this.db
       .prepare(
         `UPDATE agent_positions SET
@@ -1234,6 +1316,98 @@ class D1AgentRepository extends MemoryAgentRepository {
       )
       .run();
     return closed;
+  }
+
+  async reducePosition(
+    id: string,
+    input: ReducePositionInput
+  ): Promise<AgentPosition | null> {
+    await this.ensureSchema();
+    const existingRow = await this.db
+      .prepare("SELECT * FROM agent_positions WHERE id = ?")
+      .bind(id)
+      .first<Record<string, unknown>>();
+    if (!existingRow) return null;
+    const existing = rowToPosition(existingRow);
+    if (existing.status === "CLOSED") return existing;
+    const soldShares = Decimal.min(
+      new Decimal(input.soldShares),
+      new Decimal(existing.shares)
+    );
+    const remainingShares = new Decimal(existing.shares).sub(soldShares);
+    const realized = new Decimal(existing.realizedPnlUsd ?? "0").add(
+      realizedTrancheUsd(
+        soldShares.toString(),
+        existing.entryPrice,
+        input.exitPrice
+      )
+    );
+
+    // Selling the whole remainder is a full close.
+    if (remainingShares.lte(0)) {
+      const closed: AgentPosition = {
+        ...existing,
+        status: "CLOSED",
+        shares: "0",
+        entryNotionalUsd: "0",
+        exitPrice: input.exitPrice,
+        exitNotionalUsd: soldShares
+          .mul(input.exitPrice)
+          .toDecimalPlaces(6)
+          .toString(),
+        realizedPnlUsd: realized.toDecimalPlaces(6).toString(),
+        closedAt: now(),
+        closeReason: input.closeReason,
+        closedRunId: input.closedRunId,
+      };
+      await this.db
+        .prepare(
+          `UPDATE agent_positions SET
+            status = ?, shares = ?, entry_notional_usd = ?, exit_price = ?,
+            exit_notional_usd = ?, realized_pnl_usd = ?, closed_at = ?,
+            close_reason = ?, closed_run_id = ?
+            WHERE id = ?`
+        )
+        .bind(
+          closed.status,
+          closed.shares,
+          closed.entryNotionalUsd,
+          closed.exitPrice,
+          closed.exitNotionalUsd,
+          closed.realizedPnlUsd,
+          closed.closedAt,
+          closed.closeReason,
+          closed.closedRunId,
+          id
+        )
+        .run();
+      return closed;
+    }
+
+    // Keep the residual open with a proportionally reduced cost basis.
+    const reduced: AgentPosition = {
+      ...existing,
+      shares: remainingShares.toDecimalPlaces(6).toString(),
+      entryNotionalUsd: remainingShares
+        .mul(existing.entryPrice)
+        .toDecimalPlaces(6)
+        .toString(),
+      realizedPnlUsd: realized.toDecimalPlaces(6).toString(),
+    };
+    await this.db
+      .prepare(
+        `UPDATE agent_positions SET
+          shares = ?, entry_notional_usd = ?, realized_pnl_usd = ?
+          WHERE id = ?`
+      )
+      .bind(
+        reduced.shares,
+        reduced.entryNotionalUsd,
+        reduced.realizedPnlUsd,
+        id
+      )
+      .run();
+    return reduced;
   }
 
   async getOpenPositionByWatchlistItem(

@@ -11,9 +11,11 @@
  *   - Content scripts are registered programmatically against a curated
  *     host allowlist (~80 hosts). XSS on one of those allowlisted hosts is
  *     the only practical exfil path.
- *   - Without these guards, an XSS-compromised content script could call
- *     `creds:get` with key `knoww_extension_access_token` and lateral-read
- *     the extension bearer token out of session storage.
+ *   - Without these guards, an XSS-compromised content script could call a
+ *     `creds:*` channel with key `knoww_extension_access_token` and lateral-read
+ *     the extension bearer token out of session storage. (Raw CLOB credentials
+ *     are no longer returned to content at all — only a `creds:has` presence
+ *     flag — but the namespace guard still protects every other session key.)
  *
  * `checkAuthorizedSender` blocks the case where a future regression adds
  * `externally_connectable` to the manifest and exposes the listener to web
@@ -48,7 +50,7 @@ export function checkAuthorizedSender(
 /**
  * Returns a rejection response if the supplied storage key is not in the
  * trading-credentials namespace. Without this gate, an XSS on an allowlisted
- * content-script host could use the generic `creds:get` channel to read
+ * content-script host could use a generic `creds:*` channel to read or probe
  * unrelated session-storage entries (most importantly the extension bearer
  * token at `knoww_extension_access_token`).
  */

@@ -94,6 +94,50 @@ function buildClosingFill(input: {
   };
 }
 
+/**
+ * A fill counts as "executed" (moved real shares) when it fully OR partially
+ * filled. The runner opens/keeps a position for both — partial fills carry the
+ * actually-filled `shares`/`notionalUsd`.
+ */
+export function isExecutedFill(fill: Pick<PaperFill, "status">): boolean {
+  return fill.status === "FILLED" || fill.status === "PARTIALLY_FILLED";
+}
+
+/**
+ * Apply a SELL fill to an open position:
+ *   - FILLED → close the whole position.
+ *   - PARTIALLY_FILLED → reduce the position by the filled shares, booking
+ *     realized P&L on only that tranche and keeping the residual open.
+ *   - anything else (BLOCKED) → leave the position untouched.
+ * Returns the resulting position (CLOSED, reduced-OPEN, or the original).
+ */
+export async function settleSellFill(input: {
+  repository: AgentRepository;
+  position: AgentPosition;
+  fill: Pick<PaperFill, "status" | "shares">;
+  exitPrice: string;
+  closeReason: PositionCloseReason;
+  runId: string;
+}): Promise<AgentPosition | null> {
+  const { repository, position, fill, exitPrice, closeReason, runId } = input;
+  if (fill.status === "FILLED") {
+    return repository.closePosition(position.id, {
+      exitPrice,
+      closeReason,
+      closedRunId: runId,
+    });
+  }
+  if (fill.status === "PARTIALLY_FILLED") {
+    return repository.reducePosition(position.id, {
+      soldShares: fill.shares,
+      exitPrice,
+      closeReason,
+      closedRunId: runId,
+    });
+  }
+  return position;
+}
+
 function timeExitDecision(): QuorumDecision {
   return {
     action: "SELL",
@@ -259,14 +303,14 @@ export async function runPaperAgent(
             reason: "time-exit",
           });
         }
-        const closed =
-          exitFill.status === "FILLED"
-            ? await repository.closePosition(openPosition.id, {
-                exitPrice,
-                closeReason: "time-exit",
-                closedRunId: run.id,
-              })
-            : openPosition;
+        const settled = await settleSellFill({
+          repository,
+          position: openPosition,
+          fill: exitFill,
+          exitPrice,
+          closeReason: "time-exit",
+          runId: run.id,
+        });
         await repository.saveRunItem({
           runId: run.id,
           watchlistItem: item,
@@ -275,7 +319,7 @@ export async function runPaperAgent(
           decision: timeExitDecision(),
           fill: exitFill,
         });
-        openPosition = closed?.status === "OPEN" ? closed : null;
+        openPosition = settled?.status === "OPEN" ? settled : null;
         continue;
       }
 
@@ -319,13 +363,14 @@ export async function runPaperAgent(
                 reason: "contradict-vote",
               });
             }
-            if (fill.status === "FILLED") {
-              await repository.closePosition(openPosition.id, {
-                exitPrice,
-                closeReason: "contradict-vote",
-                closedRunId: run.id,
-              });
-            }
+            await settleSellFill({
+              repository,
+              position: openPosition,
+              fill,
+              exitPrice,
+              closeReason: "contradict-vote",
+              runId: run.id,
+            });
           }
           // decision.action === "BUY" with an existing long position:
           // do nothing (we don't average up in v1).
@@ -345,7 +390,9 @@ export async function runPaperAgent(
             portfolio,
           });
           fill = opened;
-          if (opened.status === "FILLED") {
+          // Open on full OR partial fills — `opened.shares`/`notionalUsd`
+          // already carry the actually-filled amount for partials.
+          if (isExecutedFill(opened)) {
             await repository.openPosition({
               watchlistItemId: item.id,
               tokenId: item.tokenId,

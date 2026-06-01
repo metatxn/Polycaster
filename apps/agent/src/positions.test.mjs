@@ -189,3 +189,106 @@ test("getPortfolioPnl aggregates realized + open notional", async () => {
     Number.parseFloat(before.openEntryNotionalUsd);
   assert.equal(openDelta.toFixed(2), "1.50");
 });
+
+test("reducePosition books realized P&L on the sold shares and keeps the remainder open", async () => {
+  const repo = createAgentRepository();
+  const position = await repo.openPosition({
+    watchlistItemId: "watch-reduce-open",
+    tokenId: "token-reduce-open",
+    entryPrice: "0.40",
+    shares: "10",
+    entryNotionalUsd: "4.00",
+    openedRunId: "run-open",
+  });
+  const reduced = await repo.reducePosition(position.id, {
+    soldShares: "4",
+    exitPrice: "0.50",
+    closeReason: "contradict-vote",
+    closedRunId: "run-reduce",
+  });
+  // Sold 4 of 10 shares at 0.50, cost basis 0.40 → realized = 4 * 0.10 = 0.4
+  assert.equal(reduced?.status, "OPEN");
+  assert.equal(reduced?.shares, "6");
+  assert.equal(reduced?.entryNotionalUsd, "2.4");
+  assert.equal(reduced?.realizedPnlUsd, "0.4");
+  // The residual is still discoverable as an open position.
+  const lookup = await repo.getOpenPositionByWatchlistItem("watch-reduce-open");
+  assert.equal(lookup?.id, position.id);
+  assert.equal(lookup?.shares, "6");
+});
+
+test("reducePosition that sells the whole remainder closes the position", async () => {
+  const repo = createAgentRepository();
+  const position = await repo.openPosition({
+    watchlistItemId: "watch-reduce-full",
+    tokenId: "token-reduce-full",
+    entryPrice: "0.40",
+    shares: "10",
+    entryNotionalUsd: "4.00",
+    openedRunId: "run-open",
+  });
+  const closed = await repo.reducePosition(position.id, {
+    soldShares: "10",
+    exitPrice: "0.50",
+    closeReason: "time-exit",
+    closedRunId: "run-reduce",
+  });
+  assert.equal(closed?.status, "CLOSED");
+  // 10 * (0.50 - 0.40) = 1.0
+  assert.equal(closed?.realizedPnlUsd, "1");
+  assert.equal(closed?.closeReason, "time-exit");
+});
+
+test("closePosition accumulates realized P&L from a prior partial reduction", async () => {
+  const repo = createAgentRepository();
+  const position = await repo.openPosition({
+    watchlistItemId: "watch-reduce-then-close",
+    tokenId: "token-reduce-then-close",
+    entryPrice: "0.40",
+    shares: "10",
+    entryNotionalUsd: "4.00",
+    openedRunId: "run-open",
+  });
+  await repo.reducePosition(position.id, {
+    soldShares: "4",
+    exitPrice: "0.50",
+    closeReason: "contradict-vote",
+    closedRunId: "run-reduce",
+  });
+  const closed = await repo.closePosition(position.id, {
+    exitPrice: "0.60",
+    closeReason: "contradict-vote",
+    closedRunId: "run-close",
+  });
+  // Partial tranche: 4 * (0.50 - 0.40) = 0.4
+  // Final tranche: 6 * (0.60 - 0.40) = 1.2
+  // Accumulated realized = 1.6
+  assert.equal(closed?.status, "CLOSED");
+  assert.equal(closed?.realizedPnlUsd, "1.6");
+});
+
+test("getPortfolioPnl counts realized P&L from partial reductions on still-open positions", async () => {
+  const repo = createAgentRepository();
+  const before = await repo.getPortfolioPnl();
+  const position = await repo.openPosition({
+    watchlistItemId: "watch-reduce-pnl",
+    tokenId: "token-reduce-pnl",
+    entryPrice: "0.40",
+    shares: "10",
+    entryNotionalUsd: "4.00",
+    openedRunId: null,
+  });
+  await repo.reducePosition(position.id, {
+    soldShares: "4",
+    exitPrice: "0.50",
+    closeReason: "contradict-vote",
+    closedRunId: null,
+  });
+  const after = await repo.getPortfolioPnl();
+  // The position is still open, but its 0.4 realized tranche must be counted.
+  const realizedDelta =
+    Number.parseFloat(after.realizedPnlUsd) -
+    Number.parseFloat(before.realizedPnlUsd);
+  assert.equal(realizedDelta.toFixed(2), "0.40");
+  assert.equal(after.openPositionCount, before.openPositionCount + 1);
+});

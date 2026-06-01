@@ -38,6 +38,8 @@ export type BridgeWalletClient = {
   signMessage: (params: SignMessageParameters) => Promise<Hex>;
   signTypedData: (params: SignTypedDataParameters) => Promise<Hex>;
   sendTransaction: (transaction: BridgeTransaction) => Promise<Hex>;
+  /** Ask the wallet to switch to a chain (used for cross-chain deposits). */
+  switchChain: (chainId: number) => Promise<void>;
 };
 
 function rawMessageToHex(message: SignMessageParameters["message"]): Hex {
@@ -136,6 +138,11 @@ export function createBridgeWalletClient(
       return (await sendSigningRequest(tabId, "eth_sendTransaction", [
         txParams,
       ])) as Hex;
+    },
+    async switchChain(chainId: number) {
+      await sendSigningRequest(tabId, "wallet_switchEthereumChain", [
+        { chainId: numberToHex(chainId) },
+      ]);
     },
   };
 

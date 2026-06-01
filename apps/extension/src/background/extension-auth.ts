@@ -1,26 +1,32 @@
 /**
  * Shared extension auth helpers used by background-side network requests.
  *
- * Currently exposes getAccessTokenViaMessage(), which the offscreen document
- * uses to retrieve the signed extension session token from chrome.storage.session
- * via message-pass to the service worker (offscreen docs cannot read session
- * storage directly).
+ * The offscreen document cannot read chrome.storage.session directly, so it
+ * message-passes to the service worker. It only ever needs to know whether a
+ * session exists (and the wallet address) — the raw bearer token stays in the
+ * worker and is attached to outbound knoww.app/api requests by the fetch-json
+ * proxy.
  */
 
-export async function getAccessTokenViaMessage(): Promise<string | null> {
+export interface ExtensionSessionInfo {
+  loggedIn: boolean;
+  address: string | null;
+}
+
+export async function getExtensionSessionInfoViaMessage(): Promise<ExtensionSessionInfo> {
   try {
     const response = await chrome.runtime.sendMessage({
-      type: "auth:get-token",
+      type: "auth:get-session-info",
     });
-    if (
-      response?.ok &&
-      typeof response.data === "string" &&
-      response.data.length > 0
-    ) {
-      return response.data;
+    if (response?.ok && response.data && typeof response.data === "object") {
+      const data = response.data as { loggedIn?: unknown; address?: unknown };
+      return {
+        loggedIn: data.loggedIn === true,
+        address: typeof data.address === "string" ? data.address : null,
+      };
     }
-    return null;
+    return { loggedIn: false, address: null };
   } catch {
-    return null;
+    return { loggedIn: false, address: null };
   }
 }

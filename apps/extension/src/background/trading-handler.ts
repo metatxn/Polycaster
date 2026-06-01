@@ -331,6 +331,9 @@ async function handleDeriveCredentials(
     return fail("Failed to derive CLOB API credentials");
   }
 
+  // Return the derived credentials to the SW, which persists them in its
+  // session store and relays a content-safe, method-only response. The
+  // offscreen document cannot write the TRUSTED_CONTEXTS-only session store.
   return ok({
     ...result.data,
     method: result.method,
@@ -361,6 +364,12 @@ async function handlePlaceOrder(
   const tabId = sender.tab?.id;
   if (!tabId) return fail("No active tab for signing");
 
+  // Credentials are injected by the SW (never sent by the content caller).
+  const credentials = msg.credentials;
+  if (!credentials) {
+    return fail("CLOB credentials not found. Enable trading for this wallet.");
+  }
+
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
 
@@ -373,7 +382,7 @@ async function handlePlaceOrder(
   const client = (await createExtensionLegacyClobClient({
     walletClient: walletClient as unknown as WalletClient,
     funderAddress,
-    credentials: msg.credentials,
+    credentials,
     builderCode,
   })) as ExtensionLegacyClobClient;
 
@@ -392,7 +401,7 @@ async function handlePlaceOrder(
     getOpenOrders: () =>
       fetchClobOpenOrders({
         address: msg.address,
-        credentials: msg.credentials,
+        credentials,
       }),
     onOpenOrdersError: (err) =>
       logWarn("trading.open-orders-fetch-failed", {
@@ -729,7 +738,9 @@ async function syncBalancesAfterCTF(msg: {
   yesTokenId?: string;
   noTokenId?: string;
 }): Promise<void> {
+  // Credentials are injected by the SW (never sent by the content caller).
   if (!msg.credentials || !msg.proxyAddress) return;
+  const credentials = msg.credentials;
 
   const signatureType: number = getPolymarketSignatureType(msg.walletMode);
   for (const target of buildClobBalanceAllowanceTargets({
@@ -737,7 +748,7 @@ async function syncBalancesAfterCTF(msg: {
   })) {
     await clobUpdateBalanceAllowance(
       msg.address,
-      msg.credentials,
+      credentials,
       target,
       signatureType
     );

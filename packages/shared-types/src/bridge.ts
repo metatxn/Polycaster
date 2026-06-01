@@ -7,6 +7,8 @@
  * @see https://docs.polymarket.com/api-reference/bridge
  */
 
+import { USDC_E_ADDRESS, USDC_E_DECIMALS } from "./contracts";
+
 export const BRIDGE_API_URL = "https://bridge.polymarket.com";
 
 export type BridgeHeaders = Record<string, string>;
@@ -481,4 +483,165 @@ export function getDepositStatusDisplay(
     default:
       return { text: status, color: "#888888", tone: "info" };
   }
+}
+
+// ============================================================================
+// Multi-chain withdrawal token/chain model + helpers.
+// Promoted from the web app so the extension reuses the same source of truth.
+// Source for a withdrawal is always pUSD (V2 collateral on Polygon); these
+// describe the DESTINATION token the user receives, resolved per chain from the
+// live /supported-assets data.
+// ============================================================================
+export type WithdrawTokenId =
+  | "usdc"
+  | "usdc-e"
+  | "usdt"
+  | "dai"
+  | "eth"
+  | "pol"
+  | "sol";
+
+export interface WithdrawTokenConfig {
+  id: WithdrawTokenId;
+  symbol: string;
+  name: string;
+  /** Polygon contract address, for display/config; dest addresses resolve live. */
+  address: string;
+  decimals: number;
+}
+
+export const WITHDRAW_TOKEN_CONFIGS: Record<
+  WithdrawTokenId,
+  WithdrawTokenConfig
+> = {
+  "usdc-e": {
+    id: "usdc-e",
+    symbol: "USDC.e",
+    name: "Bridged USDC",
+    address: USDC_E_ADDRESS,
+    decimals: USDC_E_DECIMALS,
+  },
+  usdc: {
+    id: "usdc",
+    symbol: "USDC",
+    name: "USD Coin",
+    address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    decimals: 6,
+  },
+  usdt: {
+    id: "usdt",
+    symbol: "USDT",
+    name: "Tether USD",
+    address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+    decimals: 6,
+  },
+  dai: {
+    id: "dai",
+    symbol: "DAI",
+    name: "Dai Stablecoin",
+    address: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
+    decimals: 18,
+  },
+  eth: {
+    id: "eth",
+    symbol: "ETH",
+    name: "Ether",
+    address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    decimals: 18,
+  },
+  pol: {
+    id: "pol",
+    symbol: "POL",
+    name: "Polygon",
+    address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    decimals: 18,
+  },
+  sol: {
+    id: "sol",
+    symbol: "SOL",
+    name: "Solana",
+    address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    decimals: 9,
+  },
+};
+
+/** Chain key → Bridge API chain id. All chains route through the bridge. */
+export const WITHDRAW_CHAIN_IDS: Record<string, string> = {
+  polygon: "137",
+  ethereum: "1",
+  base: "8453",
+  arbitrum: "42161",
+  optimism: "10",
+  bsc: "56",
+  solana: "1151111081099710",
+};
+
+/** Bridge API token symbol → internal WithdrawTokenId. */
+export const SYMBOL_TO_WITHDRAW_TOKEN_ID: Record<string, WithdrawTokenId> = {
+  USDC: "usdc",
+  "USDC.e": "usdc-e",
+  USDT: "usdt",
+  DAI: "dai",
+  ETH: "eth",
+  POL: "pol",
+  SOL: "sol",
+};
+
+type BridgeAssetLike = {
+  chainId: string;
+  token: { symbol: string; address: string };
+};
+
+/**
+ * Build a `chainId -> tokenId -> address` index from live supported-assets data.
+ * First match wins (the API orders preferred contracts first).
+ */
+export function buildBridgeTokenIndex(
+  supportedAssets: BridgeAssetLike[]
+): Record<string, Partial<Record<WithdrawTokenId, string>>> {
+  const index: Record<string, Partial<Record<WithdrawTokenId, string>>> = {};
+  for (const asset of supportedAssets) {
+    const tokenId = SYMBOL_TO_WITHDRAW_TOKEN_ID[asset.token.symbol];
+    if (!tokenId) continue;
+    if (!index[asset.chainId]) index[asset.chainId] = {};
+    if (!index[asset.chainId][tokenId]) {
+      index[asset.chainId][tokenId] = asset.token.address;
+    }
+  }
+  return index;
+}
+
+/**
+ * Resolve the destination token address for a chain + token, falling back to
+ * USDC on that chain when the specific token isn't mapped.
+ */
+export function resolveDestTokenAddress(
+  bridgeTokenIndex: Record<string, Partial<Record<WithdrawTokenId, string>>>,
+  toChainId: string,
+  tokenId: WithdrawTokenId
+): string {
+  const chainTokens = bridgeTokenIndex[toChainId];
+  if (chainTokens?.[tokenId]) return chainTokens[tokenId] as string;
+  if (chainTokens?.usdc) return chainTokens.usdc as string;
+  return "";
+}
+
+/**
+ * Tokens available for a chain, derived from live API data. Polygon always
+ * offers usdc/usdc-e (relayer path) plus any bridge-supported tokens.
+ */
+export function getAvailableTokensForChain(
+  bridgeTokenIndex: Record<string, Partial<Record<WithdrawTokenId, string>>>,
+  chainKey: string
+): WithdrawTokenId[] {
+  const chainId = WITHDRAW_CHAIN_IDS[chainKey] || "1";
+  const chainTokens = bridgeTokenIndex[chainId];
+  if (chainKey === "polygon") {
+    const bridgeTokenIds = chainTokens
+      ? (Object.keys(chainTokens) as WithdrawTokenId[])
+      : [];
+    return [...new Set<WithdrawTokenId>(["usdc", "usdc-e", ...bridgeTokenIds])];
+  }
+  if (!chainTokens || Object.keys(chainTokens).length === 0) return ["usdc"];
+  return Object.keys(chainTokens) as WithdrawTokenId[];
 }

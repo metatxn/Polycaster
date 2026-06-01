@@ -18,6 +18,7 @@ import { WalletBridge } from "./trading/bridge";
 import { ExtensionSession } from "./trading/extension-session";
 import { TradingPanel } from "./trading/trading-panel";
 import { TradingService } from "./trading/trading-service";
+import { renderWalletConnectQrSvg } from "./trading/walletconnect-qr";
 import { escapeHtml, escapeSelectorValue } from "./utils";
 
 function clampGammaPrice(value: number): number {
@@ -3917,6 +3918,15 @@ function initNotificationStack(): void {
   });
 }
 
+// Register the wallet bridge (incl. the `trading:signing-request` listener)
+// eagerly on every supported page. Otherwise it only initialises lazily on the
+// first wallet action, so a tab that connected and later reloaded would have no
+// signing listener — and portfolio deposit/withdraw signatures relayed to it
+// would fail with "Receiving end does not exist".
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  WalletBridge.init();
+}
+
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener(
     (
@@ -4009,6 +4019,54 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             await ExtensionSession.ensureAuthorized(address);
           })
           .catch(() => {});
+        return false;
+      }
+
+      if (message?.type === "KNOWW_PORTFOLIO_REAUTH") {
+        void (async () => {
+          try {
+            let address = TradingService.getContext().address;
+            if (!address) {
+              await TradingService.connectWallet();
+              address = TradingService.getContext().address;
+            }
+            if (!address) {
+              throw new Error("Connect your wallet to continue.");
+            }
+            // Drop any stale token so ensureAuthorized always re-signs a fresh
+            // challenge instead of short-circuiting on a present-but-dead token.
+            await ExtensionSession.clear();
+            await ExtensionSession.ensureAuthorized(address);
+            sendResponse({ success: true, data: { address } });
+          } catch (err) {
+            sendResponse({
+              success: false,
+              data: {
+                error:
+                  err instanceof Error
+                    ? err.message
+                    : "Re-authorization failed",
+              },
+            });
+          }
+        })();
+        return true;
+      }
+
+      if (message?.type === "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE") {
+        const wcState = WalletBridge.getMobileConnectionState();
+        let qrSvg: string | null = null;
+        if (wcState.qrUri) {
+          try {
+            qrSvg = renderWalletConnectQrSvg(wcState.qrUri);
+          } catch {
+            qrSvg = null;
+          }
+        }
+        sendResponse({
+          success: true,
+          data: { status: wcState.status, error: wcState.error, qrSvg },
+        });
         return false;
       }
 

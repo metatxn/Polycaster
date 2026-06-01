@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { logger } from "@/lib/logger";
+import { sanitizeUpstreamBody } from "@/lib/upstream-error";
 
 /**
  * Check if the identifier is a numeric event ID or a slug
@@ -79,7 +80,7 @@ export async function GET(
         id,
         status: eventResponse.status,
         statusText: eventResponse.statusText,
-        body: errorText.slice(0, 500),
+        body: sanitizeUpstreamBody(errorText),
       });
       return NextResponse.json(
         {

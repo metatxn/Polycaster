@@ -1369,10 +1369,21 @@ Headers
 
 Query parameters
 
-- Same filter set as `GET /api/events/paginated`, except this route always forces:
-  - `order=volume`
-  - `ascending=false`
-  - defaults `limit=15`, `closed=false`
+| Name             | Type     | Required | Validation                                                                                                               |
+| ---------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `limit`          | `number` | No       | Coerced integer `1..100`. Default `15`.                                                                                 |
+| `after_cursor`   | `string` | No       | Optional keyset cursor, max length `512`.                                                                               |
+| `closed`         | `"true" \| "false"` | No | Defaults to `"false"`.                                                                                                  |
+| `volume24hr_min` | `number` | No       | Coerced finite number `0..1e12`. Mapped upstream as `volume_min`.                                                       |
+| `volume1wk_min`  | `number` | No       | Coerced finite number `0..1e12`. Also mapped upstream as `volume_min`.                                                  |
+| `liquidity_min`  | `number` | No       | Coerced finite number `0..1e12`. Passed upstream as `liquidity_min`.                                                    |
+| `tag_slug`       | `string` | No       | Optional tag slug, `1..100` chars.                                                                                      |
+| `markets`        | `"full"` | No       | When set to `"full"`, expanded market fields are returned. Otherwise only market IDs are returned.                      |
+
+Notes
+
+- The route always forces `order=volume` and `ascending=false`.
+- `offset` is rejected; callers must use `after_cursor`.
 
 Success `200`
 
@@ -1380,7 +1391,7 @@ Success `200`
 
 Errors
 
-- `400`: Not used.
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -1479,10 +1490,21 @@ Headers
 
 Query parameters
 
-- Same filter set as `GET /api/events/paginated`, except this route always forces:
-  - `order=startDate`
-  - `ascending=false`
-  - defaults `limit=15`, `closed=false`
+| Name             | Type     | Required | Validation                                                                                                               |
+| ---------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `limit`          | `number` | No       | Coerced integer `1..100`. Default `15`.                                                                                 |
+| `after_cursor`   | `string` | No       | Optional keyset cursor, max length `512`.                                                                               |
+| `closed`         | `"true" \| "false"` | No | Defaults to `"false"`.                                                                                                  |
+| `volume24hr_min` | `number` | No       | Coerced finite number `0..1e12`. Mapped upstream as `volume_min`.                                                       |
+| `volume1wk_min`  | `number` | No       | Coerced finite number `0..1e12`. Also mapped upstream as `volume_min`.                                                  |
+| `liquidity_min`  | `number` | No       | Coerced finite number `0..1e12`. Passed upstream as `liquidity_min`.                                                    |
+| `tag_slug`       | `string` | No       | Optional tag slug, `1..100` chars.                                                                                      |
+| `markets`        | `"full"` | No       | When set to `"full"`, expanded market fields are returned. Otherwise only market IDs are returned.                      |
+
+Notes
+
+- The route always forces `order=startDate` and `ascending=false`.
+- `offset` is rejected; callers must use `after_cursor`.
 
 Success `200`
 
@@ -1490,7 +1512,7 @@ Success `200`
 
 Errors
 
-- `400`: Not used.
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -1909,8 +1931,9 @@ Errors
 
 - `400`: Not used.
 - `401`: Not used.
-- `404`: Not handled locally; upstream fetch failures currently surface as `500`.
-- `500`: `{ success: false, error: string }`
+- `404`: Possible when the upstream CLOB helper throws a `ClobRequestError` with status `404`; body is `{ success: false, error: "Unable to load market info right now." }`
+- `500`: `{ success: false, error: "Unable to load market info right now." }`
+- Other upstream CLOB failures: the handler returns the upstream status code when exposed by `ClobRequestError`, always with the same generic error string.
 
 Rate limiting
 
@@ -1954,8 +1977,9 @@ Errors
 
 - `400`: Not used.
 - `401`: Not used.
-- `404`: Not handled locally; upstream failures become `500`.
-- `500`: `{ success: false, error: string }`
+- `404`: Possible when the upstream CLOB helper throws a `ClobRequestError` with status `404`; body is `{ success: false, error: "Unable to load the order book right now." }`
+- `500`: `{ success: false, error: "Unable to load the order book right now." }`
+- Other upstream CLOB failures: the handler returns the upstream status code when exposed by `ClobRequestError`, always with the same generic error string.
 
 Rate limiting
 
@@ -2129,8 +2153,9 @@ Errors
 
 - `400`: `{ success: false, error: "Invalid query parameters", details: string }`
 - `401`: Not used.
-- `404`: Not handled locally; upstream failures become `500`.
-- `500`: `{ success: false, error: string }`
+- `404`: Possible when the upstream CLOB helper throws a `ClobRequestError` with status `404`; body is `{ success: false, error: "Unable to load the price right now." }`
+- `500`: `{ success: false, error: "Unable to load the price right now." }`
+- Other upstream CLOB failures: the handler returns the upstream status code when exposed by `ClobRequestError`, always with the same generic error string.
 
 Rate limiting
 
@@ -2221,8 +2246,9 @@ Errors
 
 - `400`: Not used.
 - `401`: Not used.
-- `404`: Not handled locally; upstream failures become `500`.
-- `500`: `{ success: false, error: string }`
+- `404`: Possible when the upstream CLOB helper throws a `ClobRequestError` with status `404`; body is `{ success: false, error: "Unable to load trades right now." }`
+- `500`: `{ success: false, error: "Unable to load trades right now." }`
+- Other upstream CLOB failures: the handler returns the upstream status code when exposed by `ClobRequestError`, always with the same generic error string.
 
 Rate limiting
 

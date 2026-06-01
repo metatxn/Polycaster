@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import { ClobRequestError } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
@@ -39,12 +40,17 @@ export async function GET(
     );
   } catch (error) {
     log.error("fetch.failed", { error });
+    // Never reflect the upstream/exception message to the client (CWE-209).
+    // Map to the upstream status class when known; otherwise 500.
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Unable to load the order book right now.",
       },
-      { status: 500, headers: { "Cache-Control": "no-store" } }
+      {
+        status: error instanceof ClobRequestError ? error.status : 500,
+        headers: { "Cache-Control": "no-store" },
+      }
     );
   }
 }

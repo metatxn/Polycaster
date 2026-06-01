@@ -822,7 +822,7 @@ function createPanel(opts: PanelOptions): HTMLElement {
   const currentCtx = TradingService.getContext();
   if (
     currentCtx.address &&
-    !currentCtx.credentials &&
+    !currentCtx.hasCredentials &&
     (currentCtx.state === "error" ||
       currentCtx.state === "deriving-credentials")
   ) {
@@ -4542,7 +4542,7 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
   }
 
   // Enable trading notice (blocks all steps)
-  const needsTrading = !ctx.credentials;
+  const needsTrading = !ctx.hasCredentials;
   if (needsTrading) {
     const enableTradingError =
       ctx.state === "error" && ctx.error
@@ -4648,7 +4648,11 @@ function render(
   if (state === "deploying") {
     addLoading(panel, "Deploying your trading wallet…");
     return;
-  } else if (ctx.isDeployed === null && ctx.proxyAddress && !ctx.credentials) {
+  } else if (
+    ctx.isDeployed === null &&
+    ctx.proxyAddress &&
+    !ctx.hasCredentials
+  ) {
     // Initial on-chain deployment check still in flight (first balance fetch).
     // Show a neutral spinner instead of flashing the Deploy gate for ~500ms.
     addLoading(panel, "Loading trading wallet…");
@@ -4667,7 +4671,7 @@ function render(
   } else if (state === "deriving-credentials") {
     addLoading(panel, "Confirm signature in your wallet...");
     return;
-  } else if (!ctx.credentials) {
+  } else if (!ctx.hasCredentials) {
     // Credentials required before trading. Hit in two scenarios:
     //   - right after Connect Wallet (state === "connected")
     //   - right after Deploy Trading Wallet (state === "ready", wallet just

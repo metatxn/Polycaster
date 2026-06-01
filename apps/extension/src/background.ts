@@ -15,6 +15,11 @@ import {
   queueAnalyticsEvent,
 } from "./background/analytics";
 import {
+  hasClobCredentials,
+  loadClobCredentials,
+  storeClobCredentials,
+} from "./background/clob-credentials-store";
+import {
   cancelClobOrder,
   fetchPortfolioOpenOrders,
   type PortfolioClobOpenOrder,
@@ -28,10 +33,23 @@ import {
   clearExtensionAccessToken,
   getExtensionAccessToken,
   getExtensionAuthorizationHeader,
+  getExtensionSessionInfo,
   getKnowwAppUrl,
   isKnowwApiUrl,
   setExtensionAccessToken,
 } from "./background/extension-session";
+import {
+  executePortfolioDeposit,
+  executePortfolioWithdraw,
+  getPortfolioBridgeAssets,
+  getPortfolioDepositMax,
+  getPortfolioWalletTokens,
+} from "./background/portfolio-funds";
+import { initBridgeWallet } from "./background/signing-state";
+import {
+  extractDerivedCredentials,
+  tradingOpNeedsCredentials,
+} from "./background/trading-credential-mediation";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import type {
   BackgroundResponse,
@@ -63,12 +81,6 @@ type ChromeSidePanelApi = {
   setPanelBehavior?: (behavior: {
     openPanelOnActionClick: boolean;
   }) => Promise<void>;
-};
-
-type StoredClobCredentials = {
-  apiKey: string;
-  apiSecret: string;
-  apiPassphrase: string;
 };
 
 let lastSidePanelTabId: number | undefined;
@@ -323,6 +335,39 @@ async function resolveContentTargetTabId(
   return lastSidePanelTabId;
 }
 
+// The tab the portfolio wallet connected on. It holds both the wallet session
+// (selected provider / WalletConnect) AND the lazily-registered signing
+// listener, so deposit/withdraw signatures must be relayed *there* — not to
+// whatever tab happens to be active when the user hits Withdraw.
+let portfolioSigningTabId: number | undefined;
+
+async function tabIsAlive(tabId: number): Promise<boolean> {
+  try {
+    await chrome.tabs.get(tabId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tab to relay portfolio signing through: the remembered connect tab when it's
+ * still open, otherwise the usual active-tab resolution.
+ */
+async function resolvePortfolioSigningTabId(
+  msg: { tabId?: number },
+  sender: chrome.runtime.MessageSender
+): Promise<number | undefined> {
+  if (
+    typeof portfolioSigningTabId === "number" &&
+    (await tabIsAlive(portfolioSigningTabId))
+  ) {
+    return portfolioSigningTabId;
+  }
+  portfolioSigningTabId = undefined;
+  return resolveContentTargetTabId(msg, sender);
+}
+
 function isRecoverableContentScriptError(error?: string): boolean {
   return /Receiving end does not exist|Could not establish connection|Extension context invalidated/i.test(
     error || ""
@@ -422,6 +467,11 @@ async function registerContentScripts(): Promise<void> {
 
 registerContentScripts();
 void flushAnalyticsQueue();
+// Resolve signing responses for requests initiated *in the worker* (portfolio
+// deposit/withdraw). Without this the worker's pending-request map is never
+// drained and every signature times out. The offscreen doc registers its own
+// copy for trading; the two are keyed by request id so they don't collide.
+initBridgeWallet();
 
 // ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
@@ -516,47 +566,6 @@ async function clearCachedTradingCredentials(): Promise<void> {
   await new Promise<void>((resolve) => {
     chrome.storage.session.remove(credentialKeys, () => resolve());
   });
-}
-
-function getTradingCredentialsStorageKey(address: string): string {
-  return `${TRADING_CREDS_STORAGE_PREFIX}${address.toLowerCase()}`;
-}
-
-function isStoredClobCredentials(
-  value: unknown
-): value is StoredClobCredentials {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as StoredClobCredentials).apiKey === "string" &&
-    typeof (value as StoredClobCredentials).apiSecret === "string" &&
-    typeof (value as StoredClobCredentials).apiPassphrase === "string"
-  );
-}
-
-async function getCachedTradingCredentials(
-  address: string
-): Promise<StoredClobCredentials | null> {
-  const key = getTradingCredentialsStorageKey(address);
-  const value = await new Promise<unknown>((resolve) => {
-    chrome.storage.session.get(key, (result) => {
-      resolve(result[key]);
-    });
-  });
-  return isStoredClobCredentials(value) ? value : null;
-}
-
-async function hasCachedTradingCredentials(address: string): Promise<boolean> {
-  return (await getCachedTradingCredentials(address)) !== null;
-}
-
-function broadcastTradingCredentialsUpdated(address: string): void {
-  chrome.runtime.sendMessage(
-    { type: TRADING_CREDENTIALS_UPDATED_MESSAGE, address },
-    () => {
-      void chrome.runtime.lastError;
-    }
-  );
 }
 
 async function broadcastTradingSessionDisconnected(): Promise<void> {
@@ -702,26 +711,77 @@ async function ensureOffscreen(): Promise<void> {
   }
 }
 
+function broadcastTradingCredentialsUpdated(address: string): void {
+  chrome.runtime.sendMessage(
+    { type: TRADING_CREDENTIALS_UPDATED_MESSAGE, address },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
+}
+
+/**
+ * Mediate CLOB credentials between content, the SW store, and the offscreen
+ * trading handler. The offscreen document can't reach the TRUSTED_CONTEXTS-only
+ * session store, so the SW:
+ *   - injects creds into credential-bearing ops before forwarding;
+ *   - persists creds from the derive response and relays a method-only result.
+ * Content never sends or receives the raw credentials.
+ */
 function forwardToOffscreen(
   message: unknown,
   sender: chrome.runtime.MessageSender,
   sendResponse: (response: BackgroundResponse) => void
 ): void {
   const tabId = sender.tab?.id;
+  const msg = message as { type?: string; address?: string };
 
-  ensureOffscreen()
-    .then(() => sendOffscreenMessage("offscreen:trading", message, tabId))
-    .then((result) => {
+  void (async () => {
+    try {
+      await ensureOffscreen();
+
+      let payload: unknown = message;
+      if (
+        typeof msg.type === "string" &&
+        tradingOpNeedsCredentials(msg.type) &&
+        typeof msg.address === "string"
+      ) {
+        const credentials = await loadClobCredentials(msg.address);
+        payload = {
+          ...(message as object),
+          credentials: credentials ?? undefined,
+        };
+      }
+
+      const result = await sendOffscreenMessage(
+        "offscreen:trading",
+        payload,
+        tabId
+      );
+
+      if (
+        msg.type === "trading:derive-credentials" &&
+        typeof msg.address === "string"
+      ) {
+        const extracted = extractDerivedCredentials(result);
+        if (extracted) {
+          await storeClobCredentials(msg.address, extracted.credentials);
+          broadcastTradingCredentialsUpdated(msg.address);
+          sendResponse(extracted.response);
+          return;
+        }
+      }
+
       sendResponse(
         result ?? { ok: false, error: "No response from offscreen" }
       );
-    })
-    .catch((err) => {
+    } catch (err) {
       sendResponse({
         ok: false,
         error: err instanceof Error ? err.message : String(err),
       });
-    });
+    }
+  })();
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -799,6 +859,14 @@ chrome.runtime.onMessage.addListener(
       visible?: boolean;
       address?: string;
       orderId?: string;
+      walletMode?: string;
+      amount?: string;
+      destination?: string;
+      chainId?: string;
+      tokenSymbol?: string;
+      tokenAddress?: string;
+      tokenDecimals?: number;
+      chainKey?: string;
       surface?: "sidebar" | "floating";
     };
 
@@ -924,9 +992,50 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_CONNECT_PORTFOLIO_WALLET") {
+      void resolveContentTargetTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          sendResponse({
+            ok: false,
+            error: "No active content tab is available.",
+          } as BackgroundResponse);
+          return;
+        }
+        // Remember the tab so later deposit/withdraw signatures relay here.
+        portfolioSigningTabId = tabId;
+        sendMessageToContentTab(
+          tabId,
+          {
+            type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
+            walletUuid: msg.walletUuid,
+          },
+          sendResponse
+        );
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE") {
       forwardToResolvedContentTab(msg, sender, sendResponse, {
-        type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
-        walletUuid: msg.walletUuid,
+        type: "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE",
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_PORTFOLIO_REAUTH") {
+      void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          sendResponse({
+            ok: false,
+            error: "NO_CONTENT_TAB",
+          } as BackgroundResponse);
+          return;
+        }
+        portfolioSigningTabId = tabId;
+        sendMessageToContentTab(
+          tabId,
+          { type: "KNOWW_PORTFOLIO_REAUTH", address: msg.address },
+          sendResponse
+        );
       });
       return true;
     }
@@ -935,7 +1044,7 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_GET_PORTFOLIO_TRADING_STATUS" &&
       typeof msg.address === "string"
     ) {
-      void hasCachedTradingCredentials(msg.address)
+      void hasClobCredentials(msg.address)
         .then((hasCredentials) => {
           sendResponse({
             ok: true,
@@ -968,7 +1077,7 @@ chrome.runtime.onMessage.addListener(
     ) {
       const address = msg.address;
       void (async () => {
-        const credentials = await getCachedTradingCredentials(address);
+        const credentials = await loadClobCredentials(address);
         if (!credentials) {
           sendResponse({
             ok: true,
@@ -1005,7 +1114,7 @@ chrome.runtime.onMessage.addListener(
       const address = msg.address;
       const orderId = msg.orderId;
       void (async () => {
-        const credentials = await getCachedTradingCredentials(address);
+        const credentials = await loadClobCredentials(address);
         if (!credentials) {
           sendResponse({
             ok: false,
@@ -1021,6 +1130,112 @@ chrome.runtime.onMessage.addListener(
           ok: false,
           error: error instanceof Error ? error.message : String(error),
         } as BackgroundResponse);
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_PORTFOLIO_BRIDGE_ASSETS") {
+      void getPortfolioBridgeAssets()
+        .then((assets) =>
+          sendResponse({ ok: true, data: { assets } } as BackgroundResponse)
+        )
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_PORTFOLIO_WALLET_TOKENS" &&
+      typeof msg.address === "string"
+    ) {
+      void getPortfolioWalletTokens(msg.address)
+        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_PORTFOLIO_GET_DEPOSIT_MAX" &&
+      typeof msg.address === "string"
+    ) {
+      const eoaAddress = msg.address;
+      void getPortfolioDepositMax(eoaAddress)
+        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
+      (msg?.type === "KNOWW_PORTFOLIO_DEPOSIT" ||
+        msg?.type === "KNOWW_PORTFOLIO_WITHDRAW") &&
+      typeof msg.address === "string" &&
+      typeof msg.amount === "string"
+    ) {
+      const isWithdraw = msg.type === "KNOWW_PORTFOLIO_WITHDRAW";
+      const eoaAddress = msg.address;
+      const amount = msg.amount;
+      const walletMode = msg.walletMode;
+      const destination = msg.destination;
+      const chainId = msg.chainId;
+      const tokenSymbol = msg.tokenSymbol;
+      const tokenAddress = msg.tokenAddress;
+      const tokenDecimals = msg.tokenDecimals;
+      const chainKey = msg.chainKey;
+      const tokenId = msg.tokenId;
+      void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          // No supported content tab to sign through — the side panel falls
+          // back to the knoww.app funds page when it sees NO_CONTENT_TAB.
+          sendResponse({
+            ok: false,
+            error: "NO_CONTENT_TAB",
+          } as BackgroundResponse);
+          return;
+        }
+        const run = isWithdraw
+          ? executePortfolioWithdraw({
+              eoaAddress,
+              walletMode,
+              amount,
+              destination: destination ?? "",
+              chainKey,
+              tokenId,
+              tabId,
+            })
+          : executePortfolioDeposit({
+              eoaAddress,
+              walletMode,
+              amount,
+              chainId,
+              tokenSymbol,
+              tokenAddress,
+              tokenDecimals,
+              tabId,
+            });
+        run
+          .then((data) =>
+            sendResponse({ ok: true, data } as BackgroundResponse)
+          )
+          .catch((error) => {
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            } as BackgroundResponse);
+          });
       });
       return true;
     }
@@ -1061,7 +1276,11 @@ chrome.runtime.onMessage.addListener(
     //      namespace so a compromised content script cannot use this generic
     //      key/value channel to read or overwrite unrelated entries (most
     //      importantly the extension bearer at `knoww_extension_access_token`).
-    if (msg?.type === "creds:get" && typeof msg.key === "string") {
+    // `creds:has` returns ONLY a boolean presence flag, never the raw
+    // credential object. CLOB credentials are written by the background worker
+    // itself (on derive) and read only inside the worker for signing/placing
+    // orders, so the apiKey/apiSecret/apiPassphrase never cross to content.
+    if (msg?.type === "creds:has" && typeof msg.key === "string") {
       const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
       if (senderReject) {
         sendResponse(senderReject as BackgroundResponse);
@@ -1072,33 +1291,20 @@ chrome.runtime.onMessage.addListener(
         sendResponse(keyReject as BackgroundResponse);
         return true;
       }
-      const k = msg.key;
-      chrome.storage.session.get(k, (result) => {
-        sendResponse({
-          ok: true,
-          data: result[k] ?? null,
-        } as BackgroundResponse);
-      });
-      return true;
-    }
-    if (msg?.type === "creds:set" && typeof msg.key === "string") {
-      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
-      if (senderReject) {
-        sendResponse(senderReject as BackgroundResponse);
-        return true;
-      }
-      const keyReject = checkCredsKey(msg.key);
-      if (keyReject) {
-        sendResponse(keyReject as BackgroundResponse);
-        return true;
-      }
-      const key = msg.key;
-      chrome.storage.session.set({ [key]: msg.value }, () => {
-        broadcastTradingCredentialsUpdated(
-          key.slice(TRADING_CREDS_STORAGE_PREFIX.length)
-        );
-        sendResponse({ ok: true, data: null } as BackgroundResponse);
-      });
+      const address = msg.key.slice(TRADING_CREDS_STORAGE_PREFIX.length);
+      void hasClobCredentials(address)
+        .then((hasCredentials) => {
+          sendResponse({
+            ok: true,
+            data: { hasCredentials },
+          } as BackgroundResponse);
+        })
+        .catch(() => {
+          sendResponse({
+            ok: true,
+            data: { hasCredentials: false },
+          } as BackgroundResponse);
+        });
       return true;
     }
     if (msg?.type === "creds:remove" && typeof msg.key === "string") {
@@ -1117,25 +1323,17 @@ chrome.runtime.onMessage.addListener(
       });
       return true;
     }
-    if (msg?.type === "auth:get-token") {
+    // Return ONLY derived session facts ({ loggedIn, address }), never the raw
+    // bearer token. The token stays in the worker; authed fetches go through the
+    // fetch-json proxy, which attaches it internally for knoww.app/api URLs.
+    if (msg?.type === "auth:get-session-info") {
       const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
       if (senderReject) {
         sendResponse(senderReject as BackgroundResponse);
         return true;
       }
-      getExtensionAccessToken().then((token) => {
-        sendResponse({ ok: true, data: token } as BackgroundResponse);
-      });
-      return true;
-    }
-    if (msg?.type === "KNOWW_GET_PORTFOLIO_SESSION") {
-      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
-      if (senderReject) {
-        sendResponse(senderReject as BackgroundResponse);
-        return true;
-      }
-      getExtensionAccessToken().then((token) => {
-        sendResponse({ ok: true, data: { token } } as BackgroundResponse);
+      getExtensionSessionInfo().then((info) => {
+        sendResponse({ ok: true, data: info } as BackgroundResponse);
       });
       return true;
     }

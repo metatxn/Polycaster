@@ -10,6 +10,9 @@
   },
   "include": [
     "src/background/unified-clob-client.ts",
+    "src/background/clob-credentials-store.ts",
+    "src/background/extension-session-token.ts",
+    "src/background/trading-credential-mediation.ts",
     "src/content/scoring-policy.ts",
     "src/content/notification-surface.ts",
     "src/background/score-markets-core.ts",

@@ -7,12 +7,7 @@
  * Step 3: Cache credentials via background service worker (session storage)
  */
 
-import {
-  type ApiKeyCreds,
-  buildClobAuthRpcTypedData,
-} from "@knoww/shared-types/polymarket";
-
-export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
+import { buildClobAuthRpcTypedData } from "@knoww/shared-types/polymarket";
 
 import { WalletBridge } from "./bridge";
 import { ExtensionSession } from "./extension-session";
@@ -69,9 +64,6 @@ function sendTradingMsg<T>(
 const CREDS_STORAGE_KEY = "knoww_clob_creds";
 
 export interface DerivedApiKeyResult {
-  apiKey: string;
-  apiSecret: string;
-  apiPassphrase: string;
   method: "create" | "derive";
 }
 
@@ -80,27 +72,21 @@ function storageKey(address: string): string {
 }
 
 export const CredentialManager = {
-  async getStored(address: string): Promise<ApiKeyCreds | null> {
+  /**
+   * Whether CLOB credentials already exist for this wallet. The raw credential
+   * object stays inside the background worker (it derives, stores, and uses it
+   * for signing/placing orders) — content only ever learns presence.
+   */
+  async has(address: string): Promise<boolean> {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
-        { type: "creds:get", key: storageKey(address) },
-        (resp: { ok: boolean; data?: ApiKeyCreds | null }) => {
+        { type: "creds:has", key: storageKey(address) },
+        (resp: { ok: boolean; data?: { hasCredentials?: boolean } }) => {
           if (chrome.runtime.lastError || !resp?.ok) {
-            resolve(null);
+            resolve(false);
             return;
           }
-          resolve(resp.data ?? null);
-        }
-      );
-    });
-  },
-
-  async store(address: string, creds: ApiKeyCreds): Promise<void> {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: "creds:set", key: storageKey(address), value: creds },
-        () => {
-          resolve();
+          resolve(resp.data?.hasCredentials === true);
         }
       );
     });
@@ -125,9 +111,8 @@ export const CredentialManager = {
    * 3. Caches the resulting credentials
    */
   async derive(address: string): Promise<DerivedApiKeyResult> {
-    const cached = await this.getStored(address);
-    if (cached) {
-      return { ...cached, method: "derive" };
+    if (await this.has(address)) {
+      return { method: "derive" };
     }
 
     await ExtensionSession.ensureAuthorized(address);
@@ -139,8 +124,10 @@ export const CredentialManager = {
 
     const signature = await WalletBridge.signTypedData(address, typedData);
 
-    // Send to background for credential derivation via CLOB API
-    const result = await sendTradingMsg<DerivedApiKeyResult>(
+    // Background derives the credentials via the CLOB API, stores them in its
+    // own session store, and returns only the method — the raw apiKey/secret/
+    // passphrase never come back to the content script.
+    return sendTradingMsg<DerivedApiKeyResult>(
       {
         type: "trading:derive-credentials",
         address,
@@ -150,12 +137,5 @@ export const CredentialManager = {
       },
       "Failed to derive credentials"
     );
-
-    await this.store(address, {
-      apiKey: result.apiKey,
-      apiSecret: result.apiSecret,
-      apiPassphrase: result.apiPassphrase,
-    });
-    return result;
   },
 };

@@ -131,11 +131,16 @@ async function fetchJson<T>(
 }
 
 export const ExtensionSession = {
-  async getToken(): Promise<string | null> {
-    return sendAuthMessage<string | null>(
-      { type: "auth:get-token" },
-      "Failed to get auth token"
+  /**
+   * Whether a knoww session exists. The raw bearer token stays in the
+   * background worker; content only learns presence.
+   */
+  async hasSession(): Promise<boolean> {
+    const info = await sendAuthMessage<{ loggedIn?: boolean }>(
+      { type: "auth:get-session-info" },
+      "Failed to get session info"
     );
+    return info?.loggedIn === true;
   },
 
   async clear(): Promise<void> {
@@ -145,10 +150,9 @@ export const ExtensionSession = {
     );
   },
 
-  async ensureAuthorized(address: string): Promise<string> {
-    const cachedToken = await this.getToken();
-    if (cachedToken) {
-      return cachedToken;
+  async ensureAuthorized(address: string): Promise<void> {
+    if (await this.hasSession()) {
+      return;
     }
 
     void window.KNOWW_ANALYTICS?.track("extension_session_started");
@@ -216,7 +220,7 @@ export const ExtensionSession = {
 
       void window.KNOWW_ANALYTICS?.track("extension_session_succeeded");
 
-      return token;
+      return;
     } catch (err) {
       if (
         err instanceof Error &&

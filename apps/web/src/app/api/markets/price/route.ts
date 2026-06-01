@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import { ClobRequestError } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
@@ -59,12 +60,16 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     log.error("fetch.failed", { error });
+    // Never reflect the upstream/exception message to the client (CWE-209).
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "Unable to load the price right now.",
       },
-      { status: 500 }
+      {
+        status: error instanceof ClobRequestError ? error.status : 500,
+        headers: { "Cache-Control": "no-store" },
+      }
     );
   }
 }

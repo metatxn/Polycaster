@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { sanitizeUpstreamBody } from "@/lib/upstream-error";
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.user.details");
@@ -121,7 +122,10 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      log.error("upstream.error", { body: errorText });
+      log.error("upstream.error", {
+        status: response.status,
+        body: sanitizeUpstreamBody(errorText),
+      });
       return NextResponse.json(
         {
           success: false,

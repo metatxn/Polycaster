@@ -117,7 +117,14 @@ export interface PaperFill {
   runId: string;
   watchlistItemId: string;
   tokenId: string;
-  status: "FILLED" | "BLOCKED";
+  /**
+   * FILLED — the order fully filled the requested size.
+   * PARTIALLY_FILLED — only part of the order filled (FAK orders only); the
+   *   `shares`/`notionalUsd` fields carry the actually-filled amount, and a SELL
+   *   in this state reduces (not closes) the underlying position.
+   * BLOCKED — nothing executed (risk gate, dry-run, error, or zero fill).
+   */
+  status: "FILLED" | "PARTIALLY_FILLED" | "BLOCKED";
   side: AgentAction;
   price: string;
   notionalUsd: string;

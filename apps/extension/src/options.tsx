@@ -526,21 +526,20 @@ function OptionsApp() {
       }
     );
 
-    // Check if user is logged in
-    chrome.runtime.sendMessage({ type: "auth:get-token" }, (response) => {
-      if (chrome.runtime.lastError) {
-        log.error("auth.get_token_failed", {
-          error: chrome.runtime.lastError.message,
-        });
-        setHasToken(false);
-        return;
+    // Check if user is logged in (derived session info only — never the token).
+    chrome.runtime.sendMessage(
+      { type: "auth:get-session-info" },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          log.error("auth.get_session_info_failed", {
+            error: chrome.runtime.lastError.message,
+          });
+          setHasToken(false);
+          return;
+        }
+        setHasToken(response?.ok === true && response.data?.loggedIn === true);
       }
-      if (response?.ok && response.data) {
-        setHasToken(true);
-      } else {
-        setHasToken(false);
-      }
-    });
+    );
   }, []);
 
   // Show status message

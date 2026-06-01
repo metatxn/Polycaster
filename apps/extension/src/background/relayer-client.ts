@@ -23,16 +23,88 @@ import {
 import { type Address, getAddress } from "viem";
 import { EXTENSION_AUTH_REQUIRED_ERROR } from "../types/chrome-messages";
 import type { BridgeWalletClient } from "./bridge-signer";
-import { getAccessTokenViaMessage } from "./extension-auth";
-import { getKnowwAppUrl } from "./extension-session";
+import {
+  type ExtensionSessionInfo,
+  getExtensionSessionInfoViaMessage,
+} from "./extension-auth";
+import {
+  clearExtensionAccessToken,
+  getExtensionAuthorizationHeader,
+  getExtensionSessionInfo,
+  getKnowwAppUrl,
+  isKnowwApiUrl,
+} from "./extension-session";
 
 const RELAYER_URL = `${getKnowwAppUrl().replace(/\/$/, "")}/api/relayer`;
+
+// This module is shared by two contexts: the offscreen document (trading) and
+// the service worker (portfolio funds). The offscreen relies on the worker for
+// session storage + CORS-free fetch via message passing — but a worker can't
+// message itself, so when we ARE the worker we must read the session and fetch
+// directly instead. `window` is absent in the service worker.
+const IS_SERVICE_WORKER = typeof window === "undefined";
+
+/** Whether a knoww session exists, read the right way for the current context. */
+function getSessionInfo(): Promise<ExtensionSessionInfo> {
+  return IS_SERVICE_WORKER
+    ? getExtensionSessionInfo()
+    : getExtensionSessionInfoViaMessage();
+}
+
+/**
+ * Direct fetch from the service worker, mirroring the fetch-json handler:
+ * attaches the bearer for knoww.app/api URLs and clears it on a 401. The SW has
+ * host permissions so there's no CORS restriction to proxy around.
+ */
+async function directFetch<T>(
+  url: string,
+  method: "GET" | "POST",
+  headers?: Record<string, string>,
+  body?: string
+): Promise<T> {
+  const finalHeaders: Record<string, string> = {
+    ...(method === "GET" ? {} : { "Content-Type": "application/json" }),
+    Accept: "application/json",
+    ...(headers ?? {}),
+  };
+  const hasAuth =
+    typeof finalHeaders.Authorization === "string" ||
+    typeof finalHeaders.authorization === "string";
+  if (!hasAuth && isKnowwApiUrl(url)) {
+    const authorization = await getExtensionAuthorizationHeader();
+    if (authorization) finalHeaders.Authorization = authorization;
+  }
+
+  const options: RequestInit = { method, headers: finalHeaders };
+  if (body !== undefined) options.body = body;
+
+  const res = await fetch(url, options);
+  if (res.status === 401 && isKnowwApiUrl(url)) {
+    await clearExtensionAccessToken();
+  }
+
+  const text = await res.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (res.status < 200 || res.status >= 300) {
+    const payload = typeof data === "string" ? data : JSON.stringify(data);
+    throw new Error(
+      `Relayer ${res.status}${payload ? `: ${payload.slice(0, 300)}` : ""}`
+    );
+  }
+  return data as T;
+}
 
 /**
  * Proxy fetch through the service worker to avoid CORS.
  * The offscreen document has a chrome-extension:// origin which gets blocked
  * by the relayer's CORS policy. The service worker can fetch without CORS
- * restrictions.
+ * restrictions — and when we already ARE the worker we fetch directly.
  */
 function proxyFetch<T>(
   url: string,
@@ -40,6 +112,9 @@ function proxyFetch<T>(
   headers?: Record<string, string>,
   body?: string
 ): Promise<T> {
+  if (IS_SERVICE_WORKER) {
+    return directFetch<T>(url, method, headers, body);
+  }
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
@@ -116,16 +191,18 @@ async function sendAuthedRequest<T>(
   body?: string,
   params?: Record<string, string>
 ): Promise<T> {
-  const token = await getAccessTokenViaMessage();
-  if (!token) {
+  // Pre-flight the session so we fail fast with a clear "auth required" error.
+  // We do NOT attach the bearer here: the relayer is a knoww.app/api URL, so the
+  // fetch-json proxy injects the token internally and it never leaves the worker.
+  const { loggedIn } = await getSessionInfo();
+  if (!loggedIn) {
     throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
   }
-  const headers = { Authorization: `Bearer ${token}` };
 
   if (method === "GET") {
-    return relayerGet<T>(path, params ?? {}, headers);
+    return relayerGet<T>(path, params ?? {});
   }
-  return relayerPost<T>(path, body ?? "", headers);
+  return relayerPost<T>(path, body ?? "");
 }
 
 const relayerTransport: RelayerExecutionTransport = {

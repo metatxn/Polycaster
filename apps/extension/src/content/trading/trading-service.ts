@@ -25,7 +25,7 @@ import {
   type TradingWalletMode,
 } from "../../types/chrome-messages";
 import { WalletBridge } from "./bridge";
-import { type ApiKeyCreds, CredentialManager } from "./credentials";
+import { CredentialManager } from "./credentials";
 import { ExtensionSession } from "./extension-session";
 import { ProxyWallet } from "./proxy-wallet";
 
@@ -70,7 +70,12 @@ export interface TradingContext {
   balance: number;
   polBalance: number;
   tokenBalances: TokenBalanceEntry[];
-  credentials: ApiKeyCreds | null;
+  /**
+   * Whether CLOB credentials exist for this wallet. The raw credentials live
+   * only in the background worker; content tracks presence so the UI can move
+   * between connected/ready states without ever holding the secret.
+   */
+  hasCredentials: boolean;
   error: string | null;
   orderBook: OrderBook | null;
   orderBookError: string | null;
@@ -97,7 +102,7 @@ function createDisconnectedContext(): TradingContext {
     balance: 0,
     polBalance: 0,
     tokenBalances: [],
-    credentials: null,
+    hasCredentials: false,
     error: null,
     orderBook: null,
     orderBookError: null,
@@ -381,7 +386,7 @@ export const TradingService = {
   },
 
   async hasActiveSession(): Promise<boolean> {
-    return (await ExtensionSession.getToken()) !== null;
+    return ExtensionSession.hasSession();
   },
 
   async connectWallet(walletUuid?: string): Promise<void> {
@@ -451,9 +456,9 @@ export const TradingService = {
         });
       }
 
-      const cached = await CredentialManager.getStored(address);
-      if (cached) {
-        update({ credentials: cached, state: "ready" });
+      const hasCreds = await CredentialManager.has(address);
+      if (hasCreds) {
+        update({ hasCredentials: true, state: "ready" });
       } else {
         update({ state: "connected" });
       }
@@ -485,11 +490,7 @@ export const TradingService = {
           : "trading_api_key_derived"
       );
       update({
-        credentials: {
-          apiKey: result.apiKey,
-          apiSecret: result.apiSecret,
-          apiPassphrase: result.apiPassphrase,
-        },
+        hasCredentials: true,
         state: "ready",
       });
 
@@ -508,10 +509,10 @@ export const TradingService = {
   },
 
   async ensureReady(): Promise<boolean> {
-    if (ctx.state === "ready" && ctx.credentials) return true;
+    if (ctx.state === "ready" && ctx.hasCredentials) return true;
     if (!ctx.address) await this.connectWallet();
     if (ctx.state === "error") return false;
-    if (!ctx.credentials) await this.deriveCredentials();
+    if (!ctx.hasCredentials) await this.deriveCredentials();
     return ctx.state === "ready";
   },
 
@@ -556,7 +557,7 @@ export const TradingService = {
         );
         update(walletData);
         await this.refreshBalance();
-        if (ctx.credentials) update({ state: "ready" });
+        if (ctx.hasCredentials) update({ state: "ready" });
       } catch (err) {
         update({
           state: "error",
@@ -684,10 +685,6 @@ export const TradingService = {
       {
         type: "trading:get-order-preflight",
         ...params,
-        // Forward creds when available so the background preflight uses the
-        // same authenticated client (and builderConfig) as place-order — fee
-        // estimates can otherwise diverge and the panel gate would be wrong.
-        ...(ctx.credentials ? { credentials: ctx.credentials } : {}),
       },
       "Order preflight failed",
       30_000
@@ -709,7 +706,7 @@ export const TradingService = {
     negRisk?: boolean;
     isMarketableBuy?: boolean;
   }): Promise<unknown> {
-    if (!ctx.address || !ctx.proxyAddress || !ctx.credentials) {
+    if (!ctx.address || !ctx.proxyAddress || !ctx.hasCredentials) {
       throw new Error("Trading setup incomplete");
     }
 
@@ -724,7 +721,6 @@ export const TradingService = {
             address: ctx.address,
             proxyAddress: ctx.proxyAddress,
             walletMode: ctx.walletMode,
-            credentials: ctx.credentials,
           },
           "Order failed"
         )
@@ -754,7 +750,7 @@ export const TradingService = {
     if (!ctx.address) throw new Error("Wallet not connected");
     if (ctx.walletMode === "eoa") {
       update({
-        state: ctx.credentials ? "ready" : "connected",
+        state: ctx.hasCredentials ? "ready" : "connected",
         isDeployed: true,
         proxyAddress: ctx.address,
       });
@@ -863,7 +859,6 @@ export const TradingService = {
             negRisk,
             proxyAddress: ctx.proxyAddress ?? undefined,
             walletMode: ctx.walletMode,
-            credentials: ctx.credentials ?? undefined,
             yesTokenId,
             noTokenId,
           },
@@ -906,7 +901,6 @@ export const TradingService = {
             negRisk,
             proxyAddress: ctx.proxyAddress ?? undefined,
             walletMode: ctx.walletMode,
-            credentials: ctx.credentials ?? undefined,
             yesTokenId,
             noTokenId,
           },

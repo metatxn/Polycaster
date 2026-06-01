@@ -242,7 +242,13 @@ test("side panel exposes a compact portfolio view without charts", () => {
   const uiSource = readSource("src/content/ui.ts");
 
   assert.equal(/data-sidepanel-view="portfolio"/.test(sidepanelSource), true);
-  assert.equal(/KNOWW_GET_PORTFOLIO_SESSION/.test(sidepanelSource), true);
+  // Session info is fetched as derived facts ({ loggedIn, address }); the raw
+  // bearer token never reaches the sidepanel (it stays in the worker).
+  assert.equal(/auth:get-session-info/.test(sidepanelSource), true);
+  assert.equal(/getPortfolioSessionAddress/.test(sidepanelSource), true);
+  assert.equal(/waitForPortfolioSessionAddress/.test(sidepanelSource), true);
+  // The sidepanel no longer decodes the session token itself.
+  assert.equal(/decodeExtensionSessionAddress/.test(sidepanelSource), false);
   assert.equal(/KNOWW_GET_PORTFOLIO_WALLETS/.test(sidepanelSource), true);
   assert.equal(/KNOWW_CONNECT_PORTFOLIO_WALLET/.test(sidepanelSource), true);
   assert.equal(
@@ -254,13 +260,6 @@ test("side panel exposes a compact portfolio view without charts", () => {
   assert.equal(/data-enable-portfolio-trading/.test(sidepanelSource), true);
   assert.equal(/renderPortfolioWalletChoices/.test(sidepanelSource), true);
   assert.equal(/renderPortfolioTradingGate/.test(sidepanelSource), true);
-  assert.equal(/waitForPortfolioSessionToken/.test(sidepanelSource), true);
-  assert.equal(/decodeExtensionSessionAddress/.test(sidepanelSource), true);
-  assert.equal(/getExtensionSessionPayloadSegment/.test(sidepanelSource), true);
-  assert.equal(
-    /parts\.length === 2\)\s*return parts\[0\]/.test(sidepanelSource),
-    true
-  );
   assert.equal(/resolvePortfolioAddress/.test(sidepanelSource), true);
   assert.equal(/trading:derive-proxy-address/.test(sidepanelSource), true);
   assert.equal(/\/api\/user\/positions/.test(sidepanelSource), true);
@@ -383,21 +382,33 @@ test("side panel refreshes portfolio trading gate when credentials update", () =
   const backgroundSource = readSource("src/background.ts");
   const sidepanelSource = readSource("src/sidepanel.ts");
 
+  // The service worker persists derived CLOB credentials and broadcasts a
+  // credentials-updated message (the raw creds never leave the worker).
   assert.equal(
     /TRADING_CREDENTIALS_UPDATED_MESSAGE/.test(backgroundSource),
     true
   );
+  assert.equal(/storeClobCredentials/.test(backgroundSource), true);
+  // The sidepanel listens for that broadcast and refreshes the portfolio gate.
   assert.equal(
     /TRADING_CREDENTIALS_UPDATED_MESSAGE/.test(sidepanelSource),
     true
   );
+  assert.equal(/loadPortfolio\(true\)/.test(sidepanelSource), true);
+  // Credential reads stay namespaced to the trading-creds prefix.
   assert.equal(
     /key\.startsWith\(TRADING_CREDS_STORAGE_PREFIX\)/.test(backgroundSource),
     true
   );
-  assert.equal(
-    /broadcastTradingCredentialsUpdated/.test(backgroundSource),
-    true
-  );
-  assert.equal(/loadPortfolio\(true\)/.test(sidepanelSource), true);
+});
+
+test("offscreen trading handler never accesses session storage directly", () => {
+  // The trading handler runs in the offscreen document, which cannot reach the
+  // TRUSTED_CONTEXTS-only session store the service worker reads. Credentials
+  // must be mediated by the SW (inject on the way in, persist on derive) — if
+  // the offscreen handler touches session storage directly, the derive flow
+  // silently fails to persist and the portfolio "enable trading" gate hangs.
+  const handlerSource = readSource("src/background/trading-handler.ts");
+  assert.equal(/chrome\.storage\.session/.test(handlerSource), false);
+  assert.equal(/clob-credentials-store/.test(handlerSource), false);
 });

@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+import { parseEventsQuery } from "@/lib/events-query";
 import { fetchGammaKeysetPage, toSlimGammaEvent } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
 import type { GammaEvent } from "@/types/gamma-api";
@@ -20,30 +21,31 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const limit = searchParams.get("limit") || "15";
-    const afterCursor = searchParams.get("after_cursor");
-
-    const volume24hrMin = searchParams.get("volume24hr_min");
-    const volume1wkMin = searchParams.get("volume1wk_min");
-    const liquidityMin = searchParams.get("liquidity_min");
-    const tagSlug = searchParams.get("tag_slug");
-    const closed = searchParams.get("closed");
-    const fullMarkets = searchParams.get("markets") === "full";
-
-    if (searchParams.has("offset")) {
+    const parsedQuery = parseEventsQuery(request.nextUrl.searchParams);
+    if (!parsedQuery.ok) {
       return NextResponse.json(
         {
           success: false,
-          error: "offset is no longer supported; use after_cursor",
+          error: parsedQuery.error,
+          ...(parsedQuery.details ? { details: parsedQuery.details } : {}),
         },
-        { status: 400 }
+        { status: parsedQuery.status }
       );
     }
+    const {
+      limit,
+      closed,
+      afterCursor,
+      volume24hrMin,
+      volume1wkMin,
+      liquidityMin,
+      tagSlug,
+      fullMarkets,
+    } = parsedQuery.data;
 
     const queryParams = new URLSearchParams();
     queryParams.set("limit", limit);
-    queryParams.set("closed", closed || "false");
+    queryParams.set("closed", closed);
     queryParams.set("order", "startDate");
     queryParams.set("ascending", "false");
 

@@ -1,3 +1,5 @@
+import { decodeExtensionSessionAddress } from "./extension-session-token";
+
 const KNOWW_APP_URL = __DEV_MODE__
   ? "http://localhost:8000"
   : "https://knoww.app";
@@ -55,4 +57,20 @@ export async function getExtensionAuthorizationHeader(): Promise<
 > {
   const token = await getExtensionAccessToken();
   return token ? `Bearer ${token}` : null;
+}
+
+export interface ExtensionSessionInfo {
+  loggedIn: boolean;
+  address: string | null;
+}
+
+/**
+ * Derived, non-secret session facts for callers that previously fetched the
+ * raw token: whether the user is logged in, and the wallet address embedded in
+ * the session token. The raw bearer never leaves the worker.
+ */
+export async function getExtensionSessionInfo(): Promise<ExtensionSessionInfo> {
+  const token = await getExtensionAccessToken();
+  if (!token) return { loggedIn: false, address: null };
+  return { loggedIn: true, address: decodeExtensionSessionAddress(token) };
 }

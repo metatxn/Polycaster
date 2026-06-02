@@ -18,6 +18,7 @@ const FALLBACK_PRICES: Record<string, number> = {
   WBTC: 100000,
   USDC: 1,
   "USDC.e": 1,
+  pUSD: 1,
   USDT: 1,
   DAI: 1,
 };

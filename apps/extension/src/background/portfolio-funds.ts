@@ -3,35 +3,38 @@
  *
  * Mirrors the knoww.app web flows and reuses the shared Polymarket Bridge API
  * (@knoww/shared-types/bridge) + relayer (@knoww/shared-types/relayer):
- *  - Deposit:  EOA transfers the chosen token on the chosen SOURCE chain to a
- *              Bridge deposit address; the bridge credits the proxy as pUSD.
- *  - Withdraw: the proxy transfers pUSD (on Polygon, via the relayer) to a Bridge
- *              withdrawal address; the bridge delivers the chosen token on the
- *              chosen DESTINATION chain to the recipient.
+ *  - Deposit:  EOA transfers pUSD directly to the proxy, or sends supported
+ *              source tokens to a Bridge deposit address that credits pUSD.
+ *  - Withdraw: Proxy transfers pUSD to a Bridge withdrawal address configured
+ *              for the chosen destination chain and token.
  *
  * Signing is delegated to the active content tab via createBridgeWalletClient
  * (the same rail "Enable trading" uses) — the side panel has no wallet itself.
  */
 
+import { logInfo, logWarn } from "@knoww/logger";
 import {
   POLYGON_WALLET_TOKENS,
   readTradingWalletBalance,
 } from "@knoww/shared-types/balances";
 import {
-  buildBridgeTokenIndex,
   createDepositAddresses,
+  type DepositTransaction,
+  fetchDepositStatus,
+  fetchQuote,
   fetchSupportedAssets,
   fetchWithdrawalAddresses,
+  findSupportedBridgeAsset,
   getMinDepositForToken,
-  resolveDestTokenAddress,
+  isPusdToken,
+  POLYGON_BRIDGE_CHAIN_ID,
+  type QuoteResponse,
+  resolveWalletDepositRoute,
   type SupportedAsset,
-  WITHDRAW_CHAIN_IDS,
-  type WithdrawTokenId,
 } from "@knoww/shared-types/bridge";
 import { POLYGON_CHAIN } from "@knoww/shared-types/chains";
 import {
   PUSD_ADDRESS,
-  PUSD_DECIMALS,
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@knoww/shared-types/contracts";
@@ -51,15 +54,19 @@ import {
 } from "viem";
 import { createBridgeWalletClient } from "./bridge-signer";
 import { getKnowwAppUrl } from "./extension-session";
+import {
+  buildPortfolioWithdrawQuoteRequest,
+  type PortfolioBridgeStatusSummary,
+  type PortfolioWithdrawDestination,
+  summarizePortfolioBridgeStatus,
+  validatePortfolioWithdrawBridgeAddress,
+} from "./portfolio-withdraw-flow";
 import { executeViaDepositWallet, executeViaRelayer } from "./relayer-client";
 
-// Polygon tokens the "Wallet" deposit method can transfer (pUSD excluded — it's
-// the trading collateral, not something you deposit). Mirrors the web list.
-const DEPOSIT_WALLET_TOKENS = POLYGON_WALLET_TOKENS.filter(
-  (t) => t.symbol !== "pUSD"
-);
+// Polygon tokens the "Wallet" deposit method can transfer.
+const DEPOSIT_WALLET_TOKENS = POLYGON_WALLET_TOKENS;
 
-const STABLE_SYMBOLS = new Set(["USDC", "USDC.e", "USDT", "DAI"]);
+const STABLE_SYMBOLS = new Set(["USDC", "USDC.e", "USDT", "DAI", "pUSD"]);
 
 export interface PortfolioWalletToken {
   symbol: string;
@@ -69,6 +76,8 @@ export interface PortfolioWalletToken {
   amount: number;
   usdValue: number;
   minUsd: number;
+  depositSupported: boolean;
+  depositDisabledReason?: string;
 }
 
 async function fetchTokenPrices(): Promise<Record<string, number>> {
@@ -126,6 +135,17 @@ export async function getPortfolioWalletTokens(
   ): void => {
     if (amount <= 0) return;
     const price = priceForSymbol(prices, symbol);
+    const supported = findSupportedBridgeAsset(
+      assets,
+      POLYGON_BRIDGE_CHAIN_ID,
+      symbol,
+      address
+    );
+    const isPusd = isPusdToken(symbol, address);
+    const minUsd = isPusd
+      ? 0
+      : (supported?.minCheckoutUsd ??
+        (getMinDepositForToken(assets, symbol) || 2));
     tokens.push({
       symbol,
       name,
@@ -133,7 +153,8 @@ export async function getPortfolioWalletTokens(
       decimals,
       amount,
       usdValue: amount * price,
-      minUsd: getMinDepositForToken(assets, symbol) || 2,
+      minUsd,
+      depositSupported: true,
     });
   };
 
@@ -217,6 +238,78 @@ export async function getPortfolioDepositMax(
   return { balance: String(result.usdcEBalance ?? 0) };
 }
 
+export async function getPortfolioWithdrawQuote(input: {
+  amount: string;
+  destination: string;
+  chainKey?: string;
+  tokenId?: string;
+}): Promise<{
+  quote: QuoteResponse;
+  destination: PortfolioWithdrawDestination;
+}> {
+  const draft = buildPortfolioWithdrawQuoteRequest({
+    amount: input.amount,
+    chainKey: input.chainKey,
+    tokenId: input.tokenId,
+    recipientAddress: input.destination,
+    supportedAssets: await getPortfolioBridgeAssets(),
+  });
+  logInfo("portfolio.withdraw.quote.request", {
+    amount: input.amount,
+    chainKey: draft.destination.chainKey,
+    tokenId: draft.destination.tokenId,
+    recipientAddress: input.destination,
+    toChainId: draft.request.toChainId,
+    toTokenAddress: draft.request.toTokenAddress,
+    fromTokenAddress: draft.request.fromTokenAddress,
+  });
+  const quote = await fetchQuote(draft.request, bridgeOptions());
+  logInfo("portfolio.withdraw.quote.response", {
+    quoteId: quote.quoteId,
+    estToTokenBaseUnit: quote.estToTokenBaseUnit,
+    estOutputUsd: quote.estOutputUsd,
+    tokenId: draft.destination.tokenId,
+    tokenSymbol: draft.destination.tokenSymbol,
+    toTokenAddress: draft.destination.toTokenAddress,
+  });
+  return { quote, destination: draft.destination };
+}
+
+export async function getPortfolioWithdrawStatus(
+  bridgeAddress: string
+): Promise<{
+  transactions: DepositTransaction[];
+  summary: PortfolioBridgeStatusSummary;
+}> {
+  const address = getAddress(bridgeAddress);
+  const transactions = await fetchDepositStatus(address, bridgeOptions());
+  const summary = summarizePortfolioBridgeStatus(transactions);
+  logInfo("portfolio.withdraw.status", {
+    bridgeAddress: address,
+    transactionCount: transactions.length,
+    status: summary.status,
+    txHash: summary.txHash,
+    fromTokenAddress: summary.fromTokenAddress,
+    fromAmountBaseUnit: summary.fromAmountBaseUnit,
+    toChainId: summary.toChainId,
+    toTokenAddress: summary.toTokenAddress,
+  });
+  if (summary.toTokenAddress?.toLowerCase() === PUSD_ADDRESS.toLowerCase()) {
+    logWarn("portfolio.withdraw.status.pusd_destination", {
+      bridgeAddress: address,
+      txHash: summary.txHash,
+      fromTokenAddress: summary.fromTokenAddress,
+      fromAmountBaseUnit: summary.fromAmountBaseUnit,
+      toChainId: summary.toChainId,
+      toTokenAddress: summary.toTokenAddress,
+    });
+  }
+  return {
+    transactions,
+    summary,
+  };
+}
+
 /**
  * Deposit: source token (EOA, on `chainId`) → Bridge deposit address → proxy
  * credited as pUSD. The wallet is switched to the source chain before signing.
@@ -233,28 +326,33 @@ export async function executePortfolioDeposit(input: {
 }): Promise<{ txHash: string; bridgeAddress: string }> {
   const eoa = getAddress(input.eoaAddress) as Address;
   const proxy = deriveProxyAddress(eoa, normalizeWalletMode(input.walletMode));
-  const chainId = input.chainId || "137";
+  const chainId = input.chainId || POLYGON_BRIDGE_CHAIN_ID;
   const tokenSymbol = input.tokenSymbol || "USDC.e";
   const tokenAddress = input.tokenAddress || USDC_E_ADDRESS;
   const tokenDecimals = input.tokenDecimals ?? USDC_E_DECIMALS;
 
-  const addresses = await createDepositAddresses(proxy, bridgeOptions());
-  const matching =
-    addresses.find(
-      (a) =>
-        a.chainId === chainId &&
-        a.tokenSymbol.toUpperCase() === tokenSymbol.toUpperCase()
-    ) ||
-    addresses.find(
-      (a) => a.chainId === chainId && a.tokenSymbol.toUpperCase() === "USDC"
-    ) ||
-    addresses.find((a) => a.chainId === chainId);
-  if (!matching) {
-    throw new Error(
-      `No bridge deposit address for ${tokenSymbol} on that chain.`
-    );
+  const isDirectPusdDeposit = isPusdToken(tokenSymbol, tokenAddress);
+  const [assets, addresses] = await Promise.all([
+    isDirectPusdDeposit
+      ? Promise.resolve([] as SupportedAsset[])
+      : getPortfolioBridgeAssets().catch(() => [] as SupportedAsset[]),
+    isDirectPusdDeposit
+      ? Promise.resolve([])
+      : createDepositAddresses(proxy, bridgeOptions()),
+  ]);
+  const route = resolveWalletDepositRoute({
+    chainId,
+    tokenSymbol,
+    tokenAddress,
+    recipientAddress: proxy,
+    supportedAssets: assets,
+    depositAddresses: addresses,
+  });
+  if (!route) {
+    throw new Error(`${tokenSymbol} is not supported for Polygon deposits.`);
   }
-  const bridgeAddress = getAddress(matching.depositAddress) as Address;
+
+  const depositAddress = getAddress(route.depositAddress) as Address;
 
   const amountRaw = parseUnits(input.amount, tokenDecimals);
   if (amountRaw <= 0n) throw new Error("Enter an amount greater than zero.");
@@ -265,14 +363,14 @@ export async function executePortfolioDeposit(input: {
 
   const isNative = tokenAddress.toLowerCase() === NATIVE_TOKEN;
   const txHash = isNative
-    ? await wallet.sendTransaction({ to: bridgeAddress, value: amountRaw })
+    ? await wallet.sendTransaction({ to: depositAddress, value: amountRaw })
     : await wallet.sendTransaction({
         to: getAddress(tokenAddress) as Address,
-        data: encodeTransfer(bridgeAddress, amountRaw),
+        data: encodeTransfer(depositAddress, amountRaw),
         value: 0n,
       });
 
-  return { txHash, bridgeAddress };
+  return { txHash, bridgeAddress: depositAddress };
 }
 
 /**
@@ -287,37 +385,86 @@ export async function executePortfolioWithdraw(input: {
   chainKey?: string;
   tokenId?: string;
   tabId: number;
-}): Promise<{ txHash: string; bridgeAddress: string }> {
+}): Promise<{
+  txHash: string;
+  bridgeAddress: string;
+  route: "bridge";
+  quote: QuoteResponse;
+  destination: PortfolioWithdrawDestination;
+}> {
   const eoa = getAddress(input.eoaAddress) as Address;
   const mode = normalizeWalletMode(input.walletMode);
   const proxy = deriveProxyAddress(eoa, mode);
-  const chainKey = input.chainKey || "polygon";
-  const toChainId = WITHDRAW_CHAIN_IDS[chainKey] ?? "137";
-  const tokenId = (input.tokenId as WithdrawTokenId) || "usdc-e";
-
-  // Resolve the destination token address from live bridge data.
-  const index = buildBridgeTokenIndex(await getPortfolioBridgeAssets());
-  const toTokenAddress =
-    resolveDestTokenAddress(index, toChainId, tokenId) ||
-    (toChainId === "137" ? USDC_E_ADDRESS : "");
-  if (!toTokenAddress) {
-    throw new Error("That token isn't available on the selected chain.");
-  }
+  const assets = await getPortfolioBridgeAssets();
+  const draft = buildPortfolioWithdrawQuoteRequest({
+    amount: input.amount,
+    chainKey: input.chainKey,
+    tokenId: input.tokenId,
+    recipientAddress: input.destination,
+    supportedAssets: assets,
+  });
+  const amountRaw = BigInt(draft.request.fromAmountBaseUnit);
+  const { destination } = draft;
+  logInfo("portfolio.withdraw.prepare", {
+    ownerAddress: eoa,
+    sourceWallet: proxy,
+    walletMode: mode,
+    recipientAddress: input.destination,
+    amountBaseUnit: draft.request.fromAmountBaseUnit,
+    chainKey: destination.chainKey,
+    tokenId: destination.tokenId,
+    tokenSymbol: destination.tokenSymbol,
+    toChainId: destination.toChainId,
+    toTokenAddress: destination.toTokenAddress,
+  });
+  const quote = await fetchQuote(draft.request, bridgeOptions());
+  logInfo("portfolio.withdraw.quote.confirmed", {
+    quoteId: quote.quoteId,
+    estToTokenBaseUnit: quote.estToTokenBaseUnit,
+    estOutputUsd: quote.estOutputUsd,
+    sourceWallet: proxy,
+    recipientAddress: input.destination,
+    tokenId: destination.tokenId,
+    toTokenAddress: destination.toTokenAddress,
+  });
 
   const response = await fetchWithdrawalAddresses(
     {
       address: proxy,
-      toChainId,
-      toTokenAddress,
+      toChainId: destination.toChainId,
+      toTokenAddress: destination.toTokenAddress,
       // EVM/Solana recipient is validated in the side panel; passed through.
       recipientAddr: input.destination,
     },
     bridgeOptions()
   );
   const bridgeAddress = getAddress(response.address.evm) as Address;
-
-  const amountRaw = parseUnits(input.amount, PUSD_DECIMALS);
-  if (amountRaw <= 0n) throw new Error("Enter an amount greater than zero.");
+  try {
+    validatePortfolioWithdrawBridgeAddress({
+      bridgeAddress,
+      recipientAddress: input.destination,
+      sourceAddress: proxy,
+    });
+  } catch (error) {
+    logWarn("portfolio.withdraw.bridge_address.rejected", {
+      error,
+      bridgeAddress,
+      sourceWallet: proxy,
+      recipientAddress: input.destination,
+      tokenId: destination.tokenId,
+      toTokenAddress: destination.toTokenAddress,
+    });
+    throw error;
+  }
+  logInfo("portfolio.withdraw.bridge_address.received", {
+    bridgeAddress,
+    sourceWallet: proxy,
+    recipientAddress: input.destination,
+    tokenId: destination.tokenId,
+    tokenSymbol: destination.tokenSymbol,
+    toChainId: destination.toChainId,
+    toTokenAddress: destination.toTokenAddress,
+  });
 
   const transactions: RelayerTransaction[] = [
     {
@@ -332,6 +479,21 @@ export async function executePortfolioWithdraw(input: {
     mode === "deposit"
       ? await executeViaDepositWallet(wallet, eoa, transactions)
       : await executeViaRelayer(wallet, eoa, transactions);
+  logInfo("portfolio.withdraw.pusd_transfer.submitted", {
+    transactionHash: result.txHash,
+    sourceWallet: proxy,
+    bridgeAddress,
+    recipientAddress: input.destination,
+    tokenId: destination.tokenId,
+    toTokenAddress: destination.toTokenAddress,
+    amountBaseUnit: amountRaw.toString(),
+  });
 
-  return { txHash: result.txHash, bridgeAddress };
+  return {
+    txHash: result.txHash,
+    bridgeAddress,
+    route: "bridge",
+    quote,
+    destination,
+  };
 }

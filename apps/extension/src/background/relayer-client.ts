@@ -81,6 +81,7 @@ async function directFetch<T>(
   const res = await fetch(url, options);
   if (res.status === 401 && isKnowwApiUrl(url)) {
     await clearExtensionAccessToken();
+    throw new Error(EXTENSION_AUTH_REQUIRED_ERROR);
   }
 
   const text = await res.text();
@@ -141,6 +142,10 @@ function proxyFetch<T>(
           return;
         }
         const status = response.status ?? 0;
+        if (status === 401 && isKnowwApiUrl(url)) {
+          reject(new Error(EXTENSION_AUTH_REQUIRED_ERROR));
+          return;
+        }
         if (status < 200 || status >= 300) {
           const payload = response.data
             ? typeof response.data === "string"

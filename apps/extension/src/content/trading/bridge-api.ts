@@ -29,16 +29,21 @@ export type {
   QuoteRequest,
   QuoteResponse,
   SupportedAsset,
+  WalletDepositRoute,
   WithdrawalAddressesResponse,
   WithdrawalRequest,
 } from "@knoww/shared-types/bridge";
 export {
   BRIDGE_API_URL,
   CHAIN_METADATA,
+  findSupportedBridgeAsset,
   formatCheckoutTime,
   getDefaultMinDeposit,
   getDepositStatusDisplay,
   getMinDepositForToken,
+  isPusdToken,
+  POLYGON_BRIDGE_CHAIN_ID,
+  resolveWalletDepositRoute,
   SOLANA_CHAIN_ID,
   SUPPORTED_BRIDGE_CHAIN_IDS,
 } from "@knoww/shared-types/bridge";

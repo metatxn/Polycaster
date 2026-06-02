@@ -142,7 +142,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   cooldownPosts: 4,
   showNotificationStack: true,
   notificationPanelSurface: "floating",
-  aiExtractionEnabled: true,
+  aiExtractionEnabled: false,
   personalizationEnabled: true,
   themeOverride: "auto",
   debugMode: false,

@@ -9,6 +9,7 @@ import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
 const log = createLogger("extension.options");
+const SHOW_KALSHI_SOURCE_SETTINGS = __DEV_MODE__;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -790,20 +791,24 @@ function OptionsApp() {
           />
         </SettingRow>
 
-        <Divider />
+        {SHOW_KALSHI_SOURCE_SETTINGS && (
+          <>
+            <Divider />
 
-        <SettingRow
-          label="Kalshi"
-          description="Show markets from Kalshi"
-          icon="K"
-          iconClass="source-icon kalshi"
-        >
-          <Toggle
-            id="source-kalshi"
-            checked={settings.sources.kalshi}
-            onChange={(v) => updateSource("kalshi", v)}
-          />
-        </SettingRow>
+            <SettingRow
+              label="Kalshi"
+              description="Show markets from Kalshi"
+              icon="K"
+              iconClass="source-icon kalshi"
+            >
+              <Toggle
+                id="source-kalshi"
+                checked={settings.sources.kalshi}
+                onChange={(v) => updateSource("kalshi", v)}
+              />
+            </SettingRow>
+          </>
+        )}
       </Section>
 
       {/* Display Settings Section */}

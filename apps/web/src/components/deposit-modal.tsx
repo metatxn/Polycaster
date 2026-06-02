@@ -2,11 +2,17 @@
 
 import { createLogger } from "@knoww/logger";
 import {
+  type DepositAddress,
   type DepositTransaction,
+  findSupportedBridgeAsset,
   getDefaultMinDeposit as getSharedDefaultMinDeposit,
   getMinDepositForToken as getSharedMinDepositForToken,
+  isPusdToken,
+  POLYGON_BRIDGE_CHAIN_ID,
   type QuoteResponse,
+  resolveWalletDepositRoute,
   type SupportedAsset,
+  type WalletDepositRoute,
 } from "@knoww/shared-types/bridge";
 import { AnimatePresence } from "framer-motion";
 import { ArrowLeft, X } from "lucide-react";
@@ -46,9 +52,14 @@ import type { DepositMethod, DepositStep } from "./deposit/types";
 interface DepositModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onDepositComplete?: () => void;
 }
 
-export function DepositModal({ open, onOpenChange }: DepositModalProps) {
+export function DepositModal({
+  open,
+  onOpenChange,
+  onDepositComplete,
+}: DepositModalProps) {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
   const { usdcBalance: polymarketBalance, refresh: refreshProxyWallet } =
@@ -61,6 +72,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   const {
     supportedAssets,
     isLoading: loadingBridge,
+    proxyAddress,
     getSupportedAssets,
     createDepositAddresses,
     getDepositStatus,
@@ -82,6 +94,9 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     useState<SupportedAsset | null>(null);
   const [amount, setAmount] = useState<string>("");
   const [bridgeAddress, setBridgeAddress] = useState<string>("");
+  const [depositRoute, setDepositRoute] = useState<WalletDepositRoute | null>(
+    null
+  );
   const [copied, setCopied] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -91,6 +106,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     DepositTransaction[]
   >([]);
   const quoteFetchedRef = useRef<string | null>(null);
+  const completionNotifiedRef = useRef(false);
   const [isLoadingQuoteLocal, setIsLoadingQuoteLocal] = useState(false);
 
   const depositContextRef = useRef({
@@ -114,6 +130,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       setSelectedBridgeAsset(null);
       setAmount("");
       setBridgeAddress("");
+      setDepositRoute(null);
       setCopied(false);
       setSearchQuery("");
       setIsProcessing(false);
@@ -126,18 +143,28 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       setQuote(null);
       setDepositTransactions([]);
       quoteFetchedRef.current = null;
+      completionNotifiedRef.current = false;
       setIsLoadingQuoteLocal(false);
     }
   }, [open]);
 
   useEffect(() => {
-    if (isConfirmed) {
-      setIsProcessing(false);
-      refreshTokens();
-      void refreshProxyWallet();
-      setTimeout(() => onOpenChange(false), 1500);
-    }
-  }, [isConfirmed, refreshTokens, refreshProxyWallet, onOpenChange]);
+    if (!isConfirmed || completionNotifiedRef.current) return;
+
+    completionNotifiedRef.current = true;
+    setIsProcessing(false);
+    refreshTokens();
+    void refreshProxyWallet();
+    onDepositComplete?.();
+    const closeTimer = setTimeout(() => onOpenChange(false), 1500);
+    return () => clearTimeout(closeTimer);
+  }, [
+    isConfirmed,
+    refreshTokens,
+    refreshProxyWallet,
+    onDepositComplete,
+    onOpenChange,
+  ]);
 
   useEffect(() => {
     if (txError) {
@@ -184,9 +211,12 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
   }, [supportedAssets]);
 
   const filteredBridgeAssets = useMemo(() => {
-    if (!searchQuery.trim()) return supportedAssets;
+    const depositAssets = supportedAssets.filter(
+      (asset) => !isPusdToken(asset.token.symbol, asset.token.address)
+    );
+    if (!searchQuery.trim()) return depositAssets;
     const query = searchQuery.toLowerCase();
-    return supportedAssets.filter(
+    return depositAssets.filter(
       (asset) =>
         asset.token.symbol.toLowerCase().includes(query) ||
         asset.token.name.toLowerCase().includes(query) ||
@@ -207,39 +237,55 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
   const handleSelectToken = useCallback(
     async (token: TokenBalance) => {
+      if (
+        token.depositSupported === false &&
+        !isPusdToken(token.symbol, token.address)
+      ) {
+        setDepositError(
+          `${token.symbol} is not supported for Polygon deposits.`
+        );
+        return;
+      }
       setSelectedToken(token);
       setIsProcessing(true);
       setDepositError(null);
       setBridgeAddress("");
+      setDepositRoute(null);
       let resolvedDepositAddress = "";
 
       try {
-        const addresses = await createDepositAddresses();
-        if (addresses && addresses.length > 0) {
-          const matching = addresses.find(
-            (addr) =>
-              addr.chainId === "137" &&
-              addr.tokenSymbol.toUpperCase() === token.symbol.toUpperCase()
+        const isDirectPusdDeposit = isPusdToken(token.symbol, token.address);
+        const assets = isDirectPusdDeposit
+          ? []
+          : supportedAssets.length > 0
+            ? supportedAssets
+            : await getSupportedAssets();
+        let addresses: DepositAddress[] = [];
+        if (!isDirectPusdDeposit) {
+          const supported = findSupportedBridgeAsset(
+            assets,
+            POLYGON_BRIDGE_CHAIN_ID,
+            token.symbol,
+            token.address
           );
-          if (matching) resolvedDepositAddress = matching.depositAddress;
-          else {
-            const polygonUsdc = addresses.find(
-              (addr) =>
-                addr.chainId === "137" &&
-                addr.tokenSymbol.toUpperCase() === "USDC"
-            );
-            if (polygonUsdc)
-              resolvedDepositAddress = polygonUsdc.depositAddress;
-            else {
-              const polygonAddr = addresses.find(
-                (addr) => addr.chainId === "137"
-              );
-              if (polygonAddr)
-                resolvedDepositAddress = polygonAddr.depositAddress;
-              else setDepositError("No deposit address available for Polygon.");
-            }
-          }
-        } else setDepositError("Failed to get deposit addresses.");
+          if (supported) addresses = await createDepositAddresses();
+        }
+        const route = resolveWalletDepositRoute({
+          chainId: POLYGON_BRIDGE_CHAIN_ID,
+          tokenSymbol: token.symbol,
+          tokenAddress: token.address,
+          recipientAddress: proxyAddress ?? undefined,
+          supportedAssets: assets,
+          depositAddresses: addresses,
+        });
+        if (route) {
+          resolvedDepositAddress = route.depositAddress;
+          setDepositRoute(route);
+        } else {
+          setDepositError(
+            `${token.symbol} is not supported for Polygon deposits.`
+          );
+        }
       } catch (err) {
         setDepositError(
           err instanceof Error ? err.message : "Failed to get deposit address."
@@ -252,12 +298,19 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       setBridgeAddress(resolvedDepositAddress);
       setStep("amount");
     },
-    [createDepositAddresses]
+    [createDepositAddresses, getSupportedAssets, proxyAddress, supportedAssets]
   );
 
   const handleSelectBridgeAsset = useCallback(
     async (asset: SupportedAsset) => {
+      if (isPusdToken(asset.token.symbol, asset.token.address)) {
+        setDepositError(
+          "Use Wallet deposit to send pUSD directly from your Polygon wallet."
+        );
+        return;
+      }
       setSelectedBridgeAsset(asset);
+      setDepositRoute(null);
       setIsProcessing(true);
       try {
         const addresses = await createDepositAddresses();
@@ -269,6 +322,13 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
                 addr.tokenSymbol === asset.token.symbol
             ) || addresses.find((addr) => addr.chainId === asset.chainId);
           if (matching) setBridgeAddress(matching.depositAddress);
+          if (matching) {
+            setDepositRoute({
+              kind: "bridge",
+              depositAddress: matching.depositAddress,
+              minUsd: asset.minCheckoutUsd,
+            });
+          }
         }
       } catch (err) {
         log.error("bridge_address.fetch_failed", { error: err });
@@ -383,13 +443,19 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       });
       if (receipt.status === "success") {
         setIsOnChainConfirmed(true);
-        waitingForBridge = true;
         posthog.capture("deposit_initiated", {
           token_symbol: selectedToken.symbol,
           amount,
           wallet_address: address,
           deposit_method: selectedMethod,
         });
+        if (depositRoute?.kind === "direct") {
+          setIsConfirming(false);
+          setIsConfirmed(true);
+          setIsProcessing(false);
+        } else {
+          waitingForBridge = true;
+        }
       } else throw new Error("Transaction failed on-chain");
     } catch (err) {
       setTxError(err instanceof Error ? err : new Error("Transaction failed"));
@@ -407,6 +473,7 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     selectedMethod,
     address,
     walletClient,
+    depositRoute?.kind,
   ]);
 
   const handleBack = useCallback(() => {
@@ -419,11 +486,13 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       setSelectedToken(null);
       setAmount("");
       setQuote(null);
+      setDepositRoute(null);
     } else if (step === "confirm") {
       if (selectedMethod === "bridge") {
         setStep("bridge-select");
         setSelectedBridgeAsset(null);
         setBridgeAddress("");
+        setDepositRoute(null);
       } else {
         setStep("amount");
         setQuote(null);
@@ -442,7 +511,8 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
       !tokenAddress ||
       tokenDecimals === undefined ||
       !amount ||
-      !bridgeAddress
+      !bridgeAddress ||
+      depositRoute?.kind === "direct"
     ) {
       return;
     }
@@ -486,7 +556,14 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
     return () => {
       cancelled = true;
     };
-  }, [step, amount, bridgeAddress, tokenAddress, tokenDecimals]);
+  }, [
+    step,
+    amount,
+    bridgeAddress,
+    tokenAddress,
+    tokenDecimals,
+    depositRoute?.kind,
+  ]);
 
   // Reset the dedup key when leaving the confirm step so a fresh quote is
   // fetched if the user navigates back and returns with different params.
@@ -498,7 +575,11 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
   // Poll deposit status after transaction is confirmed
   const shouldPollStatus =
-    isOnChainConfirmed && isConfirming && !isConfirmed && !!bridgeAddress;
+    isOnChainConfirmed &&
+    isConfirming &&
+    !isConfirmed &&
+    !!bridgeAddress &&
+    depositRoute?.kind !== "direct";
 
   useEffect(() => {
     if (!shouldPollStatus) return;
@@ -592,8 +673,10 @@ export function DepositModal({ open, onOpenChange }: DepositModalProps) {
 
   const selectedTokenMinDeposit = useMemo(() => {
     if (!selectedToken) return defaultMinDeposit;
+    if (isPusdToken(selectedToken.symbol, selectedToken.address)) return 0;
+    if (depositRoute) return depositRoute.minUsd;
     return getMinDepositForToken(selectedToken.symbol);
-  }, [selectedToken, defaultMinDeposit, getMinDepositForToken]);
+  }, [selectedToken, defaultMinDeposit, depositRoute, getMinDepositForToken]);
 
   const isBelowMinimum = useMemo(() => {
     if (!amount || enteredAmountUsd === 0) return false;

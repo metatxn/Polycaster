@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useConnection } from "wagmi";
+import { PUSD_ADDRESS, PUSD_DECIMALS } from "@/constants/contracts";
 import { qk } from "@/lib/query-keys";
 import { useTokenPrices } from "./use-token-prices";
 
@@ -18,6 +19,8 @@ export interface TokenBalance {
   balanceRaw: string;
   usdValue: number;
   logoUrl?: string;
+  depositSupported?: boolean;
+  depositDisabledReason?: string;
 }
 
 /**
@@ -38,6 +41,13 @@ const POLYGON_TOKENS: Array<{
   decimals: number;
   logoUrl?: string;
 }> = [
+  {
+    symbol: "pUSD",
+    name: "Polymarket USD",
+    address: PUSD_ADDRESS,
+    decimals: PUSD_DECIMALS,
+    logoUrl: "/usdc-token.webp",
+  },
   {
     symbol: "USDC",
     name: "USD Coin",
@@ -213,6 +223,7 @@ async function fetchWalletTokens(
             balanceRaw: balance.toString(),
             usdValue,
             logoUrl: token.logoUrl,
+            depositSupported: true,
           });
         }
       }

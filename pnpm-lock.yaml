@@ -10,8 +10,8 @@ catalogs:
       specifier: 2.4.15
       version: 2.4.15
     '@polymarket/client':
-      specifier: 0.0.0-canary-20260520141050
-      version: 0.0.0-canary-20260520141050
+      specifier: 0.0.0-canary-20260529160249
+      version: 0.0.0-canary-20260529160249
     '@types/react':
       specifier: 19.2.15
       version: 19.2.15
@@ -422,7 +422,7 @@ importers:
     dependencies:
       '@polymarket/client':
         specifier: 'catalog:'
-        version: 0.0.0-canary-20260520141050(typescript@6.0.3)(viem@2.50.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))
+        version: 0.0.0-canary-20260529160249(typescript@6.0.3)(viem@2.50.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))
       decimal.js:
         specifier: 'catalog:'
         version: 10.6.0
@@ -1849,11 +1849,11 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@polymarket/bindings@0.0.0-canary-20260520141050':
-    resolution: {integrity: sha512-djdIMn9srsUCgHFDukEUQQd/xJMr7wUJGn9nYN0JiRwZ0yYGighzvBP6u4Gbr3wg2xzzG/1X0IKrCy/5EGuP7g==}
+  '@polymarket/bindings@0.0.0-canary-20260529160249':
+    resolution: {integrity: sha512-m4/Kp6ATI1bYiJRpPF7+/MCOiY3bQ/2LjplfngGvaWhO1vylmK007pCQku5IGfAk+qdmpsHeWyYHGRFjf7nV/A==}
 
-  '@polymarket/client@0.0.0-canary-20260520141050':
-    resolution: {integrity: sha512-tc6KuIrzSh2MTSSo0OWy7Bc7h8zq+canPQG9WLc0yUJ+FPLvW/hqyaghwWT02EHPa3CVS2epI7L4DT33zjg6NQ==}
+  '@polymarket/client@0.0.0-canary-20260529160249':
+    resolution: {integrity: sha512-JfQldq1tShzYKoS3msL/20KbhVTgxld4VB+JDcXruymNSfzfKxNqviA5ijhxFvPdkajQ8Hx/GF3IFHOj9rJCfg==}
     peerDependencies:
       '@privy-io/node': ^0.15.0
       ethers-v5: ^5.8.0
@@ -1866,8 +1866,8 @@ packages:
       viem:
         optional: true
 
-  '@polymarket/types@0.0.0-canary-20260520141050':
-    resolution: {integrity: sha512-2ZUJAQ4SmAFOYqhsIQoHqNrFZDP6MTLD2AnwCK7Na7APCnbJ86Y74zAHv4kON+dBiAe5wSYJSBpD3U985BUheA==}
+  '@polymarket/types@0.0.0-canary-20260529160249':
+    resolution: {integrity: sha512-w7AeusU+53EF5+vRJM5BxvykR5SMZShTf1VCi6VldKf9pXQTmeh7M7vexs1GKdRR4k3Qdo/5mPwm0Sn96oMFXA==}
 
   '@poppinss/colors@4.1.6':
     resolution: {integrity: sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg==}
@@ -8673,26 +8673,26 @@ snapshots:
     dependencies:
       playwright: 1.60.0
 
-  '@polymarket/bindings@0.0.0-canary-20260520141050':
+  '@polymarket/bindings@0.0.0-canary-20260529160249':
     dependencies:
-      '@polymarket/types': 0.0.0-canary-20260520141050
+      '@polymarket/types': 0.0.0-canary-20260529160249
       zod: 4.4.3
 
-  '@polymarket/client@0.0.0-canary-20260520141050(typescript@6.0.3)(viem@2.50.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))':
+  '@polymarket/client@0.0.0-canary-20260529160249(typescript@6.0.3)(viem@2.50.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))':
     dependencies:
-      '@polymarket/bindings': 0.0.0-canary-20260520141050
-      '@polymarket/types': 0.0.0-canary-20260520141050
+      '@polymarket/bindings': 0.0.0-canary-20260529160249
+      '@polymarket/types': 0.0.0-canary-20260529160249
       it-merge: 3.0.14
       it-pushable: 3.2.4
       ky: 1.14.3
-      ox: 0.14.20(typescript@6.0.3)(zod@4.4.3)
+      ox: 0.14.22(typescript@6.0.3)(zod@4.4.3)
       zod: 4.4.3
     optionalDependencies:
       viem: 2.50.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3)
     transitivePeerDependencies:
       - typescript
 
-  '@polymarket/types@0.0.0-canary-20260520141050':
+  '@polymarket/types@0.0.0-canary-20260529160249':
     dependencies:
       neverthrow: 8.2.0
       type-fest: 5.6.0

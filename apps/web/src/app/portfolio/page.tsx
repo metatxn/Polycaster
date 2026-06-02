@@ -188,14 +188,54 @@ export default function PortfolioPage() {
     setShowSellModal(true);
   };
 
+  const depositRefetchTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const withdrawRefetchTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const sellRefetchTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearDepositRefetchTimers = useCallback(() => {
+    for (const id of depositRefetchTimers.current) clearTimeout(id);
+    depositRefetchTimers.current = [];
+  }, []);
+
+  const clearWithdrawRefetchTimers = useCallback(() => {
+    for (const id of withdrawRefetchTimers.current) clearTimeout(id);
+    withdrawRefetchTimers.current = [];
+  }, []);
 
   const clearSellRefetchTimers = useCallback(() => {
     for (const id of sellRefetchTimers.current) clearTimeout(id);
     sellRefetchTimers.current = [];
   }, []);
 
+  useEffect(() => clearDepositRefetchTimers, [clearDepositRefetchTimers]);
+  useEffect(() => clearWithdrawRefetchTimers, [clearWithdrawRefetchTimers]);
   useEffect(() => clearSellRefetchTimers, [clearSellRefetchTimers]);
+
+  const handleDepositComplete = useCallback(() => {
+    clearDepositRefetchTimers();
+
+    refreshProxyWallet();
+
+    const delays = [1000, 3000, 5000, 10000, 15000, 20000, 30000];
+    for (const ms of delays) {
+      depositRefetchTimers.current.push(
+        setTimeout(() => refreshProxyWallet(), ms)
+      );
+    }
+  }, [clearDepositRefetchTimers, refreshProxyWallet]);
+
+  const handleWithdrawComplete = useCallback(() => {
+    clearWithdrawRefetchTimers();
+
+    refreshProxyWallet();
+
+    const delays = [1000, 3000, 5000, 10000, 15000, 20000, 30000];
+    for (const ms of delays) {
+      withdrawRefetchTimers.current.push(
+        setTimeout(() => refreshProxyWallet(), ms)
+      );
+    }
+  }, [clearWithdrawRefetchTimers, refreshProxyWallet]);
 
   const handleSellSuccess = () => {
     clearSellRefetchTimers();
@@ -490,12 +530,14 @@ export default function PortfolioPage() {
       <DepositModal
         open={showDepositModal}
         onOpenChange={setShowDepositModal}
+        onDepositComplete={handleDepositComplete}
       />
 
       {/* Withdraw Modal */}
       <WithdrawModal
         open={showWithdrawModal}
         onOpenChange={setShowWithdrawModal}
+        onWithdrawComplete={handleWithdrawComplete}
       />
 
       {/* Sell Position Modal */}

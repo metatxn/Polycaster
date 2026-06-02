@@ -61,6 +61,13 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function requestWalletDiscovery(): void {
+  window.postMessage(
+    { type: "KNOWW_LIST_WALLETS", _n: getNonce() },
+    window.location.origin
+  );
+}
+
 function init(): void {
   if (initialized) return;
   initialized = true;
@@ -131,10 +138,7 @@ function init(): void {
     return false;
   });
 
-  window.postMessage(
-    { type: "KNOWW_LIST_WALLETS", _n: nonce },
-    window.location.origin
-  );
+  requestWalletDiscovery();
 }
 
 function request(
@@ -238,7 +242,7 @@ export const WalletBridge = {
   async connect(walletUuid?: string): Promise<string[]> {
     if (walletUuid === WALLETCONNECT_WALLET_UUID) {
       selectedWalletUuid = WALLETCONNECT_WALLET_UUID;
-      return WalletConnectBridge.connect();
+      return WalletConnectBridge.connect({ forceNew: true });
     }
     if (walletUuid) {
       this.selectWallet(walletUuid);
@@ -323,8 +327,24 @@ export const WalletBridge = {
   },
 
   async disconnect(): Promise<void> {
-    if (!isWalletConnectSelected()) return;
-    await WalletConnectBridge.disconnect();
+    const wasWalletConnectSelected = isWalletConnectSelected();
     selectedWalletUuid = undefined;
+    if (wasWalletConnectSelected) {
+      await WalletConnectBridge.disconnect();
+    }
+    init();
+    requestWalletDiscovery();
+  },
+
+  resetAfterDisconnect(): void {
+    const wasWalletConnectSelected = isWalletConnectSelected();
+    selectedWalletUuid = undefined;
+    if (wasWalletConnectSelected) {
+      void WalletConnectBridge.disconnect().catch(() => {
+        /* best-effort cleanup after a global logout */
+      });
+    }
+    init();
+    requestWalletDiscovery();
   },
 };

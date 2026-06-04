@@ -965,6 +965,7 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
       return false;
     }
 
+    WalletBridge.resetAfterDisconnect();
     TradingService.reset();
     return false;
   });

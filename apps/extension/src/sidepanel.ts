@@ -1,13 +1,21 @@
+import { logInfo, logWarn } from "@knoww/logger";
 import {
   buildBridgeTokenIndex,
   CHAIN_METADATA,
+  formatCheckoutTime,
   getAvailableTokensForChain,
+  isPusdToken,
+  type QuoteResponse,
   SOLANA_CHAIN_ID,
   type SupportedAsset,
   WITHDRAW_CHAIN_IDS,
   WITHDRAW_TOKEN_CONFIGS,
 } from "@knoww/shared-types/bridge";
 import Decimal from "decimal.js";
+import type {
+  PortfolioBridgeStatusSummary,
+  PortfolioWithdrawDestination,
+} from "./background/portfolio-withdraw-flow";
 import {
   EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_CREDENTIALS_UPDATED_MESSAGE,
@@ -166,6 +174,7 @@ const PORTFOLIO_CONNECT_TIMEOUT_MS = 90_000;
 const PORTFOLIO_CONNECT_POLL_MS = 1_000;
 const PORTFOLIO_HISTORY_PAGE_SIZE = 5;
 const PORTFOLIO_HISTORY_FETCH_LIMIT = 25;
+const PORTFOLIO_AMOUNT_DECIMALS = 6;
 const KNOWW_APP_URL = __DEV_MODE__
   ? "http://localhost:8000"
   : "https://knoww.app";
@@ -188,6 +197,15 @@ let portfolioWalletConnectActive = false;
 let portfolioWalletConnectToken = 0;
 let portfolioWalletConnectQr: string | null = null;
 let portfolioWalletConnectError: string | null = null;
+let portfolioFundRefreshRun = 0;
+const portfolioFundRefreshTimers: ReturnType<typeof setTimeout>[] = [];
+const WITHDRAW_QUOTE_DEBOUNCE_MS = 350;
+const WITHDRAW_STATUS_POLL_MS = 4500;
+const WITHDRAW_STATUS_MAX_POLLS = 40;
+let portfolioWithdrawQuoteTimer: ReturnType<typeof setTimeout> | null = null;
+let portfolioWithdrawQuoteRun = 0;
+let portfolioWithdrawStatusTimer: ReturnType<typeof setTimeout> | null = null;
+let portfolioWithdrawStatusRun = 0;
 // Inline two-step confirm for cancelling an open order: the first tap "arms"
 // the button (turns it into a red Confirm), a second tap commits, and a timer
 // auto-reverts it so a stray tap never reaches the live order book.
@@ -488,6 +506,32 @@ function openPortfolioPage(): void {
   window.open(`${KNOWW_APP_URL}/portfolio`, "_blank", "noopener,noreferrer");
 }
 
+// Disconnect the connected wallet from the portfolio view — mirrors the
+// trading-panel header action. The worker's `auth:logout` clears the knoww.app
+// session + cached trading credentials and broadcasts
+// TRADING_SESSION_DISCONNECTED_MESSAGE, which the listener below turns into a
+// reset to the signed-out screen via clearPortfolioSessionState(). We never
+// throw here: the worker clears local state in its own `finally`, so even a
+// failed network logout still tears the session down.
+let portfolioDisconnecting = false;
+async function disconnectPortfolioWallet(
+  button: HTMLButtonElement
+): Promise<void> {
+  if (portfolioDisconnecting) return;
+  portfolioDisconnecting = true;
+  button.classList.add("is-busy");
+  button.title = "Disconnecting…";
+  void sendRuntimeMessage({
+    type: "analytics:track",
+    event: "wallet_disconnected",
+  });
+  try {
+    await sendRuntimeMessage({ type: "auth:logout" });
+  } finally {
+    portfolioDisconnecting = false;
+  }
+}
+
 // Deposit/withdraw move real funds, which can't be signed from the side panel
 // (it has no wallet context) and must not be hand-rolled against the funding
 // contracts. We deep-link into knoww.app's tested Deposit/Withdraw modals,
@@ -503,6 +547,25 @@ interface PortfolioWalletToken {
   amount: number;
   usdValue: number;
   minUsd: number;
+  depositSupported?: boolean;
+  depositDisabledReason?: string;
+}
+
+interface PortfolioWithdrawFormParams {
+  amount: string;
+  amountDecimal: Decimal;
+  chainKey: string;
+  tokenId: string;
+  destination: string;
+}
+
+interface PortfolioWithdrawQuotePayload {
+  quote?: QuoteResponse;
+  destination?: PortfolioWithdrawDestination;
+}
+
+interface PortfolioWithdrawStatusPayload {
+  summary?: PortfolioBridgeStatusSummary;
 }
 
 let portfolioFundView: PortfolioFundAction | null = null;
@@ -620,6 +683,11 @@ function renderPortfolioFundForm(
         <span class="knoww-pf-fund-hint" data-fund-dest-hint>Sends to your connected wallet by default — edit to withdraw elsewhere.</span>
       </div>`
       }
+      ${
+        isDeposit
+          ? ""
+          : `<div class="knoww-pf-withdraw-quote" data-withdraw-quote hidden></div>`
+      }
       <div class="knoww-pf-fund-status" data-fund-status hidden></div>
       ${renderFundSubmitButton(title, isDeposit)}
     </div>
@@ -684,6 +752,7 @@ function fundTokenOptions(
     const out: string[] = [];
     for (const asset of assets) {
       if (asset.chainId !== chainValue) continue;
+      if (isPusdToken(asset.token.symbol, asset.token.address)) continue;
       const value = [
         asset.chainId,
         asset.token.symbol,
@@ -771,6 +840,7 @@ async function loadPortfolioBridgeAssets(
   if (portfolioFundView !== action) return;
   chainSelect.innerHTML = fundChainOptions(action, assets);
   fillFundTokenSelect(container, action, assets);
+  if (action === "withdraw") schedulePortfolioWithdrawQuote(0);
 }
 
 // ── Deposit method screen (Wallet / Transfer Crypto / coming soon) ──
@@ -833,18 +903,22 @@ function renderDepositTokenList(): string {
       .map((t, i) => {
         // Below the bridge minimum → can't be deposited, so it isn't selectable.
         const belowMin = t.usdValue < t.minUsd;
+        const unsupported = t.depositSupported === false;
+        const disabled = unsupported || belowMin;
         return `
         <button type="button" class="knoww-pf-token${
-          belowMin ? " is-disabled" : ""
-        }"${belowMin ? " disabled" : ` data-deposit-token="${i}"`}>
+          disabled ? " is-disabled" : ""
+        }"${disabled ? " disabled" : ` data-deposit-token="${i}"`}>
           <span class="knoww-pf-token-id">
             <span class="knoww-pf-token-sym">${escapeHtml(t.symbol)}</span>
             <span class="knoww-pf-token-bal">${escapeHtml(formatTokenAmount(t.amount))}</span>
           </span>
           <span class="knoww-pf-token-meta">
             <span class="knoww-pf-token-min">${
-              belowMin ? "Below min" : "Min"
-            } · ${escapeHtml(formatMoney(t.minUsd))}</span>
+              unsupported
+                ? escapeHtml(t.depositDisabledReason || "Unsupported")
+                : `${belowMin ? "Below min" : "Min"} · ${escapeHtml(formatMoney(t.minUsd))}`
+            }</span>
             <strong>${escapeHtml(formatMoney(t.usdValue))}</strong>
           </span>
         </button>`;
@@ -867,6 +941,9 @@ function renderDepositTokenList(): string {
 }
 
 function renderDepositAmountStep(token: PortfolioWalletToken): string {
+  const sub = isPusdToken(token.symbol, token.address)
+    ? "On Polygon · direct transfer"
+    : `On Polygon · minimum ${formatMoney(token.minUsd)}`;
   return `
     <div class="knoww-pf-fund is-deposit">
       <div class="knoww-pf-fund-head">
@@ -875,7 +952,7 @@ function renderDepositAmountStep(token: PortfolioWalletToken): string {
         </button>
         <div class="knoww-pf-fund-heading">
           <span class="knoww-pf-fund-kicker">Deposit · ${escapeHtml(token.symbol)}</span>
-          <p class="knoww-pf-fund-sub">On Polygon · minimum ${escapeHtml(formatMoney(token.minUsd))}</p>
+          <p class="knoww-pf-fund-sub">${escapeHtml(sub)}</p>
         </div>
       </div>
       <div class="knoww-pf-fund-field">
@@ -950,6 +1027,7 @@ function openPortfolioFunds(action: PortfolioFundAction): void {
   }
   portfolioFundView = action;
   portfolioFundBusy = false;
+  clearPortfolioWithdrawFlowTimers();
   portfolioDepositToken = null;
   if (action === "deposit") {
     setDepositStep("method");
@@ -964,6 +1042,7 @@ function openPortfolioFunds(action: PortfolioFundAction): void {
 function closePortfolioFunds(): void {
   portfolioFundView = null;
   portfolioFundBusy = false;
+  clearPortfolioWithdrawFlowTimers();
   portfolioDepositStep = null;
   portfolioDepositToken = null;
   if (latestPortfolioData) renderPortfolioContent_inPlace();
@@ -977,6 +1056,31 @@ function renderPortfolioContent_inPlace(): void {
   }
 }
 
+function clearPortfolioFundRefreshTimers(): void {
+  for (const timer of portfolioFundRefreshTimers) clearTimeout(timer);
+  portfolioFundRefreshTimers.length = 0;
+}
+
+function schedulePortfolioFundRefreshes(action: PortfolioFundAction): void {
+  clearPortfolioFundRefreshTimers();
+  const run = ++portfolioFundRefreshRun;
+  const delays = [2600, 4000, 6500, 10000, 15000, 20000, 30000];
+
+  for (const delay of delays) {
+    portfolioFundRefreshTimers.push(
+      setTimeout(() => {
+        if (run !== portfolioFundRefreshRun) return;
+        if (portfolioFundView === action) {
+          portfolioFundView = null;
+        } else if (portfolioFundView !== null) {
+          return;
+        }
+        void loadPortfolio(true);
+      }, delay)
+    );
+  }
+}
+
 function setPortfolioFundStatus(
   kind: "info" | "error" | "success",
   message: string
@@ -987,6 +1091,310 @@ function setPortfolioFundStatus(
   status.hidden = false;
   status.className = `knoww-pf-fund-status is-${kind}`;
   status.textContent = message;
+}
+
+function parsePortfolioAmount(value: string): Decimal | null {
+  try {
+    const amount = new Decimal(value);
+    return amount.isFinite() ? amount : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePortfolioAmountInput(value: string): string {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  if (!cleaned) return "";
+
+  const dotIndex = cleaned.indexOf(".");
+  if (dotIndex === -1) {
+    return cleaned.replace(/^0+(?=\d)/, "");
+  }
+
+  const wholeRaw = cleaned.slice(0, dotIndex).replace(/\./g, "");
+  const fractionalRaw = cleaned
+    .slice(dotIndex + 1)
+    .replace(/\./g, "")
+    .slice(0, PORTFOLIO_AMOUNT_DECIMALS);
+  const whole = wholeRaw.replace(/^0+(?=\d)/, "") || "0";
+  return `${whole}.${fractionalRaw}`;
+}
+
+function formatPortfolioAmountInputValue(value: string): string {
+  const amount = parsePortfolioAmount(value);
+  if (!amount || amount.lt(0)) return "0";
+  return amount
+    .toDecimalPlaces(PORTFOLIO_AMOUNT_DECIMALS, Decimal.ROUND_DOWN)
+    .toFixed();
+}
+
+function readPortfolioWithdrawParams(
+  reportErrors: boolean
+): PortfolioWithdrawFormParams | null {
+  const container = getPortfolioContainer();
+  const data = latestPortfolioData;
+  if (!container || !data) return null;
+
+  const amount = (
+    container.querySelector<HTMLInputElement>("[data-fund-amount]")?.value || ""
+  ).trim();
+  const amountDecimal = parsePortfolioAmount(amount);
+  if (!amount || !amountDecimal || amountDecimal.lte(0)) {
+    if (reportErrors) {
+      setPortfolioFundStatus("error", "Enter an amount greater than zero.");
+    }
+    return null;
+  }
+
+  const chainKey =
+    container.querySelector<HTMLSelectElement>("[data-fund-chain]")?.value ||
+    "";
+  const tokenId =
+    container.querySelector<HTMLSelectElement>("[data-fund-token]")?.value ||
+    "";
+  const destination = (
+    container.querySelector<HTMLInputElement>("[data-fund-dest]")?.value || ""
+  ).trim();
+  if (!chainKey || !tokenId) {
+    if (reportErrors)
+      setPortfolioFundStatus("error", "Select a chain and token.");
+    return null;
+  }
+
+  const isSolana = chainKey === "solana";
+  const validEvm = /^0x[0-9a-fA-F]{40}$/.test(destination);
+  const validSol = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(destination);
+  if (!destination || (isSolana ? !validSol : !validEvm)) {
+    if (reportErrors) {
+      setPortfolioFundStatus(
+        "error",
+        isSolana
+          ? "Enter a valid Solana recipient address."
+          : "Enter a valid 0x recipient address."
+      );
+    }
+    return null;
+  }
+
+  const available = new Decimal(data.cashBalance || 0);
+  if (amountDecimal.gt(available.plus("0.000000001"))) {
+    if (reportErrors) {
+      setPortfolioFundStatus("error", "Amount exceeds your available balance.");
+    }
+    return null;
+  }
+
+  return { amount, amountDecimal, chainKey, tokenId, destination };
+}
+
+function clearPortfolioWithdrawQuoteTimer(): void {
+  if (portfolioWithdrawQuoteTimer) clearTimeout(portfolioWithdrawQuoteTimer);
+  portfolioWithdrawQuoteTimer = null;
+  portfolioWithdrawQuoteRun++;
+}
+
+function clearPortfolioWithdrawStatusTimer(): void {
+  if (portfolioWithdrawStatusTimer) clearTimeout(portfolioWithdrawStatusTimer);
+  portfolioWithdrawStatusTimer = null;
+  portfolioWithdrawStatusRun++;
+}
+
+function clearPortfolioWithdrawFlowTimers(): void {
+  clearPortfolioWithdrawQuoteTimer();
+  clearPortfolioWithdrawStatusTimer();
+}
+
+function hidePortfolioWithdrawQuote(): void {
+  const quote = getPortfolioContainer()?.querySelector<HTMLElement>(
+    "[data-withdraw-quote]"
+  );
+  if (!quote) return;
+  quote.hidden = true;
+  quote.innerHTML = "";
+}
+
+function setPortfolioWithdrawQuote(kind: "info" | "error", html: string): void {
+  const quote = getPortfolioContainer()?.querySelector<HTMLElement>(
+    "[data-withdraw-quote]"
+  );
+  if (!quote) return;
+  quote.hidden = false;
+  quote.className = `knoww-pf-withdraw-quote is-${kind}`;
+  quote.innerHTML = html;
+}
+
+function formatTokenBaseUnitAmount(baseUnit: string, decimals: number): string {
+  try {
+    const value = new Decimal(baseUnit || "0").div(
+      new Decimal(10).pow(decimals)
+    );
+    if (!value.isFinite() || value.eq(0)) return "0";
+    return value
+      .toDecimalPlaces(Math.min(Math.max(decimals, 2), 8), Decimal.ROUND_DOWN)
+      .toFixed()
+      .replace(/\.?0+$/, "");
+  } catch {
+    return "0";
+  }
+}
+
+function renderPortfolioWithdrawQuote(
+  payload: PortfolioWithdrawQuotePayload
+): void {
+  const quote = payload.quote;
+  const destination = payload.destination;
+  if (!quote || !destination) {
+    hidePortfolioWithdrawQuote();
+    return;
+  }
+
+  const outputAmount = formatTokenBaseUnitAmount(
+    quote.estToTokenBaseUnit,
+    destination.tokenDecimals
+  );
+  const feeUsd = new Decimal(quote.estFeeBreakdown?.totalImpactUsd ?? 0);
+  const feeLabel = feeUsd.lte(0) ? "Free" : formatDecimalMoney(feeUsd);
+  const timeLabel = formatCheckoutTime(quote.estCheckoutTimeMs);
+  setPortfolioWithdrawQuote(
+    "info",
+    `
+      <div class="knoww-pf-withdraw-quote-row">
+        <span>You receive</span>
+        <strong>${escapeHtml(outputAmount)} ${escapeHtml(destination.tokenSymbol)}</strong>
+      </div>
+      <div class="knoww-pf-withdraw-quote-row">
+        <span>Fee</span>
+        <strong>${escapeHtml(feeLabel)}</strong>
+      </div>
+      <div class="knoww-pf-withdraw-quote-row">
+        <span>Est. time</span>
+        <strong>${escapeHtml(timeLabel)}</strong>
+      </div>
+    `
+  );
+}
+
+async function requestPortfolioWithdrawQuote(
+  params: PortfolioWithdrawFormParams
+): Promise<RuntimeResponse> {
+  logInfo("portfolio.withdraw.ui.quote.request", {
+    amount: params.amount,
+    chainKey: params.chainKey,
+    tokenId: params.tokenId,
+    recipientAddress: params.destination,
+  });
+  const response = await sendRuntimeMessage({
+    type: "KNOWW_PORTFOLIO_WITHDRAW_QUOTE",
+    amount: params.amount,
+    destination: params.destination,
+    chainKey: params.chainKey,
+    tokenId: params.tokenId,
+  });
+  if (!response.ok) {
+    logWarn("portfolio.withdraw.ui.quote.failed", {
+      error: response.error,
+      amount: params.amount,
+      chainKey: params.chainKey,
+      tokenId: params.tokenId,
+      recipientAddress: params.destination,
+    });
+  }
+  return response;
+}
+
+function schedulePortfolioWithdrawQuote(
+  delay = WITHDRAW_QUOTE_DEBOUNCE_MS
+): void {
+  if (portfolioFundView !== "withdraw") return;
+  clearPortfolioWithdrawQuoteTimer();
+  const params = readPortfolioWithdrawParams(false);
+  if (!params) {
+    hidePortfolioWithdrawQuote();
+    return;
+  }
+
+  const run = ++portfolioWithdrawQuoteRun;
+  portfolioWithdrawQuoteTimer = setTimeout(() => {
+    void (async () => {
+      setPortfolioWithdrawQuote(
+        "info",
+        `<div class="knoww-pf-withdraw-quote-row"><span>Bridge</span><strong>Checking quote...</strong></div>`
+      );
+      const response = await requestPortfolioWithdrawQuote(params);
+      if (run !== portfolioWithdrawQuoteRun || portfolioFundView !== "withdraw")
+        return;
+      if (!response.ok) {
+        setPortfolioWithdrawQuote(
+          "error",
+          `<div class="knoww-pf-withdraw-quote-row"><span>Bridge</span><strong>${escapeHtml(
+            response.error || "Quote unavailable"
+          )}</strong></div>`
+        );
+        return;
+      }
+      renderPortfolioWithdrawQuote(
+        (response.data as PortfolioWithdrawQuotePayload | undefined) ?? {}
+      );
+    })();
+  }, delay);
+}
+
+function startPortfolioWithdrawStatusPolling(bridgeAddress: string): void {
+  clearPortfolioWithdrawStatusTimer();
+  const run = ++portfolioWithdrawStatusRun;
+  let polls = 0;
+
+  const poll = async (): Promise<void> => {
+    if (run !== portfolioWithdrawStatusRun || portfolioFundView !== "withdraw")
+      return;
+    polls += 1;
+    const response = await sendRuntimeMessage({
+      type: "KNOWW_PORTFOLIO_WITHDRAW_STATUS",
+      bridgeAddress,
+    });
+    if (run !== portfolioWithdrawStatusRun || portfolioFundView !== "withdraw")
+      return;
+
+    if (response.ok) {
+      const summary = (
+        response.data as PortfolioWithdrawStatusPayload | undefined
+      )?.summary;
+      if (summary) {
+        if (summary.completed) {
+          portfolioFundBusy = false;
+          setPortfolioFundStatus("success", "Withdrawal completed.");
+          schedulePortfolioFundRefreshes("withdraw");
+          return;
+        }
+        if (summary.failed) {
+          portfolioFundBusy = false;
+          setPortfolioFundStatus(
+            "error",
+            "Bridge failed. Try a smaller amount or retry later."
+          );
+          return;
+        }
+        setPortfolioFundStatus("info", `Bridge status: ${summary.text}.`);
+      }
+    }
+
+    if (polls >= WITHDRAW_STATUS_MAX_POLLS) {
+      portfolioFundBusy = false;
+      setPortfolioFundStatus(
+        "info",
+        "Bridge is still processing. Refresh portfolio shortly."
+      );
+      schedulePortfolioFundRefreshes("withdraw");
+      return;
+    }
+
+    portfolioWithdrawStatusTimer = setTimeout(
+      () => void poll(),
+      WITHDRAW_STATUS_POLL_MS
+    );
+  };
+
+  portfolioWithdrawStatusTimer = setTimeout(() => void poll(), 1500);
 }
 
 function isAuthRequiredError(error?: string): boolean {
@@ -1035,13 +1443,14 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
   const amount = (
     container.querySelector<HTMLInputElement>("[data-fund-amount]")?.value || ""
   ).trim();
-  const amountNum = Number(amount);
-  if (!amount || !Number.isFinite(amountNum) || amountNum <= 0) {
+  const amountDecimal = parsePortfolioAmount(amount);
+  if (!amount || !amountDecimal || amountDecimal.lte(0)) {
     setPortfolioFundStatus("error", "Enter an amount greater than zero.");
     return;
   }
 
   let fundParams: Record<string, unknown>;
+  let withdrawParams: PortfolioWithdrawFormParams | null = null;
 
   // Deposit · Wallet path — token chosen from the wallet balance list.
   if (action === "deposit" && portfolioDepositStep === "amount") {
@@ -1050,8 +1459,25 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
       setPortfolioFundStatus("error", "Select a token to deposit.");
       return;
     }
-    if (amountNum > token.amount + 1e-9) {
+    if (token.depositSupported === false) {
+      setPortfolioFundStatus(
+        "error",
+        `${token.symbol} is not supported for Polygon deposits.`
+      );
+      return;
+    }
+    if (amountDecimal.gt(new Decimal(token.amount).plus("0.000000001"))) {
       setPortfolioFundStatus("error", "Amount exceeds your wallet balance.");
+      return;
+    }
+    const amountUsd = amountDecimal.mul(
+      new Decimal(token.usdValue).div(token.amount || 1)
+    );
+    if (amountUsd.lt(token.minUsd)) {
+      setPortfolioFundStatus(
+        "error",
+        `Minimum deposit is ${formatMoney(token.minUsd)}.`
+      );
       return;
     }
     fundParams = {
@@ -1068,13 +1494,6 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
     const tokenValue =
       container.querySelector<HTMLSelectElement>("[data-fund-token]")?.value ||
       "";
-    const destination =
-      action === "withdraw"
-        ? (
-            container.querySelector<HTMLInputElement>("[data-fund-dest]")
-              ?.value || ""
-          ).trim()
-        : "";
     if (!chainValue || !tokenValue) {
       setPortfolioFundStatus("error", "Select a chain and token.");
       return;
@@ -1089,34 +1508,48 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
         tokenDecimals: Number(tokenDecimals),
       };
     } else {
-      const chainKey = chainValue;
-      const tokenId = tokenValue;
-      const isSolana = chainKey === "solana";
-      const validEvm = /^0x[0-9a-fA-F]{40}$/.test(destination);
-      const validSol = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(destination);
-      if (!destination || (isSolana ? !validSol : !validEvm)) {
-        setPortfolioFundStatus(
-          "error",
-          isSolana
-            ? "Enter a valid Solana recipient address."
-            : "Enter a valid 0x recipient address."
-        );
-        return;
-      }
-      if (amountNum > data.cashBalance + 1e-9) {
-        setPortfolioFundStatus(
-          "error",
-          "Amount exceeds your available balance."
-        );
-        return;
-      }
-      fundParams = { destination, chainKey, tokenId };
+      withdrawParams = readPortfolioWithdrawParams(true);
+      if (!withdrawParams) return;
+      logInfo("portfolio.withdraw.ui.form.selected", {
+        amount: withdrawParams.amount,
+        chainKey: withdrawParams.chainKey,
+        tokenId: withdrawParams.tokenId,
+        recipientAddress: withdrawParams.destination,
+      });
+      fundParams = {
+        destination: withdrawParams.destination,
+        chainKey: withdrawParams.chainKey,
+        tokenId: withdrawParams.tokenId,
+      };
     }
   }
 
   portfolioFundBusy = true;
   const loadingLabel = action === "deposit" ? "Depositing…" : "Withdrawing…";
-  setFundSubmitLoading(true, loadingLabel);
+  setFundSubmitLoading(
+    true,
+    action === "withdraw" ? "Getting quote…" : loadingLabel
+  );
+
+  if (action === "withdraw" && withdrawParams) {
+    setPortfolioFundStatus("info", "Fetching bridge quote…");
+    const quoteResponse = await requestPortfolioWithdrawQuote(withdrawParams);
+    if (portfolioFundView !== action) return;
+    if (!quoteResponse.ok) {
+      portfolioFundBusy = false;
+      setFundSubmitLoading(false);
+      setPortfolioFundStatus(
+        "error",
+        quoteResponse.error || "Could not fetch a bridge quote."
+      );
+      return;
+    }
+    renderPortfolioWithdrawQuote(
+      (quoteResponse.data as PortfolioWithdrawQuotePayload | undefined) ?? {}
+    );
+    setFundSubmitLoading(true, loadingLabel);
+  }
+
   setPortfolioFundStatus("info", "Confirm the transaction in your wallet…");
 
   const walletMode = await readStoredWalletMode(data.ownerAddress);
@@ -1132,6 +1565,16 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
       ...fundParams,
     });
 
+  if (action === "withdraw" && withdrawParams) {
+    logInfo("portfolio.withdraw.ui.submit.request", {
+      ownerAddress: data.ownerAddress,
+      walletMode,
+      amount,
+      chainKey: withdrawParams.chainKey,
+      tokenId: withdrawParams.tokenId,
+      recipientAddress: withdrawParams.destination,
+    });
+  }
   let response = await sendFundRequest();
   if (portfolioFundView !== action) return;
 
@@ -1157,6 +1600,16 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
     }
     setFundSubmitLoading(true, loadingLabel);
     setPortfolioFundStatus("info", "Confirm the transaction in your wallet…");
+    if (action === "withdraw" && withdrawParams) {
+      logInfo("portfolio.withdraw.ui.submit.retry", {
+        ownerAddress: data.ownerAddress,
+        walletMode,
+        amount,
+        chainKey: withdrawParams.chainKey,
+        tokenId: withdrawParams.tokenId,
+        recipientAddress: withdrawParams.destination,
+      });
+    }
     response = await sendFundRequest();
     if (portfolioFundView !== action) return;
   }
@@ -1164,21 +1617,56 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
   if (response.ok) {
     portfolioFundBusy = false;
     setFundSubmitLoading(false);
+    if (action === "withdraw") {
+      const payload = response.data as
+        | {
+            bridgeAddress?: string;
+            destination?: PortfolioWithdrawDestination;
+          }
+        | undefined;
+      logInfo("portfolio.withdraw.ui.submit.response", {
+        bridgeAddress: payload?.bridgeAddress,
+        chainKey: payload?.destination?.chainKey,
+        tokenId: payload?.destination?.tokenId,
+        tokenSymbol: payload?.destination?.tokenSymbol,
+        toChainId: payload?.destination?.toChainId,
+        toTokenAddress: payload?.destination?.toTokenAddress,
+        recipientAddress: withdrawParams?.destination,
+      });
+      setPortfolioFundStatus(
+        "info",
+        `Withdrawal sent to bridge for ${
+          payload?.destination?.tokenSymbol || "the selected token"
+        }. Waiting for completion...`
+      );
+      if (payload?.bridgeAddress) {
+        startPortfolioWithdrawStatusPolling(payload.bridgeAddress);
+      } else {
+        schedulePortfolioFundRefreshes(action);
+      }
+      return;
+    }
     setPortfolioFundStatus(
       "success",
-      action === "deposit"
-        ? "Deposit submitted. Funds appear once the bridge settles."
-        : "Withdrawal submitted. It will arrive once the bridge settles."
+      "Deposit submitted. Funds appear once processing completes."
     );
-    setTimeout(() => {
-      portfolioFundView = null;
-      void loadPortfolio(true);
-    }, 2600);
+    schedulePortfolioFundRefreshes(action);
     return;
   }
 
   portfolioFundBusy = false;
   setFundSubmitLoading(false);
+  if (action === "withdraw" && withdrawParams) {
+    logWarn("portfolio.withdraw.ui.submit.failed", {
+      error: response.error,
+      ownerAddress: data.ownerAddress,
+      walletMode,
+      amount,
+      chainKey: withdrawParams.chainKey,
+      tokenId: withdrawParams.tokenId,
+      recipientAddress: withdrawParams.destination,
+    });
+  }
   if (response.error === "NO_CONTENT_TAB") {
     setPortfolioFundStatus(
       "error",
@@ -1350,6 +1838,15 @@ async function connectPortfolioWalletConnect(): Promise<void> {
       type: "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE",
     });
     if (portfolioWalletConnectToken !== token) return;
+
+    if (response.ok === false) {
+      portfolioWalletConnectError =
+        response.error || "Could not prepare the WalletConnect QR code.";
+      portfolioWalletConnectQr = null;
+      if (container) container.innerHTML = renderPortfolioWalletConnect();
+      portfolioWalletConnectActive = false;
+      return;
+    }
 
     const payload = response.data as
       | {
@@ -1785,10 +2282,15 @@ function renderPortfolioSummary(data: PortfolioData): string {
             details?.userName || formatAddress(data.address)
           )}</span>
         </div>
-        <button type="button" class="knoww-portfolio-open" data-open-portfolio>
-          <span>Open</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"></path></svg>
-        </button>
+        <div class="knoww-pf-hero-actions">
+          <button type="button" class="knoww-portfolio-open" data-open-portfolio>
+            <span>Open</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"></path></svg>
+          </button>
+          <button type="button" class="knoww-pf-hero-disconnect" data-portfolio-disconnect title="Disconnect wallet" aria-label="Disconnect wallet">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          </button>
+        </div>
       </div>
       <div class="knoww-pf-hero-value">
         <span class="knoww-pf-hero-label">Position value</span>
@@ -2301,6 +2803,19 @@ function renderPortfolioSignedOut(): string {
   `;
 }
 
+async function refreshPortfolioWalletChoicesAfterDisconnect(): Promise<void> {
+  const container = root?.querySelector<HTMLElement>(
+    "[data-sidepanel-portfolio]"
+  );
+  if (!container || container.hidden) return;
+
+  portfolioWallets = await getPortfolioWallets();
+  const sessionAddress = await getPortfolioSessionAddress();
+  if (sessionAddress) return;
+
+  container.innerHTML = renderPortfolioSignedOut();
+}
+
 function clearPortfolioSessionState(): void {
   portfolioLoaded = false;
   portfolioConnectError = null;
@@ -2319,6 +2834,7 @@ function clearPortfolioSessionState(): void {
   );
   if (container && !container.hidden) {
     container.innerHTML = renderPortfolioSignedOut();
+    void refreshPortfolioWalletChoicesAfterDisconnect();
   }
 }
 
@@ -2517,11 +3033,17 @@ function render(): void {
         min-width: 0;
         min-height: 100vh;
         margin: 0;
-        background: var(--kse-panel, #121212);
+        background: var(--kse-panel, #18181b);
         overflow: hidden;
       }
 
       #knoww-notification-stack.knoww-sidepanel-stack {
+        /* Side-panel-only neutral near-black palette (anchored on #18181b).
+           Overrides the shared warm dark tokens for this surface only. */
+        --kse-bg: #121214;
+        --kse-panel: #18181b;
+        --kse-panel-2: #1f1f23;
+        --kse-bg-3: #1d1d21;
         position: static !important;
         top: auto !important;
         right: auto !important;
@@ -2689,8 +3211,8 @@ function render(): void {
         /* Tiers tuned for legibility: at 9-12px on these dark surfaces the old
            0.58/0.40 muted tokens fell below ~3:1. Lifted to keep the same
            hierarchy (hi > mid > dim) while clearing AA for small UI text. */
-        --pf-mid: rgba(255, 255, 255, 0.68);
-        --pf-dim: rgba(255, 255, 255, 0.54);
+        --pf-mid: rgba(255, 255, 255, 0.74);
+        --pf-dim: rgba(255, 255, 255, 0.62);
         --pf-line: rgba(255, 255, 255, 0.07);
         --pf-line-2: rgba(255, 255, 255, 0.13);
         --pf-surface: rgba(255, 255, 255, 0.022);
@@ -2757,8 +3279,8 @@ function render(): void {
       }
 
       .knoww-pf-kicker {
-        font: 600 9px/1 var(--pf-mono);
-        letter-spacing: 0.2em;
+        font: 600 10px/1 var(--pf-mono);
+        letter-spacing: 0.16em;
         text-transform: uppercase;
         color: var(--pf-dim);
       }
@@ -2779,8 +3301,8 @@ function render(): void {
 
       .knoww-pf-hero-label {
         display: block;
-        font: 600 9px/1 var(--pf-mono);
-        letter-spacing: 0.18em;
+        font: 600 10px/1 var(--pf-mono);
+        letter-spacing: 0.16em;
         text-transform: uppercase;
         color: var(--pf-dim);
       }
@@ -2831,8 +3353,8 @@ function render(): void {
 
       .knoww-pf-delta-label {
         color: var(--pf-dim);
-        font-size: 9px;
-        letter-spacing: 0.14em;
+        font-size: 10px;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
       }
 
@@ -2862,8 +3384,8 @@ function render(): void {
       }
 
       .knoww-pf-strip-label {
-        font: 600 9px/1 var(--pf-mono);
-        letter-spacing: 0.14em;
+        font: 600 10px/1 var(--pf-mono);
+        letter-spacing: 0.1em;
         text-transform: uppercase;
         color: var(--pf-dim);
       }
@@ -2875,6 +3397,50 @@ function render(): void {
         font: 500 14px/1 var(--pf-mono);
         color: var(--pf-hi);
         font-variant-numeric: tabular-nums;
+      }
+
+      .knoww-pf-hero-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        flex: none;
+      }
+
+      /* Icon-only disconnect — mirrors the trading-panel header action. Sits
+         beside Open; tints red on hover to signal it's a destructive action. */
+      .knoww-pf-hero-disconnect {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.72);
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease,
+          border-color 0.15s ease, opacity 0.15s ease;
+      }
+
+      .knoww-pf-hero-disconnect:hover {
+        border-color: rgba(251, 113, 133, 0.5);
+        background: rgba(251, 113, 133, 0.14);
+        color: var(--pf-neg);
+      }
+
+      .knoww-pf-hero-disconnect svg {
+        width: 13px;
+        height: 13px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .knoww-pf-hero-disconnect.is-busy {
+        opacity: 0.55;
+        pointer-events: none;
       }
 
       /* ---- Open button (also used in wallet/sign-in actions) ---- */
@@ -3137,8 +3703,8 @@ function render(): void {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font: 600 9px/1 var(--pf-mono);
-        letter-spacing: 0.18em;
+        font: 600 10px/1 var(--pf-mono);
+        letter-spacing: 0.16em;
         text-transform: uppercase;
         color: var(--pf-accent, var(--pf-dim));
       }
@@ -3154,7 +3720,7 @@ function render(): void {
 
       .knoww-pf-fund-sub {
         margin: 4px 0 0;
-        font: 500 11px/1.4 var(--pf-sans);
+        font: 500 12px/1.4 var(--pf-sans);
         color: var(--pf-mid);
       }
 
@@ -3168,8 +3734,8 @@ function render(): void {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        font: 600 9.5px/1 var(--pf-mono);
-        letter-spacing: 0.13em;
+        font: 600 10.5px/1 var(--pf-mono);
+        letter-spacing: 0.1em;
         text-transform: uppercase;
         color: var(--pf-mid);
       }
@@ -3269,8 +3835,8 @@ function render(): void {
         background: var(--pf-accent-tint, rgba(255, 255, 255, 0.06));
         color: var(--pf-accent, var(--pf-hi));
         cursor: pointer;
-        font: 700 9.5px/1 var(--pf-mono);
-        letter-spacing: 0.14em;
+        font: 700 10px/1 var(--pf-mono);
+        letter-spacing: 0.12em;
         text-transform: uppercase;
         transition: background 0.14s ease, border-color 0.14s ease;
       }
@@ -3303,7 +3869,7 @@ function render(): void {
       .knoww-pf-fund-hint {
         margin-top: 2px;
         color: var(--pf-dim);
-        font: 500 9.5px/1.4 var(--pf-sans);
+        font: 500 10.5px/1.4 var(--pf-sans);
         letter-spacing: 0.01em;
       }
 
@@ -3374,6 +3940,47 @@ function render(): void {
       .knoww-pf-fund-status.is-success {
         background: rgba(52, 211, 153, 0.12);
         color: var(--pf-pos);
+      }
+
+      .knoww-pf-withdraw-quote {
+        display: grid;
+        gap: 8px;
+        border: 1px solid rgba(59, 130, 246, 0.38);
+        border-radius: 10px;
+        background: rgba(37, 99, 235, 0.12);
+        padding: 10px 12px;
+      }
+
+      .knoww-pf-withdraw-quote[hidden] {
+        display: none;
+      }
+
+      .knoww-pf-withdraw-quote.is-error {
+        border-color: rgba(251, 113, 133, 0.36);
+        background: rgba(251, 113, 133, 0.12);
+      }
+
+      .knoww-pf-withdraw-quote-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        font: 500 11px/1.3 var(--pf-sans);
+        color: var(--pf-mid);
+      }
+
+      .knoww-pf-withdraw-quote-row span:first-child {
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-withdraw-quote-row strong {
+        min-width: 0;
+        text-align: right;
+        color: var(--pf-hi);
+        overflow-wrap: anywhere;
       }
 
       .knoww-pf-fund-submit {
@@ -3506,13 +4113,13 @@ function render(): void {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font: 600 12.5px/1.1 var(--pf-sans);
+        font: 600 14px/1.1 var(--pf-sans);
         color: var(--pf-hi);
       }
 
       .knoww-pf-method-meta {
-        font: 500 9px/1 var(--pf-mono);
-        letter-spacing: 0.1em;
+        font: 500 10px/1 var(--pf-mono);
+        letter-spacing: 0.08em;
         text-transform: uppercase;
         color: var(--pf-mid);
       }
@@ -3531,8 +4138,8 @@ function render(): void {
         border: 1px solid rgba(245, 191, 36, 0.4);
         border-radius: 999px;
         padding: 3px 7px;
-        font: 600 8px/1 var(--pf-mono);
-        letter-spacing: 0.12em;
+        font: 600 9px/1 var(--pf-mono);
+        letter-spacing: 0.1em;
         text-transform: uppercase;
         color: rgba(245, 191, 36, 0.85);
       }
@@ -3546,7 +4153,7 @@ function render(): void {
         border-radius: 12px;
         background: rgba(255, 255, 255, 0.03);
         cursor: pointer;
-        padding: 11px 14px;
+        padding: 12px 14px;
         text-align: left;
         transition: border-color 0.14s ease, background 0.14s ease;
       }
@@ -3572,12 +4179,12 @@ function render(): void {
       }
 
       .knoww-pf-token-sym {
-        font: 600 13px/1 var(--pf-sans);
+        font: 600 14px/1 var(--pf-sans);
         color: var(--pf-hi);
       }
 
       .knoww-pf-token-bal {
-        font: 500 11px/1 var(--pf-mono);
+        font: 500 12px/1 var(--pf-mono);
         color: rgba(255, 255, 255, 0.8);
         font-variant-numeric: tabular-nums;
       }
@@ -3589,16 +4196,16 @@ function render(): void {
       }
 
       .knoww-pf-token-meta strong {
-        font: 600 12.5px/1 var(--pf-mono);
+        font: 600 14px/1 var(--pf-mono);
         color: var(--pf-hi);
         font-variant-numeric: tabular-nums;
       }
 
       .knoww-pf-token-min {
-        font: 500 9px/1 var(--pf-mono);
-        letter-spacing: 0.08em;
+        font: 600 10.5px/1 var(--pf-mono);
+        letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: rgba(245, 191, 36, 0.8);
+        color: rgba(245, 191, 36, 0.92);
       }
 
       /* ---- Table (tabs + panels) ---- */
@@ -3637,8 +4244,8 @@ function render(): void {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font: 600 9px/1 var(--pf-mono);
-        letter-spacing: 0.08em;
+        font: 600 10px/1 var(--pf-mono);
+        letter-spacing: 0.07em;
         text-transform: uppercase;
       }
 
@@ -3692,8 +4299,8 @@ function render(): void {
 
       .knoww-portfolio-history-controls span {
         color: var(--pf-dim);
-        font: 500 9px/1 var(--pf-mono);
-        letter-spacing: 0.12em;
+        font: 500 10px/1 var(--pf-mono);
+        letter-spacing: 0.1em;
         text-transform: uppercase;
       }
 
@@ -3876,7 +4483,7 @@ function render(): void {
         display: -webkit-box;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
-        font: 600 12.5px/1.3 var(--pf-sans);
+        font: 600 13px/1.3 var(--pf-sans);
       }
 
       .knoww-portfolio-row-meta {
@@ -3885,7 +4492,7 @@ function render(): void {
         white-space: nowrap;
         margin-top: 4px;
         color: var(--pf-dim);
-        font: 500 9.5px/1.2 var(--pf-mono);
+        font: 500 10.5px/1.2 var(--pf-mono);
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }
@@ -3900,13 +4507,13 @@ function render(): void {
 
       .knoww-portfolio-row-value strong {
         color: var(--pf-hi);
-        font: 500 12.5px/1.1 var(--pf-mono);
+        font: 500 13px/1.1 var(--pf-mono);
         font-variant-numeric: tabular-nums;
       }
 
       .knoww-portfolio-row-value span {
         color: var(--pf-mid);
-        font: 500 10px/1.1 var(--pf-mono);
+        font: 500 10.5px/1.1 var(--pf-mono);
         font-variant-numeric: tabular-nums;
       }
 
@@ -3985,7 +4592,7 @@ function render(): void {
       .knoww-pf-empty-sub {
         max-width: 230px;
         color: var(--pf-dim);
-        font: 500 10px/1.5 var(--pf-mono);
+        font: 500 11px/1.5 var(--pf-mono);
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }
@@ -4125,7 +4732,7 @@ function render(): void {
         max-width: 240px;
         margin: 2px auto 0;
         color: var(--pf-dim);
-        font: 500 9.5px/1.5 var(--pf-mono);
+        font: 500 10px/1.5 var(--pf-mono);
         letter-spacing: 0.03em;
         text-transform: uppercase;
       }
@@ -4387,8 +4994,31 @@ function render(): void {
         );
         if (portfolioFundView === "withdraw") {
           syncFundRecipientForChain(container);
+          schedulePortfolioWithdrawQuote();
         }
       }
+    }
+    const tokenSelect = (event.target as Element | null)?.closest(
+      "[data-fund-token]"
+    );
+    if (tokenSelect && portfolioFundView === "withdraw") {
+      schedulePortfolioWithdrawQuote();
+    }
+  });
+  root.addEventListener("input", (event) => {
+    const target = event.target as Element | null;
+    const amountInput = target?.closest<HTMLInputElement>("[data-fund-amount]");
+    if (amountInput) {
+      const normalized = normalizePortfolioAmountInput(amountInput.value);
+      if (normalized !== amountInput.value) {
+        amountInput.value = normalized;
+      }
+    }
+    if (
+      portfolioFundView === "withdraw" &&
+      (amountInput || target?.closest("[data-fund-dest]"))
+    ) {
+      schedulePortfolioWithdrawQuote();
     }
   });
   root.addEventListener("click", (event) => {
@@ -4480,6 +5110,14 @@ function render(): void {
       return;
     }
 
+    const portfolioDisconnect = (
+      event.target as Element | null
+    )?.closest<HTMLButtonElement>("[data-portfolio-disconnect]");
+    if (portfolioDisconnect) {
+      void disconnectPortfolioWallet(portfolioDisconnect);
+      return;
+    }
+
     const portfolioFund = (
       event.target as Element | null
     )?.closest<HTMLElement>("[data-portfolio-fund]");
@@ -4537,6 +5175,7 @@ function render(): void {
       if (destInput) {
         destInput.value = useEoaChip.dataset.eoa || "";
         destInput.focus();
+        schedulePortfolioWithdrawQuote();
       }
       return;
     }
@@ -4551,8 +5190,11 @@ function render(): void {
             ? String(latestPortfolioData?.cashBalance ?? 0)
             : container?.querySelector<HTMLElement>("[data-fund-avail]")
                 ?.dataset.value || "0";
-        amountInput.value = String(Number(value) || 0);
+        amountInput.value = formatPortfolioAmountInputValue(value);
         amountInput.focus();
+        if (portfolioFundView === "withdraw") {
+          schedulePortfolioWithdrawQuote(0);
+        }
       }
       return;
     }

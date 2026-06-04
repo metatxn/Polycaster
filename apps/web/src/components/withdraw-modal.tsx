@@ -1,5 +1,6 @@
 "use client";
 
+import { createLogger } from "@knoww/logger";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -34,9 +35,12 @@ import {
 } from "@/hooks/use-withdraw";
 import { cn } from "@/lib/utils";
 
+const log = createLogger("withdraw-modal");
+
 interface WithdrawModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onWithdrawComplete?: () => void;
 }
 
 const TOKEN_DISPLAY: Record<
@@ -159,7 +163,11 @@ function AccentNote({ color, caption, children }: AccentNoteProps) {
   );
 }
 
-export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
+export function WithdrawModal({
+  open,
+  onOpenChange,
+  onWithdrawComplete,
+}: WithdrawModalProps) {
   const { address } = useConnection();
   const {
     withdraw,
@@ -185,6 +193,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
   );
   const [txHash, setTxHash] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const completionNotifiedRef = useRef(false);
 
   const [tokenDropdownOpen, setTokenDropdownOpen] = useState(false);
   const [chainDropdownOpen, setChainDropdownOpen] = useState(false);
@@ -211,6 +220,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
       setSelectedChain(WITHDRAW_CHAINS[0]);
       setTxHash(null);
       setShowSuccess(false);
+      completionNotifiedRef.current = false;
       reset();
     }
   }, [open, reset]);
@@ -224,6 +234,20 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
       setShowSuccess(true);
     }
   }, [state]);
+
+  useEffect(() => {
+    if (
+      completionNotifiedRef.current ||
+      (state !== "confirmed" &&
+        state !== "bridging" &&
+        state !== "bridge_complete")
+    ) {
+      return;
+    }
+
+    completionNotifiedRef.current = true;
+    onWithdrawComplete?.();
+  }, [state, onWithdrawComplete]);
 
   const amountNum = useMemo(() => Number.parseFloat(amount) || 0, [amount]);
 
@@ -240,14 +264,66 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
     return /^0x[a-fA-F0-9]{40}$/.test(recipientAddress);
   }, [recipientAddress, selectedChain.id]);
 
-  const canProceed = useMemo(() => {
-    return isValidAmount && amountNum >= 2 && isValidAddress && canWithdraw;
-  }, [isValidAmount, amountNum, isValidAddress, canWithdraw]);
-
   const isCrossChain = useMemo(
     () => selectedChain.id !== "polygon",
     [selectedChain.id]
   );
+
+  const canProceed = useMemo(() => {
+    return isValidAmount && amountNum >= 2 && isValidAddress && canWithdraw;
+  }, [isValidAmount, amountNum, isValidAddress, canWithdraw]);
+
+  const withdrawDebugParams = useMemo(() => {
+    const toChainId = WITHDRAW_CHAIN_IDS[selectedChain.id] || "137";
+    const resolvedToTokenAddress = resolveDestTokenAddress(
+      bridgeTokenIndex,
+      toChainId,
+      selectedTokenId
+    );
+    const fallbackToTokenAddress =
+      toChainId === "137" ? selectedTokenConfig.address : "";
+    const toTokenAddress = resolvedToTokenAddress || fallbackToTokenAddress;
+
+    return {
+      amount,
+      amountNum,
+      recipientAddress,
+      selectedChainId: selectedChain.id,
+      selectedChainName: selectedChain.name,
+      selectedTokenId,
+      selectedTokenSymbol: selectedTokenConfig.symbol,
+      toChainId,
+      toTokenAddress,
+      resolvedToTokenAddress,
+      fallbackToTokenAddress,
+      canProceed,
+      canWithdraw,
+      isValidAddress,
+      isValidAmount,
+      availableBalance: usdcBalance,
+      quoteId: quote?.quoteId,
+      quoteEstToTokenBaseUnit: quote?.estToTokenBaseUnit,
+      quoteEstOutputUsd: quote?.estOutputUsd,
+    };
+  }, [
+    amount,
+    amountNum,
+    recipientAddress,
+    selectedChain.id,
+    selectedChain.name,
+    selectedTokenId,
+    selectedTokenConfig.symbol,
+    selectedTokenConfig.address,
+    bridgeTokenIndex,
+    canProceed,
+    canWithdraw,
+    isValidAddress,
+    isValidAmount,
+    usdcBalance,
+    quote?.quoteId,
+    quote?.estToTokenBaseUnit,
+    quote?.estOutputUsd,
+  ]);
 
   const quoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -257,11 +333,11 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
     }
 
     const toChainId = WITHDRAW_CHAIN_IDS[selectedChain.id] || "137";
-    const toTokenAddress = resolveDestTokenAddress(
-      bridgeTokenIndex,
-      toChainId,
-      selectedTokenId
-    );
+    const toTokenAddress =
+      resolveDestTokenAddress(bridgeTokenIndex, toChainId, selectedTokenId) ||
+      (toChainId === "137"
+        ? WITHDRAW_TOKEN_CONFIGS[selectedTokenId].address
+        : "");
 
     if (
       !amountNum ||
@@ -337,6 +413,19 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
   const LARGE_WITHDRAWAL_THRESHOLD_USD = 50_000;
   const isLargeWithdrawal = amountNum > LARGE_WITHDRAWAL_THRESHOLD_USD;
 
+  const explorerChainId =
+    state === "bridge_complete" && bridgeTracking.transactionHash
+      ? selectedChain.id
+      : "polygon";
+  const explorerTxHash =
+    state === "bridge_complete" && bridgeTracking.transactionHash
+      ? bridgeTracking.transactionHash
+      : txHash;
+  const explorerLabel =
+    state === "bridge_complete" && bridgeTracking.transactionHash
+      ? `View destination on ${CHAIN_EXPLORER_NAMES[explorerChainId]}`
+      : `View source transfer on ${CHAIN_EXPLORER_NAMES.polygon}`;
+
   const handleUseConnected = useCallback(() => {
     if (address) setRecipientAddress(address);
   }, [address]);
@@ -356,16 +445,28 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
   const selectedChainId = selectedChain.id;
 
   const handleWithdraw = useCallback(async () => {
-    if (!canProceed) return;
+    log.info("submit.clicked", withdrawDebugParams);
+    if (!canProceed) {
+      log.warn("submit.blocked", withdrawDebugParams);
+      return;
+    }
     const result = await withdraw({
       amount,
       destinationAddress: recipientAddress,
       tokenId: selectedTokenId,
       chainId: selectedChainId,
     });
+    log.info("submit.result", {
+      ...withdrawDebugParams,
+      success: result.success,
+      transactionHash: result.transactionHash,
+      bridgeDepositAddress: result.bridgeDepositAddress,
+      error: result.error,
+    });
     if (result.transactionHash) setTxHash(result.transactionHash);
   }, [
     canProceed,
+    withdrawDebugParams,
     amount,
     recipientAddress,
     withdraw,
@@ -491,7 +592,7 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                     <span className="text-lg font-semibold leading-snug text-(--kwm-ink) text-center max-w-[300px] tracking-tight">
                       {state === "bridge_complete"
                         ? `Your ${selectedTokenConfig.symbol} landed on ${selectedChain.name}.`
-                        : `${amount} pUSD routed to ${selectedChain.name} — arriving shortly.`}
+                        : `${amount} pUSD sent to the bridge - ${selectedTokenConfig.symbol} is arriving shortly.`}
                     </span>
                   </div>
 
@@ -522,15 +623,15 @@ export function WithdrawModal({ open, onOpenChange }: WithdrawModalProps) {
                   ) : null}
 
                   {/* Explorer link */}
-                  {txHash ? (
+                  {explorerTxHash ? (
                     <a
-                      href={`${CHAIN_EXPLORER_URLS.polygon}${txHash}`}
+                      href={`${CHAIN_EXPLORER_URLS[explorerChainId]}${explorerTxHash}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center justify-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-2) hover:text-(--kwm-ink) transition-colors mb-4"
                     >
                       <span className="underline underline-offset-4 decoration-(--kwm-hl)">
-                        View on {CHAIN_EXPLORER_NAMES.polygon}
+                        {explorerLabel}
                       </span>
                       <ExternalLink className="h-3 w-3" />
                     </a>

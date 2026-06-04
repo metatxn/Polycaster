@@ -140,12 +140,15 @@ export function Confirmation({
   depositTransactions,
   isLoadingDepositStatus,
 }: ConfirmationProps) {
+  const isDirectPusdDeposit = selectedToken?.symbol === "pUSD";
   const displayReceiveAmount = quote
     ? (Number(quote.estToTokenBaseUnit) / 1e6).toFixed(2)
     : receiveAmount;
   const estimatedTime = quote
     ? formatCheckoutTime(quote.estCheckoutTimeMs)
-    : "< 2 min";
+    : isDirectPusdDeposit
+      ? "On-chain"
+      : "< 2 min";
 
   return (
     <motion.div
@@ -238,7 +241,7 @@ export function Confirmation({
           </div>
 
           {/* Bridge advisory */}
-          {selectedToken.symbol !== "pUSD" && (
+          {!isDirectPusdDeposit && (
             <AccentNote tone="info" caption="Auto-Conversion">
               Your {selectedToken.symbol} routes through Polymarket Bridge and
               lands as pUSD on Polygon.
@@ -250,7 +253,9 @@ export function Confirmation({
             <DetailRow label="Source">
               Wallet · {address ? formatAddress(address) : "—"}
             </DetailRow>
-            <DetailRow label="Via">Polymarket Bridge</DetailRow>
+            <DetailRow label="Via">
+              {isDirectPusdDeposit ? "Direct transfer" : "Polymarket Bridge"}
+            </DetailRow>
             <DetailRow label="Destination">Polymarket Wallet</DetailRow>
             <DetailRow label="Est. Time">{estimatedTime}</DetailRow>
           </div>
@@ -267,7 +272,11 @@ export function Confirmation({
                 `${quote ? "" : "~"}${displayReceiveAmount} pUSD`
               )}
             </DetailRow>
-            {quote?.estFeeBreakdown ? (
+            {isDirectPusdDeposit ? (
+              <DetailRow label="Network Cost" muted>
+                Polygon gas
+              </DetailRow>
+            ) : quote?.estFeeBreakdown ? (
               <>
                 <DetailRow label="Gas Fee" muted>
                   ${quote.estFeeBreakdown.gasUsd.toFixed(4)}
@@ -325,7 +334,9 @@ export function Confirmation({
           {/* Bridge pending */}
           {isOnChainConfirmed && isConfirming && !isConfirmed && (
             <AccentNote tone="info" caption="On-Chain Confirmed">
-              Waiting for the bridge to credit pUSD to your Polymarket wallet.
+              {isDirectPusdDeposit
+                ? "Waiting for the direct pUSD transfer to finalize."
+                : "Waiting for the bridge to credit pUSD to your Polymarket wallet."}
             </AccentNote>
           )}
 
@@ -424,7 +435,7 @@ export function Confirmation({
             ) : isOnChainConfirmed && isConfirming ? (
               <span className="inline-flex items-center gap-2">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Waiting for Bridge
+                {isDirectPusdDeposit ? "Finalizing" : "Waiting for Bridge"}
               </span>
             ) : isConfirming ? (
               <span className="inline-flex items-center gap-2">
@@ -432,14 +443,22 @@ export function Confirmation({
                 Confirming On-Chain
               </span>
             ) : isOnChainConfirmed ? (
-              "Bridge Update Pending"
+              isDirectPusdDeposit ? (
+                "Finalizing"
+              ) : (
+                "Bridge Update Pending"
+              )
             ) : isConfirmed ? (
               <span className="inline-flex items-center gap-2">
                 <Check className="h-3.5 w-3.5" />
                 Deposit Complete
               </span>
             ) : !bridgeAddress ? (
-              "Loading Bridge"
+              isDirectPusdDeposit ? (
+                "Loading Wallet"
+              ) : (
+                "Loading Bridge"
+              )
             ) : !isWalletReady ? (
               "Wallet Loading"
             ) : (

@@ -39,9 +39,7 @@ const SECURITY_HEADERS: Record<string, string> = {
   // Control referrer information
   "Referrer-Policy": "strict-origin-when-cross-origin",
 
-  // Opt out of FLoC / Topics API tracking
-  "Permissions-Policy":
-    "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 
   // DNS prefetch control
   "X-DNS-Prefetch-Control": "on",

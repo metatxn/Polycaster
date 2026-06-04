@@ -1,17 +1,22 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import type { DepositStatus, QuoteResponse } from "@knoww/shared-types/bridge";
+import {
+  buildBridgeTokenIndex,
+  type DepositStatus,
+  getAvailableTokensForChain,
+  type QuoteResponse,
+  resolveDestTokenAddress,
+  validateWithdrawBridgeDestination,
+  WITHDRAW_CHAIN_IDS,
+  WITHDRAW_TOKEN_CONFIGS,
+  type WithdrawTokenId,
+} from "@knoww/shared-types/bridge";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { encodeFunctionData, getAddress, parseUnits } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
-import {
-  PUSD_ADDRESS,
-  PUSD_DECIMALS,
-  USDC_E_ADDRESS,
-  USDC_E_DECIMALS,
-} from "@/constants/contracts";
+import { PUSD_ADDRESS, PUSD_DECIMALS } from "@/constants/contracts";
 import { qk } from "@/lib/query-keys";
 import {
   executeViaDepositWallet,
@@ -22,6 +27,15 @@ import { useBridge } from "./use-bridge";
 import { useProxyWallet } from "./use-proxy-wallet";
 
 const log = createLogger("withdraw");
+
+export type { WithdrawTokenId };
+export {
+  buildBridgeTokenIndex,
+  getAvailableTokensForChain,
+  resolveDestTokenAddress,
+  WITHDRAW_CHAIN_IDS,
+  WITHDRAW_TOKEN_CONFIGS,
+};
 
 /**
  * ERC20 transfer ABI for encoding the transfer call
@@ -37,52 +51,6 @@ const ERC20_TRANSFER_ABI = [
     outputs: [{ name: "", type: "bool" }],
   },
 ] as const;
-
-// ────────────────────────────────────────────────────────────
-// Legacy Uniswap swap path (kept for reference — replaced by Polymarket Bridge API)
-// ────────────────────────────────────────────────────────────
-//
-// const ERC20_APPROVE_ABI = [
-//   {
-//     name: "approve",
-//     type: "function",
-//     inputs: [
-//       { name: "spender", type: "address" },
-//       { name: "amount", type: "uint256" },
-//     ],
-//     outputs: [{ name: "", type: "bool" }],
-//   },
-// ] as const;
-//
-// const UNISWAP_V3_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
-// const NATIVE_USDC_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
-// const POOL_FEE = 100;
-// const MAX_SLIPPAGE_BPS = BigInt(10);
-//
-// const SWAP_ROUTER_ABI = [
-//   {
-//     name: "exactInputSingle",
-//     type: "function",
-//     inputs: [
-//       {
-//         name: "params",
-//         type: "tuple",
-//         components: [
-//           { name: "tokenIn", type: "address" },
-//           { name: "tokenOut", type: "address" },
-//           { name: "fee", type: "uint24" },
-//           { name: "recipient", type: "address" },
-//           { name: "deadline", type: "uint256" },
-//           { name: "amountIn", type: "uint256" },
-//           { name: "amountOutMinimum", type: "uint256" },
-//           { name: "sqrtPriceLimitX96", type: "uint160" },
-//         ],
-//       },
-//     ],
-//     outputs: [{ name: "amountOut", type: "uint256" }],
-//   },
-// ] as const;
-// ────────────────────────────────────────────────────────────
 
 /**
  * Withdrawal transaction states.
@@ -118,189 +86,11 @@ export interface WithdrawResult {
 export interface BridgeTrackingInfo {
   status: DepositStatus | null;
   depositAddress: string | null;
+  transactionHash: string | null;
 }
 
-/**
- * Supported tokens for withdrawal
- */
-export type WithdrawTokenId =
-  | "usdc"
-  | "usdc-e"
-  | "usdt"
-  | "dai"
-  | "eth"
-  | "pol"
-  | "sol";
-
-export interface WithdrawTokenConfig {
-  id: WithdrawTokenId;
-  symbol: string;
-  name: string;
-  address: string;
-  decimals: number;
-}
-
-/**
- * Token configurations — these are DESTINATION tokens the user can receive.
- * The source pulled from the Safe is always pUSD (V2 trading collateral).
- * The `address` is the Polygon contract address for display / config purposes.
- * Destination-chain addresses are resolved dynamically from /supported-assets.
- */
-export const WITHDRAW_TOKEN_CONFIGS: Record<
-  WithdrawTokenId,
-  WithdrawTokenConfig
-> = {
-  "usdc-e": {
-    id: "usdc-e",
-    symbol: "USDC.e",
-    name: "Bridged USDC",
-    address: USDC_E_ADDRESS,
-    decimals: USDC_E_DECIMALS,
-  },
-  usdc: {
-    id: "usdc",
-    symbol: "USDC",
-    name: "USD Coin",
-    address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-    decimals: 6,
-  },
-  usdt: {
-    id: "usdt",
-    symbol: "USDT",
-    name: "Tether USD",
-    address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-    decimals: 6,
-  },
-  dai: {
-    id: "dai",
-    symbol: "DAI",
-    name: "Dai Stablecoin",
-    address: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
-    decimals: 18,
-  },
-  eth: {
-    id: "eth",
-    symbol: "ETH",
-    name: "Ether",
-    address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-    decimals: 18,
-  },
-  pol: {
-    id: "pol",
-    symbol: "POL",
-    name: "Polygon",
-    address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-    decimals: 18,
-  },
-  sol: {
-    id: "sol",
-    symbol: "SOL",
-    name: "Solana",
-    address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-    decimals: 9,
-  },
-};
-
-/**
- * Chain IDs for withdrawal via the Polymarket Bridge API.
- * All chains (including Polygon) route through the bridge.
- */
-export const WITHDRAW_CHAIN_IDS: Record<string, string> = {
-  polygon: "137",
-  ethereum: "1",
-  base: "8453",
-  arbitrum: "42161",
-  optimism: "10",
-  bsc: "56",
-  solana: "1151111081099710",
-};
-
-/**
- * Maps a token symbol from the Bridge API to our internal WithdrawTokenId.
- */
-const SYMBOL_TO_TOKEN_ID: Record<string, WithdrawTokenId> = {
-  USDC: "usdc",
-  "USDC.e": "usdc-e",
-  USDT: "usdt",
-  DAI: "dai",
-  ETH: "eth",
-  POL: "pol",
-  SOL: "sol",
-};
-
-type SupportedAssetLike = {
-  chainId: string;
-  token: { symbol: string; address: string };
-};
-
-/**
- * Build a `chainId -> tokenId -> address` index from the live supported-assets API data.
- * When the API returns multiple addresses for the same symbol on a chain,
- * the first match wins (the API orders preferred contracts first).
- */
-export function buildBridgeTokenIndex(
-  supportedAssets: SupportedAssetLike[]
-): Record<string, Partial<Record<WithdrawTokenId, string>>> {
-  const index: Record<string, Partial<Record<WithdrawTokenId, string>>> = {};
-
-  for (const asset of supportedAssets) {
-    const tokenId = SYMBOL_TO_TOKEN_ID[asset.token.symbol];
-    if (!tokenId) continue;
-
-    if (!index[asset.chainId]) {
-      index[asset.chainId] = {};
-    }
-    if (!index[asset.chainId][tokenId]) {
-      index[asset.chainId][tokenId] = asset.token.address;
-    }
-  }
-
-  return index;
-}
-
-/**
- * Resolve the destination token address for a given chain + token pair.
- * Falls back to USDC on the chain if the specific token isn't mapped.
- */
-export function resolveDestTokenAddress(
-  bridgeTokenIndex: Record<string, Partial<Record<WithdrawTokenId, string>>>,
-  toChainId: string,
-  tokenId: WithdrawTokenId
-): string {
-  const chainTokens = bridgeTokenIndex[toChainId];
-  if (chainTokens?.[tokenId]) return chainTokens[tokenId] as string;
-  if (chainTokens?.usdc) return chainTokens.usdc as string;
-  return "";
-}
-
-/**
- * Which tokens are available for a given chain, derived from live API data.
- * Polygon always includes usdc/usdc-e (relayer path) plus any bridge-supported tokens.
- */
-export function getAvailableTokensForChain(
-  bridgeTokenIndex: Record<string, Partial<Record<WithdrawTokenId, string>>>,
-  chainKey: string
-): WithdrawTokenId[] {
-  const chainId = WITHDRAW_CHAIN_IDS[chainKey] || "1";
-  const chainTokens = bridgeTokenIndex[chainId];
-
-  if (chainKey === "polygon") {
-    const bridgeTokenIds = chainTokens
-      ? (Object.keys(chainTokens) as WithdrawTokenId[])
-      : [];
-    const combined = new Set<WithdrawTokenId>([
-      "usdc",
-      "usdc-e",
-      ...bridgeTokenIds,
-    ]);
-    return [...combined];
-  }
-
-  if (!chainTokens || Object.keys(chainTokens).length === 0) return ["usdc"];
-  return Object.keys(chainTokens) as WithdrawTokenId[];
-}
-
-// All tokens (including Polygon USDC/USDC.e) now go through the Polymarket Bridge API.
+// Withdrawals go through the Polymarket Bridge API. For Polygon USDC, the bridge
+// owns the Collateral Offramp / Uniswap route after receiving pUSD.
 
 /**
  * Parameters for initiating a withdrawal
@@ -320,7 +110,8 @@ export interface WithdrawParams {
  * Hook for withdrawing USDC from Polymarket proxy wallet to external wallet
  *
  * Uses the Polymarket relayer to execute gasless transactions from the Safe wallet.
- * The withdrawal is a simple ERC20 transfer from the proxy wallet to the external address.
+ * The Bridge API returns a destination-configured address. We transfer pUSD to
+ * that address; Polymarket routes/swaps it to the requested destination token.
  *
  * @example
  * ```tsx
@@ -332,7 +123,7 @@ export interface WithdrawParams {
  *     destinationAddress: "0x..."
  *   });
  *   if (result.success) {
- *     console.log("Withdrawal successful:", result.transactionHash);
+ *     return result.transactionHash;
  *   }
  * };
  * ```
@@ -365,6 +156,7 @@ export function useWithdraw() {
   const [bridgeTracking, setBridgeTracking] = useState<BridgeTrackingInfo>({
     status: null,
     depositAddress: null,
+    transactionHash: null,
   });
 
   const bridgeStatusPollRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -460,7 +252,11 @@ export function useWithdraw() {
         clearInterval(bridgeStatusPollRef.current);
       }
 
-      setBridgeTracking({ status: null, depositAddress });
+      setBridgeTracking({
+        status: null,
+        depositAddress,
+        transactionHash: null,
+      });
       setState("bridging");
 
       const poll = async () => {
@@ -468,7 +264,11 @@ export function useWithdraw() {
           const txns = await getDepositStatus(depositAddress);
           if (txns.length > 0) {
             const latest = txns[txns.length - 1];
-            setBridgeTracking({ status: latest.status, depositAddress });
+            setBridgeTracking({
+              status: latest.status,
+              depositAddress,
+              transactionHash: latest.txHash ?? null,
+            });
 
             if (latest.status === "COMPLETED") {
               setState("bridge_complete");
@@ -504,71 +304,6 @@ export function useWithdraw() {
       bridgeStatusPollRef.current = null;
     }
   }, []);
-
-  // ────────────────────────────────────────────────────────────
-  // Legacy Polygon-only withdrawal via direct transfer / Uniswap swap
-  // Replaced by the Polymarket Bridge API path for all tokens and chains.
-  // ────────────────────────────────────────────────────────────
-  //
-  // const buildPolygonWithdrawTxs = (
-  //   destinationAddress: string,
-  //   amountInWei: bigint,
-  //   tokenId: WithdrawTokenId
-  // ): Array<{ to: string; data: string; value: string }> => {
-  //   const transactions: Array<{ to: string; data: string; value: string }> = [];
-  //
-  //   if (tokenId === "usdc") {
-  //     const approveData = encodeFunctionData({
-  //       abi: ERC20_APPROVE_ABI,
-  //       functionName: "approve",
-  //       args: [UNISWAP_V3_ROUTER as `0x${string}`, amountInWei],
-  //     });
-  //     transactions.push({
-  //       to: USDC_E_ADDRESS,
-  //       data: approveData,
-  //       value: "0",
-  //     });
-  //
-  //     const amountOutMinimum =
-  //       amountInWei - (amountInWei * MAX_SLIPPAGE_BPS) / BigInt(10000);
-  //     const deadline = BigInt(Math.floor(Date.now() / 1000) + 20 * 60);
-  //     const swapData = encodeFunctionData({
-  //       abi: SWAP_ROUTER_ABI,
-  //       functionName: "exactInputSingle",
-  //       args: [
-  //         {
-  //           tokenIn: USDC_E_ADDRESS as `0x${string}`,
-  //           tokenOut: NATIVE_USDC_ADDRESS as `0x${string}`,
-  //           fee: POOL_FEE,
-  //           recipient: destinationAddress as `0x${string}`,
-  //           deadline,
-  //           amountIn: amountInWei,
-  //           amountOutMinimum,
-  //           sqrtPriceLimitX96: BigInt(0),
-  //         },
-  //       ],
-  //     });
-  //     transactions.push({
-  //       to: UNISWAP_V3_ROUTER,
-  //       data: swapData,
-  //       value: "0",
-  //     });
-  //   } else {
-  //     const transferData = encodeFunctionData({
-  //       abi: ERC20_TRANSFER_ABI,
-  //       functionName: "transfer",
-  //       args: [destinationAddress as `0x${string}`, amountInWei],
-  //     });
-  //     transactions.push({
-  //       to: USDC_E_ADDRESS,
-  //       data: transferData,
-  //       value: "0",
-  //     });
-  //   }
-  //
-  //   return transactions;
-  // };
-  // ────────────────────────────────────────────────────────────
 
   /**
    * Submit transactions via relayer and poll for confirmation.
@@ -673,38 +408,56 @@ export function useWithdraw() {
         throw new Error(`Unsupported token: ${tokenId}`);
       }
 
-      // Bridge requires a minimum of ~$2 per the /supported-assets minCheckoutUsd
-      const MIN_BRIDGE_AMOUNT_USD = 2;
-      if (parsedAmount < MIN_BRIDGE_AMOUNT_USD) {
-        throw new Error(
-          `Minimum withdrawal is $${MIN_BRIDGE_AMOUNT_USD}. The Polymarket Bridge requires at least $${MIN_BRIDGE_AMOUNT_USD} to process.`
-        );
-      }
-
       setState("signing");
       setError(null);
 
       try {
         const amountInWei = parseUnits(amount, PUSD_DECIMALS);
 
-        // ─── Bridge path (all tokens, all chains) ───
-        const toTokenAddress = resolveDestTokenAddress(
-          bridgeTokenIndex,
-          toChainId,
-          tokenId
-        );
+        // ─── Bridge path ───
+        // Bridge requires a minimum of ~$2 per the /supported-assets minCheckoutUsd.
+        const MIN_BRIDGE_AMOUNT_USD = 2;
+        if (parsedAmount < MIN_BRIDGE_AMOUNT_USD) {
+          throw new Error(
+            `Minimum withdrawal is $${MIN_BRIDGE_AMOUNT_USD}. The Polymarket Bridge requires at least $${MIN_BRIDGE_AMOUNT_USD} to process.`
+          );
+        }
+
+        const toTokenAddress =
+          resolveDestTokenAddress(bridgeTokenIndex, toChainId, tokenId) ||
+          (toChainId === "137" ? tokenConfig.address : "");
 
         if (!toTokenAddress) {
           throw new Error(
             `Token ${tokenId} is not supported on this chain. Please try a different token.`
           );
         }
+        try {
+          validateWithdrawBridgeDestination({
+            toTokenAddress,
+            recipientAddress: destinationAddress,
+            sourceAddress: proxyAddress,
+          });
+        } catch (err) {
+          log.warn("bridge.destination.rejected", {
+            error: err,
+            tokenId,
+            toChainId,
+            toTokenAddress,
+            proxyAddress,
+            destinationAddress,
+          });
+          throw err;
+        }
 
-        log.debug("bridge.addresses.requesting", {
+        log.info("bridge.addresses.requesting", {
           address: proxyAddress,
           toChainId,
           toTokenAddress,
           recipientAddr: destinationAddress,
+          tokenId,
+          tokenSymbol: tokenConfig.symbol,
+          amountBaseUnit: amountInWei.toString(),
         });
 
         const bridgeResponse = await getWithdrawalAddresses({
@@ -724,8 +477,35 @@ export function useWithdraw() {
             "Bridge did not return a deposit address for the selected chain"
           );
         }
+        try {
+          validateWithdrawBridgeDestination({
+            toTokenAddress,
+            bridgeAddress: bridgeDepositAddress,
+            recipientAddress: destinationAddress,
+            sourceAddress: proxyAddress,
+          });
+        } catch (err) {
+          log.warn("bridge.deposit_address.rejected", {
+            error: err,
+            bridgeDepositAddress,
+            proxyAddress,
+            destinationAddress,
+            tokenId,
+            toChainId,
+            toTokenAddress,
+          });
+          throw err;
+        }
 
-        log.debug("bridge.deposit_address.received", { bridgeDepositAddress });
+        log.info("bridge.deposit_address.received", {
+          bridgeDepositAddress,
+          proxyAddress,
+          destinationAddress,
+          tokenId,
+          tokenSymbol: tokenConfig.symbol,
+          toChainId,
+          toTokenAddress,
+        });
 
         const transferData = encodeFunctionData({
           abi: ERC20_TRANSFER_ABI,
@@ -741,7 +521,7 @@ export function useWithdraw() {
           },
         ];
 
-        log.debug("bridge.withdrawal.submitting", {
+        log.info("bridge.withdrawal.submitting", {
           from: proxyAddress,
           bridgeAddress: bridgeDepositAddress,
           recipient: destinationAddress,
@@ -812,7 +592,11 @@ export function useWithdraw() {
     setError(null);
     setQuote(null);
     setQuoteError(null);
-    setBridgeTracking({ status: null, depositAddress: null });
+    setBridgeTracking({
+      status: null,
+      depositAddress: null,
+      transactionHash: null,
+    });
     stopBridgeStatusPolling();
   }, [stopBridgeStatusPolling]);
 

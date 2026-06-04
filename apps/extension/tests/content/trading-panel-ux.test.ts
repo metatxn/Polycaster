@@ -86,6 +86,73 @@ test("order summary uses clearer decision labels", () => {
   assert.equal(/`Profit if \$\{opts\.outcomeName\}`/.test(source), false);
 });
 
+test("deposit token list whitelists direct pUSD deposits", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(
+    /token\.depositSupported === false &&\s*!isPusdToken\(token\.symbol, token\.address\)/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /const isUnsupported =\s*tok\.depositSupported === false && !isDirectPusdDeposit;/.test(
+      source
+    ),
+    true
+  );
+});
+
+test("deposit ERC20 transfers use viem encoding helpers", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(/parseUnits/.test(source), true);
+  assert.equal(/encodeFunctionData/.test(source), true);
+  assert.equal(/erc20Abi/.test(source), true);
+  assert.equal(/BigInt\(10 \*\* decimals\)/.test(source), false);
+  assert.equal(/ERC20_TRANSFER_SELECTOR/.test(source), false);
+});
+
+test("WalletConnect metadata uses the current page origin in content scripts", () => {
+  const source = readSource("src/content/trading/walletconnect-bridge.ts");
+
+  assert.equal(/function getWalletConnectMetadataUrl/.test(source), true);
+  assert.equal(/url:\s*getWalletConnectMetadataUrl\(\)/.test(source), true);
+  assert.equal(/window\.location\.origin/.test(source), true);
+  assert.equal(/url:\s*"https:\/\/knoww\.app"/.test(source), false);
+});
+
+test("WalletConnect QR path forces a fresh pairing session", () => {
+  const bridgeSource = readSource("src/content/trading/bridge.ts");
+  const walletConnectSource = readSource(
+    "src/content/trading/walletconnect-bridge.ts"
+  );
+
+  assert.equal(
+    /WalletConnectBridge\.connect\(\{ forceNew: true \}\)/.test(bridgeSource),
+    true
+  );
+  assert.equal(/forceNew\?: boolean/.test(walletConnectSource), true);
+  assert.equal(/disconnectExistingSession/.test(walletConnectSource), true);
+  assert.equal(/if \(forceNew\)/.test(walletConnectSource), true);
+});
+
+test("session disconnect resets the wallet bridge before rendering choices", () => {
+  const bridgeSource = readSource("src/content/trading/bridge.ts");
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  assert.equal(/resetAfterDisconnect/.test(bridgeSource), true);
+  assert.equal(/selectedWalletUuid\s*=\s*undefined/.test(bridgeSource), true);
+  assert.equal(/WalletConnectBridge\.disconnect\(\)/.test(bridgeSource), true);
+  assert.equal(/KNOWW_LIST_WALLETS/.test(bridgeSource), true);
+  assert.equal(
+    /TRADING_SESSION_DISCONNECTED_MESSAGE[\s\S]*WalletBridge\.resetAfterDisconnect\(\)/.test(
+      serviceSource
+    ),
+    true
+  );
+});
+
 test("installed wallet buttons reset Reddit host button and image styles", () => {
   const css = readInlineCss();
 

@@ -618,10 +618,10 @@ function injectInlineStyles(): void {
         border-radius: 6px !important;
         padding: 4px 7px !important;
         font-family: "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
-        font-size: 9px !important;
+        font-size: 10px !important;
         font-weight: 600 !important;
         letter-spacing: 0 !important;
-        line-height: 1 !important;
+        line-height: 1.2 !important;
         cursor: pointer !important;
         transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
       }

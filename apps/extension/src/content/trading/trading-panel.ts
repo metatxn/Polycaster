@@ -33,6 +33,7 @@ import Decimal from "decimal.js";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import QRCode from "react-qr-code";
+import { encodeFunctionData, erc20Abi, parseUnits } from "viem";
 import type { ClobOrderType } from "../../types/chrome-messages";
 import type { Market } from "../../types/market";
 import { escapeHtml } from "../utils";
@@ -45,12 +46,17 @@ import {
   fetchDepositStatus,
   fetchQuote,
   fetchSupportedAssets,
+  findSupportedBridgeAsset,
   formatCheckoutTime,
   getDefaultMinDeposit,
   getDepositStatusDisplay,
   getMinDepositForToken,
+  isPusdToken,
+  POLYGON_BRIDGE_CHAIN_ID,
   type QuoteResponse,
+  resolveWalletDepositRoute,
   type SupportedAsset,
+  type WalletDepositRoute,
 } from "./bridge-api";
 import { CredentialManager } from "./credentials";
 import { formatTradingErrorLine, mapTradingError } from "./error-mapping";
@@ -84,8 +90,6 @@ const DEPOSIT_TOKENS: Array<{
     decimals: 18,
   },
 ];
-const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
-
 // ── Types ──
 
 interface PanelOptions {
@@ -113,6 +117,8 @@ interface DepositToken {
   usdValue: number;
   address: string;
   decimals: number;
+  depositSupported?: boolean;
+  depositDisabledReason?: string;
 }
 
 type DepositStep = "method" | "token" | "bridge-select" | "amount" | "confirm";
@@ -173,6 +179,7 @@ let depositSelected: DepositToken | null = null;
 let depositAmount = "";
 let depositError: string | null = null;
 let depositBridgeAddress = "";
+let depositRoute: WalletDepositRoute | null = null;
 let depositBridgeAssets: SupportedAsset[] = [];
 let depositSelectedBridgeAsset: SupportedAsset | null = null;
 let depositBridgeSearchQuery = "";
@@ -805,6 +812,7 @@ function createPanel(opts: PanelOptions): HTMLElement {
   depositSelected = null;
   depositAmount = "";
   depositError = null;
+  depositRoute = null;
 
   if (opts.isMultiOutcome) {
     selectedOutcome = "yes";
@@ -3022,6 +3030,7 @@ function resetDepositState(): void {
   depositAmount = "";
   depositError = null;
   depositBridgeAddress = "";
+  depositRoute = null;
   depositBridgeAssets = [];
   depositSelectedBridgeAsset = null;
   depositBridgeSearchQuery = "";
@@ -3181,6 +3190,7 @@ async function fetchEoaBalancesViaWallet(
         usdValue: amount * price,
         address: DEPOSIT_TOKENS[i].address,
         decimals: DEPOSIT_TOKENS[i].decimals,
+        depositSupported: true,
       });
     }
   }
@@ -3236,21 +3246,8 @@ function startDepositFlow(eoaAddress: string): void {
   });
 }
 
-function encodeErc20Transfer(to: string, amountHex: string): string {
-  const toStripped = to.toLowerCase().replace("0x", "").padStart(64, "0");
-  const amtStripped = amountHex.replace("0x", "").padStart(64, "0");
-  return `${ERC20_TRANSFER_SELECTOR}${toStripped}${amtStripped}`;
-}
-
 function toHex(n: bigint): string {
   return `0x${n.toString(16)}`;
-}
-
-function parseTokenAmount(input: string, decimals: number): bigint {
-  const parts = input.split(".");
-  const whole = parts[0] || "0";
-  const frac = (parts[1] || "").slice(0, decimals).padEnd(decimals, "0");
-  return BigInt(whole) * BigInt(10 ** decimals) + BigInt(frac);
 }
 
 let depositPollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3348,6 +3345,15 @@ async function depositSelectToken(
   token: DepositToken,
   proxyAddress: string
 ): Promise<void> {
+  if (
+    token.depositSupported === false &&
+    !isPusdToken(token.symbol, token.address)
+  ) {
+    depositError = `${token.symbol} is not supported for Polygon deposits.`;
+    rerender();
+    return;
+  }
+
   trackPanelAnalytics("deposit_asset_selected", {
     depositMethod: "wallet",
     tokenSymbol: token.symbol,
@@ -3355,29 +3361,39 @@ async function depositSelectToken(
   depositSelected = token;
   depositError = null;
   depositBridgeAddress = "";
+  depositRoute = null;
   depositState = "loading-bridge";
   rerender();
 
   try {
-    if (depositAddressesCache.length === 0) {
-      depositAddressesCache = await createDepositAddresses(proxyAddress);
+    const isDirectPusdDeposit = isPusdToken(token.symbol, token.address);
+    if (!isDirectPusdDeposit && depositBridgeAssets.length === 0) {
+      depositBridgeAssets = await fetchSupportedAssets();
     }
-    const addrs = depositAddressesCache;
-    if (addrs.length > 0) {
-      const matching =
-        addrs.find(
-          (a) =>
-            a.chainId === "137" &&
-            a.tokenSymbol.toUpperCase() === token.symbol.toUpperCase()
-        ) ||
-        addrs.find(
-          (a) => a.chainId === "137" && a.tokenSymbol.toUpperCase() === "USDC"
-        ) ||
-        addrs.find((a) => a.chainId === "137");
-      if (matching) depositBridgeAddress = matching.depositAddress;
-      else depositError = "No deposit address available for Polygon.";
+    if (!isDirectPusdDeposit) {
+      const supported = findSupportedBridgeAsset(
+        depositBridgeAssets,
+        POLYGON_BRIDGE_CHAIN_ID,
+        token.symbol,
+        token.address
+      );
+      if (supported && depositAddressesCache.length === 0) {
+        depositAddressesCache = await createDepositAddresses(proxyAddress);
+      }
+    }
+    const route = resolveWalletDepositRoute({
+      chainId: POLYGON_BRIDGE_CHAIN_ID,
+      tokenSymbol: token.symbol,
+      tokenAddress: token.address,
+      recipientAddress: proxyAddress,
+      supportedAssets: isDirectPusdDeposit ? [] : depositBridgeAssets,
+      depositAddresses: isDirectPusdDeposit ? [] : depositAddressesCache,
+    });
+    if (route) {
+      depositRoute = route;
+      depositBridgeAddress = route.depositAddress;
     } else {
-      depositError = "Failed to get deposit addresses.";
+      depositError = `${token.symbol} is not supported for Polygon deposits.`;
     }
   } catch (err) {
     depositError =
@@ -3393,12 +3409,20 @@ async function depositSelectBridgeAsset(
   asset: SupportedAsset,
   proxyAddress: string
 ): Promise<void> {
+  if (isPusdToken(asset.token.symbol, asset.token.address)) {
+    depositError =
+      "Use Wallet deposit to send pUSD directly from your Polygon wallet.";
+    rerender();
+    return;
+  }
+
   trackPanelAnalytics("deposit_asset_selected", {
     depositMethod: "bridge",
     tokenSymbol: asset.token.symbol,
     chainName: asset.chainName,
   });
   depositSelectedBridgeAsset = asset;
+  depositRoute = null;
   depositState = "loading-bridge";
   rerender();
 
@@ -3413,7 +3437,14 @@ async function depositSelectBridgeAsset(
           (a) =>
             a.chainId === asset.chainId && a.tokenSymbol === asset.token.symbol
         ) || addrs.find((a) => a.chainId === asset.chainId);
-      if (matching) depositBridgeAddress = matching.depositAddress;
+      if (matching) {
+        depositBridgeAddress = matching.depositAddress;
+        depositRoute = {
+          kind: "bridge",
+          depositAddress: matching.depositAddress,
+          minUsd: asset.minCheckoutUsd,
+        };
+      }
     }
   } catch (err) {
     depositError =
@@ -3430,13 +3461,14 @@ function depositFetchQuote(): void {
     !depositSelected ||
     !depositBridgeAddress ||
     !depositAmount ||
+    depositRoute?.kind === "direct" ||
     depositIsLoadingQuote
   )
     return;
   const numAmount = parseFloat(depositAmount);
   if (!numAmount || numAmount <= 0) return;
 
-  const amountBaseUnit = parseTokenAmount(
+  const amountBaseUnit = parseUnits(
     depositAmount,
     depositSelected.decimals
   ).toString();
@@ -3475,7 +3507,8 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
   rerender();
 
   try {
-    const amountBig = parseTokenAmount(depositAmount, depositSelected.decimals);
+    const amountBig = parseUnits(depositAmount, depositSelected.decimals);
+    const prevBalance = ctx.balance;
 
     let txHash: string;
     if (depositSelected.address === "native") {
@@ -3485,11 +3518,16 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         value: toHex(amountBig),
       });
     } else {
-      const data = encodeErc20Transfer(depositBridgeAddress, toHex(amountBig));
+      const data = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "transfer",
+        args: [depositBridgeAddress as `0x${string}`, amountBig],
+      });
       txHash = await WalletBridge.sendTransaction({
         from: ctx.address,
         to: depositSelected.address,
         data,
+        value: "0x0",
       });
     }
 
@@ -3520,7 +3558,23 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
     });
     rerender();
 
-    const prevBalance = ctx.balance;
+    if (depositRoute?.kind === "direct") {
+      await refreshDepositBalanceUntilSynced(prevBalance);
+      depositIsConfirming = false;
+      depositIsConfirmed = true;
+      trackPanelAnalytics("deposit_completed", {
+        ...getDepositEventProperties(),
+        statusSource: "direct_transfer",
+      });
+      rerender();
+      setTimeout(() => {
+        activeView = "order";
+        resetDepositState();
+        rerender();
+      }, 3000);
+      return;
+    }
+
     const BRIDGE_TIMEOUT = 180_000;
     const bridgeStart = Date.now();
 
@@ -3843,10 +3897,16 @@ function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
 
   const tokenList = el("div", "knoww-tp-deposit-token-list");
   for (const tok of depositTokens) {
+    const isDirectPusdDeposit = isPusdToken(tok.symbol, tok.address);
     const minDep = getMinDepositForToken(depositBridgeAssets, tok.symbol);
+    const isUnsupported =
+      tok.depositSupported === false && !isDirectPusdDeposit;
     const isBelowMinDeposit = tok.usdValue < minDep;
     const isBelowMinBalance = tok.usdValue < MIN_BALANCE_USD;
-    const isDisabled = isBelowMinDeposit || isBelowMinBalance;
+    const isDisabled =
+      isUnsupported ||
+      isBelowMinDeposit ||
+      (!isDirectPusdDeposit && isBelowMinBalance);
     const row = el(
       "button",
       `knoww-tp-deposit-token-row${isDisabled ? " below-min" : ""}`
@@ -3873,8 +3933,17 @@ function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
     );
     row.appendChild(symCol);
     const rightCol = el("div", "knoww-tp-deposit-token-right");
-    if (isDisabled) {
-      const badgeAmount = isBelowMinBalance ? MIN_BALANCE_USD : minDep;
+    if (isUnsupported) {
+      rightCol.appendChild(
+        el(
+          "span",
+          "knoww-tp-deposit-min-badge",
+          tok.depositDisabledReason || "Unsupported"
+        )
+      );
+    } else if (isDisabled) {
+      const badgeAmount =
+        !isDirectPusdDeposit && isBelowMinBalance ? MIN_BALANCE_USD : minDep;
       rightCol.appendChild(
         el("span", "knoww-tp-deposit-min-badge", `Min $${badgeAmount}`)
       );
@@ -3943,14 +4012,17 @@ function renderDepositBridgeSelectStep(
 
   // Filter assets
   const query = depositBridgeSearchQuery.toLowerCase().trim();
+  const depositAssets = depositBridgeAssets.filter(
+    (a) => !isPusdToken(a.token.symbol, a.token.address)
+  );
   const filtered = query
-    ? depositBridgeAssets.filter(
+    ? depositAssets.filter(
         (a) =>
           a.token.symbol.toLowerCase().includes(query) ||
           a.token.name.toLowerCase().includes(query) ||
           a.chainName.toLowerCase().includes(query)
       )
-    : depositBridgeAssets;
+    : depositAssets;
 
   const list = el("div", "knoww-tp-deposit-bridge-list");
   for (const asset of filtered) {
@@ -4058,11 +4130,10 @@ function renderDepositAmountStep(form: HTMLElement): void {
 
   // Minimum deposit/balance warnings
   const enteredUsd = computeEnteredAmountUsd();
-  const minDep = getMinDepositForToken(
-    depositBridgeAssets,
-    depositSelected.symbol
-  );
-  const MIN_AMOUNT_USD = 2;
+  const minDep =
+    depositRoute?.minUsd ??
+    getMinDepositForToken(depositBridgeAssets, depositSelected.symbol);
+  const MIN_AMOUNT_USD = depositRoute?.kind === "direct" ? 0 : 2;
   const isBelowMinBalance = enteredUsd > 0 && enteredUsd < MIN_AMOUNT_USD;
   const isBelowMinDeposit = enteredUsd > 0 && enteredUsd < minDep;
 
@@ -4233,7 +4304,9 @@ function renderDepositConfirmStep(
     : computeReceiveAmount();
   const estimatedTime = depositQuote
     ? formatCheckoutTime(depositQuote.estCheckoutTimeMs)
-    : "< 2 min";
+    : depositRoute?.kind === "direct"
+      ? "On-chain"
+      : "< 2 min";
 
   // Amount display
   form.appendChild(
@@ -4266,7 +4339,12 @@ function renderDepositConfirmStep(
   const details = el("div", "knoww-tp-deposit-details-card");
   const rows: Array<[string, string]> = [
     ["Source", `🦊 Wallet (${ctx.address ? truncAddr(ctx.address) : ""})`],
-    ["Via", "🌉 Polymarket Bridge"],
+    [
+      "Via",
+      depositRoute?.kind === "direct"
+        ? "Direct transfer"
+        : "🌉 Polymarket Bridge",
+    ],
     ["Destination", "📊 Polymarket Wallet"],
     ["Est. time", estimatedTime],
   ];
@@ -4315,7 +4393,12 @@ function renderDepositConfirmStep(
   const feeDivider = el("div", "knoww-tp-deposit-fee-divider");
   breakdown.appendChild(feeDivider);
 
-  if (depositQuote?.estFeeBreakdown) {
+  if (depositRoute?.kind === "direct") {
+    const r = el("div", "knoww-tp-deposit-fee-row");
+    r.appendChild(el("span", "knoww-tp-deposit-fee-label", "Network cost"));
+    r.appendChild(el("span", "knoww-tp-deposit-fee-value", "Polygon gas"));
+    breakdown.appendChild(r);
+  } else if (depositQuote?.estFeeBreakdown) {
     const fb = depositQuote.estFeeBreakdown;
     const feeRows: Array<[string, string]> = [
       ["Gas fee", `$${fb.gasUsd.toFixed(4)}`],
@@ -4397,7 +4480,13 @@ function renderDepositConfirmStep(
     const infoText = el("div", "");
     infoText.appendChild(el("div", "", "Transaction confirmed on-chain!"));
     infoText.appendChild(
-      el("div", "", "Waiting for bridge to credit pUSD to your wallet...")
+      el(
+        "div",
+        "",
+        depositRoute?.kind === "direct"
+          ? "Finalizing direct pUSD transfer..."
+          : "Waiting for bridge to credit pUSD to your wallet..."
+      )
     );
     infoText.style.fontSize = "11px";
     infoBanner.appendChild(infoText);

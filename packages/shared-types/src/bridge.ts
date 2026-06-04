@@ -7,9 +7,10 @@
  * @see https://docs.polymarket.com/api-reference/bridge
  */
 
-import { USDC_E_ADDRESS, USDC_E_DECIMALS } from "./contracts";
+import { PUSD_ADDRESS, USDC_E_ADDRESS, USDC_E_DECIMALS } from "./contracts.ts";
 
 export const BRIDGE_API_URL = "https://bridge.polymarket.com";
+export const POLYGON_BRIDGE_CHAIN_ID = "137";
 
 export type BridgeHeaders = Record<string, string>;
 
@@ -158,6 +159,24 @@ export interface DepositStatusDisplay {
   tone: DepositStatusTone;
 }
 
+export type WalletDepositRouteKind = "bridge" | "direct";
+
+export interface WalletDepositRoute {
+  /** `direct` means send pUSD straight to the recipient wallet on Polygon. */
+  kind: WalletDepositRouteKind;
+  depositAddress: string;
+  minUsd: number;
+}
+
+export interface ResolveWalletDepositRouteInput {
+  chainId: string;
+  tokenSymbol: string;
+  tokenAddress: string;
+  recipientAddress?: string;
+  supportedAssets: SupportedAsset[];
+  depositAddresses: DepositAddress[];
+}
+
 export const SOLANA_CHAIN_ID = "1151111081099710";
 
 export const SUPPORTED_BRIDGE_CHAIN_IDS = [
@@ -255,6 +274,108 @@ function getBridgeHeaders(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function normalizeSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase();
+}
+
+function normalizeAddress(address: string): string {
+  return address.trim().toLowerCase();
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return (
+    left.startsWith("0x") &&
+    right.startsWith("0x") &&
+    normalizeAddress(left) === normalizeAddress(right)
+  );
+}
+
+export function isPusdToken(
+  tokenSymbol: string,
+  tokenAddress: string
+): boolean {
+  return (
+    normalizeSymbol(tokenSymbol) === "PUSD" ||
+    sameAddress(tokenAddress, PUSD_ADDRESS)
+  );
+}
+
+export function findSupportedBridgeAsset(
+  assets: SupportedAsset[],
+  chainId: string,
+  tokenSymbol: string,
+  tokenAddress: string
+): SupportedAsset | undefined {
+  const requestedSymbol = normalizeSymbol(tokenSymbol);
+
+  return assets.find((asset) => {
+    if (asset.chainId !== chainId) return false;
+    return (
+      normalizeSymbol(asset.token.symbol) === requestedSymbol ||
+      sameAddress(asset.token.address, tokenAddress)
+    );
+  });
+}
+
+export function findDepositAddressForChain(
+  depositAddresses: DepositAddress[],
+  chainId: string,
+  asset?: SupportedAsset
+): DepositAddress | undefined {
+  if (asset) {
+    const assetSymbol = normalizeSymbol(asset.token.symbol);
+    const matching = depositAddresses.find(
+      (address) =>
+        address.chainId === chainId &&
+        (normalizeSymbol(address.tokenSymbol) === assetSymbol ||
+          sameAddress(address.tokenAddress, asset.token.address))
+    );
+    if (matching) return matching;
+  }
+
+  return depositAddresses.find((address) => address.chainId === chainId);
+}
+
+export function resolveWalletDepositRoute({
+  chainId,
+  tokenSymbol,
+  tokenAddress,
+  recipientAddress,
+  supportedAssets,
+  depositAddresses,
+}: ResolveWalletDepositRouteInput): WalletDepositRoute | null {
+  if (isPusdToken(tokenSymbol, tokenAddress)) {
+    if (chainId !== POLYGON_BRIDGE_CHAIN_ID || !recipientAddress) return null;
+    return {
+      kind: "direct",
+      depositAddress: recipientAddress,
+      minUsd: 0,
+    };
+  }
+
+  const asset = findSupportedBridgeAsset(
+    supportedAssets,
+    chainId,
+    tokenSymbol,
+    tokenAddress
+  );
+  const bridgeAddress = findDepositAddressForChain(
+    depositAddresses,
+    chainId,
+    asset
+  );
+
+  if (asset && bridgeAddress) {
+    return {
+      kind: "bridge",
+      depositAddress: bridgeAddress.depositAddress,
+      minUsd: asset.minCheckoutUsd,
+    };
+  }
+
+  return null;
 }
 
 async function readBridgeError(
@@ -438,6 +559,8 @@ export function getMinDepositForToken(
   tokenSymbol: string
 ): number {
   const normalizedTokenSymbol = tokenSymbol.toUpperCase();
+  if (normalizedTokenSymbol === "PUSD") return 0;
+
   const matching = assets.filter((asset) => {
     const assetSymbol = asset.token.symbol.toUpperCase();
     return (
@@ -624,6 +747,35 @@ export function resolveDestTokenAddress(
   if (chainTokens?.[tokenId]) return chainTokens[tokenId] as string;
   if (chainTokens?.usdc) return chainTokens.usdc as string;
   return "";
+}
+
+function isSameBridgeAddress(left?: string, right?: string): boolean {
+  return Boolean(
+    left && right && left.trim().toLowerCase() === right.trim().toLowerCase()
+  );
+}
+
+export function validateWithdrawBridgeDestination(input: {
+  toTokenAddress?: string;
+  bridgeAddress?: string;
+  recipientAddress?: string;
+  sourceAddress?: string;
+}): void {
+  if (isSameBridgeAddress(input.toTokenAddress, PUSD_ADDRESS)) {
+    throw new Error(
+      "Resolved withdrawal destination is pUSD. Select USDC or USDC.e so the Polymarket Bridge unwraps to the requested token."
+    );
+  }
+  if (isSameBridgeAddress(input.bridgeAddress, input.recipientAddress)) {
+    throw new Error(
+      "Bridge returned the recipient address as the pUSD transfer target. Refusing to send direct pUSD."
+    );
+  }
+  if (isSameBridgeAddress(input.bridgeAddress, input.sourceAddress)) {
+    throw new Error(
+      "Bridge returned the source wallet as the pUSD transfer target. Refusing to submit withdrawal."
+    );
+  }
 }
 
 /**

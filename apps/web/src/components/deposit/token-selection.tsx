@@ -1,3 +1,4 @@
+import { isPusdToken } from "@knoww/shared-types/bridge";
 import { motion } from "framer-motion";
 import { Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
@@ -58,17 +59,24 @@ export function TokenSelection({
 
           <div className="flex flex-col gap-2">
             {walletTokens.map((token) => {
+              const isDirectPusdDeposit = isPusdToken(
+                token.symbol,
+                token.address
+              );
               const minDeposit = getMinDepositForToken(token.symbol);
+              const isUnsupported =
+                token.depositSupported === false && !isDirectPusdDeposit;
               const isBelowMinimum = token.usdValue < minDeposit;
+              const isDisabled = isUnsupported || isBelowMinimum;
               return (
                 <button
                   key={token.address}
                   type="button"
-                  onClick={() => !isBelowMinimum && onSelectToken(token)}
-                  disabled={isBelowMinimum}
+                  onClick={() => !isDisabled && onSelectToken(token)}
+                  disabled={isDisabled}
                   className={cn(
                     "group w-full flex items-center justify-between gap-4 px-3.5 py-3 border border-(--kwm-hl) rounded-md text-left transition-colors",
-                    isBelowMinimum
+                    isDisabled
                       ? "cursor-not-allowed opacity-50"
                       : "hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-2)"
                   )}
@@ -100,17 +108,19 @@ export function TokenSelection({
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    {isBelowMinimum && (
+                    {isUnsupported ? (
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3) tabular-nums">
+                        {token.depositDisabledReason || "Unsupported"}
+                      </span>
+                    ) : isBelowMinimum ? (
                       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-warn) tabular-nums">
                         Min · ${minDeposit}
                       </span>
-                    )}
+                    ) : null}
                     <span
                       className={cn(
                         "font-mono text-sm tabular-nums",
-                        isBelowMinimum
-                          ? "text-(--kwm-ink-3)"
-                          : "text-(--kwm-ink)"
+                        isDisabled ? "text-(--kwm-ink-3)" : "text-(--kwm-ink)"
                       )}
                     >
                       ${token.usdValue.toFixed(2)}

@@ -18,7 +18,7 @@ minimumReleaseAgeExclude:
 
 catalog:
   "@biomejs/biome": "2.4.15"
-  "@polymarket/client": "0.0.0-canary-20260520141050"
+  "@polymarket/client": "0.0.0-canary-20260529160249"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
   "decimal.js": "^10.6.0"

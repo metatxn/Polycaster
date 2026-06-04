@@ -54,6 +54,40 @@ test("settings default to floating and expose a user-facing placement control", 
   );
 });
 
+test("AI-assisted matching defaults off and remains user-configurable", () => {
+  const settingsSource = readSource("src/types/settings.ts");
+  const optionsSource = readSource("src/options.tsx");
+
+  assert.equal(/aiExtractionEnabled:\s*false/.test(settingsSource), true);
+  assert.equal(/label="AI-Assisted Matching"/.test(optionsSource), true);
+  assert.equal(
+    /checked=\{settings\.aiExtractionEnabled\}/.test(optionsSource),
+    true
+  );
+  assert.equal(
+    /setSettings\(\(prev\) => \(\{ \.\.\.prev, aiExtractionEnabled: v \}\)\)/.test(
+      optionsSource
+    ),
+    true
+  );
+});
+
+test("production settings hide the Kalshi source toggle", () => {
+  const optionsSource = readSource("src/options.tsx");
+
+  assert.equal(
+    /const SHOW_KALSHI_SOURCE_SETTINGS = __DEV_MODE__;/.test(optionsSource),
+    true
+  );
+  assert.equal(
+    /\{SHOW_KALSHI_SOURCE_SETTINGS && \(\s*<>\s*<Divider \/>\s*<SettingRow\s+label="Kalshi"/s.test(
+      optionsSource
+    ),
+    true
+  );
+  assert.equal(/id="source-kalshi"/.test(optionsSource), true);
+});
+
 test("notification stack can move itself into the browser side panel", () => {
   const uiSource = readSource("src/content/ui.ts");
   const backgroundSource = readSource("src/background.ts");
@@ -285,6 +319,16 @@ test("side panel exposes a compact portfolio view without charts", () => {
   assert.equal(/KNOWW_GET_PORTFOLIO_WALLETS/.test(backgroundSource), true);
   assert.equal(/KNOWW_CONNECT_PORTFOLIO_WALLET/.test(backgroundSource), true);
   assert.equal(
+    /KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE[\s\S]*resolvePortfolioSigningTabId/.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /portfolioWalletConnectError\s*=\s*response\.error/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
     /KNOWW_GET_PORTFOLIO_TRADING_STATUS/.test(backgroundSource),
     true
   );
@@ -320,6 +364,16 @@ test("side panel clears portfolio state when trading disconnects", () => {
   assert.equal(/portfolioConnectError\s*=\s*null/.test(sidepanelSource), true);
   assert.equal(/portfolioWallets\s*=\s*null/.test(sidepanelSource), true);
   assert.equal(
+    /refreshPortfolioWalletChoicesAfterDisconnect/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /portfolioWallets\s*=\s*await getPortfolioWallets\(\)/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
     /chrome\.runtime\.sendMessage\(\s*\{\s*type:\s*TRADING_SESSION_DISCONNECTED_MESSAGE\s*\}/s.test(
       backgroundSource
     ),
@@ -338,6 +392,33 @@ test("trading preflight market info uses direct CLOB fetch fallback", () => {
     true
   );
   assert.equal(/fetchUnifiedClobMarket/.test(source), false);
+});
+
+test("side panel clamps portfolio fund amount inputs to six decimals", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /const PORTFOLIO_AMOUNT_DECIMALS = 6;/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /function normalizePortfolioAmountInput/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /function formatPortfolioAmountInputValue/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /normalizePortfolioAmountInput\(amountInput\.value\)/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /amountInput\.value = formatPortfolioAmountInputValue\(value\);/.test(
+      sidepanelSource
+    ),
+    true
+  );
 });
 
 test("limit order book loading exits on fetch failure", () => {

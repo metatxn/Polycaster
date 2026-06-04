@@ -4,7 +4,7 @@
 // handles fetch proxying, and attaches extension auth headers.
 // ============================================
 
-import { logWarn } from "@knoww/logger";
+import { logInfo, logWarn } from "@knoww/logger";
 import { fetchClobOrderBook } from "@knoww/shared-types/clob";
 import {
   POLYMARKET_API,
@@ -44,6 +44,8 @@ import {
   getPortfolioBridgeAssets,
   getPortfolioDepositMax,
   getPortfolioWalletTokens,
+  getPortfolioWithdrawQuote,
+  getPortfolioWithdrawStatus,
 } from "./background/portfolio-funds";
 import { initBridgeWallet } from "./background/signing-state";
 import {
@@ -867,6 +869,7 @@ chrome.runtime.onMessage.addListener(
       tokenAddress?: string;
       tokenDecimals?: number;
       chainKey?: string;
+      bridgeAddress?: string;
       surface?: "sidebar" | "floating";
     };
 
@@ -1015,8 +1018,21 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE") {
-      forwardToResolvedContentTab(msg, sender, sendResponse, {
-        type: "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE",
+      void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          sendResponse({
+            ok: false,
+            error: "No active content tab is available.",
+          } as BackgroundResponse);
+          return;
+        }
+        sendMessageToContentTab(
+          tabId,
+          {
+            type: "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE",
+          },
+          sendResponse
+        );
       });
       return true;
     }
@@ -1180,6 +1196,55 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (
+      msg?.type === "KNOWW_PORTFOLIO_WITHDRAW_QUOTE" &&
+      typeof msg.amount === "string" &&
+      typeof msg.destination === "string"
+    ) {
+      logInfo("portfolio.withdraw.message.quote", {
+        amount: msg.amount,
+        recipientAddress: msg.destination,
+        chainKey: msg.chainKey,
+        tokenId: msg.tokenId,
+      });
+      void getPortfolioWithdrawQuote({
+        amount: msg.amount,
+        destination: msg.destination,
+        chainKey: msg.chainKey,
+        tokenId: msg.tokenId,
+      })
+        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
+        .catch((error) => {
+          logWarn("portfolio.withdraw.message.quote_failed", {
+            error,
+            amount: msg.amount,
+            recipientAddress: msg.destination,
+            chainKey: msg.chainKey,
+            tokenId: msg.tokenId,
+          });
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_PORTFOLIO_WITHDRAW_STATUS" &&
+      typeof msg.bridgeAddress === "string"
+    ) {
+      void getPortfolioWithdrawStatus(msg.bridgeAddress)
+        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (
       (msg?.type === "KNOWW_PORTFOLIO_DEPOSIT" ||
         msg?.type === "KNOWW_PORTFOLIO_WITHDRAW") &&
       typeof msg.address === "string" &&
@@ -1196,6 +1261,16 @@ chrome.runtime.onMessage.addListener(
       const tokenDecimals = msg.tokenDecimals;
       const chainKey = msg.chainKey;
       const tokenId = msg.tokenId;
+      if (isWithdraw) {
+        logInfo("portfolio.withdraw.message.execute", {
+          ownerAddress: eoaAddress,
+          walletMode,
+          amount,
+          recipientAddress: destination,
+          chainKey,
+          tokenId,
+        });
+      }
       void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
         if (typeof tabId !== "number") {
           // No supported content tab to sign through — the side panel falls
@@ -1231,6 +1306,17 @@ chrome.runtime.onMessage.addListener(
             sendResponse({ ok: true, data } as BackgroundResponse)
           )
           .catch((error) => {
+            if (isWithdraw) {
+              logWarn("portfolio.withdraw.message.execute_failed", {
+                error,
+                ownerAddress: eoaAddress,
+                walletMode,
+                amount,
+                recipientAddress: destination,
+                chainKey,
+                tokenId,
+              });
+            }
             sendResponse({
               ok: false,
               error: error instanceof Error ? error.message : String(error),

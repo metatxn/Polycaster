@@ -80,25 +80,61 @@ class ChromeWalletConnectStorage implements KeyValueStorage {
   }
 }
 
-let providerPromise: Promise<UniversalProvider> | null = null;
-let connectPromise: Promise<string[]> | null = null;
-let state: WalletConnectState = {
-  status: "idle",
-  qrUri: null,
-  error: null,
+type WalletConnectBridgeSharedState = {
+  providerPromise: Promise<UniversalProvider> | null;
+  connectPromise: Promise<string[]> | null;
+  state: WalletConnectState;
+  connectedAccounts: string[];
+  listeners: WalletConnectStateListener[];
+  attachedProviders: WeakSet<UniversalProvider>;
 };
-let connectedAccounts: string[] = [];
-const listeners: WalletConnectStateListener[] = [];
+
+type WalletConnectGlobal = typeof globalThis & {
+  __KNOWW_WALLETCONNECT_BRIDGE_STATE__?: WalletConnectBridgeSharedState;
+};
+
+function getSharedState(): WalletConnectBridgeSharedState {
+  const globalState = globalThis as WalletConnectGlobal;
+  if (!globalState.__KNOWW_WALLETCONNECT_BRIDGE_STATE__) {
+    globalState.__KNOWW_WALLETCONNECT_BRIDGE_STATE__ = {
+      providerPromise: null,
+      connectPromise: null,
+      state: {
+        status: "idle",
+        qrUri: null,
+        error: null,
+      },
+      connectedAccounts: [],
+      listeners: [],
+      attachedProviders: new WeakSet<UniversalProvider>(),
+    };
+  }
+  return globalState.__KNOWW_WALLETCONNECT_BRIDGE_STATE__;
+}
+
+const shared = getSharedState();
 
 function getProjectId(): string {
   return process.env.WALLETCONNECT_PROJECT_ID || "";
 }
 
+function getWalletConnectMetadataUrl(): string {
+  try {
+    const origin = window.location.origin;
+    if (origin.startsWith("https://") || origin.startsWith("http://")) {
+      return origin;
+    }
+  } catch {
+    /* fall through to the canonical product URL */
+  }
+  return "https://knoww.app";
+}
+
 function emit(next: Partial<WalletConnectState>): void {
-  state = { ...state, ...next };
-  for (const listener of listeners) {
+  shared.state = { ...shared.state, ...next };
+  for (const listener of shared.listeners) {
     try {
-      listener(state);
+      listener(shared.state);
     } catch {
       /* ignore listener failures */
     }
@@ -131,7 +167,7 @@ function buildNamespace(methods: string[]) {
 function syncAccountsFromSession(provider: UniversalProvider): string[] {
   const namespace = provider.session?.namespaces.eip155;
   const accounts = normalizeAccounts(namespace?.accounts ?? []);
-  connectedAccounts = accounts;
+  shared.connectedAccounts = accounts;
   emit({
     status: accounts.length > 0 ? "connected" : "idle",
     qrUri: null,
@@ -141,7 +177,7 @@ function syncAccountsFromSession(provider: UniversalProvider): string[] {
 }
 
 async function getProvider(): Promise<UniversalProvider> {
-  if (providerPromise) return providerPromise;
+  if (shared.providerPromise) return shared.providerPromise;
 
   const projectId = getProjectId();
   if (!projectId) {
@@ -151,12 +187,12 @@ async function getProvider(): Promise<UniversalProvider> {
   }
 
   emit({ status: "initializing", qrUri: null, error: null });
-  providerPromise = UniversalProvider.init({
+  shared.providerPromise = UniversalProvider.init({
     projectId,
     metadata: {
       name: "Knoww",
       description: "A prediction market layer for the open internet.",
-      url: "https://knoww.app",
+      url: getWalletConnectMetadataUrl(),
       icons: ["https://knoww.app/logo-256x256.png"],
     },
     storage: new ChromeWalletConnectStorage(),
@@ -164,32 +200,35 @@ async function getProvider(): Promise<UniversalProvider> {
     disableProviderPing: true,
   })
     .then((provider) => {
-      provider.on("display_uri", (uri: string) => {
-        emit({ status: "pairing", qrUri: uri, error: null });
-      });
-      provider.on("accountsChanged", (accounts: unknown) => {
-        connectedAccounts = normalizeAccounts(accounts);
-        emit({
-          status: connectedAccounts.length > 0 ? "connected" : "idle",
-          qrUri: null,
-          error: null,
+      if (!shared.attachedProviders.has(provider)) {
+        shared.attachedProviders.add(provider);
+        provider.on("display_uri", (uri: string) => {
+          emit({ status: "pairing", qrUri: uri, error: null });
         });
-      });
-      provider.on("session_update", () => {
-        syncAccountsFromSession(provider);
-      });
-      provider.on("disconnect", () => {
-        connectedAccounts = [];
-        emit({ status: "idle", qrUri: null, error: null });
-      });
+        provider.on("accountsChanged", (accounts: unknown) => {
+          shared.connectedAccounts = normalizeAccounts(accounts);
+          emit({
+            status: shared.connectedAccounts.length > 0 ? "connected" : "idle",
+            qrUri: null,
+            error: null,
+          });
+        });
+        provider.on("session_update", () => {
+          syncAccountsFromSession(provider);
+        });
+        provider.on("disconnect", () => {
+          shared.connectedAccounts = [];
+          emit({ status: "idle", qrUri: null, error: null });
+        });
+      }
       return provider;
     })
     .catch((error) => {
-      providerPromise = null;
+      shared.providerPromise = null;
       throw error;
     });
 
-  return providerPromise;
+  return shared.providerPromise;
 }
 
 async function getSessionAccounts(): Promise<string[]> {
@@ -206,24 +245,41 @@ async function request<T = unknown>(
   return provider.request<T>({ method, params }, POLYGON_CAIP_CHAIN_ID);
 }
 
+async function disconnectExistingSession(provider: UniversalProvider) {
+  try {
+    if (provider.session) {
+      await provider.disconnect();
+    }
+  } catch (error) {
+    log.warn("disconnect_existing.failed", { error });
+  }
+  shared.connectedAccounts = [];
+  emit({ status: "idle", qrUri: null, error: null });
+}
+
 export const WalletConnectBridge = {
   onStateChange(listener: WalletConnectStateListener): () => void {
-    listeners.push(listener);
+    shared.listeners.push(listener);
     return () => {
-      const index = listeners.indexOf(listener);
-      if (index >= 0) listeners.splice(index, 1);
+      const index = shared.listeners.indexOf(listener);
+      if (index >= 0) shared.listeners.splice(index, 1);
     };
   },
 
   getState(): WalletConnectState {
-    return state;
+    return shared.state;
   },
 
-  async connect(): Promise<string[]> {
-    if (connectPromise) return connectPromise;
+  async connect(options: { forceNew?: boolean } = {}): Promise<string[]> {
+    if (shared.connectPromise) return shared.connectPromise;
 
-    connectPromise = (async () => {
+    shared.connectPromise = (async () => {
       try {
+        const forceNew = options.forceNew === true;
+        if (forceNew) {
+          await disconnectExistingSession(await getProvider());
+        }
+
         const existing = await getSessionAccounts();
         if (existing.length > 0) return existing;
 
@@ -243,7 +299,7 @@ export const WalletConnectBridge = {
         if (accounts.length === 0) {
           throw new Error("No accounts returned");
         }
-        connectedAccounts = accounts;
+        shared.connectedAccounts = accounts;
         emit({ status: "connected", qrUri: null, error: null });
         return accounts;
       } catch (error) {
@@ -252,15 +308,15 @@ export const WalletConnectBridge = {
         emit({ status: "error", qrUri: null, error: message });
         throw error;
       } finally {
-        connectPromise = null;
+        shared.connectPromise = null;
       }
     })();
 
-    return connectPromise;
+    return shared.connectPromise;
   },
 
   async getAccounts(): Promise<string[]> {
-    if (connectedAccounts.length > 0) return connectedAccounts;
+    if (shared.connectedAccounts.length > 0) return shared.connectedAccounts;
     try {
       return await getSessionAccounts();
     } catch {
@@ -311,7 +367,7 @@ export const WalletConnectBridge = {
     if (provider.session) {
       await provider.disconnect();
     }
-    connectedAccounts = [];
+    shared.connectedAccounts = [];
     emit({ status: "idle", qrUri: null, error: null });
   },
 };

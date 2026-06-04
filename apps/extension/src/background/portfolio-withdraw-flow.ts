@@ -4,19 +4,21 @@ import {
   type DepositStatusTone,
   type DepositTransaction,
   getDepositStatusDisplay,
+  getWithdrawExecutionRoute,
   POLYGON_BRIDGE_CHAIN_ID,
   type QuoteRequest,
-  resolveDestTokenAddress,
+  type QuoteResponse,
   type SupportedAsset,
   validateWithdrawBridgeDestination,
-  WITHDRAW_CHAIN_IDS,
-  WITHDRAW_TOKEN_CONFIGS,
+  type WithdrawExecutionRouteKind,
   type WithdrawTokenId,
 } from "@knoww/shared-types/bridge";
 import { PUSD_ADDRESS, PUSD_DECIMALS } from "@knoww/shared-types/contracts";
+import Decimal from "decimal.js";
 import { parseUnits } from "viem";
 
 export interface PortfolioWithdrawDestination {
+  routeKind: WithdrawExecutionRouteKind;
   chainKey: string;
   tokenId: WithdrawTokenId;
   toChainId: string;
@@ -43,39 +45,56 @@ export interface PortfolioBridgeStatusSummary {
   toTokenAddress?: string;
 }
 
+export function formatPortfolioTokenBaseUnitAmount(
+  baseUnit: string,
+  decimals: number
+): string {
+  try {
+    const value = new Decimal(baseUnit || "0").div(
+      new Decimal(10).pow(decimals)
+    );
+    if (!value.isFinite() || value.eq(0)) return "0";
+    return value
+      .toDecimalPlaces(Math.min(Math.max(decimals, 2), 8), Decimal.ROUND_DOWN)
+      .toFixed()
+      .replace(/(\.\d*?)0+$/, "$1")
+      .replace(/\.$/, "");
+  } catch {
+    return "0";
+  }
+}
+
 export function resolvePortfolioWithdrawDestination(input: {
   supportedAssets: SupportedAsset[];
   chainKey?: string;
   tokenId?: string;
 }): PortfolioWithdrawDestination {
   const chainKey = input.chainKey || "polygon";
-  const toChainId = WITHDRAW_CHAIN_IDS[chainKey] ?? POLYGON_BRIDGE_CHAIN_ID;
   const tokenId = (input.tokenId as WithdrawTokenId) || "usdc-e";
-  const tokenConfig = WITHDRAW_TOKEN_CONFIGS[tokenId];
-  if (!tokenConfig) {
-    throw new Error("That token isn't available on the selected chain.");
-  }
-
   const index = buildBridgeTokenIndex(input.supportedAssets);
-  const toTokenAddress =
-    resolveDestTokenAddress(index, toChainId, tokenId) ||
-    (toChainId === POLYGON_BRIDGE_CHAIN_ID ? tokenConfig.address : "");
-  if (!toTokenAddress) {
-    throw new Error("That token isn't available on the selected chain.");
-  }
-  validateWithdrawBridgeDestination({ toTokenAddress });
-
-  return {
+  const route = getWithdrawExecutionRoute({
+    bridgeTokenIndex: index,
     chainKey,
     tokenId,
-    toChainId,
-    toTokenAddress,
-    tokenSymbol: tokenConfig.symbol,
-    tokenDecimals: tokenConfig.decimals,
+  });
+  validateWithdrawBridgeDestination({
+    routeKind: route.kind,
+    toTokenAddress: route.tokenAddress,
+  });
+
+  return {
+    routeKind: route.kind,
+    chainKey,
+    tokenId,
+    toChainId: route.toChainId,
+    toTokenAddress: route.tokenAddress,
+    tokenSymbol: route.tokenSymbol,
+    tokenDecimals: route.tokenDecimals,
   };
 }
 
 export function validatePortfolioWithdrawBridgeAddress(input: {
+  routeKind?: WithdrawExecutionRouteKind;
   bridgeAddress: string;
   recipientAddress: string;
   sourceAddress: string;
@@ -109,6 +128,36 @@ export function buildPortfolioWithdrawQuoteRequest(input: {
       toChainId: destination.toChainId,
       toTokenAddress: destination.toTokenAddress,
     },
+  };
+}
+
+export function buildPortfolioDirectWithdrawQuote(input: {
+  amount: string;
+  destination: PortfolioWithdrawDestination;
+}): QuoteResponse {
+  const amountRaw = parseUnits(input.amount, input.destination.tokenDecimals);
+  const amountUsd = new Decimal(input.amount || "0");
+
+  return {
+    estCheckoutTimeMs: 27_000,
+    estFeeBreakdown: {
+      appFeeLabel: "Direct transfer",
+      appFeePercent: 0,
+      appFeeUsd: 0,
+      fillCostPercent: 0,
+      fillCostUsd: 0,
+      gasUsd: 0,
+      maxSlippage: 0,
+      minReceived: amountUsd.toNumber(),
+      swapImpact: 0,
+      swapImpactUsd: 0,
+      totalImpact: 0,
+      totalImpactUsd: 0,
+    },
+    estInputUsd: amountUsd.toNumber(),
+    estOutputUsd: amountUsd.toNumber(),
+    estToTokenBaseUnit: amountRaw.toString(),
+    quoteId: "direct",
   };
 }
 

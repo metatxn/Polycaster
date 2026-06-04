@@ -53,6 +53,42 @@ function isWalletConnectSelected(walletUuid?: string): boolean {
   return (walletUuid ?? selectedWalletUuid) === WALLETCONNECT_WALLET_UUID;
 }
 
+function getWalletErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      code?: unknown;
+      message?: unknown;
+      shortMessage?: unknown;
+    };
+    const message =
+      typeof candidate.message === "string"
+        ? candidate.message
+        : typeof candidate.shortMessage === "string"
+          ? candidate.shortMessage
+          : "";
+    const code =
+      typeof candidate.code === "string" || typeof candidate.code === "number"
+        ? String(candidate.code)
+        : "";
+    return [message, code].filter(Boolean).join(" ");
+  }
+  return "";
+}
+
+function formatWalletSigningError(error: unknown): string {
+  const message = getWalletErrorMessage(error);
+  if (
+    /user rejected|request rejected|rejected the request|denied|4001/i.test(
+      message
+    )
+  ) {
+    return "Transaction rejected.";
+  }
+  return message || "Wallet request failed.";
+}
+
 export function getNonce(): string | undefined {
   return window.__KNOWW_BRIDGE_NONCE__;
 }
@@ -130,7 +166,7 @@ function init(): void {
         chrome.runtime.sendMessage({
           type: "trading:signing-response",
           id,
-          error: err instanceof Error ? err.message : String(err),
+          error: formatWalletSigningError(err),
         });
       });
 
@@ -324,6 +360,10 @@ export const WalletBridge = {
 
   getMobileConnectionState(): WalletConnectState {
     return WalletConnectBridge.getState();
+  },
+
+  async cancelMobileConnect(): Promise<void> {
+    await WalletConnectBridge.cancel();
   },
 
   async disconnect(): Promise<void> {

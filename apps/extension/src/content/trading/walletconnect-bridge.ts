@@ -83,6 +83,10 @@ class ChromeWalletConnectStorage implements KeyValueStorage {
 type WalletConnectBridgeSharedState = {
   providerPromise: Promise<UniversalProvider> | null;
   connectPromise: Promise<string[]> | null;
+  // Monotonic id for the in-flight connect attempt. Bumped whenever an attempt
+  // is superseded (forceNew re-entry or an explicit cancel) so the stale
+  // attempt's settlement can't clobber the newer one's state/connectPromise.
+  connectGeneration: number;
   state: WalletConnectState;
   connectedAccounts: string[];
   listeners: WalletConnectStateListener[];
@@ -99,6 +103,7 @@ function getSharedState(): WalletConnectBridgeSharedState {
     globalState.__KNOWW_WALLETCONNECT_BRIDGE_STATE__ = {
       providerPromise: null,
       connectPromise: null,
+      connectGeneration: 0,
       state: {
         status: "idle",
         qrUri: null,
@@ -257,6 +262,24 @@ async function disconnectExistingSession(provider: UniversalProvider) {
   emit({ status: "idle", qrUri: null, error: null });
 }
 
+// Tear down an in-flight pairing attempt (one waiting on the QR scan). Bumping
+// the generation first invalidates the pending attempt so its rejection can't
+// emit an error or null out a newer attempt's connectPromise; then we abort the
+// WalletConnect pairing so the relay subscription/URI is released promptly
+// instead of lingering until the ~3-min pairing TTL.
+async function abortPendingConnect(): Promise<void> {
+  shared.connectGeneration++;
+  shared.connectPromise = null;
+  if (!shared.providerPromise) return;
+  try {
+    const provider = await getProvider();
+    provider.abortPairingAttempt();
+    await provider.cleanupPendingPairings();
+  } catch (error) {
+    log.warn("connect.abort_failed", { error });
+  }
+}
+
 export const WalletConnectBridge = {
   onStateChange(listener: WalletConnectStateListener): () => void {
     shared.listeners.push(listener);
@@ -271,11 +294,21 @@ export const WalletConnectBridge = {
   },
 
   async connect(options: { forceNew?: boolean } = {}): Promise<string[]> {
-    if (shared.connectPromise) return shared.connectPromise;
+    const forceNew = options.forceNew === true;
 
-    shared.connectPromise = (async () => {
+    if (shared.connectPromise) {
+      // A non-forced caller (silent reconnect) joins the in-flight attempt.
+      if (!forceNew) return shared.connectPromise;
+      // An explicit connect while a previous attempt is still pending (e.g. the
+      // user cancelled the QR and tapped connect again). Abort the stale
+      // attempt so we generate a fresh pairing URI instead of handing back the
+      // old in-flight promise — otherwise the QR can be stale or never appear.
+      await abortPendingConnect();
+    }
+
+    const generation = ++shared.connectGeneration;
+    const attempt = (async () => {
       try {
-        const forceNew = options.forceNew === true;
         if (forceNew) {
           await disconnectExistingSession(await getProvider());
         }
@@ -303,16 +336,32 @@ export const WalletConnectBridge = {
         emit({ status: "connected", qrUri: null, error: null });
         return accounts;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        log.warn("connect.failed", { error: message });
-        emit({ status: "error", qrUri: null, error: message });
+        // A superseded attempt (aborted by a newer connect/cancel) must not
+        // surface its rejection as the visible error state.
+        if (shared.connectGeneration === generation) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          log.warn("connect.failed", { error: message });
+          emit({ status: "error", qrUri: null, error: message });
+        }
         throw error;
       } finally {
-        shared.connectPromise = null;
+        if (shared.connectGeneration === generation) {
+          shared.connectPromise = null;
+        }
       }
     })();
 
-    return shared.connectPromise;
+    shared.connectPromise = attempt;
+    return attempt;
+  },
+
+  // Abort an in-flight pairing without tearing down an established session.
+  // Used when the user dismisses the QR so the pending attempt and its relay
+  // subscription are released immediately instead of lingering.
+  async cancel(): Promise<void> {
+    await abortPendingConnect();
+    emit({ status: "idle", qrUri: null, error: null });
   },
 
   async getAccounts(): Promise<string[]> {

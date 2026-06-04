@@ -27,12 +27,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   getAvailableTokensForChain,
+  getWithdrawExecutionRoute,
+  POLYGON_BRIDGE_CHAIN_ID,
   resolveDestTokenAddress,
   useWithdraw,
   WITHDRAW_CHAIN_IDS,
   WITHDRAW_TOKEN_CONFIGS,
   type WithdrawTokenId,
 } from "@/hooks/use-withdraw";
+import { formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 const log = createLogger("withdraw-modal");
@@ -47,6 +50,7 @@ const TOKEN_DISPLAY: Record<
   WithdrawTokenId,
   { icon: string | null; fallback: string }
 > = {
+  pusd: { icon: null, fallback: "pUSD" },
   usdc: { icon: "/usdc-token.webp", fallback: "USDC" },
   "usdc-e": { icon: "/usdc-token.webp", fallback: "USDC" },
   usdt: { icon: null, fallback: "USDT" },
@@ -179,6 +183,8 @@ export function WithdrawModal({
     usdcBalance,
     canWithdraw,
     bridgeTokenIndex,
+    getWithdrawMinUsd,
+    clearWithdrawQuote,
     quote,
     isLoadingQuote,
     bridgeTracking,
@@ -187,7 +193,7 @@ export function WithdrawModal({
   const [recipientAddress, setRecipientAddress] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
   const [selectedTokenId, setSelectedTokenId] =
-    useState<WithdrawTokenId>("usdc");
+    useState<WithdrawTokenId>("usdc-e");
   const [selectedChain, setSelectedChain] = useState<WithdrawChain>(
     WITHDRAW_CHAINS[0]
   );
@@ -205,6 +211,33 @@ export function WithdrawModal({
 
   const selectedTokenConfig = WITHDRAW_TOKEN_CONFIGS[selectedTokenId];
   const selectedTokenDisplay = TOKEN_DISPLAY[selectedTokenId];
+  const selectedWithdrawRoute = useMemo(() => {
+    try {
+      return getWithdrawExecutionRoute({
+        bridgeTokenIndex,
+        chainKey: selectedChain.id,
+        tokenId: selectedTokenId,
+      });
+    } catch {
+      return null;
+    }
+  }, [bridgeTokenIndex, selectedChain.id, selectedTokenId]);
+  const isDirectWithdrawal = selectedWithdrawRoute?.kind === "direct";
+  const minWithdrawUsd = useMemo(() => {
+    if (selectedWithdrawRoute?.kind === "direct") return 0;
+    const toChainId =
+      WITHDRAW_CHAIN_IDS[selectedChain.id] || POLYGON_BRIDGE_CHAIN_ID;
+    return getWithdrawMinUsd(toChainId, selectedTokenId);
+  }, [
+    getWithdrawMinUsd,
+    selectedChain.id,
+    selectedTokenId,
+    selectedWithdrawRoute?.kind,
+  ]);
+  const minWithdrawLabel = useMemo(
+    () => formatCurrency(minWithdrawUsd),
+    [minWithdrawUsd]
+  );
 
   useEffect(() => {
     if (!availableTokens.includes(selectedTokenId)) {
@@ -216,7 +249,7 @@ export function WithdrawModal({
     if (!open) {
       setRecipientAddress("");
       setAmount("");
-      setSelectedTokenId("usdc");
+      setSelectedTokenId("usdc-e");
       setSelectedChain(WITHDRAW_CHAINS[0]);
       setTxHash(null);
       setShowSuccess(false);
@@ -270,18 +303,24 @@ export function WithdrawModal({
   );
 
   const canProceed = useMemo(() => {
-    return isValidAmount && amountNum >= 2 && isValidAddress && canWithdraw;
-  }, [isValidAmount, amountNum, isValidAddress, canWithdraw]);
+    return (
+      isValidAmount &&
+      amountNum >= minWithdrawUsd &&
+      isValidAddress &&
+      canWithdraw
+    );
+  }, [isValidAmount, amountNum, minWithdrawUsd, isValidAddress, canWithdraw]);
 
   const withdrawDebugParams = useMemo(() => {
-    const toChainId = WITHDRAW_CHAIN_IDS[selectedChain.id] || "137";
+    const toChainId =
+      WITHDRAW_CHAIN_IDS[selectedChain.id] || POLYGON_BRIDGE_CHAIN_ID;
     const resolvedToTokenAddress = resolveDestTokenAddress(
       bridgeTokenIndex,
       toChainId,
       selectedTokenId
     );
     const fallbackToTokenAddress =
-      toChainId === "137" ? selectedTokenConfig.address : "";
+      toChainId === POLYGON_BRIDGE_CHAIN_ID ? selectedTokenConfig.address : "";
     const toTokenAddress = resolvedToTokenAddress || fallbackToTokenAddress;
 
     return {
@@ -292,6 +331,7 @@ export function WithdrawModal({
       selectedChainName: selectedChain.name,
       selectedTokenId,
       selectedTokenSymbol: selectedTokenConfig.symbol,
+      routeKind: selectedWithdrawRoute?.kind,
       toChainId,
       toTokenAddress,
       resolvedToTokenAddress,
@@ -304,6 +344,8 @@ export function WithdrawModal({
       quoteId: quote?.quoteId,
       quoteEstToTokenBaseUnit: quote?.estToTokenBaseUnit,
       quoteEstOutputUsd: quote?.estOutputUsd,
+      minWithdrawUsd,
+      minWithdrawLabel,
     };
   }, [
     amount,
@@ -314,6 +356,7 @@ export function WithdrawModal({
     selectedTokenId,
     selectedTokenConfig.symbol,
     selectedTokenConfig.address,
+    selectedWithdrawRoute?.kind,
     bridgeTokenIndex,
     canProceed,
     canWithdraw,
@@ -323,6 +366,8 @@ export function WithdrawModal({
     quote?.quoteId,
     quote?.estToTokenBaseUnit,
     quote?.estOutputUsd,
+    minWithdrawUsd,
+    minWithdrawLabel,
   ]);
 
   const quoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -332,12 +377,18 @@ export function WithdrawModal({
       clearTimeout(quoteTimerRef.current);
     }
 
-    const toChainId = WITHDRAW_CHAIN_IDS[selectedChain.id] || "137";
+    const toChainId =
+      WITHDRAW_CHAIN_IDS[selectedChain.id] || POLYGON_BRIDGE_CHAIN_ID;
     const toTokenAddress =
       resolveDestTokenAddress(bridgeTokenIndex, toChainId, selectedTokenId) ||
-      (toChainId === "137"
+      (toChainId === POLYGON_BRIDGE_CHAIN_ID
         ? WITHDRAW_TOKEN_CONFIGS[selectedTokenId].address
         : "");
+
+    if (selectedWithdrawRoute?.kind === "direct") {
+      clearWithdrawQuote();
+      return;
+    }
 
     if (
       !amountNum ||
@@ -363,13 +414,16 @@ export function WithdrawModal({
     amountNum,
     selectedChain.id,
     selectedTokenId,
+    selectedWithdrawRoute?.kind,
     recipientAddress,
     isValidAddress,
     bridgeTokenIndex,
     fetchWithdrawQuote,
+    clearWithdrawQuote,
   ]);
 
   const estimatedReceive = useMemo(() => {
+    if (isDirectWithdrawal && amountNum > 0) return amountNum.toFixed(6);
     if (quote) {
       const tokenConfig = WITHDRAW_TOKEN_CONFIGS[selectedTokenId];
       const baseUnit = BigInt(quote.estToTokenBaseUnit);
@@ -384,16 +438,17 @@ export function WithdrawModal({
     }
     if (!amountNum || amountNum <= 0) return "—";
     return `~${amountNum.toFixed(2)}`;
-  }, [quote, amountNum, selectedTokenId]);
+  }, [quote, amountNum, selectedTokenId, isDirectWithdrawal]);
 
   const estimatedTime = useMemo(() => {
+    if (isDirectWithdrawal) return "~27s";
     if (quote) {
       const seconds = Math.round(quote.estCheckoutTimeMs / 1000);
       if (seconds < 60) return `~${seconds}s`;
       return `~${Math.round(seconds / 60)} min`;
     }
     return isCrossChain ? "10–30 min" : "~5 min";
-  }, [quote, isCrossChain]);
+  }, [quote, isCrossChain, isDirectWithdrawal]);
 
   const totalFeeUsd = useMemo(() => {
     if (!quote) return null;
@@ -483,14 +538,16 @@ export function WithdrawModal({
       return (
         <span className="inline-flex items-center gap-2">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Creating Bridge Withdrawal
+          {isDirectWithdrawal
+            ? "Preparing Transfer"
+            : "Creating Bridge Withdrawal"}
         </span>
       );
     if (state === "submitting")
       return (
         <span className="inline-flex items-center gap-2">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Sending to Bridge
+          {isDirectWithdrawal ? "Sending Transfer" : "Sending to Bridge"}
         </span>
       );
     if (state === "pending")
@@ -503,7 +560,7 @@ export function WithdrawModal({
     if (!recipientAddress) return "Enter Recipient Address";
     if (!isValidAddress) return "Invalid Address";
     if (!amount || amountNum <= 0) return "Enter Amount";
-    if (amountNum < 2) return "Minimum · $2";
+    if (amountNum < minWithdrawUsd) return `Minimum · ${minWithdrawLabel}`;
     if (amountNum > usdcBalance) return "Insufficient Balance";
     return "Withdraw";
   };
@@ -587,17 +644,23 @@ export function WithdrawModal({
                     >
                       {state === "bridge_complete"
                         ? "Withdrawal Complete"
-                        : "Sent to Bridge"}
+                        : isDirectWithdrawal
+                          ? "Withdrawal Sent"
+                          : "Sent to Bridge"}
                     </span>
                     <span className="text-lg font-semibold leading-snug text-(--kwm-ink) text-center max-w-[300px] tracking-tight">
                       {state === "bridge_complete"
                         ? `Your ${selectedTokenConfig.symbol} landed on ${selectedChain.name}.`
-                        : `${amount} pUSD sent to the bridge - ${selectedTokenConfig.symbol} is arriving shortly.`}
+                        : isDirectWithdrawal
+                          ? `${amount} ${selectedTokenConfig.symbol} sent to ${selectedChain.name}.`
+                          : `${amount} pUSD sent to the bridge - ${selectedTokenConfig.symbol} is arriving shortly.`}
                     </span>
                   </div>
 
                   {/* Tracking strip */}
-                  {state !== "bridge_complete" && bridgeTracking.status ? (
+                  {!isDirectWithdrawal &&
+                  state !== "bridge_complete" &&
+                  bridgeTracking.status ? (
                     <div className="flex items-center justify-center gap-2 border border-(--kwm-hl) rounded-md py-2.5 mb-4 bg-(--kwm-bg-2)">
                       <Loader2 className="h-3 w-3 animate-spin text-(--kwm-accent)" />
                       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
@@ -613,7 +676,9 @@ export function WithdrawModal({
                     </div>
                   ) : null}
 
-                  {state !== "bridge_complete" && !bridgeTracking.status ? (
+                  {!isDirectWithdrawal &&
+                  state !== "bridge_complete" &&
+                  !bridgeTracking.status ? (
                     <div className="flex items-center justify-center gap-2 border border-(--kwm-hl) rounded-md py-2.5 mb-4 bg-(--kwm-bg-2)">
                       <Loader2 className="h-3 w-3 animate-spin text-(--kwm-accent)" />
                       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
@@ -872,10 +937,19 @@ export function WithdrawModal({
 
                   {/* Info note */}
                   <div className="mb-3">
-                    <AccentNote color="blue" caption="Polymarket Bridge">
-                      {isCrossChain
-                        ? `pUSD converts to ${selectedTokenConfig.symbol} and routes to ${selectedChain.name} — typically 10–30 minutes.`
-                        : `pUSD converts to ${selectedTokenConfig.symbol} on Polygon.`}
+                    <AccentNote
+                      color="blue"
+                      caption={
+                        isDirectWithdrawal
+                          ? "Direct Transfer"
+                          : "Polymarket Bridge"
+                      }
+                    >
+                      {isDirectWithdrawal
+                        ? `${selectedTokenConfig.symbol} transfers directly to your Polygon wallet. Redepositing it later will use the bridge to convert back to pUSD.`
+                        : isCrossChain
+                          ? `pUSD converts to ${selectedTokenConfig.symbol} and routes to ${selectedChain.name} — typically 10–30 minutes.`
+                          : `pUSD converts to ${selectedTokenConfig.symbol} on Polygon.`}
                     </AccentNote>
                   </div>
 

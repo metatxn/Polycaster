@@ -5,6 +5,9 @@ import {
   buildBridgeTokenIndex,
   type DepositStatus,
   getAvailableTokensForChain,
+  getMinWithdrawalForToken,
+  getWithdrawExecutionRoute,
+  POLYGON_BRIDGE_CHAIN_ID,
   type QuoteResponse,
   resolveDestTokenAddress,
   validateWithdrawBridgeDestination,
@@ -14,9 +17,16 @@ import {
 } from "@knoww/shared-types/bridge";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { encodeFunctionData, getAddress, parseUnits } from "viem";
+import {
+  encodeFunctionData,
+  erc20Abi,
+  formatUnits,
+  getAddress,
+  parseUnits,
+} from "viem";
 import { useConnection, useWalletClient } from "wagmi";
 import { PUSD_ADDRESS, PUSD_DECIMALS } from "@/constants/contracts";
+import { formatCurrency } from "@/lib/formatters";
 import { qk } from "@/lib/query-keys";
 import {
   executeViaDepositWallet,
@@ -27,11 +37,14 @@ import { useBridge } from "./use-bridge";
 import { useProxyWallet } from "./use-proxy-wallet";
 
 const log = createLogger("withdraw");
+const DEFAULT_BRIDGE_MIN_WITHDRAW_USD = 2;
 
 export type { WithdrawTokenId };
 export {
   buildBridgeTokenIndex,
   getAvailableTokensForChain,
+  getWithdrawExecutionRoute,
+  POLYGON_BRIDGE_CHAIN_ID,
   resolveDestTokenAddress,
   WITHDRAW_CHAIN_IDS,
   WITHDRAW_TOKEN_CONFIGS,
@@ -51,6 +64,29 @@ const ERC20_TRANSFER_ABI = [
     outputs: [{ name: "", type: "bool" }],
   },
 ] as const;
+
+async function assertErc20Balance(input: {
+  ownerAddress: string;
+  tokenAddress: string;
+  tokenSymbol: string;
+  tokenDecimals: number;
+  amountRaw: bigint;
+}): Promise<void> {
+  const { getPublicClient } = await import("@/lib/rpc");
+  const balanceRaw = await getPublicClient().readContract({
+    address: input.tokenAddress as `0x${string}`,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [input.ownerAddress as `0x${string}`],
+  });
+
+  if (balanceRaw >= input.amountRaw) return;
+
+  const available = formatUnits(balanceRaw, input.tokenDecimals);
+  throw new Error(
+    `Insufficient ${input.tokenSymbol} balance. Available: ${available} ${input.tokenSymbol}.`
+  );
+}
 
 /**
  * Withdrawal transaction states.
@@ -168,6 +204,16 @@ export function useWithdraw() {
     [supportedAssets]
   );
 
+  const getWithdrawMinUsd = useCallback(
+    (toChainId: string, tokenId: WithdrawTokenId): number => {
+      return (
+        getMinWithdrawalForToken(supportedAssets, toChainId, tokenId) ??
+        DEFAULT_BRIDGE_MIN_WITHDRAW_USD
+      );
+    },
+    [supportedAssets]
+  );
+
   const resolveWithdrawalSigner = useCallback(async () => {
     const hookAccount = address
       ? (address as `0x${string}`)
@@ -223,7 +269,7 @@ export function useWithdraw() {
         const amountBaseUnit = parseUnits(amount, PUSD_DECIMALS).toString();
         const result = await getQuote({
           fromAmountBaseUnit: amountBaseUnit,
-          fromChainId: "137",
+          fromChainId: POLYGON_BRIDGE_CHAIN_ID,
           fromTokenAddress: PUSD_ADDRESS,
           recipientAddress,
           toChainId,
@@ -242,6 +288,12 @@ export function useWithdraw() {
     },
     [proxyAddress, getQuote]
   );
+
+  const clearWithdrawQuote = useCallback(() => {
+    setQuote(null);
+    setQuoteError(null);
+    setIsLoadingQuote(false);
+  }, []);
 
   /**
    * Start polling the bridge status endpoint after the relayer confirms.
@@ -378,7 +430,7 @@ export function useWithdraw() {
         throw new Error("Invalid withdrawal amount");
       }
 
-      const toChainId = WITHDRAW_CHAIN_IDS[chainId] || "137";
+      const toChainId = WITHDRAW_CHAIN_IDS[chainId] || POLYGON_BRIDGE_CHAIN_ID;
 
       if (chainId === "solana") {
         if (!destinationAddress || destinationAddress.length < 10) {
@@ -404,28 +456,70 @@ export function useWithdraw() {
       }
 
       const tokenConfig = WITHDRAW_TOKEN_CONFIGS[tokenId];
-      if (!tokenConfig) {
-        throw new Error(`Unsupported token: ${tokenId}`);
-      }
+      if (!tokenConfig) throw new Error(`Unsupported token: ${tokenId}`);
 
       setState("signing");
       setError(null);
 
       try {
-        const amountInWei = parseUnits(amount, PUSD_DECIMALS);
+        const route = getWithdrawExecutionRoute({
+          bridgeTokenIndex,
+          chainKey: chainId,
+          tokenId,
+        });
 
-        // ─── Bridge path ───
-        // Bridge requires a minimum of ~$2 per the /supported-assets minCheckoutUsd.
-        const MIN_BRIDGE_AMOUNT_USD = 2;
-        if (parsedAmount < MIN_BRIDGE_AMOUNT_USD) {
+        if (route.kind === "direct") {
+          const directAmountRaw = parseUnits(amount, route.tokenDecimals);
+          await assertErc20Balance({
+            ownerAddress: proxyAddress,
+            tokenAddress: route.tokenAddress,
+            tokenSymbol: route.tokenSymbol,
+            tokenDecimals: route.tokenDecimals,
+            amountRaw: directAmountRaw,
+          });
+
+          const transferData = encodeFunctionData({
+            abi: ERC20_TRANSFER_ABI,
+            functionName: "transfer",
+            args: [destinationAddress as `0x${string}`, directAmountRaw],
+          });
+
+          log.info("direct.withdrawal.submitting", {
+            from: proxyAddress,
+            recipient: destinationAddress,
+            chain: chainId,
+            token: route.tokenId,
+            tokenAddress: route.tokenAddress,
+            amount,
+          });
+
+          return submitAndPollRelayer([
+            {
+              to: route.tokenAddress,
+              data: transferData,
+              value: "0",
+            },
+          ]);
+        }
+
+        const amountInWei = parseUnits(amount, PUSD_DECIMALS);
+        await assertErc20Balance({
+          ownerAddress: proxyAddress,
+          tokenAddress: PUSD_ADDRESS,
+          tokenSymbol: "pUSD",
+          tokenDecimals: PUSD_DECIMALS,
+          amountRaw: amountInWei,
+        });
+
+        const minBridgeAmountUsd = getWithdrawMinUsd(toChainId, tokenId);
+        if (parsedAmount < minBridgeAmountUsd) {
+          const minBridgeAmountLabel = formatCurrency(minBridgeAmountUsd);
           throw new Error(
-            `Minimum withdrawal is $${MIN_BRIDGE_AMOUNT_USD}. The Polymarket Bridge requires at least $${MIN_BRIDGE_AMOUNT_USD} to process.`
+            `Minimum withdrawal is ${minBridgeAmountLabel}. The Polymarket Bridge requires at least ${minBridgeAmountLabel} to process.`
           );
         }
 
-        const toTokenAddress =
-          resolveDestTokenAddress(bridgeTokenIndex, toChainId, tokenId) ||
-          (toChainId === "137" ? tokenConfig.address : "");
+        const toTokenAddress = route.tokenAddress;
 
         if (!toTokenAddress) {
           throw new Error(
@@ -434,6 +528,7 @@ export function useWithdraw() {
         }
         try {
           validateWithdrawBridgeDestination({
+            routeKind: route.kind,
             toTokenAddress,
             recipientAddress: destinationAddress,
             sourceAddress: proxyAddress,
@@ -479,6 +574,7 @@ export function useWithdraw() {
         }
         try {
           validateWithdrawBridgeDestination({
+            routeKind: route.kind,
             toTokenAddress,
             bridgeAddress: bridgeDepositAddress,
             recipientAddress: destinationAddress,
@@ -605,6 +701,7 @@ export function useWithdraw() {
     withdraw,
     reset,
     fetchWithdrawQuote,
+    clearWithdrawQuote,
 
     // State
     state,
@@ -624,6 +721,7 @@ export function useWithdraw() {
 
     // Dynamic token index built from /supported-assets
     bridgeTokenIndex,
+    getWithdrawMinUsd,
 
     // Validation helpers
     canWithdraw: isConnected && !!proxyAddress && usdcBalance > 0,

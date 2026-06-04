@@ -2,6 +2,7 @@ import {
   type DepositTransaction,
   formatCheckoutTime,
   getDepositStatusDisplay,
+  isPusdToken,
   type QuoteResponse,
   type SupportedAsset,
 } from "@knoww/shared-types/bridge";
@@ -140,7 +141,9 @@ export function Confirmation({
   depositTransactions,
   isLoadingDepositStatus,
 }: ConfirmationProps) {
-  const isDirectPusdDeposit = selectedToken?.symbol === "pUSD";
+  const isDirectPusdDeposit = selectedToken
+    ? isPusdToken(selectedToken.symbol, selectedToken.address)
+    : false;
   const displayReceiveAmount = quote
     ? (Number(quote.estToTokenBaseUnit) / 1e6).toFixed(2)
     : receiveAmount;

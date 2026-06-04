@@ -5,6 +5,7 @@
 // ============================================
 
 import { logInfo, logWarn } from "@knoww/logger";
+import type { QuoteResponse } from "@knoww/shared-types/bridge";
 import { fetchClobOrderBook } from "@knoww/shared-types/clob";
 import {
   POLYMARKET_API,
@@ -669,6 +670,42 @@ function isScoreMarketsSuccessResponse(
   );
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isPortfolioWithdrawQuoteResponse(
+  value: unknown
+): value is QuoteResponse {
+  if (!isRecord(value)) return false;
+  const fee = value.estFeeBreakdown;
+  if (!isRecord(fee)) return false;
+
+  return (
+    typeof value.quoteId === "string" &&
+    typeof value.estToTokenBaseUnit === "string" &&
+    isFiniteNumber(value.estCheckoutTimeMs) &&
+    isFiniteNumber(value.estInputUsd) &&
+    isFiniteNumber(value.estOutputUsd) &&
+    typeof fee.appFeeLabel === "string" &&
+    isFiniteNumber(fee.appFeePercent) &&
+    isFiniteNumber(fee.appFeeUsd) &&
+    isFiniteNumber(fee.fillCostPercent) &&
+    isFiniteNumber(fee.fillCostUsd) &&
+    isFiniteNumber(fee.gasUsd) &&
+    isFiniteNumber(fee.maxSlippage) &&
+    isFiniteNumber(fee.minReceived) &&
+    isFiniteNumber(fee.swapImpact) &&
+    isFiniteNumber(fee.swapImpactUsd) &&
+    isFiniteNumber(fee.totalImpact) &&
+    isFiniteNumber(fee.totalImpactUsd)
+  );
+}
+
 function isTradingMessage(message: unknown): boolean {
   return (
     typeof message === "object" &&
@@ -870,6 +907,7 @@ chrome.runtime.onMessage.addListener(
       tokenDecimals?: number;
       chainKey?: string;
       bridgeAddress?: string;
+      quote?: unknown;
       surface?: "sidebar" | "floating";
     };
 
@@ -1030,6 +1068,26 @@ chrome.runtime.onMessage.addListener(
           tabId,
           {
             type: "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE",
+          },
+          sendResponse
+        );
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT") {
+      void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          sendResponse({
+            ok: false,
+            error: "No active content tab is available.",
+          } as BackgroundResponse);
+          return;
+        }
+        sendMessageToContentTab(
+          tabId,
+          {
+            type: "KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT",
           },
           sendResponse
         );
@@ -1261,6 +1319,10 @@ chrome.runtime.onMessage.addListener(
       const tokenDecimals = msg.tokenDecimals;
       const chainKey = msg.chainKey;
       const tokenId = msg.tokenId;
+      const withdrawQuote =
+        isWithdraw && isPortfolioWithdrawQuoteResponse(msg.quote)
+          ? msg.quote
+          : undefined;
       if (isWithdraw) {
         logInfo("portfolio.withdraw.message.execute", {
           ownerAddress: eoaAddress,
@@ -1289,6 +1351,7 @@ chrome.runtime.onMessage.addListener(
               destination: destination ?? "",
               chainKey,
               tokenId,
+              quote: withdrawQuote,
               tabId,
             })
           : executePortfolioDeposit({

@@ -12,9 +12,10 @@ import {
   WITHDRAW_TOKEN_CONFIGS,
 } from "@knoww/shared-types/bridge";
 import Decimal from "decimal.js";
-import type {
-  PortfolioBridgeStatusSummary,
-  PortfolioWithdrawDestination,
+import {
+  formatPortfolioTokenBaseUnitAmount,
+  type PortfolioBridgeStatusSummary,
+  type PortfolioWithdrawDestination,
 } from "./background/portfolio-withdraw-flow";
 import {
   EXTENSION_AUTH_REQUIRED_ERROR,
@@ -529,6 +530,8 @@ async function disconnectPortfolioWallet(
     await sendRuntimeMessage({ type: "auth:logout" });
   } finally {
     portfolioDisconnecting = false;
+    button.classList.remove("is-busy");
+    button.title = "Disconnect wallet";
   }
 }
 
@@ -902,9 +905,10 @@ function renderDepositTokenList(): string {
     body = tokens
       .map((t, i) => {
         // Below the bridge minimum → can't be deposited, so it isn't selectable.
-        const belowMin = t.usdValue < t.minUsd;
+        const priceUnavailable = t.minUsd > 0 && t.usdValue <= 0;
+        const belowMin = !priceUnavailable && t.usdValue < t.minUsd;
         const unsupported = t.depositSupported === false;
-        const disabled = unsupported || belowMin;
+        const disabled = unsupported || priceUnavailable || belowMin;
         return `
         <button type="button" class="knoww-pf-token${
           disabled ? " is-disabled" : ""
@@ -917,7 +921,9 @@ function renderDepositTokenList(): string {
             <span class="knoww-pf-token-min">${
               unsupported
                 ? escapeHtml(t.depositDisabledReason || "Unsupported")
-                : `${belowMin ? "Below min" : "Min"} · ${escapeHtml(formatMoney(t.minUsd))}`
+                : priceUnavailable
+                  ? "Price unavailable"
+                  : `${belowMin ? "Below min" : "Min"} · ${escapeHtml(formatMoney(t.minUsd))}`
             }</span>
             <strong>${escapeHtml(formatMoney(t.usdValue))}</strong>
           </span>
@@ -1223,21 +1229,6 @@ function setPortfolioWithdrawQuote(kind: "info" | "error", html: string): void {
   quote.innerHTML = html;
 }
 
-function formatTokenBaseUnitAmount(baseUnit: string, decimals: number): string {
-  try {
-    const value = new Decimal(baseUnit || "0").div(
-      new Decimal(10).pow(decimals)
-    );
-    if (!value.isFinite() || value.eq(0)) return "0";
-    return value
-      .toDecimalPlaces(Math.min(Math.max(decimals, 2), 8), Decimal.ROUND_DOWN)
-      .toFixed()
-      .replace(/\.?0+$/, "");
-  } catch {
-    return "0";
-  }
-}
-
 function renderPortfolioWithdrawQuote(
   payload: PortfolioWithdrawQuotePayload
 ): void {
@@ -1248,7 +1239,7 @@ function renderPortfolioWithdrawQuote(
     return;
   }
 
-  const outputAmount = formatTokenBaseUnitAmount(
+  const outputAmount = formatPortfolioTokenBaseUnitAmount(
     quote.estToTokenBaseUnit,
     destination.tokenDecimals
   );
@@ -1318,7 +1309,7 @@ function schedulePortfolioWithdrawQuote(
     void (async () => {
       setPortfolioWithdrawQuote(
         "info",
-        `<div class="knoww-pf-withdraw-quote-row"><span>Bridge</span><strong>Checking quote...</strong></div>`
+        `<div class="knoww-pf-withdraw-quote-row"><span>Route</span><strong>Checking quote...</strong></div>`
       );
       const response = await requestPortfolioWithdrawQuote(params);
       if (run !== portfolioWithdrawQuoteRun || portfolioFundView !== "withdraw")
@@ -1326,7 +1317,7 @@ function schedulePortfolioWithdrawQuote(
       if (!response.ok) {
         setPortfolioWithdrawQuote(
           "error",
-          `<div class="knoww-pf-withdraw-quote-row"><span>Bridge</span><strong>${escapeHtml(
+          `<div class="knoww-pf-withdraw-quote-row"><span>Quote</span><strong>${escapeHtml(
             response.error || "Quote unavailable"
           )}</strong></div>`
         );
@@ -1451,6 +1442,7 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
 
   let fundParams: Record<string, unknown>;
   let withdrawParams: PortfolioWithdrawFormParams | null = null;
+  let withdrawQuotePayload: PortfolioWithdrawQuotePayload | undefined;
 
   // Deposit · Wallet path — token chosen from the wallet balance list.
   if (action === "deposit" && portfolioDepositStep === "amount") {
@@ -1468,6 +1460,13 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
     }
     if (amountDecimal.gt(new Decimal(token.amount).plus("0.000000001"))) {
       setPortfolioFundStatus("error", "Amount exceeds your wallet balance.");
+      return;
+    }
+    if (token.minUsd > 0 && token.usdValue <= 0) {
+      setPortfolioFundStatus(
+        "error",
+        "Token price is unavailable. Refresh and try again."
+      );
       return;
     }
     const amountUsd = amountDecimal.mul(
@@ -1532,7 +1531,7 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
   );
 
   if (action === "withdraw" && withdrawParams) {
-    setPortfolioFundStatus("info", "Fetching bridge quote…");
+    setPortfolioFundStatus("info", "Checking withdrawal route…");
     const quoteResponse = await requestPortfolioWithdrawQuote(withdrawParams);
     if (portfolioFundView !== action) return;
     if (!quoteResponse.ok) {
@@ -1540,13 +1539,14 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
       setFundSubmitLoading(false);
       setPortfolioFundStatus(
         "error",
-        quoteResponse.error || "Could not fetch a bridge quote."
+        quoteResponse.error || "Could not prepare the withdrawal."
       );
       return;
     }
-    renderPortfolioWithdrawQuote(
-      (quoteResponse.data as PortfolioWithdrawQuotePayload | undefined) ?? {}
-    );
+    withdrawQuotePayload =
+      (quoteResponse.data as PortfolioWithdrawQuotePayload | undefined) ??
+      undefined;
+    renderPortfolioWithdrawQuote(withdrawQuotePayload ?? {});
     setFundSubmitLoading(true, loadingLabel);
   }
 
@@ -1563,6 +1563,9 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
       walletMode,
       amount,
       ...fundParams,
+      ...(action === "withdraw" && withdrawQuotePayload?.quote
+        ? { quote: withdrawQuotePayload.quote }
+        : {}),
     });
 
   if (action === "withdraw" && withdrawParams) {
@@ -1594,7 +1597,9 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
       setFundSubmitLoading(false);
       setPortfolioFundStatus(
         "error",
-        reauth.error || "Could not re-authorize. Try again."
+        reauth.error
+          ? formatPortfolioTransactionError(reauth.error)
+          : "Could not re-authorize. Try again."
       );
       return;
     }
@@ -1621,23 +1626,28 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
       const payload = response.data as
         | {
             bridgeAddress?: string;
+            route?: "bridge" | "direct";
             destination?: PortfolioWithdrawDestination;
           }
         | undefined;
       logInfo("portfolio.withdraw.ui.submit.response", {
         bridgeAddress: payload?.bridgeAddress,
         chainKey: payload?.destination?.chainKey,
+        route: payload?.route,
+        routeKind: payload?.destination?.routeKind,
         tokenId: payload?.destination?.tokenId,
         tokenSymbol: payload?.destination?.tokenSymbol,
         toChainId: payload?.destination?.toChainId,
         toTokenAddress: payload?.destination?.toTokenAddress,
         recipientAddress: withdrawParams?.destination,
       });
+      const tokenSymbol =
+        payload?.destination?.tokenSymbol || "the selected token";
       setPortfolioFundStatus(
-        "info",
-        `Withdrawal sent to bridge for ${
-          payload?.destination?.tokenSymbol || "the selected token"
-        }. Waiting for completion...`
+        payload?.route === "direct" ? "success" : "info",
+        payload?.route === "direct"
+          ? `Withdrawal submitted for ${tokenSymbol}.`
+          : `Withdrawal sent to bridge for ${tokenSymbol}. Waiting for completion...`
       );
       if (payload?.bridgeAddress) {
         startPortfolioWithdrawStatusPolling(payload.bridgeAddress);
@@ -1686,7 +1696,7 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
   }
   setPortfolioFundStatus(
     "error",
-    response.error || "Could not complete the transaction."
+    formatPortfolioTransactionError(response.error)
   );
 }
 
@@ -1697,6 +1707,18 @@ function isSigningBridgeUnreachable(error?: string): boolean {
     error.includes("Could not establish connection") ||
     error.includes("Extension context invalidated")
   );
+}
+
+function formatPortfolioTransactionError(error?: string): string {
+  if (!error) return "Could not complete the transaction.";
+  if (
+    /user rejected|request rejected|rejected the request|denied|4001/i.test(
+      error
+    )
+  ) {
+    return "Transaction rejected.";
+  }
+  return error;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -1890,6 +1912,9 @@ function cancelPortfolioWalletConnect(): void {
   portfolioWalletConnectToken++;
   portfolioWalletConnectQr = null;
   portfolioWalletConnectError = null;
+  // Tear down the in-flight pairing in the content script so the relay
+  // subscription is released and a later reconnect starts a fresh QR.
+  void sendRuntimeMessage({ type: "KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT" });
   const container = root?.querySelector<HTMLElement>(
     "[data-sidepanel-portfolio]"
   );

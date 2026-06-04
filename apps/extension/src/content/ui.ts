@@ -14,7 +14,7 @@ import type {
   NestedMarket,
 } from "../types/market";
 import { setCspSafeImageSrc } from "./image-proxy";
-import { WalletBridge } from "./trading/bridge";
+import { WALLETCONNECT_WALLET_UUID, WalletBridge } from "./trading/bridge";
 import { ExtensionSession } from "./trading/extension-session";
 import { TradingPanel } from "./trading/trading-panel";
 import { TradingService } from "./trading/trading-service";
@@ -39,6 +39,54 @@ function parseGammaPriceArray(
   raw: string | readonly unknown[] | null | undefined
 ): number[] {
   return parseGammaNumberArray(raw).map(clampGammaPrice);
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      code?: unknown;
+      message?: unknown;
+      shortMessage?: unknown;
+    };
+    const message =
+      typeof candidate.message === "string"
+        ? candidate.message
+        : typeof candidate.shortMessage === "string"
+          ? candidate.shortMessage
+          : "";
+    const code =
+      typeof candidate.code === "string" || typeof candidate.code === "number"
+        ? String(candidate.code)
+        : "";
+    return [message, code].filter(Boolean).join(" ");
+  }
+  return "";
+}
+
+function formatWalletPromptError(error: unknown): string {
+  const message = getErrorMessage(error);
+  if (
+    /user rejected|request rejected|rejected the request|denied|4001/i.test(
+      message
+    )
+  ) {
+    return "Wallet prompt rejected.";
+  }
+  return message || "Wallet request failed.";
+}
+
+async function connectAndAuthorizePortfolioWallet(
+  walletUuid?: string
+): Promise<string> {
+  await TradingService.connectWallet(walletUuid);
+  const address = TradingService.getContext().address;
+  if (!address) {
+    throw new Error("Wallet connection was cancelled.");
+  }
+  await ExtensionSession.ensureAuthorized(address);
+  return address;
 }
 
 /**
@@ -4008,18 +4056,33 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
       }
 
       if (message?.type === "KNOWW_CONNECT_PORTFOLIO_WALLET") {
-        sendResponse({
-          success: true,
-          data: { status: "started" },
-        });
-        void TradingService.connectWallet(message.walletUuid)
-          .then(async () => {
-            const address = TradingService.getContext().address;
-            if (!address) return;
-            await ExtensionSession.ensureAuthorized(address);
-          })
-          .catch(() => {});
-        return false;
+        if (message.walletUuid === WALLETCONNECT_WALLET_UUID) {
+          sendResponse({ success: true, data: { status: "started" } });
+          void (async () => {
+            try {
+              await connectAndAuthorizePortfolioWallet(message.walletUuid);
+            } catch {
+              // WalletConnect pairing errors are exposed through the polled
+              // bridge state; installed-wallet failures are returned below.
+            }
+          })();
+          return false;
+        }
+
+        void (async () => {
+          try {
+            const address = await connectAndAuthorizePortfolioWallet(
+              message.walletUuid
+            );
+            sendResponse({ success: true, data: { address } });
+          } catch (err) {
+            sendResponse({
+              success: false,
+              data: { error: formatWalletPromptError(err) },
+            });
+          }
+        })();
+        return true;
       }
 
       if (message?.type === "KNOWW_PORTFOLIO_REAUTH") {
@@ -4051,6 +4114,12 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
           }
         })();
         return true;
+      }
+
+      if (message?.type === "KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT") {
+        void WalletBridge.cancelMobileConnect().catch(() => {});
+        sendResponse({ success: true, data: { status: "cancelled" } });
+        return false;
       }
 
       if (message?.type === "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE") {

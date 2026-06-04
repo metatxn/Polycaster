@@ -35,6 +35,7 @@ import {
 import { POLYGON_CHAIN } from "@knoww/shared-types/chains";
 import {
   PUSD_ADDRESS,
+  PUSD_DECIMALS,
   USDC_E_ADDRESS,
   USDC_E_DECIMALS,
 } from "@knoww/shared-types/contracts";
@@ -43,6 +44,7 @@ import {
   derivePolymarketSafe,
   type RelayerTransaction,
 } from "@knoww/shared-types/relayer";
+import Decimal from "decimal.js";
 import {
   type Address,
   createPublicClient,
@@ -55,6 +57,7 @@ import {
 import { createBridgeWalletClient } from "./bridge-signer";
 import { getKnowwAppUrl } from "./extension-session";
 import {
+  buildPortfolioDirectWithdrawQuote,
   buildPortfolioWithdrawQuoteRequest,
   type PortfolioBridgeStatusSummary,
   type PortfolioWithdrawDestination,
@@ -144,8 +147,7 @@ export async function getPortfolioWalletTokens(
     const isPusd = isPusdToken(symbol, address);
     const minUsd = isPusd
       ? 0
-      : (supported?.minCheckoutUsd ??
-        (getMinDepositForToken(assets, symbol) || 2));
+      : (supported?.minCheckoutUsd ?? getMinDepositForToken(assets, symbol));
     tokens.push({
       symbol,
       name,
@@ -154,7 +156,9 @@ export async function getPortfolioWalletTokens(
       amount,
       usdValue: amount * price,
       minUsd,
-      depositSupported: true,
+      depositSupported: isPusd || Boolean(supported),
+      depositDisabledReason:
+        isPusd || supported ? undefined : "Unsupported deposits",
     });
   };
 
@@ -210,6 +214,30 @@ function encodeTransfer(to: Address, amountRaw: bigint): `0x${string}` {
   });
 }
 
+async function assertPortfolioTokenBalance(input: {
+  owner: Address;
+  tokenAddress: Address;
+  tokenSymbol: string;
+  tokenDecimals: number;
+  amountRaw: bigint;
+}): Promise<void> {
+  const balanceRaw = await polygonClient.readContract({
+    address: input.tokenAddress,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [input.owner],
+  });
+
+  if (balanceRaw >= input.amountRaw) return;
+
+  const available = new Decimal(balanceRaw.toString())
+    .div(new Decimal(10).pow(input.tokenDecimals))
+    .toFixed();
+  throw new Error(
+    `Insufficient ${input.tokenSymbol} balance. Available: ${available} ${input.tokenSymbol}.`
+  );
+}
+
 let cachedAssets: SupportedAsset[] | null = null;
 
 /** Live bridge-supported chains + tokens (cached) for the deposit/withdraw UI. */
@@ -258,11 +286,27 @@ export async function getPortfolioWithdrawQuote(input: {
     amount: input.amount,
     chainKey: draft.destination.chainKey,
     tokenId: draft.destination.tokenId,
+    routeKind: draft.destination.routeKind,
     recipientAddress: input.destination,
     toChainId: draft.request.toChainId,
     toTokenAddress: draft.request.toTokenAddress,
     fromTokenAddress: draft.request.fromTokenAddress,
   });
+  if (draft.destination.routeKind === "direct") {
+    const quote = buildPortfolioDirectWithdrawQuote({
+      amount: input.amount,
+      destination: draft.destination,
+    });
+    logInfo("portfolio.withdraw.quote.direct", {
+      quoteId: quote.quoteId,
+      estToTokenBaseUnit: quote.estToTokenBaseUnit,
+      estOutputUsd: quote.estOutputUsd,
+      tokenId: draft.destination.tokenId,
+      tokenSymbol: draft.destination.tokenSymbol,
+      toTokenAddress: draft.destination.toTokenAddress,
+    });
+    return { quote, destination: draft.destination };
+  }
   const quote = await fetchQuote(draft.request, bridgeOptions());
   logInfo("portfolio.withdraw.quote.response", {
     quoteId: quote.quoteId,
@@ -384,11 +428,12 @@ export async function executePortfolioWithdraw(input: {
   destination: string;
   chainKey?: string;
   tokenId?: string;
+  quote?: QuoteResponse;
   tabId: number;
 }): Promise<{
   txHash: string;
-  bridgeAddress: string;
-  route: "bridge";
+  bridgeAddress?: string;
+  route: "bridge" | "direct";
   quote: QuoteResponse;
   destination: PortfolioWithdrawDestination;
 }> {
@@ -403,7 +448,6 @@ export async function executePortfolioWithdraw(input: {
     recipientAddress: input.destination,
     supportedAssets: assets,
   });
-  const amountRaw = BigInt(draft.request.fromAmountBaseUnit);
   const { destination } = draft;
   logInfo("portfolio.withdraw.prepare", {
     ownerAddress: eoa,
@@ -411,13 +455,21 @@ export async function executePortfolioWithdraw(input: {
     walletMode: mode,
     recipientAddress: input.destination,
     amountBaseUnit: draft.request.fromAmountBaseUnit,
+    routeKind: destination.routeKind,
     chainKey: destination.chainKey,
     tokenId: destination.tokenId,
     tokenSymbol: destination.tokenSymbol,
     toChainId: destination.toChainId,
     toTokenAddress: destination.toTokenAddress,
   });
-  const quote = await fetchQuote(draft.request, bridgeOptions());
+  const quote =
+    input.quote ??
+    (destination.routeKind === "direct"
+      ? buildPortfolioDirectWithdrawQuote({
+          amount: input.amount,
+          destination,
+        })
+      : await fetchQuote(draft.request, bridgeOptions()));
   logInfo("portfolio.withdraw.quote.confirmed", {
     quoteId: quote.quoteId,
     estToTokenBaseUnit: quote.estToTokenBaseUnit,
@@ -425,7 +477,60 @@ export async function executePortfolioWithdraw(input: {
     sourceWallet: proxy,
     recipientAddress: input.destination,
     tokenId: destination.tokenId,
+    routeKind: destination.routeKind,
     toTokenAddress: destination.toTokenAddress,
+  });
+
+  const wallet = createBridgeWalletClient(eoa, input.tabId);
+
+  if (destination.routeKind === "direct") {
+    const amountRaw = parseUnits(input.amount, destination.tokenDecimals);
+    const recipient = getAddress(input.destination) as Address;
+    const tokenAddress = getAddress(destination.toTokenAddress) as Address;
+
+    await assertPortfolioTokenBalance({
+      owner: proxy,
+      tokenAddress,
+      tokenSymbol: destination.tokenSymbol,
+      tokenDecimals: destination.tokenDecimals,
+      amountRaw,
+    });
+
+    const transactions: RelayerTransaction[] = [
+      {
+        to: tokenAddress,
+        data: encodeTransfer(recipient, amountRaw),
+        value: "0",
+      },
+    ];
+    const result =
+      mode === "deposit"
+        ? await executeViaDepositWallet(wallet, eoa, transactions)
+        : await executeViaRelayer(wallet, eoa, transactions);
+    logInfo("portfolio.withdraw.direct_transfer.submitted", {
+      transactionHash: result.txHash,
+      sourceWallet: proxy,
+      recipientAddress: recipient,
+      tokenId: destination.tokenId,
+      tokenAddress,
+      amountBaseUnit: amountRaw.toString(),
+    });
+
+    return {
+      txHash: result.txHash,
+      route: "direct",
+      quote,
+      destination,
+    };
+  }
+
+  const amountRaw = BigInt(draft.request.fromAmountBaseUnit);
+  await assertPortfolioTokenBalance({
+    owner: proxy,
+    tokenAddress: PUSD_ADDRESS as Address,
+    tokenSymbol: "pUSD",
+    tokenDecimals: PUSD_DECIMALS,
+    amountRaw,
   });
 
   const response = await fetchWithdrawalAddresses(
@@ -438,9 +543,14 @@ export async function executePortfolioWithdraw(input: {
     },
     bridgeOptions()
   );
-  const bridgeAddress = getAddress(response.address.evm) as Address;
+  const evmBridgeAddress = response.address.evm;
+  if (!evmBridgeAddress) {
+    throw new Error("Bridge did not return an EVM deposit address.");
+  }
+  const bridgeAddress = getAddress(evmBridgeAddress) as Address;
   try {
     validatePortfolioWithdrawBridgeAddress({
+      routeKind: destination.routeKind,
       bridgeAddress,
       recipientAddress: input.destination,
       sourceAddress: proxy,
@@ -474,7 +584,6 @@ export async function executePortfolioWithdraw(input: {
     },
   ];
 
-  const wallet = createBridgeWalletClient(eoa, input.tabId);
   const result =
     mode === "deposit"
       ? await executeViaDepositWallet(wallet, eoa, transactions)

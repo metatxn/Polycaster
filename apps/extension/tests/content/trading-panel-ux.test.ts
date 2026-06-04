@@ -103,6 +103,160 @@ test("deposit token list whitelists direct pUSD deposits", () => {
   );
 });
 
+test("portfolio wallet token metadata preserves bridge support and blocks unknown-price minimum checks", () => {
+  const fundsSource = readSource("src/background/portfolio-funds.ts");
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /depositSupported:\s*isPusd \|\| Boolean\(supported\)/.test(fundsSource),
+    true
+  );
+  assert.equal(
+    /getMinDepositForToken\(assets, symbol\) \|\| 2/.test(fundsSource),
+    false
+  );
+  assert.equal(
+    /const priceUnavailable = t\.minUsd > 0 && t\.usdValue <= 0;/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /const disabled = unsupported \|\| priceUnavailable \|\| belowMin;/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /if \(token\.minUsd > 0 && token\.usdValue <= 0\)/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /Token price is unavailable\. Refresh and try again\./.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /token\.usdValue > 0 && amountUsd\.lt\(token\.minUsd\)/.test(
+      sidepanelSource
+    ),
+    false
+  );
+});
+
+test("portfolio withdrawal checks for a missing EVM bridge address before checksumming", () => {
+  const source = readSource("src/background/portfolio-funds.ts");
+
+  assert.equal(
+    /const evmBridgeAddress = response\.address\.evm;[\s\S]*if \(!evmBridgeAddress\) \{[\s\S]*Bridge did not return an EVM deposit address/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(/getAddress\(response\.address\.evm\)/.test(source), false);
+});
+
+test("portfolio withdrawal execution reuses the side panel quote", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const backgroundSource = readSource("src/background.ts");
+  const fundsSource = readSource("src/background/portfolio-funds.ts");
+
+  assert.equal(
+    /quote:\s*withdrawQuotePayload\.quote/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /function isPortfolioWithdrawQuoteResponse/.test(backgroundSource),
+    true
+  );
+  assert.equal(
+    /isPortfolioWithdrawQuoteResponse\(msg\.quote\)/.test(backgroundSource),
+    true
+  );
+  assert.equal(
+    /\? \(msg\.quote as QuoteResponse\)/.test(backgroundSource),
+    false
+  );
+  assert.equal(/quote:\s*withdrawQuote/.test(backgroundSource), true);
+  assert.equal(
+    /const quote =\s*input\.quote \?\?[\s\S]*destination\.routeKind === "direct"[\s\S]*buildPortfolioDirectWithdrawQuote[\s\S]*await fetchQuote\(draft\.request, bridgeOptions\(\)\)/.test(
+      fundsSource
+    ),
+    true
+  );
+});
+
+test("portfolio wallet connect reports rejected wallet prompts", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const bridgeSource = readSource("src/content/trading/bridge.ts");
+
+  assert.equal(/function formatWalletPromptError/.test(uiSource), true);
+  assert.equal(
+    /if \(message\?\.type === "KNOWW_CONNECT_PORTFOLIO_WALLET"\) \{[\s\S]*catch \(err\) \{[\s\S]*sendResponse\(\{\s*success: false/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /if \(message\?\.type === "KNOWW_CONNECT_PORTFOLIO_WALLET"\) \{[\s\S]*return true;[\s\S]*if \(message\?\.type === "KNOWW_PORTFOLIO_REAUTH"\)/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /void TradingService\.connectWallet\(message\.walletUuid\)[\s\S]{0,500}\.catch\(\(\) => \{\}\)/.test(
+      uiSource
+    ),
+    false
+  );
+  assert.equal(
+    /function formatPortfolioTransactionError/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /setPortfolioFundStatus\(\s*"error",\s*formatPortfolioTransactionError\(response\.error\)\s*\)/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(/function formatWalletSigningError/.test(bridgeSource), true);
+  assert.equal(
+    /error: formatWalletSigningError\(err\)/.test(bridgeSource),
+    true
+  );
+});
+
+test("portfolio WalletConnect QR connect returns immediately so state polling can render the QR", () => {
+  const uiSource = readSource("src/content/ui.ts");
+
+  assert.equal(/WALLETCONNECT_WALLET_UUID/.test(uiSource), true);
+  assert.equal(
+    /if \(message\.walletUuid === WALLETCONNECT_WALLET_UUID\) \{[\s\S]*sendResponse\(\{\s*success: true,\s*data: \{ status: "started" \}[\s\S]*void \(async \(\) => \{[\s\S]*connectAndAuthorizePortfolioWallet\(message\.walletUuid\)/.test(
+      uiSource
+    ),
+    true
+  );
+  assert.equal(
+    /if \(message\.walletUuid === WALLETCONNECT_WALLET_UUID\) \{[\s\S]*return false;[\s\S]*\}[\s\S]*void \(async \(\) =>/.test(
+      uiSource
+    ),
+    true
+  );
+});
+
+test("portfolio disconnect clears the busy button state when logout send fails", () => {
+  const source = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /finally \{[\s\S]*portfolioDisconnecting = false;[\s\S]*button\.classList\.remove\("is-busy"\);[\s\S]*button\.title = "Disconnect wallet";/.test(
+      source
+    ),
+    true
+  );
+});
+
 test("deposit ERC20 transfers use viem encoding helpers", () => {
   const source = readSource("src/content/trading/trading-panel.ts");
 
@@ -135,6 +289,55 @@ test("WalletConnect QR path forces a fresh pairing session", () => {
   assert.equal(/forceNew\?: boolean/.test(walletConnectSource), true);
   assert.equal(/disconnectExistingSession/.test(walletConnectSource), true);
   assert.equal(/if \(forceNew\)/.test(walletConnectSource), true);
+});
+
+test("WalletConnect re-entrant connect aborts the stale pairing instead of reusing it", () => {
+  const walletConnectSource = readSource(
+    "src/content/trading/walletconnect-bridge.ts"
+  );
+
+  // A non-forced caller still joins the in-flight attempt…
+  assert.equal(
+    /if \(!forceNew\) return shared\.connectPromise;/.test(walletConnectSource),
+    true
+  );
+  // …but a forced re-entry tears the pending attempt down first.
+  assert.equal(/await abortPendingConnect\(\)/.test(walletConnectSource), true);
+  assert.equal(/abortPairingAttempt\(\)/.test(walletConnectSource), true);
+  assert.equal(/cleanupPendingPairings\(\)/.test(walletConnectSource), true);
+  // Generation guard so a superseded attempt can't clobber the newer one.
+  assert.equal(
+    /shared\.connectGeneration === generation/.test(walletConnectSource),
+    true
+  );
+});
+
+test("dismissing the WalletConnect QR cancels the in-flight pairing end to end", () => {
+  const walletConnectSource = readSource(
+    "src/content/trading/walletconnect-bridge.ts"
+  );
+  const bridgeSource = readSource("src/content/trading/bridge.ts");
+  const uiSource = readSource("src/content/ui.ts");
+  const backgroundSource = readSource("src/background.ts");
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /async cancel\(\): Promise<void>/.test(walletConnectSource),
+    true
+  );
+  assert.equal(
+    /async cancelMobileConnect\(\): Promise<void>/.test(bridgeSource),
+    true
+  );
+  assert.equal(/KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT/.test(uiSource), true);
+  assert.equal(
+    /KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT/.test(backgroundSource),
+    true
+  );
+  assert.equal(
+    /KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT/.test(sidepanelSource),
+    true
+  );
 });
 
 test("session disconnect resets the wallet bridge before rendering choices", () => {

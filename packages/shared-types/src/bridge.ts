@@ -7,10 +7,27 @@
  * @see https://docs.polymarket.com/api-reference/bridge
  */
 
-import { PUSD_ADDRESS, USDC_E_ADDRESS, USDC_E_DECIMALS } from "./contracts.ts";
+import {
+  PUSD_ADDRESS,
+  PUSD_DECIMALS,
+  USDC_E_ADDRESS,
+  USDC_E_DECIMALS,
+} from "./contracts.ts";
 
 export const BRIDGE_API_URL = "https://bridge.polymarket.com";
 export const POLYGON_BRIDGE_CHAIN_ID = "137";
+
+/**
+ * Default builder attribution code sent as the `X-Builder-Code` header on every
+ * Bridge API request. Callers may override it per-request via
+ * `BridgeRequestOptions.builderCode` (e.g. from an env var), but the Bridge API
+ * warns when the header is absent, so we always fall back to this value to keep
+ * attribution working even in builds where the env var was not injected.
+ *
+ * This is a public on-chain attribution address, not a secret credential.
+ */
+export const DEFAULT_BUILDER_CODE =
+  "0xbfd2aaab2ffd43d8247ee99fcfd89231fbb6086aeeb46eceedf263a7e1982457";
 
 export type BridgeHeaders = Record<string, string>;
 
@@ -261,14 +278,14 @@ function getFetch(options?: BridgeRequestOptions): BridgeFetch {
   return fetchImpl;
 }
 
-function getBridgeHeaders(
+export function getBridgeHeaders(
   options?: BridgeRequestOptions,
   extraHeaders?: BridgeHeaders
 ): BridgeHeaders {
   return {
     ...(options?.headers ?? {}),
     ...(extraHeaders ?? {}),
-    ...(options?.builderCode ? { "X-Builder-Code": options.builderCode } : {}),
+    "X-Builder-Code": options?.builderCode || DEFAULT_BUILDER_CODE,
   };
 }
 
@@ -290,6 +307,10 @@ function sameAddress(left: string, right: string): boolean {
     right.startsWith("0x") &&
     normalizeAddress(left) === normalizeAddress(right)
   );
+}
+
+function isGenericDepositAddress(address: DepositAddress): boolean {
+  return address.tokenAddress.trim() === "";
 }
 
 export function isPusdToken(
@@ -333,6 +354,11 @@ export function findDepositAddressForChain(
           sameAddress(address.tokenAddress, asset.token.address))
     );
     if (matching) return matching;
+
+    return depositAddresses.find(
+      (address) =>
+        address.chainId === chainId && isGenericDepositAddress(address)
+    );
   }
 
   return depositAddresses.find((address) => address.chainId === chainId);
@@ -611,11 +637,13 @@ export function getDepositStatusDisplay(
 // ============================================================================
 // Multi-chain withdrawal token/chain model + helpers.
 // Promoted from the web app so the extension reuses the same source of truth.
-// Source for a withdrawal is always pUSD (V2 collateral on Polygon); these
-// describe the DESTINATION token the user receives, resolved per chain from the
-// live /supported-assets data.
+// Most withdrawals source pUSD through the bridge, but Polygon USDC.e can be
+// sent directly from the trading wallet when it is already held there.
+// These describe the user-selected receive token, resolved per chain from the
+// live /supported-assets data when the bridge is involved.
 // ============================================================================
 export type WithdrawTokenId =
+  | "pusd"
   | "usdc"
   | "usdc-e"
   | "usdt"
@@ -637,6 +665,13 @@ export const WITHDRAW_TOKEN_CONFIGS: Record<
   WithdrawTokenId,
   WithdrawTokenConfig
 > = {
+  pusd: {
+    id: "pusd",
+    symbol: "pUSD",
+    name: "Polymarket USD",
+    address: PUSD_ADDRESS,
+    decimals: PUSD_DECIMALS,
+  },
   "usdc-e": {
     id: "usdc-e",
     symbol: "USDC.e",
@@ -701,6 +736,8 @@ export const WITHDRAW_CHAIN_IDS: Record<string, string> = {
 
 /** Bridge API token symbol → internal WithdrawTokenId. */
 export const SYMBOL_TO_WITHDRAW_TOKEN_ID: Record<string, WithdrawTokenId> = {
+  pUSD: "pusd",
+  PUSD: "pusd",
   USDC: "usdc",
   "USDC.e": "usdc-e",
   USDT: "usdt",
@@ -709,6 +746,19 @@ export const SYMBOL_TO_WITHDRAW_TOKEN_ID: Record<string, WithdrawTokenId> = {
   POL: "pol",
   SOL: "sol",
 };
+
+export function getMinWithdrawalForToken(
+  assets: SupportedAsset[],
+  chainId: string,
+  tokenId: WithdrawTokenId
+): number | undefined {
+  const asset = assets.find(
+    (entry) =>
+      entry.chainId === chainId &&
+      SYMBOL_TO_WITHDRAW_TOKEN_ID[entry.token.symbol] === tokenId
+  );
+  return asset?.minCheckoutUsd;
+}
 
 type BridgeAssetLike = {
   chainId: string;
@@ -749,6 +799,64 @@ export function resolveDestTokenAddress(
   return "";
 }
 
+export type WithdrawExecutionRouteKind = "bridge" | "direct";
+
+export interface WithdrawExecutionRoute {
+  kind: WithdrawExecutionRouteKind;
+  chainKey: string;
+  tokenId: WithdrawTokenId;
+  toChainId: string;
+  tokenAddress: string;
+  tokenSymbol: string;
+  tokenDecimals: number;
+}
+
+export function getWithdrawExecutionRoute(input: {
+  bridgeTokenIndex: Record<string, Partial<Record<WithdrawTokenId, string>>>;
+  chainKey?: string;
+  tokenId?: WithdrawTokenId;
+}): WithdrawExecutionRoute {
+  const chainKey = input.chainKey || "polygon";
+  const tokenId = input.tokenId || "usdc-e";
+  const tokenConfig = WITHDRAW_TOKEN_CONFIGS[tokenId];
+  if (!tokenConfig) {
+    throw new Error(`Unsupported token: ${tokenId}`);
+  }
+
+  const toChainId = WITHDRAW_CHAIN_IDS[chainKey] || POLYGON_BRIDGE_CHAIN_ID;
+  const tokenAddress =
+    resolveDestTokenAddress(input.bridgeTokenIndex, toChainId, tokenId) ||
+    (toChainId === POLYGON_BRIDGE_CHAIN_ID ? tokenConfig.address : "");
+
+  if (!tokenAddress) {
+    throw new Error(
+      `Token ${tokenId} is not supported on this chain. Please try a different token.`
+    );
+  }
+  if (isSameBridgeAddress(tokenAddress, PUSD_ADDRESS) && tokenId !== "pusd") {
+    throw new Error(
+      "Resolved withdrawal destination is pUSD for a non-pUSD token."
+    );
+  }
+
+  // The trading wallet balance model tracks pUSD + USDC.e. Direct native USDC
+  // would require separate native-USDC balance support, so keep that bridged.
+  const kind =
+    toChainId === POLYGON_BRIDGE_CHAIN_ID && tokenId === "usdc-e"
+      ? "direct"
+      : "bridge";
+
+  return {
+    kind,
+    chainKey,
+    tokenId,
+    toChainId,
+    tokenAddress,
+    tokenSymbol: tokenConfig.symbol,
+    tokenDecimals: tokenConfig.decimals,
+  };
+}
+
 function isSameBridgeAddress(left?: string, right?: string): boolean {
   return Boolean(
     left && right && left.trim().toLowerCase() === right.trim().toLowerCase()
@@ -756,14 +864,18 @@ function isSameBridgeAddress(left?: string, right?: string): boolean {
 }
 
 export function validateWithdrawBridgeDestination(input: {
+  routeKind?: WithdrawExecutionRouteKind;
   toTokenAddress?: string;
   bridgeAddress?: string;
   recipientAddress?: string;
   sourceAddress?: string;
 }): void {
-  if (isSameBridgeAddress(input.toTokenAddress, PUSD_ADDRESS)) {
+  if (
+    isSameBridgeAddress(input.toTokenAddress, PUSD_ADDRESS) &&
+    input.routeKind !== "bridge"
+  ) {
     throw new Error(
-      "Resolved withdrawal destination is pUSD. Select USDC or USDC.e so the Polymarket Bridge unwraps to the requested token."
+      "Resolved withdrawal destination is pUSD without an explicit bridge route."
     );
   }
   if (isSameBridgeAddress(input.bridgeAddress, input.recipientAddress)) {

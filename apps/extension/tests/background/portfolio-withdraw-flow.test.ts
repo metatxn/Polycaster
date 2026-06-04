@@ -3,6 +3,7 @@ import test from "node:test";
 import { PUSD_ADDRESS } from "@knoww/shared-types/contracts";
 import {
   buildPortfolioWithdrawQuoteRequest,
+  formatPortfolioTokenBaseUnitAmount,
   summarizePortfolioBridgeStatus,
   validatePortfolioWithdrawBridgeAddress,
 } from "../../src/background/portfolio-withdraw-flow";
@@ -64,6 +65,13 @@ test("buildPortfolioWithdrawQuoteRequest unwraps pUSD to selected Polygon USDC",
   });
   assert.equal(quote.destination.tokenSymbol, "USDC");
   assert.equal(quote.destination.tokenDecimals, 6);
+});
+
+test("formatPortfolioTokenBaseUnitAmount preserves whole-number trailing zeros", () => {
+  assert.equal(formatPortfolioTokenBaseUnitAmount("100000000", 6), "100");
+  assert.equal(formatPortfolioTokenBaseUnitAmount("20000000", 6), "20");
+  assert.equal(formatPortfolioTokenBaseUnitAmount("100500000", 6), "100.5");
+  assert.equal(formatPortfolioTokenBaseUnitAmount("100000", 6), "0.1");
 });
 
 test("buildPortfolioWithdrawQuoteRequest falls back to Polygon config address only when live data lacks the token", () => {

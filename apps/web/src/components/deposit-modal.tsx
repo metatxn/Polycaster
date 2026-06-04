@@ -255,6 +255,12 @@ export function DepositModal({
 
       try {
         const isDirectPusdDeposit = isPusdToken(token.symbol, token.address);
+        if (isDirectPusdDeposit && !proxyAddress) {
+          setDepositError(
+            "Trading wallet is still loading. Try again in a moment."
+          );
+          return;
+        }
         const assets = isDirectPusdDeposit
           ? []
           : supportedAssets.length > 0
@@ -531,10 +537,10 @@ export function DepositModal({
 
     fetchBridgeQuote({
       fromAmountBaseUnit: amountBaseUnit,
-      fromChainId: "137",
+      fromChainId: POLYGON_BRIDGE_CHAIN_ID,
       fromTokenAddress: tokenAddress,
       recipientAddress: bridgeAddress,
-      toChainId: "137",
+      toChainId: POLYGON_BRIDGE_CHAIN_ID,
       toTokenAddress: POLYGON_PUSD_ADDRESS,
     })
       .then((data) => {

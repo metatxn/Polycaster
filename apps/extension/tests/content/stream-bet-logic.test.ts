@@ -151,3 +151,18 @@ test("formatPillPrices caps at the first two outcomes", () => {
     "A 50¢ / B 30¢"
   );
 });
+
+test("pickHolding breaks an exact value tie by lowest outcome index", () => {
+  // Both sides worth $3.00; index 0 must win regardless of array order.
+  const a = pickHolding([
+    { outcomeIndex: 1, name: "MOUZ", balance: "5", price: 0.6 },
+    { outcomeIndex: 0, name: "FURIA", balance: "5", price: 0.6 },
+  ]);
+  assert.equal(a?.outcomeIndex, 0);
+  assert.equal(a?.name, "FURIA");
+});
+
+test("formatPillPrices handles one outcome and an empty list", () => {
+  assert.equal(formatPillPrices([{ name: "FURIA", price: 0.6 }]), "FURIA 60¢");
+  assert.equal(formatPillPrices([]), "");
+});

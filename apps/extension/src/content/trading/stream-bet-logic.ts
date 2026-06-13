@@ -86,7 +86,12 @@ export function pickHolding(
     if (!hasDisplayPosition(c.balance)) continue;
     const valueUsd = positionValueUsd(c.balance, c.price);
     const value = Number(valueUsd);
-    if (value > bestValue) {
+    const wins =
+      value > bestValue ||
+      (value === bestValue &&
+        best !== null &&
+        c.outcomeIndex < best.outcomeIndex);
+    if (wins) {
       bestValue = value;
       const shares = balanceToNumber(c.balance);
       best = {

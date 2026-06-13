@@ -36,8 +36,16 @@ import type { ConnectionState } from "@/hooks/use-shared-websocket";
 import { useTopHolders } from "@/hooks/use-top-holders";
 import type { Position } from "@/hooks/use-user-positions";
 import { useUserTrades } from "@/hooks/use-user-trades";
-import { formatPrice, formatVolume } from "@/lib/formatters";
+import { formatPrice, formatVolume, relativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+
+/** Sub-1% outcomes show "<1%" instead of a misleading "0%" (the raw price
+ *  is sub-cent, e.g. 0.4¢). */
+function formatProbability(pct: number, yesPriceRaw?: string | number): string {
+  const raw = yesPriceRaw !== undefined ? Number(yesPriceRaw) * 100 : pct;
+  if (Number.isFinite(raw) && raw > 0 && raw < 1) return "<1%";
+  return `${pct}%`;
+}
 
 // Lazy load heavy chart and order book components
 const MarketPriceChart = dynamic(
@@ -61,22 +69,6 @@ const OrderBook = dynamic(
     loading: () => <Skeleton className="h-[300px] w-full rounded-xl" />,
   }
 );
-
-/** Compact relative-time label (e.g. "8d ago", "2h ago") for trade history. */
-function formatRelativeTime(timestamp: string | number): string {
-  const t =
-    typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime();
-  const diffMs = Date.now() - t;
-  if (!Number.isFinite(diffMs) || diffMs < 0) return "just now";
-  const s = Math.floor(diffMs / 1000);
-  const m = Math.floor(s / 60);
-  const h = Math.floor(m / 60);
-  const d = Math.floor(h / 24);
-  if (d > 0) return `${d}d ago`;
-  if (h > 0) return `${h}h ago`;
-  if (m > 0) return `${m}m ago`;
-  return `${s}s ago`;
-}
 
 interface MarketData {
   id: string;
@@ -471,7 +463,7 @@ function MarketExpandedContent({
                         </span>
                       </span>
                       <span className="font-mono text-[10px] uppercase tracking-wider text-(--kwm-ink-3)">
-                        {formatRelativeTime(trade.timestamp)}
+                        {relativeTime(trade.timestamp, "verbose")}
                       </span>
                     </div>
                   );
@@ -1116,7 +1108,10 @@ export function OutcomesTable({
 
                             <div className="flex flex-col items-end shrink-0">
                               <span className="font-mono text-xl font-bold tabular-nums leading-none">
-                                {market.yesProbability}%
+                                {formatProbability(
+                                  market.yesProbability,
+                                  market.yesPrice
+                                )}
                               </span>
                               {market.change === 0 ? (
                                 <span className="font-mono text-[10px] font-bold mt-1.5 text-(--kwm-ink-dim) tabular-nums">
@@ -1177,7 +1172,10 @@ export function OutcomesTable({
                           {/* Column 2: Percentage + Change */}
                           <div className="flex items-center justify-end gap-3 pr-4 border-r border-(--kwm-hl) h-8">
                             <span className="font-mono text-xl xl:text-2xl font-bold tabular-nums min-w-[50px] xl:min-w-[55px] text-right">
-                              {market.yesProbability}%
+                              {formatProbability(
+                                market.yesProbability,
+                                market.yesPrice
+                              )}
                             </span>
                             {market.change === 0 ? (
                               <span className="font-mono text-xs xl:text-sm font-bold min-w-[60px] xl:min-w-[70px] text-center text-(--kwm-ink-dim) tabular-nums shrink-0">
@@ -1343,7 +1341,10 @@ export function OutcomesTable({
                               <div className="flex items-center gap-3 shrink-0">
                                 <div className="text-right">
                                   <span className="text-lg font-bold tabular-nums text-(--kwm-ink-3)">
-                                    {market.yesProbability}%
+                                    {formatProbability(
+                                      market.yesProbability,
+                                      market.yesPrice
+                                    )}
                                   </span>
                                   <span className="text-xs text-(--kwm-ink-3) ml-1">
                                     Yes

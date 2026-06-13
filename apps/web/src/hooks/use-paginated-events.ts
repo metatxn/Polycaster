@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 interface PaginatedEvent {
@@ -156,19 +157,9 @@ export function usePaginatedEvents({
         params.set("end_date_max", filters.endDateTo);
       }
 
-      const response = await fetch(
+      const result = await fetchJson<PaginatedEventsResponse>(
         `/api/events/paginated?${params.toString()}`
       );
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch paginated events");
-      }
-
-      const result = (await response.json()) as PaginatedEventsResponse;
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to fetch paginated events");
-      }
 
       return {
         events: result.data || [],
@@ -178,6 +169,24 @@ export function usePaginatedEvents({
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     initialPageParam: "",
+    // Deduplicate across page boundaries as a defence-in-depth guard against
+    // Gamma's inclusive-cursor behaviour (which is compensated server-side in
+    // /api/events/paginated but may still surface in edge cases such as live-
+    // data rank shifts between the two fetches).
+    select: (data) => {
+      const seen = new Set<string>();
+      return {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          events: page.events.filter((e) => {
+            if (seen.has(e.id)) return false;
+            seen.add(e.id);
+            return true;
+          }),
+        })),
+      };
+    },
     staleTime: refetchInterval > 0 ? refetchInterval : undefined,
     refetchInterval: refetchInterval > 0 ? refetchInterval : false,
     refetchOnWindowFocus: false,

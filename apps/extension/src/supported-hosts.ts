@@ -8,7 +8,7 @@
  * The content script itself still uses hostPatterns regexes for
  * fine-grained adapter detection at runtime.
  *
- * NOTE: These patterns are also consumed by webpack.config.js at build
+ * NOTE: These patterns are also consumed by webpack.config.cjs at build
  * time to generate the manifest's `host_permissions` array (union of
  * content-script sites + API domains). Keep this file importable by
  * both TypeScript (background SW) and plain Node (webpack).
@@ -17,6 +17,11 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   // Twitter / X
   "https://x.com/*",
   "https://twitter.com/*",
+
+  // Twitch (streaming surface — companion Live Markets card)
+  "https://www.twitch.tv/*",
+  "https://twitch.tv/*",
+  "https://m.twitch.tv/*",
 
   // LinkedIn
   "https://www.linkedin.com/*",
@@ -214,7 +219,7 @@ export const API_HOST_PERMISSIONS: string[] = [
   "https://clob.polymarket.com/*",
   "https://data-api.polymarket.com/*",
   // Keep in sync with RELAYER_API_HOST_PERMISSION in @knoww/shared-types/polymarket.
-  // webpack.config.js reads this file with a regex and cannot resolve imports.
+  // webpack.config.cjs reads this file with a regex and cannot resolve imports.
   "https://relayer-v2.polymarket.com/*",
   "https://user-pnl-api.polymarket.com/*",
   // Polymarket Bridge — deposit/withdrawal address + status for native funding.

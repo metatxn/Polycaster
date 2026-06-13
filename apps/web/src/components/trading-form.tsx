@@ -1,8 +1,7 @@
 "use client";
 
 import { formatTradingFormError } from "@knoww/shared-types/trading-errors";
-import { useAppKit } from "@reown/appkit/react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -21,7 +20,9 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DepositModal } from "@/components/deposit-modal";
 import { useOnboarding } from "@/context/onboarding-context";
+import { formatCents, formatProfitLabel } from "@/lib/formatters";
 import { formatSlippageDisplay } from "@/lib/slippage";
+import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
 import { useTradingFormState } from "./trading/hooks/use-trading-form-state";
 import { LimitExpiration } from "./trading/limit-expiration";
 import { MergeSharesModal } from "./trading/merge-shares-modal";
@@ -141,9 +142,20 @@ export function TradingForm(props: TradingFormProps) {
     disableSticky = false,
   } = props;
 
-  const { open } = useAppKit();
   const { setShowOnboarding } = useOnboarding();
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      await openWalletModal();
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -214,7 +226,6 @@ export function TradingForm(props: TradingFormProps) {
   const slippageExceedsMax = slippageResult
     ? slippageResult.slippagePercent > maxSlippagePercent
     : false;
-  const formatCents = (price: number) => `${(price * 100).toFixed(1)}¢`;
 
   // LIMIT orders enforce min_order_size on both sides; MARKET sells can fill smaller.
   const belowLimitMin = orderType === "LIMIT" && shares < minShares;
@@ -243,6 +254,10 @@ export function TradingForm(props: TradingFormProps) {
     const next = Math.max(0.1, Math.min(99.9, limitPriceCents + deltaCents));
     setLimitPrice(next / 100);
   };
+  const profitLabel = formatProfitLabel(
+    calculations.potentialWin,
+    calculations.total
+  );
 
   return (
     <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
@@ -327,7 +342,7 @@ export function TradingForm(props: TradingFormProps) {
                 </button>
                 <AnimatePresence>
                   {showMoreMenu && (
-                    <motion.div
+                    <m.div
                       initial={{ opacity: 0, y: -8, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.95 }}
@@ -357,7 +372,7 @@ export function TradingForm(props: TradingFormProps) {
                         <Merge className="h-3.5 w-3.5 text-(--kwm-ink-3)" />
                         Merge
                       </button>
-                    </motion.div>
+                    </m.div>
                   )}
                 </AnimatePresence>
               </div>
@@ -548,6 +563,7 @@ export function TradingForm(props: TradingFormProps) {
             <input
               type="text"
               inputMode="numeric"
+              name="shares"
               className="tk-step-input"
               value={shares}
               onChange={(e) => {
@@ -610,9 +626,12 @@ export function TradingForm(props: TradingFormProps) {
               <div className="tk-sum-row profit">
                 <span className="l">Profit</span>
                 <span className="v tabular-nums">
-                  ${(calculations.potentialWin - calculations.total).toFixed(2)}
+                  {profitLabel}
                   {calculations.total > 0 && (
-                    <span className="ret">({calculations.returnPercent}%)</span>
+                    <span className="ret">
+                      {" "}
+                      ({calculations.returnPercent}%)
+                    </span>
                   )}
                 </span>
               </div>
@@ -623,7 +642,7 @@ export function TradingForm(props: TradingFormProps) {
               variants so colors track the active theme. */}
           <AnimatePresence>
             {error && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -634,11 +653,11 @@ export function TradingForm(props: TradingFormProps) {
                     {formatTradingFormError(error.message)}
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {side === "SELL" && maxSellShares <= 0 && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -649,11 +668,11 @@ export function TradingForm(props: TradingFormProps) {
                     No {selectedOutcome?.name || "shares"} to sell
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {belowLimitMin && shares > 0 && !error && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -665,11 +684,11 @@ export function TradingForm(props: TradingFormProps) {
                     {minShares === 1 ? "" : "s"} minimum
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {hasInsufficientBalance && side === "BUY" && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -689,11 +708,11 @@ export function TradingForm(props: TradingFormProps) {
                     {(calculations.total - (effectiveBalance ?? 0)).toFixed(2)}
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {needsApproval && !hasInsufficientBalance && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -710,7 +729,7 @@ export function TradingForm(props: TradingFormProps) {
                     </span>
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
@@ -721,10 +740,13 @@ export function TradingForm(props: TradingFormProps) {
               <button
                 type="button"
                 className="tk-cta ready"
-                onClick={() => open()}
+                disabled={connecting}
+                onMouseEnter={preloadWalletModal}
+                onFocus={preloadWalletModal}
+                onClick={() => void handleConnect()}
               >
                 <Wallet className="h-4 w-4" />
-                Connect Wallet to Trade
+                {connecting ? "Connecting…" : "Connect Wallet to Trade"}
               </button>
             ) : !hasCredentials ? (
               <button

@@ -1,10 +1,25 @@
 import { createLogger } from "@knoww/logger";
 import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { jsonError } from "@/lib/api-error";
+import { clampedInt, firstIssueMessage, orAbsent } from "@/lib/api-query";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 
 const log = createLogger("api.whales.activity");
+
+/**
+ * Coercing/clamping query validation. Bounds and defaults mirror the
+ * previous hand-rolled parsing exactly; the only tightening is that an
+ * unknown `timePeriod` is now a 400 instead of silently becoming WEEK.
+ */
+const activityQuerySchema = z.object({
+  whaleCount: clampedInt(5, 100, 25),
+  tradesPerWhale: clampedInt(1, 100, 50),
+  timePeriod: z.enum(["DAY", "WEEK", "MONTH", "ALL"]).default("WEEK"),
+});
 
 /**
  * Whale Activity API Route v2
@@ -168,10 +183,18 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
 
-    const whaleCount = Math.min(
-      Math.max(Number.parseInt(searchParams.get("whaleCount") || "25", 10), 5),
-      100
-    );
+    const parsedQuery = activityQuerySchema.safeParse({
+      whaleCount: orAbsent(searchParams.get("whaleCount")),
+      tradesPerWhale: orAbsent(searchParams.get("tradesPerWhale")),
+      timePeriod: orAbsent(searchParams.get("timePeriod")),
+    });
+    if (!parsedQuery.success) {
+      return jsonError(firstIssueMessage(parsedQuery.error), 400);
+    }
+    const { whaleCount, tradesPerWhale, timePeriod } = parsedQuery.data;
+
+    // Float param with no upper bound — outside clampedInt's contract, so
+    // the hand-rolled NaN/negative fallback stays.
     const parsedMinTradeSize = Number.parseFloat(
       searchParams.get("minTradeSize") || "100"
     );
@@ -179,21 +202,6 @@ export async function GET(request: NextRequest) {
       Number.isNaN(parsedMinTradeSize) || parsedMinTradeSize < 0
         ? 100
         : parsedMinTradeSize;
-    const tradesPerWhale = Math.min(
-      Math.max(
-        Number.parseInt(searchParams.get("tradesPerWhale") || "50", 10),
-        1
-      ),
-      100
-    );
-
-    const timePeriodParam = searchParams.get("timePeriod") || "WEEK";
-    const validTimePeriods = ["DAY", "WEEK", "MONTH", "ALL"] as const;
-    const timePeriod = validTimePeriods.includes(
-      timePeriodParam as (typeof validTimePeriods)[number]
-    )
-      ? (timePeriodParam as "DAY" | "WEEK" | "MONTH" | "ALL")
-      : "WEEK";
 
     // Step 1: Fetch leaderboard whales + global large trades in parallel.
     // We always pull the MONTH leaderboard so the set of observed whales is
@@ -372,14 +380,17 @@ export async function GET(request: NextRequest) {
 
     const dataAge = now - fetchStartTime;
 
-    return NextResponse.json({
-      success: true,
-      activities: limitedActivities,
-      whaleCount: topTraders.length,
-      totalTrades: limitedActivities.length,
-      lastUpdated: new Date().toISOString(),
-      dataAge,
-    } satisfies WhaleActivityResponse);
+    return NextResponse.json(
+      {
+        success: true,
+        activities: limitedActivities,
+        whaleCount: topTraders.length,
+        totalTrades: limitedActivities.length,
+        lastUpdated: new Date().toISOString(),
+        dataAge,
+      } satisfies WhaleActivityResponse,
+      { headers: getCacheHeaders("whales") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
     return NextResponse.json(

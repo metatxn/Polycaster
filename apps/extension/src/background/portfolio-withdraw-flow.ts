@@ -14,7 +14,7 @@ import {
   type WithdrawTokenId,
 } from "@knoww/shared-types/bridge";
 import { PUSD_ADDRESS, PUSD_DECIMALS } from "@knoww/shared-types/contracts";
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 import { parseUnits } from "viem";
 
 export interface PortfolioWithdrawDestination {

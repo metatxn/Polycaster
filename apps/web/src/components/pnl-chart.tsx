@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import {
   useCallback,
   useEffect,
@@ -15,6 +15,7 @@ import {
   type PnLInterval,
   usePnLHistory,
 } from "@/hooks/use-pnl-history";
+import { formatCurrencyCompact, formatPercent } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 interface PnLChartProps {
@@ -26,23 +27,6 @@ interface PnLChartProps {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function formatCurrency(value: number): string {
-  const absValue = Math.abs(value);
-  const sign = value < 0 ? "-" : "";
-
-  if (absValue >= 1_000_000) {
-    return `${sign}$${(absValue / 1_000_000).toFixed(2)}M`;
-  }
-  if (absValue >= 1000) {
-    return `${sign}$${(absValue / 1000).toFixed(2)}K`;
-  }
-  return `${sign}$${absValue.toFixed(2)}`;
-}
-
-function formatPercent(value: number): string {
-  return `${value.toFixed(2)}%`;
-}
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
@@ -370,7 +354,7 @@ export function InteractiveLineChart({
               }}
             >
               <span className="block font-mono text-[9px] uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-500 tabular-nums whitespace-nowrap">
-                ▲ {formatCurrency(peakPt.data.pnl)}
+                ▲ {formatCurrencyCompact(peakPt.data.pnl)}
               </span>
             </div>
           );
@@ -393,7 +377,7 @@ export function InteractiveLineChart({
               }}
             >
               <span className="block font-mono text-[9px] uppercase tracking-[0.12em] text-red-600 dark:text-red-500 tabular-nums whitespace-nowrap">
-                ▼ {formatCurrency(troughPt.data.pnl)}
+                ▼ {formatCurrencyCompact(troughPt.data.pnl)}
               </span>
             </div>
           );
@@ -422,7 +406,7 @@ export function InteractiveLineChart({
             transform: "translateX(-50%)",
           }}
         >
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: 2 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.12 }}
@@ -437,7 +421,7 @@ export function InteractiveLineChart({
                 hoveredIsPositive ? "text-emerald-500" : "text-red-500"
               )}
             >
-              {formatCurrency(hoveredPoint.data.pnl)}
+              {formatCurrencyCompact(hoveredPoint.data.pnl)}
             </p>
             {hoveredIndex > 0 && (
               <p
@@ -451,12 +435,12 @@ export function InteractiveLineChart({
                 {hoveredPoint.data.pnl - data[hoveredIndex - 1].pnl >= 0
                   ? "↑"
                   : "↓"}{" "}
-                {formatCurrency(
+                {formatCurrencyCompact(
                   Math.abs(hoveredPoint.data.pnl - data[hoveredIndex - 1].pnl)
                 )}
               </p>
             )}
-          </motion.div>
+          </m.div>
         </div>
       )}
     </div>
@@ -567,7 +551,7 @@ export function PnLChart({
                   isPositive ? "text-emerald-500" : "text-red-500"
                 }`}
               >
-                {formatCurrency(data.summary.endPnl)}
+                {formatCurrencyCompact(data.summary.endPnl)}
               </span>
               <span
                 className={`font-mono text-[11px] uppercase tracking-[0.12em] tabular-nums flex items-center gap-1 ${
@@ -575,7 +559,7 @@ export function PnLChart({
                 }`}
               >
                 {data.summary.change >= 0 ? "↑" : "↓"}
-                {formatCurrency(Math.abs(data.summary.change))}
+                {formatCurrencyCompact(Math.abs(data.summary.change))}
                 <span className="text-muted-foreground/70">
                   ({formatPercent(data.summary.changePercent)})
                 </span>

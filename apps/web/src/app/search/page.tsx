@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { Loader2, TrendingUp, X } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -149,8 +149,9 @@ function SearchContent() {
 
   const handleClear = useCallback(() => {
     setQuery("");
+    router.replace("/search", { scroll: false });
     inputRef.current?.focus();
-  }, []);
+  }, [router]);
 
   const handleEventClick = useCallback(
     (event: SearchEvent) => {
@@ -221,6 +222,8 @@ function SearchContent() {
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24">
         <div className="max-w-4xl mx-auto">
+          <h1 className="sr-only">Search markets</h1>
+
           <ProductHero
             breadcrumbs={[
               { label: "Markets", href: "/markets" },
@@ -229,7 +232,7 @@ function SearchContent() {
           />
 
           {/* Search Input — DeFi terminal field with mono caret */}
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
@@ -247,6 +250,7 @@ function SearchContent() {
                 id="search-input"
                 ref={inputRef}
                 type="text"
+                name="q"
                 placeholder="An event, a candidate, a ticker…"
                 value={query}
                 onChange={handleInputChange}
@@ -270,12 +274,12 @@ function SearchContent() {
                 </button>
               )}
             </div>
-          </motion.div>
+          </m.div>
 
           {/* Last Searched Markets */}
           <AnimatePresence mode="wait">
             {showLastSearchedMarkets && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -286,7 +290,7 @@ function SearchContent() {
                 </h2>
                 <div className="border-t border-border/40">
                   {lastSearchedMarkets.map((market, index) => (
-                    <motion.button
+                    <m.button
                       key={market.id}
                       type="button"
                       initial={{ opacity: 0, y: 4 }}
@@ -332,17 +336,17 @@ function SearchContent() {
                           )}
                         </div>
                       </div>
-                    </motion.button>
+                    </m.button>
                   ))}
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           {/* Recent Searches */}
           <AnimatePresence mode="wait">
             {showRecentSearches && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -366,6 +370,7 @@ function SearchContent() {
                       <button
                         type="button"
                         onClick={() => handleRemoveRecentSearch(search)}
+                        aria-label={`Remove ${search} from recent searches`}
                         className="p-0.5 opacity-40 group-hover:opacity-80 transition-opacity"
                       >
                         <X className="h-3 w-3" />
@@ -373,14 +378,14 @@ function SearchContent() {
                     </div>
                   ))}
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           {/* Search Results */}
           <AnimatePresence mode="wait">
             {showResults && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -479,7 +484,7 @@ function SearchContent() {
                         </div>
                         <div className="border-t border-border/40">
                           {data.events.map((event, index) => (
-                            <motion.button
+                            <m.button
                               key={event.id}
                               type="button"
                               initial={{ opacity: 0, y: 4 }}
@@ -571,7 +576,7 @@ function SearchContent() {
                                     )}
                                 </div>
                               </div>
-                            </motion.button>
+                            </m.button>
                           ))}
                         </div>
                       </div>
@@ -591,18 +596,23 @@ function SearchContent() {
                           </span>
                         )}
                         <span className="mx-3 text-border/80">·</span>
-                        <span>markets shown</span>
+                        <span>
+                          {(data.events?.length || 0) === 1
+                            ? "MARKET"
+                            : "MARKETS"}{" "}
+                          SHOWN
+                        </span>
                       </div>
                     )}
                   </div>
                 )}
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           {/* Empty State - No query and no recent data */}
           {!showResults && !showRecentSearches && !showLastSearchedMarkets && (
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               className="py-8 max-w-md"
@@ -620,7 +630,7 @@ function SearchContent() {
                 An event name, a candidate, a ticker, or a topic — type at least
                 two characters to see markets.
               </p>
-            </motion.div>
+            </m.div>
           )}
         </div>
       </main>

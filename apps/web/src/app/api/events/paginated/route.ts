@@ -31,6 +31,29 @@ const ALLOWED_ORDER_FIELDS = new Set([
 
 class QueryValidationError extends Error {}
 
+/**
+ * Gamma keyset cursors are inclusive: the continuation page usually repeats
+ * the cursor item. Decode the item id from the cursor (base64url payload =
+ * 32-byte signature + JSON keyset tuple) so we can drop exactly that item.
+ * Returns null when the format doesn't match — callers must then drop
+ * NOTHING (fail toward a duplicate, which the client dedupes; never toward
+ * silently losing an unseen event).
+ */
+function decodeCursorItemId(cursor: string): string | null {
+  try {
+    const raw = Buffer.from(cursor, "base64url");
+    const json = JSON.parse(raw.subarray(32).toString("utf8")) as {
+      keys?: { v?: unknown }[];
+    };
+    const last = json.keys?.[json.keys.length - 1]?.v;
+    return typeof last === "string" || typeof last === "number"
+      ? String(last)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function badRequest(error: string) {
   return NextResponse.json({ success: false, error }, { status: 400 });
 }
@@ -196,8 +219,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Gamma's /events/keyset uses an inclusive cursor: when after_cursor is
+    // supplied, the cursor's row (the last item of the previous page) usually
+    // comes back again.  We compensate by requesting one extra item and
+    // dropping the cursor item from the result so every page contains
+    // `limit` unique items.
+    const gammaLimit = afterCursor ? limit + 1 : limit;
+
     const params = new URLSearchParams({
-      limit: String(limit),
+      limit: String(gammaLimit),
       closed: String(closed),
       order,
       ascending: String(ascending),
@@ -248,10 +278,20 @@ export async function GET(request: NextRequest) {
       ["events", "data"]
     );
 
+    // Drop ONLY the cursor item (it was the last item of the previous page).
+    // Filtering by id anywhere in the page is loss-free: that id was already
+    // delivered. Do NOT cap back to `limit` afterwards — Gamma's next_cursor
+    // points at ITS last returned item, so trimming the tail would make the
+    // next page start after a never-shown event.
+    const cursorItemId = afterCursor ? decodeCursorItemId(afterCursor) : null;
+    const pageItems = cursorItemId
+      ? page.items.filter((e) => String(e.id) !== cursorItemId)
+      : page.items;
+
     return NextResponse.json(
       {
         success: true,
-        data: page.items.map((event) => toSlimGammaEvent(event, fullMarkets)),
+        data: pageItems.map((event) => toSlimGammaEvent(event, fullMarkets)),
         pagination: {
           hasMore: Boolean(page.nextCursor),
           nextCursor: page.nextCursor,

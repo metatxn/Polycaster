@@ -2,8 +2,11 @@ import { createLogger } from "@knoww/logger";
 import { fetchClobPrice } from "@knoww/shared-types/clob";
 import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { clampedInt, nonNegativeFloatParam, orAbsent } from "@/lib/api-query";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { scoreFundingCluster } from "@/lib/insider/archetypes/funding-cluster";
 import { scoreOwnerCluster } from "@/lib/insider/archetypes/owner-cluster";
 
@@ -208,49 +211,57 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
 
-    const maxAccountAgeHours = Math.min(
-      Math.max(
-        Number.parseInt(searchParams.get("maxAccountAge") || "168", 10),
-        1
-      ),
-      336
+    // Coercing/clamping integer params. Bounds and defaults mirror the
+    // previous hand-rolled parsing exactly (junk falls back to the default
+    // instead of leaking NaN into downstream fetch limits / thresholds).
+    const {
+      maxAccountAge: maxAccountAgeHours,
+      minScore: minSuspicionScore,
+      limit,
+    } = z
+      .object({
+        maxAccountAge: clampedInt(1, 336, 168),
+        // No upper bound previously — keep it that way (a huge threshold is
+        // a valid "show me nothing below X" input).
+        minScore: clampedInt(0, Number.MAX_SAFE_INTEGER, 30),
+        limit: clampedInt(1, 200, 50),
+      })
+      .parse({
+        maxAccountAge: orAbsent(searchParams.get("maxAccountAge")),
+        minScore: orAbsent(searchParams.get("minScore")),
+        limit: orAbsent(searchParams.get("limit")),
+      });
+
+    // Float params (no upper bound) are outside clampedInt's contract, but
+    // still need finite validation so junk cannot leak NaN into comparisons.
+    const minUsdValue = nonNegativeFloatParam(
+      searchParams.get("minUsdValue"),
+      5000
     );
-    const minUsdValue = Math.max(
-      Number.parseFloat(searchParams.get("minUsdValue") || "5000"),
-      0
-    );
-    const minShares = Math.max(
-      Number.parseFloat(searchParams.get("minShares") || "0"),
-      0
-    );
-    const minSuspicionScore = Math.max(
-      Number.parseInt(searchParams.get("minScore") || "30", 10),
-      0
-    );
-    const limit = Math.min(
-      Math.max(Number.parseInt(searchParams.get("limit") || "50", 10), 1),
-      200
-    );
+    const minShares = nonNegativeFloatParam(searchParams.get("minShares"), 0);
 
     // Step 1: Fetch recent trades globally
     const recentTrades = await fetchRecentTrades(500);
 
     if (recentTrades.length === 0) {
-      return NextResponse.json({
-        success: true,
-        activities: [],
-        stats: {
-          totalTradesScanned: 0,
-          uniqueTradersFound: 0,
-          newAccountsFound: 0,
-          suspiciousActivities: 0,
-          criticalCount: 0,
-          highCount: 0,
-          mediumCount: 0,
-          repeatOffenders: 0,
-        },
-        lastUpdated: new Date().toISOString(),
-      } satisfies SuspiciousActivityResponse);
+      return NextResponse.json(
+        {
+          success: true,
+          activities: [],
+          stats: {
+            totalTradesScanned: 0,
+            uniqueTradersFound: 0,
+            newAccountsFound: 0,
+            suspiciousActivities: 0,
+            criticalCount: 0,
+            highCount: 0,
+            mediumCount: 0,
+            repeatOffenders: 0,
+          },
+          lastUpdated: new Date().toISOString(),
+        } satisfies SuspiciousActivityResponse,
+        { headers: getCacheHeaders("whales") }
+      );
     }
 
     // Step 2: Filter by minimum USD value and shares
@@ -671,23 +682,26 @@ export async function GET(request: NextRequest) {
       (a) => a.analysis.repeatOffender
     ).length;
 
-    return NextResponse.json({
-      success: true,
-      activities: limitedActivities,
-      stats: {
-        totalTradesScanned: recentTrades.length,
-        uniqueTradersFound: uniqueTraders.length,
-        newAccountsFound: [...traderHistories.values()].filter(
-          (h) => h.accountAgeHours <= maxAccountAgeHours
-        ).length,
-        suspiciousActivities: suspiciousActivities.length,
-        criticalCount,
-        highCount,
-        mediumCount,
-        repeatOffenders,
-      },
-      lastUpdated: new Date().toISOString(),
-    } satisfies SuspiciousActivityResponse);
+    return NextResponse.json(
+      {
+        success: true,
+        activities: limitedActivities,
+        stats: {
+          totalTradesScanned: recentTrades.length,
+          uniqueTradersFound: uniqueTraders.length,
+          newAccountsFound: [...traderHistories.values()].filter(
+            (h) => h.accountAgeHours <= maxAccountAgeHours
+          ).length,
+          suspiciousActivities: suspiciousActivities.length,
+          criticalCount,
+          highCount,
+          mediumCount,
+          repeatOffenders,
+        },
+        lastUpdated: new Date().toISOString(),
+      } satisfies SuspiciousActivityResponse,
+      { headers: getCacheHeaders("whales") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
     return NextResponse.json(

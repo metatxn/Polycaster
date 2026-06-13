@@ -5,7 +5,7 @@ import {
   resolveNegRisk,
 } from "@knoww/shared-types/polymarket";
 import { useQuery } from "@tanstack/react-query";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
@@ -34,6 +34,7 @@ import {
   type LiveGameState,
   useSportsWebSocket,
 } from "@/hooks/use-sports-websocket";
+import { qk } from "@/lib/query-keys";
 import { SPORT_GROUPS } from "@/lib/sport-categories";
 import { getSportRailOpenGroupSlugsFromEvents } from "@/lib/sport-rail-open-groups";
 import {
@@ -322,7 +323,7 @@ export default function LiveMarketsPage() {
   );
 
   const { data: companionMarketMap } = useQuery({
-    queryKey: ["companion-markets", stableCompanionKey],
+    queryKey: qk.sports.companionMarkets(stableCompanionKey),
     queryFn: async () => {
       if (!companionSlugs.length) return {};
       const results = await Promise.allSettled(
@@ -565,6 +566,8 @@ export default function LiveMarketsPage() {
       <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-12">
+        <h1 className="sr-only">Live sports markets</h1>
+
         <ProductHero
           breadcrumbs={[
             { label: "Markets", href: "/markets" },
@@ -617,7 +620,7 @@ export default function LiveMarketsPage() {
 
           {/* Left: Sportsbook */}
           <AnimatePresence mode="wait">
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
@@ -701,7 +704,7 @@ export default function LiveMarketsPage() {
                     />
                   </div>
                 )}
-            </motion.div>
+            </m.div>
           </AnimatePresence>
 
           {/* Right: Trade Panel — sticky sidebar */}
@@ -747,9 +750,10 @@ export default function LiveMarketsPage() {
           </div>
         </div>
 
+        {/* Sits flush above BottomNav (token + safe-area inset) */}
         {/* Mobile: bottom sheet trade bar */}
         {selectedMarket && tradingOutcomes.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 bg-(--kwm-bg)/95 backdrop-blur-md border-t border-(--kwm-hl-2) lg:hidden z-50">
+          <div className="fixed bottom-[calc(var(--spacing-bottom-nav)+env(safe-area-inset-bottom,0px))] left-0 right-0 bg-(--kwm-bg)/95 backdrop-blur-md border-t border-(--kwm-hl-2) lg:hidden z-50">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex-1 min-w-0">
                 <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3)">

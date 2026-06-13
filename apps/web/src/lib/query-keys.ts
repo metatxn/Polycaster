@@ -46,6 +46,29 @@ export const qk = {
       lookbackDays: number,
       fidelity: number
     ) => ["price-history-batch", tokenIds, lookbackDays, fidelity] as const,
+    /** Prefix for ANY priceHistory subkey — use with `invalidateQueries`. */
+    allPriceHistory: () => ["priceHistory"] as const,
+    /** Main market chart series batch (market-price-chart). */
+    priceHistory: (
+      tokenIds: readonly string[],
+      timeRange: string,
+      fidelity: number
+    ) => ["priceHistory", tokenIds, timeRange, fidelity] as const,
+    /** Event-detail outcome-table inline quote sparklines. */
+    outcomeTablePriceHistory: (
+      timeRange: string,
+      tokenIds: readonly string[],
+      startTs: number,
+      fidelity: number
+    ) =>
+      [
+        "priceHistory",
+        "outcome-table",
+        timeRange,
+        tokenIds,
+        startTs,
+        fidelity,
+      ] as const,
   },
 
   // Tag metadata + tag-scoped market lists.
@@ -61,6 +84,14 @@ export const qk = {
     list: () => ["sports-list"] as const,
     bySport: (sportTag: string) => ["sports-markets", sportTag] as const,
     teams: (params: unknown) => ["teams", params] as const,
+    /** Companion "more markets" enrichment — keyed by the sorted,
+     *  comma-joined slug list so the key is stable across renders. */
+    companionMarkets: (slugsKey: string) =>
+      ["companion-markets", slugsKey] as const,
+    /** League-rail market counts — keyed by the sorted, comma-joined
+     *  tag-slug list. */
+    leagueCounts: (tagSlugsKey: string) =>
+      ["league-counts", tagSlugsKey] as const,
   },
 
   // User-owned data: positions, orders, P&L.
@@ -88,8 +119,10 @@ export const qk = {
         options.market,
         options.active,
       ] as const,
+    /** Re-rooted from "marketPositions" so positions.all() invalidation
+     *  reaches it; old cache entries go cold once after deploy. */
     forMarket: (userAddress: string, marketId: string) =>
-      ["marketPositions", userAddress, marketId] as const,
+      ["userPositions", "market", userAddress, marketId] as const,
   },
   pnl: {
     summary: (userAddress: string) => ["userPnLSummary", userAddress] as const,
@@ -107,6 +140,26 @@ export const qk = {
     usdcBalance: (address: string) => ["usdcBalance", address] as const,
     portfolioValue: (address: string) => ["portfolio-value", address] as const,
     polPrice: () => ["pol-price"] as const,
+    /** Prefix for ANY usdcAllowance subkey — use with `invalidateQueries`. */
+    allUsdcAllowances: () => ["usdcAllowance"] as const,
+    usdcAllowance: (
+      proxyAddress: string | null,
+      hasProxyWallet: boolean,
+      negRisk: boolean
+    ) => ["usdcAllowance", proxyAddress, hasProxyWallet, negRisk] as const,
+    /** Prefix for ANY tradingApprovals subkey — use with `invalidateQueries`. */
+    allTradingApprovals: () => ["tradingApprovals"] as const,
+    tradingApprovals: (
+      proxyAddress: string | null,
+      hasProxyWallet: boolean,
+      checkAmountRaw: string
+    ) =>
+      [
+        "tradingApprovals",
+        proxyAddress,
+        hasProxyWallet,
+        checkAmountRaw,
+      ] as const,
   },
 
   // Profiles & social.
@@ -135,6 +188,9 @@ export const qk = {
 
   // Order book — feeds the trade ticket.
   orderBook: (tokenId: string) => ["orderBook", tokenId] as const,
+  /** Batched REST order-book seed (outcome-table inline quotes). */
+  orderBooks: (tokenIds: readonly string[]) =>
+    ["orderBooks", tokenIds] as const,
 
   // Whale tape + insider detector.
   whales: {

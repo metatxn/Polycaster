@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { PUSD_ADDRESS } from "@knoww/shared-types/contracts";
+import { test } from "vitest";
 import {
   buildPortfolioWithdrawQuoteRequest,
   formatPortfolioTokenBaseUnitAmount,

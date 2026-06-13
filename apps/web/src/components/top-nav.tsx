@@ -1,15 +1,17 @@
 "use client";
 
-import { useAppKit } from "@reown/appkit/react";
 import { Wallet } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { useConnection } from "wagmi";
 import { KnowwMark } from "@/components/knoww-mark";
 import { MarketSearch } from "@/components/market-search";
 import { NotificationBellMobile } from "@/components/notifications";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WalletMenu } from "@/components/wallet-menu";
+import { formatAddress } from "@/lib/formatters";
+import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
 
 /**
  * Top nav — the two-row bar above every app page at xl+. Row 1: wordmark
@@ -51,15 +53,20 @@ const CATEGORIES: Array<{ label: string; href: string }> = [
   { label: "Mentions", href: "/events/mention-markets" },
 ];
 
-/** Truncate a 0x… address to `0x1234…abcd` for the wallet badge. */
-function formatAddress(addr: string): string {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
 export function TopNav() {
   const pathname = usePathname();
   const { address, isConnected } = useConnection();
-  const { open } = useAppKit();
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      await openWalletModal();
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   return (
     <div className="border-b border-border/60">
@@ -126,11 +133,14 @@ export function TopNav() {
           ) : (
             <button
               type="button"
-              onClick={() => open()}
+              disabled={connecting}
+              onMouseEnter={preloadWalletModal}
+              onFocus={preloadWalletModal}
+              onClick={() => void handleConnect()}
               className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-foreground/90 transition-colors"
             >
               <Wallet className="h-3.5 w-3.5" />
-              Connect
+              {connecting ? "Connecting…" : "Connect"}
             </button>
           )}
           {/* ThemeToggle renders its theme label inside the button,

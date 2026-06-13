@@ -11,7 +11,7 @@ Knoww is a prediction-markets product built on top of Polymarket.
 It has three active product/operator surfaces:
 
 - `apps/web`: the public web app at `knoww.app`, where users browse markets, view portfolios, inspect whale activity, and place trades.
-- `apps/extension`: a Chrome extension that injects relevant prediction-market cards into supported social, community, and editorial sites and can initiate trading flows from those pages.
+- `apps/extension`: a Chrome extension that injects relevant prediction-market cards into supported social, community, editorial, and streaming sites and can initiate trading flows from those pages.
 - `apps/web/src/app/agent`: an internal operator dashboard for the paper-trading agent and its supporting admin APIs.
 
 There is also one active scheduled runtime path:
@@ -22,14 +22,14 @@ There is also one active scheduled runtime path:
 
 - End users browsing prediction markets on the web app
 - Traders connecting Polygon wallets and placing Polymarket orders
-- Extension users reading social, community, editorial, finance, sports, and prediction-native sites such as X/Twitter, LinkedIn, Reddit, Farcaster, Bluesky, Discord, Hacker News, Stack Overflow, Quora, Product Hunt, Lemmy, Kalshi, Manifold, and crypto/news sites and discovering related markets inline
+- Extension users reading social, community, editorial, finance, sports, prediction-native, and streaming sites such as X/Twitter, LinkedIn, Reddit, Farcaster, Bluesky, Discord, Hacker News, Stack Overflow, Quora, Product Hunt, Lemmy, Kalshi, Manifold, Twitch, and crypto/news sites and discovering related markets inline
 
 ### Problems it solves
 
 - Makes Polymarket data easier to browse than Polymarket’s raw APIs
 - Adds web-app views that combine multiple upstream Polymarket APIs into a single UI
 - Hides sensitive builder-signing credentials behind first-party proxy routes
-- Lets users discover markets in-context on social, community, and editorial sites instead of manually searching
+- Lets users discover markets in-context on social, community, editorial, and streaming sites instead of manually searching
 
 ### Repository shape
 
@@ -80,12 +80,13 @@ flowchart LR
 
 | Module | Key paths | Responsibility | Talks to |
 | --- | --- | --- | --- |
-| Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/landing-page-client.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, and serves both the marketing landing experience and the main market-browsing pages | Hooks, contexts, server-cache, API routes |
-| Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/landing/*`, `apps/web/src/components/leaderboard/*`, `apps/web/src/components/notifications/*`, `apps/web/src/components/portfolio/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*` | Houses reusable UI primitives plus feature-level views for landing-page storytelling, comments, deposits, leaderboard, portfolio, notifications, price alerts, and trading flows | App shell, hooks, contexts, wallet state |
-| Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, sidebar, theme, trading | React components and hooks |
+| Web app shell | `apps/web/src/app/layout.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/home-content.tsx` | Renders the public site, bootstraps providers, and serves both the marketing landing experience and the main market-browsing pages | Hooks, contexts, server-cache, API routes |
+| Web feature components | `apps/web/src/components/*`, `apps/web/src/components/comments/*`, `apps/web/src/components/deposit/*`, `apps/web/src/components/landing/*`, `apps/web/src/components/leaderboard/*`, `apps/web/src/components/notifications/*`, `apps/web/src/components/portfolio/*`, `apps/web/src/components/sportsbook/*`, `apps/web/src/components/trading/*`, `apps/web/src/components/ui/*`, `apps/web/src/hooks/use-price-alerts.ts` | Houses reusable UI primitives plus feature-level views for landing-page storytelling, comments, deposits, leaderboard, portfolio, sportsbook/live-sports surfaces, notifications, hook-driven price alerting, and trading flows | App shell, hooks, contexts, wallet state |
+| Web UI state | `apps/web/src/context/*` | Client-only UI state for wallet, filters, onboarding, and trading | React components and hooks |
+| Marketing theme runtime | `apps/web/src/components/kw-theme.tsx`, `apps/web/src/components/kw-theme-state.ts`, `apps/web/src/components/landing/landing-shell.tsx` | Owns the marketing/editorial theme system layered on top of `next-themes`, including the landing-page theme shell and migration from the legacy landing-only theme key | Marketing pages, `ThemeProvider`, localStorage |
 | Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/extension-auth.ts`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, extension CORS/session helpers, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
-| Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/events/sports/live/page.tsx`, `apps/web/src/app/sports/live/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/components/price-alerts/*`, `apps/web/src/app/whales/_components/*`, `apps/web/src/app/whales/_lib/*` | Powers live sports markets across the current live-route aliases, CLOB notification surfaces, browser-side price alerting, and whale-specific dashboards/aggregations | Web data hooks, websocket managers, Polymarket CLOB |
+| Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/events/sports/live/page.tsx`, `apps/web/src/app/sports/live/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/hooks/use-price-alerts.ts`, `apps/web/src/app/whales/_components/*`, `apps/web/src/app/whales/_lib/*` | Powers live sports markets across the current live-route aliases, CLOB notification surfaces, hook-driven browser price-alert detection, and whale-specific dashboards/aggregations | Web data hooks, websocket managers, Polymarket CLOB |
 | Agent operator dashboard | `apps/web/src/app/agent/page.tsx`, `apps/web/src/app/agent/agent-dashboard-client.tsx` | Internal UI for managing watchlist items, triggering runs, reviewing evidence/votes, inspecting paper positions, live-order audits, and model calibration | Agent admin APIs, `apps/agent`, D1 |
 | API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI | Polymarket APIs, OpenRouter, relayer proxy, Polygon RPC |
 | Agent admin API helpers | `apps/web/src/lib/agent/api.ts`, `apps/web/src/lib/agent/repository.ts`, `apps/web/src/app/api/agent/**/*/route.ts` | Enforces admin auth/origin checks, binds Cloudflare D1 when available, and exposes the paper-trading control plane over `/api/agent/*` | Agent dashboard, `apps/agent`, D1, origin guard |
@@ -95,11 +96,11 @@ flowchart LR
 | Insider detection and backtesting | `apps/web/src/lib/insider/*`, `apps/web/src/app/api/whales/backtest/route.ts` | Scores suspicious trading with archetype-based detectors, replays the same logic against resolved markets, and exposes the heavyweight backtest API used by the whales backtest UI | Polymarket Gamma/Data/CLOB APIs, trader-history cache, whales pages |
 | Web constants and types | `apps/web/src/constants/*`, `apps/web/src/types/*` | Shared Polymarket constants, API enums, cache durations, and typed response shapes used across routes, hooks, and components | Web app shell, API routes, hooks |
 | Web platform guards | `apps/web/src/middleware.ts`, `apps/web/instrumentation-client.ts` | Applies security headers/CSP and bootstraps browser-side telemetry | Browser, Next.js runtime, PostHog |
-| Extension content runtime | `apps/extension/src/content/index.ts`, `apps/extension/src/content/*` | Bundles the content-script pipeline, detects supported sites, extracts post/article text, ranks relevant markets, and injects inline UI and trading panels | Background service worker, page bridge, Knoww APIs, Polymarket APIs |
+| Extension content runtime | `apps/extension/src/content/index.ts`, `apps/extension/src/content/*`, `apps/extension/src/content/streaming/stream-markets.ts` | Bundles the content-script pipeline, detects supported sites, extracts post/article text, ranks relevant markets, and also powers stream-surface companion cards such as Twitch's Live Markets module | Background service worker, page bridge, Knoww APIs, Polymarket APIs |
 | Extension in-page trading bridge | `apps/extension/src/content/trading/*`, `apps/extension/src/page-bridge.ts` | Manages content-script trading UI, extension-session bootstrapping, proxy-wallet bridging, and page-world wallet RPC handoff for inline trading flows | Content runtime, background worker, page bridge, `/api/extension/session/*`, `/api/relayer/*` |
 | Extension background worker | `apps/extension/src/background.ts`, `apps/extension/src/background/*` | Central message router, auth token storage, batched analytics queue, CORS-safe fetch proxy, local NLP/embedding services | Content scripts, offscreen document, Knoww API, analytics ingest proxy, Polymarket APIs |
 | Extension page bridge | `apps/extension/src/page-bridge.ts` | Runs in the page's main world to discover injected wallets via EIP-6963 and bridge EIP-1193 RPC requests between page wallets and the isolated content script | Content runtime, injected wallet providers |
-| Extension platform and host config | `apps/extension/src/supported-hosts.ts`, `apps/extension/src/content/platform-registry.ts`, `apps/extension/src/content/platforms/*` | Defines match patterns, platform adapters, and site-specific extraction/injection behavior for supported social and editorial surfaces | Content runtime, background worker |
+| Extension platform and host config | `apps/extension/src/supported-hosts.ts`, `apps/extension/src/content/platform-registry.ts`, `apps/extension/src/content/platforms/*` | Defines match patterns, platform adapters, and site-specific extraction/injection behavior for supported social, editorial, prediction-native, and streaming surfaces | Content runtime, background worker |
 | Extension offscreen runtimes | `apps/extension/src/offscreen/offscreen.ts`, `apps/extension/src/offscreen/scoring-runtime.ts`, `apps/extension/src/offscreen/trading-runtime.ts`, `apps/extension/src/background/trading-handler.ts` | Splits heavy scoring and trading work out of the MV3 service worker, loading runtime-specific modules only when needed | Background worker, relayer, CLOB, Polygon RPC, local scoring pipeline |
 | Extension options and preferences | `apps/extension/src/options.tsx`, `apps/extension/src/content/preferences.ts`, `apps/extension/src/types/settings.ts` | Manages per-user platform/source toggles, analytics preferences, theme overrides, and debug settings | Chrome storage, content runtime, background worker |
 | Extension sidepanel | `apps/extension/src/sidepanel.ts` | Renders the extension-owned sidepanel UI for snapshot markets, search, portfolio, and wallet-session controls outside the in-page injection flow | Background worker, Knoww API, Chrome extension runtime |
@@ -111,7 +112,7 @@ flowchart LR
 
 | Page | Key path | Purpose |
 | --- | --- | --- |
-| Home | `apps/web/src/app/page.tsx`, `apps/web/src/app/landing-page-client.tsx` | Public marketing landing page for the product and extension |
+| Home | `apps/web/src/app/page.tsx` | Public marketing landing page for the product and extension |
 | Markets home | `apps/web/src/app/home-content.tsx` | Main market-browsing experience with persisted view-mode state |
 | Event listing by tag | `apps/web/src/app/events/[tag]/page.tsx` | Category/tag-driven event browsing |
 | Event detail | `apps/web/src/app/events/detail/[slug]/page.tsx` | Event-level market list and event metadata view |
@@ -326,12 +327,11 @@ Notes:
 
 | Storage | Key shape | Defined in | Purpose |
 | --- | --- | --- | --- |
-| `sessionStorage` | `polymarket_api_creds_<address>` | `apps/web/src/hooks/use-clob-credentials.ts` | Stores derived CLOB API credentials for the current browser session |
-| `sessionStorage` | `polymarket_readonly_keys_<address>` | `apps/web/src/hooks/use-clob-credentials.ts` | Stores read-only CLOB API keys |
+| `sessionStorage` | `polymarket_api_creds_<clobBaseUrl>_<address>` | `apps/web/src/hooks/use-clob-credentials.ts` | Stores derived CLOB API credentials for the current browser session, namespaced by the active CLOB host |
 | `sessionStorage` | `homeViewMode` | `apps/web/src/app/home-content.tsx` | Remembers the home-page view mode for the active tab |
 | `localStorage` | search-related keys | `apps/web/src/app/search/page.tsx`, `apps/web/src/components/market-search.tsx` | Stores recent searches / last-viewed search results |
 | `localStorage` | `knoww_onboarding_complete_<address>` | `apps/web/src/context/onboarding-context.tsx` | Remembers that a wallet completed trading onboarding |
-| `localStorage` | `knoww-accent-color` | `apps/web/src/context/color-theme-context.tsx` | Persists the selected accent color |
+| `localStorage` | `theme` (with legacy migration from `knoww-landing-theme`) | `apps/web/src/components/kw-theme.tsx`, `apps/web/src/components/landing/landing-shell.tsx` | Persists the marketing/app theme selected through `next-themes` |
 | `localStorage` | `price-alerts-storage` | `apps/web/src/hooks/use-price-alerts.ts` | Persists browser-side price alert configuration |
 | `localStorage` | `trading_session_*` envelope keys | `apps/web/src/lib/session.ts` | Persists signed trading-session metadata with integrity checks |
 
@@ -506,7 +506,7 @@ Why:
 
 - Content scripts can touch the page DOM but should stay lightweight
 - The MV3 service worker is good for routing and storage, but not heavy crypto bundles
-- The offscreen document hosts `ethers` and `ClobClient` without bloating the service worker lifecycle
+- The offscreen document hosts `viem`-based trading and the unified CLOB client without bloating the service worker lifecycle
 
 Where to see it:
 

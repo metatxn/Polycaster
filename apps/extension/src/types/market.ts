@@ -361,4 +361,10 @@ export interface InjectedMarketEntry {
   timestamp: number;
   isInViewport?: boolean;
   lastVisibleAt?: number;
+  /**
+   * True for markets surfaced by a streaming surface (Twitch/YouTube) rather
+   * than the feed scan. These have no injected post card, so the stack treats
+   * them as always-active and skips DOM availability checks.
+   */
+  isStreamSurface?: boolean;
 }

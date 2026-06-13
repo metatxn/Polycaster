@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { BadgeCheck, Check, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { LeaderboardTrader } from "@/hooks/use-leaderboard";
-import { formatCurrency } from "@/lib/formatters";
+import { formatAddress, formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 interface LeaderboardTableProps {
@@ -32,10 +32,6 @@ function rankAccentClass(rank: number): string {
   if (rank === 2) return "after:bg-(--kwm-ink-3)/60";
   if (rank === 3) return "after:bg-amber-600/70";
   return "after:bg-transparent";
-}
-
-function formatAddress(address: string) {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 /** Some traders have a `userName` that's actually a raw wallet address
@@ -86,6 +82,7 @@ function CopyButton({ text }: { text: string }) {
         <button
           type="button"
           onClick={handleCopy}
+          aria-label="Copy address"
           className="p-1 text-(--kwm-ink-3)/70 hover:text-(--kwm-ink) transition-colors"
         >
           {copied ? (
@@ -182,7 +179,7 @@ export function LeaderboardTable({
           const rankDisplay = rank < 10 ? `0${rank}` : `${rank}`;
 
           return (
-            <motion.div
+            <m.div
               key={trader.proxyWallet}
               role="button"
               tabIndex={0}
@@ -243,7 +240,7 @@ export function LeaderboardTable({
                   </div>
                   {!nameIsAddress(trader) && (
                     <div className="flex items-center gap-1">
-                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
+                      <span className="font-mono text-[10px] tracking-[0.12em] text-(--kwm-ink-3)">
                         {formatAddress(trader.proxyWallet)}
                       </span>
                       <CopyButton text={trader.proxyWallet} />
@@ -287,7 +284,7 @@ export function LeaderboardTable({
                   <span className="text-(--kwm-ink-3)/60">—</span>
                 )}
               </div>
-            </motion.div>
+            </m.div>
           );
         })}
       </div>
@@ -303,7 +300,7 @@ export function LeaderboardTable({
           const rankDisplay = rank < 10 ? `0${rank}` : `${rank}`;
 
           return (
-            <motion.div
+            <m.div
               key={trader.proxyWallet}
               role="button"
               tabIndex={0}
@@ -364,7 +361,7 @@ export function LeaderboardTable({
                 </div>
                 {!nameIsAddress(trader) && (
                   <div className="flex items-center gap-1 mb-2">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-(--kwm-ink-3)">
+                    <span className="font-mono text-[10px] tracking-[0.12em] text-(--kwm-ink-3)">
                       {formatAddress(trader.proxyWallet)}
                     </span>
                     <CopyButton text={trader.proxyWallet} />
@@ -396,7 +393,7 @@ export function LeaderboardTable({
                   <ExternalLink className="h-3.5 w-3.5" />
                 </Link>
               )}
-            </motion.div>
+            </m.div>
           );
         })}
       </div>

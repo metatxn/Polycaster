@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import {
   ChevronDown,
   ChevronRight,
@@ -95,9 +95,13 @@ CommentItemProps) {
   // Show/hide replies (separate from minimize)
   const [showReplies, setShowReplies] = useState(depth < 2);
 
-  const displayName = comment.profile?.displayUsernamePublic
+  const rawName = comment.profile?.displayUsernamePublic
     ? comment.profile.name
-    : comment.profile?.pseudonym || "Anonymous";
+    : null;
+  const displayName =
+    rawName && !/^0x[0-9a-fA-F]{40}/.test(rawName)
+      ? rawName
+      : comment.profile?.pseudonym || "Anonymous";
 
   const avatarUrl =
     comment.profile?.profileImageOptimized?.imageUrlOptimized ||
@@ -194,7 +198,7 @@ CommentItemProps) {
   const totalReplies = countAllReplies(comment);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
@@ -386,7 +390,7 @@ CommentItemProps) {
           {/* Collapsible content */}
           <AnimatePresence initial={false}>
             {!isMinimized && (
-              <motion.div
+              <m.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
@@ -488,7 +492,7 @@ CommentItemProps) {
                     />
                   )}
                 </AnimatePresence> */}
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
         </div>
@@ -497,7 +501,7 @@ CommentItemProps) {
       {/* Nested replies - hidden when parent is minimized */}
       <AnimatePresence initial={false}>
         {hasReplies && showReplies && !isMinimized && (
-          <motion.div
+          <m.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -521,9 +525,9 @@ CommentItemProps) {
                 // onReply={onReply}
               />
             ))}
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </m.div>
   );
 }

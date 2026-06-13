@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 export interface Holder {
@@ -37,15 +38,9 @@ async function fetchTopHolders(
     limit: limit.toString(),
   });
 
-  const response = await fetch(
+  return fetchJson<TopHoldersResponse[]>(
     `${POLYMARKET_API.DATA.HOLDERS}?${params.toString()}`
   );
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch top holders");
-  }
-
-  return response.json();
 }
 
 /**

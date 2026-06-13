@@ -1,5 +1,6 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isAllowedOrigin } from "@/lib/origin-guard";
 
@@ -294,10 +295,7 @@ export async function POST(request: NextRequest) {
 
   if (!requestOrigin || !isAllowedOrigin(requestOrigin)) {
     log.warn("origin.rejected", { origin: requestOrigin || "(no origin)" });
-    return NextResponse.json(
-      { error: "Forbidden: origin not allowed" },
-      { status: 403 }
-    );
+    return jsonError("Forbidden: origin not allowed", 403);
   }
 
   // Rate limit: 30 requests per minute
@@ -311,10 +309,7 @@ export async function POST(request: NextRequest) {
   // Check content-length to reject oversized payloads early
   const contentLength = request.headers.get("content-length");
   if (contentLength && Number.parseInt(contentLength, 10) > MAX_BODY_SIZE) {
-    return NextResponse.json(
-      { error: "Request body too large" },
-      { status: 413, headers: corsHeaders }
-    );
+    return jsonError("Request body too large", 413, corsHeaders);
   }
 
   // Parse JSON body with dedicated error handling
@@ -322,28 +317,19 @@ export async function POST(request: NextRequest) {
   try {
     const rawBody = await request.text();
     if (rawBody.length > MAX_BODY_SIZE) {
-      return NextResponse.json(
-        { error: "Request body too large" },
-        { status: 413, headers: corsHeaders }
-      );
+      return jsonError("Request body too large", 413, corsHeaders);
     }
     body = JSON.parse(rawBody);
   } catch (parseError) {
     // Handle JSON parse errors (SyntaxError) with a 400 response
     log.warn("body.invalid_json", { error: parseError });
-    return NextResponse.json(
-      { error: "Invalid JSON payload" },
-      { status: 400, headers: corsHeaders }
-    );
+    return jsonError("Invalid JSON payload", 400, corsHeaders);
   }
 
   try {
     // Validate the request body structure
     if (!body || (typeof body !== "object" && !Array.isArray(body))) {
-      return NextResponse.json(
-        { error: "Invalid JSON-RPC request" },
-        { status: 400, headers: corsHeaders }
-      );
+      return jsonError("Invalid JSON-RPC request", 400, corsHeaders);
     }
 
     // Validate JSON-RPC methods against denylist
@@ -357,16 +343,18 @@ export async function POST(request: NextRequest) {
           : undefined;
 
       if (typeof method !== "string") {
-        return NextResponse.json(
-          { error: "Invalid JSON-RPC request: missing method" },
-          { status: 400, headers: corsHeaders }
+        return jsonError(
+          "Invalid JSON-RPC request: missing method",
+          400,
+          corsHeaders
         );
       }
 
       if (BLOCKED_RPC_METHODS.has(method)) {
-        return NextResponse.json(
-          { error: `RPC method not allowed through proxy: ${method}` },
-          { status: 403, headers: corsHeaders }
+        return jsonError(
+          `RPC method not allowed through proxy: ${method}`,
+          403,
+          corsHeaders
         );
       }
     }
@@ -395,16 +383,10 @@ export async function POST(request: NextRequest) {
         endpoint: endpoint.name,
       })),
     });
-    return NextResponse.json(
-      { error: "RPC upstream unavailable" },
-      { status: 502, headers: corsHeaders }
-    );
+    return jsonError("RPC upstream unavailable", 502, corsHeaders);
   } catch (error) {
     log.error("proxy.failed", { error });
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500, headers: corsHeaders }
-    );
+    return jsonError("Internal server error", 500, corsHeaders);
   }
 }
 

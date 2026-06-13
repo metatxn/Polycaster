@@ -2,7 +2,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { AlertCircle, ArrowRight, Loader2, X } from "lucide-react";
 
 const log = createLogger("merge-modal");
@@ -248,7 +248,7 @@ export function MergeSharesModal({
           {/* Preview */}
           <AnimatePresence>
             {numericAmount > 0 && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -273,7 +273,7 @@ export function MergeSharesModal({
                     </span>
                   </div>
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
@@ -291,7 +291,7 @@ export function MergeSharesModal({
           {/* Error Message */}
           <AnimatePresence>
             {displayError && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -299,14 +299,14 @@ export function MergeSharesModal({
               >
                 <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
                 <span className="text-sm text-destructive">{displayError}</span>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           {/* Success Message */}
           <AnimatePresence>
             {isSuccess && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -315,7 +315,7 @@ export function MergeSharesModal({
                 <span className="text-sm text-emerald-500">
                   ✓ Merge successful! pUSD added to your balance.
                 </span>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 

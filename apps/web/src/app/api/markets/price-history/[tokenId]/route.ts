@@ -4,6 +4,14 @@ import {
   fetchClobPriceHistory,
 } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { jsonError } from "@/lib/api-error";
+import {
+  clampedInt,
+  firstIssueMessage,
+  orAbsent,
+  tokenIdSchema,
+} from "@/lib/api-query";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 
@@ -44,32 +52,24 @@ export async function GET(
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
-    const { tokenId } = await params;
-
-    if (!tokenId) {
-      return NextResponse.json(
-        { success: false, error: "Token ID is required" },
-        { status: 400 }
-      );
+    const tokenIdResult = tokenIdSchema.safeParse((await params).tokenId);
+    if (!tokenIdResult.success) {
+      return jsonError(firstIssueMessage(tokenIdResult.error), 400);
     }
-
-    // Validate token ID format (should be a long numeric string)
-    if (tokenId.length < 10) {
-      return NextResponse.json(
-        { success: false, error: "Invalid token ID format" },
-        { status: 400 }
-      );
-    }
+    const tokenId = tokenIdResult.data;
 
     const { searchParams } = new URL(request.url);
-    const fidelity = searchParams.get("fidelity") || "60";
-    let startTs = searchParams.get("startTs");
-
-    // If no startTs provided, default to 30 days ago
-    if (!startTs) {
-      const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
-      startTs = thirtyDaysAgo.toString();
-    }
+    // If no startTs provided, default to 30 days ago.
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+    const { fidelity, startTs } = z
+      .object({
+        fidelity: clampedInt(1, 1440, 60),
+        startTs: clampedInt(0, 4102444800, thirtyDaysAgo),
+      })
+      .parse({
+        fidelity: orAbsent(searchParams.get("fidelity")),
+        startTs: orAbsent(searchParams.get("startTs")),
+      });
 
     // Fetch from Polymarket CLOB API
     const data = await fetchClobPriceHistory<PolymarketPriceHistoryResponse>(
@@ -89,8 +89,8 @@ export async function GET(
         success: true,
         history: data.history || [],
         tokenId,
-        startTs: Number(startTs),
-        fidelity: Number(fidelity),
+        startTs,
+        fidelity,
       },
       { headers: getCacheHeaders("priceHistory") }
     );

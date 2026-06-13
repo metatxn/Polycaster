@@ -11,13 +11,15 @@ import { MainContent } from "@/components/main-content";
 import { ThemedToaster } from "@/components/themed-toaster";
 import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import ContextProvider from "@/context";
+import { serializeJsonLd } from "@/lib/json-ld";
 import { DEFAULT_SEO_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
+// Variable font — one file covers the full 200-800 weight axis (the
+// explicit-weight form downloaded seven separate files for the same range).
 const plusJakartaSans = Plus_Jakarta_Sans({
   variable: "--font-sans",
   subsets: ["latin"],
-  weight: ["200", "300", "400", "500", "600", "700", "800"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -44,14 +46,12 @@ const fraunces = Fraunces({
 const geistSans = Geist({
   variable: "--font-geist",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
   display: "swap",
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
   display: "swap",
 });
 
@@ -147,7 +147,7 @@ export default async function RootLayout({
         <link rel="dns-prefetch" href={CLOB_WS_BASE_URL} />
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
         />
       </head>
       <body

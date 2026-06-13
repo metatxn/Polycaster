@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import type { TabType } from "./types";
 
 export function TabNav({
@@ -48,7 +48,7 @@ export function TabNav({
               )}
             </span>
             {isActive && (
-              <motion.span
+              <m.span
                 layoutId="portfolioTabUnderline"
                 aria-hidden="true"
                 className="absolute inset-x-0 -bottom-px h-px bg-foreground"

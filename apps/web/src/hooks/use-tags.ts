@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 export interface Tag {
@@ -28,18 +29,7 @@ interface TagsResponse {
  * Fetch all available tags/categories
  */
 async function fetchTags(): Promise<Tag[]> {
-  const response = await fetch("/api/tags");
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch tags");
-  }
-
-  const data: TagsResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || "Failed to fetch tags");
-  }
-
+  const data = await fetchJson<TagsResponse>("/api/tags");
   return data.tags || [];
 }
 

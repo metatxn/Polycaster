@@ -8,19 +8,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  ACCENT_COLORS,
-  BASE_THEMES,
-  useAccentColor,
-} from "@/context/color-theme-context";
+import { BASE_THEMES } from "@/lib/base-themes";
 import { cn } from "@/lib/utils";
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const { accentColor, setAccentColor } = useAccentColor();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -107,30 +101,6 @@ export function ThemeToggle() {
                 <Check className="h-3 w-3 ml-auto shrink-0 text-primary" />
               )}
             </button>
-          ))}
-        </div>
-
-        <DropdownMenuSeparator />
-
-        {/* Accent Color Section */}
-        <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
-          Accent Color
-        </DropdownMenuLabel>
-        <div className="grid grid-cols-7 gap-1 p-2">
-          {ACCENT_COLORS.map((color) => (
-            <button
-              key={color.value}
-              type="button"
-              onClick={() => setAccentColor(color.value)}
-              className={cn(
-                "h-6 w-6 rounded-full border-2 transition-all hover:scale-110",
-                accentColor === color.value
-                  ? "border-foreground ring-2 ring-foreground ring-offset-1 ring-offset-background"
-                  : "border-transparent"
-              )}
-              style={{ backgroundColor: color.color }}
-              title={color.label}
-            />
           ))}
         </div>
       </DropdownMenuContent>

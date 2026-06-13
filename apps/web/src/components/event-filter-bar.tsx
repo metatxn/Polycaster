@@ -230,11 +230,13 @@ interface EventFilterBarProps {
    *  game-state concepts, so the chip only makes sense for sports —
    *  keep it off elsewhere. */
   showStatus?: boolean;
+  showTags?: boolean;
 }
 
 export function EventFilterBar({
   className,
   showStatus = false,
+  showTags = true,
 }: EventFilterBarProps) {
   const {
     filters,
@@ -341,35 +343,36 @@ export function EventFilterBar({
           </FilterChip>
         )}
 
-        {/* Tags Filter */}
-        <FilterChip
-          icon={Tag}
-          label="Tags"
-          value={tagsLabel}
-          isActive={isTagsActive}
-        >
-          <DropdownMenuContent
-            align="start"
-            className="w-48 max-h-64 overflow-y-auto"
+        {showTags && (
+          <FilterChip
+            icon={Tag}
+            label="Tags"
+            value={tagsLabel}
+            isActive={isTagsActive}
           >
-            <DropdownMenuCheckboxItem
-              checked={filters.tagSlugs.length === 0}
-              onCheckedChange={() => setTagSlugs([])}
+            <DropdownMenuContent
+              align="start"
+              className="w-48 max-h-64 overflow-y-auto"
             >
-              All tags
-            </DropdownMenuCheckboxItem>
-            <DropdownMenuSeparator />
-            {tags?.slice(0, 15).map((tag) => (
               <DropdownMenuCheckboxItem
-                key={tag.slug}
-                checked={filters.tagSlugs.includes(tag.slug)}
-                onCheckedChange={() => handleTagToggle(tag.slug)}
+                checked={filters.tagSlugs.length === 0}
+                onCheckedChange={() => setTagSlugs([])}
               >
-                {tag.label}
+                All tags
               </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </FilterChip>
+              <DropdownMenuSeparator />
+              {tags?.slice(0, 15).map((tag) => (
+                <DropdownMenuCheckboxItem
+                  key={tag.slug}
+                  checked={filters.tagSlugs.includes(tag.slug)}
+                  onCheckedChange={() => handleTagToggle(tag.slug)}
+                >
+                  {tag.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </FilterChip>
+        )}
 
         {/* Volume Filter */}
         <FilterChip

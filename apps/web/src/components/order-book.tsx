@@ -2,7 +2,7 @@
 
 import { fetchClobOrderBook } from "@knoww/shared-types/clob";
 import { useQuery } from "@tanstack/react-query";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import {
   ChevronDown,
   ChevronUp,
@@ -41,6 +41,7 @@ import {
   type ConnectionState,
   useOrderBookWebSocket,
 } from "@/hooks/use-shared-websocket";
+import { qk } from "@/lib/query-keys";
 import { isValidTokenId, isValidTokenIdForRest } from "@/lib/token-validation";
 import { cn } from "@/lib/utils";
 
@@ -282,7 +283,7 @@ export function OrderBook({
     refetch,
     isFetching,
   } = useQuery<OrderBookData>({
-    queryKey: ["orderBook", tokenId],
+    queryKey: qk.orderBook(tokenId),
     queryFn: () => fetchOrderBook(tokenId),
     staleTime: 30000, // Consider data fresh for 30s
     gcTime: 60000, // Keep in cache for 60s (prevents refetch on tab switch)
@@ -744,14 +745,14 @@ export function OrderBook({
 
         <CollapsibleContent>
           <AnimatePresence mode="wait">
-            <motion.div
+            <m.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
             >
               {renderOrderBookContent()}
-            </motion.div>
+            </m.div>
           </AnimatePresence>
         </CollapsibleContent>
       </div>

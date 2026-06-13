@@ -1,10 +1,5 @@
 /**
- * Product footer — DeFi/financial counterpart to `EditorialFooter`. Used
- * across product pages (/leaderboard, /portfolio, /whales, /search,
- * /events, /profile, etc) wrapped in `.kw-app`.
- *
- * Compact mono row — no editorial italic pull quote. Wordmark + context
- * + year on one line.
+ * Product footer used across product pages inside `.kw-app`.
  */
 export function ProductFooter({
   context = "Polymarket",

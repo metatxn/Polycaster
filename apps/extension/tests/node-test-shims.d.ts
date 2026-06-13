@@ -8,12 +8,15 @@ declare module "node:assert/strict" {
   export default assert;
 }
 
-declare module "node:test" {
-  type TestFn = () => void | Promise<void>;
+declare module "node:fs" {
+  export function readFileSync(
+    path: string,
+    options: { encoding: "utf8" }
+  ): string;
+}
 
-  function test(name: string, fn: TestFn): void;
-
-  export default test;
+declare module "node:path" {
+  export function join(...parts: string[]): string;
 }
 
 declare module "node:module" {

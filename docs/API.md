@@ -340,7 +340,7 @@ Success `200`
 - Schema:
   - `success: true`
   - `orders: { idempotencyKey, runId, watchlistItemId, tokenId, side, requestedSizeUsd, price, signedOrderHash, orderId, status: "DRY_RUN" | "POSTED" | "FILLED" | "CANCELED" | "FAILED", submittedAt, filledAt, createdAt, dryRun, error }[]`
-  - `config: { enabled: boolean, dryRun: boolean, confirmedReal: boolean, hasWalletKey: boolean, maxLiveNotionalUsd: string, clobHost: string, chainId: number }`
+  - `config: { enabled: boolean, dryRun: boolean, confirmedReal: boolean, hasWalletKey: boolean, hasCredentialEncryptionKey: boolean, emergencyStop: boolean, dailyOrderCap: string | null, dailyNotionalCap: string | null, maxLiveNotionalUsd: string, clobHost: string, chainId: number }`
 
 Errors
 

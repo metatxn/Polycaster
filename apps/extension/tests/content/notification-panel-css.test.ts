@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "vitest";
 
 declare const process: { cwd(): string };
-declare function require(moduleName: string): unknown;
-
-const { readFileSync } = require("node:fs") as {
-  readFileSync(path: string, options: { encoding: "utf8" }): string;
-};
-const { join } = require("node:path") as {
-  join(...parts: string[]): string;
-};
 
 function readInlineCss(): string {
   return readFileSync(join(process.cwd(), "src/content/knoww-inline.css"), {
@@ -59,7 +53,7 @@ test("notification monetary display calculations use Decimal.js", () => {
   const volumeFormatter = extractFunctionSource(uiSource, "formatMarketVolume");
   const priceRenderer = extractFunctionSource(uiSource, "renderEditorialPrice");
 
-  assert.equal(/import Decimal from "decimal\.js";/.test(uiSource), true);
+  assert.equal(/import \{ Decimal \} from "decimal\.js";/.test(uiSource), true);
   assert.equal(/toDecimal\(/.test(volumeFormatter), true);
   assert.equal(/toDecimal\(prices\[[^\]]+\]\)/.test(priceRenderer), true);
   assert.equal(

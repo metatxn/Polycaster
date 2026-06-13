@@ -1,6 +1,8 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { jsonError } from "@/lib/api-error";
+import { clampedInt, orAbsent } from "@/lib/api-query";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 
@@ -66,13 +68,11 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get("category")?.toUpperCase() || "OVERALL";
     const timePeriod = searchParams.get("timePeriod")?.toUpperCase() || "DAY";
     const orderBy = searchParams.get("orderBy")?.toUpperCase() || "PNL";
-    const limit = Math.min(
-      Math.max(Number.parseInt(searchParams.get("limit") || "25", 10), 1),
-      50
+    const limit = clampedInt(1, 50, 25).parse(
+      orAbsent(searchParams.get("limit"))
     );
-    const offset = Math.max(
-      Number.parseInt(searchParams.get("offset") || "0", 10),
-      0
+    const offset = clampedInt(0, Number.MAX_SAFE_INTEGER, 0).parse(
+      orAbsent(searchParams.get("offset"))
     );
     const user = searchParams.get("user") || undefined;
     const userName = searchParams.get("userName") || undefined;
@@ -81,11 +81,9 @@ export async function GET(request: NextRequest) {
     if (
       !VALID_CATEGORIES.includes(category as (typeof VALID_CATEGORIES)[number])
     ) {
-      return NextResponse.json(
-        {
-          error: `Invalid category. Valid options: ${VALID_CATEGORIES.join(", ")}`,
-        },
-        { status: 400 }
+      return jsonError(
+        `Invalid category. Valid options: ${VALID_CATEGORIES.join(", ")}`,
+        400
       );
     }
 
@@ -95,21 +93,17 @@ export async function GET(request: NextRequest) {
         timePeriod as (typeof VALID_TIME_PERIODS)[number]
       )
     ) {
-      return NextResponse.json(
-        {
-          error: `Invalid timePeriod. Valid options: ${VALID_TIME_PERIODS.join(", ")}`,
-        },
-        { status: 400 }
+      return jsonError(
+        `Invalid timePeriod. Valid options: ${VALID_TIME_PERIODS.join(", ")}`,
+        400
       );
     }
 
     // Validate order by
     if (!VALID_ORDER_BY.includes(orderBy as (typeof VALID_ORDER_BY)[number])) {
-      return NextResponse.json(
-        {
-          error: `Invalid orderBy. Valid options: ${VALID_ORDER_BY.join(", ")}`,
-        },
-        { status: 400 }
+      return jsonError(
+        `Invalid orderBy. Valid options: ${VALID_ORDER_BY.join(", ")}`,
+        400
       );
     }
 
@@ -142,10 +136,7 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       log.error("upstream.error", { status: response.status });
-      return NextResponse.json(
-        { error: "Failed to fetch leaderboard data" },
-        { status: response.status }
-      );
+      return jsonError("Failed to fetch leaderboard data", response.status);
     }
 
     const traders: LeaderboardTrader[] = await response.json();
@@ -164,9 +155,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     log.error("fetch.failed", { error });
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return jsonError("Internal server error", 500);
   }
 }

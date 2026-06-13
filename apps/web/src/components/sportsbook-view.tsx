@@ -5,7 +5,7 @@ import {
   resolveNegRisk,
 } from "@knoww/shared-types/polymarket";
 import { useQuery } from "@tanstack/react-query";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -24,6 +24,7 @@ import {
   type LiveGameState,
   useSportsWebSocket,
 } from "@/hooks/use-sports-websocket";
+import { qk } from "@/lib/query-keys";
 import {
   isCurrentSportsEvent,
   isLiveOrRecentlyStartedSportsEvent,
@@ -315,7 +316,8 @@ export function SportsbookView({
     tagSlug,
     seriesId,
     filters: liveOnly ? { live: true } : undefined,
-    refetchInterval: liveOnly ? 10_000 : 30_000,
+    // /api/events/* is edge-cached for 60s (s-maxage) — polling faster than ~half the TTL only re-downloads cached bytes.
+    refetchInterval: liveOnly ? 30_000 : 60_000,
     fullMarkets: true,
   });
 
@@ -409,7 +411,7 @@ export function SportsbookView({
   );
 
   const { data: companionMarketMap } = useQuery({
-    queryKey: ["companion-markets", stableCompanionKey],
+    queryKey: qk.sports.companionMarkets(stableCompanionKey),
     queryFn: async () => {
       if (!companionSlugs.length) return {};
       const results = await Promise.allSettled(
@@ -641,13 +643,17 @@ export function SportsbookView({
   const isLoading = liveLoading || scheduledLoading;
   const error = liveError || scheduledError;
   const labelText = label?.toLowerCase() ?? "sports";
+  const displayLeagueLabel =
+    labelText.length <= 4
+      ? labelText.toUpperCase()
+      : labelText.charAt(0).toUpperCase() + labelText.slice(1);
 
   return (
     <>
       <div className="grid min-w-0 items-start gap-6 lg:gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
         {/* Left: live + scheduled sportsbook */}
         <AnimatePresence mode="wait">
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -704,14 +710,14 @@ export function SportsbookView({
                     No Markets
                   </p>
                   <p className="font-editorial italic text-xl text-foreground max-w-md mx-auto leading-snug">
-                    No active {labelText} markets right now.
+                    No active {displayLeagueLabel} markets right now.
                   </p>
                   <p className="text-sm text-muted-foreground mt-3 max-w-md mx-auto">
                     Check back soon, or try a different league from the rail.
                   </p>
                 </div>
               )}
-          </motion.div>
+          </m.div>
         </AnimatePresence>
 
         {/* Right: trade panel — sticky sidebar */}
@@ -756,9 +762,10 @@ export function SportsbookView({
         </div>
       </div>
 
+      {/* Sits flush above BottomNav (token + safe-area inset) */}
       {/* Mobile bottom-bar trade trigger */}
       {selectedMarket && tradingOutcomes.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border/60 lg:hidden z-50">
+        <div className="fixed bottom-[calc(var(--spacing-bottom-nav)+env(safe-area-inset-bottom,0px))] left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border/60 lg:hidden z-50">
           <div className="flex items-center justify-between gap-3 px-4 py-3">
             <div className="flex-1 min-w-0">
               <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted-foreground/90">

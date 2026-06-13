@@ -1,5 +1,6 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 
 const log = createLogger("api.price.pol");
@@ -52,10 +53,7 @@ export async function GET(request: NextRequest) {
 
     if (!apiKey) {
       log.warn("config.missing", { key: "COINMARKET_API_KEY" });
-      return NextResponse.json(
-        { error: "API key not configured" },
-        { status: 500 }
-      );
+      return jsonError("API key not configured", 500);
     }
 
     const response = await fetch(
@@ -108,9 +106,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(
-      { error: "Failed to fetch POL price" },
-      { status: 500 }
-    );
+    return jsonError("Failed to fetch POL price", 500);
   }
 }

@@ -7,8 +7,6 @@ import {
   readErc1155Approval,
   readPusdExchangeAllowance,
 } from "@knoww/shared-types/approvals";
-import { fetchClobOrderBook } from "@knoww/shared-types/clob";
-import { CTF_JSON_ABI } from "@knoww/shared-types/ctf";
 import {
   assertClobPostOrderSuccess,
   CLOB_ASSET_TYPES,
@@ -29,7 +27,6 @@ import {
 import {
   buildClobOrderPreflightPlan,
   buildPusdAutoWrapTransactions,
-  DEFAULT_APPROVAL_AMOUNT,
   formatConditionalShares,
   parseApprovalAmountRaw,
   planPusdAutoWrap,
@@ -42,7 +39,6 @@ import { useConnection, useWalletClient } from "wagmi";
 const log = createLogger("clob-client");
 
 import {
-  CTF_ADDRESS,
   PUSD_ADDRESS,
   PUSD_DECIMALS,
   USDC_E_ADDRESS,
@@ -59,6 +55,26 @@ import {
   getViemWalletClient,
   hasViemWalletProvider,
 } from "@/lib/viem-wallet-client";
+import {
+  readConditionalBalanceRaw,
+  readPusdAllowance,
+  readPusdBalance,
+  readUsdcBalance,
+} from "./clob/balances";
+import {
+  checkOrderScoring,
+  checkOrdersScoring,
+  fetchOpenOrders,
+  fetchOrderBook,
+} from "./clob/market-data";
+import {
+  CLOB_BALANCE_SYNC_DELAYS_MS,
+  type ClobOperationStep,
+  DEFAULT_TRADING_APPROVAL_RAW,
+  isBalanceAllowanceError,
+  parseRawUnits,
+  wait,
+} from "./clob/shared";
 import { useClobCredentials } from "./use-clob-credentials";
 import { useProxyWallet } from "./use-proxy-wallet";
 import { useRelayerClient } from "./use-relayer-client";
@@ -99,52 +115,12 @@ export interface CreateOrderParams {
 
 // Module-level config to avoid hook dependencies
 const CLOB_HOST = CLOB_BASE_URL;
-const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
-  DEFAULT_APPROVAL_AMOUNT
-);
-const CLOB_BALANCE_SYNC_DELAYS_MS = [0, 250, 750, 1500, 2500] as const;
 
 type ClobBalanceAllowanceReadableClient = ClobBalanceAllowanceClient & {
   getBalanceAllowance?: (
     args: ClobBalanceAllowanceTarget
   ) => Promise<{ balance?: string | number | bigint }>;
 };
-
-function parseRawUnits(value: string | number | bigint | undefined): bigint {
-  if (typeof value === "bigint") return value;
-  if (typeof value === "number") {
-    return Number.isFinite(value) && value >= 0
-      ? BigInt(Math.trunc(value))
-      : BigInt(0);
-  }
-  if (typeof value === "string" && /^\d+$/.test(value)) {
-    return BigInt(value);
-  }
-  return BigInt(0);
-}
-
-function isBalanceAllowanceError(error: unknown): boolean {
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "";
-  return /not enough balance\s*\/\s*allowance|balance is not enough/i.test(
-    message
-  );
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-type ClobOperationStep =
-  | "idle"
-  | "checking"
-  | "approving"
-  | "preparing"
-  | "placing";
 
 /**
  * Hook for interacting with Polymarket CLOB using the official SDK
@@ -207,28 +183,6 @@ export function useClobClient() {
       hasViemWalletProvider(walletClient)
     );
   }, [isConnected, hasCredentials, hasProxyWallet, proxyAddress, walletClient]);
-
-  const readConditionalBalanceRaw = useCallback(
-    async (tokenId: string, owner: string): Promise<bigint> => {
-      const { createPublicClient, http } = await import("viem");
-      const { polygon } = await import("@/lib/chains");
-
-      const publicClient = createPublicClient({
-        chain: polygon,
-        transport: http(getRpcUrl()),
-      });
-
-      const balances = (await publicClient.readContract({
-        address: CTF_ADDRESS as Address,
-        abi: CTF_JSON_ABI,
-        functionName: "balanceOfBatch",
-        args: [[owner as Address], [BigInt(tokenId)]],
-      })) as readonly bigint[];
-
-      return balances[0] ?? BigInt(0);
-    },
-    []
-  );
 
   /**
    * Ensure the proxy wallet has enough pUSD to cover a BUY order.
@@ -738,7 +692,6 @@ export function useClobClient() {
       ensureSellCtfApproval,
       ensureV2Approvals,
       proxyAddress,
-      readConditionalBalanceRaw,
     ]
   );
 
@@ -747,7 +700,7 @@ export function useClobClient() {
    */
   const getOrderBook = useCallback(async (tokenId: string) => {
     try {
-      return await fetchClobOrderBook(tokenId, { host: CLOB_HOST });
+      return await fetchOrderBook(tokenId, CLOB_HOST);
     } catch (err) {
       log.error("order_book.fetch_failed", { error: err });
       throw err;
@@ -762,8 +715,7 @@ export function useClobClient() {
 
     try {
       const client = await getClient();
-      const orders = await client.getOpenOrders();
-      return orders || [];
+      return fetchOpenOrders(client);
     } catch (err) {
       log.error("open_orders.fetch_failed", { error: err });
       return [];
@@ -904,36 +856,7 @@ export function useClobClient() {
       if (!targetAddress) throw new Error("Wallet not connected");
 
       try {
-        const { createPublicClient, http, formatUnits } = await import("viem");
-        const { polygon } = await import("@/lib/chains");
-
-        const ERC20_ABI = [
-          {
-            inputs: [{ name: "owner", type: "address" }],
-            name: "balanceOf",
-            outputs: [{ name: "", type: "uint256" }],
-            stateMutability: "view",
-            type: "function",
-          },
-        ] as const;
-
-        const client = createPublicClient({
-          chain: polygon,
-          transport: http(getRpcUrl()),
-        });
-
-        const balance = await client.readContract({
-          address: USDC_E_ADDRESS,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [targetAddress as `0x${string}`],
-        });
-
-        return {
-          balance: Number(formatUnits(balance, USDC_E_DECIMALS)),
-          balanceRaw: balance.toString(),
-          decimals: USDC_E_DECIMALS,
-        };
+        return await readUsdcBalance(targetAddress);
       } catch (err) {
         log.error("usdc_balance.fetch_failed", { error: err });
         throw err;
@@ -954,36 +877,7 @@ export function useClobClient() {
       const targetAddress = walletAddress || proxyAddress;
       if (!targetAddress) throw new Error("No wallet address");
 
-      const { createPublicClient, http, formatUnits } = await import("viem");
-      const { polygon } = await import("@/lib/chains");
-
-      const ERC20_BALANCE_ABI = [
-        {
-          inputs: [{ name: "owner", type: "address" }],
-          name: "balanceOf",
-          outputs: [{ name: "", type: "uint256" }],
-          stateMutability: "view",
-          type: "function",
-        },
-      ] as const;
-
-      const client = createPublicClient({
-        chain: polygon,
-        transport: http(getRpcUrl()),
-      });
-
-      const balance = await client.readContract({
-        address: PUSD_ADDRESS,
-        abi: ERC20_BALANCE_ABI,
-        functionName: "balanceOf",
-        args: [targetAddress as `0x${string}`],
-      });
-
-      return {
-        balance: Number(formatUnits(balance, PUSD_DECIMALS)),
-        balanceRaw: balance.toString(),
-        decimals: PUSD_DECIMALS,
-      };
+      return readPusdBalance(targetAddress);
     },
     [proxyAddress]
   );
@@ -997,26 +891,7 @@ export function useClobClient() {
       if (!targetAddress) throw new Error("Wallet not connected");
 
       try {
-        const { createPublicClient, http, formatUnits } = await import("viem");
-        const { polygon } = await import("@/lib/chains");
-
-        const client = createPublicClient({
-          chain: polygon,
-          transport: http(getRpcUrl()),
-        });
-
-        const allowance = await readPusdExchangeAllowance(
-          client,
-          targetAddress as Address,
-          negRisk
-        );
-
-        return {
-          allowance: Number(formatUnits(allowance, PUSD_DECIMALS)),
-          allowanceRaw: allowance.toString(),
-          decimals: PUSD_DECIMALS,
-          exchange: negRisk ? "NEG_RISK_CTF_EXCHANGE" : "CTF_EXCHANGE",
-        };
+        return await readPusdAllowance(targetAddress, negRisk);
       } catch (err) {
         log.error("pusd_allowance.fetch_failed", { error: err });
         throw err;
@@ -1034,9 +909,7 @@ export function useClobClient() {
       if (!canTrade) return false;
       try {
         const client = await getClient();
-        // SDK uses snake_case: order_id
-        const response = await client.isOrderScoring({ order_id: orderId });
-        return !!response.scoring;
+        return checkOrderScoring(client, orderId);
       } catch (err) {
         log.error("order_scoring.check_failed", { error: err });
         return false;
@@ -1053,8 +926,7 @@ export function useClobClient() {
       if (!canTrade || orderIds.length === 0) return {};
       try {
         const client = await getClient();
-        // The SDK method might return a dictionary/record of orderId -> scoring
-        return await client.areOrdersScoring({ orderIds });
+        return checkOrdersScoring(client, orderIds);
       } catch (err) {
         log.error("order_scoring.batch_check_failed", { error: err });
         return {};

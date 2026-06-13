@@ -1,4 +1,4 @@
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 
 const X_HANDLE_RE = /^[a-zA-Z0-9_]{1,15}$/;
 const BADGE_CACHE_TTL_MS = 5 * 60 * 1000;

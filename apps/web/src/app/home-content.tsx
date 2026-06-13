@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import {
   Activity,
   Clock,
@@ -575,7 +575,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
             header and meta-strip. Mobile/tablet always see this
             header since the terminal view falls back to the card
             grid below lg. */}
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
@@ -620,13 +620,13 @@ export function HomeContent({ initialData }: HomeContentProps) {
               Top Traders
             </Link>
           </nav>
-        </motion.div>
+        </m.div>
 
         {/* Mobile/Tablet Filter Rows (below xl) — kept in sync with the
             terminal-view's `xl:block` mount so they don't overlap. */}
         <div className="xl:hidden">
           {/* Tab Pills Row + Search */}
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.1 }}
@@ -674,14 +674,14 @@ export function HomeContent({ initialData }: HomeContentProps) {
 
             {/* Search Input */}
             <MarketSearch className="hidden sm:block w-64" />
-          </motion.div>
+          </m.div>
 
           {/* Filter Bar - Separate row on mobile/tablet */}
           <EventFilterBar />
         </div>
 
         {/* Events Content */}
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
@@ -711,7 +711,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           {currentData.isLoading && !currentData.error && (
             <div className="xl:hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5">
               {[...Array(10)].map((_, i) => (
-                <motion.div
+                <m.div
                   key={`skeleton-${i}`}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -725,7 +725,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
                     <Skeleton className="h-3 sm:h-4 w-full rounded-md sm:rounded-lg bg-muted/30" />
                     <Skeleton className="h-3 sm:h-4 w-2/3 rounded-md sm:rounded-lg bg-muted/30" />
                   </div>
-                </motion.div>
+                </m.div>
               ))}
             </div>
           )}
@@ -835,7 +835,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
           {!currentData.isLoading &&
             currentData.events.length === 0 &&
             !currentData.error && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className="text-center py-24 border-t border-b border-border/40"
@@ -867,12 +867,12 @@ export function HomeContent({ initialData }: HomeContentProps) {
                     Clear all filters
                   </button>
                 )}
-              </motion.div>
+              </m.div>
             )}
-        </motion.div>
+        </m.div>
 
         {/* Bottom CTA — editorial colophon */}
-        <motion.section
+        <m.section
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           viewport={{ once: true, margin: "-100px" }}
@@ -906,7 +906,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
               </Button>
             </div>
           </div>
-        </motion.section>
+        </m.section>
       </main>
 
       {/* Minimal Footer - Hidden on mobile (bottom nav takes its place) */}

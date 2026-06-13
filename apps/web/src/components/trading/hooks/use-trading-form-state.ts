@@ -16,13 +16,11 @@ import {
   Side,
   useClobClient,
 } from "@/hooks/use-clob-client";
-import {
-  PROXY_WALLET_QUERY_KEY,
-  useProxyWallet,
-} from "@/hooks/use-proxy-wallet";
+import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useUserPositions } from "@/hooks/use-user-positions";
 import { checkAllApprovals } from "@/lib/approvals";
 import { calculatePotentialPnL, OrderSide } from "@/lib/polymarket";
+import { qk } from "@/lib/query-keys";
 import { clearBalanceCache } from "@/lib/rpc";
 import {
   calculateSlippage,
@@ -275,7 +273,7 @@ export function useTradingFormState({
   }, [side, orderType, limitPrice, marketOrderPrice, shares, slippageResult]);
 
   const { data: onChainAllowance, refetch: refetchAllowance } = useQuery({
-    queryKey: ["usdcAllowance", proxyAddress, hasProxyWallet, negRisk],
+    queryKey: qk.wallet.usdcAllowance(proxyAddress, hasProxyWallet, negRisk),
     queryFn: () => getUsdcAllowance(proxyAddress || undefined, negRisk),
     enabled: isConnected && hasProxyWallet && !!proxyAddress,
     // Allowance only changes when we explicitly update it. Polling every
@@ -354,12 +352,11 @@ export function useTradingFormState({
     refetch: refetchTradingApprovals,
     isLoading: isCheckingTradingApprovals,
   } = useQuery({
-    queryKey: [
-      "tradingApprovals",
+    queryKey: qk.wallet.tradingApprovals(
       proxyAddress,
       hasProxyWallet,
-      tradingApprovalCheckAmountRaw.toString(),
-    ],
+      tradingApprovalCheckAmountRaw.toString()
+    ),
     queryFn: () =>
       checkAllApprovals(proxyAddress || "", tradingApprovalCheckAmountRaw),
     enabled: shouldCheckTradingApprovals,
@@ -399,8 +396,12 @@ export function useTradingFormState({
         refreshProxyWallet(),
         refetchAllowance(),
         refetchTradingApprovals(),
-        queryClient.invalidateQueries({ queryKey: ["tradingApprovals"] }),
-        queryClient.invalidateQueries({ queryKey: ["usdcAllowance"] }),
+        queryClient.invalidateQueries({
+          queryKey: qk.wallet.allTradingApprovals(),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: qk.wallet.allUsdcAllowances(),
+        }),
       ]);
 
       const scheduleApprovalRefetch = (delay: number) => {
@@ -501,28 +502,38 @@ export function useTradingFormState({
 
           // Invalidate all related queries
           await Promise.all([
-            // Use exact query key match for proxy wallet (includes address)
             queryClient.invalidateQueries({
-              queryKey: [PROXY_WALLET_QUERY_KEY],
-              exact: false, // Match all queries starting with this key
+              queryKey: qk.proxyWallet.all(),
             }),
-            queryClient.invalidateQueries({ queryKey: ["usdcBalance"] }),
-            queryClient.invalidateQueries({ queryKey: ["usdcAllowance"] }),
-            queryClient.invalidateQueries({ queryKey: ["tradingApprovals"] }),
-            queryClient.invalidateQueries({ queryKey: ["userPositions"] }),
-            queryClient.invalidateQueries({ queryKey: ["openOrders"] }),
+            queryClient.invalidateQueries({
+              queryKey: qk.wallet.allUsdcBalances(),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: qk.wallet.allUsdcAllowances(),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: qk.wallet.allTradingApprovals(),
+            }),
+            queryClient.invalidateQueries({ queryKey: qk.positions.all() }),
+            queryClient.invalidateQueries({ queryKey: qk.orders.all() }),
           ]);
 
           // Immediate refetch after cache is cleared
           await Promise.all([
             queryClient.refetchQueries({
-              queryKey: [PROXY_WALLET_QUERY_KEY],
+              queryKey: qk.proxyWallet.all(),
               exact: false,
             }),
-            queryClient.refetchQueries({ queryKey: ["usdcBalance"] }),
-            queryClient.refetchQueries({ queryKey: ["usdcAllowance"] }),
-            queryClient.refetchQueries({ queryKey: ["tradingApprovals"] }),
-            queryClient.refetchQueries({ queryKey: ["userPositions"] }),
+            queryClient.refetchQueries({
+              queryKey: qk.wallet.allUsdcBalances(),
+            }),
+            queryClient.refetchQueries({
+              queryKey: qk.wallet.allUsdcAllowances(),
+            }),
+            queryClient.refetchQueries({
+              queryKey: qk.wallet.allTradingApprovals(),
+            }),
+            queryClient.refetchQueries({ queryKey: qk.positions.all() }),
           ]);
 
           // Multiple delayed refetches to catch backend updates
@@ -531,13 +542,19 @@ export function useTradingFormState({
             clearBalanceCache(proxyAddress);
             await Promise.all([
               queryClient.refetchQueries({
-                queryKey: [PROXY_WALLET_QUERY_KEY],
+                queryKey: qk.proxyWallet.all(),
                 exact: false,
               }),
-              queryClient.refetchQueries({ queryKey: ["usdcBalance"] }),
-              queryClient.refetchQueries({ queryKey: ["usdcAllowance"] }),
-              queryClient.refetchQueries({ queryKey: ["tradingApprovals"] }),
-              queryClient.refetchQueries({ queryKey: ["userPositions"] }),
+              queryClient.refetchQueries({
+                queryKey: qk.wallet.allUsdcBalances(),
+              }),
+              queryClient.refetchQueries({
+                queryKey: qk.wallet.allUsdcAllowances(),
+              }),
+              queryClient.refetchQueries({
+                queryKey: qk.wallet.allTradingApprovals(),
+              }),
+              queryClient.refetchQueries({ queryKey: qk.positions.all() }),
             ]);
           };
 
@@ -576,8 +593,12 @@ export function useTradingFormState({
           refreshProxyWallet(),
           refetchAllowance(),
           refetchTradingApprovals(),
-          queryClient.invalidateQueries({ queryKey: ["tradingApprovals"] }),
-          queryClient.invalidateQueries({ queryKey: ["usdcAllowance"] }),
+          queryClient.invalidateQueries({
+            queryKey: qk.wallet.allTradingApprovals(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: qk.wallet.allUsdcAllowances(),
+          }),
         ]);
       }
       onOrderError?.(error);

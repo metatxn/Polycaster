@@ -27,6 +27,7 @@ import {
 import { WalletBridge } from "./bridge";
 import { CredentialManager } from "./credentials";
 import { ExtensionSession } from "./extension-session";
+import type { OutcomeBalances } from "./outcome-balances";
 import { ProxyWallet } from "./proxy-wallet";
 
 export type TradingState =
@@ -510,9 +511,24 @@ export const TradingService = {
 
   async ensureReady(): Promise<boolean> {
     if (ctx.state === "ready" && ctx.hasCredentials) return true;
+    // A prior rejected signature leaves state="error"; a fresh user-initiated
+    // ensureReady must clear it and retry, otherwise the button is dead until
+    // reload. Reset to the closest non-error state before re-prompting.
+    if (ctx.state === "error") {
+      update({
+        state: ctx.address ? "connected" : "disconnected",
+        error: null,
+      });
+    }
     if (!ctx.address) await this.connectWallet();
-    if (ctx.state === "error") return false;
+    // Connect genuinely failed (no account / rejected the connect itself).
+    if (!ctx.address) return false;
     if (!ctx.hasCredentials) await this.deriveCredentials();
+    // For a returning user `connectWallet` reaches "ready" without refreshing
+    // balance/allowance (only `deriveCredentials` refreshes, and it's skipped
+    // when creds already exist). Without this, callers that read ctx right after
+    // — e.g. the stream card — see allowance 0 and show a false "Approve".
+    if (ctx.state === "ready") await this.refreshBalance();
     return ctx.state === "ready";
   },
 
@@ -825,6 +841,10 @@ export const TradingService = {
       );
 
       update({ state: "ready" });
+      // Refresh so the on-chain allowance lands back in ctx — otherwise callers
+      // that re-render off `getContext()` (e.g. the stream card's inline action)
+      // keep seeing the stale pre-approval allowance and show "Approve" forever.
+      await this.refreshBalance();
       return result.txHash;
     } catch (err) {
       update({
@@ -924,7 +944,7 @@ export const TradingService = {
   async getOutcomeBalances(
     yesTokenId: string,
     noTokenId: string
-  ): Promise<{ yesBalance: number; noBalance: number; minBalance: number }> {
+  ): Promise<OutcomeBalances> {
     if (!ctx.proxyAddress) throw new Error("Proxy wallet not derived");
     return sendMsg(
       {

@@ -1,8 +1,4 @@
-export function formatAddress(address: string | null | undefined): string {
-  if (!address) return "";
-  if (address.length <= 10) return address;
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
+import { formatAddress } from "@/lib/formatters";
 
 // Some traders have a `name` that's actually a raw wallet address (often
 // with a suffix like `-1772479215461`). Showing the raw 42-char string

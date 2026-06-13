@@ -35,6 +35,36 @@ export class RateLimitError extends Error {
 }
 
 /**
+ * Opportunistic cleanup. Module-scope timers are unreliable on Cloudflare
+ * Workers (timers set outside a request context may never fire), so expired
+ * entries are swept lazily: at most once per SWEEP_INTERVAL_MS, piggybacked
+ * on an incoming rateLimit() call.
+ */
+const SWEEP_INTERVAL_MS = 60 * 1000;
+let lastSweepAt = 0;
+
+function sweepExpiredEntries(now: number): void {
+  if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
+  lastSweepAt = now;
+  for (const [key, value] of rateLimitMap.entries()) {
+    if (now > value.resetTime) {
+      rateLimitMap.delete(key);
+    }
+  }
+}
+
+/** Test-only introspection helper. Not for production use. */
+export function _rateLimitStoreSize(): number {
+  return rateLimitMap.size;
+}
+
+/** Test-only reset helper. Not for production use. */
+export function _resetRateLimitStore(): void {
+  rateLimitMap.clear();
+  lastSweepAt = 0;
+}
+
+/**
  * Rate limiter using token bucket algorithm
  * @param uniqueId - Unique identifier (e.g., IP address, user ID)
  * @param options - Rate limit configuration
@@ -48,6 +78,7 @@ export function rateLimit(
   }
 ): { success: boolean; limit: number; remaining: number; reset: number } {
   const now = Date.now();
+  sweepExpiredEntries(now);
   const store = rateLimitMap.get(uniqueId);
 
   // If no store exists or reset time has passed, create new store
@@ -86,15 +117,3 @@ export function rateLimit(
     reset: store.resetTime,
   };
 }
-
-/**
- * Cleanup old entries periodically to prevent memory leaks
- */
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of rateLimitMap.entries()) {
-    if (now > value.resetTime) {
-      rateLimitMap.delete(key);
-    }
-  }
-}, 60 * 1000); // Clean up every minute

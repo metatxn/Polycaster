@@ -107,6 +107,7 @@ import {
 } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 import { createExtensionLegacyClobClient } from "./unified-clob-client";
+import { formatUsd6 } from "./usd-format";
 
 const CLOB_HOST = POLYMARKET_API.CLOB.BASE;
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
@@ -1001,8 +1002,10 @@ async function ensurePusdSufficient(
   if (!wrapPlan.needsWrap) return;
 
   if (!wrapPlan.hasEnoughBaseCollateral) {
+    // Format raw 6-decimal base units to USD — otherwise the message reads
+    // "need 1000000 more pUSD" (raw) instead of "need $1.00 more".
     throw new Error(
-      `Insufficient collateral: need ${wrapPlan.baseShortfallRaw.toString()} more pUSD (or USDC.e to wrap), have ${wrapPlan.availablePusdRaw.toString()} pUSD + ${usdcBalance.toString()} USDC.e`
+      `Insufficient collateral: need ${formatUsd6(wrapPlan.baseShortfallRaw)} more pUSD (or USDC.e to wrap), have ${formatUsd6(wrapPlan.availablePusdRaw)} pUSD + ${formatUsd6(usdcBalance)} USDC.e`
     );
   }
 
@@ -1032,11 +1035,11 @@ async function handleGetOutcomeBalances(
     msg.noTokenId
   );
 
-  const yesBalance = Number(formatUnits(balances.yesBalance, 6));
-  const noBalance = Number(formatUnits(balances.noBalance, 6));
+  // Exact 6-decimal strings — Number() here would route share balances
+  // through floats before the panel's sizing and display logic sees them.
   return ok({
-    yesBalance,
-    noBalance,
-    minBalance: Number(formatUnits(balances.minBalance, 6)),
+    yesBalance: formatUnits(balances.yesBalance, 6),
+    noBalance: formatUnits(balances.noBalance, 6),
+    minBalance: formatUnits(balances.minBalance, 6),
   });
 }

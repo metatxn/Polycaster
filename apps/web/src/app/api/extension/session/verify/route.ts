@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getAddress, verifyMessage } from "viem";
 import { z } from "zod";
 import { POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import {
   issueExtensionSessionToken,
@@ -104,8 +105,10 @@ export async function POST(request: NextRequest) {
     const parsed = verifyInputSchema.safeParse(body);
 
     if (!parsed.success) {
+      // Extra field `details` preserved; success: false added
       return NextResponse.json(
         {
+          success: false,
           error: "Invalid request payload",
           details: parsed.error.format(),
         },
@@ -131,10 +134,7 @@ export async function POST(request: NextRequest) {
         challenge.address !== walletAddress.toLowerCase() ||
         challenge.chainId !== chainId
       ) {
-        return NextResponse.json(
-          { error: "Invalid or expired challenge" },
-          { status: 401 }
-        );
+        return jsonError("Invalid or expired challenge", 401);
       }
 
       const isValid = await verifyMessage({
@@ -144,10 +144,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (!isValid) {
-        return NextResponse.json(
-          { error: "Invalid signature" },
-          { status: 401 }
-        );
+        return jsonError("Invalid signature", 401);
       }
 
       const { token, claims } = await issueExtensionSessionToken({
@@ -172,10 +169,7 @@ export async function POST(request: NextRequest) {
         error instanceof Error &&
         error.message.includes("EXTENSION_SESSION_SECRET")
       ) {
-        return NextResponse.json(
-          { error: "Extension session secret is not configured" },
-          { status: 503 }
-        );
+        return jsonError("Extension session secret is not configured", 503);
       }
 
       // If it's a signature validation error, key recovery error, or challenge token validation error
@@ -190,24 +184,15 @@ export async function POST(request: NextRequest) {
           error.message.includes("verification"));
 
       if (isClientError) {
-        return NextResponse.json(
-          { error: "Invalid signature or expired challenge" },
-          { status: 401 }
-        );
+        return jsonError("Invalid signature or expired challenge", 401);
       }
 
-      return NextResponse.json(
-        { error: "Failed to establish extension session" },
-        { status: 503 }
-      );
+      return jsonError("Failed to establish extension session", 503);
     }
   } catch (error) {
     log.error("verify.payload_parse_failed", {
       error: error instanceof Error ? error.message : String(error),
     });
-    return NextResponse.json(
-      { error: "Invalid request payload" },
-      { status: 400 }
-    );
+    return jsonError("Invalid request payload", 400);
   }
 }

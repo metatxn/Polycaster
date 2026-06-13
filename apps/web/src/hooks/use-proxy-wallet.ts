@@ -24,12 +24,6 @@ import {
  * Polymarket Proxy Wallet Hook
  */
 
-// Polymarket Data API
-// const DATA_API_BASE = "https://data-api.polymarket.com";
-
-// Query key for proxy wallet data
-export const PROXY_WALLET_QUERY_KEY = "proxy-wallet";
-
 export interface ProxyWalletData {
   proxyAddress: string | null;
   isDeployed: boolean;

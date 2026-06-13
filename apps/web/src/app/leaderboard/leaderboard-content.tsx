@@ -1,7 +1,7 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { useRouter, useSearchParams } from "next/navigation";
+import { AnimatePresence, m } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection } from "wagmi";
 import { ChromeHeader } from "@/components/app-layout";
@@ -25,6 +25,7 @@ import {
   type LeaderboardTrader,
   useLeaderboard,
 } from "@/hooks/use-leaderboard";
+import { useNow } from "@/hooks/use-now";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { cn } from "@/lib/utils";
 
@@ -81,6 +82,20 @@ function EditorialDropdown<T extends string>({
     <DropdownMenuContent
       align="start"
       className="min-w-36 rounded-none border border-(--kwm-hl-2) bg-(--kwm-panel) backdrop-blur-sm p-0 shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+      onCloseAutoFocus={(event) => {
+        // Radix re-focuses the trigger when the menu closes, and the
+        // browser's native focus-reveal scrolls (centers) the trigger back
+        // into view — if the user has scrolled the filter chip off-screen
+        // this yanks the viewport back up (scrollY clamps to 0 here).
+        // Re-focus manually with preventScroll so keyboard users keep
+        // their tab position without the page jumping. The content's
+        // aria-labelledby is the trigger's id (Radix wires it up).
+        event.preventDefault();
+        const content = event.target as HTMLElement | null;
+        const triggerId = content?.getAttribute("aria-labelledby");
+        const trigger = triggerId ? document.getElementById(triggerId) : null;
+        trigger?.focus({ preventScroll: true });
+      }}
     >
       {options.map((option) => {
         const isActive = selected === option.value;
@@ -109,35 +124,102 @@ function EditorialDropdown<T extends string>({
   );
 }
 
-interface LeaderboardContentProps {
-  initialData?: InitialLeaderboardData | null;
+/** Ticking "updated Xs ago" leaf — re-renders only this label (every 5s)
+ *  instead of the whole leaderboard page (every second). */
+function LeaderboardDataAge({ updatedAt }: { updatedAt: number }) {
+  const now = useNow(5_000);
+  return <ProductDataAge dataAgeMs={now - updatedAt} />;
 }
 
-export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
+interface LeaderboardContentProps {
+  initialData?: InitialLeaderboardData | null;
+  /** Initial filter values read server-side from searchParams to avoid
+   *  re-suspending useSearchParams() on every URL change (which resets scroll). */
+  initialCategory?: LeaderboardCategory;
+  initialTimePeriod?: LeaderboardTimePeriod;
+  initialOrderBy?: LeaderboardOrderBy;
+}
+
+export function LeaderboardContent({
+  initialData,
+  initialCategory: initialCategoryProp = "OVERALL",
+  initialTimePeriod: initialTimePeriodProp = "DAY",
+  initialOrderBy: initialOrderByProp = "PNL",
+}: LeaderboardContentProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { address } = useConnection();
   const { proxyAddress } = useProxyWallet();
 
-  // Get initial values from URL params
-  const initialCategory =
-    (searchParams.get("category") as LeaderboardCategory) || "OVERALL";
-  const initialTimePeriod =
-    (searchParams.get("timePeriod") as LeaderboardTimePeriod) || "DAY";
-  const initialOrderBy =
-    (searchParams.get("orderBy") as LeaderboardOrderBy) || "PNL";
-
   const [category, setCategory] =
-    useState<LeaderboardCategory>(initialCategory);
-  const [timePeriod, setTimePeriod] =
-    useState<LeaderboardTimePeriod>(initialTimePeriod);
-  const [orderBy, setOrderBy] = useState<LeaderboardOrderBy>(initialOrderBy);
+    useState<LeaderboardCategory>(initialCategoryProp);
+  const [timePeriod, setTimePeriod] = useState<LeaderboardTimePeriod>(
+    initialTimePeriodProp
+  );
+  const [orderBy, setOrderBy] =
+    useState<LeaderboardOrderBy>(initialOrderByProp);
 
   // Infinite-scroll pagination: fetch one page at a time from the hook
-  // and accumulate results in local state. Filter changes reset both.
+  // and accumulate results in local state.
   const [page, setPage] = useState(1);
+
+  // The SSR seed only stands in for the default view's FIRST page-1 fetch.
+  // Once the user changes any filter the seed rows are replaced, so coming
+  // back to the default combination must run a real query — otherwise the
+  // query stays disabled and the previous filter's rows linger forever.
+  const [seedConsumed, setSeedConsumed] = useState(false);
+
+  // Filter changes deliberately do NOT clear `allTraders`: the query keeps
+  // the previous rows via `keepPreviousData`, and the accumulation effect
+  // below swaps them once fresh page-1 data lands. Clearing here would
+  // collapse the table to a short skeleton mid-fetch, shrink the document,
+  // and let the browser clamp scrollY to 0.
+  const resetPagination = () => {
+    setPage(1);
+    setSeedConsumed(true);
+  };
+
+  // Sync filter state when the server-provided props change. On browser
+  // back/forward (popstate) Next re-renders page.tsx with the restored
+  // URL's searchParams, but useState ignores prop changes after mount —
+  // without this the URL and the rendered view desync. This is React's
+  // "adjust state during render" pattern (intentionally not an effect, so
+  // children never see the stale frame). When the user changes a dropdown
+  // the handlers set state BEFORE pushing the URL, so the props that come
+  // back equal current state and the inner sync no-ops.
+  const [prevInitial, setPrevInitial] = useState({
+    category: initialCategoryProp,
+    timePeriod: initialTimePeriodProp,
+    orderBy: initialOrderByProp,
+  });
+  if (
+    prevInitial.category !== initialCategoryProp ||
+    prevInitial.timePeriod !== initialTimePeriodProp ||
+    prevInitial.orderBy !== initialOrderByProp
+  ) {
+    setPrevInitial({
+      category: initialCategoryProp,
+      timePeriod: initialTimePeriodProp,
+      orderBy: initialOrderByProp,
+    });
+    // Only force state when it actually differs from the URL — a late RSC
+    // response for a dropdown change the client already applied must not
+    // reset pagination the user has since scrolled through.
+    if (
+      category !== initialCategoryProp ||
+      timePeriod !== initialTimePeriodProp ||
+      orderBy !== initialOrderByProp
+    ) {
+      setCategory(initialCategoryProp);
+      setTimePeriod(initialTimePeriodProp);
+      setOrderBy(initialOrderByProp);
+      // Mirror exactly what the dropdown handlers do on a filter change.
+      resetPagination();
+    }
+  }
+
   const usingInitialSeed =
     !!initialData &&
+    !seedConsumed &&
     category === "OVERALL" &&
     timePeriod === "DAY" &&
     orderBy === "PNL";
@@ -150,56 +232,72 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
   // Skip the client-side fetch for the seeded first page — the SSR'd
   // traders are already rendered.
   const skipInitialQuery = page === 1 && usingInitialSeed;
-  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } =
-    useLeaderboard({
-      category,
-      timePeriod,
-      orderBy,
-      limit: ITEMS_PER_PAGE,
-      offset,
-      enabled: !skipInitialQuery,
-    });
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+    isPlaceholderData,
+    dataUpdatedAt,
+  } = useLeaderboard({
+    category,
+    timePeriod,
+    orderBy,
+    limit: ITEMS_PER_PAGE,
+    offset,
+    enabled: !skipInitialQuery,
+  });
 
-  // Tick the "updated Xs ago" meta so it counts forward between refetches.
   // When seeded from SSR the first client fetch is skipped, so
   // dataUpdatedAt stays 0 until the first refetch — fall back to the
   // mount timestamp so the meta still reads sensibly on arrival.
-  const [now, setNow] = useState(() => Date.now());
+  // The "updated Xs ago" ticking lives in the LeaderboardDataAge leaf so
+  // it doesn't re-render the whole page every second.
   const [mountedAt] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
   const effectiveUpdatedAt = dataUpdatedAt || mountedAt;
-  const dataAgeMs = now - effectiveUpdatedAt;
 
   // Accumulate traders as pages arrive. Dedupe on proxyWallet so a
   // rapid filter-change race can't insert the same trader twice.
+  // Placeholder frames are skipped: with `keepPreviousData` the hook
+  // re-serves the PREVIOUS queryKey's rows while a new filter/page is in
+  // flight — acting on those here would overwrite the accumulated list
+  // with stale data (e.g. replace 3 accumulated pages with the old
+  // combo's last page). Page-1 of a new filter combo therefore swaps the
+  // old rows only once real data for that combo lands.
   useEffect(() => {
-    if (!data?.traders) return;
+    if (!data?.traders || isPlaceholderData) return;
     setAllTraders((prev) => {
       if (page === 1) return data.traders;
       const seen = new Set(prev.map((t) => t.proxyWallet));
       const fresh = data.traders.filter((t) => !seen.has(t.proxyWallet));
       return [...prev, ...fresh];
     });
-  }, [data, page]);
+  }, [data, page, isPlaceholderData]);
 
   // hasMore: the most recent fetched page was full. We don't know the
   // absolute total from the API so we stop loading when the server
   // returns a short page.
   const lastPageSize =
-    data?.traders?.length ?? initialData?.traders?.length ?? 0;
+    data?.traders?.length ??
+    (usingInitialSeed ? initialData.traders.length : 0);
   const hasMore = lastPageSize === ITEMS_PER_PAGE;
 
   const userAddress = proxyAddress || address;
 
   // Update URL when filters change (page is no longer a URL param —
   // infinite scroll is stateful to the session, not shareable).
+  // Build params from current local state + overrides so we never need
+  // useSearchParams() here — that hook would re-suspend the Suspense
+  // boundary on every URL change and cause a scroll-to-0 reset.
   const updateURL = useCallback(
     (newParams: Record<string, string>) => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("page");
+      const params = new URLSearchParams();
+      // Seed from current local state
+      if (category !== "OVERALL") params.set("category", category);
+      if (timePeriod !== "DAY") params.set("timePeriod", timePeriod);
+      if (orderBy !== "PNL") params.set("orderBy", orderBy);
+      // Apply overrides
       for (const [key, value] of Object.entries(newParams)) {
         if (value) {
           params.set(key, value);
@@ -207,15 +305,11 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
           params.delete(key);
         }
       }
-      router.push(`/leaderboard?${params.toString()}`, { scroll: false });
+      const qs = params.toString();
+      router.push(`/leaderboard${qs ? `?${qs}` : ""}`, { scroll: false });
     },
-    [router, searchParams]
+    [router, category, timePeriod, orderBy]
   );
-
-  const resetPagination = () => {
-    setPage(1);
-    setAllTraders([]);
-  };
 
   const handleCategoryChange = (value: LeaderboardCategory) => {
     setCategory(value);
@@ -237,12 +331,25 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
 
   // Infinite-scroll sentinel. Fires `setPage(p + 1)` when the element
   // enters the viewport (with a 400px pre-load margin) and we're
-  // neither mid-load nor at the end.
+  // neither mid-load nor at the end. `isPlaceholderData` also blocks it:
+  // while a new filter/page is fetching, `data` (and thus `hasMore`)
+  // describes the previous queryKey, so advancing the page would skip the
+  // pending page-1 swap and append onto stale rows.
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
-    if (isLoading || !hasMore || allTraders.length === 0) return;
+    // `error` blocks re-arming: with old rows kept on screen during a
+    // failed fetch, an armed sentinel would keep incrementing the page
+    // against a failing API. The error strip's "Try again" is the retry.
+    if (
+      isLoading ||
+      isPlaceholderData ||
+      error ||
+      !hasMore ||
+      allTraders.length === 0
+    )
+      return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
@@ -253,7 +360,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isLoading, hasMore, allTraders.length]);
+  }, [isLoading, isPlaceholderData, error, hasMore, allTraders.length]);
 
   return (
     <div className="kw-app min-h-screen flex flex-col bg-(--kwm-bg) relative overflow-x-hidden selection:bg-(--kwm-ink)/15">
@@ -261,6 +368,8 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
       <ChromeHeader />
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
+        <h1 className="sr-only">Leaderboard</h1>
+
         <ProductHero
           breadcrumbs={[
             { label: "Markets", href: "/markets" },
@@ -268,7 +377,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
           ]}
           rightSlot={
             <>
-              <ProductDataAge dataAgeMs={dataAgeMs} />
+              <LeaderboardDataAge updatedAt={effectiveUpdatedAt} />
               <ProductRefreshButton
                 onRefresh={() => refetch()}
                 isFetching={isFetching}
@@ -290,6 +399,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
               <button
                 key={cat.value}
                 type="button"
+                aria-pressed={isActive}
                 onClick={() => handleCategoryChange(cat.value)}
                 className={cn(
                   "shrink-0 whitespace-nowrap py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] leading-none transition-colors relative"
@@ -371,7 +481,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
             scroll. The key only changes on filter change so new pages
             don't retrigger the fade-in animation on every append. */}
         <AnimatePresence mode="wait">
-          <motion.div
+          <m.div
             key={`${category}-${timePeriod}-${orderBy}`}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -384,7 +494,7 @@ export function LeaderboardContent({ initialData }: LeaderboardContentProps) {
               orderBy={orderBy}
               highlightAddress={userAddress}
             />
-          </motion.div>
+          </m.div>
         </AnimatePresence>
 
         {/* Infinite-scroll sentinel + status strip */}

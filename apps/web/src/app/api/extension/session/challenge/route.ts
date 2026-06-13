@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getAddress } from "viem";
 import { z } from "zod";
 import { POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { issueExtensionChallengeToken } from "@/lib/auth/extension-session";
 import { createSiwxChallenge } from "@/lib/siwx/message";
@@ -86,8 +87,10 @@ export async function POST(request: NextRequest) {
     const parsed = challengeInputSchema.safeParse(body);
 
     if (!parsed.success) {
+      // Extra field `details` preserved; success: false added
       return NextResponse.json(
         {
+          success: false,
           error: "Invalid request payload",
           details: parsed.error.format(),
         },
@@ -127,15 +130,9 @@ export async function POST(request: NextRequest) {
       error instanceof Error &&
       error.message.includes("EXTENSION_SESSION_SECRET")
     ) {
-      return NextResponse.json(
-        { error: "Extension session secret is not configured" },
-        { status: 503 }
-      );
+      return jsonError("Extension session secret is not configured", 503);
     }
 
-    return NextResponse.json(
-      { error: "Invalid request payload" },
-      { status: 400 }
-    );
+    return jsonError("Invalid request payload", 400);
   }
 }

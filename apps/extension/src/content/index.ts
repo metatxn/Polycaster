@@ -44,6 +44,8 @@ import "./platforms/bluesky";
 import "./platforms/mastodon";
 import "./platforms/discord";
 import "./platforms/farcaster";
+// Streaming surfaces (single companion card, not feed injection)
+import "./platforms/twitch";
 import "./platforms/coinmarketcap";
 import "./platforms/paragraph";
 import "./platforms/coindesk";
@@ -93,6 +95,9 @@ import "./ui";
 
 // 11. Injection logic (feed watching, card injection)
 import "./injection";
+
+// 11.5. Streaming surface (single companion card for twitch/youtube/etc.)
+import "./streaming/stream-markets";
 
 // 12. Main entry point (starts the extension)
 import "./main";

@@ -1,13 +1,14 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.37",
+  "version": "2.5.39",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "webpack --mode production && node scripts/assert-production-bundle.mjs",
-    "dev": "webpack --mode development --watch",
+    "build": "webpack --config webpack.config.cjs --mode production && node scripts/assert-production-bundle.mjs",
+    "dev": "webpack --config webpack.config.cjs --mode development --watch",
     "clean": "rm -rf dist",
     "test": "pnpm run test:scoring",
-    "test:scoring": "rm -rf .test-dist && tsc -p tsconfig.tests.json && node --test .test-dist/apps/extension/tests/**/*.test.js",
+    "test:scoring": "vitest run --config vitest.config.ts",
     "benchmark:embeddings": "node scripts/benchmark-embeddings.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
@@ -42,6 +43,7 @@
     "process": "0.11.10",
     "ts-loader": "9.5.7",
     "typescript": "catalog:",
+    "vitest": "^4.1.7",
     "webpack": "5.107.1",
     "webpack-cli": "7.0.2"
   }

@@ -4,7 +4,7 @@ import {
   parseGammaNumberArray,
   parseGammaStringArray,
 } from "@knoww/shared-types/polymarket";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Flame } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -202,7 +202,7 @@ export function EventCard({
   const animateEntry = index < 20;
 
   return (
-    <motion.div
+    <m.div
       initial={animateEntry ? { opacity: 0, y: 20 } : false}
       animate={animateEntry ? { opacity: 1, y: 0 } : undefined}
       transition={
@@ -215,7 +215,7 @@ export function EventCard({
           : undefined
       }
       whileTap={{ scale: 0.98 }}
-      className="h-full"
+      className="h-full [content-visibility:auto] [contain-intrinsic-size:auto_360px]"
     >
       <Link
         href={href}
@@ -421,7 +421,7 @@ export function EventCard({
           )}
         </div>
       </Link>
-    </motion.div>
+    </m.div>
   );
 }
 

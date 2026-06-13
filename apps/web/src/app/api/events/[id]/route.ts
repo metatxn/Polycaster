@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { logger } from "@/lib/logger";
 import { sanitizeUpstreamBody } from "@/lib/upstream-error";
 
@@ -103,19 +104,18 @@ export async function GET(
       );
     }
 
-    // Fetch markets associated with this event
-    // Markets are linked to events, so we need to fetch them separately
-    let markets: Record<string, unknown>[] = [];
-
-    // If the event has markets array, use it directly
-    if (event.markets && Array.isArray(event.markets)) {
-      markets = event.markets as Record<string, unknown>[];
-    } else {
+    // The markets fetch (keyed by event.slug) and the negRisk child-event
+    // fetch (keyed by event.id) are independent of each other — run them
+    // concurrently instead of back-to-back.
+    const fetchMarkets = async (): Promise<Record<string, unknown>[]> => {
+      // If the event already embeds its markets, use them directly.
+      if (event.markets && Array.isArray(event.markets)) {
+        return event.markets as Record<string, unknown>[];
+      }
       // Otherwise, fetch markets by event slug or ID (always filter closed=false)
       const marketsUrl = `${POLYMARKET_API.GAMMA.MARKETS}?events_slug=${
         event.slug || id
       }&closed=false`;
-
       try {
         const marketsResponse = await fetch(marketsUrl, {
           headers: {
@@ -125,9 +125,8 @@ export async function GET(
             ? { cache: "no-store" as const }
             : { next: { revalidate: CACHE_DURATION.MARKETS } }),
         });
-
         if (marketsResponse.ok) {
-          markets = (await marketsResponse.json()) as Record<string, unknown>[];
+          return (await marketsResponse.json()) as Record<string, unknown>[];
         }
       } catch (error) {
         logger.warn("events.detail.markets_fetch_failed", {
@@ -136,7 +135,8 @@ export async function GET(
         });
         // Continue with empty markets array
       }
-    }
+      return [];
+    };
 
     // Polymarket nests "Most Sixes" / "Top Batter" / "Toss Match Double" etc.
     // as separate negRisk child events linked back via `parentEventId`. The
@@ -145,7 +145,8 @@ export async function GET(
     // children and append their markets to the response so the outcomes
     // table renders the full set.
     const eventId = typeof event.id === "string" ? event.id : null;
-    if (eventId) {
+    const fetchChildEvents = async (): Promise<Record<string, unknown>[]> => {
+      if (!eventId) return [];
       try {
         const childrenUrl = `${POLYMARKET_API.GAMMA.EVENTS}?parent_event_id=${eventId}&limit=50&closed=false`;
         const childrenResponse = await fetch(childrenUrl, {
@@ -154,44 +155,11 @@ export async function GET(
             ? { cache: "no-store" as const }
             : { next: { revalidate: CACHE_DURATION.EVENTS } }),
         });
-
         if (childrenResponse.ok) {
           const childEvents = (await childrenResponse.json()) as Array<
             Record<string, unknown>
           >;
-          if (Array.isArray(childEvents)) {
-            const seenMarketIds = new Set(
-              markets
-                .map((m) => (typeof m.id === "string" ? m.id : null))
-                .filter((v): v is string => v !== null)
-            );
-            for (const child of childEvents) {
-              const childMarkets = Array.isArray(child.markets)
-                ? (child.markets as Record<string, unknown>[])
-                : [];
-              const childEventId =
-                typeof child.id === "string"
-                  ? child.id
-                  : typeof child.id === "number"
-                    ? String(child.id)
-                    : null;
-              for (const market of childMarkets) {
-                const mid = typeof market.id === "string" ? market.id : null;
-                if (mid && seenMarketIds.has(mid)) continue;
-                if (mid) seenMarketIds.add(mid);
-                markets.push({
-                  ...market,
-                  // Tag with the IMMEDIATE child event id (Most Sixes, Top
-                  // Batter, …), not the grandparent event id. The UI groups
-                  // negRisk siblings by this so each section maps to one
-                  // child event — using the grandparent collapsed every
-                  // negRisk market into a single nine-button row.
-                  parentEventId: childEventId,
-                  parentEventTitle: child.title,
-                });
-              }
-            }
-          }
+          if (Array.isArray(childEvents)) return childEvents;
         }
       } catch (error) {
         logger.warn("events.detail.children_fetch_failed", {
@@ -201,16 +169,61 @@ export async function GET(
         // Children fan-out is best-effort; missing children should not fail
         // the parent event response.
       }
+      return [];
+    };
+
+    const [markets, childEvents] = await Promise.all([
+      fetchMarkets(),
+      fetchChildEvents(),
+    ]);
+
+    const seenMarketIds = new Set(
+      markets
+        .map((m) => (typeof m.id === "string" ? m.id : null))
+        .filter((v): v is string => v !== null)
+    );
+    for (const child of childEvents) {
+      const childMarkets = Array.isArray(child.markets)
+        ? (child.markets as Record<string, unknown>[])
+        : [];
+      const childEventId =
+        typeof child.id === "string"
+          ? child.id
+          : typeof child.id === "number"
+            ? String(child.id)
+            : null;
+      for (const market of childMarkets) {
+        const mid = typeof market.id === "string" ? market.id : null;
+        if (mid && seenMarketIds.has(mid)) continue;
+        if (mid) seenMarketIds.add(mid);
+        markets.push({
+          ...market,
+          // Tag with the IMMEDIATE child event id (Most Sixes, Top
+          // Batter, …), not the grandparent event id. The UI groups
+          // negRisk siblings by this so each section maps to one
+          // child event — using the grandparent collapsed every
+          // negRisk market into a single nine-button row.
+          parentEventId: childEventId,
+          parentEventTitle: child.title,
+        });
+      }
     }
 
-    return NextResponse.json({
-      success: true,
-      event: {
-        ...event,
-        markets,
-        marketCount: markets.length,
+    return NextResponse.json(
+      {
+        success: true,
+        event: {
+          ...event,
+          markets,
+          marketCount: markets.length,
+        },
       },
-    });
+      {
+        headers: fresh
+          ? { "Cache-Control": "no-store" }
+          : getCacheHeaders("events"),
+      }
+    );
   } catch (error) {
     logger.error("events.detail.fetch_failed", {
       error: error instanceof Error ? error.message : String(error),

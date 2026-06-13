@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
-import { formatCurrencyCompact } from "@/lib/formatters";
+import { formatAddress, formatCurrencyCompact } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import {
   isBigBetWhale,
@@ -14,7 +14,6 @@ import {
 import type { WhaleSortColumn, WhaleTypeFilter } from "../_lib/constants";
 import {
   displayName,
-  formatAddress,
   formatTimeAgo,
   isAnimatedImageUrl,
   isRawAddressLike,

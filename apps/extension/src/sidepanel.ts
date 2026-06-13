@@ -11,7 +11,7 @@ import {
   WITHDRAW_CHAIN_IDS,
   WITHDRAW_TOKEN_CONFIGS,
 } from "@knoww/shared-types/bridge";
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 import {
   formatPortfolioTokenBaseUnitAmount,
   type PortfolioBridgeStatusSummary,

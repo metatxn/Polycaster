@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import Module from "node:module";
-import test from "node:test";
+import { test } from "vitest";
 import { SUPPORTED_MATCH_PATTERNS } from "../../src/supported-hosts";
 
 type ImportedAdapter =
-  typeof import("../../src/content/platforms/espncricinfo.js");
+  typeof import("../../src/content/platforms/espncricinfo");
 
 class FakeElement {
   readonly attributes = new Map<string, string>();
@@ -233,7 +233,7 @@ async function importAdapter(): Promise<ImportedAdapter> {
     },
   } as unknown as Document;
 
-  const mod = await import("../../src/content/platforms/espncricinfo.js");
+  const mod = await import("../../src/content/platforms/espncricinfo");
   assert.ok(registered.length <= 1);
   return mod;
 }

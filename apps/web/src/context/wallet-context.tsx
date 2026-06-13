@@ -1,7 +1,5 @@
 "use client";
 
-import { useAppKit } from "@reown/appkit/react";
-
 import {
   createContext,
   type ReactNode,
@@ -17,6 +15,7 @@ import {
 } from "wagmi";
 import { polygon } from "@/lib/chains";
 import { getRpcUrl } from "@/lib/rpc";
+import { openWalletModal } from "@/lib/wallet-modal";
 
 /**
  * Wallet context value
@@ -40,7 +39,6 @@ interface WalletContextValue {
 
   // Actions
   connect: () => void;
-  disconnect: () => void;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -69,20 +67,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const { address, isConnected, isConnecting } = useConnection();
   const { data: walletClient, isLoading: isWalletClientLoading } =
     useWalletClient();
-  const { open, close } = useAppKit();
 
   // EOA address
   const eoaAddress = address || null;
 
-  // Connect wallet via AppKit modal
+  // Connect wallet via AppKit modal (lazily initialized on first use)
   const connect = useCallback(() => {
-    open();
-  }, [open]);
-
-  // Disconnect wallet using AppKit
-  const disconnect = useCallback(async () => {
-    await close();
-  }, [close]);
+    void openWalletModal();
+  }, []);
 
   const value = useMemo<WalletContextValue>(
     () => ({
@@ -99,7 +91,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       // Actions
       connect,
-      disconnect,
     }),
     [
       isConnected,
@@ -108,7 +99,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       eoaAddress,
       walletClient,
       connect,
-      disconnect,
     ]
   );
 

@@ -128,6 +128,20 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
     void safeSendMessage({ type: "scoring:prewarm-offscreen" });
   }, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
 
+  // Streaming surfaces (Twitch/YouTube/…) have no feed of posts. Instead of
+  // scanning the page and running the relevance pipeline, surface a single
+  // companion Live Markets card seeded by the stream's game/category. Skip
+  // watchFeed (and thus the English check → context gate → AI score filtering)
+  // entirely.
+  if (platform?.surface === "stream") {
+    log(
+      "🎥 Streaming platform detected — starting Live Markets card:",
+      platformName
+    );
+    window.KNOWW_STREAMING?.initStreamingMarkets?.();
+    return;
+  }
+
   // Determine site-specific selectors using platform registry
   let itemSelector: string;
   let containerSelector: string;

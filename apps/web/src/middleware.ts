@@ -138,9 +138,12 @@ function applyGlobalHeaders(response: NextResponse, requestId: string) {
 /**
  * Matcher configuration.
  *
- * Apply middleware to every route so host canonicalization also covers
- * robots.txt, sitemap.xml, and static asset URLs.
+ * Covers all routes EXCEPT Next.js build assets (`/_next/static`,
+ * `/_next/image`) and the favicon — those are immutable static files that
+ * don't need per-request security headers or host canonicalization, and
+ * skipping them avoids running the middleware on every chunk request.
+ * robots.txt and sitemap.xml are still matched for host canonicalization.
  */
 export const config = {
-  matcher: ["/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

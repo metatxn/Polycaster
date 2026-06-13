@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import type { TokenBalance } from "@/hooks/use-wallet-tokens";
@@ -35,7 +35,7 @@ export function AmountInput({
   onContinue,
 }: AmountInputProps) {
   return (
-    <motion.div
+    <m.div
       key="amount"
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -162,6 +162,6 @@ export function AmountInput({
           ? `Min · $${selectedTokenMinDeposit} Required`
           : "Continue"}
       </button>
-    </motion.div>
+    </m.div>
   );
 }

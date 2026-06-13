@@ -1,7 +1,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import {
   ArrowLeft,
   Check,
@@ -625,7 +625,7 @@ export function WithdrawModal({
           <div className="px-5 py-5 flex-1 min-h-0 overflow-y-auto">
             <AnimatePresence mode="wait">
               {showSuccess ? (
-                <motion.div
+                <m.div
                   key="success"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -710,9 +710,9 @@ export function WithdrawModal({
                   >
                     {state === "bridge_complete" ? "Done" : "Close"}
                   </button>
-                </motion.div>
+                </m.div>
               ) : (
-                <motion.div
+                <m.div
                   key="form"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -1046,7 +1046,7 @@ export function WithdrawModal({
                       </a>
                     </div>
                   ) : null}
-                </motion.div>
+                </m.div>
               )}
             </AnimatePresence>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { Loader2, Search, X } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -201,6 +201,7 @@ export function MarketSearch({
         <input
           ref={inputRef}
           type="text"
+          name="q"
           placeholder={effectivePlaceholder}
           value={query}
           onChange={handleInputChange}
@@ -236,7 +237,7 @@ export function MarketSearch({
              rounded card under the nav input. */}
       <AnimatePresence>
         {showDropdown && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
@@ -402,7 +403,7 @@ export function MarketSearch({
                   )}
               </div>
             )}
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

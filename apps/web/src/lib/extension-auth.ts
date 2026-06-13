@@ -7,7 +7,7 @@ import {
 export const ALLOWED_EXTENSION_ORIGINS = [
   "chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc",
   "chrome-extension://naoaonihikedoiemhbolbnolibpmojgf",
-  "chrome-extension://cefhmagobkjigobnmhnhldofoangmhei", // remove this later
+  "chrome-extension://cefhmagobkjigobnmhnhldofoangmhei", // dev-environment build of the extension — keep
 ];
 
 const ALLOWED_REFERER_HOSTS = new Set(["knoww.app", "www.knoww.app"]);
@@ -90,29 +90,19 @@ export async function verifyExtensionRequest(
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
-export async function verifyExtensionAccess(
-  request: NextRequest,
-  requiredScope: ExtensionScope,
-  options?: {
-    allowLowTrustFallback?: boolean;
-  }
-): Promise<NextResponse | null> {
-  if (process.env.NODE_ENV === "development") {
-    return null;
-  }
+/** How a pre-auth extension request was authenticated. */
+export type ExtensionTrust = "session" | "low-trust";
 
-  const authHeader = request.headers.get("authorization");
-
-  if (authHeader?.startsWith("Bearer ")) {
-    const { response } = await requireExtensionSession(request, requiredScope);
-    return response;
-  }
-
-  if (options?.allowLowTrustFallback) {
-    return verifyExtensionRequest(request);
-  }
-
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export interface ExtensionPreAuthResult {
+  /** Non-null means the request must be rejected with this response. */
+  response: NextResponse | null;
+  /**
+   * "session"   — Bearer token verified against a signed extension session.
+   * "low-trust" — only the spoofable Origin/Referer gate passed. Callers
+   *               invoking paid work (LLM routes) must apply stricter rate
+   *               limits to this tier (see checkAiRateLimit).
+   */
+  trust: ExtensionTrust;
 }
 
 /**
@@ -120,13 +110,27 @@ export async function verifyExtensionAccess(
  *
  * These endpoints are called during the post-scanning phase before
  * the user has connected a wallet, so a session token may not exist.
- * Falls back to origin-based verification when no Bearer token is present.
+ * Falls back to origin-based verification when no Bearer token is present,
+ * and reports which trust tier passed so callers can rate-limit accordingly.
  */
 export async function verifyExtensionAccessPreAuth(
   request: NextRequest,
   requiredScope: ExtensionScope
-): Promise<NextResponse | null> {
-  return verifyExtensionAccess(request, requiredScope, {
-    allowLowTrustFallback: true,
-  });
+): Promise<ExtensionPreAuthResult> {
+  if (process.env.NODE_ENV === "development") {
+    // "session" trust so local dev calls are never capped by the
+    // low-trust daily limit in checkAiRateLimit.
+    return { response: null, trust: "session" };
+  }
+
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const { response } = await requireExtensionSession(request, requiredScope);
+    return { response, trust: "session" };
+  }
+
+  return {
+    response: await verifyExtensionRequest(request),
+    trust: "low-trust",
+  };
 }

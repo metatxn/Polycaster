@@ -59,6 +59,8 @@ export function SportsContent({ selectedSport = "" }: SportsContentProps) {
 
           {/* Right: hero + sportsbook + trade panel */}
           <div className="min-w-0 overflow-hidden">
+            <h1 className="sr-only">{sport.label} markets</h1>
+
             <ProductHero
               breadcrumbs={breadcrumbs}
               rightSlot={

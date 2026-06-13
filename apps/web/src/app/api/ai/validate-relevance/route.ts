@@ -2,7 +2,8 @@ import { createLogger } from "@knoww/logger";
 import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { checkRateLimit } from "@/lib/api-rate-limit";
+import { checkAiRateLimit } from "@/lib/ai-rate-limit";
+import { jsonError } from "@/lib/api-error";
 import {
   extensionCorsHeaders,
   handleExtensionPreflight,
@@ -228,7 +229,7 @@ export async function OPTIONS(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
-  const authResponse = await verifyExtensionAccessPreAuth(
+  const { response: authResponse, trust } = await verifyExtensionAccessPreAuth(
     request,
     "ai:validate"
   );
@@ -237,9 +238,7 @@ export async function POST(request: NextRequest) {
     return authResponse;
   }
 
-  const rateLimitResponse = checkRateLimit(request, {
-    uniqueTokenPerInterval: 30,
-  });
+  const rateLimitResponse = checkAiRateLimit(request, trust, 30);
   if (rateLimitResponse) {
     for (const [k, v] of Object.entries(cors))
       rateLimitResponse.headers.set(k, v);
@@ -259,10 +258,9 @@ export async function POST(request: NextRequest) {
       !body.marketTitle ||
       typeof body.marketTitle !== "string"
     ) {
-      return NextResponse.json(
-        { error: "Missing 'postText' or 'marketTitle'" },
-        { status: 400, headers: cors }
-      );
+      const errRes = jsonError("Missing 'postText' or 'marketTitle'", 400);
+      for (const [k, v] of Object.entries(cors)) errRes.headers.set(k, v);
+      return errRes;
     }
 
     const tags = Array.isArray(body.marketTags)
@@ -285,8 +283,10 @@ export async function POST(request: NextRequest) {
     const isClientError =
       error instanceof SyntaxError ||
       (error instanceof Error && error.message.includes("JSON"));
+    // Extra fields preserved; success: false added manually
     return NextResponse.json(
       {
+        success: false,
         relevant: true,
         reason: "",
         confidence: 0,

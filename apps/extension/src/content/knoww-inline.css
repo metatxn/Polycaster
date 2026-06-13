@@ -2209,6 +2209,358 @@
   position: relative !important;
 }
 
+/* Streaming surface: the row is collapsed (title + price) by default and
+   expands its betting area on click. */
+.knoww-notification-item--stream {
+  flex-wrap: wrap !important;
+  row-gap: 10px !important;
+  align-items: center !important;
+  cursor: pointer !important;
+}
+.knoww-notification-item--stream .knoww-notification-content {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+/* Betting area hidden until the row is expanded. */
+/* ─── Stream inline deposit host (reuses the panel's .knoww-tp-* deposit UI) ─── */
+#knoww-notification-stack .knoww-stream-deposit-host {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  display: none !important;
+}
+/* While depositing, the host takes over and the bet controls hide. A class is
+   required because the bet-control rules use !important (inline styles lose). */
+#knoww-notification-stack
+  .knoww-stream-bet.depositing
+  .knoww-stream-deposit-host {
+  display: block !important;
+}
+#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-seg-row,
+#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-chips,
+#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-action {
+  display: none !important;
+}
+#knoww-notification-stack .knoww-stream-deposit-host .knoww-tp-form {
+  width: 100% !important;
+  padding: 0 !important;
+}
+
+/* ─── Stream "Other markets" collapsible dropdown ─── */
+#knoww-notification-stack .knoww-stream-others-toggle {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  padding: 11px 14px !important;
+  margin-top: 4px !important;
+  border: none !important;
+  border-top: 1px solid var(--kse-hairline) !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  font-family: inherit !important;
+  transition: background 0.15s ease !important;
+}
+#knoww-notification-stack .knoww-stream-others-toggle:hover {
+  background: var(--kse-control-hover) !important;
+}
+#knoww-notification-stack .knoww-stream-others-label {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 9px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  color: var(--kse-ink-2) !important;
+}
+#knoww-notification-stack .knoww-stream-others-chevron {
+  display: inline-block !important;
+  font-size: 10px !important;
+  line-height: 1 !important;
+  color: var(--kse-ink-dim) !important;
+  transform: rotate(-90deg) !important;
+  transition: transform 0.18s ease !important;
+}
+#knoww-notification-stack
+  .knoww-stream-others-toggle.expanded
+  .knoww-stream-others-chevron {
+  transform: rotate(0deg) !important;
+}
+#knoww-notification-stack .knoww-stream-others-count {
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  font-size: 8.5px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.14em !important;
+  color: var(--kse-ink-2) !important;
+  border: 1px solid var(--kse-hairline-2) !important;
+  border-radius: 999px !important;
+  padding: 2px 7px !important;
+  line-height: 1 !important;
+  background: var(--kse-control-hover) !important;
+}
+#knoww-notification-stack .knoww-stream-others-list {
+  display: none !important;
+}
+#knoww-notification-stack .knoww-stream-others-list.expanded {
+  display: block !important;
+}
+
+.knoww-stream-bet {
+  flex: 0 0 100% !important;
+  width: 100% !important;
+  display: none !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+.knoww-notification-item--stream.expanded .knoww-stream-bet {
+  display: flex !important;
+}
+/* The notification item is a CSS grid (32px 1fr auto); make the betting area
+   span all columns so it gets the full card width instead of one 32px cell. */
+#knoww-notification-stack .knoww-notification-item--stream .knoww-stream-bet {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+}
+/* Segment selector: 2 outcomes → one row; 3-4 options → 2x2 grid. */
+.knoww-stream-seg-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+}
+/* Outcome segments — outlined pills (name + cents); the selected side tints
+   with its colour. Two side by side; 3-4 options wrap to a 2x2 grid. */
+.knoww-stream-seg {
+  flex: 1 1 calc(50% - 4px) !important;
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  padding: 10px 12px !important;
+  border: 1.5px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: 11px !important;
+  background: transparent !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  cursor: pointer !important;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease !important;
+}
+.knoww-stream-seg .knoww-stream-seg-name {
+  font-weight: 500 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  min-width: 0 !important;
+}
+.knoww-stream-seg .knoww-stream-seg-price {
+  font-weight: 700 !important;
+  flex: none !important;
+}
+.knoww-stream-seg.yes {
+  color: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+}
+.knoww-stream-seg.no {
+  color: rgb(229, 115, 115) !important;
+}
+.knoww-stream-seg.sel.yes {
+  border-color: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  background: rgba(0, 186, 124, 0.12) !important;
+}
+.knoww-stream-seg.sel.no {
+  border-color: rgb(221, 33, 96) !important;
+  background: rgba(221, 33, 96, 0.12) !important;
+}
+.knoww-stream-seg.sel.opt {
+  border-color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.08)) !important;
+}
+
+/* Amount chips — simple pills. */
+.knoww-stream-chips {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+}
+.knoww-stream-chip {
+  flex: 1 1 0 !important;
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  padding: 7px 6px !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease !important;
+}
+.knoww-stream-chip:hover {
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.05)) !important;
+}
+.knoww-stream-chip.active {
+  background: var(--knoww-text, rgb(231, 233, 234)) !important;
+  border-color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  color: var(--knoww-bg, rgb(0, 0, 0)) !important;
+}
+
+/* Single contextual action button (the trade state machine). */
+.knoww-stream-action {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+}
+.knoww-stream-trade {
+  width: 100% !important;
+  border: none !important;
+  border-radius: 12px !important;
+  padding: 12px 14px !important;
+  font-family: inherit !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+  color: #fff !important;
+  background: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  transition:
+    filter 0.12s ease,
+    opacity 0.12s ease !important;
+}
+.knoww-stream-trade:hover {
+  filter: brightness(0.96) !important;
+}
+.knoww-stream-trade.green {
+  background: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+}
+.knoww-stream-trade.rose {
+  background: rgb(221, 33, 96) !important;
+}
+.knoww-stream-trade.ghost {
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.06)) !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-stream-trade.warn {
+  background: rgba(221, 33, 96, 0.16) !important;
+  color: rgb(221, 33, 96) !important;
+}
+.knoww-stream-trade.deposit {
+  background: var(
+    --knoww-deposit-bg,
+    linear-gradient(135deg, rgb(16, 185, 129), rgb(20, 184, 166))
+  ) !important;
+  color: var(--knoww-deposit-text, #fff) !important;
+}
+.knoww-stream-trade:disabled {
+  opacity: 0.85 !important;
+  cursor: default !important;
+}
+.knoww-stream-trade-sub {
+  font-family: var(--knoww-mono, ui-monospace, monospace) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  opacity: 0.82 !important;
+}
+.knoww-stream-confirm-row {
+  display: grid !important;
+  grid-template-columns: 88px 1fr !important;
+  gap: 8px !important;
+}
+.knoww-stream-cancel {
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+}
+.knoww-stream-hint {
+  font-size: 11px !important;
+  text-align: center !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-stream-hint.good {
+  color: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+}
+.knoww-stream-hint.warn {
+  color: rgb(221, 33, 96) !important;
+}
+.knoww-stream-spin {
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50% !important;
+  border: 2px solid rgba(255, 255, 255, 0.35) !important;
+  border-top-color: #fff !important;
+  animation: knoww-stream-spin 0.7s linear infinite !important;
+}
+@keyframes knoww-stream-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Shared stake selector above the stream market list. */
+.knoww-stream-stakebar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 10px 16px !important;
+  border-bottom: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+}
+.knoww-stream-stake-label {
+  font-size: 11px !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-stream-stake-chips {
+  display: flex !important;
+  gap: 6px !important;
+}
+.knoww-stream-stake-chip {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  padding: 6px 10px !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  background: transparent !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  cursor: pointer !important;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease !important;
+}
+.knoww-stream-stake-chip:hover {
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.05)) !important;
+}
+.knoww-stream-stake-chip.active {
+  background: var(--knoww-text, rgb(231, 233, 234)) !important;
+  border-color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  color: var(--knoww-bg, rgb(0, 0, 0)) !important;
+}
+.knoww-stream-stake-mode {
+  margin-left: auto !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+}
+
 /* Source-specific notification styling */
 .knoww-notification-item.knoww-source-kalshi {
   border-left: 3px solid rgba(245, 158, 11, 0.6) !important;
@@ -3186,6 +3538,11 @@
   border: 1px solid rgba(34, 197, 94, 0.2) !important;
   color: rgb(34, 197, 94) !important;
 }
+.knoww-tp-deposit-info-banner.stream {
+  background: rgba(34, 197, 94, 0.06) !important;
+  border: 1px solid rgba(34, 197, 94, 0.16) !important;
+  margin-top: 4px !important;
+}
 
 /* Bridge selection */
 .knoww-tp-deposit-search-wrap {
@@ -3410,6 +3767,36 @@
 .knoww-tp-deposit-fee-row.highlight .knoww-tp-deposit-fee-value {
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   font-weight: 600 !important;
+}
+/* Stream deposit: fee details tucked behind an (i) hover on "You receive". */
+.knoww-tp-deposit-fee-info {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  margin-left: 5px !important;
+  cursor: help !important;
+}
+.knoww-tp-deposit-fee-info-icon {
+  font-size: 11px !important;
+  line-height: 1 !important;
+  color: var(--knoww-text-secondary, rgba(255, 255, 255, 0.4)) !important;
+}
+.knoww-tp-deposit-fee-tooltip {
+  position: absolute !important;
+  bottom: calc(100% + 8px) !important;
+  left: 0 !important;
+  z-index: 60 !important;
+  min-width: 180px !important;
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: #1a1a1d !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+  display: none !important;
+}
+.knoww-tp-deposit-fee-info:hover .knoww-tp-deposit-fee-tooltip,
+.knoww-tp-deposit-fee-info:focus-within .knoww-tp-deposit-fee-tooltip {
+  display: block !important;
 }
 .knoww-tp-deposit-inline-spinner {
   display: inline-block !important;

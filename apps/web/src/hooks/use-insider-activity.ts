@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Decimal from "decimal.js";
+import { fetchJson } from "@/lib/fetch-json";
 import type {
   ArchetypeId,
   ArchetypeScore,
@@ -171,14 +172,9 @@ async function fetchInsiderActivity(
     params.set("limit", options.limit.toString());
   }
 
-  const response = await fetch(`/api/whales/suspicious?${params.toString()}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch insider activity");
-  }
-
-  return response.json();
+  return fetchJson<SuspiciousActivityResponse>(
+    `/api/whales/suspicious?${params.toString()}`
+  );
 }
 
 export function useInsiderActivity(options: UseInsiderActivityOptions = {}) {

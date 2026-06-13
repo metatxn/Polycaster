@@ -248,6 +248,7 @@ function NumberControl({
       </div>
       <input
         type="number"
+        name={label.toLowerCase().replace(/\s+/g, "-")}
         value={value}
         min={min}
         max={max}

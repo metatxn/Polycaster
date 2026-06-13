@@ -6,7 +6,7 @@ import {
   type QuoteResponse,
   type SupportedAsset,
 } from "@knoww/shared-types/bridge";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Check, Copy, Loader2 } from "lucide-react";
 import type { TokenBalance } from "@/hooks/use-wallet-tokens";
 import { formatAddress } from "@/lib/formatters";
@@ -154,7 +154,7 @@ export function Confirmation({
       : "< 2 min";
 
   return (
-    <motion.div
+    <m.div
       key="confirm"
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -470,6 +470,6 @@ export function Confirmation({
           </button>
         </>
       ) : null}
-    </motion.div>
+    </m.div>
   );
 }

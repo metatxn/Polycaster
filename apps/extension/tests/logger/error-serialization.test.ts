@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { logWarn } from "../../../../packages/logger/src/index";
 
 test("structured warning logs include nested Error details", () => {

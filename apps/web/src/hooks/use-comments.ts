@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 import type {
   Comment,
@@ -54,19 +55,9 @@ async function fetchComments(
     searchParams.set("holders_only", String(params.holders_only));
   }
 
-  const response = await fetch(`/api/comments?${searchParams.toString()}`);
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch comments");
-  }
-
-  const data: CommentsApiResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || "Failed to fetch comments");
-  }
-
-  return data;
+  return fetchJson<CommentsApiResponse>(
+    `/api/comments?${searchParams.toString()}`
+  );
 }
 
 /**

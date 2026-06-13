@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { createExtensionLegacyClobClient } from "../../src/background/unified-clob-client";
 
 test("createExtensionLegacyClobClient wires unified SDK auth into the legacy CLOB adapter", async () => {

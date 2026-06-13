@@ -2236,8 +2236,7 @@
   display: block !important;
 }
 #knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-seg-row,
-#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-chips,
-#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-action {
+#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-actionrow {
   display: none !important;
 }
 #knoww-notification-stack .knoww-stream-deposit-host .knoww-tp-form {
@@ -2313,7 +2312,7 @@
   width: 100% !important;
   display: none !important;
   flex-direction: column !important;
-  gap: 8px !important;
+  gap: 6px !important;
 }
 .knoww-notification-item--stream.expanded .knoww-stream-bet {
   display: flex !important;
@@ -2339,14 +2338,14 @@
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  gap: 8px !important;
-  padding: 10px 12px !important;
+  gap: 6px !important;
+  padding: 8px 10px !important;
   border: 1.5px solid var(--knoww-border, rgb(47, 51, 54)) !important;
-  border-radius: 11px !important;
+  border-radius: 9px !important;
   background: transparent !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   font-family: inherit !important;
-  font-size: 13px !important;
+  font-size: 12px !important;
   cursor: pointer !important;
   transition:
     border-color 0.12s ease,
@@ -2382,38 +2381,6 @@
   background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.08)) !important;
 }
 
-/* Amount chips — simple pills. */
-.knoww-stream-chips {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 6px !important;
-}
-.knoww-stream-chip {
-  flex: 1 1 0 !important;
-  box-sizing: border-box !important;
-  min-width: 0 !important;
-  padding: 7px 6px !important;
-  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
-  border-radius: 9px !important;
-  background: transparent !important;
-  color: var(--knoww-text, rgb(231, 233, 234)) !important;
-  font-family: inherit !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  cursor: pointer !important;
-  transition:
-    border-color 0.12s ease,
-    background 0.12s ease !important;
-}
-.knoww-stream-chip:hover {
-  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.05)) !important;
-}
-.knoww-stream-chip.active {
-  background: var(--knoww-text, rgb(231, 233, 234)) !important;
-  border-color: var(--knoww-text, rgb(231, 233, 234)) !important;
-  color: var(--knoww-bg, rgb(0, 0, 0)) !important;
-}
-
 /* Single contextual action button (the trade state machine). */
 .knoww-stream-action {
   display: flex !important;
@@ -2423,18 +2390,18 @@
 .knoww-stream-trade {
   width: 100% !important;
   border: none !important;
-  border-radius: 12px !important;
-  padding: 12px 14px !important;
+  border-radius: 10px !important;
+  padding: 9px 11px !important;
   font-family: inherit !important;
   font-weight: 600 !important;
-  font-size: 14px !important;
+  font-size: 13px !important;
   cursor: pointer !important;
   color: #fff !important;
   background: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 8px !important;
+  gap: 6px !important;
   transition:
     filter 0.12s ease,
     opacity 0.12s ease !important;
@@ -2473,6 +2440,184 @@
   font-weight: 500 !important;
   opacity: 0.82 !important;
 }
+
+/* ─── Compact head: short title + BUY/SELL toggle ─── */
+.knoww-stream-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+}
+.knoww-stream-title {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  min-width: 0 !important;
+}
+.knoww-stream-buysell {
+  display: inline-flex !important;
+  flex: none !important;
+  padding: 2px !important;
+  gap: 2px !important;
+  border-radius: 8px !important;
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.06)) !important;
+}
+.knoww-stream-bs-opt {
+  border: none !important;
+  background: transparent !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-family: inherit !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  padding: 4px 9px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease !important;
+}
+.knoww-stream-bs-opt.sel {
+  background: var(--knoww-bg, rgb(0, 0, 0)) !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+
+/* ─── Action row: inline −/＋ stepper + trade button on one line ─── */
+.knoww-stream-actionrow {
+  display: grid !important;
+  grid-template-columns: auto 1fr !important;
+  gap: 6px !important;
+  align-items: stretch !important;
+}
+.knoww-stream-actionrow.full {
+  grid-template-columns: 1fr !important;
+}
+.knoww-stream-stepper {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: 10px !important;
+  padding: 2px !important;
+}
+.knoww-stream-step-btn {
+  width: 26px !important;
+  height: 26px !important;
+  display: grid !important;
+  place-items: center !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  transition: background 0.12s ease !important;
+}
+.knoww-stream-step-btn:hover {
+  background: var(--knoww-header-chip-bg, rgba(255, 255, 255, 0.06)) !important;
+}
+.knoww-stream-step-btn:disabled {
+  opacity: 0.4 !important;
+  cursor: default !important;
+}
+.knoww-stream-step-val {
+  min-width: 34px !important;
+  text-align: center !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+
+/* ─── Holdings footer: "YOU HOLD … · $value" + one-tap SELL ─── */
+.knoww-stream-hold {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding-top: 6px !important;
+  margin-top: 2px !important;
+  border-top: 1px solid var(--kse-hairline, rgba(255, 255, 255, 0.08)) !important;
+  font-family: "KnowwMono", "SF Mono", "Consolas", monospace !important;
+  font-size: 10px !important;
+  letter-spacing: 0.04em !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-stream-hold-text {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.knoww-stream-hold-label {
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+.knoww-stream-hold-val {
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-weight: 600 !important;
+}
+.knoww-stream-hold-sell {
+  flex: none !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  background: transparent !important;
+  color: rgb(229, 115, 115) !important;
+  font-family: inherit !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  padding: 4px 10px !important;
+  border-radius: 999px !important;
+  cursor: pointer !important;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease !important;
+}
+.knoww-stream-hold-sell:hover {
+  background: rgba(221, 33, 96, 0.12) !important;
+  border-color: rgb(221, 33, 96) !important;
+}
+.knoww-stream-hold-sell:disabled {
+  opacity: 0.4 !important;
+  cursor: default !important;
+}
+
+/* ─── Compact collapsed pill (stream rows only) ─── */
+.knoww-notification-item--stream .knoww-stream-pill {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  font-family: "KnowwMono", "SF Mono", "Consolas", monospace !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+.knoww-stream-pill-prices {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-stream-pill-hold {
+  flex: none !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  border: 1px solid var(--kse-hairline-2, rgba(255, 255, 255, 0.14)) !important;
+  border-radius: 999px !important;
+  padding: 2px 7px !important;
+}
+
 .knoww-stream-confirm-row {
   display: grid !important;
   grid-template-columns: 88px 1fr !important;

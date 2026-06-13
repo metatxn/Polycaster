@@ -14,9 +14,10 @@ export const STREAM_STAKE_STEP = 1;
 export const STREAM_STAKE_MIN = 1;
 
 /**
- * Clamp a USD stake to whole dollars within [min, ceiling]. `max` of 0 means
- * "no ceiling" (balance unknown / not funded). When funded, the ceiling is the
- * floored balance, but never below `min`.
+ * Clamp a USD stake to whole dollars within [min, ceiling]. A `max` of 0 (or any
+ * non-positive value) means "no ceiling" — balance unknown / not funded, so the
+ * user can dial in the amount they intend to deposit. When `max > 0` the ceiling
+ * is the floored balance, but never below `min`.
  */
 export function clampStake(
   stake: number,

@@ -36,3 +36,14 @@ test("stepStake moves by one dollar and clamps", () => {
   assert.equal(stepStake(1, -1), 1); // already at floor
   assert.equal(stepStake(3, 1, 1, 3), 3); // at ceiling
 });
+
+test("clampStake collapses non-finite input to the minimum", () => {
+  assert.equal(clampStake(Number.NaN), 1);
+  assert.equal(clampStake(Number.POSITIVE_INFINITY), 1);
+  assert.equal(clampStake(Number.NaN, 1, 50), 1);
+});
+
+test("stepStake collapses non-finite current to the minimum", () => {
+  assert.equal(stepStake(Number.NaN, 1), 1);
+  assert.equal(stepStake(Number.POSITIVE_INFINITY, -1), 1);
+});

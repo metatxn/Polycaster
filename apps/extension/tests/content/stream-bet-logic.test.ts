@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  canSellHolding,
   clampStake,
+  formatHoldingLine,
+  formatPillPrices,
+  pickHolding,
   STREAM_STAKE_STEP,
+  type StreamHolding,
+  sellButtonLabel,
   stepStake,
 } from "../../src/content/trading/stream-bet-logic";
 
@@ -46,4 +52,102 @@ test("clampStake collapses non-finite input to the minimum", () => {
 test("stepStake collapses non-finite current to the minimum", () => {
   assert.equal(stepStake(Number.NaN, 1), 1);
   assert.equal(stepStake(Number.POSITIVE_INFINITY, -1), 1);
+});
+
+test("pickHolding returns null when nothing is held", () => {
+  assert.equal(
+    pickHolding([
+      { outcomeIndex: 0, name: "FURIA", balance: "0", price: 0.6 },
+      { outcomeIndex: 1, name: "MOUZ", balance: "0.001", price: 0.41 },
+    ]),
+    null
+  );
+});
+
+test("pickHolding returns the held side with shares + value", () => {
+  const h = pickHolding([
+    { outcomeIndex: 0, name: "FURIA", balance: "5", price: 0.6 },
+    { outcomeIndex: 1, name: "MOUZ", balance: "0", price: 0.41 },
+  ]);
+  assert.ok(h);
+  assert.equal(h?.outcomeIndex, 0);
+  assert.equal(h?.name, "FURIA");
+  assert.equal(h?.shares, 5);
+  assert.equal(h?.sharesLabel, "5");
+  assert.equal(h?.valueUsd, "3.00");
+});
+
+test("pickHolding picks the larger-value side when both are held", () => {
+  const h = pickHolding([
+    { outcomeIndex: 0, name: "FURIA", balance: "2", price: 0.6 }, // $1.20
+    { outcomeIndex: 1, name: "MOUZ", balance: "10", price: 0.41 }, // $4.10
+  ]);
+  assert.equal(h?.name, "MOUZ");
+});
+
+test("pickHolding formats fractional shares to one decimal", () => {
+  const h = pickHolding([
+    { outcomeIndex: 0, name: "FURIA", balance: "3.333333", price: 0.6 },
+    { outcomeIndex: 1, name: "MOUZ", balance: "0", price: 0.41 },
+  ]);
+  assert.equal(h?.sharesLabel, "3.3");
+});
+
+test("formatHoldingLine renders 'shares name · $value'", () => {
+  const h: StreamHolding = {
+    outcomeIndex: 0,
+    name: "FURIA",
+    shares: 5,
+    sharesLabel: "5",
+    valueUsd: "3.00",
+  };
+  assert.equal(formatHoldingLine(h), "5 FURIA · $3.00");
+});
+
+test("sellButtonLabel renders 'Sell shares name · ~$value'", () => {
+  const h: StreamHolding = {
+    outcomeIndex: 0,
+    name: "FURIA",
+    shares: 5,
+    sharesLabel: "5",
+    valueUsd: "3.00",
+  };
+  assert.equal(sellButtonLabel(h), "Sell 5 FURIA · ~$3.00");
+});
+
+test("canSellHolding requires shares at or above the min order size", () => {
+  const h: StreamHolding = {
+    outcomeIndex: 0,
+    name: "FURIA",
+    shares: 5,
+    sharesLabel: "5",
+    valueUsd: "3.00",
+  };
+  assert.equal(canSellHolding(h, 5), true);
+  assert.equal(canSellHolding(h, 6), false);
+  assert.equal(canSellHolding(null, 5), false);
+});
+
+test("formatPillPrices renders 'A a¢ / B b¢' for two outcomes", () => {
+  assert.equal(
+    formatPillPrices([
+      { name: "FURIA", price: 0.6 },
+      { name: "MOUZ", price: 0.41 },
+    ]),
+    "FURIA 60¢ / MOUZ 41¢"
+  );
+});
+
+test("formatPillPrices caps at the first two outcomes", () => {
+  assert.equal(
+    formatPillPrices(
+      [
+        { name: "A", price: 0.5 },
+        { name: "B", price: 0.3 },
+        { name: "C", price: 0.2 },
+      ],
+      2
+    ),
+    "A 50¢ / B 30¢"
+  );
 });

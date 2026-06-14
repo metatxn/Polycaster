@@ -1006,7 +1006,7 @@ export function OutcomesTable({
                     />
                   </div>
                 </div>
-                <span className="w-[210px] text-center">Trade</span>
+                <span className="w-[240px] text-center">Trade</span>
               </div>
             )}
             <div className="divide-y divide-(--kwm-hl)">
@@ -1204,7 +1204,7 @@ export function OutcomesTable({
 
                       {/* Right Side: Trading Buttons — editorial outline CTAs */}
                       <div className="px-4 pb-3 lg:pb-0 lg:pr-4 lg:pl-0 flex items-center justify-center">
-                        <div className="grid w-full grid-cols-2 items-center gap-2 lg:w-[210px]">
+                        <div className="grid w-full grid-cols-2 items-center gap-2 lg:w-[240px]">
                           <OutcomeTradeButton
                             label="Yes"
                             price={market.yesPrice}

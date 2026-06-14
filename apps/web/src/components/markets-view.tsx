@@ -71,6 +71,7 @@ interface SubMarket {
   title: string;
   yes: number;
   no: number;
+  tokenId?: string;
 }
 
 type MarketViewTab = "categories" | "trending" | "breaking" | "new";
@@ -116,6 +117,12 @@ function toNumber(v: number | string | undefined): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
+function isGenericPlaceholderCandidate(title: string): boolean {
+  return /^(?:team|app|car|player|candidate|option|choice)\s+[a-z]$/i.test(
+    title.trim()
+  );
+}
+
 function extractTopMarkets(event: MarketViewEvent, limit = 3): SubMarket[] {
   const markets = event.markets ?? [];
   const parsed: SubMarket[] = [];
@@ -125,15 +132,21 @@ function extractTopMarkets(event: MarketViewEvent, limit = 3): SubMarket[] {
     const yes = prices[0];
     const no = prices[1];
     if (Number.isNaN(yes) || Number.isNaN(no)) continue;
+    const title = m.groupItemTitle || m.question || "Outcome";
     parsed.push({
       id: m.id,
-      title: m.groupItemTitle || m.question || "Outcome",
+      title,
       yes,
       no,
+      tokenId: parseGammaStringArray(m.clobTokenIds)[0],
     });
   }
-  parsed.sort((a, b) => b.yes - a.yes);
-  return parsed.slice(0, limit);
+  const namedCandidates = parsed.filter(
+    (market) => !isGenericPlaceholderCandidate(market.title)
+  );
+  const candidates = namedCandidates.length > 0 ? namedCandidates : parsed;
+  candidates.sort((a, b) => b.yes - a.yes);
+  return candidates.slice(0, limit);
 }
 
 function summarizeEvent(event: MarketViewEvent): {
@@ -151,23 +164,7 @@ function summarizeEvent(event: MarketViewEvent): {
  *  when the event has no parseable markets or the leader's token
  *  list is missing. */
 function leaderTokenId(event: MarketViewEvent): string | null {
-  const markets = event.markets ?? [];
-  if (markets.length === 0) return null;
-  // Find the market with the highest YES price (mirrors extractTopMarkets).
-  let bestIdx = -1;
-  let bestYes = -1;
-  for (let i = 0; i < markets.length; i++) {
-    const prices = parseGammaNumberArray(markets[i].outcomePrices);
-    if (prices.length < 2) continue;
-    const yes = prices[0];
-    if (Number.isFinite(yes) && yes > bestYes) {
-      bestYes = yes;
-      bestIdx = i;
-    }
-  }
-  if (bestIdx === -1) return null;
-  const ids = parseGammaStringArray(markets[bestIdx].clobTokenIds);
-  return ids[0] ?? null;
+  return extractTopMarkets(event, 1)[0]?.tokenId ?? null;
 }
 
 // ============================================================

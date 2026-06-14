@@ -13,10 +13,19 @@ import type {
   Market,
   NestedMarket,
 } from "../types/market";
-import { STREAM_TRADE_AMOUNT_PRESETS } from "../types/settings";
 import { setCspSafeImageSrc } from "./image-proxy";
 import { WALLETCONNECT_WALLET_UUID, WalletBridge } from "./trading/bridge";
 import { ExtensionSession } from "./trading/extension-session";
+import {
+  canSellHolding,
+  clampStake,
+  formatHoldingLine,
+  parseStreamStakeInput,
+  pickHolding,
+  type StreamHolding,
+  sellButtonLabel,
+  stepStake,
+} from "./trading/stream-bet-logic";
 import { TradingPanel } from "./trading/trading-panel";
 import { TradingService } from "./trading/trading-service";
 import { renderWalletConnectQrSvg } from "./trading/walletconnect-qr";
@@ -2632,6 +2641,13 @@ function createNotificationStack(): HTMLElement {
     }
   });
 
+  // Streaming surface: keep the original header (icons), but slim the panel via
+  // CSS — drop the footer and the "Live now" section label. The marker class is
+  // the hook for those rules (see `.knoww-stack-stream` in knoww-inline.css).
+  if (isStreamSurface()) {
+    container.classList.add("knoww-stack-stream");
+  }
+
   // Hydrate from persisted state on first creation.
   void readPersistedStackMinimized().then((persisted) => {
     if (persisted !== cachedStackMinimized) {
@@ -3112,6 +3128,13 @@ async function submitStreamMarketOrder(
 
 type StreamTxStatus = "idle" | "placing" | "placed" | "failed";
 
+/** A short market label for the compact head, e.g. "FURIA vs MOUZ". Falls back
+ *  to the market title, trimmed of any " - <event>" suffix. */
+function streamShortTitle(market: Market): string {
+  const title = market.title || "Market";
+  return title.split(/\s[-–—|]\s/)[0].trim() || title;
+}
+
 /**
  * Build the card's betting area to match the design's "one-click trading":
  * the outcomes as a SEGMENT SELECTOR + a single contextual ACTION BUTTON that
@@ -3126,33 +3149,64 @@ function buildStreamBetting(market: Market): HTMLElement {
 
   const wrap = document.createElement("div");
   wrap.className = "knoww-stream-bet";
+
+  // Head: just the BUY/SELL toggle (the market title lives in the collapsed
+  // pill directly above, so it isn't repeated here). Hidden by default; shown
+  // only when there's a sellable position (see renderHead).
+  const head = document.createElement("div");
+  head.className = "knoww-stream-head knoww-stream-hidden";
+  const buysell = document.createElement("div");
+  buysell.className = "knoww-stream-buysell";
+  head.appendChild(buysell);
+
   const segRow = document.createElement("div");
   segRow.className = "knoww-stream-seg-row";
-  const chipsRow = document.createElement("div");
-  chipsRow.className = "knoww-stream-chips";
+
+  // Action row: inline stepper + contextual trade button on one line.
+  const actionRow = document.createElement("div");
+  actionRow.className = "knoww-stream-actionrow";
+  const stepperWrap = document.createElement("div");
+  stepperWrap.className = "knoww-stream-stepper";
   const actionWrap = document.createElement("div");
   actionWrap.className = "knoww-stream-action";
-  // Host for the inline deposit flow (rendered by the trading panel's deposit
-  // engine). Hidden until the user taps "Deposit to trade"; replaces the
-  // segments/chips/action while active so the deposit is inline in the card.
+  actionRow.appendChild(stepperWrap);
+  actionRow.appendChild(actionWrap);
+
+  // Contextual hint (full width, below the action row) so a wrapped hint can
+  // never inflate the stepper/trade row height.
+  const hintHost = document.createElement("div");
+  hintHost.className = "knoww-stream-hint-host";
+
+  // Holdings footer (2-outcome markets only; filled once balances load).
+  const holdFooter = document.createElement("div");
+  holdFooter.className = "knoww-stream-hold knoww-stream-hidden";
+
+  // Host for the inline deposit flow (unchanged behavior).
   const depositHost = document.createElement("div");
   depositHost.className = "knoww-stream-deposit-host";
+
+  wrap.appendChild(head);
   wrap.appendChild(segRow);
-  wrap.appendChild(chipsRow);
-  wrap.appendChild(actionWrap);
+  wrap.appendChild(actionRow);
+  wrap.appendChild(hintHost);
+  wrap.appendChild(holdFooter);
   wrap.appendChild(depositHost);
 
   let selectedIdx = 0;
+  let side: "BUY" | "SELL" = "BUY";
+  let holding: StreamHolding | null = null;
   let txStatus: StreamTxStatus = "idle";
-  // True while the inline deposit flow owns the card body.
   let depositing = false;
-  // Last placement error, surfaced inline on the "failed" state so the user
-  // sees *why* (insufficient balance, approval, rejected order) instead of a
-  // generic "something went wrong".
   let lastError: string | null = null;
-  // Label shown while an inline setup step (connect / enable / approve) runs;
-  // the wallet's own popup handles the actual signature — no big panel.
   let busy: string | null = null;
+  let holdingGen = 0;
+  // Holdings footer + BUY/SELL apply ONLY to genuine binary (Yes/No) markets:
+  // getOutcomeBalances and pickHolding assume a Yes/No token pair. A
+  // multi-outcome market reduced to 2 active options gives every option
+  // outcomeIndex 0 (distinguished by marketIndex), which would mis-target the
+  // sell — so exclude those. They keep BUY + the stepper, no footer/toggle.
+  const twoSided =
+    options.length === 2 && !options[0].isMulti && !options[1].isMulti;
 
   const runSetup = (label: string, fn: () => Promise<unknown>): void => {
     busy = label;
@@ -3215,6 +3269,35 @@ function buildStreamBetting(market: Market): HTMLElement {
       });
   };
 
+  function doSell(): void {
+    if (!holding) return;
+    const opt = options[holding.outcomeIndex];
+    const balanceBefore = TradingService.getContext().balance;
+    txStatus = "placing";
+    renderAction();
+    submitStreamMarketSell(market, opt, holding.shares)
+      .then(() => {
+        txStatus = "placed";
+        lastError = null;
+        pollBalanceChange(balanceBefore);
+        void loadHolding();
+      })
+      .catch((err: unknown) => {
+        txStatus = "failed";
+        lastError = err instanceof Error ? err.message : String(err) || null;
+        void TradingService.refreshBalance();
+      })
+      .finally(() => {
+        renderAction();
+        window.setTimeout(() => {
+          if (txStatus === "placed" || txStatus === "failed") {
+            txStatus = "idle";
+            renderAction();
+          }
+        }, 2800);
+      });
+  }
+
   // Open the deposit flow INLINE inside the card: hide the bet controls and let
   // the trading panel's deposit engine render into `depositHost`. Keeps the
   // funding flow on one surface instead of spawning a separate floating panel.
@@ -3250,7 +3333,7 @@ function buildStreamBetting(market: Market): HTMLElement {
         streamInlineDepositActive = false;
         wrap.classList.remove("depositing");
         renderSegments();
-        renderChips();
+        renderStepper();
         renderAction();
         // The bridge can report "complete" a beat before the on-chain pUSD
         // balance is readable, so on return the card may still show the old
@@ -3265,7 +3348,6 @@ function buildStreamBetting(market: Market): HTMLElement {
 
   function renderSegments(): void {
     segRow.innerHTML = "";
-    const twoSided = options.length === 2;
     options.forEach((opt, i) => {
       const seg = document.createElement("button");
       seg.type = "button";
@@ -3291,34 +3373,286 @@ function buildStreamBetting(market: Market): HTMLElement {
         selectedIdx = i;
         txStatus = "idle";
         renderSegments();
-        renderChips();
+        renderStepper();
         renderAction();
       };
       segRow.appendChild(seg);
     });
   }
 
-  function renderChips(): void {
-    chipsRow.innerHTML = "";
-    const active = getStreamStake();
-    for (const amt of STREAM_TRADE_AMOUNT_PRESETS) {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = `knoww-stream-chip${amt === active ? " active" : ""}`;
-      chip.textContent = `$${amt}`;
-      chip.onclick = (e) => {
+  function renderStepper(): void {
+    stepperWrap.innerHTML = "";
+    const stake = getStreamStake();
+    const normalizedStake = clampStake(stake);
+    const setInputWidth = (input: HTMLInputElement): void => {
+      input.style.width = `${Math.max(2, input.value.length)}ch`;
+    };
+    const mk = (label: string, dir: 1 | -1): HTMLButtonElement => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "knoww-stream-step-btn";
+      b.textContent = label;
+      const nextVal = stepStake(stake, dir);
+      b.disabled = nextVal === stake;
+      b.onclick = (e) => {
         e.stopPropagation();
-        streamStakeUsd = amt;
+        streamStakeUsd = stepStake(getStreamStake(), dir);
         txStatus = "idle";
-        renderChips();
+        renderStepper();
         renderAction();
       };
-      chipsRow.appendChild(chip);
+      return b;
+    };
+    const val = document.createElement("label");
+    val.className = "knoww-stream-step-val";
+    const dollar = document.createElement("span");
+    dollar.className = "knoww-stream-step-prefix";
+    dollar.textContent = "$";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.className = "knoww-stream-step-input";
+    input.setAttribute("aria-label", "Trade amount in dollars");
+    input.value = String(normalizedStake);
+    setInputWidth(input);
+    input.onpointerdown = (e) => e.stopPropagation();
+    input.onclick = (e) => e.stopPropagation();
+    input.onfocus = (e) => {
+      e.stopPropagation();
+      input.select();
+    };
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        input.blur();
+      } else if (e.key === "Escape") {
+        input.value = String(clampStake(getStreamStake()));
+        input.blur();
+      }
+    };
+    input.oninput = (e) => {
+      e.stopPropagation();
+      setInputWidth(input);
+      const parsed = parseStreamStakeInput(input.value);
+      if (parsed == null) return;
+      streamStakeUsd = parsed;
+      txStatus = "idle";
+      renderAction();
+    };
+    input.onblur = () => {
+      streamStakeUsd =
+        parseStreamStakeInput(input.value) ?? clampStake(getStreamStake());
+      window.setTimeout(() => {
+        if (!wrap.isConnected) return;
+        renderStepper();
+        renderAction();
+      }, 0);
+    };
+    val.appendChild(dollar);
+    val.appendChild(input);
+    stepperWrap.appendChild(mk("−", -1));
+    stepperWrap.appendChild(val);
+    stepperWrap.appendChild(mk("+", 1));
+  }
+
+  function renderPill(): void {
+    const item = wrap.closest(".knoww-notification-item--stream");
+    const chip = item?.querySelector<HTMLElement>(".knoww-stream-pill-hold");
+    if (!chip) return;
+    if (holding) {
+      chip.textContent = `${holding.sharesLabel} ${holding.name}`;
+      chip.style.display = "";
+    } else {
+      chip.style.display = "none";
+    }
+  }
+
+  function renderHead(): void {
+    buysell.innerHTML = "";
+    // The head (BUY/SELL toggle) only appears when there's a sellable position in
+    // THIS market — otherwise there's nothing to sell, so we stay BUY-only and
+    // hide the head entirely, keeping the card small.
+    const ctx = TradingService.getContext();
+    const sellable = twoSided && canSellHolding(holding, ctx.minOrderSize || 0);
+    head.classList.toggle("knoww-stream-hidden", !sellable);
+    if (!sellable) {
+      if (side === "SELL") side = "BUY";
+      return;
+    }
+    (["BUY", "SELL"] as const).forEach((s) => {
+      const opt = document.createElement("button");
+      opt.type = "button";
+      opt.className = `knoww-stream-bs-opt${s === side ? " sel" : ""}`;
+      opt.textContent = s;
+      opt.disabled = txStatus === "placing";
+      opt.onclick = (e) => {
+        e.stopPropagation();
+        if (txStatus === "placing") return;
+        if (side === s) return;
+        side = s;
+        txStatus = "idle";
+        renderHead();
+        renderStepper();
+        renderAction();
+      };
+      buysell.appendChild(opt);
+    });
+  }
+
+  function renderHold(): void {
+    if (!twoSided || !holding) {
+      holdFooter.classList.add("knoww-stream-hidden");
+      holdFooter.innerHTML = "";
+      return;
+    }
+    holdFooter.classList.remove("knoww-stream-hidden");
+    holdFooter.innerHTML = "";
+    const text = document.createElement("span");
+    text.className = "knoww-stream-hold-text";
+    const label = document.createElement("span");
+    label.className = "knoww-stream-hold-label";
+    label.textContent = "YOU HOLD ";
+    const val = document.createElement("span");
+    val.className = "knoww-stream-hold-val";
+    val.textContent = formatHoldingLine(holding);
+    text.appendChild(label);
+    text.appendChild(val);
+
+    const sell = document.createElement("button");
+    sell.type = "button";
+    sell.className = "knoww-stream-hold-sell";
+    sell.textContent = "Sell";
+    const ctx = TradingService.getContext();
+    sell.disabled = !canSellHolding(holding, ctx.minOrderSize || 0);
+    sell.onclick = (e) => {
+      e.stopPropagation();
+      if (!holding) return;
+      selectedIdx = holding.outcomeIndex;
+      side = "SELL";
+      renderHead();
+      renderSegments();
+      renderStepper();
+      doSell();
+    };
+    holdFooter.appendChild(text);
+    holdFooter.appendChild(sell);
+  }
+
+  async function loadHolding(): Promise<void> {
+    if (!twoSided) return;
+    const gen = ++holdingGen;
+    try {
+      const [yesTok, noTok] = await Promise.all([
+        resolveOrderTokens(
+          market,
+          options[0].outcomeIndex,
+          options[0].isMulti,
+          options[0].marketIndex
+        ),
+        resolveOrderTokens(
+          market,
+          options[1].outcomeIndex,
+          options[1].isMulti,
+          options[1].marketIndex
+        ),
+      ]);
+      if (gen !== holdingGen || !wrap.isConnected) return;
+      if (!yesTok.tokenId || !noTok.tokenId) return;
+      const balances = await TradingService.getOutcomeBalances(
+        yesTok.tokenId,
+        noTok.tokenId
+      );
+      if (gen !== holdingGen || !wrap.isConnected) return;
+      holding = pickHolding([
+        {
+          outcomeIndex: options[0].outcomeIndex,
+          name: options[0].name,
+          balance: balances.yesBalance,
+          price: options[0].price,
+        },
+        {
+          outcomeIndex: options[1].outcomeIndex,
+          name: options[1].name,
+          balance: balances.noBalance,
+          price: options[1].price,
+        },
+      ]);
+      if (side === "SELL" && !holding) {
+        // The whole position was just sold (or vanished). Fall back to BUY and
+        // clear the trade status so the BUY-worded "Trade placed ✓" can't flash
+        // after a sell — the SELL "Sold ✓" was already shown by doSell.
+        side = "BUY";
+        txStatus = "idle";
+      }
+      // Holding changed → refresh the BUY/SELL toggle visibility (renderHead
+      // gates it on a sellable position), the stepper, footer, pill and action.
+      renderHead();
+      renderStepper();
+      renderHold();
+      renderPill();
+      renderAction();
+    } catch {
+      /* balances are best-effort; leave the footer hidden */
     }
   }
 
   function renderAction(): void {
     actionWrap.innerHTML = "";
+    hintHost.innerHTML = "";
+
+    const showStepper =
+      side === "BUY" &&
+      !busy &&
+      (txStatus === "idle" || txStatus === "failed" || txStatus === "placed");
+
+    if (side === "SELL") {
+      actionRow.classList.add("full");
+      stepperWrap.classList.add("knoww-stream-hidden");
+      const ctx = TradingService.getContext();
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "knoww-stream-trade rose";
+      if (!holding || !canSellHolding(holding, ctx.minOrderSize || 0)) {
+        btn.classList.remove("rose");
+        btn.classList.add("ghost");
+        btn.disabled = true;
+        btn.textContent = holding
+          ? "Position too small to sell"
+          : "Nothing to sell";
+      } else if (txStatus === "placing") {
+        btn.classList.remove("rose");
+        btn.classList.add("ghost");
+        btn.disabled = true;
+        btn.innerHTML = `<span class="knoww-stream-spin"></span> Selling…`;
+      } else if (txStatus === "placed") {
+        btn.classList.remove("rose");
+        btn.classList.add("green");
+        btn.disabled = true;
+        btn.textContent = "Sold ✓";
+      } else if (txStatus === "failed") {
+        btn.classList.remove("rose");
+        btn.classList.add("ghost");
+        btn.textContent = "Unable to sell — retry";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          doSell();
+        };
+      } else {
+        btn.textContent = sellButtonLabel(holding);
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          doSell();
+        };
+      }
+      actionWrap.appendChild(btn);
+      return;
+    }
+
+    actionRow.classList.toggle("full", !showStepper);
+    stepperWrap.classList.toggle("knoww-stream-hidden", !showStepper);
+
     const opt = options[selectedIdx];
     const stake = getStreamStake();
     const ctx = TradingService.getContext();
@@ -3455,30 +3789,64 @@ function buildStreamBetting(market: Market): HTMLElement {
     }
 
     actionWrap.appendChild(btn);
-    if (hint.textContent) actionWrap.appendChild(hint);
+    if (hint.textContent) hintHost.appendChild(hint);
   }
 
+  renderHead();
   renderSegments();
-  renderChips();
+  renderStepper();
   renderAction();
+  renderHold();
+  renderPill();
+  void loadHolding();
 
   // Each card reads wallet readiness from the shared TradingService at render
-  // time, so without this every card would keep showing "Connect to trade"
-  // even after another card connected. Re-render on global state changes; skip
-  // while this card has an inline setup in flight (its own finally re-renders),
-  // and self-unsubscribe once the card leaves the DOM.
+  // time. Re-render the stepper/action/footer on global state changes; skip
+  // while an inline setup/deposit is in flight, and self-unsubscribe once the
+  // card leaves the DOM.
   const unsubState = TradingService.onStateChange(() => {
     if (!wrap.isConnected) {
       unsubState();
       return;
     }
-    // While the inline deposit owns the card, its own subscription drives
-    // rendering — don't stomp it with the bet action.
     if (busy || depositing) return;
+    renderHead();
+    renderStepper();
     renderAction();
+    renderHold();
   });
 
+  // Refresh holdings when this card is (re)expanded (see the item click handler).
+  wrap.addEventListener("knoww-stream-expanded", () => void loadHolding());
+
   return wrap;
+}
+
+/** Place a market SELL of `shares` of the given stream outcome. Throws on failure. */
+async function submitStreamMarketSell(
+  market: Market,
+  opt: StreamOption,
+  shares: number
+): Promise<void> {
+  const tokens = await resolveOrderTokens(
+    market,
+    opt.outcomeIndex,
+    opt.isMulti,
+    opt.marketIndex
+  );
+  if (!tokens.tokenId) throw new Error("Could not resolve market token");
+  await TradingService.placeOrder({
+    tokenId: tokens.tokenId,
+    conditionId: tokens.conditionId,
+    outcomeIndex: opt.outcomeIndex,
+    side: "SELL",
+    price: 0,
+    size: shares,
+    amount: 0,
+    orderType: "FAK",
+    negRisk: tokens.negRisk,
+    isMarketableBuy: false,
+  });
 }
 
 function createNotificationItem(
@@ -3596,7 +3964,28 @@ function createNotificationItem(
     // like a normal market. Clicking it expands the inline betting area
     // (segment selector + action button). Accordion: only one open at a time.
     item.classList.add("knoww-notification-item--stream");
-    item.appendChild(pricesDiv);
+
+    // Compact collapsed pill: the market title (+ optional holdings chip +
+    // chevron). Outcome names and prices live in the expanded segments, so the
+    // collapsed row stays focused on identifying the market.
+    content.innerHTML = "";
+    const pill = document.createElement("div");
+    pill.className = "knoww-stream-pill";
+    const pillTitle = document.createElement("span");
+    pillTitle.className = "knoww-stream-pill-title";
+    pillTitle.textContent = streamShortTitle(market);
+    const holdChip = document.createElement("span");
+    holdChip.className = "knoww-stream-pill-hold";
+    holdChip.style.display = "none";
+    const chev = document.createElement("span");
+    chev.className = "knoww-stream-pill-chev";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "⌄";
+    pill.appendChild(pillTitle);
+    pill.appendChild(holdChip);
+    pill.appendChild(chev);
+    content.appendChild(pill);
+
     item.appendChild(buildStreamBetting(market));
 
     item.setAttribute("aria-label", `Markets for ${market.title || "market"}`);
@@ -3612,6 +4001,11 @@ function createNotificationItem(
         if (el !== item) el.classList.remove("expanded");
       });
       item.classList.toggle("expanded", willExpand);
+      if (willExpand) {
+        item
+          .querySelector(".knoww-stream-bet")
+          ?.dispatchEvent(new CustomEvent("knoww-stream-expanded"));
+      }
     };
     item.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {

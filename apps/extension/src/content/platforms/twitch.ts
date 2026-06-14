@@ -20,8 +20,11 @@
 // scoping to the selectors above rather than a global query.)
 // ============================================
 
+import { createLogger } from "@knoww/logger";
 import type { PlatformAdapter, StreamContext } from "../../types/platform";
 import { registerAdapterWithRetry } from "../platform-registry";
+
+const log = createLogger("extension.twitch");
 
 // Game/category link selectors, in priority order (live → VOD → offline).
 const GAME_LINK_SELECTORS = [
@@ -77,6 +80,34 @@ function findGame(): { game: string; slug?: string } | null {
   return null;
 }
 
+// Surface what we read off the Twitch DOM in debug mode. Deduped on change so
+// frequent stream-context polling does not spam repeated rows.
+let lastStreamDebugKey = "";
+function logStreamContextDebug(ctx: StreamContext): void {
+  const key = `${ctx.game}|${ctx.gameSlug || ""}|${ctx.title}|${ctx.isLive}`;
+  if (key === lastStreamDebugKey) return;
+  lastStreamDebugKey = key;
+  const gameLinkCandidates = GAME_LINK_SELECTORS.map((selector) => {
+    const el = document.querySelector(selector);
+    return {
+      selector,
+      found: !!el,
+      href: el?.getAttribute("href") || null,
+      text: (el?.textContent || "").trim() || null,
+      imgAlt: el?.querySelector("img")?.getAttribute("alt")?.trim() || null,
+    };
+  });
+  log.debug("stream.context", {
+    url: location.href,
+    game: ctx.game,
+    gameSlug: ctx.gameSlug,
+    title: ctx.title,
+    tags: ctx.tags,
+    isLive: ctx.isLive,
+    gameLinkCandidates,
+  });
+}
+
 function getStreamContext(): StreamContext | null {
   const found = findGame();
   const title = firstText(TITLE_SELECTORS);
@@ -90,17 +121,19 @@ function getStreamContext(): StreamContext | null {
     .slice(0, 8);
 
   // No game and no title → nothing to query (e.g. the browse/following pages).
-  if (!found?.game && !title) {
-    return { game: "", title: "", tags, isLive };
-  }
+  const ctx: StreamContext =
+    !found?.game && !title
+      ? { game: "", title: "", tags, isLive }
+      : {
+          game: found?.game || "",
+          gameSlug: found?.slug,
+          title,
+          tags,
+          isLive,
+        };
 
-  return {
-    game: found?.game || "",
-    gameSlug: found?.slug,
-    title,
-    tags,
-    isLive,
-  };
+  logStreamContextDebug(ctx);
+  return ctx;
 }
 
 const TwitchAdapter: PlatformAdapter = {

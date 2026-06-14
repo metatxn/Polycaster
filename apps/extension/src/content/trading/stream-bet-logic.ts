@@ -6,6 +6,7 @@
 // (buildStreamBetting in ui.ts) imports these and renders around them.
 // ============================================
 
+import { Decimal } from "decimal.js";
 import {
   balanceToNumber,
   hasDisplayPosition,
@@ -47,6 +48,25 @@ export function stepStake(
   max = 0
 ): number {
   return clampStake(current + dir * STREAM_STAKE_STEP, min, max);
+}
+
+/** Parse a manually-entered stream stake into the whole-dollar model. */
+export function parseStreamStakeInput(
+  raw: string,
+  min = STREAM_STAKE_MIN
+): number | null {
+  const normalized = raw.trim().replace(/^\$/, "").replace(/,/g, "").trim();
+  if (!normalized) return null;
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return null;
+
+  try {
+    const amount = new Decimal(normalized);
+    if (!amount.isFinite()) return null;
+    const rounded = amount.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    return Decimal.max(rounded, min).toNumber();
+  } catch {
+    return null;
+  }
 }
 
 // ── Holding selection, sell readiness, and label/price formatting ─────────────

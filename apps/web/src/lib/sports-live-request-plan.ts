@@ -10,12 +10,11 @@ type SportsEventLike = {
 
 export function shouldFetchScheduledSportsFallback({
   liveQueryLoading,
-  liveEventCount,
 }: {
   liveQueryLoading: boolean;
   liveEventCount: number;
 }): boolean {
-  return !liveQueryLoading && liveEventCount === 0;
+  return !liveQueryLoading;
 }
 
 function needsCompanionMarkets(event: SportsEventLike): boolean {

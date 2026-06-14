@@ -29,6 +29,11 @@
 import { createLogger } from "@knoww/logger";
 import type { InjectedMarketEntry, Market } from "../../types/market";
 import type { StreamContext } from "../../types/platform";
+import {
+  buildMatchQuery,
+  buildQuery,
+  rankStreamMarkets,
+} from "./stream-market-ranking";
 
 const log = createLogger("extension.streaming");
 
@@ -71,58 +76,6 @@ function readContext(): StreamContext | null {
     log.error("stream.context_read_failed", { error: String(e) });
     return null;
   }
-}
-
-/** Build the query for the unified market search from the stream context. */
-function buildQuery(ctx: StreamContext): string {
-  // The game/category is the strongest signal (e.g. "VALORANT", "Dota 2").
-  // Fall back to the stream title when no category is present.
-  return (ctx.game || ctx.title || "").trim();
-}
-
-/**
- * Extract the "Team A vs Team B" match-up from a stream title, when present.
- * Stream titles are typically "<match> - <event>" (e.g.
- * "SRG vs SWIM - VCT Game Changers Grand Finals"), and searching that match-up
- * surfaces the exact market for what's being watched — which we pin to the top.
- * Returns "" when the title isn't a head-to-head match-up.
- */
-function buildMatchQuery(title: string): string {
-  if (!title) return "";
-  // The match-up is the first segment, before the event/description separator.
-  const head = title.split(/\s[-–—|•:]\s/)[0].trim();
-  // Only treat it as a match-up if it reads like "A vs B" / "A v B".
-  return /\bvs?\.?\b/i.test(head) ? head : "";
-}
-
-/**
- * Significant game tokens (≥4 chars, no pure numbers) from the game name + slug.
- * e.g. "Dota 2" → ["dota"], "Counter-Strike 2" → ["counter","strike"].
- */
-function gameTokens(ctx: StreamContext): string[] {
-  const base = `${ctx.game || ""} ${(ctx.gameSlug || "").replace(/-/g, " ")}`
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 4 && !/^\d+$/.test(t));
-  return Array.from(new Set(base));
-}
-
-/**
- * Is this market genuinely about the streamed game? The broad game search
- * (knoww.app/api/search) returns fuzzy matches even when a game has no markets
- * (e.g. "Elden Ring" → a PGA Tour market), and the stream surface bypasses the
- * normal relevance pipeline — so gate game results here. Esports markets carry
- * the game name in their title/tags ("Valorant: …", "Dota 2: …"), so match the
- * full game name (substring) or any significant token as a whole word.
- */
-function isRelevantToGame(market: Market, ctx: StreamContext): boolean {
-  const name = (ctx.game || "").trim().toLowerCase();
-  const hay = `${market.title || ""} ${(market.tags || [])
-    .map((t) => `${t.label || ""} ${t.slug || ""}`)
-    .join(" ")}`.toLowerCase();
-  if (name && hay.includes(name)) return true;
-  const words = new Set(hay.split(/[^a-z0-9]+/).filter(Boolean));
-  return gameTokens(ctx).some((tok) => words.has(tok));
 }
 
 /** Wrap fetched markets as postless stack entries (no DOM card to reference). */
@@ -180,32 +133,19 @@ async function fetchOnce(ctx: StreamContext): Promise<number> {
         : Promise.resolve([] as Market[]),
     ]);
 
-    const seen = new Set<string>();
-    const ordered: Market[] = [];
-    const push = (list: Market[]): void => {
-      for (const m of list) {
-        if (!m?.id || seen.has(m.id)) continue;
-        seen.add(m.id);
-        ordered.push(m);
-      }
-    };
-    // Filter BOTH result sets to markets actually about this game, so neither a
-    // market-less game nor a meme "X vs Y" stream title surfaces random fuzzy
-    // matches (e.g. an NBA market on a Counter-Strike stream). Legit match
-    // markets carry the game name ("Counter-Strike: Spirit vs 9z") so they pass.
-    const keep = (list: Market[]): Market[] =>
-      ctx.game ? list.filter((m) => isRelevantToGame(m, ctx)) : list;
-    push(keep(matchFound)); // watched match-up first
-    push(
-      keep([...gameFound].sort((a, b) => (b.volume || 0) - (a.volume || 0)))
-    );
-
-    const ranked = ordered.slice(0, MAX_STREAM_MARKETS);
+    const ranked = rankStreamMarkets({
+      ctx,
+      matchFound,
+      gameFound,
+      maxMarkets: MAX_STREAM_MARKETS,
+    });
 
     log.info("stream.fetched", {
       game: ctx.game,
+      matchQuery: matchQuery || null,
       match: matchFound.length,
       total: ranked.length,
+      shown: ranked.map((market) => market.title).slice(0, 5),
     });
 
     if (ranked.length > 0) {
@@ -267,10 +207,14 @@ async function tick(): Promise<void> {
     return;
   }
 
-  // Already showing markets for this game → slow price refresh.
+  // Already showing markets for this game -> wait for the slow refresh interval,
+  // then fall through to fetch fresh prices.
   if (renderedKey === key) {
-    schedule(REFRESH_OK_MS);
-    return;
+    const sinceLast = Date.now() - lastFetchAt;
+    if (lastFetchAt > 0 && sinceLast < REFRESH_OK_MS) {
+      schedule(REFRESH_OK_MS - sinceLast);
+      return;
+    }
   }
 
   // Respect a minimum gap between real fetches for the same game.

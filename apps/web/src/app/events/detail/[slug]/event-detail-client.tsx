@@ -62,6 +62,10 @@ import { FieldTiles } from "./field-tiles";
 import { HeaderSection } from "./header-section";
 import { MatchupOutcomes } from "./matchup-outcomes";
 import {
+  buildMatchupTradingOutcomes,
+  compactMatchupOutcomeName,
+} from "./matchup-trading-outcomes";
+import {
   type BookSnapshot,
   fetchBookSnapshot,
   fetchBookSnapshots,
@@ -806,12 +810,23 @@ export default function EventDetailClient({
   // Seed the outcome-table inline quotes from REST before any row is clicked.
   // The websocket subscription below is intentionally narrower; it switches on
   // for the market the user selects or expands.
-  const restQuoteTokenIds = useMemo(
+  const chartQuoteTokenIds = useMemo(
     () => [
       ...new Set(
         sortedMarketData
           .slice(0, MAX_MARKETS_WITH_REST_QUOTES)
           .map((market) => market.yesTokenId)
+          .filter((tokenId): tokenId is string => Boolean(tokenId))
+      ),
+    ],
+    [sortedMarketData]
+  );
+  const restQuoteTokenIds = useMemo(
+    () => [
+      ...new Set(
+        sortedMarketData
+          .slice(0, MAX_MARKETS_WITH_REST_QUOTES)
+          .flatMap((market) => [market.yesTokenId, market.noTokenId])
           .filter((tokenId): tokenId is string => Boolean(tokenId))
       ),
     ],
@@ -853,7 +868,7 @@ export default function EventDetailClient({
 
   const { chartRangeChangeByTokenId } = useChartRangeHistory(
     chartTimeRange,
-    restQuoteTokenIds,
+    chartQuoteTokenIds,
     earliestCreatedAt,
     sortedMarketData
   );
@@ -870,8 +885,8 @@ export default function EventDetailClient({
   const displayQuoteTokenIds = useMemo(
     () =>
       sortedMarketDataWithChartRangeChange
-        .filter((market) => market.negRisk && market.yesTokenId)
-        .map((market) => market.yesTokenId),
+        .flatMap((market) => [market.yesTokenId, market.noTokenId])
+        .filter((tokenId): tokenId is string => Boolean(tokenId)),
     [sortedMarketDataWithChartRangeChange]
   );
   const displayQuoteBestAskKey = useOrderBookStore((state) =>
@@ -893,20 +908,25 @@ export default function EventDetailClient({
   const matchupMarketDataWithDisplayQuotes = useMemo(
     () =>
       sortedMarketDataWithChartRangeChange.map((market) => {
-        if (!market.negRisk || !market.yesTokenId) return market;
+        const yesBestAsk = displayQuoteBestAskByTokenId.get(market.yesTokenId);
+        const noBestAsk = displayQuoteBestAskByTokenId.get(market.noTokenId);
+        const hasYesBestAsk =
+          yesBestAsk !== null &&
+          yesBestAsk !== undefined &&
+          Number.isFinite(yesBestAsk);
+        const hasNoBestAsk =
+          noBestAsk !== null &&
+          noBestAsk !== undefined &&
+          Number.isFinite(noBestAsk);
 
-        const bestAsk = displayQuoteBestAskByTokenId.get(market.yesTokenId);
-        if (
-          bestAsk === null ||
-          bestAsk === undefined ||
-          !Number.isFinite(bestAsk)
-        ) {
+        if (!hasYesBestAsk && !hasNoBestAsk) {
           return market;
         }
 
         return {
           ...market,
-          displayYesPrice: String(bestAsk),
+          ...(hasYesBestAsk ? { displayYesPrice: String(yesBestAsk) } : {}),
+          ...(hasNoBestAsk ? { displayNoPrice: String(noBestAsk) } : {}),
         };
       }),
     [displayQuoteBestAskByTokenId, sortedMarketDataWithChartRangeChange]
@@ -1376,6 +1396,50 @@ export default function EventDetailClient({
     : isSingleMarketEvent
       ? chartMarket?.yesTokenId
       : chartMarket?.yesTokenId;
+  const matchupTradingMoneylineMarkets = isMatchup
+    ? matchupMarketDataWithDisplayQuotes
+        .filter((m) => (m.sportsMarketType ?? "").toLowerCase() === "moneyline")
+        .sort(
+          (a, b) =>
+            matchupMoneylineRank(a.groupItemTitle, matchupTeams) -
+            matchupMoneylineRank(b.groupItemTitle, matchupTeams)
+        )
+    : [];
+  const isGroupedMoneylineTradingPanel =
+    isMatchup &&
+    selectedMarket?.sportsMarketType?.toLowerCase() === "moneyline" &&
+    matchupTradingMoneylineMarkets.length > 1;
+  const isMatchupMoneylineTradingPanel =
+    isMatchup &&
+    selectedMarket?.sportsMarketType?.toLowerCase() === "moneyline";
+  const tradingFormOutcomes = isGroupedMoneylineTradingPanel
+    ? buildMatchupTradingOutcomes(matchupTradingMoneylineMarkets, matchupTeams)
+    : isMatchupMoneylineTradingPanel
+      ? tradingOutcomes.map((outcome) => ({
+          ...outcome,
+          name: compactMatchupOutcomeName(outcome.name, matchupTeams),
+        }))
+      : tradingOutcomes;
+  const tradingFormSelectedOutcomeIndex = isGroupedMoneylineTradingPanel
+    ? Math.max(
+        0,
+        matchupTradingMoneylineMarkets.findIndex(
+          (market) => market.id === selectedMarket?.id
+        )
+      )
+    : selectedOutcomeIndex;
+  const handleTradingFormOutcomeChange = (nextIndex: number) => {
+    if (isGroupedMoneylineTradingPanel) {
+      const nextMarket = matchupTradingMoneylineMarkets[nextIndex];
+      if (nextMarket) {
+        setSelectedMarketId(nextMarket.id);
+        setSelectedOutcomeIndex(0);
+        return;
+      }
+    }
+
+    setSelectedOutcomeIndex(nextIndex);
+  };
   const sportsRailActiveSlug = isTeamMatchupEvent(event.teams)
     ? getSportsRailActiveSlug(event)
     : undefined;
@@ -1578,7 +1642,7 @@ export default function EventDetailClient({
 
               {/* Trading Panel - Sticky on desktop, spans both rows so it sticks alongside comments too */}
               <div className="lg:col-span-1 lg:row-span-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
-                {selectedMarket && tradingOutcomes.length > 0 && (
+                {selectedMarket && tradingFormOutcomes.length > 0 && (
                   <ErrorBoundary name="Trading Form">
                     <TradingForm
                       marketTitle={
@@ -1587,11 +1651,12 @@ export default function EventDetailClient({
                           : selectedMarket.groupItemTitle || event.title
                       }
                       tokenId={
-                        tradingOutcomes[selectedOutcomeIndex]?.tokenId || ""
+                        tradingFormOutcomes[tradingFormSelectedOutcomeIndex]
+                          ?.tokenId || ""
                       }
-                      outcomes={tradingOutcomes}
-                      selectedOutcomeIndex={selectedOutcomeIndex}
-                      onOutcomeChange={setSelectedOutcomeIndex}
+                      outcomes={tradingFormOutcomes}
+                      selectedOutcomeIndex={tradingFormSelectedOutcomeIndex}
+                      onOutcomeChange={handleTradingFormOutcomeChange}
                       negRisk={resolveNegRisk(selectedMarket, event)}
                       tickSize={tickSize}
                       minOrderSize={minOrderSize}

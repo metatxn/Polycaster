@@ -406,6 +406,12 @@ export function TradingForm(props: TradingFormProps) {
                 const isYes = idx === 0;
                 const isSelected = selectedOutcomeIndex === idx;
                 const priceCents = (outcome.price ?? 0) * 100;
+                const rawLabel = outcome.name?.trim();
+                const normalizedLabel = rawLabel?.toLowerCase();
+                const label =
+                  normalizedLabel === "yes" || normalizedLabel === "no"
+                    ? normalizedLabel.toUpperCase()
+                    : rawLabel || (isYes ? "YES" : "NO");
                 return (
                   <button
                     key={outcome.tokenId ?? idx}
@@ -413,7 +419,7 @@ export function TradingForm(props: TradingFormProps) {
                     onClick={() => onOutcomeChange(idx)}
                     className={`tk-price ${isSelected ? "on" : ""} ${isYes ? "yes" : "no"}`}
                   >
-                    <span className="lbl">{isYes ? "YES" : "NO"}</span>
+                    <span className="lbl">{label}</span>
                     <span className="v tabular-nums">
                       {priceCents.toFixed(1)}
                       <span className="cent">¢</span>

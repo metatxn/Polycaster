@@ -6,6 +6,7 @@ import {
   clampStake,
   formatHoldingLine,
   formatPillPrices,
+  parseStreamStakeInput,
   pickHolding,
   STREAM_STAKE_STEP,
   type StreamHolding,
@@ -52,6 +53,19 @@ test("clampStake collapses non-finite input to the minimum", () => {
 test("stepStake collapses non-finite current to the minimum", () => {
   assert.equal(stepStake(Number.NaN, 1), 1);
   assert.equal(stepStake(Number.POSITIVE_INFINITY, -1), 1);
+});
+
+test("parseStreamStakeInput accepts direct whole-dollar entry", () => {
+  assert.equal(parseStreamStakeInput("100"), 100);
+  assert.equal(parseStreamStakeInput("$100"), 100);
+  assert.equal(parseStreamStakeInput("100.49"), 100);
+  assert.equal(parseStreamStakeInput("100.50"), 101);
+});
+
+test("parseStreamStakeInput returns null for empty or invalid edits", () => {
+  assert.equal(parseStreamStakeInput(""), null);
+  assert.equal(parseStreamStakeInput("$"), null);
+  assert.equal(parseStreamStakeInput("abc"), null);
 });
 
 test("pickHolding returns null when nothing is held", () => {

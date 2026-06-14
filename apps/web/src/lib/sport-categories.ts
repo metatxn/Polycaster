@@ -153,7 +153,7 @@ export const SPORT_GROUPS: readonly SportGroup[] = [
       {
         slug: "fifa-world-cup",
         label: "FIFA World Cup",
-        tagSlug: "soccer-fifwc",
+        tagSlug: "fifa-world-cup",
         seriesId: 11433,
       },
       {

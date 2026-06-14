@@ -2236,7 +2236,9 @@
   display: block !important;
 }
 #knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-seg-row,
-#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-actionrow {
+#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-actionrow,
+#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-head,
+#knoww-notification-stack .knoww-stream-bet.depositing .knoww-stream-hold {
   display: none !important;
 }
 #knoww-notification-stack .knoww-stream-deposit-host .knoww-tp-form {
@@ -2389,12 +2391,18 @@
 }
 .knoww-stream-trade {
   width: 100% !important;
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  /* One tidy line: a long outcome name truncates instead of wrapping the
+     button into a tall block. */
+  min-height: 40px !important;
   border: none !important;
   border-radius: 10px !important;
   padding: 9px 11px !important;
   font-family: inherit !important;
   font-weight: 600 !important;
   font-size: 13px !important;
+  line-height: 1.1 !important;
   cursor: pointer !important;
   color: #fff !important;
   background: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
@@ -2402,9 +2410,15 @@
   align-items: center !important;
   justify-content: center !important;
   gap: 6px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
   transition:
     filter 0.12s ease,
     opacity 0.12s ease !important;
+}
+/* The "Trade $X" label keeps its width; the "outcome · ¢" subtitle truncates. */
+.knoww-stream-trade > span:first-child {
+  flex: 0 0 auto !important;
 }
 .knoww-stream-trade:hover {
   filter: brightness(0.96) !important;
@@ -2439,13 +2453,21 @@
   font-size: 11px !important;
   font-weight: 500 !important;
   opacity: 0.82 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+/* Contextual hint sits full-width below the action row (never inflates it). */
+.knoww-stream-hint-host:empty {
+  display: none !important;
 }
 
 /* ─── Compact head: short title + BUY/SELL toggle ─── */
 .knoww-stream-head {
   display: flex !important;
   align-items: center !important;
-  justify-content: space-between !important;
+  justify-content: flex-end !important;
   gap: 8px !important;
 }
 .knoww-stream-title {
@@ -2485,6 +2507,10 @@
   background: var(--knoww-bg, rgb(0, 0, 0)) !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
 }
+.knoww-stream-bs-opt:disabled {
+  opacity: 0.5 !important;
+  cursor: default !important;
+}
 
 /* ─── Action row: inline −/＋ stepper + trade button on one line ─── */
 .knoww-stream-actionrow {
@@ -2495,6 +2521,15 @@
 }
 .knoww-stream-actionrow.full {
   grid-template-columns: 1fr !important;
+}
+/* Hide modifier toggled by JS. The base display rules below use !important, so
+   an inline `style.display = "none"` can't override them — these higher-
+   specificity rules win, letting render* hide the footer/stepper/toggle. */
+.knoww-stream-head.knoww-stream-hidden,
+.knoww-stream-hold.knoww-stream-hidden,
+.knoww-stream-stepper.knoww-stream-hidden,
+.knoww-stream-buysell.knoww-stream-hidden {
+  display: none !important;
 }
 .knoww-stream-stepper {
   display: inline-flex !important;
@@ -2526,11 +2561,37 @@
   cursor: default !important;
 }
 .knoww-stream-step-val {
-  min-width: 34px !important;
-  text-align: center !important;
+  min-width: 38px !important;
+  max-width: 76px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 1px !important;
   font-family: inherit !important;
   font-size: 13px !important;
   font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-stream-step-prefix {
+  flex: none !important;
+  pointer-events: none !important;
+}
+.knoww-stream-step-input {
+  appearance: textfield !important;
+  min-width: 2ch !important;
+  max-width: 5ch !important;
+  border: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  font: inherit !important;
+  font-weight: inherit !important;
+  line-height: 1 !important;
+  text-align: left !important;
+}
+.knoww-stream-step-input:focus {
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
 }
 
@@ -2598,12 +2659,17 @@
   font-size: 12px !important;
   font-weight: 600 !important;
 }
-.knoww-stream-pill-prices {
+.knoww-stream-pill-title {
   flex: 1 1 auto !important;
   min-width: 0 !important;
-  white-space: nowrap !important;
+  /* Show the full title, wrapping to at most two lines (keeps the row slim
+     for short titles, complete for long ones). */
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
   overflow: hidden !important;
-  text-overflow: ellipsis !important;
+  line-height: 1.3 !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
 }
 .knoww-stream-pill-hold {
@@ -2616,6 +2682,26 @@
   border: 1px solid var(--kse-hairline-2, rgba(255, 255, 255, 0.14)) !important;
   border-radius: 999px !important;
   padding: 2px 7px !important;
+}
+.knoww-stream-pill-chev {
+  flex: none !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  transition: transform 0.18s ease !important;
+}
+.knoww-notification-item--stream.expanded .knoww-stream-pill-chev {
+  transform: rotate(180deg) !important;
+}
+
+/* ─── Streaming surface chrome: slimmer panel ───
+   The original header is kept; on stream sites we just drop the "LIVE · SEE ALL"
+   footer and the "Live now" section label to slim the card. */
+#knoww-notification-stack.knoww-stack-stream #knoww-stack-footer {
+  display: none !important;
+}
+#knoww-notification-stack.knoww-stack-stream .knoww-stack-section-header {
+  display: none !important;
 }
 
 .knoww-stream-confirm-row {

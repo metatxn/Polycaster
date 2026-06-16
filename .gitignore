@@ -72,3 +72,5 @@ apps/extension/.embedding-benchmark-cache/
 .playwright-mcp/
 .pnpm-store
 .readability/
+.design-preview/
+.design-review*/

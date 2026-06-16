@@ -277,10 +277,12 @@ export function TradingForm(props: TradingFormProps) {
     const next = Math.max(0.1, Math.min(99.9, limitPriceCents + deltaCents));
     setLimitPrice(next / 100);
   };
-  const profitLabel = formatProfitLabel(
-    calculations.potentialWin,
-    calculations.total
-  );
+  // `calculations.potentialWin` is already NET profit (shares − cost). The
+  // gross return — what lands back if the outcome resolves in your favor —
+  // is net + cost, and that's what the "Return" row should show and what
+  // `formatProfitLabel` (return − cost) expects to recover the net profit.
+  const grossReturn = calculations.potentialWin + calculations.total;
+  const profitLabel = formatProfitLabel(grossReturn, calculations.total);
   const totalLabel = formatUsd(calculations.total);
   const shareQuantityLabel = formatShareQuantity(shares);
   const orderActionLabel = side === "BUY" ? "Buy" : "Sell";
@@ -323,7 +325,7 @@ export function TradingForm(props: TradingFormProps) {
                 {isLiveData && (
                   <span className="inline-flex items-center gap-1">
                     <Wifi className="h-2.5 w-2.5" />
-                    <span>Live</span>
+                    <span>Live price</span>
                   </span>
                 )}
               </div>
@@ -657,26 +659,30 @@ export function TradingForm(props: TradingFormProps) {
                   {totalLabel}
                 </span>
               </div>
-              <div className="tk-sum-row">
-                <span className="l">
-                  Return if {selectedOutcome?.name?.toUpperCase() ?? "YES"}
-                </span>
-                <span className="v up tabular-nums">
-                  ${calculations.potentialWin.toFixed(2)}
-                </span>
-              </div>
-              <div className="tk-sum-row profit">
-                <span className="l">Profit</span>
-                <span className="v tabular-nums">
-                  {profitLabel}
-                  {calculations.total > 0 && (
-                    <span className="ret">
-                      {" "}
-                      ({calculations.returnPercent}%)
+              {side === "BUY" && (
+                <>
+                  <div className="tk-sum-row">
+                    <span className="l">
+                      Return if {selectedOutcome?.name?.toUpperCase() ?? "YES"}
                     </span>
-                  )}
-                </span>
-              </div>
+                    <span className="v up tabular-nums">
+                      ${grossReturn.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="tk-sum-row profit">
+                    <span className="l">Profit</span>
+                    <span className="v up tabular-nums">
+                      {profitLabel}
+                      {calculations.total > 0 && (
+                        <span className="ret">
+                          {" "}
+                          ({calculations.returnPercent}%)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

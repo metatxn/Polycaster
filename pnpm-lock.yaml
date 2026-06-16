@@ -43,7 +43,7 @@ overrides:
   qs: 6.15.2
   body-parser: 2.2.2
   h3: 1.15.11
-  hono: 4.12.22
+  hono: 4.12.25
   postcss: 8.5.15
   minimatch: 10.2.5
   lodash: 4.18.1
@@ -4445,8 +4445,8 @@ packages:
   hermes-parser@0.35.0:
     resolution: {integrity: sha512-9JLjeHxBx8T4CAsydZR49PNZUaix+WpQJwu9p2010lu+7Kwl6D/7wYFFJxoz+aXkaaClp9Zfg6W6/zVlSJORaA==}
 
-  hono@4.12.22:
-    resolution: {integrity: sha512-7fvVPbB92zNRsQke+uiRGwtTuef0tB2Dg4hWxYfFNvkQhIltWoyi0ONReM5LWA+jJWS3nfT5lTq+qbsIpX0IQw==}
+  hono@4.12.25:
+    resolution: {integrity: sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -5036,7 +5036,7 @@ packages:
       '@modelcontextprotocol/sdk': '>=1.25.0'
       elysia: '>=1'
       express: '>=5'
-      hono: 4.12.22
+      hono: 4.12.25
       viem: '>=2.50.4'
     peerDependenciesMeta:
       '@modelcontextprotocol/sdk':
@@ -11455,10 +11455,10 @@ snapshots:
 
   accounts@0.14.7(@react-native-async-storage/async-storage@3.1.1(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.7)(utf-8-validate@5.0.10))(react@19.2.7))(@types/react@19.2.17)(@wagmi/core@3.5.0)(express@5.2.1)(immer@9.0.21)(react@19.2.7)(typescript@6.0.3)(use-sync-external-store@1.4.0(react@19.2.7))(viem@2.52.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))(wagmi@3.6.16):
     dependencies:
-      hono: 4.12.22
+      hono: 4.12.25
       idb-keyval: 6.2.2
       mipd: 0.0.7(typescript@6.0.3)
-      mppx: 0.6.27(express@5.2.1)(hono@4.12.22)(typescript@6.0.3)(viem@2.52.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))
+      mppx: 0.6.27(express@5.2.1)(hono@4.12.25)(typescript@6.0.3)(viem@2.52.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))
       ox: 0.14.22(typescript@6.0.3)(zod@4.4.3)
       webauthx: 0.1.2(typescript@6.0.3)(zod@4.4.3)
       zod: 4.4.3
@@ -12407,7 +12407,7 @@ snapshots:
     dependencies:
       hermes-estree: 0.35.0
 
-  hono@4.12.22: {}
+  hono@4.12.25: {}
 
   html-encoding-sniffer@6.0.0(@noble/hashes@2.2.0):
     dependencies:
@@ -13056,7 +13056,7 @@ snapshots:
 
   motion-utils@12.39.0: {}
 
-  mppx@0.6.27(express@5.2.1)(hono@4.12.22)(typescript@6.0.3)(viem@2.52.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3)):
+  mppx@0.6.27(express@5.2.1)(hono@4.12.25)(typescript@6.0.3)(viem@2.52.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3)):
     dependencies:
       incur: 0.4.6
       ox: 0.14.22(typescript@6.0.3)(zod@4.4.3)
@@ -13064,7 +13064,7 @@ snapshots:
       zod: 4.4.3
     optionalDependencies:
       express: 5.2.1
-      hono: 4.12.22
+      hono: 4.12.25
     transitivePeerDependencies:
       - typescript
 
@@ -13427,7 +13427,7 @@ snapshots:
   porto@0.2.37(@tanstack/react-query@5.101.0(react@19.2.7))(@types/react@19.2.17)(@wagmi/core@3.5.0)(immer@9.0.21)(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.7)(utf-8-validate@5.0.10))(react@19.2.7)(typescript@6.0.3)(use-sync-external-store@1.4.0(react@19.2.7))(viem@2.52.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))(wagmi@3.6.16):
     dependencies:
       '@wagmi/core': 3.5.0(@tanstack/query-core@5.101.0)(@types/react@19.2.17)(accounts@0.14.7)(immer@9.0.21)(react@19.2.7)(typescript@6.0.3)(use-sync-external-store@1.4.0(react@19.2.7))(viem@2.52.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3))
-      hono: 4.12.22
+      hono: 4.12.25
       idb-keyval: 6.2.2
       mipd: 0.0.7(typescript@6.0.3)
       ox: 0.9.17(typescript@6.0.3)(zod@4.4.3)

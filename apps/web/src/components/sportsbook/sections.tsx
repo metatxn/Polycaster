@@ -220,8 +220,17 @@ export function ScheduledLeagueSection({
       <div className="-mt-px space-y-3">
         {groupedByDate.map((group) => (
           <div key={group.key} className="-mt-px">
-            <div className="px-4 py-2 border-y border-(--kwm-hl) bg-(--kwm-bg-2) font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink)">
-              {group.label}
+            {/* Day separator — deliberately heavier than the mono column
+                header above so a long multi-day list reads as distinct days
+                rather than one undifferentiated stream. */}
+            <div className="flex items-center gap-2.5 px-4 py-2.5 border-y border-(--kwm-hl-2) bg-(--kwm-bg-2)">
+              <span
+                className="h-3 w-[3px] shrink-0 rounded-full bg-(--kwm-ink-3)"
+                aria-hidden="true"
+              />
+              <span className="font-(family-name:--font-geist) text-[13px] font-semibold uppercase tracking-[0.1em] text-(--kwm-ink)">
+                {group.label}
+              </span>
             </div>
             {group.events.map((event) => {
               const game = eventGameMap.get(event.id) ?? null;

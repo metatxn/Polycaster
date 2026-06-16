@@ -40,6 +40,37 @@ import {
 
 export type SportRowVariant = "live" | "scheduled";
 
+// ── ImpliedProbBar ─────────────────────────────────────────────────
+// Hairline implied-probability meter that fills the row's open space below
+// the 3xl breakpoint, where the Spread/Total columns are hidden. It turns
+// the otherwise-empty gap between team name and price into a quick
+// at-a-glance read of the favorite, and disappears once Spread/Total take
+// that space at 3xl. The desktop row is already `hidden md:block`, so a
+// base `flex` never shows on mobile — `3xl:hidden` then mirrors the proven
+// `hidden 3xl:flex` pattern used by the Spread/Total cells (base vs a single
+// responsive variant, avoiding responsive-vs-responsive ordering issues).
+// Decorative — the price button already announces the number, so aria-hidden.
+
+function ImpliedProbBar({ pct, favored }: { pct: number; favored: boolean }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <span
+      className="flex 3xl:hidden flex-1 items-center min-w-[32px] max-w-[200px]"
+      aria-hidden="true"
+    >
+      <span className="relative h-[3px] w-full overflow-hidden rounded-full bg-(--kwm-hl)">
+        <span
+          className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500"
+          style={{
+            width: `${clamped}%`,
+            backgroundColor: favored ? "var(--kwm-up)" : "var(--kwm-ink-3)",
+          }}
+        />
+      </span>
+    </span>
+  );
+}
+
 // ── SportEventRow ──────────────────────────────────────────────────
 
 export function SportEventRow({
@@ -349,7 +380,7 @@ export function SportEventRow({
                 </span>
               )}
               <TeamAvatar name={teamNames[0]} />
-              <div className="flex min-w-0 items-baseline gap-2">
+              <div className="flex min-w-0 items-center gap-4">
                 <span className="min-w-0 truncate text-base font-semibold text-(--kwm-ink)">
                   {teamNames[0]}
                 </span>
@@ -358,6 +389,12 @@ export function SportEventRow({
                     {homeScore}
                   </span>
                 )}
+                {homeMoneylinePrice != null && (
+                  <ImpliedProbBar
+                    pct={Math.round((homeMoneylinePrice ?? 0) * 100)}
+                    favored={homeFavored}
+                  />
+                )}
               </div>
               <div className="w-[106px] flex justify-center">
                 {moneylineDisplay.home ? (
@@ -365,6 +402,7 @@ export function SportEventRow({
                     abbr={homeAbbr}
                     price={homeMoneylinePrice ?? moneylineDisplay.home.price}
                     isFavored={homeFavored}
+                    fill
                     selected={
                       tokenIdForOutcome(
                         moneylineDisplay.home.line.market,
@@ -389,6 +427,7 @@ export function SportEventRow({
                     abbr={homeAbbr}
                     handicap={spread.label || ""}
                     price={homeSpreadPrice ?? spread.prices[0]}
+                    fill
                     selected={
                       tokenIdForOutcome(spread.market, spread.idx?.[0] ?? 0) ===
                       selectedOutcomeTokenId
@@ -407,6 +446,7 @@ export function SportEventRow({
                     label="O"
                     line={total.label || ""}
                     price={homeTotalPrice ?? total.prices[0]}
+                    fill
                     selected={
                       tokenIdForOutcome(total.market, total.idx?.[0] ?? 0) ===
                       selectedOutcomeTokenId
@@ -421,24 +461,42 @@ export function SportEventRow({
               </div>
             </div>
 
-            {/* Draw (soccer 3-way markets) */}
+            {/* Draw (soccer 3-way markets) — aligned under the Moneyline
+                column via spacer cells so Home / Draw / Away read as one
+                vertical group instead of the draw floating mid-row. */}
             {moneylineDisplay.draw && (
-              <div className="flex justify-center px-4 py-0.5">
-                <DrawButton
-                  price={drawMoneylinePrice ?? moneylineDisplay.draw.price}
-                  selected={
-                    tokenIdForOutcome(
-                      moneylineDisplay.draw.line.market,
-                      moneylineDisplay.draw.outcomeIndex
-                    ) === selectedOutcomeTokenId
-                  }
-                  onClick={(e) =>
-                    handlePriceClick(
-                      e,
-                      moneylineDisplay.draw?.line ?? null,
-                      moneylineDisplay.draw?.outcomeIndex ?? 0
-                    )
-                  }
+              <div className={cn(gridClass, "items-center gap-3 px-4 py-0.5")}>
+                {isLive && !showInlineScore && (
+                  <span className="w-6" aria-hidden="true" />
+                )}
+                <span aria-hidden="true" />
+                <span aria-hidden="true" />
+                <div className="w-[106px]">
+                  <DrawButton
+                    fill
+                    price={drawMoneylinePrice ?? moneylineDisplay.draw.price}
+                    selected={
+                      tokenIdForOutcome(
+                        moneylineDisplay.draw.line.market,
+                        moneylineDisplay.draw.outcomeIndex
+                      ) === selectedOutcomeTokenId
+                    }
+                    onClick={(e) =>
+                      handlePriceClick(
+                        e,
+                        moneylineDisplay.draw?.line ?? null,
+                        moneylineDisplay.draw?.outcomeIndex ?? 0
+                      )
+                    }
+                  />
+                </div>
+                <span
+                  className="hidden 3xl:block w-[132px]"
+                  aria-hidden="true"
+                />
+                <span
+                  className="hidden 3xl:block w-[122px]"
+                  aria-hidden="true"
                 />
               </div>
             )}
@@ -457,7 +515,7 @@ export function SportEventRow({
                 </span>
               )}
               <TeamAvatar name={teamNames[1]} />
-              <div className="flex min-w-0 items-baseline gap-2">
+              <div className="flex min-w-0 items-center gap-4">
                 <span className="min-w-0 truncate text-base font-semibold text-(--kwm-ink)">
                   {teamNames[1]}
                 </span>
@@ -466,6 +524,12 @@ export function SportEventRow({
                     {awayScore}
                   </span>
                 )}
+                {awayMoneylinePrice != null && (
+                  <ImpliedProbBar
+                    pct={Math.round((awayMoneylinePrice ?? 0) * 100)}
+                    favored={!homeFavored}
+                  />
+                )}
               </div>
               <div className="w-[106px] flex justify-center">
                 {moneylineDisplay.away ? (
@@ -473,6 +537,7 @@ export function SportEventRow({
                     abbr={awayAbbr}
                     price={awayMoneylinePrice ?? moneylineDisplay.away.price}
                     isFavored={!homeFavored}
+                    fill
                     selected={
                       tokenIdForOutcome(
                         moneylineDisplay.away.line.market,
@@ -503,6 +568,7 @@ export function SportEventRow({
                         : ""
                     }
                     price={awaySpreadPrice ?? spread.prices[1]}
+                    fill
                     selected={
                       tokenIdForOutcome(spread.market, spread.idx?.[1] ?? 1) ===
                       selectedOutcomeTokenId
@@ -521,6 +587,7 @@ export function SportEventRow({
                     label="U"
                     line={total.label || ""}
                     price={awayTotalPrice ?? total.prices[1]}
+                    fill
                     selected={
                       tokenIdForOutcome(total.market, total.idx?.[1] ?? 1) ===
                       selectedOutcomeTokenId
@@ -807,13 +874,14 @@ export function CompactEventRow({
               abbr={homeAbbr}
               price={homeMoneylinePrice ?? moneylineDisplay.home.price}
               isFavored={homeFavored}
+              fill
               selected={
                 tokenIdForOutcome(
                   moneylineDisplay.home.line.market,
                   moneylineDisplay.home.outcomeIndex
                 ) === selectedOutcomeTokenId
               }
-              className="text-xs px-2.5 py-1.5"
+              className="w-24 shrink-0 text-xs px-2.5"
               onClick={(e) => {
                 handlePriceClick(
                   e,
@@ -829,8 +897,10 @@ export function CompactEventRow({
           )}
         </div>
         {moneylineDisplay.draw && (
-          <div className="flex justify-center px-3 py-0.5">
+          <div className="flex justify-end px-3 py-0.5">
             <DrawButton
+              fill
+              className="w-24 shrink-0 text-xs px-2.5"
               price={drawMoneylinePrice ?? moneylineDisplay.draw.price}
               selected={
                 tokenIdForOutcome(
@@ -882,13 +952,14 @@ export function CompactEventRow({
                 abbr={awayAbbr}
                 price={awayMoneylinePrice ?? moneylineDisplay.away.price}
                 isFavored={!homeFavored}
+                fill
                 selected={
                   tokenIdForOutcome(
                     moneylineDisplay.away.line.market,
                     moneylineDisplay.away.outcomeIndex
                   ) === selectedOutcomeTokenId
                 }
-                className="text-xs px-2.5 py-1.5"
+                className="w-24 shrink-0 text-xs px-2.5"
                 onClick={(e) => {
                   handlePriceClick(
                     e,

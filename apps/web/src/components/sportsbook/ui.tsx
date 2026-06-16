@@ -1,8 +1,10 @@
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";
 import { formatPrice } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { countryFlagSrc } from "./country-flags";
 import { teamAbbr } from "./market-parsing";
 
 // ── Team color palette ────────────────────────────────────────────
@@ -37,21 +39,32 @@ export function TeamAvatar({
   imageSrc?: string;
   size?: "sm" | "md";
 }) {
+  const [failed, setFailed] = useState(false);
   const initials = teamAbbr(name);
   const colorClass = TEAM_COLORS[hashString(name) % TEAM_COLORS.length];
   const dim = size === "sm" ? 24 : 28;
   const sizeClasses =
     size === "sm" ? "w-6 h-6 text-[9px]" : "w-7 h-7 text-[10px]";
 
-  if (imageSrc) {
+  // Prefer an explicit image; otherwise fall back to a bundled national-team
+  // flag derived from the name. Non-countries (clubs, fighters) resolve to
+  // null and render the colored-initials badge. A load error (missing flag
+  // or broken image) also degrades to initials, so there's no broken state.
+  const resolvedSrc = imageSrc ?? countryFlagSrc(name);
+
+  if (resolvedSrc && !failed) {
     return (
       <Image
-        src={imageSrc}
+        src={resolvedSrc}
         alt={name}
         width={dim}
         height={dim}
-        className={cn("rounded-full object-cover shrink-0", sizeClasses)}
+        className={cn(
+          "rounded-full object-cover shrink-0 bg-(--kwm-bg-3)",
+          sizeClasses
+        )}
         title={name}
+        onError={() => setFailed(true)}
       />
     );
   }
@@ -69,6 +82,21 @@ export function TeamAvatar({
   );
 }
 
+// ── Price cell primitives ──────────────────────────────────────────
+// Shared shell for the price / spread / total / draw cells so they stay
+// visually consistent and pick up the same hover, press, and keyboard-focus
+// affordances. `fill` switches between a content-hugging inline pill (mobile,
+// beside the team name) and a full-width tabular cell (desktop grid columns),
+// where right-aligned prices line up for fast column scanning.
+
+const CELL_SHELL =
+  "h-10 px-3 rounded-md border whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--kwm-ink) active:bg-(--kwm-bg-3)";
+
+const cellLayout = (fill?: boolean) =>
+  fill
+    ? "flex w-full items-center justify-center gap-2"
+    : "inline-flex items-center gap-2";
+
 /** Editorial price cell — hairline border, mono ticker, tabular-nums price.
  *  Favored side gets emerald text; underdog stays neutral. No color fills. */
 export function PriceButton({
@@ -76,6 +104,7 @@ export function PriceButton({
   price,
   isFavored,
   selected = false,
+  fill = false,
   className,
   onClick,
 }: {
@@ -83,6 +112,7 @@ export function PriceButton({
   price: number;
   isFavored: boolean;
   selected?: boolean;
+  fill?: boolean;
   className?: string;
   onClick?: (e: React.MouseEvent) => void;
 }) {
@@ -91,7 +121,8 @@ export function PriceButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
+        CELL_SHELL,
+        cellLayout(fill),
         selected
           ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
           : isFavored
@@ -120,12 +151,14 @@ export function SpreadCell({
   handicap,
   price,
   selected = false,
+  fill = false,
   onClick,
 }: {
   abbr: string;
   handicap: string;
   price: number;
   selected?: boolean;
+  fill?: boolean;
   onClick?: (e: React.MouseEvent) => void;
 }) {
   return (
@@ -133,7 +166,8 @@ export function SpreadCell({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
+        CELL_SHELL,
+        cellLayout(fill),
         selected
           ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
           : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)"
@@ -154,12 +188,14 @@ export function TotalCell({
   line,
   price,
   selected = false,
+  fill = false,
   onClick,
 }: {
   label: string;
   line: string;
   price: number;
   selected?: boolean;
+  fill?: boolean;
   onClick?: (e: React.MouseEvent) => void;
 }) {
   return (
@@ -167,7 +203,8 @@ export function TotalCell({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
+        CELL_SHELL,
+        cellLayout(fill),
         selected
           ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
           : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)"
@@ -186,10 +223,14 @@ export function TotalCell({
 export function DrawButton({
   price,
   selected = false,
+  fill = false,
+  className,
   onClick,
 }: {
   price: number;
   selected?: boolean;
+  fill?: boolean;
+  className?: string;
   onClick?: (e: React.MouseEvent) => void;
 }) {
   return (
@@ -197,10 +238,12 @@ export function DrawButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-baseline gap-2 px-3 h-8 rounded-md border whitespace-nowrap transition-colors",
+        CELL_SHELL,
+        cellLayout(fill),
         selected
           ? "border-(--kwm-ink) bg-(--kwm-bg-3)"
-          : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)"
+          : "border-(--kwm-hl) bg-(--kwm-bg-2) hover:border-(--kwm-hl-3) hover:bg-(--kwm-bg-3)",
+        className
       )}
     >
       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-(--kwm-warn)">

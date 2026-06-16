@@ -44,14 +44,17 @@ export function SportsContent({ selectedSport = "" }: SportsContentProps) {
       <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
-        {/* Mobile-only sport picker — full rail lives in the left column at lg+ */}
-        <div className="lg:hidden mb-4">
+        {/* Compact sport picker — the full rail takes the left column only at
+            xl+. Below that the rail + match list + trade panel can't share the
+            width without the row meta colliding, so the panel wins and the rail
+            collapses into this drawer. */}
+        <div className="xl:hidden mb-4">
           <LeagueRailMobile activeSlug={selectedSport || undefined} />
         </div>
 
-        <div className="grid gap-6 lg:gap-6 lg:grid-cols-[220px_minmax(0,1fr)] xl:gap-8 xl:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="grid gap-6 xl:gap-8 xl:grid-cols-[240px_minmax(0,1fr)]">
           {/* Left: League rail (sticky) */}
-          <div className="hidden lg:block">
+          <div className="hidden xl:block">
             <div className="sticky top-4 self-start">
               <LeagueRail activeSlug={selectedSport || undefined} />
             </div>

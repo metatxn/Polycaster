@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TradingForm } from "./trading-form";
+
+const useTradingFormStateMock = vi.hoisted(() => vi.fn());
 
 vi.mock("next/image", () => ({
   default: ({
@@ -47,7 +49,11 @@ vi.mock("./trading/merge-shares-modal", () => ({
 }));
 
 vi.mock("./trading/hooks/use-trading-form-state", () => ({
-  useTradingFormState: vi.fn(() => ({
+  useTradingFormState: useTradingFormStateMock,
+}));
+
+function makeTradingFormState(overrides = {}) {
+  return {
     side: "BUY",
     setSide: vi.fn(),
     orderType: "MARKET",
@@ -89,10 +95,15 @@ vi.mock("./trading/hooks/use-trading-form-state", () => ({
     handleSubmit: vi.fn(),
     hasValidTokenId: true,
     canFullyFill: true,
-  })),
-}));
+    ...overrides,
+  };
+}
 
 describe("TradingForm", () => {
+  beforeEach(() => {
+    useTradingFormStateMock.mockReturnValue(makeTradingFormState());
+  });
+
   it("uses outcome names as price-selector labels", () => {
     render(
       <TradingForm
@@ -124,5 +135,54 @@ describe("TradingForm", () => {
     expect(screen.getByText("AFG2")).toBeInTheDocument();
     expect(screen.queryByText("YES")).not.toBeInTheDocument();
     expect(screen.queryByText("NO")).not.toBeInTheDocument();
+  });
+
+  it("shows buy cost in the summary and CTA", () => {
+    useTradingFormStateMock.mockReturnValue(
+      makeTradingFormState({
+        shares: 6,
+        calculations: {
+          price: 0.176,
+          total: 1.056,
+          potentialWin: 4.92,
+          potentialLoss: 1.056,
+          returnPercent: "465.9",
+        },
+        hasCredentials: true,
+        isConnected: true,
+      })
+    );
+
+    render(
+      <TradingForm
+        marketTitle="France"
+        tokenId="france-token"
+        outcomes={[
+          {
+            name: "YES",
+            tokenId: "france-token",
+            price: 0.176,
+            probability: 18,
+          },
+          {
+            name: "NO",
+            tokenId: "not-france-token",
+            price: 0.825,
+            probability: 82,
+          },
+        ]}
+        selectedOutcomeIndex={0}
+        onOutcomeChange={() => {}}
+        bestBid={0.175}
+        bestAsk={0.176}
+        disableSticky
+      />
+    );
+
+    expect(screen.getByText("Cost").parentElement).toHaveTextContent("$1.06");
+    expect(
+      screen.getByRole("button", { name: /buy 6 shares for \$1\.06/i })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/buy 6 @ market/i)).not.toBeInTheDocument();
   });
 });

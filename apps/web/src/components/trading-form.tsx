@@ -1,6 +1,7 @@
 "use client";
 
 import { formatTradingFormError } from "@knoww/shared-types/trading-errors";
+import Decimal from "decimal.js";
 import { AnimatePresence, m } from "framer-motion";
 import {
   AlertCircle,
@@ -120,6 +121,28 @@ function LimitQueueStatusInline({
       <span className="tick">Tick {tickLabel}</span>
     </div>
   );
+}
+
+function formatUsd(amount: number): string {
+  try {
+    const value = new Decimal(amount);
+    return value.isFinite() ? `$${value.toFixed(2)}` : "$0.00";
+  } catch {
+    return "$0.00";
+  }
+}
+
+function formatShareQuantity(quantity: number): string {
+  try {
+    const value = new Decimal(quantity);
+    if (!value.isFinite()) return "0";
+    const rounded = value.toDecimalPlaces(4);
+    return rounded.isInteger()
+      ? rounded.toFixed(0)
+      : rounded.toFixed().replace(/\.?0+$/, "");
+  } catch {
+    return "0";
+  }
 }
 
 /**
@@ -258,6 +281,9 @@ export function TradingForm(props: TradingFormProps) {
     calculations.potentialWin,
     calculations.total
   );
+  const totalLabel = formatUsd(calculations.total);
+  const shareQuantityLabel = formatShareQuantity(shares);
+  const orderActionLabel = side === "BUY" ? "Buy" : "Sell";
 
   return (
     <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
@@ -623,6 +649,16 @@ export function TradingForm(props: TradingFormProps) {
             <div className="tk-summary">
               <div className="tk-sum-row">
                 <span className="l">
+                  {side === "BUY" ? "Cost" : "Proceeds"}
+                </span>
+                <span
+                  className={`v tabular-nums ${side === "SELL" ? "up" : ""}`}
+                >
+                  {totalLabel}
+                </span>
+              </div>
+              <div className="tk-sum-row">
+                <span className="l">
                   Return if {selectedOutcome?.name?.toUpperCase() ?? "YES"}
                 </span>
                 <span className="v up tabular-nums">
@@ -888,10 +924,8 @@ export function TradingForm(props: TradingFormProps) {
                     ) : (
                       <TrendingDown className="h-4 w-4" />
                     )}
-                    {side === "BUY" ? "Buy" : "Sell"} {shares} @{" "}
-                    {orderType === "LIMIT"
-                      ? `${(limitPrice * 100).toFixed(1)}¢`
-                      : "Market"}
+                    {orderActionLabel} {shareQuantityLabel} shares for{" "}
+                    {totalLabel}
                   </>
                 )}
               </button>

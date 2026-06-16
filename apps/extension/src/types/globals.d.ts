@@ -211,7 +211,11 @@ declare global {
         query: string,
         matchedTags?: string[]
       ) => Promise<Market[]>;
-      calculateRelevanceScore: (postTexts: string[], market: Market) => number;
+      calculateRelevanceScore: (
+        postTexts: string[],
+        market: Market,
+        options?: { includeNestedMarketContext?: boolean }
+      ) => number;
       validateMarketRelevance: (
         postText: string,
         market: Market

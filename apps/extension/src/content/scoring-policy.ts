@@ -1,5 +1,6 @@
 import type { ContextGateResult } from "../types/chrome-messages";
 import type { Market } from "../types/market";
+import { buildMarketContextText } from "./market-context";
 
 export type ScoringMode = "hybrid" | "lexical" | "heuristic";
 
@@ -496,7 +497,10 @@ export interface DetermineScoringModeInput {
 
 export interface GateDecisionInput {
   postText: string;
-  market: Pick<Market, "title" | "description" | "tags" | "category">;
+  market: Pick<
+    Market,
+    "title" | "description" | "tags" | "category" | "markets"
+  >;
   matchedTags: string[];
   scoringMode: ScoringMode;
   score: number;
@@ -508,6 +512,11 @@ export interface GateDecisionInput {
    * signals requirement.
    */
   relaxed?: boolean;
+  includeNestedMarketContext?: boolean;
+}
+
+interface BuildMarketGateTextOptions {
+  includeNestedMarkets?: boolean;
 }
 
 export interface GateDecisionResult {
@@ -556,7 +565,11 @@ function inferPostDomains(
 }
 
 function inferMarketDomains(
-  market: Pick<Market, "title" | "description" | "tags" | "category">
+  market: Pick<
+    Market,
+    "title" | "description" | "tags" | "category" | "markets"
+  >,
+  includeNestedMarkets = false
 ): Set<MarketDomain> {
   const domains = new Set<MarketDomain>();
   addDomainFromLabel(domains, market.category);
@@ -564,7 +577,10 @@ function inferMarketDomains(
     addDomainFromLabel(domains, tag.label);
     addDomainFromLabel(domains, tag.slug);
   }
-  addDomainsFromText(domains, buildMarketGateText(market));
+  addDomainsFromText(
+    domains,
+    buildMarketGateText(market, { includeNestedMarkets })
+  );
   return domains;
 }
 
@@ -677,8 +693,13 @@ function getSharedHighPrecisionSignals(
 }
 
 export function buildMarketGateText(
-  market: Pick<Market, "title" | "description">
+  market: Pick<Market, "title" | "description" | "markets">,
+  options: BuildMarketGateTextOptions = {}
 ): string {
+  if (options.includeNestedMarkets) {
+    return buildMarketContextText(market);
+  }
+
   let text = market.title || "";
   if (market.description) {
     text += ` ${market.description.slice(0, 120)}`;
@@ -788,8 +809,12 @@ export function evaluateCandidateGate({
   score,
   gate,
   relaxed,
+  includeNestedMarketContext = false,
 }: GateDecisionInput): GateDecisionResult {
-  const fallbackGate = naiveContextGate(postText, buildMarketGateText(market));
+  const gateText = buildMarketGateText(market, {
+    includeNestedMarkets: includeNestedMarketContext,
+  });
+  const fallbackGate = naiveContextGate(postText, gateText);
   let resolvedGate = gate ?? fallbackGate;
   let gatePass = resolvedGate.pass;
   let usedRecoveryGate = false;
@@ -818,10 +843,9 @@ export function evaluateCandidateGate({
     scoringMode === "hybrid" &&
     score >= HIGH_PRECISION_SINGLE_SIGNAL_FLOOR
   ) {
-    const marketText = buildMarketGateText(market);
     const sharedHighPrecisionSignals = getSharedHighPrecisionSignals(
       postText,
-      marketText
+      gateText
     );
     if (sharedHighPrecisionSignals.length > 0) {
       recoveryGate = fallbackGate;
@@ -835,7 +859,7 @@ export function evaluateCandidateGate({
   }
 
   const postDomains = inferPostDomains(postText, matchedTags);
-  const marketDomains = inferMarketDomains(market);
+  const marketDomains = inferMarketDomains(market, includeNestedMarketContext);
   const domainCompatible = hasCompatibleDomain(postDomains, marketDomains);
   if (gatePass && !domainCompatible) {
     gatePass = false;

@@ -11,6 +11,7 @@ import type {
   Market,
   MarketSearchResult,
 } from "../types/market";
+import { getPreferredOutcomeNames } from "./market-context";
 import {
   type RelevanceTelemetryCandidate,
   recordRelevanceTelemetry,
@@ -650,6 +651,20 @@ function getCurrentItemSelector(): string | null {
   return window.KNOWW_PLATFORM?.getSelectors?.().item || null;
 }
 
+function cleanupPlatformStaleInjections(context: string): void {
+  const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  if (!platform?.cleanupStaleInjections) return;
+
+  try {
+    platform.cleanupStaleInjections();
+  } catch (error) {
+    window.KNOWW_UTILS?.log?.(
+      `⚠️ [${context}] cleanupStaleInjections failed:`,
+      error
+    );
+  }
+}
+
 function findPostByKey(
   postKey: string,
   posts?: Array<{ post: Element; key: string | null }>
@@ -948,6 +963,8 @@ async function analyzePostAndFindMarket(
   } = window.KNOWW_API;
   const { CONFIG, ENABLED_SOURCES } = window.KNOWW_CONFIG;
   const currentPlatform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
+  const includeNestedMarketContext =
+    currentPlatform?.enableNestedMarketContext === true;
   const isDebug =
     window.KNOWW_CONFIG?.isDebugMode?.() ??
     window.KNOWW_CONFIG?.DEV_MODE ??
@@ -976,6 +993,29 @@ async function analyzePostAndFindMarket(
     .replace(/\s+/g, " ")
     .trim();
   const postKey = getPostIdentityKey(post) ?? undefined;
+
+  if (currentPlatform?.resolveDirectMarkets) {
+    try {
+      const directResolution = await currentPlatform.resolveDirectMarkets(post);
+      if (directResolution?.markets.length) {
+        return {
+          markets: directResolution.markets,
+          topics: directResolution.topics?.length
+            ? directResolution.topics
+            : ["sports"],
+          postText: directResolution.postText || text || extractedText,
+        };
+      }
+      if (directResolution?.bypassGenericSearch) {
+        log(
+          "Skipping generic market search after structured direct-market resolution"
+        );
+        return null;
+      }
+    } catch (error) {
+      log("Direct market resolution failed:", error);
+    }
+  }
 
   if ((!text || text.length < 20) && directMarkets.length === 0) {
     log("Post text too short:", text?.slice(0, 30));
@@ -1043,18 +1083,28 @@ async function analyzePostAndFindMarket(
   let scoringMode: ScoringMode = "heuristic";
   try {
     marketTexts = markets.map((m) => {
-      let rich = m.title || "";
+      let rich = includeNestedMarketContext
+        ? buildMarketGateText(m, {
+            includeNestedMarkets: true,
+          })
+        : m.title || "";
       const tagStr = (m.tags || [])
         .map((t) => t.label || t.slug || "")
         .filter(Boolean)
         .slice(0, 5)
         .join(", ");
       if (tagStr) rich += ` [${tagStr}]`;
-      if (m.description) rich += ` ${m.description.slice(0, 120)}`;
+      if (!includeNestedMarketContext && m.description) {
+        rich += ` ${m.description.slice(0, 120)}`;
+      }
       return rich;
     });
 
-    gateTexts = markets.map((market) => buildMarketGateText(market));
+    gateTexts = markets.map((market) =>
+      buildMarketGateText(market, {
+        includeNestedMarkets: includeNestedMarketContext,
+      })
+    );
 
     const scoring = await scoreMarketsBatch(text, marketTexts, gateTexts);
     contextGateResults = scoring.contextGateResults;
@@ -1092,7 +1142,7 @@ async function analyzePostAndFindMarket(
       }
     } else if (scoringMode === "lexical") {
       const heuristicScores = markets.map((m) =>
-        calculateRelevanceScore([text], m)
+        calculateRelevanceScore([text], m, { includeNestedMarketContext })
       );
       const BM25_WEIGHT = 0.8;
       const HEURISTIC_WEIGHT = 0.2;
@@ -1112,7 +1162,9 @@ async function analyzePostAndFindMarket(
         "⚠️ Heuristic scoring — offscreen scoring unavailable:",
         scoring.source
       );
-      marketScores = markets.map((m) => calculateRelevanceScore([text], m));
+      marketScores = markets.map((m) =>
+        calculateRelevanceScore([text], m, { includeNestedMarketContext })
+      );
     }
 
     if (isDebug && scoringMode !== "heuristic" && marketScores.length > 0) {
@@ -1188,7 +1240,9 @@ async function analyzePostAndFindMarket(
   } catch (e) {
     scoringMode = "heuristic";
     log("⚠️ Heuristic scoring — scoring error:", e);
-    marketScores = markets.map((m) => calculateRelevanceScore([text], m));
+    marketScores = markets.map((m) =>
+      calculateRelevanceScore([text], m, { includeNestedMarketContext })
+    );
   }
   // -----------------------------------------
 
@@ -1329,6 +1383,7 @@ async function analyzePostAndFindMarket(
           score,
           gate: contextGateResults[i],
           relaxed: currentPlatform?.relaxContextGate === true,
+          includeNestedMarketContext,
         });
     const gate = gateDecision.gate;
     const signals = (gate.meaningfulNouns || 0) + (gate.sharedEntities || 0);
@@ -1362,7 +1417,9 @@ async function analyzePostAndFindMarket(
         gateBlockedHighScorers.push({
           index: i,
           score,
-          gateText: buildMarketGateText(market),
+          gateText: buildMarketGateText(market, {
+            includeNestedMarkets: includeNestedMarketContext,
+          }),
         });
         metricsRetryEligible++;
       }
@@ -1431,10 +1488,17 @@ async function analyzePostAndFindMarket(
     }
 
     const existingCandidate = candidateMarketsById.get(market.id);
+    const preferredOutcomeNames = includeNestedMarketContext
+      ? getPreferredOutcomeNames(text, market)
+      : [];
+    const contextualMarket =
+      preferredOutcomeNames.length > 0
+        ? { ...market, _preferredOutcomeNames: preferredOutcomeNames }
+        : market;
     if (!existingCandidate || score > existingCandidate.score) {
       const rerankScore = rerankScoresByIndex.get(i);
-      candidateMarketsById.set(market.id, {
-        market,
+      candidateMarketsById.set(contextualMarket.id, {
+        market: contextualMarket,
         score,
         rerankScore,
         source: source as "polymarket" | "kalshi",
@@ -2108,6 +2172,8 @@ async function processVisiblePosts(options: {
     return;
   }
 
+  cleanupPlatformStaleInjections("PostScanner");
+
   // Debug: Log that we're scanning for posts
   if (isDebug) {
     log(`\n🔄 [PostScanner] ========== SCAN START ==========`);
@@ -2455,6 +2521,8 @@ async function processQueuedPosts(options: {
   if (!hasValidExtensionContextForProcessing("QueueProcessor")) {
     return;
   }
+
+  cleanupPlatformStaleInjections("QueueProcessor");
 
   if (document.hidden || isAnalyzing || pendingPostsQueue.length === 0) {
     return;

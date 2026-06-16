@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  buildMarketGateText,
   CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
   determineScoringMode,
   evaluateCandidateGate,
@@ -137,6 +138,29 @@ test("getEffectiveThreshold only floors hybrid mode", () => {
   assert.equal(getEffectiveThreshold(0.62, "hybrid"), 0.62);
   assert.equal(getEffectiveThreshold(0.45, "lexical"), 0.45);
   assert.equal(getEffectiveThreshold(0.45, "heuristic"), 0.45);
+});
+
+test("buildMarketGateText keeps nested markets opt-in to preserve default platform scoring", () => {
+  const market = createMarket({
+    title: "World Cup Winner",
+    description: "Tournament winner market",
+    markets: [
+      {
+        active: true,
+        groupItemTitle: "Germany",
+        question: "Will Germany win the 2026 FIFA World Cup?",
+      },
+    ],
+  });
+
+  assert.equal(
+    buildMarketGateText(market),
+    "World Cup Winner Tournament winner market"
+  );
+  assert.match(
+    buildMarketGateText(market, { includeNestedMarkets: true }),
+    /Germany/
+  );
 });
 
 test("evaluateCandidateGate falls back to local gate in heuristic mode when missing", () => {

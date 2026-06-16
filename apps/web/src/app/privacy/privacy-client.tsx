@@ -490,8 +490,8 @@ export default function PrivacyClient() {
                 </li>
                 <li>
                   <strong>API credentials and read-only API keys</strong> stored
-                  in <code>sessionStorage</code> and cleared when you close your
-                  browser.
+                  in <code>localStorage</code> with expiration and cleared when
+                  you disconnect or reset trading credentials.
                 </li>
                 <li>
                   <strong>

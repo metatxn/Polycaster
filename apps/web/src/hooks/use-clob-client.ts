@@ -20,8 +20,10 @@ import {
 } from "@knoww/shared-types/polymarket";
 import {
   adaptUnifiedSecureClientForLegacyClob,
+  createUnifiedPolymarketCredentialsOnlySigner,
   createUnifiedPolymarketSecureClient,
   createUnifiedPolymarketViemSigner,
+  isPolymarketFreshAuthenticationRequiredError,
   type UnifiedSdkTradingClient,
 } from "@knoww/shared-types/polymarket-unified";
 import {
@@ -128,7 +130,7 @@ type ClobBalanceAllowanceReadableClient = ClobBalanceAllowanceClient & {
 export function useClobClient() {
   const { address, isConnected } = useConnection();
   const { data: walletClient } = useWalletClient();
-  const { credentials, hasCredentials, deriveCredentials } =
+  const { credentials, hasCredentials, deriveCredentials, clearCredentials } =
     useClobCredentials();
   const {
     proxyAddress,
@@ -168,6 +170,30 @@ export function useClobClient() {
       { builderCode }
     );
   }, [credentials, proxyAddress, isEoaMode, address, walletClient]);
+
+  /**
+   * Internal helper for passive CLOB reads. It reuses existing credentials only
+   * and must never ask the wallet to sign fresh auth during polling.
+   */
+  const getReadOnlyClient = useCallback(async () => {
+    if (!credentials) throw new Error("API credentials not available");
+    if (!proxyAddress) throw new Error("Trading wallet not found");
+    if (!address) throw new Error("Wallet not connected");
+
+    const builderCode = process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
+
+    const { client } = await createUnifiedPolymarketSecureClient({
+      signer: createUnifiedPolymarketCredentialsOnlySigner(address),
+      wallet: isEoaMode ? address : proxyAddress,
+      credentials,
+      allowFreshAuthentication: false,
+    });
+
+    return adaptUnifiedSecureClientForLegacyClob(
+      client as unknown as UnifiedSdkTradingClient,
+      { builderCode }
+    );
+  }, [credentials, proxyAddress, isEoaMode, address]);
 
   /**
    * Check if the client can be used. All signing should route through the active
@@ -714,13 +740,20 @@ export function useClobClient() {
     if (!canTrade) return [];
 
     try {
-      const client = await getClient();
+      const client = await getReadOnlyClient();
       return fetchOpenOrders(client);
     } catch (err) {
-      log.error("open_orders.fetch_failed", { error: err });
+      if (isPolymarketFreshAuthenticationRequiredError(err)) {
+        clearCredentials();
+        log.debug("open_orders.fetch_skipped", {
+          reason: "credentials_invalid",
+        });
+      } else {
+        log.error("open_orders.fetch_failed", { error: err });
+      }
       return [];
     }
-  }, [canTrade, getClient]);
+  }, [canTrade, getReadOnlyClient, clearCredentials]);
 
   /**
    * Update (set) the default app trading allowance set for the connected EOA.
@@ -908,14 +941,21 @@ export function useClobClient() {
     async (orderId: string): Promise<boolean> => {
       if (!canTrade) return false;
       try {
-        const client = await getClient();
+        const client = await getReadOnlyClient();
         return checkOrderScoring(client, orderId);
       } catch (err) {
-        log.error("order_scoring.check_failed", { error: err });
+        if (isPolymarketFreshAuthenticationRequiredError(err)) {
+          clearCredentials();
+          log.debug("order_scoring.check_skipped", {
+            reason: "credentials_invalid",
+          });
+        } else {
+          log.error("order_scoring.check_failed", { error: err });
+        }
         return false;
       }
     },
-    [canTrade, getClient]
+    [canTrade, getReadOnlyClient, clearCredentials]
   );
 
   /**
@@ -925,14 +965,21 @@ export function useClobClient() {
     async (orderIds: string[]): Promise<Record<string, boolean>> => {
       if (!canTrade || orderIds.length === 0) return {};
       try {
-        const client = await getClient();
+        const client = await getReadOnlyClient();
         return checkOrdersScoring(client, orderIds);
       } catch (err) {
-        log.error("order_scoring.batch_check_failed", { error: err });
+        if (isPolymarketFreshAuthenticationRequiredError(err)) {
+          clearCredentials();
+          log.debug("order_scoring.batch_check_skipped", {
+            reason: "credentials_invalid",
+          });
+        } else {
+          log.error("order_scoring.batch_check_failed", { error: err });
+        }
         return {};
       }
     },
-    [canTrade, getClient]
+    [canTrade, getReadOnlyClient, clearCredentials]
   );
 
   return {

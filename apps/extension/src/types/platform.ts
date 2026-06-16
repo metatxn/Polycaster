@@ -1,3 +1,5 @@
+import type { MarketSearchResult } from "./market";
+
 // ============================================
 // SHARED PLATFORM TYPES
 // Common interfaces used across platform adapters
@@ -73,6 +75,34 @@ export interface StreamContext {
 }
 
 /**
+ * Sports match metadata extracted from schedule rows or live match pages.
+ * Used by platform adapters that can map a page item directly to a Gamma
+ * sports event without running broad text search.
+ */
+export interface SportsMatchCandidate {
+  homeTeam: string;
+  awayTeam: string;
+  homeAbbreviation?: string;
+  awayAbbreviation?: string;
+  eventTime?: string;
+  league?: string;
+  leagueSlug?: string;
+  title?: string;
+}
+
+/**
+ * Optional direct-market resolution for platform-specific exact matches.
+ * `bypassGenericSearch` tells the scanner not to fall back to broad relevance
+ * search when the adapter knows a page item is a precise structured object.
+ */
+export interface DirectMarketResolution {
+  markets: MarketSearchResult[];
+  topics?: string[];
+  bypassGenericSearch?: boolean;
+  postText?: string;
+}
+
+/**
  * Platform Adapter Interface
  */
 export interface PlatformAdapter {
@@ -101,6 +131,13 @@ export interface PlatformAdapter {
    */
   relaxContextGate?: boolean;
   /**
+   * When true, scoring/gating can include nested Polymarket market labels and
+   * questions. Default false preserves the historical behavior for social
+   * feeds such as X/Twitter, where only event title/description should drive
+   * matching.
+   */
+  enableNestedMarketContext?: boolean;
+  /**
    * Overrides the default per-scan injection cap for this platform. Useful
    * when a single page surfaces many strong candidates at once (e.g. Kalshi's
    * dense market grid) and the default density budget is the limiting factor.
@@ -121,6 +158,10 @@ export interface PlatformAdapter {
   };
   extractPostText: (post: Element) => string;
   extractMarketLinkHints?: (post: Element) => MarketLinkHint[];
+  resolveDirectMarkets?: (
+    post: Element
+  ) => Promise<DirectMarketResolution | null>;
+  cleanupStaleInjections?: () => void;
   findInjectionPoint: (post: Element) => InjectionPoint | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getCardStyles?: (theme?: string) => any;

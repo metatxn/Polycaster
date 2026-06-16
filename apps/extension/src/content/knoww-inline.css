@@ -2695,8 +2695,8 @@
 }
 
 /* ─── Streaming surface chrome: slimmer panel ───
-   The original header is kept; on stream sites we just drop the "LIVE · SEE ALL"
-   footer and the "Live now" section label to slim the card. */
+   The original header is kept; on stream sites we drop the live footer and
+   the "Live now" section label to slim the card. */
 #knoww-notification-stack.knoww-stack-stream #knoww-stack-footer {
   display: none !important;
 }
@@ -6630,22 +6630,6 @@
     opacity: 0.55;
     transform: scale(0.85);
   }
-}
-
-#knoww-notification-stack .knoww-stack-footer-see-all {
-  background: transparent !important;
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  font: inherit !important;
-  letter-spacing: 0.12em !important;
-  text-transform: uppercase !important;
-  color: var(--kse-ink) !important;
-  cursor: pointer !important;
-}
-
-#knoww-notification-stack .knoww-stack-footer-see-all:hover {
-  color: var(--kse-ink-2) !important;
 }
 
 #knoww-notification-stack.knoww-stack-minimized .knoww-stack-footer {

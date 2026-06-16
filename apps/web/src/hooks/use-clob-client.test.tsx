@@ -28,6 +28,7 @@ const clobCredentialsState = vi.hoisted(() => ({
   },
   hasCredentials: true,
   deriveCredentials: vi.fn(),
+  clearCredentials: vi.fn(),
 }));
 
 const legacyClient = vi.hoisted(() => ({
@@ -37,10 +38,16 @@ const legacyClient = vi.hoisted(() => ({
 
 const unifiedSdkMock = vi.hoisted(() => ({
   adaptUnifiedSecureClientForLegacyClob: vi.fn(),
+  createUnifiedPolymarketCredentialsOnlySigner: vi.fn((address: string) => ({
+    address,
+    getAddress: vi.fn().mockResolvedValue(address),
+    signTypedData: vi.fn(),
+  })),
   createUnifiedPolymarketSecureClient: vi.fn(),
   createUnifiedPolymarketViemSigner: vi.fn((signer: unknown) => ({
     signer,
   })),
+  isPolymarketFreshAuthenticationRequiredError: vi.fn(() => false),
 }));
 
 const viemWalletClientMock = vi.hoisted(() => ({
@@ -100,6 +107,7 @@ describe("useClobClient", () => {
     proxyWalletState.walletMode = "safe";
     clobCredentialsState.credentials = credentials;
     clobCredentialsState.hasCredentials = true;
+    clobCredentialsState.clearCredentials.mockReset();
 
     viemWalletClientMock.hasViemWalletProvider.mockReturnValue(true);
     viemWalletClientMock.getViemWalletClient.mockResolvedValue({
@@ -130,13 +138,13 @@ describe("useClobClient", () => {
       unifiedSdkMock.createUnifiedPolymarketSecureClient
     ).toHaveBeenCalledWith({
       signer: expect.objectContaining({
-        signer: expect.objectContaining({
-          requestAddresses: expect.any(Function),
-        }),
+        address: wagmiState.address,
       }),
       wallet: proxyWalletState.proxyAddress,
       credentials,
+      allowFreshAuthentication: false,
     });
+    expect(viemWalletClientMock.getViemWalletClient).not.toHaveBeenCalled();
     expect(
       unifiedSdkMock.adaptUnifiedSecureClientForLegacyClob
     ).toHaveBeenCalledWith(

@@ -14,6 +14,7 @@ import type {
   NestedMarket,
 } from "../types/market";
 import { setCspSafeImageSrc } from "./image-proxy";
+import { prioritizeByPreferredOutcomeNames } from "./market-context";
 import { WALLETCONNECT_WALLET_UUID, WalletBridge } from "./trading/bridge";
 import { ExtensionSession } from "./trading/extension-session";
 import {
@@ -431,6 +432,10 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
 
   // Sort by price descending (highest probability first)
   result.multiOutcomeData.sort((a, b) => b.price - a.price);
+  result.multiOutcomeData = prioritizeByPreferredOutcomeNames(
+    result.multiOutcomeData,
+    market._preferredOutcomeNames
+  );
 
   if (result.multiOutcomeData.length <= 1) {
     result.isMultiOutcome = false;
@@ -1826,16 +1831,9 @@ function applyMinimizedState(
 
 function applyStackExpandedState(
   container: HTMLElement,
-  seeAll: HTMLButtonElement,
   expanded: boolean
 ): void {
   container.classList.toggle("knoww-stack-expanded", expanded);
-  seeAll.textContent = formatSeeAllLabel(expanded, 0, 0);
-  seeAll.setAttribute("aria-pressed", expanded ? "true" : "false");
-  seeAll.setAttribute(
-    "aria-label",
-    expanded ? "Show fewer markets" : "See all markets in this panel"
-  );
 }
 
 function clampNotificationStackToViewport(container: HTMLElement): void {
@@ -1883,36 +1881,6 @@ function resetNotificationStackToPreferredPosition(
   container.style.removeProperty("left");
   container.style.removeProperty("top");
   container.style.removeProperty("right");
-}
-
-function formatSeeAllLabel(
-  expanded: boolean,
-  totalAvailable: number,
-  totalDisplayed: number
-): string {
-  if (expanded) return "Show less";
-  if (totalAvailable > totalDisplayed) return `See all ${totalAvailable} →`;
-  return "See all →";
-}
-
-function updateStackSeeAllButton(
-  expanded: boolean,
-  totalAvailable: number,
-  totalDisplayed: number
-): void {
-  const seeAll = document.querySelector<HTMLButtonElement>(
-    "#knoww-stack-footer .knoww-stack-footer-see-all"
-  );
-  if (!seeAll) return;
-  seeAll.textContent = formatSeeAllLabel(
-    expanded,
-    totalAvailable,
-    totalDisplayed
-  );
-  seeAll.title =
-    !expanded && totalAvailable > totalDisplayed
-      ? `Showing ${totalDisplayed} of ${totalAvailable} markets`
-      : "";
 }
 
 function createStackTabs(): HTMLElement {
@@ -1965,14 +1933,10 @@ function updateStackTabsState(root?: HTMLElement): void {
     });
 }
 
-function setStackExpanded(
-  container: HTMLElement,
-  seeAll: HTMLButtonElement,
-  expanded: boolean
-): void {
+function setStackExpanded(container: HTMLElement, expanded: boolean): void {
   cachedStackExpanded = expanded;
   persistStackExpanded(expanded);
-  applyStackExpandedState(container, seeAll, expanded);
+  applyStackExpandedState(container, expanded);
   requestAnimationFrame(() => clampNotificationStackToViewport(container));
   if (expanded) updateStackTabsState();
   updateNotificationStack(getStackBaseMarkets());
@@ -1982,16 +1946,9 @@ function handleNotificationStackKeydown(e: KeyboardEvent): void {
   if (!notificationStackContainer) return;
   if (notificationStackContainer.style.display === "none") return;
 
-  const seeAll = document.querySelector<HTMLButtonElement>(
-    "#knoww-stack-footer .knoww-stack-footer-see-all"
-  );
-
   if (e.key === "Escape") {
     if (notificationStackContainer.classList.contains("knoww-stack-expanded")) {
-      if (seeAll) {
-        setStackExpanded(notificationStackContainer, seeAll, false);
-        seeAll.focus();
-      }
+      setStackExpanded(notificationStackContainer, false);
       e.preventDefault();
       return;
     }
@@ -2499,7 +2456,7 @@ function createNotificationStack(): HTMLElement {
     }
   });
 
-  // Footer — "● LIVE · HH:MM ET" left, "SEE ALL →" right.
+  // Footer — live timestamp only; full browsing now lives in the sidebar.
   const footer = document.createElement("div");
   footer.className = "knoww-stack-footer";
   footer.id = "knoww-stack-footer";
@@ -2509,32 +2466,21 @@ function createNotificationStack(): HTMLElement {
   liveLabel.id = "knoww-stack-footer-live";
   liveLabel.textContent = formatLiveTimeLabel();
 
-  const seeAll = document.createElement("button");
-  seeAll.className = "knoww-stack-footer-see-all";
-  seeAll.type = "button";
-  applyStackExpandedState(container, seeAll, cachedStackExpanded);
-  seeAll.addEventListener("click", () => {
-    const nextExpanded = !cachedStackExpanded;
-    if (nextExpanded && container.classList.contains("knoww-stack-minimized")) {
+  applyStackExpandedState(container, cachedStackExpanded);
+
+  browseTrendingBtn?.addEventListener("click", () => {
+    cachedStackFilter = "trending";
+    if (container.classList.contains("knoww-stack-minimized")) {
       cachedStackMinimized = false;
       applyMinimizedState(container, minimizeToggle, false);
       persistStackMinimized(false);
     }
-    setStackExpanded(container, seeAll, nextExpanded);
-    void window.KNOWW_ANALYTICS?.track("notification_stack_see_all_clicked", {
-      expanded: nextExpanded,
-    });
-  });
-
-  browseTrendingBtn?.addEventListener("click", () => {
-    cachedStackFilter = "trending";
-    setStackExpanded(container, seeAll, true);
+    setStackExpanded(container, true);
     updateStackTabsState();
     void window.KNOWW_ANALYTICS?.track("notification_empty_browse_trending");
   });
 
   footer.appendChild(liveLabel);
-  footer.appendChild(seeAll);
 
   container.appendChild(header);
   container.appendChild(searchContainer);
@@ -4594,13 +4540,13 @@ function appendTrendingSection(
   realMarketIds: Set<string>,
   animationIndex: number,
   expandedTrending = false
-): void {
+): number {
   const trendingToShow = getVisibleTrendingMarkets(
     realMarketIds,
     expandedTrending
   );
 
-  if (trendingToShow.length === 0) return;
+  if (trendingToShow.length === 0) return animationIndex;
 
   const header = createNotificationSectionHeader(
     "Trending now",
@@ -4614,6 +4560,8 @@ function appendTrendingSection(
     const item = createTrendingMarketItem(market, animationIndex + index);
     itemsContainer.appendChild(item);
   });
+
+  return animationIndex + trendingToShow.length;
 }
 
 /**
@@ -4802,8 +4750,6 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
 
   const totalDisplayed =
     displayedActiveMarkets.length + displayedScrolledMarkets.length;
-  const totalAvailable = activeMarkets.length + scrolledOutMarkets.length;
-  updateStackSeeAllButton(cachedStackExpanded, totalAvailable, totalDisplayed);
 
   if (
     totalDisplayed === 0 &&
@@ -4855,6 +4801,21 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
     }
   }
 
+  // Trending appears between active markets and seen-earlier markets.
+  // Collect real market IDs so we can skip duplicates.
+  const realMarketIds = new Set<string>();
+  for (const entry of [...activeMarkets, ...scrolledOutMarkets]) {
+    realMarketIds.add(entry.market.id);
+  }
+  if (showTrendingSection) {
+    animationIndex = appendTrendingSection(
+      itemsContainer,
+      realMarketIds,
+      animationIndex,
+      cachedStackExpanded && activeFilter === "trending"
+    );
+  }
+
   if (displayedScrolledMarkets.length > 0) {
     itemsContainer.appendChild(
       createNotificationSectionHeader(
@@ -4868,21 +4829,6 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
       animationIndex++;
       itemsContainer.appendChild(item);
     });
-  }
-
-  // Trending section — always appended at the bottom when available.
-  // Collect real market IDs so we can skip duplicates.
-  const realMarketIds = new Set<string>();
-  for (const entry of [...activeMarkets, ...scrolledOutMarkets]) {
-    realMarketIds.add(entry.market.id);
-  }
-  if (showTrendingSection) {
-    appendTrendingSection(
-      itemsContainer,
-      realMarketIds,
-      animationIndex,
-      cachedStackExpanded && activeFilter === "trending"
-    );
   }
 
   setTimeout(() => {

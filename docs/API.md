@@ -996,6 +996,52 @@ Rate limiting
 
 - No explicit rate limiter
 
+## Images
+
+### GET `/api/image`
+
+Description: Validates an allowlisted upstream image URL, signs the request with the server-only optimizer key, and streams the shared image optimizer response back through a same-origin proxy.
+
+Headers
+
+- Auth: none
+- Optional: `Accept` is forwarded upstream when present; otherwise the route uses `image/avif,image/webp,image/*,*/*`.
+
+Query parameters
+
+| Name | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `url` | `string` | Yes | Must be an HTTPS URL whose host is allowlisted: `cryptologos.cc`, `polymarket-upload.s3.us-east-2.amazonaws.com`, `polymarket.com`, or any `*.polymarket.com` host. |
+| `w` | `number` | Yes | Coerced integer `1..4096`. |
+| `q` | `number` | No | Coerced integer `1..100`, default `75`. |
+| `type` | `string` | No | Trimmed and must match `^[a-z0-9.+-]{1,32}$`. |
+| `v` | `string` | No | Trimmed and must match `^\d{1,3}$`. Used as a client cache-busting hint only and is not part of the upstream signature. |
+
+Success `200`
+
+- Streams the upstream optimized image body.
+- Passes through these response headers when present:
+  - `accept-ranges`
+  - `cache-control`
+  - `content-length`
+  - `content-type`
+  - `etag`
+  - `expires`
+  - `last-modified`
+- If the upstream response omits `cache-control`, the route sets:
+  - `Cache-Control: public, max-age=86400, s-maxage=31536000, stale-while-revalidate=86400`
+
+Errors
+
+- `400`: `{ success: false, error: "Invalid image query parameters" }`
+- `429`: shared rate-limit response
+- `502`: `{ success: false, error: "Image optimizer request failed" }`
+- `503`: `{ success: false, error: "Image optimizer signing is not configured" }` or `{ success: false, error: "Image optimizer is not configured" }`
+
+Rate limiting
+
+- `600` requests/minute/IP
+
 ## Comments
 
 ### GET `/api/comments`

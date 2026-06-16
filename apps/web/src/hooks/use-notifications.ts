@@ -2,18 +2,18 @@
 
 import { createLogger } from "@knoww/logger";
 import {
+  createUnifiedPolymarketCredentialsOnlySigner,
   createUnifiedPolymarketSecureClient,
-  createUnifiedPolymarketViemSigner,
+  isPolymarketFreshAuthenticationRequiredError,
   type UnifiedPolymarketSecureClient,
 } from "@knoww/shared-types/polymarket-unified";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConnection, useWalletClient } from "wagmi";
+import { useConnection } from "wagmi";
 
 const log = createLogger("notifications");
 
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
-import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import type {
   DropNotificationParams,
   Notification,
@@ -86,8 +86,8 @@ function isExpectedClobReadFailure(err: unknown): boolean {
  */
 export function useNotifications() {
   const { address, isConnected } = useConnection();
-  const { data: walletClient } = useWalletClient();
-  const { credentials, hasCredentials } = useClobCredentials();
+  const { credentials, hasCredentials, clearCredentials } =
+    useClobCredentials();
   const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -116,23 +116,19 @@ export function useNotifications() {
       throw new Error("Trading wallet address required for notifications");
     }
 
-    if (typeof window === "undefined") {
-      throw new Error("No wallet provider found");
+    if (!address) {
+      throw new Error("Wallet not connected");
     }
 
-    const viemWalletClient = await getViemWalletClient(
-      walletClient,
-      address as `0x${string}` | undefined
-    );
-
     const { client } = await createUnifiedPolymarketSecureClient({
-      signer: createUnifiedPolymarketViemSigner(viemWalletClient),
+      signer: createUnifiedPolymarketCredentialsOnlySigner(address),
       wallet: proxyAddress,
       credentials,
+      allowFreshAuthentication: false,
     });
 
     return client as UnifiedPolymarketSecureClient & UnifiedNotificationClient;
-  }, [address, credentials, proxyAddress, walletClient]);
+  }, [address, credentials, proxyAddress]);
 
   /**
    * Fetch notifications from the CLOB API
@@ -171,7 +167,10 @@ export function useNotifications() {
       const error =
         err instanceof Error ? err : new Error("Failed to fetch notifications");
       setError(error);
-      if (isExpectedClobReadFailure(err)) {
+      if (isPolymarketFreshAuthenticationRequiredError(err)) {
+        clearCredentials();
+        log.debug("fetch.skipped", { reason: "credentials_invalid" });
+      } else if (isExpectedClobReadFailure(err)) {
         log.debug("fetch.skipped", { reason: error.message });
       } else {
         log.error("fetch.failed", { error: err });
@@ -179,7 +178,7 @@ export function useNotifications() {
     } finally {
       setIsLoading(false);
     }
-  }, [hasCredentials, isConnected, getAuthenticatedClient]);
+  }, [hasCredentials, isConnected, getAuthenticatedClient, clearCredentials]);
 
   /**
    * Dismiss (drop) specific notifications

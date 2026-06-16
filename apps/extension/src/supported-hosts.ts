@@ -190,6 +190,7 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://www.skysports.com/*",
   "https://www.sportingnews.com/*",
   "https://www.cbssports.com/*",
+  "https://foxsports.com/*",
   "https://www.foxsports.com/*",
   "https://www.cnet.com/*",
   "https://www.zdnet.com/*",

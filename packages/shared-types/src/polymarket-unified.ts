@@ -74,7 +74,37 @@ export interface UnifiedPolymarketSecureClientOptions<TClient = unknown>
   wallet?: string;
   credentials?: ApiKeyCreds;
   nonce?: number;
+  /**
+   * Allow the SDK to ask the signer for fresh L1 auth if supplied credentials
+   * are rejected. Passive reads should set this to false so background polling
+   * can never open a wallet signature prompt.
+   */
+  allowFreshAuthentication?: boolean;
   createSecureClientImpl?: CreateSecureClientImpl<TClient>;
+}
+
+const FRESH_AUTHENTICATION_BLOCKED_MESSAGE =
+  "Stored Polymarket API credentials require explicit re-authentication.";
+const FRESH_AUTHENTICATION_BLOCKED_NAME =
+  "PolymarketFreshAuthenticationRequiredError";
+
+function createPolymarketFreshAuthenticationRequiredError(): Error {
+  const error = new Error(FRESH_AUTHENTICATION_BLOCKED_MESSAGE);
+  error.name = FRESH_AUTHENTICATION_BLOCKED_NAME;
+  return error;
+}
+
+export function isPolymarketFreshAuthenticationRequiredError(
+  error: unknown
+): boolean {
+  if (!isRecord(error)) return false;
+
+  const name = typeof error.name === "string" ? error.name : "";
+  const message = typeof error.message === "string" ? error.message : "";
+  return (
+    name === FRESH_AUTHENTICATION_BLOCKED_NAME ||
+    message.includes(FRESH_AUTHENTICATION_BLOCKED_MESSAGE)
+  );
 }
 
 type UnifiedSdkMarketOrderRequest = {
@@ -329,6 +359,49 @@ export function createUnifiedPolymarketViemSigner(
   };
 }
 
+function throwFreshAuthenticationRequired(): never {
+  throw createPolymarketFreshAuthenticationRequiredError();
+}
+
+export function createUnifiedPolymarketCredentialsOnlySigner(
+  address: string
+): Signer {
+  return {
+    async getAddress() {
+      return address as Awaited<ReturnType<Signer["getAddress"]>>;
+    },
+    async signTypedData(_payload: TypedDataPayload) {
+      throwFreshAuthenticationRequired();
+    },
+    async signMessage(_message: Parameters<Signer["signMessage"]>[0]) {
+      throwFreshAuthenticationRequired();
+    },
+    async sendTransaction(_request: SignerTransactionRequest) {
+      throwFreshAuthenticationRequired();
+    },
+  };
+}
+
+function blockFreshAuthentication(signer: unknown): unknown {
+  if (!isRecord(signer) && typeof signer !== "function") return signer;
+
+  return new Proxy(signer as object, {
+    get(target, prop, receiver) {
+      if (
+        prop === "signTypedData" ||
+        prop === "signMessage" ||
+        prop === "sendTransaction"
+      ) {
+        return async () => {
+          throwFreshAuthenticationRequired();
+        };
+      }
+
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
 function getLegacyTokenId(request: LegacyClobOrderRequest): string {
   const tokenId = request.tokenId ?? request.tokenID;
   if (!tokenId) throw new Error("Polymarket order token id is required");
@@ -578,8 +651,12 @@ export async function createUnifiedPolymarketSecureClient<
 >(
   options: UnifiedPolymarketSecureClientOptions<TClient>
 ): Promise<UnifiedPolymarketSecureClientResult<TClient>> {
+  const signer =
+    options.credentials && options.allowFreshAuthentication === false
+      ? blockFreshAuthentication(options.signer)
+      : options.signer;
   const clientOptions: Record<string, unknown> = {
-    signer: options.signer,
+    signer,
   };
 
   if (options.wallet) clientOptions.wallet = options.wallet;

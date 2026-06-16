@@ -48,6 +48,12 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* BottomNav content height (h-14). Mobile trade bars offset by this plus
+     the device safe-area inset so they clear the nav on notched phones. */
+  --spacing-bottom-nav: 3.5rem;
+  /* Sportsbook spread/total columns need ~673px of center column; with the
+     side rails that only exists at >=1440px. */
+  --breakpoint-3xl: 1440px;
 }
 
 :root {
@@ -120,116 +126,6 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
-}
-
-/* ===== ACCENT COLOR PRESETS ===== */
-
-/* Violet Accent */
-[data-accent="violet"] {
-  --primary: oklch(0.585 0.233 277.117);
-  --primary-foreground: oklch(1 0 0);
-  --ring: oklch(0.585 0.233 277.117);
-  --sidebar-primary: oklch(0.585 0.233 277.117);
-}
-.dark[data-accent="violet"],
-.midnight[data-accent="violet"],
-.ocean[data-accent="violet"],
-.slate[data-accent="violet"],
-.softpop[data-accent="violet"] {
-  --primary: oklch(0.702 0.183 293.541);
-  --primary-foreground: oklch(0.145 0 0);
-  --ring: oklch(0.702 0.183 293.541);
-  --sidebar-primary: oklch(0.702 0.183 293.541);
-}
-
-/* Blue Accent */
-[data-accent="blue"] {
-  --primary: oklch(0.546 0.245 262.881);
-  --primary-foreground: oklch(1 0 0);
-  --ring: oklch(0.546 0.245 262.881);
-  --sidebar-primary: oklch(0.546 0.245 262.881);
-}
-.dark[data-accent="blue"],
-.midnight[data-accent="blue"],
-.ocean[data-accent="blue"],
-.slate[data-accent="blue"],
-.softpop[data-accent="blue"] {
-  --primary: oklch(0.623 0.214 259.815);
-  --primary-foreground: oklch(0.145 0 0);
-  --ring: oklch(0.623 0.214 259.815);
-  --sidebar-primary: oklch(0.623 0.214 259.815);
-}
-
-/* Emerald Accent */
-[data-accent="emerald"] {
-  --primary: oklch(0.596 0.145 163.225);
-  --primary-foreground: oklch(1 0 0);
-  --ring: oklch(0.596 0.145 163.225);
-  --sidebar-primary: oklch(0.596 0.145 163.225);
-}
-.dark[data-accent="emerald"],
-.midnight[data-accent="emerald"],
-.ocean[data-accent="emerald"],
-.slate[data-accent="emerald"],
-.softpop[data-accent="emerald"] {
-  --primary: oklch(0.696 0.17 162.48);
-  --primary-foreground: oklch(0.145 0 0);
-  --ring: oklch(0.696 0.17 162.48);
-  --sidebar-primary: oklch(0.696 0.17 162.48);
-}
-
-/* Rose Accent */
-[data-accent="rose"] {
-  --primary: oklch(0.645 0.246 16.439);
-  --primary-foreground: oklch(1 0 0);
-  --ring: oklch(0.645 0.246 16.439);
-  --sidebar-primary: oklch(0.645 0.246 16.439);
-}
-.dark[data-accent="rose"],
-.midnight[data-accent="rose"],
-.ocean[data-accent="rose"],
-.slate[data-accent="rose"],
-.softpop[data-accent="rose"] {
-  --primary: oklch(0.715 0.195 13.5);
-  --primary-foreground: oklch(0.145 0 0);
-  --ring: oklch(0.715 0.195 13.5);
-  --sidebar-primary: oklch(0.715 0.195 13.5);
-}
-
-/* Orange Accent */
-[data-accent="orange"] {
-  --primary: oklch(0.705 0.213 47.604);
-  --primary-foreground: oklch(1 0 0);
-  --ring: oklch(0.705 0.213 47.604);
-  --sidebar-primary: oklch(0.705 0.213 47.604);
-}
-.dark[data-accent="orange"],
-.midnight[data-accent="orange"],
-.ocean[data-accent="orange"],
-.slate[data-accent="orange"],
-.softpop[data-accent="orange"] {
-  --primary: oklch(0.769 0.188 70.08);
-  --primary-foreground: oklch(0.145 0 0);
-  --ring: oklch(0.769 0.188 70.08);
-  --sidebar-primary: oklch(0.769 0.188 70.08);
-}
-
-/* Cyan Accent */
-[data-accent="cyan"] {
-  --primary: oklch(0.715 0.143 215.221);
-  --primary-foreground: oklch(0.145 0 0);
-  --ring: oklch(0.715 0.143 215.221);
-  --sidebar-primary: oklch(0.715 0.143 215.221);
-}
-.dark[data-accent="cyan"],
-.midnight[data-accent="cyan"],
-.ocean[data-accent="cyan"],
-.slate[data-accent="cyan"],
-.softpop[data-accent="cyan"] {
-  --primary: oklch(0.789 0.154 211.53);
-  --primary-foreground: oklch(0.145 0 0);
-  --ring: oklch(0.789 0.154 211.53);
-  --sidebar-primary: oklch(0.789 0.154 211.53);
 }
 
 /* ===== FULL THEME VARIATIONS ===== */
@@ -693,12 +589,26 @@ html.softpop {
   }
 }
 
-@media (min-width: 1024px) {
+/*
+ * Sportsbook wide-viewport grid overrides.
+ *
+ * Column schemes at >=1440px:
+ *   Live:      score | avatar | team | moneyline | spread | total
+ *   Scheduled: avatar | team | moneyline | spread | total
+ *
+ * The sub-1440 base templates use arbitrary grid-cols classes defined inline
+ * in event-rows.tsx and sections.tsx (event-grid-live / event-grid-scheduled).
+ * The spread and total columns are toggled with `3xl:` (hidden below, flex/
+ * inline above) — the `3xl:` breakpoint is declared as --breakpoint-3xl in
+ * the @theme inline block above and must stay in sync with this query's
+ * min-width value.
+ */
+@media (min-width: 1440px) {
   .event-grid-live {
-    grid-template-columns: auto auto minmax(220px, 380px) auto auto auto;
+    grid-template-columns: auto auto minmax(100px, 1fr) auto auto auto;
   }
   .event-grid-scheduled {
-    grid-template-columns: auto minmax(220px, 380px) auto auto auto;
+    grid-template-columns: auto minmax(100px, 1fr) auto auto auto;
   }
 }
 
@@ -1131,6 +1041,24 @@ body:not(:has(.kw-landing))
     .font-mono.uppercase.opacity-70
   ) {
   opacity: 0.9;
+}
+
+/* ===== READABILITY FLOOR =====
+   App screens never render text below 12px: micro-labels authored at
+   8-11px compute to 12px. The landing page (.kw-landing) is exempt —
+   its editorial scale stays untouched. Keep the selector list in sync
+   with the text-[*px] utilities actually used in TSX. */
+body
+:is(
+  .text-\[8px\],
+  .text-\[9px\],
+  .text-\[10px\],
+  .text-\[10\.5px\],
+  .text-\[11px\],
+  .text-\[11\.5px\]
+):not(.kw-landing *) {
+  /* biome-ignore lint/complexity/noImportantStyles: readability floor must beat utility specificity */
+  font-size: 12px !important;
 }
 
 /* Word-stagger entry animation — each word gets its own delay. */
@@ -3464,7 +3392,8 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   border-radius: 6px;
   background: var(--kwm-bg-2);
   font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 11px;
+  /* 12px readability floor — was 11px */
+  font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--kwm-ink-2);
@@ -3494,7 +3423,8 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
 }
 /* Label span — dimmer, with a trailing colon (LABEL: VALUE). */
 .kw-app .kwm-pills button[type="button"] > span.font-mono {
-  font-size: 11px;
+  /* 12px readability floor — was 11px */
+  font-size: 12px;
   letter-spacing: 0.04em;
   opacity: 0.7;
 }
@@ -3507,7 +3437,8 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
 /* Value span — normalize weight so it doesn't break the mono rhythm. */
 .kw-app .kwm-pills button[type="button"] > span:not(.absolute):not(.font-mono) {
   font-weight: 400;
-  font-size: 11px;
+  /* 12px readability floor — was 11px */
+  font-size: 12px;
   letter-spacing: 0.04em;
 }
 /* Leading icon (first svg) — tint with ink-3 normally, green on active. */
@@ -4067,7 +3998,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply text-base font-medium text-(--kwm-ink) tracking-[-0.01em];
 }
 .kw-app .kw-ticket .tk-subject-info .meta {
-  @apply flex items-center gap-1.5 mt-0.5 font-(family-name:--font-geist-mono) text-[10px] tracking-[0.10em] uppercase text-(--kwm-ink-3);
+  @apply flex items-center gap-1.5 mt-0.5 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.10em] uppercase text-(--kwm-ink-3);
 }
 .kw-app .kw-ticket .tk-subject-info .meta .neg {
   @apply text-(--kwm-warn) border border-(--kwm-warn-border) bg-(--kwm-warn-soft) px-1.5 py-0.5 rounded-[3px];
@@ -4081,7 +4012,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply grid grid-cols-2 mt-3 border border-(--kwm-hl) rounded-md overflow-hidden;
 }
 .kw-app .kw-ticket .tk-tab {
-  @apply bg-transparent border-0 px-3 py-1.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
+  @apply bg-transparent border-0 px-3 py-1.5 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
 }
 .kw-app .kw-ticket .tk-tab.on {
   @apply text-(--kwm-ink) bg-(--kwm-bg-3);
@@ -4095,7 +4026,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply grid grid-cols-2 mt-2 border border-(--kwm-hl) rounded-md overflow-hidden;
 }
 .kw-app .kw-ticket .tk-side button {
-  @apply bg-transparent border-0 px-3 py-2 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
+  @apply bg-transparent border-0 px-3 py-2 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
 }
 .kw-app .kw-ticket .tk-side button + button {
   @apply border-l border-(--kwm-hl);
@@ -4124,7 +4055,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply border-(--kwm-down-border) bg-(--kwm-down-soft);
 }
 .kw-app .kw-ticket .tk-price .lbl {
-  @apply font-(family-name:--font-geist-mono) text-[10px] tracking-[0.16em] uppercase text-(--kwm-ink-3) col-start-1 row-start-1;
+  @apply font-(family-name:--font-geist-mono) text-[12px] tracking-[0.16em] uppercase text-(--kwm-ink-3) col-start-1 row-start-1;
 }
 .kw-app .kw-ticket .tk-price.on.yes .lbl {
   @apply text-(--kwm-up);
@@ -4136,10 +4067,10 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply text-[20px] font-medium tracking-[-0.025em] text-(--kwm-ink) leading-none col-start-1 row-start-2;
 }
 .kw-app .kw-ticket .tk-price .v .cent {
-  @apply text-[11px] text-(--kwm-ink-3) ml-px;
+  @apply text-[12px] text-(--kwm-ink-3) ml-px;
 }
 .kw-app .kw-ticket .tk-price .delta {
-  @apply font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-ink-dim) col-start-2 row-start-2 text-right self-end;
+  @apply font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-dim) col-start-2 row-start-2 text-right self-end;
 }
 .kw-app .kw-ticket .tk-price.on .delta {
   color: inherit;
@@ -4156,13 +4087,13 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply text-(--kwm-ink) font-medium whitespace-nowrap;
 }
 .kw-app .kw-ticket .tk-limit-head .bidask {
-  @apply inline-flex gap-2.5 font-(family-name:--font-geist-mono) text-[11px];
+  @apply inline-flex gap-2.5 font-(family-name:--font-geist-mono) text-[12px];
 }
 .kw-app .kw-ticket .tk-limit-head .ba {
   @apply inline-flex items-baseline gap-1;
 }
 .kw-app .kw-ticket .tk-limit-head .ba-l {
-  @apply text-(--kwm-ink-dim) text-[9px] tracking-[0.14em] uppercase;
+  @apply text-(--kwm-ink-dim) text-[12px] tracking-[0.14em] uppercase;
 }
 .kw-app .kw-ticket .tk-limit-head .ba-v {
   @apply font-medium;
@@ -4195,13 +4126,13 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply font-(family-name:--font-geist-mono) text-xs text-(--kwm-ink-3) ml-0.5;
 }
 .kw-app .kw-ticket .tk-limit-status {
-  @apply flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] font-(family-name:--font-geist-mono) text-[10px] tracking-[0.04em] border border-(--kwm-hl) bg-(--kwm-bg) text-(--kwm-ink-2);
+  @apply flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] font-(family-name:--font-geist-mono) text-[12px] tracking-[0.04em] border border-(--kwm-hl) bg-(--kwm-bg) text-(--kwm-ink-2);
 }
 .kw-app .kw-ticket .tk-limit-status .dot {
   @apply w-1.5 h-1.5 rounded-full bg-(--kwm-ink-3) shrink-0;
 }
 .kw-app .kw-ticket .tk-limit-status .tick {
-  @apply ml-auto text-(--kwm-ink-dim) text-[9px] tracking-[0.14em] uppercase;
+  @apply ml-auto text-(--kwm-ink-dim) text-[12px] tracking-[0.14em] uppercase;
 }
 .kw-app .kw-ticket .tk-limit-status.ok {
   @apply border-(--kwm-up-border) bg-(--kwm-up-soft) text-(--kwm-up);
@@ -4230,7 +4161,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
 
 /* Execution info row — Avg Price + Slippage (MARKET orders only) */
 .kw-app .kw-ticket .tk-summary-row {
-  @apply flex justify-between items-baseline mt-2 py-1.5 border-t border-dashed border-(--kwm-hl) font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-ink-3) tracking-[0.04em];
+  @apply flex justify-between items-baseline mt-2 py-1.5 border-t border-dashed border-(--kwm-hl) font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-3) tracking-[0.04em];
 }
 .kw-app .kw-ticket .tk-summary-row .num {
   @apply text-(--kwm-ink);
@@ -4241,7 +4172,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
 
 /* Shares stepper */
 .kw-app .kw-ticket .tk-shares-lbl {
-  @apply mt-2 flex justify-between items-center font-(family-name:--font-geist-mono) text-[10px] tracking-[0.16em] uppercase text-(--kwm-ink-dim);
+  @apply mt-2 flex justify-between items-center font-(family-name:--font-geist-mono) text-[12px] tracking-[0.16em] uppercase text-(--kwm-ink-dim);
 }
 .kw-app .kw-ticket .tk-shares-lbl .max {
   @apply text-(--kwm-accent) cursor-pointer tracking-[0.12em];
@@ -4250,7 +4181,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply grid grid-cols-[auto_auto_1fr_auto_auto] items-stretch mt-2 border border-(--kwm-hl-2) rounded-md overflow-hidden;
 }
 .kw-app .kw-ticket .tk-step-btn {
-  @apply bg-transparent border-0 px-2.5 h-9 min-w-9 font-(family-name:--font-geist-mono) text-[11px] text-(--kwm-ink-2) cursor-pointer border-r border-(--kwm-hl) tracking-[0.05em];
+  @apply bg-transparent border-0 px-2.5 h-9 min-w-9 font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-2) cursor-pointer border-r border-(--kwm-hl) tracking-[0.05em];
 }
 .kw-app .kw-ticket .tk-step-btn:hover {
   @apply bg-(--kwm-bg-3) text-(--kwm-ink);
@@ -4273,7 +4204,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply text-xs text-(--kwm-ink) whitespace-nowrap;
 }
 .kw-app .kw-ticket .tk-toggle .info .s {
-  @apply font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-ink-dim) tracking-[0.04em];
+  @apply font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-dim) tracking-[0.04em];
 }
 .kw-app .kw-ticket .tk-switch {
   @apply relative w-9 h-5 rounded-full bg-(--kwm-bg) border border-(--kwm-hl-2) cursor-pointer shrink-0 transition-[background-color,border-color] duration-150;
@@ -4306,7 +4237,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply text-(--kwm-up);
 }
 .kw-app .kw-ticket .tk-sum-row .v.up .ret {
-  @apply text-(--kwm-up) ml-1.5 text-[11px];
+  @apply text-(--kwm-up) ml-1.5 text-[12px];
 }
 .kw-app .kw-ticket .tk-sum-row.profit .v {
   @apply text-(--kwm-up) text-[15px];
@@ -4336,7 +4267,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
 }
 
 .kw-app .kw-ticket .tk-terms {
-  @apply mt-2.5 text-center text-[10px] text-(--kwm-ink-dim);
+  @apply mt-2.5 text-center text-[12px] text-(--kwm-ink-dim);
 }
 .kw-app .kw-ticket .tk-terms a {
   @apply text-(--kwm-ink-3) border-b border-(--kwm-hl);
@@ -4346,7 +4277,7 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
    base = amber (warn), `.error` = red (destructive), `.info` = neutral
    (informational). Mono micro-caps for the message column. */
 .kw-app .kw-ticket .tk-warn {
-  @apply mt-3 px-3 py-2.5 border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-start gap-2.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.04em] text-(--kwm-warn) leading-snug;
+  @apply mt-3 px-3 py-2.5 border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-start gap-2.5 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.04em] text-(--kwm-warn) leading-snug;
 }
 .kw-app .kw-ticket .tk-warn.error {
   @apply border-[color-mix(in_oklch,var(--kwm-down)_30%,transparent)] bg-(--kwm-down-soft) text-(--kwm-down);
@@ -4361,13 +4292,13 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   @apply min-w-0 flex-1;
 }
 .kw-app .kw-ticket .tk-warn .body .sub {
-  @apply block mt-0.5 text-(--kwm-ink-3) text-[10px] tracking-[0.04em];
+  @apply block mt-0.5 text-(--kwm-ink-3) text-[12px] tracking-[0.04em];
 }
 
 /* Balance context strip — design's `.tk-warn-bal`. Slim amber strip
    showing the shortfall, sits above the merged Deposit CTA. */
 .kw-app .kw-ticket .tk-warn-bal {
-  @apply mt-3 px-2.5 py-[7px] border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-center justify-between gap-2 font-(family-name:--font-geist-mono) text-[10px] text-(--kwm-warn) tracking-[0.04em];
+  @apply mt-3 px-2.5 py-[7px] border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-center justify-between gap-2 font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-warn) tracking-[0.04em];
 }
 .kw-app .kw-ticket .tk-warn-bal .h {
   @apply text-(--kwm-warn) font-medium;

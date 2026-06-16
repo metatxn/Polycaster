@@ -5,17 +5,17 @@ import {
   shouldFetchScheduledSportsFallback,
 } from "./sports-live-request-plan.ts";
 
-test("does not fetch scheduled sports while live events are present", () => {
+test("fetches scheduled sports after the live query settles while live events are present", () => {
   assert.equal(
     shouldFetchScheduledSportsFallback({
       liveQueryLoading: false,
       liveEventCount: 3,
     }),
-    false
+    true
   );
 });
 
-test("fetches scheduled sports only after the live query returns empty", () => {
+test("waits for the live query before fetching scheduled sports", () => {
   assert.equal(
     shouldFetchScheduledSportsFallback({
       liveQueryLoading: true,

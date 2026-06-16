@@ -41,3 +41,10 @@ export function getKwColorScheme(theme: KwTheme): "light" | "dark" {
     ? "dark"
     : "light";
 }
+
+/** Theme values that map to a dark color-scheme — consumed by the
+ *  pre-paint inline script in landing-shell so it can set data-scheme
+ *  without importing the full KW_THEMES table into the script string. */
+export const KW_DARK_THEME_VALUES: readonly KwTheme[] = KW_THEMES.filter(
+  (t) => t.isDark
+).map((t) => t.value);

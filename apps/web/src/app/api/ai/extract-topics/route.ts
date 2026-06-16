@@ -2,13 +2,15 @@ import { createLogger } from "@knoww/logger";
 import { generateText, Output } from "ai";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { checkRateLimit } from "@/lib/api-rate-limit";
+import { checkAiRateLimit } from "@/lib/ai-rate-limit";
+import { jsonError } from "@/lib/api-error";
 import {
   extensionCorsHeaders,
   handleExtensionPreflight,
   verifyExtensionAccessPreAuth,
 } from "@/lib/extension-auth";
 import { createAttributedOpenRouter } from "@/lib/openrouter";
+import { getTopicExtractionModelName } from "./model-config";
 
 const log = createLogger("api.ai.extract-topics");
 
@@ -378,7 +380,7 @@ async function extractTopicsFromText(
     const openrouter = createAttributedOpenRouter(apiKey);
     const aiResult = await withTimeout(
       generateText({
-        model: openrouter.chat("openai/gpt-5.4-nano"),
+        model: openrouter.chat(getTopicExtractionModelName()),
         output: Output.object({ schema: TopicExtractionSchema }),
         system: SYSTEM_PROMPT,
         prompt: `Analyze this social media post and extract prediction market topics.
@@ -457,7 +459,7 @@ export async function OPTIONS(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
-  const authResponse = await verifyExtensionAccessPreAuth(
+  const { response: authResponse, trust } = await verifyExtensionAccessPreAuth(
     request,
     "ai:extract"
   );
@@ -466,9 +468,7 @@ export async function POST(request: NextRequest) {
     return authResponse;
   }
 
-  const rateLimitResponse = checkRateLimit(request, {
-    uniqueTokenPerInterval: 20,
-  });
+  const rateLimitResponse = checkAiRateLimit(request, trust, 20);
   if (rateLimitResponse) {
     for (const [k, v] of Object.entries(cors))
       rateLimitResponse.headers.set(k, v);
@@ -480,10 +480,9 @@ export async function POST(request: NextRequest) {
     const { text } = body;
 
     if (!text || typeof text !== "string") {
-      return NextResponse.json(
-        { error: "Missing or invalid 'text' field" },
-        { status: 400, headers: cors }
-      );
+      const errRes = jsonError("Missing or invalid 'text' field", 400);
+      for (const [k, v] of Object.entries(cors)) errRes.headers.set(k, v);
+      return errRes;
     }
 
     const extraction = await extractTopicsFromText(text);
@@ -514,7 +513,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
-  const authResponse = await verifyExtensionAccessPreAuth(
+  const { response: authResponse, trust } = await verifyExtensionAccessPreAuth(
     request,
     "ai:extract"
   );
@@ -523,9 +522,7 @@ export async function GET(request: NextRequest) {
     return authResponse;
   }
 
-  const rateLimitResponse = checkRateLimit(request, {
-    uniqueTokenPerInterval: 20,
-  });
+  const rateLimitResponse = checkAiRateLimit(request, trust, 20);
   if (rateLimitResponse) {
     for (const [k, v] of Object.entries(cors))
       rateLimitResponse.headers.set(k, v);
@@ -536,8 +533,10 @@ export async function GET(request: NextRequest) {
   const text = searchParams.get("text");
 
   if (!text) {
+    // Extra field `usage` preserved; success: false added manually
     return NextResponse.json(
       {
+        success: false,
         error: "Missing 'text' query parameter",
         usage: "GET /api/ai/extract-topics?text=your+text+here",
       },

@@ -19,7 +19,8 @@ export type CacheProfile =
   | "user" // User-specific data (no cache)
   | "leaderboard" // Leaderboard data (1 minute)
   | "priceHistory" // Historical price data (5 minutes)
-  | "search"; // Search results (30 seconds, aligns with upstream fetch revalidate)
+  | "search" // Search results (30 seconds, aligns with upstream fetch revalidate)
+  | "whales"; // Whale feeds (1 minute — expensive multi-upstream pipelines)
 
 interface CacheConfig {
   maxAge: number; // Browser cache (seconds)
@@ -82,6 +83,10 @@ const CACHE_PROFILES: Record<CacheProfile, CacheConfig> = {
     sMaxAge: 30, // 30 seconds at edge (aligns with upstream fetch revalidate: 30)
     staleWhileRevalidate: 60, // 1 minute
     staleIfError: 120, // 2 minutes
+    isPrivate: false,
+  },
+  whales: {
+    ...MINUTE_CACHE,
     isPrivate: false,
   },
 };

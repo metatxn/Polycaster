@@ -7,15 +7,26 @@ import {
   parseGammaStringArray,
   resolveNegRisk,
 } from "@knoww/shared-types/polymarket";
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 import type {
   InjectedMarketEntry,
   Market,
   NestedMarket,
 } from "../types/market";
 import { setCspSafeImageSrc } from "./image-proxy";
+import { prioritizeByPreferredOutcomeNames } from "./market-context";
 import { WALLETCONNECT_WALLET_UUID, WalletBridge } from "./trading/bridge";
 import { ExtensionSession } from "./trading/extension-session";
+import {
+  canSellHolding,
+  clampStake,
+  formatHoldingLine,
+  parseStreamStakeInput,
+  pickHolding,
+  type StreamHolding,
+  sellButtonLabel,
+  stepStake,
+} from "./trading/stream-bet-logic";
 import { TradingPanel } from "./trading/trading-panel";
 import { TradingService } from "./trading/trading-service";
 import { renderWalletConnectQrSvg } from "./trading/walletconnect-qr";
@@ -134,7 +145,13 @@ async function resolveTokenAndShowPanel(
   price: number,
   anchorElement: HTMLElement,
   isMultiOutcome: boolean,
-  marketIndex?: number
+  marketIndex?: number,
+  tradeOpts?: {
+    amountUsd?: number;
+    autoSubmit?: boolean;
+    view?: "order" | "deposit";
+    streamDeposit?: boolean;
+  }
 ): Promise<void> {
   const { log } = window.KNOWW_UTILS;
   const panelAnchor =
@@ -196,6 +213,10 @@ async function resolveTokenAndShowPanel(
       conditionId,
       yesTokenId,
       noTokenId,
+      initialAmountUsd: tradeOpts?.amountUsd,
+      autoSubmit: tradeOpts?.autoSubmit,
+      initialView: tradeOpts?.view,
+      streamDeposit: tradeOpts?.streamDeposit,
     });
     void window.KNOWW_ANALYTICS?.track("trading_panel_opened", {
       marketId: market.id,
@@ -411,6 +432,10 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
 
   // Sort by price descending (highest probability first)
   result.multiOutcomeData.sort((a, b) => b.price - a.price);
+  result.multiOutcomeData = prioritizeByPreferredOutcomeNames(
+    result.multiOutcomeData,
+    market._preferredOutcomeNames
+  );
 
   if (result.multiOutcomeData.length <= 1) {
     result.isMultiOutcome = false;
@@ -1806,16 +1831,9 @@ function applyMinimizedState(
 
 function applyStackExpandedState(
   container: HTMLElement,
-  seeAll: HTMLButtonElement,
   expanded: boolean
 ): void {
   container.classList.toggle("knoww-stack-expanded", expanded);
-  seeAll.textContent = formatSeeAllLabel(expanded, 0, 0);
-  seeAll.setAttribute("aria-pressed", expanded ? "true" : "false");
-  seeAll.setAttribute(
-    "aria-label",
-    expanded ? "Show fewer markets" : "See all markets in this panel"
-  );
 }
 
 function clampNotificationStackToViewport(container: HTMLElement): void {
@@ -1865,36 +1883,6 @@ function resetNotificationStackToPreferredPosition(
   container.style.removeProperty("right");
 }
 
-function formatSeeAllLabel(
-  expanded: boolean,
-  totalAvailable: number,
-  totalDisplayed: number
-): string {
-  if (expanded) return "Show less";
-  if (totalAvailable > totalDisplayed) return `See all ${totalAvailable} →`;
-  return "See all →";
-}
-
-function updateStackSeeAllButton(
-  expanded: boolean,
-  totalAvailable: number,
-  totalDisplayed: number
-): void {
-  const seeAll = document.querySelector<HTMLButtonElement>(
-    "#knoww-stack-footer .knoww-stack-footer-see-all"
-  );
-  if (!seeAll) return;
-  seeAll.textContent = formatSeeAllLabel(
-    expanded,
-    totalAvailable,
-    totalDisplayed
-  );
-  seeAll.title =
-    !expanded && totalAvailable > totalDisplayed
-      ? `Showing ${totalDisplayed} of ${totalAvailable} markets`
-      : "";
-}
-
 function createStackTabs(): HTMLElement {
   const tabs = document.createElement("div");
   tabs.className = "knoww-stack-tabs";
@@ -1921,9 +1909,7 @@ function createStackTabs(): HTMLElement {
       void window.KNOWW_ANALYTICS?.track("notification_stack_filter_changed", {
         filter: cachedStackFilter,
       });
-      updateNotificationStack(
-        window.KNOWW_INJECTION?.getInjectedMarkets?.() || []
-      );
+      updateNotificationStack(getStackBaseMarkets());
     });
     tabs.appendChild(tab);
   });
@@ -1947,33 +1933,22 @@ function updateStackTabsState(root?: HTMLElement): void {
     });
 }
 
-function setStackExpanded(
-  container: HTMLElement,
-  seeAll: HTMLButtonElement,
-  expanded: boolean
-): void {
+function setStackExpanded(container: HTMLElement, expanded: boolean): void {
   cachedStackExpanded = expanded;
   persistStackExpanded(expanded);
-  applyStackExpandedState(container, seeAll, expanded);
+  applyStackExpandedState(container, expanded);
   requestAnimationFrame(() => clampNotificationStackToViewport(container));
   if (expanded) updateStackTabsState();
-  updateNotificationStack(window.KNOWW_INJECTION?.getInjectedMarkets?.() || []);
+  updateNotificationStack(getStackBaseMarkets());
 }
 
 function handleNotificationStackKeydown(e: KeyboardEvent): void {
   if (!notificationStackContainer) return;
   if (notificationStackContainer.style.display === "none") return;
 
-  const seeAll = document.querySelector<HTMLButtonElement>(
-    "#knoww-stack-footer .knoww-stack-footer-see-all"
-  );
-
   if (e.key === "Escape") {
     if (notificationStackContainer.classList.contains("knoww-stack-expanded")) {
-      if (seeAll) {
-        setStackExpanded(notificationStackContainer, seeAll, false);
-        seeAll.focus();
-      }
+      setStackExpanded(notificationStackContainer, false);
       e.preventDefault();
       return;
     }
@@ -2166,6 +2141,52 @@ function renderEditorialPrice(
 
   container.appendChild(numEl);
   container.appendChild(sideLabel);
+}
+
+// Tracks whether the fullscreen listeners have been wired (once per page).
+let fullscreenReparentBound = false;
+
+/** The active fullscreen element across vendor-prefixed implementations. */
+function getFullscreenElement(): Element | null {
+  return (
+    document.fullscreenElement ||
+    // Safari/older WebKit
+    (document as Document & { webkitFullscreenElement?: Element | null })
+      .webkitFullscreenElement ||
+    null
+  );
+}
+
+/**
+ * Keep the notification panel visible across fullscreen transitions by
+ * re-parenting it into the fullscreen element (and back to <body> on exit).
+ * A fixed-position node still anchors to the viewport inside the fullscreen
+ * element, so the panel stays in its corner.
+ */
+function setupFullscreenReparenting(container: HTMLElement): void {
+  if (fullscreenReparentBound) return;
+  fullscreenReparentBound = true;
+
+  const reparent = (): void => {
+    const stack =
+      notificationStackContainer ||
+      document.getElementById("knoww-notification-stack") ||
+      container;
+    if (!stack) return;
+
+    const fsEl = getFullscreenElement();
+    const target: HTMLElement =
+      fsEl instanceof HTMLElement ? fsEl : document.body;
+
+    if (stack.parentElement !== target) {
+      target.appendChild(stack);
+    }
+    // Player chrome can sit at very high stacking; keep the panel above it.
+    stack.style.zIndex = fsEl ? "2147483647" : "";
+  };
+
+  document.addEventListener("fullscreenchange", reparent);
+  document.addEventListener("webkitfullscreenchange", reparent);
 }
 
 /**
@@ -2435,7 +2456,7 @@ function createNotificationStack(): HTMLElement {
     }
   });
 
-  // Footer — "● LIVE · HH:MM ET" left, "SEE ALL →" right.
+  // Footer — live timestamp only; full browsing now lives in the sidebar.
   const footer = document.createElement("div");
   footer.className = "knoww-stack-footer";
   footer.id = "knoww-stack-footer";
@@ -2445,32 +2466,21 @@ function createNotificationStack(): HTMLElement {
   liveLabel.id = "knoww-stack-footer-live";
   liveLabel.textContent = formatLiveTimeLabel();
 
-  const seeAll = document.createElement("button");
-  seeAll.className = "knoww-stack-footer-see-all";
-  seeAll.type = "button";
-  applyStackExpandedState(container, seeAll, cachedStackExpanded);
-  seeAll.addEventListener("click", () => {
-    const nextExpanded = !cachedStackExpanded;
-    if (nextExpanded && container.classList.contains("knoww-stack-minimized")) {
+  applyStackExpandedState(container, cachedStackExpanded);
+
+  browseTrendingBtn?.addEventListener("click", () => {
+    cachedStackFilter = "trending";
+    if (container.classList.contains("knoww-stack-minimized")) {
       cachedStackMinimized = false;
       applyMinimizedState(container, minimizeToggle, false);
       persistStackMinimized(false);
     }
-    setStackExpanded(container, seeAll, nextExpanded);
-    void window.KNOWW_ANALYTICS?.track("notification_stack_see_all_clicked", {
-      expanded: nextExpanded,
-    });
-  });
-
-  browseTrendingBtn?.addEventListener("click", () => {
-    cachedStackFilter = "trending";
-    setStackExpanded(container, seeAll, true);
+    setStackExpanded(container, true);
     updateStackTabsState();
     void window.KNOWW_ANALYTICS?.track("notification_empty_browse_trending");
   });
 
   footer.appendChild(liveLabel);
-  footer.appendChild(seeAll);
 
   container.appendChild(header);
   container.appendChild(searchContainer);
@@ -2481,6 +2491,12 @@ function createNotificationStack(): HTMLElement {
   // Append to body with fixed positioning (all platforms)
   document.body.appendChild(container);
   log("Notification stack created with fixed position");
+
+  // Keep the panel visible when the page enters fullscreen (e.g. a Twitch/
+  // YouTube player). The browser only paints the fullscreen element's subtree,
+  // so a body-level fixed panel would vanish — re-parent it into the
+  // fullscreen element while fullscreen is active, and back to body on exit.
+  setupFullscreenReparenting(container);
 
   startLiveTimeTicker();
 
@@ -2570,6 +2586,13 @@ function createNotificationStack(): HTMLElement {
       toggleMinimized();
     }
   });
+
+  // Streaming surface: keep the original header (icons), but slim the panel via
+  // CSS — drop the footer and the "Live now" section label. The marker class is
+  // the hook for those rules (see `.knoww-stack-stream` in knoww-inline.css).
+  if (isStreamSurface()) {
+    container.classList.add("knoww-stack-stream");
+  }
 
   // Hydrate from persisted state on first creation.
   void readPersistedStackMinimized().then((persisted) => {
@@ -2835,6 +2858,943 @@ function createSearchResultItem(market: Market): HTMLElement {
 /**
  * Create a notification item for a market
  */
+// Active stake (USD) for stream one-click trades, seeded from settings and
+// adjustable via the stake chips. Module-level so it's shared across cards.
+let streamStakeUsd: number | null = null;
+
+function getStreamTradingSettings(): {
+  defaultAmount: number;
+  oneClickEnabled: boolean;
+  confirmBeforeTrade: boolean;
+} {
+  return (
+    window.KNOWW_CONFIG?.getStreamTradingSettings?.() || {
+      defaultAmount: 20,
+      oneClickEnabled: true,
+      confirmBeforeTrade: true,
+    }
+  );
+}
+
+function getStreamStake(): number {
+  if (streamStakeUsd == null) {
+    streamStakeUsd = getStreamTradingSettings().defaultAmount;
+  }
+  return streamStakeUsd;
+}
+
+interface StreamBet {
+  outcomes: string[];
+  prices: number[];
+  isMulti: boolean;
+  marketIndex: number;
+  multiOutcomeData: MultiOutcomeItem[];
+}
+
+/**
+ * For a sports/esports event with many nested markets (Match Winner, map
+ * winners, handicaps, over/unders…), find the "Match Winner" moneyline market
+ * and return its two team outcomes + the nested-market index. That's what a
+ * bettor wants on the card — "Team A vs Team B" — not a stray over/under.
+ */
+function getMatchWinnerBet(market: Market): StreamBet | null {
+  const nested = market.markets;
+  if (!nested || nested.length < 2) return null;
+
+  const isMoneylineTitle = (g: string): boolean =>
+    /\b(match\s*winner|moneyline|series\s*winner|to\s*win)\b/i.test(g);
+  const isDerivative = (g: string, o: string[]): boolean =>
+    /over|under|handicap|total|o\/u|map\s*\d/i.test(g) ||
+    o.some((x) => /^(over|under)$/i.test(x));
+  // A head-to-head moneyline names the two TEAMS. Reject Yes/No sub-markets —
+  // those belong to outright "winner" events, which should use the top-N
+  // multi-outcome path (each team's price), not a single Yes/No.
+  const isTeamPair = (m: NestedMarket): boolean => {
+    const o = parseGammaStringArray(m.outcomes);
+    return (
+      o.length === 2 &&
+      !(o[0].toLowerCase() === "yes" && o[1].toLowerCase() === "no") &&
+      !isDerivative(m.groupItemTitle || "", o)
+    );
+  };
+
+  let idx = nested.findIndex(
+    (m) => isMoneylineTitle(m.groupItemTitle || "") && isTeamPair(m)
+  );
+  if (idx < 0) {
+    // The main market's question usually equals the event title.
+    const t = (market.title || "").trim().toLowerCase();
+    idx = nested.findIndex(
+      (m) => (m.question || "").trim().toLowerCase() === t && isTeamPair(m)
+    );
+  }
+  if (idx < 0) {
+    // Any clean two-team market that isn't an over/under or handicap.
+    idx = nested.findIndex(isTeamPair);
+  }
+  if (idx < 0) return null;
+
+  const m = nested[idx];
+  const outcomes = parseGammaStringArray(m.outcomes);
+  const prices = parseGammaPriceArray(m.outcomePrices);
+  if (outcomes.length < 2 || prices.length < 2) return null;
+  return {
+    outcomes,
+    prices,
+    isMulti: false,
+    marketIndex: idx,
+    multiOutcomeData: [],
+  };
+}
+
+/** Resolve which outcomes to show on a stream card's betting row. */
+function resolveStreamBet(market: Market): StreamBet {
+  const moneyline = getMatchWinnerBet(market);
+  if (moneyline) return moneyline;
+
+  const d = resolveMarketDisplayData(market);
+  const firstActiveMarketIndex =
+    parseMultiOutcomeData(market).firstActiveMarketIndex;
+  return {
+    outcomes: d.outcomes,
+    prices: d.prices,
+    isMulti: d.isMultiOutcome,
+    marketIndex: firstActiveMarketIndex,
+    multiOutcomeData: d.multiOutcomeData,
+  };
+}
+
+interface StreamOption {
+  name: string;
+  price: number;
+  outcomeIndex: number;
+  isMulti: boolean;
+  marketIndex: number;
+  cls: string;
+}
+
+/**
+ * The outcomes to show as quick-bet buttons on a stream card: the two teams /
+ * Yes-No for a head-to-head, or the top 4 options (by price) for a multi-
+ * outcome market.
+ */
+function streamOptionsFor(market: Market): StreamOption[] {
+  const bet = resolveStreamBet(market);
+  if (bet.isMulti && bet.multiOutcomeData.length > 0) {
+    return [...bet.multiOutcomeData]
+      .sort((a, b) => b.price - a.price)
+      .slice(0, 4)
+      .map((o, k) => ({
+        name: o.name,
+        price: o.price,
+        outcomeIndex: 0,
+        isMulti: true,
+        marketIndex: o.marketIndex,
+        cls: `option-${(k % 5) + 1}`,
+      }));
+  }
+  const isYesNo =
+    bet.outcomes[0]?.toLowerCase() === "yes" &&
+    bet.outcomes[1]?.toLowerCase() === "no";
+  return bet.outcomes.slice(0, 2).map((name, k) => ({
+    name,
+    price: bet.prices[k] ?? 0.5,
+    outcomeIndex: k,
+    isMulti: false,
+    marketIndex: bet.marketIndex,
+    cls: isYesNo ? (k === 0 ? "yes" : "no") : `option-${k + 1}`,
+  }));
+}
+
+/** Resolve the CLOB token / condition / negRisk for a market order. */
+async function resolveOrderTokens(
+  market: Market,
+  outcomeIndex: number,
+  isMulti: boolean,
+  marketIndex: number
+): Promise<{ tokenId?: string; conditionId?: string; negRisk: boolean }> {
+  let tokenId: string | undefined =
+    (isMulti
+      ? getTokenIdForMultiOutcome(market, marketIndex)
+      : getTokenIdForOutcome(market, outcomeIndex, marketIndex)) ?? undefined;
+  if (!tokenId) {
+    tokenId =
+      (await window.KNOWW_API.fetchClobTokenIds(
+        market,
+        outcomeIndex,
+        isMulti,
+        marketIndex
+      )) || undefined;
+  }
+  const nestedMarket = market.markets?.[marketIndex];
+  let conditionId: string | undefined;
+  const negRisk = resolveNegRisk(nestedMarket, market);
+  if (nestedMarket) {
+    conditionId = nestedMarket.conditionId as string | undefined;
+    const ids = parseGammaStringArray(nestedMarket.clobTokenIds);
+    if (ids.length >= 2) {
+      const corrected = isMulti ? ids[0] : ids[outcomeIndex];
+      if (corrected) tokenId = corrected;
+    }
+  }
+  return { tokenId, conditionId, negRisk };
+}
+
+/** Place a market BUY for the selected stream outcome. Throws on failure. */
+async function submitStreamMarketOrder(
+  market: Market,
+  opt: StreamOption,
+  stake: number
+): Promise<void> {
+  const ctx = TradingService.getContext();
+  const tokens = await resolveOrderTokens(
+    market,
+    opt.outcomeIndex,
+    opt.isMulti,
+    opt.marketIndex
+  );
+  if (!tokens.tokenId) throw new Error("Could not resolve market token");
+  const shares = Math.max(
+    ctx.minOrderSize || 5,
+    Math.round(stake / Math.max(opt.price, 0.01))
+  );
+  await TradingService.placeOrder({
+    tokenId: tokens.tokenId,
+    conditionId: tokens.conditionId,
+    outcomeIndex: opt.outcomeIndex,
+    side: "BUY",
+    price: 0,
+    size: shares,
+    amount: stake,
+    orderType: "FAK",
+    negRisk: tokens.negRisk,
+    isMarketableBuy: true,
+  });
+}
+
+type StreamTxStatus = "idle" | "placing" | "placed" | "failed";
+
+/** A short market label for the compact head, e.g. "FURIA vs MOUZ". Falls back
+ *  to the market title, trimmed of any " - <event>" suffix. */
+function streamShortTitle(market: Market): string {
+  const title = market.title || "Market";
+  return title.split(/\s[-–—|]\s/)[0].trim() || title;
+}
+
+/**
+ * Build the card's betting area to match the design's "one-click trading":
+ * the outcomes as a SEGMENT SELECTOR + a single contextual ACTION BUTTON that
+ * carries every trade state inline (Trade → Confirm → Placing → Placed, plus
+ * Connect / Insufficient / Approve). Selecting an outcome never opens a panel;
+ * the big panel is only a setup fallback for connect / approve / deposit.
+ */
+function buildStreamBetting(market: Market): HTMLElement {
+  const marketSource = market.source || "polymarket";
+  const isKalshi = marketSource === "kalshi";
+  const options = streamOptionsFor(market);
+
+  const wrap = document.createElement("div");
+  wrap.className = "knoww-stream-bet";
+
+  // Head: just the BUY/SELL toggle (the market title lives in the collapsed
+  // pill directly above, so it isn't repeated here). Hidden by default; shown
+  // only when there's a sellable position (see renderHead).
+  const head = document.createElement("div");
+  head.className = "knoww-stream-head knoww-stream-hidden";
+  const buysell = document.createElement("div");
+  buysell.className = "knoww-stream-buysell";
+  head.appendChild(buysell);
+
+  const segRow = document.createElement("div");
+  segRow.className = "knoww-stream-seg-row";
+
+  // Action row: inline stepper + contextual trade button on one line.
+  const actionRow = document.createElement("div");
+  actionRow.className = "knoww-stream-actionrow";
+  const stepperWrap = document.createElement("div");
+  stepperWrap.className = "knoww-stream-stepper";
+  const actionWrap = document.createElement("div");
+  actionWrap.className = "knoww-stream-action";
+  actionRow.appendChild(stepperWrap);
+  actionRow.appendChild(actionWrap);
+
+  // Contextual hint (full width, below the action row) so a wrapped hint can
+  // never inflate the stepper/trade row height.
+  const hintHost = document.createElement("div");
+  hintHost.className = "knoww-stream-hint-host";
+
+  // Holdings footer (2-outcome markets only; filled once balances load).
+  const holdFooter = document.createElement("div");
+  holdFooter.className = "knoww-stream-hold knoww-stream-hidden";
+
+  // Host for the inline deposit flow (unchanged behavior).
+  const depositHost = document.createElement("div");
+  depositHost.className = "knoww-stream-deposit-host";
+
+  wrap.appendChild(head);
+  wrap.appendChild(segRow);
+  wrap.appendChild(actionRow);
+  wrap.appendChild(hintHost);
+  wrap.appendChild(holdFooter);
+  wrap.appendChild(depositHost);
+
+  let selectedIdx = 0;
+  let side: "BUY" | "SELL" = "BUY";
+  let holding: StreamHolding | null = null;
+  let txStatus: StreamTxStatus = "idle";
+  let depositing = false;
+  let lastError: string | null = null;
+  let busy: string | null = null;
+  let holdingGen = 0;
+  // Holdings footer + BUY/SELL apply ONLY to genuine binary (Yes/No) markets:
+  // getOutcomeBalances and pickHolding assume a Yes/No token pair. A
+  // multi-outcome market reduced to 2 active options gives every option
+  // outcomeIndex 0 (distinguished by marketIndex), which would mis-target the
+  // sell — so exclude those. They keep BUY + the stepper, no footer/toggle.
+  const twoSided =
+    options.length === 2 && !options[0].isMulti && !options[1].isMulti;
+
+  const runSetup = (label: string, fn: () => Promise<unknown>): void => {
+    busy = label;
+    renderAction();
+    fn()
+      .catch(() => {
+        /* leave state; the action re-renders to the current readiness */
+      })
+      .finally(() => {
+        busy = null;
+        renderAction();
+      });
+  };
+
+  // Balance settles asynchronously after a trade/deposit (V2 fill settlement,
+  // bridge credit). An immediate refresh reads the pre-change value, so poll a
+  // few times until ctx.balance moves off `before` — the card's onStateChange
+  // subscription re-renders the action once it lands.
+  const pollBalanceChange = (before: number): void => {
+    let tries = 0;
+    const tick = async (): Promise<void> => {
+      await TradingService.refreshBalance();
+      tries += 1;
+      if (tries < 6 && TradingService.getContext().balance === before) {
+        window.setTimeout(() => void tick(), 2500);
+      }
+    };
+    void tick();
+  };
+
+  const doPlace = (): void => {
+    const opt = options[selectedIdx];
+    const balanceBefore = TradingService.getContext().balance;
+    txStatus = "placing";
+    renderAction();
+    submitStreamMarketOrder(market, opt, getStreamStake())
+      .then(() => {
+        txStatus = "placed";
+        lastError = null;
+        window.KNOWW_PREFERENCES?.recordClick(market);
+        // Reflect the spent collateral once the fill settles on-chain.
+        pollBalanceChange(balanceBefore);
+      })
+      .catch((err: unknown) => {
+        txStatus = "failed";
+        lastError = err instanceof Error ? err.message : String(err) || null;
+        // The balance may be stale (e.g. funds withdrawn elsewhere), which is
+        // how an unaffordable trade slipped through. Refresh so the card
+        // re-renders to the correct "Deposit to trade" state after the failure.
+        void TradingService.refreshBalance();
+      })
+      .finally(() => {
+        renderAction();
+        window.setTimeout(() => {
+          if (txStatus === "placed" || txStatus === "failed") {
+            txStatus = "idle";
+            renderAction();
+          }
+        }, 2800);
+      });
+  };
+
+  function doSell(): void {
+    if (!holding) return;
+    const opt = options[holding.outcomeIndex];
+    const balanceBefore = TradingService.getContext().balance;
+    txStatus = "placing";
+    renderAction();
+    submitStreamMarketSell(market, opt, holding.shares)
+      .then(() => {
+        txStatus = "placed";
+        lastError = null;
+        pollBalanceChange(balanceBefore);
+        void loadHolding();
+      })
+      .catch((err: unknown) => {
+        txStatus = "failed";
+        lastError = err instanceof Error ? err.message : String(err) || null;
+        void TradingService.refreshBalance();
+      })
+      .finally(() => {
+        renderAction();
+        window.setTimeout(() => {
+          if (txStatus === "placed" || txStatus === "failed") {
+            txStatus = "idle";
+            renderAction();
+          }
+        }, 2800);
+      });
+  }
+
+  // Open the deposit flow INLINE inside the card: hide the bet controls and let
+  // the trading panel's deposit engine render into `depositHost`. Keeps the
+  // funding flow on one surface instead of spawning a separate floating panel.
+  const openInlineDeposit = (): void => {
+    const opt = options[selectedIdx];
+    depositing = true;
+    streamInlineDepositActive = true;
+    // Toggle a class (not inline styles) — the bet-control rules use !important,
+    // which inline styles can't override.
+    wrap.classList.add("depositing");
+    // The deposit form is taller than the bet controls, but the stack only
+    // enables scrolling via `.knoww-has-overflow` inside updateNotificationStack
+    // — which we suppress while depositing. Enable scroll directly so the
+    // confirm button is always reachable, and bring the form into view.
+    const itemsContainer = document.getElementById("knoww-stack-items");
+    itemsContainer?.classList.add("knoww-has-overflow");
+    TradingPanel.mountInlineDeposit({
+      host: depositHost,
+      opts: {
+        market,
+        outcomeName: opt.name,
+        outcomeIndex: opt.outcomeIndex,
+        price: opt.price,
+        side: "BUY",
+        tokenId: "",
+        anchorElement: wrap,
+        isMultiOutcome: opt.isMulti,
+        initialAmountUsd: getStreamStake(),
+        streamDeposit: true,
+      },
+      onClose: () => {
+        depositing = false;
+        streamInlineDepositActive = false;
+        wrap.classList.remove("depositing");
+        renderSegments();
+        renderStepper();
+        renderAction();
+        // The bridge can report "complete" a beat before the on-chain pUSD
+        // balance is readable, so on return the card may still show the old
+        // balance. Poll until it changes — the subscription re-renders.
+        pollBalanceChange(TradingService.getContext().balance);
+      },
+    });
+    requestAnimationFrame(() => {
+      depositHost.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  };
+
+  function renderSegments(): void {
+    segRow.innerHTML = "";
+    options.forEach((opt, i) => {
+      const seg = document.createElement("button");
+      seg.type = "button";
+      const sideCls = twoSided ? (i === 0 ? "yes" : "no") : "opt";
+      seg.className = `knoww-stream-seg ${sideCls}${
+        i === selectedIdx ? " sel" : ""
+      }`;
+      const cents = Math.round(opt.price * 100);
+      const label = document.createElement("span");
+      label.className = "knoww-stream-seg-name";
+      label.textContent = opt.name;
+      const price = document.createElement("span");
+      price.className = "knoww-stream-seg-price";
+      price.textContent = `${cents}¢`;
+      seg.appendChild(label);
+      seg.appendChild(price);
+      seg.onclick = (e) => {
+        e.stopPropagation();
+        if (isKalshi) {
+          window.open(buildKalshiUrl(market), "_blank", "noopener,noreferrer");
+          return;
+        }
+        selectedIdx = i;
+        txStatus = "idle";
+        renderSegments();
+        renderStepper();
+        renderAction();
+      };
+      segRow.appendChild(seg);
+    });
+  }
+
+  function renderStepper(): void {
+    stepperWrap.innerHTML = "";
+    const stake = getStreamStake();
+    const normalizedStake = clampStake(stake);
+    const setInputWidth = (input: HTMLInputElement): void => {
+      input.style.width = `${Math.max(2, input.value.length)}ch`;
+    };
+    const mk = (label: string, dir: 1 | -1): HTMLButtonElement => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "knoww-stream-step-btn";
+      b.textContent = label;
+      const nextVal = stepStake(stake, dir);
+      b.disabled = nextVal === stake;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        streamStakeUsd = stepStake(getStreamStake(), dir);
+        txStatus = "idle";
+        renderStepper();
+        renderAction();
+      };
+      return b;
+    };
+    const val = document.createElement("label");
+    val.className = "knoww-stream-step-val";
+    const dollar = document.createElement("span");
+    dollar.className = "knoww-stream-step-prefix";
+    dollar.textContent = "$";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.className = "knoww-stream-step-input";
+    input.setAttribute("aria-label", "Trade amount in dollars");
+    input.value = String(normalizedStake);
+    setInputWidth(input);
+    input.onpointerdown = (e) => e.stopPropagation();
+    input.onclick = (e) => e.stopPropagation();
+    input.onfocus = (e) => {
+      e.stopPropagation();
+      input.select();
+    };
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        input.blur();
+      } else if (e.key === "Escape") {
+        input.value = String(clampStake(getStreamStake()));
+        input.blur();
+      }
+    };
+    input.oninput = (e) => {
+      e.stopPropagation();
+      setInputWidth(input);
+      const parsed = parseStreamStakeInput(input.value);
+      if (parsed == null) return;
+      streamStakeUsd = parsed;
+      txStatus = "idle";
+      renderAction();
+    };
+    input.onblur = () => {
+      streamStakeUsd =
+        parseStreamStakeInput(input.value) ?? clampStake(getStreamStake());
+      window.setTimeout(() => {
+        if (!wrap.isConnected) return;
+        renderStepper();
+        renderAction();
+      }, 0);
+    };
+    val.appendChild(dollar);
+    val.appendChild(input);
+    stepperWrap.appendChild(mk("−", -1));
+    stepperWrap.appendChild(val);
+    stepperWrap.appendChild(mk("+", 1));
+  }
+
+  function renderPill(): void {
+    const item = wrap.closest(".knoww-notification-item--stream");
+    const chip = item?.querySelector<HTMLElement>(".knoww-stream-pill-hold");
+    if (!chip) return;
+    if (holding) {
+      chip.textContent = `${holding.sharesLabel} ${holding.name}`;
+      chip.style.display = "";
+    } else {
+      chip.style.display = "none";
+    }
+  }
+
+  function renderHead(): void {
+    buysell.innerHTML = "";
+    // The head (BUY/SELL toggle) only appears when there's a sellable position in
+    // THIS market — otherwise there's nothing to sell, so we stay BUY-only and
+    // hide the head entirely, keeping the card small.
+    const ctx = TradingService.getContext();
+    const sellable = twoSided && canSellHolding(holding, ctx.minOrderSize || 0);
+    head.classList.toggle("knoww-stream-hidden", !sellable);
+    if (!sellable) {
+      if (side === "SELL") side = "BUY";
+      return;
+    }
+    (["BUY", "SELL"] as const).forEach((s) => {
+      const opt = document.createElement("button");
+      opt.type = "button";
+      opt.className = `knoww-stream-bs-opt${s === side ? " sel" : ""}`;
+      opt.textContent = s;
+      opt.disabled = txStatus === "placing";
+      opt.onclick = (e) => {
+        e.stopPropagation();
+        if (txStatus === "placing") return;
+        if (side === s) return;
+        side = s;
+        txStatus = "idle";
+        renderHead();
+        renderStepper();
+        renderAction();
+      };
+      buysell.appendChild(opt);
+    });
+  }
+
+  function renderHold(): void {
+    if (!twoSided || !holding) {
+      holdFooter.classList.add("knoww-stream-hidden");
+      holdFooter.innerHTML = "";
+      return;
+    }
+    holdFooter.classList.remove("knoww-stream-hidden");
+    holdFooter.innerHTML = "";
+    const text = document.createElement("span");
+    text.className = "knoww-stream-hold-text";
+    const label = document.createElement("span");
+    label.className = "knoww-stream-hold-label";
+    label.textContent = "YOU HOLD ";
+    const val = document.createElement("span");
+    val.className = "knoww-stream-hold-val";
+    val.textContent = formatHoldingLine(holding);
+    text.appendChild(label);
+    text.appendChild(val);
+
+    const sell = document.createElement("button");
+    sell.type = "button";
+    sell.className = "knoww-stream-hold-sell";
+    sell.textContent = "Sell";
+    const ctx = TradingService.getContext();
+    sell.disabled = !canSellHolding(holding, ctx.minOrderSize || 0);
+    sell.onclick = (e) => {
+      e.stopPropagation();
+      if (!holding) return;
+      selectedIdx = holding.outcomeIndex;
+      side = "SELL";
+      renderHead();
+      renderSegments();
+      renderStepper();
+      doSell();
+    };
+    holdFooter.appendChild(text);
+    holdFooter.appendChild(sell);
+  }
+
+  async function loadHolding(): Promise<void> {
+    if (!twoSided) return;
+    const gen = ++holdingGen;
+    try {
+      const [yesTok, noTok] = await Promise.all([
+        resolveOrderTokens(
+          market,
+          options[0].outcomeIndex,
+          options[0].isMulti,
+          options[0].marketIndex
+        ),
+        resolveOrderTokens(
+          market,
+          options[1].outcomeIndex,
+          options[1].isMulti,
+          options[1].marketIndex
+        ),
+      ]);
+      if (gen !== holdingGen || !wrap.isConnected) return;
+      if (!yesTok.tokenId || !noTok.tokenId) return;
+      const balances = await TradingService.getOutcomeBalances(
+        yesTok.tokenId,
+        noTok.tokenId
+      );
+      if (gen !== holdingGen || !wrap.isConnected) return;
+      holding = pickHolding([
+        {
+          outcomeIndex: options[0].outcomeIndex,
+          name: options[0].name,
+          balance: balances.yesBalance,
+          price: options[0].price,
+        },
+        {
+          outcomeIndex: options[1].outcomeIndex,
+          name: options[1].name,
+          balance: balances.noBalance,
+          price: options[1].price,
+        },
+      ]);
+      if (side === "SELL" && !holding) {
+        // The whole position was just sold (or vanished). Fall back to BUY and
+        // clear the trade status so the BUY-worded "Trade placed ✓" can't flash
+        // after a sell — the SELL "Sold ✓" was already shown by doSell.
+        side = "BUY";
+        txStatus = "idle";
+      }
+      // Holding changed → refresh the BUY/SELL toggle visibility (renderHead
+      // gates it on a sellable position), the stepper, footer, pill and action.
+      renderHead();
+      renderStepper();
+      renderHold();
+      renderPill();
+      renderAction();
+    } catch {
+      /* balances are best-effort; leave the footer hidden */
+    }
+  }
+
+  function renderAction(): void {
+    actionWrap.innerHTML = "";
+    hintHost.innerHTML = "";
+
+    const showStepper =
+      side === "BUY" &&
+      !busy &&
+      (txStatus === "idle" || txStatus === "failed" || txStatus === "placed");
+
+    if (side === "SELL") {
+      actionRow.classList.add("full");
+      stepperWrap.classList.add("knoww-stream-hidden");
+      const ctx = TradingService.getContext();
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "knoww-stream-trade rose";
+      if (!holding || !canSellHolding(holding, ctx.minOrderSize || 0)) {
+        btn.classList.remove("rose");
+        btn.classList.add("ghost");
+        btn.disabled = true;
+        btn.textContent = holding
+          ? "Position too small to sell"
+          : "Nothing to sell";
+      } else if (txStatus === "placing") {
+        btn.classList.remove("rose");
+        btn.classList.add("ghost");
+        btn.disabled = true;
+        btn.innerHTML = `<span class="knoww-stream-spin"></span> Selling…`;
+      } else if (txStatus === "placed") {
+        btn.classList.remove("rose");
+        btn.classList.add("green");
+        btn.disabled = true;
+        btn.textContent = "Sold ✓";
+      } else if (txStatus === "failed") {
+        btn.classList.remove("rose");
+        btn.classList.add("ghost");
+        btn.textContent = "Unable to sell — retry";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          doSell();
+        };
+      } else {
+        btn.textContent = sellButtonLabel(holding);
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          doSell();
+        };
+      }
+      actionWrap.appendChild(btn);
+      return;
+    }
+
+    actionRow.classList.toggle("full", !showStepper);
+    stepperWrap.classList.toggle("knoww-stream-hidden", !showStepper);
+
+    const opt = options[selectedIdx];
+    const stake = getStreamStake();
+    const ctx = TradingService.getContext();
+    const pct = Math.round(opt.price * 100);
+    const sideColor =
+      options.length === 2 && selectedIdx === 1 ? "rose" : "green";
+
+    // Busy (inline setup in flight) → spinner, short-circuit everything.
+    if (busy) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "knoww-stream-trade ghost";
+      b.disabled = true;
+      b.innerHTML = `<span class="knoww-stream-spin"></span> ${busy}`;
+      actionWrap.appendChild(b);
+      return;
+    }
+
+    let kind:
+      | "ready"
+      | "placing"
+      | "placed"
+      | "failed"
+      | "connect"
+      | "enable"
+      | "insufficient"
+      | "approve"
+      | "kalshi";
+    if (isKalshi) kind = "kalshi";
+    else if (txStatus === "placing") kind = "placing";
+    else if (txStatus === "placed") kind = "placed";
+    else if (txStatus === "failed") kind = "failed";
+    else if (!ctx.address) kind = "connect";
+    else if (!ctx.hasCredentials || ctx.state !== "ready") kind = "enable";
+    else if (stake > ctx.balance) kind = "insufficient";
+    else {
+      const nested = market.markets?.[opt.marketIndex];
+      const negRisk = resolveNegRisk(nested, market);
+      const allowance = negRisk ? ctx.usdcAllowanceNegRisk : ctx.usdcAllowance;
+      kind = allowance < stake ? "approve" : "ready";
+    }
+
+    const hint = document.createElement("div");
+    hint.className = "knoww-stream-hint";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "knoww-stream-trade";
+
+    switch (kind) {
+      case "kalshi":
+        btn.classList.add("ghost");
+        btn.textContent = "Trade on Kalshi";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          window.open(buildKalshiUrl(market), "_blank", "noopener,noreferrer");
+        };
+        break;
+      case "connect":
+        btn.classList.add("ghost");
+        btn.textContent = "Connect to trade";
+        hint.textContent = "Connect a wallet to place trades";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          // Inline: triggers the wallet's own connect + signature popups.
+          runSetup("Connecting…", () => TradingService.ensureReady());
+        };
+        break;
+      case "enable":
+        btn.classList.add("ghost");
+        btn.textContent = "Enable trading";
+        hint.textContent = "One-time signature to enable trading";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          runSetup("Enabling…", () => TradingService.ensureReady());
+        };
+        break;
+      case "insufficient":
+        btn.classList.add("deposit");
+        btn.textContent = `Deposit to trade $${stake}`;
+        hint.textContent = `Balance $${ctx.balance.toFixed(2)} · add funds to place this trade`;
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          openInlineDeposit();
+        };
+        break;
+      case "approve":
+        btn.classList.add("ghost");
+        btn.textContent = "Approve to trade";
+        hint.textContent = "One-time approval, then trade instantly";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const nested = market.markets?.[opt.marketIndex];
+          const negRisk = resolveNegRisk(nested, market);
+          runSetup("Approving…", () => TradingService.approveUsdc(negRisk));
+        };
+        break;
+      case "placing":
+        btn.classList.add("ghost");
+        btn.disabled = true;
+        btn.innerHTML = `<span class="knoww-stream-spin"></span> Placing trade…`;
+        break;
+      case "placed":
+        btn.classList.add("green");
+        btn.disabled = true;
+        btn.textContent = "Trade placed ✓";
+        hint.classList.add("good");
+        hint.textContent = `Filled · ${opt.name} ${pct}¢`;
+        break;
+      case "failed":
+        btn.classList.add("ghost");
+        btn.textContent = "Unable to place — retry";
+        hint.classList.add("warn");
+        hint.textContent = lastError
+          ? truncateText(lastError, 110)
+          : "Something went wrong · tap to retry";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          doPlace();
+        };
+        break;
+      default:
+        // ready
+        btn.classList.add(sideColor);
+        btn.innerHTML = `<span>Trade $${stake}</span><span class="knoww-stream-trade-sub">${opt.name} · ${pct}¢</span>`;
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          // Instant one-click placement — no confirm step. The user has already
+          // expanded the card and picked an amount, so the trade button is the
+          // commit action.
+          doPlace();
+        };
+        break;
+    }
+
+    actionWrap.appendChild(btn);
+    if (hint.textContent) hintHost.appendChild(hint);
+  }
+
+  renderHead();
+  renderSegments();
+  renderStepper();
+  renderAction();
+  renderHold();
+  renderPill();
+  void loadHolding();
+
+  // Each card reads wallet readiness from the shared TradingService at render
+  // time. Re-render the stepper/action/footer on global state changes; skip
+  // while an inline setup/deposit is in flight, and self-unsubscribe once the
+  // card leaves the DOM.
+  const unsubState = TradingService.onStateChange(() => {
+    if (!wrap.isConnected) {
+      unsubState();
+      return;
+    }
+    if (busy || depositing) return;
+    renderHead();
+    renderStepper();
+    renderAction();
+    renderHold();
+  });
+
+  // Refresh holdings when this card is (re)expanded (see the item click handler).
+  wrap.addEventListener("knoww-stream-expanded", () => void loadHolding());
+
+  return wrap;
+}
+
+/** Place a market SELL of `shares` of the given stream outcome. Throws on failure. */
+async function submitStreamMarketSell(
+  market: Market,
+  opt: StreamOption,
+  shares: number
+): Promise<void> {
+  const tokens = await resolveOrderTokens(
+    market,
+    opt.outcomeIndex,
+    opt.isMulti,
+    opt.marketIndex
+  );
+  if (!tokens.tokenId) throw new Error("Could not resolve market token");
+  await TradingService.placeOrder({
+    tokenId: tokens.tokenId,
+    conditionId: tokens.conditionId,
+    outcomeIndex: opt.outcomeIndex,
+    side: "SELL",
+    price: 0,
+    size: shares,
+    amount: 0,
+    orderType: "FAK",
+    negRisk: tokens.negRisk,
+    isMarketableBuy: false,
+  });
+}
+
 function createNotificationItem(
   marketData: InjectedMarketEntry,
   index: number,
@@ -2943,6 +3903,64 @@ function createNotificationItem(
 
   item.appendChild(icon);
   item.appendChild(content);
+
+  const isStream = marketData.isStreamSurface === true;
+  if (isStream) {
+    // Stream surface: collapsed by default — the row shows the title + price
+    // like a normal market. Clicking it expands the inline betting area
+    // (segment selector + action button). Accordion: only one open at a time.
+    item.classList.add("knoww-notification-item--stream");
+
+    // Compact collapsed pill: the market title (+ optional holdings chip +
+    // chevron). Outcome names and prices live in the expanded segments, so the
+    // collapsed row stays focused on identifying the market.
+    content.innerHTML = "";
+    const pill = document.createElement("div");
+    pill.className = "knoww-stream-pill";
+    const pillTitle = document.createElement("span");
+    pillTitle.className = "knoww-stream-pill-title";
+    pillTitle.textContent = streamShortTitle(market);
+    const holdChip = document.createElement("span");
+    holdChip.className = "knoww-stream-pill-hold";
+    holdChip.style.display = "none";
+    const chev = document.createElement("span");
+    chev.className = "knoww-stream-pill-chev";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "⌄";
+    pill.appendChild(pillTitle);
+    pill.appendChild(holdChip);
+    pill.appendChild(chev);
+    content.appendChild(pill);
+
+    item.appendChild(buildStreamBetting(market));
+
+    item.setAttribute("aria-label", `Markets for ${market.title || "market"}`);
+    item.onclick = (e) => {
+      // Don't toggle when interacting with the betting controls themselves.
+      if ((e.target as Element).closest(".knoww-stream-bet")) return;
+      const willExpand = !item.classList.contains("expanded");
+      // Accordion: collapse any other expanded market.
+      const siblings = item.parentElement?.querySelectorAll(
+        ".knoww-notification-item--stream.expanded"
+      );
+      siblings?.forEach((el) => {
+        if (el !== item) el.classList.remove("expanded");
+      });
+      item.classList.toggle("expanded", willExpand);
+      if (willExpand) {
+        item
+          .querySelector(".knoww-stream-bet")
+          ?.dispatchEvent(new CustomEvent("knoww-stream-expanded"));
+      }
+    };
+    item.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        item.click();
+      }
+    });
+    return item;
+  }
   item.appendChild(pricesDiv);
 
   // Click handler to scroll to the market card, or open URL if card is gone
@@ -3164,6 +4182,15 @@ function classifyInjectedMarketEntry(
   marketData: InjectedMarketEntry,
   now: number
 ): ClassifiedInjectedMarketEntry {
+  // Streaming-surface markets have no injected post card to track — they are
+  // always "active" (the stream is what's live), so skip the DOM availability
+  // checks that would otherwise classify them as scrolled-out.
+  if (marketData.isStreamSurface) {
+    marketData.isInViewport = true;
+    marketData.lastVisibleAt = now;
+    return { entry: marketData, status: "active" };
+  }
+
   const isCardAvailable = isCardStillAvailable(
     marketData.cardRef,
     marketData.market.title
@@ -3256,7 +4283,37 @@ function showNotificationContent(view: "empty" | "items"): void {
   } else {
     itemsContainer.style.setProperty("display", "none", "important");
     emptyState.style.removeProperty("display");
+    if (isStreamSurface()) applyStreamEmptyState(emptyState);
   }
+}
+
+/**
+ * Rewrite the empty state for a streaming surface: it's not "scanning a feed",
+ * it's "this game has no markets". Shows a static message and drops the feed-
+ * oriented loading dots + "Browse trending" CTA (trending is suppressed here).
+ */
+function applyStreamEmptyState(emptyState: HTMLElement): void {
+  const welcome = emptyState.querySelector<HTMLElement>("[data-knoww-welcome]");
+  const scanning = emptyState.querySelector<HTMLElement>(
+    "[data-knoww-scanning]"
+  );
+  if (welcome) welcome.style.setProperty("display", "none", "important");
+  if (scanning) scanning.style.removeProperty("display");
+
+  const title = emptyState.querySelector(".knoww-stack-empty-title");
+  if (title) title.textContent = "No markets for this stream";
+  const sub = emptyState.querySelector(".knoww-stack-empty-sub");
+  if (sub) {
+    sub.textContent = "This game has no live prediction markets right now.";
+  }
+  for (const sel of [".knoww-stack-empty-dots", ".knoww-stack-empty-pulse"]) {
+    emptyState
+      .querySelector<HTMLElement>(sel)
+      ?.style.setProperty("display", "none", "important");
+  }
+  emptyState
+    .querySelector<HTMLElement>("[data-knoww-browse-trending]")
+    ?.style.setProperty("display", "none", "important");
 }
 
 /**
@@ -3392,7 +4449,7 @@ function shuffleTrending(): void {
     `🔀 [Trending] Shuffled — now showing: ${visibleTrending.map((m) => m.title?.slice(0, 30)).join(", ")}`
   );
 
-  const currentMarkets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+  const currentMarkets = getStackBaseMarkets();
   updateNotificationStack(currentMarkets);
 }
 
@@ -3403,6 +4460,8 @@ function shuffleTrending(): void {
 async function fetchAndCacheTrending(): Promise<void> {
   const { log } = window.KNOWW_UTILS;
 
+  // Streaming surfaces only show markets relevant to the stream — no trending.
+  if (isStreamSurface()) return;
   if (trendingFetchInFlight) return;
   trendingFetchInFlight = true;
   log("🔥 [Trending] Fetching trending markets...");
@@ -3418,7 +4477,7 @@ async function fetchAndCacheTrending(): Promise<void> {
 
     startTrendingShuffleTimer();
 
-    const currentMarkets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+    const currentMarkets = getStackBaseMarkets();
     updateNotificationStack(currentMarkets);
   } catch (e) {
     log("🔥 [Trending] Failed to fetch trending markets:", e);
@@ -3481,13 +4540,13 @@ function appendTrendingSection(
   realMarketIds: Set<string>,
   animationIndex: number,
   expandedTrending = false
-): void {
+): number {
   const trendingToShow = getVisibleTrendingMarkets(
     realMarketIds,
     expandedTrending
   );
 
-  if (trendingToShow.length === 0) return;
+  if (trendingToShow.length === 0) return animationIndex;
 
   const header = createNotificationSectionHeader(
     "Trending now",
@@ -3501,6 +4560,8 @@ function appendTrendingSection(
     const item = createTrendingMarketItem(market, animationIndex + index);
     itemsContainer.appendChild(item);
   });
+
+  return animationIndex + trendingToShow.length;
 }
 
 /**
@@ -3509,6 +4570,8 @@ function appendTrendingSection(
  * to discover feed-relevant markets first.
  */
 function startTrendingFetchTimer(): void {
+  // No trending on streaming surfaces.
+  if (isStreamSurface()) return;
   if (trendingPool.length > 0 || trendingFetchTimer || trendingFetchInFlight) {
     return;
   }
@@ -3530,11 +4593,117 @@ function cancelTrendingFetchTimer(): void {
   }
 }
 
+// On streaming surfaces (Twitch/YouTube) there is no feed scan, so the
+// canonical `getInjectedMarkets()` store is empty. The streaming module pushes
+// its markets here instead; when set, every internal stack refresh (trending
+// fetch, shuffle, theme/resize re-render, snapshots) reads from this store so
+// the stream markets are never clobbered by an empty feed store.
+let streamMarketEntries: InjectedMarketEntry[] | null = null;
+// True while an inline deposit owns a stream card. Suppresses the periodic
+// stack rebuild so a price refresh can't wipe the in-progress deposit form.
+let streamInlineDepositActive = false;
+// Whether the "Other markets" dropdown on a stream surface is expanded. Default
+// collapsed; remembered across price refreshes and SPA navigation within the
+// session (the content script stays alive, so a module flag is enough).
+let streamOthersExpanded = false;
+
+/**
+ * Render the stream-surface active section: the watched match (entry[0]) is
+ * featured on top, every other market is tucked into a collapsible "Other
+ * markets" dropdown. Returns the next animation index.
+ */
+function renderStreamActiveSection(
+  container: HTMLElement,
+  entries: InjectedMarketEntry[],
+  startIndex: number
+): number {
+  let index = startIndex;
+  const featured = entries[0];
+  const others = entries.slice(1);
+
+  container.appendChild(
+    createNotificationSectionHeader("Live now", entries.length, "active")
+  );
+  container.appendChild(createNotificationItem(featured, index++, true));
+
+  if (others.length === 0) return index;
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "knoww-stream-others-toggle";
+  toggle.innerHTML = `
+    <span class="knoww-stream-others-label">
+      <span class="knoww-stream-others-chevron" aria-hidden="true">▾</span>
+      <span>Other markets</span>
+    </span>
+    <span class="knoww-stream-others-count">${others.length}</span>
+  `;
+
+  const list = document.createElement("div");
+  list.className = "knoww-stream-others-list";
+  others.forEach((entry) => {
+    list.appendChild(createNotificationItem(entry, index++, true));
+  });
+
+  const applyExpanded = (): void => {
+    toggle.classList.toggle("expanded", streamOthersExpanded);
+    list.classList.toggle("expanded", streamOthersExpanded);
+    toggle.setAttribute("aria-expanded", String(streamOthersExpanded));
+    // Expanding grows the list past the stack's max-height, but the scroll
+    // class is only set during updateNotificationStack (when collapsed → fits).
+    // Re-evaluate now so the expanded list is actually scrollable.
+    const items = document.getElementById("knoww-stack-items");
+    if (items) {
+      items.classList.toggle(
+        "knoww-has-overflow",
+        items.scrollHeight > items.clientHeight
+      );
+    }
+  };
+  applyExpanded();
+
+  toggle.onclick = (e) => {
+    e.stopPropagation();
+    streamOthersExpanded = !streamOthersExpanded;
+    applyExpanded();
+  };
+
+  container.appendChild(toggle);
+  container.appendChild(list);
+  return index;
+}
+
+/** True on streaming surfaces (Twitch/YouTube). Trending is suppressed there. */
+function isStreamSurface(): boolean {
+  return window.KNOWW_PLATFORM?.getCurrentPlatform?.()?.surface === "stream";
+}
+
+function getStackBaseMarkets(): InjectedMarketEntry[] {
+  if (streamMarketEntries) return streamMarketEntries;
+  return window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+}
+
+/**
+ * Set the markets for a streaming surface and render them. This is the entry
+ * point the streaming module calls instead of feeding the per-post scan.
+ */
+function setStreamMarkets(markets: InjectedMarketEntry[]): void {
+  streamMarketEntries = markets;
+  updateNotificationStack(markets);
+}
+
 /**
  * Update the notification stack with current markets
  */
 function updateNotificationStack(markets: InjectedMarketEntry[]): void {
   const { log } = window.KNOWW_UTILS;
+
+  // Don't rebuild the stack while an inline deposit is mid-flow — it would
+  // destroy the deposit form's DOM (and state) on the next price refresh.
+  if (streamInlineDepositActive) {
+    log("📋 [NotificationStack] Skipped rebuild — inline deposit active");
+    return;
+  }
 
   log(`\n📋 [NotificationStack] ========== UPDATE START ==========`);
   log(
@@ -3574,14 +4743,13 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
   const showActiveSection = activeFilter === "all" || activeFilter === "active";
   const showSeenSection = activeFilter === "all" || activeFilter === "seen";
   const showTrendingSection =
-    activeFilter === "all" || activeFilter === "trending";
+    !isStreamSurface() &&
+    (activeFilter === "all" || activeFilter === "trending");
   const displayedActiveMarkets = showActiveSection ? recentActiveMarkets : [];
   const displayedScrolledMarkets = showSeenSection ? recentScrolledMarkets : [];
 
   const totalDisplayed =
     displayedActiveMarkets.length + displayedScrolledMarkets.length;
-  const totalAvailable = activeMarkets.length + scrolledOutMarkets.length;
-  updateStackSeeAllButton(cachedStackExpanded, totalAvailable, totalDisplayed);
 
   if (
     totalDisplayed === 0 &&
@@ -3610,18 +4778,42 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
   let animationIndex = 0;
 
   if (displayedActiveMarkets.length > 0) {
-    itemsContainer.appendChild(
-      createNotificationSectionHeader(
-        "Active now",
-        displayedActiveMarkets.length,
-        "active"
-      )
+    if (isStreamSurface()) {
+      // Stream: feature the watched match, collapse the rest into a dropdown.
+      animationIndex = renderStreamActiveSection(
+        itemsContainer,
+        displayedActiveMarkets,
+        animationIndex
+      );
+    } else {
+      itemsContainer.appendChild(
+        createNotificationSectionHeader(
+          "Active now",
+          displayedActiveMarkets.length,
+          "active"
+        )
+      );
+      displayedActiveMarkets.forEach((marketData) => {
+        const item = createNotificationItem(marketData, animationIndex, true);
+        animationIndex++;
+        itemsContainer.appendChild(item);
+      });
+    }
+  }
+
+  // Trending appears between active markets and seen-earlier markets.
+  // Collect real market IDs so we can skip duplicates.
+  const realMarketIds = new Set<string>();
+  for (const entry of [...activeMarkets, ...scrolledOutMarkets]) {
+    realMarketIds.add(entry.market.id);
+  }
+  if (showTrendingSection) {
+    animationIndex = appendTrendingSection(
+      itemsContainer,
+      realMarketIds,
+      animationIndex,
+      cachedStackExpanded && activeFilter === "trending"
     );
-    displayedActiveMarkets.forEach((marketData) => {
-      const item = createNotificationItem(marketData, animationIndex, true);
-      animationIndex++;
-      itemsContainer.appendChild(item);
-    });
   }
 
   if (displayedScrolledMarkets.length > 0) {
@@ -3637,21 +4829,6 @@ function updateNotificationStack(markets: InjectedMarketEntry[]): void {
       animationIndex++;
       itemsContainer.appendChild(item);
     });
-  }
-
-  // Trending section — always appended at the bottom when available.
-  // Collect real market IDs so we can skip duplicates.
-  const realMarketIds = new Set<string>();
-  for (const entry of [...activeMarkets, ...scrolledOutMarkets]) {
-    realMarketIds.add(entry.market.id);
-  }
-  if (showTrendingSection) {
-    appendTrendingSection(
-      itemsContainer,
-      realMarketIds,
-      animationIndex,
-      cachedStackExpanded && activeFilter === "trending"
-    );
   }
 
   setTimeout(() => {
@@ -3874,7 +5051,7 @@ function getNotificationStackSnapshot(
   trendingLimit?: number
 ): Record<string, unknown> {
   startTrendingFetchTimer();
-  const markets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+  const markets = getStackBaseMarkets();
   const { activeMarkets, scrolledOutMarkets } =
     selectRepresentativeMarketEntries(markets);
   const realMarketIds = new Set<string>();
@@ -3912,7 +5089,7 @@ async function searchNotificationStackMarkets(
 }
 
 function focusNotificationStackMarket(marketId: string): boolean {
-  const markets = window.KNOWW_INJECTION?.getInjectedMarkets?.() || [];
+  const markets = getStackBaseMarkets();
   const { activeMarkets, scrolledOutMarkets } =
     selectRepresentativeMarketEntries(markets);
   const injectedEntry = [...activeMarkets, ...scrolledOutMarkets].find(
@@ -4196,55 +5373,69 @@ function setupDraggable(log: (...args: unknown[]) => void): void {
   let isDragging = false;
   let dragOffsetX = 0;
   let dragOffsetY = 0;
+  let activePointerId: number | null = null;
 
-  header.addEventListener("mousedown", (e: MouseEvent) => {
+  // Pointer Events + setPointerCapture: unlike document-level mousemove, this
+  // keeps every move event routed to the header even while the cursor passes
+  // over the video player / iframes / other pointer-capturing elements (which
+  // is exactly what swallows a mouse-event drag on Twitch/YouTube).
+  header.addEventListener("pointerdown", (e: PointerEvent) => {
     if (!notificationStackContainer || e.button !== 0) return;
 
-    // Don't drag if clicking on a button inside the header
+    // Don't drag when starting on a button inside the header.
     if ((e.target as Element).closest("button")) return;
 
+    const rect = notificationStackContainer.getBoundingClientRect();
+    dragOffsetX = e.clientX - rect.left;
+    dragOffsetY = e.clientY - rect.top;
     isDragging = true;
-    dragOffsetX =
-      e.clientX - notificationStackContainer.getBoundingClientRect().left;
-    dragOffsetY =
-      e.clientY - notificationStackContainer.getBoundingClientRect().top;
+    activePointerId = e.pointerId;
+    try {
+      header.setPointerCapture(e.pointerId);
+    } catch {
+      // capture is best-effort
+    }
 
     notificationStackContainer.classList.add("knoww-dragging");
     e.preventDefault();
   });
 
-  document.addEventListener("mousemove", (e: MouseEvent) => {
+  header.addEventListener("pointermove", (e: PointerEvent) => {
     if (!isDragging || !notificationStackContainer) return;
 
-    const newLeft = e.clientX - dragOffsetX;
-    const newTop = e.clientY - dragOffsetY;
-
-    // Clamp to viewport
     const rect = notificationStackContainer.getBoundingClientRect();
     const maxLeft = window.innerWidth - rect.width;
     const maxTop = window.innerHeight - rect.height;
+    const newLeft = Math.max(0, Math.min(e.clientX - dragOffsetX, maxLeft));
+    const newTop = Math.max(0, Math.min(e.clientY - dragOffsetY, maxTop));
 
-    // Use setProperty with 'important' to override the !important in CSS
-    notificationStackContainer.style.setProperty(
-      "left",
-      `${Math.max(0, Math.min(newLeft, maxLeft))}px`,
-      "important"
-    );
-    notificationStackContainer.style.setProperty(
-      "top",
-      `${Math.max(0, Math.min(newTop, maxTop))}px`,
-      "important"
-    );
-    notificationStackContainer.style.setProperty("right", "auto", "important");
+    // setProperty with 'important' beats the !important top/right in CSS.
+    // Also neutralize right/bottom so the box moves instead of stretching.
+    const style = notificationStackContainer.style;
+    style.setProperty("left", `${newLeft}px`, "important");
+    style.setProperty("top", `${newTop}px`, "important");
+    style.setProperty("right", "auto", "important");
+    style.setProperty("bottom", "auto", "important");
 
     e.preventDefault();
   });
 
-  document.addEventListener("mouseup", () => {
+  const endDrag = (): void => {
     if (!isDragging || !notificationStackContainer) return;
     isDragging = false;
+    if (activePointerId !== null) {
+      try {
+        header.releasePointerCapture(activePointerId);
+      } catch {
+        // ignore
+      }
+      activePointerId = null;
+    }
     notificationStackContainer.classList.remove("knoww-dragging");
-  });
+  };
+
+  header.addEventListener("pointerup", endDrag);
+  header.addEventListener("pointercancel", endDrag);
 
   log("Draggable behavior initialized on notification stack header");
 }
@@ -4260,6 +5451,7 @@ export const KNOWW_UI = {
   createNotificationStack,
   createNotificationItem,
   updateNotificationStack,
+  setStreamMarkets,
   updateNotificationStackTheme,
   scrollToMarket,
   initNotificationStack,

@@ -1,6 +1,5 @@
 "use client";
 
-import { useAppKit } from "@reown/appkit/react";
 import { ArrowDownToLine, Rocket, Wallet } from "lucide-react";
 import Link from "next/link";
 import posthog from "posthog-js";
@@ -14,13 +13,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { WalletMenu } from "@/components/wallet-menu";
 import { useOnboarding } from "@/context/onboarding-context";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
-
-/** Truncate a 0x… address to `0x1234…abcd` for the mobile wallet pill.
- *  Mirrors the helper in TopNav so the two bars render the wallet in
- *  the same shape even though the layouts differ. */
-function formatAddress(addr: string): string {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
+import { formatAddress } from "@/lib/formatters";
+import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
 
 /**
  * Mobile top bar (below xl). Visually mirrors `<TopNav>` — editorial
@@ -31,8 +25,19 @@ function formatAddress(addr: string): string {
  */
 export function Navbar() {
   const { address, isConnected } = useConnection();
-  const { open } = useAppKit();
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      posthog.capture("wallet_connect_clicked");
+      await openWalletModal();
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const { setShowOnboarding, needsTradingSetup } = useOnboarding();
   const { proxyAddress, isDeployed: hasProxyWallet } = useProxyWallet();
@@ -99,14 +104,14 @@ export function Navbar() {
           ) : (
             <button
               type="button"
-              onClick={() => {
-                posthog.capture("wallet_connect_clicked");
-                open();
-              }}
+              disabled={connecting}
+              onMouseEnter={preloadWalletModal}
+              onFocus={preloadWalletModal}
+              onClick={() => void handleConnect()}
               className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-foreground/90 transition-colors"
             >
               <Wallet className="h-3.5 w-3.5" />
-              Connect
+              {connecting ? "Connecting…" : "Connect"}
             </button>
           )}
 

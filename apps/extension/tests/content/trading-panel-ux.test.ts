@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "vitest";
 
 declare const process: { cwd(): string };
-declare function require(moduleName: string): unknown;
-
-const { readFileSync } = require("node:fs") as {
-  readFileSync(path: string, options: { encoding: "utf8" }): string;
-};
-const { join } = require("node:path") as {
-  join(...parts: string[]): string;
-};
 
 function readSource(path: string): string {
   return readFileSync(join(process.cwd(), path), { encoding: "utf8" });
@@ -265,6 +259,24 @@ test("deposit ERC20 transfers use viem encoding helpers", () => {
   assert.equal(/erc20Abi/.test(source), true);
   assert.equal(/BigInt\(10 \*\* decimals\)/.test(source), false);
   assert.equal(/ERC20_TRANSFER_SELECTOR/.test(source), false);
+});
+
+test("deposit amount validation and max use exact raw token balances", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(/amountRaw\?: string;/.test(source), true);
+  assert.equal(/function balanceHexToBigInt/.test(source), true);
+  assert.equal(/amountRaw: amountRaw\.toString\(\)/.test(source), true);
+  assert.equal(/amountRaw: polRaw\.toString\(\)/.test(source), true);
+  assert.equal(/function parseDepositAmountRaw/.test(source), true);
+  assert.equal(/function isDepositAmountOverBalance/.test(source), true);
+  assert.equal(
+    /BigInt\(depositSelected\.amountRaw\) \* BigInt\(pct\)\) \/ 100n/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(/sendViemDeposit/.test(source), false);
 });
 
 test("WalletConnect metadata uses the current page origin in content scripts", () => {

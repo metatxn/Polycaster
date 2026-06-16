@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /** Token data for a market outcome */
@@ -117,24 +118,10 @@ async function fetchEventDetail(
 ): Promise<Event | null> {
   if (!slugOrId) return null;
 
-  const response = await fetch(
+  const data = await fetchJson<EventDetailResponse>(
     `/api/events/${encodeURIComponent(slugOrId)}?fresh=1`,
     { cache: "no-store" }
   );
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error("Event not found");
-    }
-    throw new Error("Failed to fetch event details");
-  }
-
-  const data: EventDetailResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || "Failed to fetch event details");
-  }
-
   return data.event;
 }
 

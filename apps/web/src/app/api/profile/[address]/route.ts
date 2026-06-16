@@ -1,6 +1,7 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { isValidAddress } from "@/lib/validation";
 
@@ -163,10 +164,7 @@ export async function GET(
     const { address } = await params;
 
     if (!address || !isValidAddress(address)) {
-      return NextResponse.json(
-        { error: "Invalid Ethereum address format" },
-        { status: 400 }
-      );
+      return jsonError("Invalid Ethereum address format", 400);
     }
 
     // Fetch all data in parallel
@@ -218,9 +216,6 @@ export async function GET(
     return NextResponse.json(profile);
   } catch (error) {
     log.error("fetch.failed", { error });
-    return NextResponse.json(
-      { error: "Failed to fetch profile" },
-      { status: 500 }
-    );
+    return jsonError("Failed to fetch profile", 500);
   }
 }

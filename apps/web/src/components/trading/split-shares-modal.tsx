@@ -1,7 +1,7 @@
 "use client";
 
 import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { AlertCircle, ArrowRight, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -244,7 +244,7 @@ export function SplitSharesModal({
           {/* Preview */}
           <AnimatePresence>
             {numericAmount > 0 && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -269,14 +269,14 @@ export function SplitSharesModal({
                     </span>
                   </div>
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           {/* Error Message */}
           <AnimatePresence>
             {displayError && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -284,14 +284,14 @@ export function SplitSharesModal({
               >
                 <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
                 <span className="text-sm text-destructive">{displayError}</span>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           {/* Success Message */}
           <AnimatePresence>
             {isSuccess && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -300,7 +300,7 @@ export function SplitSharesModal({
                 <span className="text-sm text-emerald-500">
                   ✓ Split successful! Shares added to your portfolio.
                 </span>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 

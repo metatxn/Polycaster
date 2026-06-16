@@ -105,9 +105,18 @@ export function checkRateLimit(
   options?: {
     interval?: number;
     uniqueTokenPerInterval?: number;
+    /**
+     * Optional bucket discriminator. Lets one route enforce several
+     * independent windows (e.g. a per-minute and a per-day limit) without
+     * the two checks double-counting into the same bucket.
+     */
+    keySuffix?: string;
   }
 ): NextResponse | null {
-  const identifier = getRateLimitKey(request);
+  const baseKey = getRateLimitKey(request);
+  const identifier = options?.keySuffix
+    ? `${baseKey}:${options.keySuffix}`
+    : baseKey;
 
   const rateLimitResult = rateLimit(identifier, {
     interval: options?.interval || 60 * 1000, // Default: 1 minute

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Knoww · Live Markets Card — streaming surface</title>
+<style>
+/* ============================================================
+   KNOWW — Live Markets Card (streaming surface prototype)
+   Brand-adapted from the Claude Design handoff. Uses ONLY the
+   two fonts the extension already bundles:
+     KnowwMono       = JetBrains Mono 500  (labels / metadata)
+     KnowwEditorial  = Fraunces italic 500 (editorial copy only)
+   Functional text (titles, prices, buttons) rides system sans.
+   Vanilla DOM/CSS to mirror the extension (the React mock was
+   reference only).
+   ============================================================ */
+@font-face {
+  font-family: "KnowwMono";
+  font-style: normal; font-weight: 500; font-display: swap;
+  src: url("../dist/fonts/jetbrains-mono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "KnowwEditorial";
+  font-style: italic; font-weight: 500; font-display: swap;
+  src: url("../dist/fonts/fraunces-italic-500.woff2") format("woff2");
+}
+
+:root {
+  /* Surfaces */
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F6F6F7;
+  --bg-subtle-2: #F0F0F2;
+
+  /* Ink */
+  --ink: #16161A;
+  --ink-soft: #3D3F45;
+  --meta: #767E8C;
+  --meta-soft: #9AA0AC;
+
+  /* Lines */
+  --line: #ECECEF;
+  --line-strong: #E2E3E7;
+
+  /* Outcomes — green keyed to the extension brand token rgb(0,186,124) */
+  --green: #00BA7C;
+  --green-ink: #07925C;      /* darker for text legibility on white */
+  --green-dot: #14C58A;
+  --green-bg: #E8F8F1;
+  --green-line: #C2EBDB;
+
+  --rose: #DD2160;
+  --rose-ink: #C21752;
+  --rose-bg: #FDEEF3;
+  --rose-line: #F6CEDC;
+
+  /* Radii */
+  --r-card: 22px;
+  --r-row: 14px;
+  --r-btn: 11px;
+  --r-thumb: 11px;
+
+  /* Type — current brand faces only */
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "KnowwMono", ui-monospace, "SF Mono", Menlo, monospace;
+  --editorial: "KnowwEditorial", Georgia, "Times New Roman", serif;
+
+  --shadow-card: 0 1px 2px rgba(16,16,26,0.05), 0 12px 28px -8px rgba(16,16,26,0.30), 0 40px 80px -32px rgba(16,16,26,0.45);
+  --shadow-pop: 0 2px 6px rgba(16,16,26,0.10), 0 18px 40px -12px rgba(16,16,26,0.45);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body { font-family: var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* ============================================================
+   STREAMING STAGE (faux Twitch live backdrop)
+   ============================================================ */
+.stage {
+  position: fixed; inset: 0; overflow: hidden;
+  background:
+    radial-gradient(1200px 600px at 30% -10%, #2a1d4d 0%, transparent 60%),
+    radial-gradient(900px 500px at 90% 110%, #15233a 0%, transparent 55%),
+    #0c0d10;
+  display: grid; grid-template-columns: 1fr 340px;
+}
+.stage-main { position: relative; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.player {
+  position: relative; flex: 1 1 auto; border-radius: 14px; overflow: hidden;
+  background:
+    repeating-linear-gradient(135deg, rgba(255,255,255,0.018) 0 22px, transparent 22px 44px),
+    linear-gradient(160deg, #171a2e 0%, #0e1018 70%);
+  border: 1px solid rgba(255,255,255,0.05);
+  display: grid; place-items: center;
+}
+.player .scene-label {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em;
+  color: rgba(255,255,255,0.30); text-transform: uppercase;
+}
+.player .live-badge {
+  position: absolute; top: 14px; left: 14px;
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(8,9,12,0.66); backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+  padding: 5px 9px;
+  font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.12em; color: #fff;
+}
+.player .live-badge .b-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff3b5c; box-shadow: 0 0 0 3px rgba(255,59,92,0.25); }
+.player .player-controls {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 44px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.55));
+  display: flex; align-items: center; gap: 12px; padding: 0 14px;
+}
+.player .ctrl { width: 18px; height: 18px; border-radius: 4px; background: rgba(255,255,255,0.45); }
+.player .ctrl.wide { flex: 1; height: 4px; border-radius: 99px; background: rgba(255,255,255,0.22); }
+.streamer-bar { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,0.86); }
+.streamer-bar .avatar { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, #9146ff, #5a2fd6); flex: none; }
+.streamer-bar .s-name { font-weight: 700; font-size: 15px; }
+.streamer-bar .s-cat { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: #c9a3ff; margin-top: 2px; }
+.streamer-bar .s-view { margin-left: auto; font-family: var(--mono); font-size: 12px; color: rgba(255,255,255,0.55); display: flex; align-items: center; gap: 6px; }
+.streamer-bar .s-view .v-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff3b5c; }
+.stage-chat {
+  background: #0a0b0e; border-left: 1px solid rgba(255,255,255,0.05);
+  display: flex; flex-direction: column;
+}
+.chat-head { height: 40px; display: grid; place-items: center; border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; color: rgba(255,255,255,0.4); text-transform: uppercase; }
+.chat-msgs { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.chat-msg { font-size: 13px; line-height: 1.4; color: rgba(255,255,255,0.62); }
+.chat-msg b { color: #b69bff; font-weight: 600; }
+.chat-msg.alt b { color: #7dd3a8; }
+.chat-msg.alt2 b { color: #ffb86b; }
+
+/* dock hint where the card would snap */
+.dock-hint { position: absolute; right: 18px; bottom: 18px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: rgba(255,255,255,0.22); }
+
+/* ============================================================
+   THE CARD
+   ============================================================ */
+.kw-float { position: fixed; right: 22px; bottom: 22px; z-index: 50; }
+.kw-card {
+  width: 360px; background: var(--bg-card);
+  border: 1px solid var(--line); border-radius: var(--r-card);
+  box-shadow: var(--shadow-card); overflow: hidden; position: relative;
+  user-select: none; -webkit-user-select: none;
+}
+.kw-card.dragging { box-shadow: 0 8px 18px rgba(0,0,0,0.3), 0 40px 90px -28px rgba(0,0,0,0.6); }
+
+/* header */
+.kw-head { display: flex; align-items: center; gap: 11px; padding: 13px 13px 12px 15px; }
+.kw-logo { width: 36px; height: 36px; border-radius: 10px; background: #16161A; display: grid; place-items: center; flex: none; cursor: grab; }
+.kw-card.dragging .kw-logo { cursor: grabbing; }
+.kw-wordmark { font-family: var(--mono); font-weight: 500; font-size: 13.5px; letter-spacing: 0.2em; color: var(--ink); margin-right: auto; padding-left: 1px; }
+.kw-iconrow { display: flex; align-items: center; gap: 6px; }
+.kw-iconbtn { width: 32px; height: 32px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; display: grid; place-items: center; color: #4B5563; cursor: pointer; transition: background .15s, border-color .15s, color .15s, transform .12s; }
+.kw-iconbtn:hover { background: var(--bg-subtle); color: var(--ink); border-color: #D6D7DC; }
+.kw-iconbtn:active { transform: scale(.94); }
+.kw-iconbtn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.kw-iconbtn svg { display: block; }
+
+.kw-divider { height: 1px; background: var(--line); }
+
+/* status row + stream context chip */
+.kw-status { display: flex; align-items: center; gap: 10px; padding: 11px 15px 10px; }
+.kw-live { display: flex; align-items: center; gap: 8px; }
+.kw-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green-dot); box-shadow: 0 0 0 4px rgba(20,197,138,0.16); position: relative; }
+.kw-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--green-dot); animation: kw-pulse 2.4s ease-out infinite; }
+@keyframes kw-pulse { 0% { transform: scale(1); opacity: .55; } 70% { transform: scale(3.2); opacity: 0; } 100% { opacity: 0; } }
+.kw-status-label { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.16em; color: var(--meta); white-space: nowrap; }
+.kw-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em; color: var(--meta); border: 1px solid var(--line-strong); border-radius: 7px; padding: 3px 8px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.kw-count b { color: var(--ink); font-weight: 600; }
+
+/* a small line tying the card to the detected stream */
+.kw-ctx { display: flex; align-items: center; gap: 7px; padding: 0 15px 10px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; color: var(--meta-soft); }
+.kw-ctx .ctx-game { color: var(--ink-soft); font-weight: 600; }
+.kw-ctx .ctx-pin { width: 5px; height: 5px; border-radius: 50%; background: #9146ff; }
+
+/* market row */
+.kw-market { display: flex; align-items: flex-start; gap: 12px; padding: 12px 15px; cursor: pointer; position: relative; transition: background .14s; }
+.kw-market:hover { background: var(--bg-subtle); }
+.kw-thumb { width: 48px; height: 48px; border-radius: var(--r-thumb); flex: none; display: grid; place-items: center; font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: 0.02em; position: relative; overflow: hidden; }
+.kw-thumb .stripe { position: absolute; inset: 0; background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.05) 0 6px, transparent 6px 12px); }
+.kw-thumb span.code { position: relative; }
+.kw-mkt-body { flex: 1 1 auto; min-width: 0; padding-top: 1px; }
+.kw-mkt-title { font-family: var(--sans); font-weight: 600; font-size: 16px; line-height: 1.2; letter-spacing: -0.01em; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kw-mkt-meta { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--meta); margin-top: 6px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.kw-mkt-meta .sep { color: var(--meta-soft); }
+.kw-mkt-meta .vol { color: var(--ink-soft); font-weight: 500; }
+.kw-mkt-meta .live { color: var(--rose-ink); }
+
+.kw-price { flex: none; text-align: right; padding-top: 1px; }
+.kw-price .num { font-family: var(--sans); font-weight: 800; font-size: 29px; letter-spacing: -0.02em; line-height: 1; display: inline-flex; align-items: flex-start; }
+.kw-price .cent { font-size: 14px; font-weight: 700; margin-top: 2px; margin-left: 1px; }
+.kw-price.yes .num, .kw-price.yes .out { color: var(--green-ink); }
+.kw-price.no .num, .kw-price.no .out { color: var(--rose-ink); }
+.kw-price .out { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.12em; margin-top: 5px; }
+
+.kw-pin { position: absolute; top: 10px; right: 11px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--meta-soft); cursor: pointer; opacity: 0; transition: opacity .14s, background .14s, color .14s, transform .25s cubic-bezier(.34,1.56,.64,1); }
+.kw-market:hover .kw-pin { opacity: 1; }
+.kw-pin:hover { background: var(--bg-subtle-2); color: var(--ink); }
+.kw-pin.pinned { opacity: 1; color: var(--ink); transform: rotate(-35deg); }
+
+/* featured hero */
+.kw-featured { padding: 3px 15px 15px; }
+.kw-featured-top { display: flex; align-items: flex-start; gap: 13px; }
+.kw-featured .kw-thumb { width: 54px; height: 54px; }
+.kw-featured .kw-mkt-title { font-size: 18.5px; }
+.kw-featured .kw-price .num { font-size: 37px; }
+.kw-featured .kw-price .cent { font-size: 17px; }
+.kw-end { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--meta); display: flex; align-items: center; gap: 6px; margin-top: 11px; }
+.kw-end .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--rose); }
+
+/* betting */
+.kw-bet { margin-top: 13px; }
+.kw-bet-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.kw-seg { border: 1.5px solid var(--line-strong); border-radius: 11px; background: #fff; padding: 10px 12px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: border-color .14s, background .14s, box-shadow .14s; }
+.kw-seg .lab { font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.1em; }
+.kw-seg .pc { font-family: var(--sans); font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+.kw-seg.yes .lab, .kw-seg.yes .pc { color: var(--green-ink); }
+.kw-seg.no .lab, .kw-seg.no .pc { color: var(--rose-ink); }
+.kw-seg.yes:hover { border-color: var(--green-line); background: var(--green-bg); }
+.kw-seg.no:hover { border-color: var(--rose-line); background: var(--rose-bg); }
+.kw-seg.yes.sel { border-color: var(--green); background: var(--green-bg); box-shadow: 0 0 0 3px rgba(0,186,124,0.12); }
+.kw-seg.no.sel { border-color: var(--rose); background: var(--rose-bg); box-shadow: 0 0 0 3px rgba(221,33,96,0.10); }
+
+.kw-amount { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.kw-amt-chips { display: flex; gap: 6px; }
+.kw-chip { font-family: var(--mono); font-size: 12px; font-weight: 500; border: 1px solid var(--line-strong); border-radius: 9px; padding: 7px 11px; cursor: pointer; color: var(--ink-soft); background: #fff; transition: all .13s; }
+.kw-chip:hover { background: var(--bg-subtle); }
+.kw-chip.sel { background: var(--ink); border-color: var(--ink); color: #fff; }
+.kw-oneclick { margin-left: auto; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--green-ink); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+
+.kw-action { margin-top: 12px; width: 100%; border: none; border-radius: 12px; padding: 13px 16px; font-family: var(--sans); font-weight: 600; font-size: 15px; letter-spacing: -0.01em; cursor: pointer; color: #fff; background: var(--green); display: flex; align-items: center; justify-content: center; gap: 9px; white-space: nowrap; transition: background .15s, opacity .15s, transform .1s; }
+.kw-action:hover { filter: brightness(0.97); }
+.kw-action:active { transform: scale(.99); }
+.kw-action.rose { background: var(--rose); }
+.kw-action.ghost { background: var(--bg-subtle-2); color: var(--ink); }
+.kw-action .sub { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em; opacity: .8; }
+.kw-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff; animation: kw-rot .7s linear infinite; }
+@keyframes kw-rot { to { transform: rotate(360deg); } }
+.kw-check { width: 17px; height: 17px; }
+.kw-check circle { stroke-dasharray: 64; stroke-dashoffset: 64; animation: kw-draw .5s ease forwards; }
+.kw-check path { stroke-dasharray: 20; stroke-dashoffset: 20; animation: kw-draw .35s ease .28s forwards; }
+@keyframes kw-draw { to { stroke-dashoffset: 0; } }
+.kw-hint { font-family: var(--mono); font-size: 11px; letter-spacing: 0.02em; color: var(--meta); text-align: center; margin-top: 9px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.kw-hint.good { color: var(--green-ink); }
+
+/* expanded list */
+.kw-list { border-top: 1px solid var(--line); }
+.kw-list-head { display: flex; align-items: center; gap: 8px; padding: 10px 15px 4px; }
+.kw-list-head .lab { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.14em; color: var(--meta-soft); }
+.kw-list-row { padding: 10px 15px; }
+.kw-list-row .kw-thumb { width: 40px; height: 40px; font-size: 10.5px; }
+.kw-list-row .kw-mkt-title { font-size: 14px; -webkit-line-clamp: 1; }
+.kw-list-row .kw-mkt-meta { margin-top: 4px; font-size: 10.5px; }
+.kw-list-row .kw-price .num { font-size: 21px; }
+.kw-list-row .kw-price .cent { font-size: 11px; }
+.kw-list-row .kw-price .out { font-size: 9px; margin-top: 3px; }
+.kw-pinned-label { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.14em; color: var(--meta-soft); padding: 10px 15px 2px; }
+
+.kw-viewall { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; border-top: 1px solid var(--line); cursor: pointer; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--meta); transition: background .14s, color .14s; }
+.kw-viewall:hover { background: var(--bg-subtle); color: var(--ink); }
+.kw-viewall svg { transition: transform .25s; }
+.kw-viewall.open svg { transform: rotate(180deg); }
+
+/* empty state — the one place we use editorial Fraunces italic */
+.kw-state { padding: 30px 22px 32px; text-align: center; }
+.kw-state-icon { width: 46px; height: 46px; border-radius: 13px; margin: 0 auto 16px; background: var(--bg-subtle); display: grid; place-items: center; color: var(--meta); }
+.kw-state-title { font-family: var(--editorial); font-style: italic; font-weight: 500; font-size: 19px; color: var(--ink); }
+.kw-state-sub { font-family: var(--mono); font-size: 11px; color: var(--meta); margin-top: 8px; letter-spacing: 0.02em; line-height: 1.5; }
+.kw-state-btn { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; padding: 9px 15px; cursor: pointer; color: var(--ink-soft); }
+.kw-state-btn:hover { background: var(--bg-subtle); color: var(--ink); }
+
+/* minimized pill */
+.kw-pill { display: inline-flex; align-items: center; gap: 11px; background: var(--bg-card); border: 1px solid var(--line); border-radius: 99px; padding: 7px 16px 7px 8px; box-shadow: var(--shadow-pop); cursor: pointer; transition: transform .18s cubic-bezier(.34,1.4,.64,1), box-shadow .18s; }
+.kw-pill:hover { transform: translateY(-1px); }
+.kw-pill .pl-logo { width: 32px; height: 32px; border-radius: 8px; background: #16161A; display: grid; place-items: center; flex: none; }
+.kw-pill .pl-word { font-family: var(--mono); font-weight: 500; font-size: 13px; letter-spacing: 0.12em; color: var(--ink); }
+.kw-pill .pl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green-dot); box-shadow: 0 0 0 3px rgba(20,197,138,0.18); }
+.kw-pill .pl-count { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink); background: var(--bg-subtle-2); border-radius: 7px; padding: 3px 7px; }
+
+@keyframes kw-rise { from { transform: translateY(9px) scale(.99); opacity: .6; } to { transform: none; opacity: 1; } }
+.kw-anim-rise { animation: kw-rise .3s cubic-bezier(.22,1,.36,1); }
+
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="stage-main">
+    <div class="player">
+      <div class="live-badge"><span class="b-dot"></span> LIVE</div>
+      <div class="scene-label">VALORANT · live stream</div>
+      <div class="player-controls">
+        <span class="ctrl"></span><span class="ctrl"></span><span class="ctrl wide"></span><span class="ctrl"></span><span class="ctrl"></span>
+      </div>
+    </div>
+    <div class="streamer-bar">
+      <div class="avatar"></div>
+      <div>
+        <div class="s-name">TenZ</div>
+        <div class="s-cat">VALORANT · VCT CHAMPIONS</div>
+      </div>
+      <div class="s-view"><span class="v-dot"></span> 7,002</div>
+    </div>
+    <div class="dock-hint">↳ Live Markets card · drag the K to move · click ⤺ to minimize</div>
+  </div>
+  <div class="stage-chat">
+    <div class="chat-head">Stream Chat</div>
+    <div class="chat-msgs">
+      <div class="chat-msg"><b>aimGod</b> what a clutch</div>
+      <div class="chat-msg alt"><b> valmain_99</b> SEN taking this map ez</div>
+      <div class="chat-msg alt2"><b>ShroudFan</b> TenZ on 18 kills already</div>
+      <div class="chat-msg"><b>radiant_andy</b> overtime incoming?</div>
+      <div class="chat-msg alt"><b>knoww_bot</b> markets live →</div>
+      <div class="chat-msg alt2"><b>plat2_forever</b> NRG comeback arc</div>
+    </div>
+  </div>
+</div>
+
+<div class="kw-float" id="float"></div>
+
+<script>
+/* ============================================================
+   Mock data — markets for the live VALORANT stream.
+   In the extension these come from KNOWW_API.searchMarkets()
+   seeded by the detected stream game/category.
+   ============================================================ */
+const STREAM = { game: "VALORANT", event: "VCT CHAMPIONS" };
+const MARKETS = [
+  { id:"m_map3", title:"Sentinels win Map 3 vs. NRG?", category:"ESPORTS", source:"VCT CHAMPIONS", thumb:{code:"SEN",tint:"#E8E0FF",ink:"#5a2fd6"}, volume:"$1.2M", yes:58, outcome:"YES", live:true, endLabel:"LIVE · Map 3" },
+  { id:"m_tenz", title:"TenZ tops 25 kills this map?", category:"ESPORTS", source:"PLAYER PROP", thumb:{code:"TENZ",tint:"#FDE2C7",ink:"#B45309"}, volume:"$340K", yes:47, outcome:"NO", live:true, endLabel:"LIVE" },
+  { id:"m_series", title:"Sentinels win the series 2–1?", category:"ESPORTS", source:"VCT CHAMPIONS", thumb:{code:"BO3",tint:"#DBEAFE",ink:"#1D4ED8"}, volume:"$540K", yes:44, outcome:"NO", live:true, endLabel:"LIVE · Bo3" },
+  { id:"m_ot", title:"Map 3 goes to overtime?", category:"ESPORTS", source:"VCT CHAMPIONS", thumb:{code:"OT",tint:"#D1FAE5",ink:"#047857"}, volume:"$210K", yes:33, outcome:"NO", live:true, endLabel:"LIVE" },
+  { id:"m_fb", title:"First blood next round: Sentinels?", category:"ESPORTS", source:"ROUND PROP", thumb:{code:"FB",tint:"#FEE2E2",ink:"#B91C1C"}, volume:"$96K", yes:52, outcome:"YES", live:true, endLabel:"LIVE" },
+  { id:"m_champ", title:"A North American team wins Champions?", category:"ESPORTS", source:"OUTRIGHT", thumb:{code:"NA",tint:"#FEF0C7",ink:"#B45309"}, volume:"$880K", yes:41, outcome:"NO", live:false, endLabel:"Ends Aug 24" },
+];
+
+const priceFor = (m, o) => o === "YES" ? m.yes : 100 - m.yes;
+
+/* ---------- state ---------- */
+const state = {
+  view: "card",            // card | min
+  featuredId: MARKETS[0].id,
+  listOpen: false,
+  pinned: [],
+  oneClick: true,
+  trade: { outcome: MARKETS[0].outcome, amount: 20, status: "ready" }, // ready|placing|success
+};
+
+/* ---------- icons ---------- */
+const I = {
+  K: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 4v16M7 12l8-8M7 12l8 8" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  settings: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+  search: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>`,
+  min: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M14 4v16"/><path d="M7.5 9.5 10 12l-2.5 2.5"/></svg>`,
+  close: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
+  chevron: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
+  pin: (f) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="${f?'currentColor':'none'}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`,
+  bolt: `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12z"/></svg>`,
+  check: `<svg class="kw-check" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12.5 2.5 2.5 5.5-5.5"/></svg>`,
+};
+
+const cents = (v) => `<span class="num">${v}<span class="cent">¢</span></span>`;
+const thumb = (m) => `<div class="kw-thumb" style="background:${m.thumb.tint};color:${m.thumb.ink}"><span class="stripe"></span><span class="code">${m.thumb.code}</span></div>`;
+const priceBlock = (m) => { const side=m.outcome; return `<div class="kw-price ${side==='YES'?'yes':'no'}">${cents(priceFor(m,side))}<div class="out">${side}</div></div>`; };
+
+/* ---------- renders ---------- */
+function render() {
+  const root = document.getElementById("float");
+  if (state.view === "min") { root.innerHTML = pillHTML(); wire(root); return; }
+  root.innerHTML = cardHTML();
+  wire(root);
+}
+
+function cardHTML() {
+  const f = MARKETS.find(m => m.id === state.featuredId);
+  const count = String(MARKETS.length).padStart(2, "0");
+  const pinnedMkts = state.pinned.map(id => MARKETS.find(m => m.id === id)).filter(Boolean).filter(m => m.id !== state.featuredId);
+  return `
+  <div class="kw-card kw-anim-rise" id="card">
+    <div class="kw-head">
+      <div class="kw-logo" data-drag title="Drag to move">${I.K}</div>
+      <div class="kw-wordmark">MARKETS</div>
+      <div class="kw-iconrow">
+        <button class="kw-iconbtn" data-act="settings" title="Settings">${I.settings}</button>
+        <button class="kw-iconbtn" data-act="search" title="Search markets">${I.search}</button>
+        <button class="kw-iconbtn" data-act="min" title="Minimize">${I.min}</button>
+        <button class="kw-iconbtn" data-act="close" title="Close">${I.close}</button>
+      </div>
+    </div>
+    <div class="kw-divider"></div>
+
+    <div class="kw-status">
+      <div class="kw-live"><span class="kw-dot"></span><span class="kw-status-label">ACTIVE NOW</span></div>
+      <span class="kw-count"><b>${count}</b> MARKETS</span>
+    </div>
+    <div class="kw-ctx"><span class="ctx-pin"></span>From this stream · <span class="ctx-game">${STREAM.game}</span> · ${STREAM.event}</div>
+
+    <div class="kw-featured">
+      <div class="kw-featured-top">
+        ${thumb(f)}
+        <div class="kw-mkt-body">
+          <div class="kw-mkt-title">${f.title}</div>
+          <div class="kw-mkt-meta"><span>${f.category}</span><span class="sep">·</span><span class="vol">${f.volume}</span></div>
+        </div>
+        ${priceBlock(f)}
+      </div>
+      <div class="kw-end">${f.live?'<span class="live-dot"></span>':''}${f.endLabel} · ${f.source}</div>
+      ${bettingHTML(f)}
+    </div>
+
+    ${!state.listOpen && pinnedMkts.length ? `
+      <div class="kw-list">
+        <div class="kw-pinned-label">${I.pin(true)} PINNED</div>
+        ${pinnedMkts.map(rowHTML).join("")}
+      </div>` : ""}
+
+    ${state.listOpen ? listHTML() : ""}
+
+    <div class="kw-viewall ${state.listOpen?'open':''}" data-act="toggle-list">
+      ${state.listOpen ? "Collapse markets" : `View all ${MARKETS.length} markets`} ${I.chevron}
+    </div>
+  </div>`;
+}
+
+function bettingHTML(f) {
+  const t = state.trade;
+  const sideColor = t.outcome === "YES" ? "" : "rose";
+  let action = "";
+  if (t.status === "placing") {
+    action = `<button class="kw-action ghost" disabled><span class="kw-spin"></span> Placing trade…</button>`;
+  } else if (t.status === "success") {
+    const est = Math.round(t.amount / (priceFor(f, t.outcome)/100));
+    action = `<button class="kw-action" disabled style="opacity:1">${I.check} Trade placed</button>
+      <div class="kw-hint good">Filled ${est} shares · ${t.outcome} ${priceFor(f,t.outcome)}¢</div>`;
+  } else {
+    action = `<button class="kw-action ${sideColor}" data-act="trade">
+      <span>Trade $${t.amount}</span><span class="sub">${t.outcome} · ${priceFor(f,t.outcome)}¢</span></button>`;
+  }
+  return `
+  <div class="kw-bet">
+    <div class="kw-bet-seg">
+      <button class="kw-seg yes ${t.outcome==='YES'?'sel':''}" data-act="side" data-side="YES"><span class="lab">YES</span><span class="pc">${f.yes}¢</span></button>
+      <button class="kw-seg no ${t.outcome==='NO'?'sel':''}" data-act="side" data-side="NO"><span class="lab">NO</span><span class="pc">${100-f.yes}¢</span></button>
+    </div>
+    <div class="kw-amount">
+      <div class="kw-amt-chips">
+        ${[20,50,100].map(c => `<button class="kw-chip ${t.amount===c?'sel':''}" data-act="amt" data-amt="${c}">$${c}</button>`).join("")}
+      </div>
+      ${state.oneClick ? `<span class="kw-oneclick">${I.bolt} 1-CLICK</span>` : ""}
+    </div>
+    ${action}
+  </div>`;
+}
+
+function rowHTML(m) {
+  const side = m.outcome;
+  const isPinned = state.pinned.includes(m.id);
+  return `
+  <div class="kw-market kw-list-row" data-act="feature" data-id="${m.id}">
+    ${thumb(m)}
+    <div class="kw-mkt-body">
+      <div class="kw-mkt-title">${m.title}</div>
+      <div class="kw-mkt-meta"><span>${m.category}</span><span class="sep">·</span><span class="vol">${m.volume}</span>${m.live?'<span class="sep">·</span><span class="live">LIVE</span>':''}</div>
+    </div>
+    ${priceBlock(m)}
+    <button class="kw-pin ${isPinned?'pinned':''}" data-act="pin" data-id="${m.id}" title="${isPinned?'Unpin':'Pin'}">${I.pin(isPinned)}</button>
+  </div>`;
+}
+
+function listHTML() {
+  let rest = MARKETS.filter(m => m.id !== state.featuredId);
+  const pinned = rest.filter(m => state.pinned.includes(m.id));
+  const others = rest.filter(m => !state.pinned.includes(m.id));
+  return `
+  <div class="kw-list">
+    ${pinned.length ? `<div class="kw-pinned-label">${I.pin(true)} PINNED</div>${pinned.map(rowHTML).join("")}<div class="kw-divider" style="margin:2px 15px"></div>` : ""}
+    <div class="kw-list-head"><span class="lab">RELATED MARKETS</span></div>
+    ${others.map(rowHTML).join("")}
+  </div>`;
+}
+
+function pillHTML() {
+  const count = String(MARKETS.length).padStart(2, "0");
+  return `<div class="kw-pill kw-anim-rise" data-act="restore" title="Open Live Markets">
+    <div class="pl-logo">${I.K}</div><span class="pl-word">MARKETS</span><span class="pl-dot"></span><span class="pl-count">${count}</span>
+  </div>`;
+}
+
+/* ---------- interactions ---------- */
+let placingTimers = [];
+function clearPlacing() { placingTimers.forEach(clearTimeout); placingTimers = []; }
+
+function wire(root) {
+  // drag by logo
+  const handle = root.querySelector("[data-drag]");
+  if (handle) handle.addEventListener("pointerdown", startDrag);
+
+  root.querySelectorAll("[data-act]").forEach(el => {
+    el.addEventListener("click", (e) => {
+      const act = el.dataset.act;
+      if (act === "min") { state.view = "min"; render(); }
+      else if (act === "close") { state.view = "min"; render(); }
+      else if (act === "restore") { state.view = "card"; render(); }
+      else if (act === "toggle-list") { state.listOpen = !state.listOpen; render(); }
+      else if (act === "feature") { e.stopPropagation(); const m = MARKETS.find(x=>x.id===el.dataset.id); state.featuredId = el.dataset.id; clearPlacing(); state.trade = { outcome: m.outcome, amount: state.trade.amount, status: "ready" }; render(); }
+      else if (act === "pin") { e.stopPropagation(); const id = el.dataset.id; state.pinned = state.pinned.includes(id) ? state.pinned.filter(x=>x!==id) : [...state.pinned, id]; render(); }
+      else if (act === "side") { state.trade.outcome = el.dataset.side; state.trade.status = "ready"; render(); }
+      else if (act === "amt") { state.trade.amount = +el.dataset.amt; state.trade.status = "ready"; render(); }
+      else if (act === "trade") { placeTrade(); }
+      else if (act === "settings" || act === "search") { el.classList.toggle("on"); }
+    });
+  });
+}
+
+function placeTrade() {
+  // one-click → straight to placing (the core single-tap order UX)
+  clearPlacing();
+  state.trade.status = "placing"; render();
+  placingTimers.push(setTimeout(() => { state.trade.status = "success"; render(); }, 1200));
+  placingTimers.push(setTimeout(() => { state.trade.status = "ready"; render(); }, 3600));
+}
+
+/* drag — moves the floating wrapper */
+function startDrag(e) {
+  const float = document.getElementById("float");
+  const card = float.querySelector("#card");
+  if (card) card.classList.add("dragging");
+  const rect = float.getBoundingClientRect();
+  const dx = e.clientX - rect.left, dy = e.clientY - rect.top;
+  float.style.right = "auto"; float.style.bottom = "auto";
+  const move = (ev) => {
+    float.style.left = Math.max(8, Math.min(window.innerWidth - rect.width - 8, ev.clientX - dx)) + "px";
+    float.style.top = Math.max(8, Math.min(window.innerHeight - 80, ev.clientY - dy)) + "px";
+  };
+  const up = () => { if (card) card.classList.remove("dragging"); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+}
+
+render();
+</script>
+</body>
+</html>

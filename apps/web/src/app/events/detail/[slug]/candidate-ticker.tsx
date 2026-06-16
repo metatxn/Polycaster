@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { formatCents } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 export interface CandidateTickerMarket {
@@ -14,12 +15,6 @@ interface CandidateTickerProps {
   markets: CandidateTickerMarket[];
   selectedMarketId: string;
   onSelectMarket: (id: string) => void;
-}
-
-function formatCents(price: string): string {
-  const n = Number.parseFloat(price);
-  if (!Number.isFinite(n)) return "—";
-  return `${(n * 100).toFixed(1)}¢`;
 }
 
 /**

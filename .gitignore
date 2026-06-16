@@ -64,8 +64,9 @@ polymarket-us-support-report.md
 .cache/
 apps/extension/.embedding-benchmark-cache/
 .claude/
+.claude*
 .env.local
-.test-dist/
+.test-dist*/
 .playwright/
 .playwright-report/
 .playwright-mcp/

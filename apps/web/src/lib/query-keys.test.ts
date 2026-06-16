@@ -45,6 +45,24 @@ describe("query-keys factory", () => {
         qk.market.priceHistoryBatch(tokens, 7, 60)
       );
     });
+
+    it("market.allPriceHistory is the prefix for both chart batches", () => {
+      expect(qk.market.allPriceHistory()).toEqual(["priceHistory"]);
+      const chart = qk.market.priceHistory(["aaa"], "1W", 60);
+      const table = qk.market.outcomeTablePriceHistory("1W", ["aaa"], 123, 60);
+      expect(chart).toEqual(["priceHistory", ["aaa"], "1W", 60]);
+      expect(table).toEqual([
+        "priceHistory",
+        "outcome-table",
+        "1W",
+        ["aaa"],
+        123,
+        60,
+      ]);
+      expect(chart[0]).toBe("priceHistory");
+      expect(table[0]).toBe("priceHistory");
+      expect(chart).not.toEqual(table);
+    });
   });
 
   describe("tags", () => {
@@ -90,10 +108,17 @@ describe("query-keys factory", () => {
 
     it("positions.forMarket is keyed by user + market", () => {
       expect(qk.positions.forMarket("0xabc", "mkt-1")).toEqual([
-        "marketPositions",
+        "userPositions",
+        "market",
         "0xabc",
         "mkt-1",
       ]);
+    });
+
+    it("positions.forMarket shares the same root as positions.all (invalidation hierarchy)", () => {
+      expect(qk.positions.forMarket("0xabc", "mkt-1")[0]).toBe(
+        qk.positions.all()[0]
+      );
     });
   });
 
@@ -198,6 +223,44 @@ describe("query-keys factory", () => {
 
     it("orderBook is keyed by tokenId", () => {
       expect(qk.orderBook("token-1")).toEqual(["orderBook", "token-1"]);
+    });
+
+    it("orderBooks (batch seed) is keyed by the token-id list", () => {
+      expect(qk.orderBooks(["token-1", "token-2"])).toEqual([
+        "orderBooks",
+        ["token-1", "token-2"],
+      ]);
+    });
+  });
+
+  describe("sports", () => {
+    it("companionMarkets is keyed by the joined slug list", () => {
+      expect(
+        qk.sports.companionMarkets("a-more-markets,b-more-markets")
+      ).toEqual(["companion-markets", "a-more-markets,b-more-markets"]);
+    });
+
+    it("leagueCounts is keyed by the joined tag-slug list", () => {
+      expect(qk.sports.leagueCounts("epl,nba")).toEqual([
+        "league-counts",
+        "epl,nba",
+      ]);
+    });
+  });
+
+  describe("wallet allowances + trading approvals", () => {
+    it("wallet.allUsdcAllowances is the prefix for every per-proxy allowance", () => {
+      expect(qk.wallet.allUsdcAllowances()).toEqual(["usdcAllowance"]);
+      const key = qk.wallet.usdcAllowance("0xabc", true, false);
+      expect(key).toEqual(["usdcAllowance", "0xabc", true, false]);
+      expect(key.slice(0, 1)).toEqual([...qk.wallet.allUsdcAllowances()]);
+    });
+
+    it("wallet.allTradingApprovals is the prefix for every approval check", () => {
+      expect(qk.wallet.allTradingApprovals()).toEqual(["tradingApprovals"]);
+      const key = qk.wallet.tradingApprovals("0xabc", true, "1000000");
+      expect(key).toEqual(["tradingApprovals", "0xabc", true, "1000000"]);
+      expect(key.slice(0, 1)).toEqual([...qk.wallet.allTradingApprovals()]);
     });
   });
 

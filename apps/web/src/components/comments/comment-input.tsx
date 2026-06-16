@@ -1,7 +1,7 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { AlertCircle, Loader2, Send, X } from "lucide-react";
 
 const log = createLogger("comment-input");
@@ -259,7 +259,7 @@ export function CommentInput({
   }
 
   return (
-    <motion.div
+    <m.div
       initial={isReply ? { opacity: 0, height: 0 } : false}
       animate={{ opacity: 1, height: "auto" }}
       exit={{ opacity: 0, height: 0 }}
@@ -316,7 +316,7 @@ export function CommentInput({
           {/* Error message */}
           <AnimatePresence>
             {error && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -331,14 +331,14 @@ export function CommentInput({
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
           {/* Actions row - show when focused or has content */}
           <AnimatePresence>
             {(isFocused || content) && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -383,11 +383,11 @@ export function CommentInput({
                     )}
                   </Button>
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
         </div>
       </div>
-    </motion.div>
+    </m.div>
   );
 }

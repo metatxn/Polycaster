@@ -7,6 +7,7 @@ export function formatVolume(vol?: number | string) {
   if (vol === undefined || vol === null || vol === "") return "N/A";
   const num = typeof vol === "string" ? Number.parseFloat(vol) : vol;
   if (Number.isNaN(num)) return "N/A";
+  if (num >= 1_000_000_000) return `$${(num / 1_000_000_000).toFixed(2)}B`;
   if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
   if (num >= 1_000) return `$${(num / 1_000).toFixed(2)}K`;
   return `$${num.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -24,6 +25,38 @@ export function formatPrice(price: string | number) {
   } catch {
     return "0.0¢";
   }
+}
+
+/**
+ * Canonical price-in-cents display. Adaptive precision (owner decision,
+ * 2026-06-11): never round away available sub-cent precision — this is a
+ * financial app — but don't show a noisy ".0" when the value is whole.
+ *   0.75   -> "75¢"
+ *   0.753  -> "75.3¢"   (one decimal, Decimal half-up)
+ */
+export function formatCents(price: string | number): string {
+  try {
+    const cents = new Decimal(price).mul(100);
+    if (!cents.isFinite()) return "0¢";
+    const rounded = cents.toDecimalPlaces(1, Decimal.ROUND_HALF_UP);
+    return rounded.isInteger()
+      ? `${rounded.toFixed(0)}¢`
+      : `${rounded.toFixed(1)}¢`;
+  } catch {
+    return "0¢";
+  }
+}
+
+/**
+ * Trade ticket profit label (potentialWin − total), computed in Decimal.
+ * Owner rule: no "+" on gains; losses render -$X.XX (sign before $). Sign
+ * derives from the ROUNDED magnitude so a sub-cent loss can't show "-$0.00".
+ */
+export function formatProfitLabel(potentialWin: number, total: number): string {
+  const profit = new Decimal(potentialWin).sub(total);
+  const magnitude = profit.abs().toFixed(2);
+  const sign = profit.isNegative() && magnitude !== "0.00" ? "-" : "";
+  return `${sign}$${magnitude}`;
 }
 
 /**
@@ -71,6 +104,36 @@ export function formatPercent(value: number): string {
 export function formatAddress(address: string): string {
   if (!address) return "";
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+/**
+ * One relative-time formatter for both UI styles:
+ *   compact -> "5m" / "3h" / "2d"      (tickers, tables)
+ *   verbose -> "5m ago" / "just now"   (feeds, notifications)
+ * `nowMs` is injectable for tests and useNow() integration.
+ */
+export function relativeTime(
+  timestamp: string | number | Date,
+  style: "compact" | "verbose" = "verbose",
+  nowMs: number = Date.now()
+): string {
+  const then = new Date(timestamp).getTime();
+  const diffMins = Math.floor((nowMs - then) / 60_000);
+  if (style === "verbose" && diffMins < 1) return "just now";
+  const units: Array<[number, string]> = [
+    [60 * 24 * 30 * 12, "y"],
+    [60 * 24 * 30, "mo"],
+    [60 * 24, "d"],
+    [60, "h"],
+    [1, "m"],
+  ];
+  for (const [mins, label] of units) {
+    if (diffMins >= mins) {
+      const v = `${Math.floor(diffMins / mins)}${label}`;
+      return style === "compact" ? v : `${v} ago`;
+    }
+  }
+  return style === "compact" ? "0m" : "just now";
 }
 
 /**

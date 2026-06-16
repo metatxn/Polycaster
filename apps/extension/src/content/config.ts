@@ -5,8 +5,10 @@
 import { createLogger } from "@knoww/logger";
 import {
   type Config,
+  DEFAULT_STREAM_TRADING_SETTINGS,
   DEFAULT_USER_SETTINGS,
   type EnabledSources,
+  type StreamTradingSettings,
   type UserSettings,
 } from "../types/settings";
 
@@ -212,6 +214,17 @@ function isNotificationStackEnabled(): boolean {
 }
 
 /**
+ * One-click betting preferences for the streaming Live Markets card.
+ * Always returns a fully-populated object (defaults merged in).
+ */
+function getStreamTradingSettings(): StreamTradingSettings {
+  return {
+    ...DEFAULT_STREAM_TRADING_SETTINGS,
+    ...(USER_SETTINGS.streamTrading || {}),
+  };
+}
+
+/**
  * Check if usage analytics should be sent
  */
 function isUsageAnalyticsEnabled(): boolean {
@@ -315,6 +328,7 @@ export const KNOWW_CONFIG = {
   TAGS_CACHE_DURATION,
   // User settings
   DEFAULT_USER_SETTINGS,
+  getStreamTradingSettings,
   getUserSettings,
   loadUserSettings,
   isPlatformEnabled,

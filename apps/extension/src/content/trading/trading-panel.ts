@@ -29,7 +29,7 @@ import {
   estimateFallbackFeeRaw,
   parsePusdUnits,
 } from "@knoww/shared-types/trading";
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import QRCode from "react-qr-code";
@@ -60,6 +60,14 @@ import {
 } from "./bridge-api";
 import { CredentialManager } from "./credentials";
 import { formatTradingErrorLine, mapTradingError } from "./error-mapping";
+import {
+  balanceChanged,
+  balanceToNumber,
+  formatBalance,
+  hasDisplayPosition,
+  type OutcomeBalances,
+  positionValueUsd,
+} from "./outcome-balances";
 import { type TradingContext, TradingService } from "./trading-service";
 
 const DEPOSIT_TOKENS: Array<{
@@ -105,6 +113,22 @@ interface PanelOptions {
   conditionId?: string;
   yesTokenId?: string;
   noTokenId?: string;
+  /** Pre-fill the order with this USD stake (converted to shares). */
+  initialAmountUsd?: number;
+  /**
+   * One-click: auto-place the order as soon as the panel reaches a fully-ready
+   * state (connected + credentialed + approved + funded). If any precondition
+   * is missing, the panel just stays open for the user — it never force-submits.
+   */
+  autoSubmit?: boolean;
+  /** Open the panel directly in a specific view (e.g. straight to deposit). */
+  initialView?: "order" | "deposit";
+  /**
+   * Opened from a stream card's "Deposit to trade $X". Drives the contextual
+   * shortfall banner in the deposit view (target = `initialAmountUsd`). Stream-
+   * only — feed/panel deposit behaviour is unaffected when this is unset.
+   */
+  streamDeposit?: boolean;
 }
 
 type OrderMode = "market" | "limit";
@@ -114,6 +138,7 @@ type ActiveView = "order" | "split" | "merge" | "deposit";
 interface DepositToken {
   symbol: string;
   amount: number;
+  amountRaw?: string;
   usdValue: number;
   address: string;
   decimals: number;
@@ -138,6 +163,18 @@ type DepositState =
 
 let activePanel: HTMLElement | null = null;
 let panelOpts: PanelOptions | null = null;
+// Inline deposit (stream surface): the deposit flow renders into a host element
+// inside a stream card instead of the floating panel, reusing the same deposit
+// state machine + `.knoww-tp-*` components so it resonates with the panel UI.
+// When set, `rerender()` re-renders the deposit form into this host.
+let inlineDepositHost: HTMLElement | null = null;
+let inlineDepositUnsub: (() => void) | null = null;
+let inlineDepositOnClose: (() => void) | null = null;
+
+/** The DOM root the deposit flow currently lives in (inline host or panel). */
+function depositDomRoot(): HTMLElement | null {
+  return inlineDepositHost ?? activePanel;
+}
 let activeUnsubscribe: (() => void) | null = null;
 let mobileQrRoot: Root | null = null;
 
@@ -148,11 +185,7 @@ let selectedShares = 10;
 let limitPrice = 0;
 let expirationPreset: ExpirationPreset = "GTC";
 let splitMergeAmount = 0;
-let outcomeBalances: {
-  yesBalance: number;
-  noBalance: number;
-  minBalance: number;
-} | null = null;
+let outcomeBalances: OutcomeBalances | null = null;
 let outcomeBalancesLoaded = false;
 let outcomeBalancesFetching = false;
 let moreMenuOpen = false;
@@ -394,8 +427,41 @@ function setButtonLoading(btn: HTMLElement, text: string): void {
 }
 
 function rerender(): void {
+  // Inline (stream) deposit re-renders only the deposit form into its host.
+  if (inlineDepositHost) {
+    renderInlineDeposit();
+    return;
+  }
   if (activePanel && panelOpts)
     render(activePanel, panelOpts, TradingService.getContext());
+}
+
+/** Re-render the deposit form into the inline host (stream card). */
+function renderInlineDeposit(): void {
+  const host = inlineDepositHost;
+  if (!host?.isConnected) {
+    closeInlineDeposit();
+    return;
+  }
+  host.innerHTML = "";
+  renderDepositForm(host, TradingService.getContext());
+}
+
+/** Tear down the inline deposit and hand control back to the card. */
+function closeInlineDeposit(): void {
+  if (inlineDepositUnsub) {
+    inlineDepositUnsub();
+    inlineDepositUnsub = null;
+  }
+  resetDepositState();
+  const host = inlineDepositHost;
+  const onClose = inlineDepositOnClose;
+  inlineDepositHost = null;
+  inlineDepositOnClose = null;
+  panelOpts = null;
+  activeView = "order";
+  if (host) host.innerHTML = "";
+  onClose?.();
 }
 
 function unmountMobileQrRoot(): void {
@@ -793,7 +859,12 @@ function createPanel(opts: PanelOptions): HTMLElement {
   activeSide = opts.side === "SELL" ? "sell" : "buy";
   activeView = "order";
   orderMode = "market";
-  selectedShares = 10;
+  // Pre-fill shares from a USD stake when provided (one-click stream trades),
+  // else the default 10. The panel re-validates min shares / notional / funds.
+  selectedShares =
+    opts.initialAmountUsd && opts.price > 0
+      ? Math.max(1, Math.round(opts.initialAmountUsd / opts.price))
+      : 10;
   limitPrice = normalizePrice(opts.price);
   expirationPreset = "GTC";
   splitMergeAmount = 0;
@@ -1120,11 +1191,10 @@ function addPortfolioBar(
   _ctx: TradingContext,
   opts: PanelOptions
 ): void {
-  const yesPos = outcomeBalances?.yesBalance ?? 0;
-  const noPos = outcomeBalances?.noBalance ?? 0;
-  const POS_THRESHOLD = 0.01;
-  const showYes = yesPos >= POS_THRESHOLD;
-  const showNo = noPos >= POS_THRESHOLD;
+  const yesPos = outcomeBalances?.yesBalance ?? "0";
+  const noPos = outcomeBalances?.noBalance ?? "0";
+  const showYes = hasDisplayPosition(yesPos);
+  const showNo = hasDisplayPosition(noPos);
 
   if (!showYes && !showNo) return;
 
@@ -1132,8 +1202,6 @@ function addPortfolioBar(
     opts.yesTokenId && opts.noTokenId ? yesPrice : opts.price;
   const currentNoPrice =
     opts.yesTokenId && opts.noTokenId ? noPriceValue : 1 - currentYesPrice;
-  const yesValue = yesPos * currentYesPrice;
-  const noValue = noPos * currentNoPrice;
 
   const yesLabel = opts.outcomeIndex === 0 ? opts.outcomeName : "Yes";
   const noLabel = opts.outcomeIndex === 0 ? "No" : opts.outcomeName;
@@ -1147,7 +1215,7 @@ function addPortfolioBar(
       el(
         "span",
         "knoww-tp-portfolio-value positive",
-        `${yesPos.toFixed(1)} @ $${currentYesPrice.toFixed(2)} · $${yesValue.toFixed(2)}`
+        `${formatBalance(yesPos, 1)} @ $${currentYesPrice.toFixed(2)} · $${positionValueUsd(yesPos, currentYesPrice)}`
       )
     );
     portfolio.appendChild(yRow);
@@ -1159,7 +1227,7 @@ function addPortfolioBar(
       el(
         "span",
         "knoww-tp-portfolio-value positive",
-        `${noPos.toFixed(1)} @ $${currentNoPrice.toFixed(2)} · $${noValue.toFixed(2)}`
+        `${formatBalance(noPos, 1)} @ $${currentNoPrice.toFixed(2)} · $${positionValueUsd(noPos, currentNoPrice)}`
       )
     );
     portfolio.appendChild(nRow);
@@ -2032,8 +2100,11 @@ function addAmountSection(
 
 function getPositionSize(opts: PanelOptions): number {
   if (!outcomeBalances) return 0;
-  if (opts.outcomeIndex === 0) return outcomeBalances.yesBalance;
-  return outcomeBalances.noBalance;
+  return balanceToNumber(
+    opts.outcomeIndex === 0
+      ? outcomeBalances.yesBalance
+      : outcomeBalances.noBalance
+  );
 }
 
 function adjustShares(delta: number, minShares: number): void {
@@ -2507,8 +2578,8 @@ function addSubmitButton(
         rerender();
 
         const prevBalance = getAvailableTradingCollateral(ctx);
-        const prevYes = outcomeBalances?.yesBalance ?? 0;
-        const prevNo = outcomeBalances?.noBalance ?? 0;
+        const prevYes = outcomeBalances?.yesBalance ?? "0";
+        const prevNo = outcomeBalances?.noBalance ?? "0";
         const POLL_INTERVAL = 3000;
         const TIMEOUT = 30000;
         const PER_POLL_TIMEOUT = 8000;
@@ -2570,16 +2641,15 @@ function addSubmitButton(
           }
 
           const newCtx = TradingService.getContext();
-          const newYes = outcomeBalances?.yesBalance ?? 0;
-          const newNo = outcomeBalances?.noBalance ?? 0;
-          const balanceChanged =
+          const newYes = outcomeBalances?.yesBalance ?? "0";
+          const newNo = outcomeBalances?.noBalance ?? "0";
+          const collateralChanged =
             Math.abs(getAvailableTradingCollateral(newCtx) - prevBalance) >
             0.001;
           const positionChanged =
-            Math.abs(newYes - prevYes) > 0.001 ||
-            Math.abs(newNo - prevNo) > 0.001;
+            balanceChanged(prevYes, newYes) || balanceChanged(prevNo, newNo);
 
-          if (balanceChanged || positionChanged) {
+          if (collateralChanged || positionChanged) {
             finishSettling("Order filled!", "success");
 
             // Show a success overlay
@@ -2841,7 +2911,9 @@ function renderMergeForm(
 
   const { state } = ctx;
   const isMerging = state === "merging";
-  const maxMerge = outcomeBalances ? outcomeBalances.minBalance : 0;
+  const maxMerge = outcomeBalances
+    ? balanceToNumber(outcomeBalances.minBalance)
+    : 0;
   const form = el("div", "knoww-tp-form");
 
   const back = elHtml(
@@ -2868,20 +2940,28 @@ function renderMergeForm(
       el(
         "span",
         "knoww-tp-summary-value",
-        outcomeBalances.yesBalance.toFixed(2)
+        formatBalance(outcomeBalances.yesBalance, 2)
       )
     );
     summary.appendChild(yRow);
     const nRow = el("div", "knoww-tp-summary-row");
     nRow.appendChild(el("span", "knoww-tp-summary-label", "NO balance"));
     nRow.appendChild(
-      el("span", "knoww-tp-summary-value", outcomeBalances.noBalance.toFixed(2))
+      el(
+        "span",
+        "knoww-tp-summary-value",
+        formatBalance(outcomeBalances.noBalance, 2)
+      )
     );
     summary.appendChild(nRow);
     const mRow = el("div", "knoww-tp-summary-row");
     mRow.appendChild(el("span", "knoww-tp-summary-label", "Max merge"));
     mRow.appendChild(
-      el("span", "knoww-tp-summary-value positive", maxMerge.toFixed(2))
+      el(
+        "span",
+        "knoww-tp-summary-value positive",
+        formatBalance(outcomeBalances.minBalance, 2)
+      )
     );
     summary.appendChild(mRow);
     form.appendChild(summary);
@@ -3060,11 +3140,16 @@ function encodeBalanceOfCall(owner: string): string {
   );
 }
 
-function parseBalanceHex(hex: string, decimals: number): number {
-  if (!hex || hex === "0x" || hex === "0x0") return 0;
+function balanceHexToBigInt(hex: string): bigint {
+  if (!hex || hex === "0x" || hex === "0x0") return 0n;
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (!clean || clean === "0") return 0;
-  const raw = BigInt(`0x${clean}`);
+  if (!clean || clean === "0") return 0n;
+  return BigInt(`0x${clean}`);
+}
+
+function parseBalanceHex(hex: string, decimals: number): number {
+  const raw = balanceHexToBigInt(hex);
+  if (raw <= 0n) return 0;
   const scale = 10n ** BigInt(decimals);
   const integerPart = raw / scale;
   const remainder = raw % scale;
@@ -3181,12 +3266,14 @@ async function fetchEoaBalancesViaWallet(
   for (let i = 0; i < DEPOSIT_TOKENS.length; i++) {
     const res = erc20Results[i];
     if (res.status !== "fulfilled") continue;
+    const amountRaw = balanceHexToBigInt(res.value);
     const amount = parseBalanceHex(res.value, DEPOSIT_TOKENS[i].decimals);
     if (amount > 0) {
       const price = getTokenPrice(DEPOSIT_TOKENS[i].symbol, prices);
       tokens.push({
         symbol: DEPOSIT_TOKENS[i].symbol,
         amount,
+        amountRaw: amountRaw.toString(),
         usdValue: amount * price,
         address: DEPOSIT_TOKENS[i].address,
         decimals: DEPOSIT_TOKENS[i].decimals,
@@ -3197,12 +3284,14 @@ async function fetchEoaBalancesViaWallet(
 
   try {
     const polHex = await WalletBridge.getBalance(eoaAddress);
+    const polRaw = balanceHexToBigInt(polHex);
     const polAmount = parseBalanceHex(polHex, 18);
     if (polAmount > 0) {
       const polPrice = getTokenPrice("POL", prices);
       tokens.push({
         symbol: "POL",
         amount: polAmount,
+        amountRaw: polRaw.toString(),
         usdValue: polAmount * polPrice,
         address: "native",
         decimals: 18,
@@ -3254,6 +3343,35 @@ let depositPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 function hasBalanceIncreased(current: number, previous: number): boolean {
   return new Decimal(current).gt(new Decimal(previous).plus(0.001));
+}
+
+function formatDepositRawAmount(raw: bigint, decimals: number): string {
+  const amount = new Decimal(raw.toString()).div(new Decimal(10).pow(decimals));
+  const fixed = amount.toFixed();
+  return fixed.includes(".")
+    ? fixed.replace(/0+$/, "").replace(/\.$/, "")
+    : fixed;
+}
+
+function parseDepositAmountRaw(
+  amount: string,
+  decimals: number
+): bigint | null {
+  try {
+    return parseUnits(amount, decimals);
+  } catch {
+    return null;
+  }
+}
+
+function isDepositAmountOverBalance(
+  amountRaw: bigint,
+  token: DepositToken
+): boolean {
+  if (token.amountRaw) return amountRaw > BigInt(token.amountRaw);
+  return new Decimal(formatDepositRawAmount(amountRaw, token.decimals)).gt(
+    token.amount
+  );
 }
 
 async function refreshDepositBalanceUntilSynced(
@@ -3498,16 +3616,22 @@ function depositFetchQuote(): void {
 
 async function executeDeposit(ctx: TradingContext): Promise<void> {
   if (!depositSelected || !ctx.address || !depositBridgeAddress) return;
-  const numAmount = parseFloat(depositAmount);
-  if (!numAmount || numAmount <= 0 || numAmount > depositSelected.amount)
+  const amountBig = parseDepositAmountRaw(
+    depositAmount,
+    depositSelected.decimals
+  );
+  if (!amountBig || amountBig <= 0n) return;
+  if (isDepositAmountOverBalance(amountBig, depositSelected)) {
+    depositError = "Insufficient balance";
+    rerender();
     return;
+  }
 
   depositIsPending = true;
   depositError = null;
   rerender();
 
   try {
-    const amountBig = parseUnits(depositAmount, depositSelected.decimals);
     const prevBalance = ctx.balance;
 
     let txHash: string;
@@ -3568,9 +3692,13 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
       });
       rerender();
       setTimeout(() => {
-        activeView = "order";
-        resetDepositState();
-        rerender();
+        if (inlineDepositHost) {
+          closeInlineDeposit();
+        } else {
+          activeView = "order";
+          resetDepositState();
+          rerender();
+        }
       }, 3000);
       return;
     }
@@ -3643,9 +3771,15 @@ async function executeDeposit(ctx: TradingContext): Promise<void> {
         });
         rerender();
         setTimeout(() => {
-          activeView = "order";
-          resetDepositState();
-          rerender();
+          // Stream: return to the trade (bet buttons now show a placeable
+          // Trade since the balance is funded). Panel: back to the order view.
+          if (inlineDepositHost) {
+            closeInlineDeposit();
+          } else {
+            activeView = "order";
+            resetDepositState();
+            rerender();
+          }
         }, 3000);
         return;
       }
@@ -3990,7 +4124,7 @@ function renderDepositBridgeSelectStep(
   searchInput.oninput = (e) => {
     depositBridgeSearchQuery = (e.target as HTMLInputElement).value;
     rerender();
-    const restored = activePanel?.querySelector<HTMLInputElement>(
+    const restored = depositDomRoot()?.querySelector<HTMLInputElement>(
       "[data-bridge-search]"
     );
     if (restored) restored.focus();
@@ -4087,7 +4221,7 @@ function renderDepositAmountStep(form: HTMLElement): void {
     depositError = null;
     rerender();
     const restored =
-      activePanel?.querySelector<HTMLInputElement>("[data-deposit-amt]");
+      depositDomRoot()?.querySelector<HTMLInputElement>("[data-deposit-amt]");
     if (restored) restored.focus();
   };
   amtCenter.appendChild(amtInput);
@@ -4101,13 +4235,19 @@ function renderDepositAmountStep(form: HTMLElement): void {
     btn.onclick = (e) => {
       e.stopPropagation();
       if (!depositSelected) return;
-      const val = (depositSelected.amount * pct) / 100;
-      depositAmount =
-        pct === 100
-          ? depositSelected.amount.toString()
-          : val.toFixed(
-              depositSelected.decimals > 6 ? 6 : depositSelected.decimals
-            );
+      if (depositSelected?.amountRaw) {
+        const raw = (BigInt(depositSelected.amountRaw) * BigInt(pct)) / 100n;
+        depositAmount = formatDepositRawAmount(raw, depositSelected.decimals);
+      } else {
+        const val = new Decimal(depositSelected.amount)
+          .mul(pct)
+          .div(100)
+          .toDecimalPlaces(
+            depositSelected.decimals > 6 ? 6 : depositSelected.decimals,
+            Decimal.ROUND_DOWN
+          );
+        depositAmount = val.toFixed();
+      }
       rerender();
     };
     presets.appendChild(btn);
@@ -4162,8 +4302,15 @@ function renderDepositAmountStep(form: HTMLElement): void {
   }
 
   // Continue button
-  const numAmt = parseFloat(depositAmount) || 0;
-  const overBalance = numAmt > depositSelected.amount;
+  const amountRaw = depositAmount
+    ? parseDepositAmountRaw(depositAmount, depositSelected.decimals)
+    : null;
+  const numAmt = amountRaw
+    ? Number(formatDepositRawAmount(amountRaw, depositSelected.decimals))
+    : 0;
+  const overBalance = amountRaw
+    ? isDepositAmountOverBalance(amountRaw, depositSelected)
+    : false;
   const isValid =
     numAmt > 0 && !overBalance && !isBelowMinBalance && !isBelowMinDeposit;
 
@@ -4317,8 +4464,8 @@ function renderDepositConfirmStep(
     )
   );
 
-  // Auto-conversion banner
-  if (depositSelected.symbol !== "pUSD") {
+  // Auto-conversion banner (hidden in the stream inline flow — keep it compact)
+  if (depositSelected.symbol !== "pUSD" && !inlineDepositHost) {
     const banner = el("div", "knoww-tp-deposit-info-banner info");
     banner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:var(--knoww-accent, #1d9bf0)"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>`;
     const text = el("div", "");
@@ -4335,26 +4482,29 @@ function renderDepositConfirmStep(
     form.appendChild(banner);
   }
 
-  // Details card
-  const details = el("div", "knoww-tp-deposit-details-card");
-  const rows: Array<[string, string]> = [
-    ["Source", `🦊 Wallet (${ctx.address ? truncAddr(ctx.address) : ""})`],
-    [
-      "Via",
-      depositRoute?.kind === "direct"
-        ? "Direct transfer"
-        : "🌉 Polymarket Bridge",
-    ],
-    ["Destination", "📊 Polymarket Wallet"],
-    ["Est. time", estimatedTime],
-  ];
-  for (const [label, value] of rows) {
-    const row = el("div", "knoww-tp-deposit-detail-row");
-    row.appendChild(el("span", "knoww-tp-deposit-detail-label", label));
-    row.appendChild(el("span", "knoww-tp-deposit-detail-value", value));
-    details.appendChild(row);
+  // Details card (Source / Via / Destination) — omitted in the stream inline
+  // flow to keep the card short; Est. time still surfaces in the breakdown.
+  if (!inlineDepositHost) {
+    const details = el("div", "knoww-tp-deposit-details-card");
+    const rows: Array<[string, string]> = [
+      ["Source", `🦊 Wallet (${ctx.address ? truncAddr(ctx.address) : ""})`],
+      [
+        "Via",
+        depositRoute?.kind === "direct"
+          ? "Direct transfer"
+          : "🌉 Polymarket Bridge",
+      ],
+      ["Destination", "📊 Polymarket Wallet"],
+      ["Est. time", estimatedTime],
+    ];
+    for (const [label, value] of rows) {
+      const row = el("div", "knoww-tp-deposit-detail-row");
+      row.appendChild(el("span", "knoww-tp-deposit-detail-label", label));
+      row.appendChild(el("span", "knoww-tp-deposit-detail-value", value));
+      details.appendChild(row);
+    }
+    form.appendChild(details);
   }
-  form.appendChild(details);
 
   // Transaction breakdown
   const breakdown = el("div", "knoww-tp-deposit-details-card");
@@ -4370,13 +4520,12 @@ function renderDepositConfirmStep(
   breakdown.appendChild(sendRow);
 
   const recvRow = el("div", "knoww-tp-deposit-detail-row");
-  recvRow.appendChild(
-    el(
-      "span",
-      "knoww-tp-deposit-detail-label",
-      `You receive ${depositQuote ? "" : "(approx)"}`
-    )
+  const recvLabel = el(
+    "span",
+    "knoww-tp-deposit-detail-label",
+    `You receive ${depositQuote ? "" : "(approx)"}`
   );
+  recvRow.appendChild(recvLabel);
   const recvVal = el("span", "knoww-tp-deposit-detail-value");
   if (depositIsLoadingQuote) {
     recvVal.appendChild(el("span", "knoww-tp-deposit-inline-spinner"));
@@ -4389,15 +4538,15 @@ function renderDepositConfirmStep(
   recvRow.appendChild(recvVal);
   breakdown.appendChild(recvRow);
 
-  // Fee breakdown
-  const feeDivider = el("div", "knoww-tp-deposit-fee-divider");
-  breakdown.appendChild(feeDivider);
+  // Fee breakdown — collected into feeBox so the stream flow can tuck it behind
+  // an (i) tooltip instead of showing gas/swap/min-received inline.
+  const feeBox = document.createElement("div");
 
   if (depositRoute?.kind === "direct") {
     const r = el("div", "knoww-tp-deposit-fee-row");
     r.appendChild(el("span", "knoww-tp-deposit-fee-label", "Network cost"));
     r.appendChild(el("span", "knoww-tp-deposit-fee-value", "Polygon gas"));
-    breakdown.appendChild(r);
+    feeBox.appendChild(r);
   } else if (depositQuote?.estFeeBreakdown) {
     const fb = depositQuote.estFeeBreakdown;
     const feeRows: Array<[string, string]> = [
@@ -4419,7 +4568,7 @@ function renderDepositConfirmStep(
       const r = el("div", "knoww-tp-deposit-fee-row");
       r.appendChild(el("span", "knoww-tp-deposit-fee-label", lbl));
       r.appendChild(el("span", "knoww-tp-deposit-fee-value", val));
-      breakdown.appendChild(r);
+      feeBox.appendChild(r);
     }
     const minRecvRow = el("div", "knoww-tp-deposit-fee-row highlight");
     minRecvRow.appendChild(
@@ -4432,7 +4581,7 @@ function renderDepositConfirmStep(
         `${fb.minReceived.toFixed(2)} pUSD`
       )
     );
-    breakdown.appendChild(minRecvRow);
+    feeBox.appendChild(minRecvRow);
   } else {
     const defaultFees: Array<[string, string]> = [
       ["Network cost", "~$0.01"],
@@ -4442,8 +4591,24 @@ function renderDepositConfirmStep(
       const r = el("div", "knoww-tp-deposit-fee-row");
       r.appendChild(el("span", "knoww-tp-deposit-fee-label", lbl));
       r.appendChild(el("span", "knoww-tp-deposit-fee-value", val));
-      breakdown.appendChild(r);
+      feeBox.appendChild(r);
     }
+  }
+
+  if (inlineDepositHost) {
+    // Stream: keep only You send / You receive; tuck the fee breakdown behind
+    // a hover (i) on the "You receive" label.
+    const info = el("span", "knoww-tp-deposit-fee-info");
+    info.setAttribute("tabindex", "0");
+    info.setAttribute("aria-label", "Fee details");
+    info.appendChild(el("span", "knoww-tp-deposit-fee-info-icon", "ⓘ"));
+    feeBox.classList.add("knoww-tp-deposit-fee-tooltip");
+    info.appendChild(feeBox);
+    recvLabel.appendChild(info);
+  } else {
+    const feeDivider = el("div", "knoww-tp-deposit-fee-divider");
+    breakdown.appendChild(feeDivider);
+    breakdown.appendChild(feeBox);
   }
   form.appendChild(breakdown);
 
@@ -4584,6 +4749,18 @@ function renderDepositConfirmStep(
     executeDeposit(ctx);
   };
   form.appendChild(btn);
+
+  // Inline (stream): after a completed deposit there's no panel close button to
+  // exit, so give an explicit way back to the bet buttons (balance is now
+  // synced, so the card will re-render to a placeable "Trade").
+  if (depositIsConfirmed && inlineDepositHost) {
+    const backToTrade = el("button", "knoww-tp-submit", "Back to trade");
+    backToTrade.onclick = (e) => {
+      e.stopPropagation();
+      closeInlineDeposit();
+    };
+    form.appendChild(backToTrade);
+  }
 }
 
 function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
@@ -4595,6 +4772,12 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
   if (depositStep === "method") {
     backBtn.onclick = (e) => {
       e.stopPropagation();
+      // Inline (stream): back exits the deposit and restores the card's
+      // bet buttons; floating panel: back returns to the order view.
+      if (inlineDepositHost) {
+        closeInlineDeposit();
+        return;
+      }
       activeView = "order";
       resetDepositState();
       rerender();
@@ -4617,6 +4800,25 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
   );
   headerRow.appendChild(balance);
   form.appendChild(headerRow);
+
+  // Stream-only: contextual shortfall banner. When the user tapped "Deposit to
+  // trade $X" on a stream card, tell them how much more they need and for which
+  // trade. Gated on `streamDeposit` so the feed/panel deposit view is unchanged.
+  if (panelOpts?.streamDeposit && depositStep === "method") {
+    const targetUsd = panelOpts.initialAmountUsd ?? 0;
+    const shortfall = targetUsd - ctx.balance;
+    if (targetUsd > 0 && shortfall > 0) {
+      const banner = el("div", "knoww-tp-deposit-info-banner stream");
+      banner.appendChild(
+        el(
+          "span",
+          "",
+          `Add $${shortfall.toFixed(2)} to place your $${targetUsd} ${panelOpts.outcomeName} trade`
+        )
+      );
+      form.appendChild(banner);
+    }
+  }
 
   // Loading state
   if (depositState === "loading-balances" && depositStep === "method") {
@@ -4914,6 +5116,40 @@ function applyOverflowOverrides(startEl: HTMLElement): void {
   }
 }
 
+/**
+ * One-click auto-submit: poll for the order submit button to reach its clean
+ * "ready to place" state — enabled, with no approve/deposit/loading class —
+ * which the panel only shows when fully connected, credentialed, approved and
+ * funded. Click it once then. If readiness isn't reached within the window
+ * (needs connect / approve / deposit), do nothing and leave the panel open for
+ * the user. This reuses the panel's own validation; it never force-places.
+ */
+function scheduleAutoSubmit(panel: HTMLElement): void {
+  let attempts = 0;
+  let done = false;
+  const tick = (): void => {
+    if (done || activePanel !== panel || !panel.isConnected) return;
+    attempts += 1;
+    const btn = panel.querySelector<HTMLButtonElement>(
+      ".knoww-tp-submit.buy, .knoww-tp-submit.sell"
+    );
+    const ready =
+      btn &&
+      !btn.disabled &&
+      !btn.classList.contains("approve") &&
+      !btn.classList.contains("deposit") &&
+      !btn.classList.contains("deposit-needed") &&
+      !btn.classList.contains("loading");
+    if (ready) {
+      done = true;
+      btn.click();
+      return;
+    }
+    if (attempts < 24) setTimeout(tick, 250); // up to ~6s
+  };
+  setTimeout(tick, 300);
+}
+
 export const TradingPanel = {
   show(opts: PanelOptions): void {
     this.hide();
@@ -4934,6 +5170,14 @@ export const TradingPanel = {
         panel.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
     });
+    if (opts.autoSubmit) scheduleAutoSubmit(panel);
+    if (opts.initialView === "deposit") {
+      const addr = TradingService.getContext().address;
+      if (addr) {
+        activeView = "deposit";
+        startDepositFlow(addr);
+      }
+    }
   },
 
   hide(): void {
@@ -4961,5 +5205,43 @@ export const TradingPanel = {
 
   isVisible(): boolean {
     return activePanel !== null;
+  },
+
+  /**
+   * Stream surface: render the deposit flow inline inside a stream card's host
+   * element (reusing the panel's deposit engine) instead of opening the floating
+   * panel. `onClose` fires when the user backs out or the host leaves the DOM.
+   */
+  mountInlineDeposit(args: {
+    host: HTMLElement;
+    opts: PanelOptions;
+    onClose?: () => void;
+  }): void {
+    // Close any floating panel so the two surfaces never fight over deposit state.
+    this.hide();
+    inlineDepositHost = args.host;
+    inlineDepositOnClose = args.onClose ?? null;
+    panelOpts = args.opts;
+    activeView = "deposit";
+    resetDepositState();
+    // Re-render the inline form on wallet/balance/tx-status changes.
+    inlineDepositUnsub = TradingService.onStateChange(() => {
+      if (!inlineDepositHost?.isConnected) {
+        closeInlineDeposit();
+        return;
+      }
+      renderInlineDeposit();
+    });
+    const addr = TradingService.getContext().address;
+    if (addr) {
+      startDepositFlow(addr);
+    } else {
+      renderInlineDeposit();
+    }
+  },
+
+  /** Tear down an inline deposit (e.g. when the card collapses). */
+  closeInlineDeposit(): void {
+    if (inlineDepositHost) closeInlineDeposit();
   },
 };

@@ -171,16 +171,19 @@ export function EventFilterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setTagSlugs = useCallback((tags: string[]) => {
-    setFilters((prev) => ({ ...prev, tagSlugs: tags }));
+    const selectedTag = tags.at(-1);
+    setFilters((prev) => ({
+      ...prev,
+      tagSlugs: selectedTag ? [selectedTag] : [],
+    }));
   }, []);
 
   const toggleTag = useCallback((tagSlug: string) => {
     setFilters((prev) => {
-      const current = prev.tagSlugs;
-      if (current.includes(tagSlug)) {
-        return { ...prev, tagSlugs: current.filter((t) => t !== tagSlug) };
+      if (prev.tagSlugs.includes(tagSlug)) {
+        return { ...prev, tagSlugs: [] };
       }
-      return { ...prev, tagSlugs: [...current, tagSlug] };
+      return { ...prev, tagSlugs: [tagSlug] };
     });
   }, []);
 
@@ -257,11 +260,15 @@ export function EventFilterProvider({ children }: { children: ReactNode }) {
   ]);
 
   const apiQueryParams = useMemo(() => {
+    const closedOnly =
+      (filters.status.includes("closed") || filters.status.includes("ended")) &&
+      !filters.status.includes("active") &&
+      !filters.status.includes("live");
     const params: { closed: boolean; tagSlug?: string } = {
-      closed: filters.status.includes("closed"),
+      closed: closedOnly,
     };
 
-    if (filters.tagSlugs.length === 1) {
+    if (filters.tagSlugs[0]) {
       params.tagSlug = filters.tagSlugs[0];
     }
 

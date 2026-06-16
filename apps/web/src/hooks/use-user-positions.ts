@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -117,14 +118,9 @@ async function fetchPositions(
     params.set("market", options.market);
   }
 
-  const response = await fetch(`/api/user/positions?${params.toString()}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch positions");
-  }
-
-  return response.json() as Promise<PositionsResponse>;
+  return fetchJson<PositionsResponse>(
+    `/api/user/positions?${params.toString()}`
+  );
 }
 
 /**
@@ -171,8 +167,8 @@ export function useUserPositions(options: UseUserPositionsOptions = {}) {
       return fetchPositions(userAddress, options);
     },
     enabled: isConnected && !!userAddress && options.enabled !== false,
-    staleTime: 10 * 1000, // 5 seconds - more responsive after trades
-    refetchInterval: 30 * 1000, // Refetch every 15 seconds
+    staleTime: 10 * 1000, // 10 seconds — responsive after trades
+    refetchInterval: 30 * 1000, // Refetch every 30 seconds
   });
 }
 

@@ -10,7 +10,7 @@ import type {
 } from "./market";
 import type { InjectionPoint, PlatformAdapter } from "./platform";
 import type { UserPreferences } from "./preferences";
-import type { UserSettings } from "./settings";
+import type { StreamTradingSettings, UserSettings } from "./settings";
 
 interface RelevanceTelemetryCandidate {
   id: string;
@@ -132,6 +132,7 @@ declare global {
       isPlatformEnabled: (platformName: string) => boolean;
       isSourceEnabled: (sourceName: string) => boolean;
       isNotificationStackEnabled: () => boolean;
+      getStreamTradingSettings: () => StreamTradingSettings;
       isUsageAnalyticsEnabled: () => boolean;
       getThemeOverride: () => string;
       isDebugMode: () => boolean;
@@ -210,7 +211,11 @@ declare global {
         query: string,
         matchedTags?: string[]
       ) => Promise<Market[]>;
-      calculateRelevanceScore: (postTexts: string[], market: Market) => number;
+      calculateRelevanceScore: (
+        postTexts: string[],
+        market: Market,
+        options?: { includeNestedMarketContext?: boolean }
+      ) => number;
       validateMarketRelevance: (
         postText: string,
         market: Market
@@ -276,6 +281,7 @@ declare global {
         index: number
       ) => HTMLElement;
       updateNotificationStack: (markets: InjectedMarketEntry[]) => void;
+      setStreamMarkets: (markets: InjectedMarketEntry[]) => void;
       updateNotificationStackTheme: () => void;
       scrollToMarket: (
         cardRefOrElement: WeakRef<HTMLElement> | HTMLElement | null | undefined,
@@ -344,6 +350,13 @@ declare global {
       findInjectionPoint: (postElement: Element) => InjectionPoint | null;
       getCardStyles: () => Record<string, unknown>;
       resetPlatformCache: () => void;
+    };
+
+    KNOWW_STREAMING?: {
+      /** Start the streaming companion card (stream-surface platforms only). */
+      initStreamingMarkets: () => void;
+      /** Force a re-read of stream context + refetch of markets. */
+      refresh: () => void;
     };
 
     KNOWW_KALSHI: {

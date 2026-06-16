@@ -211,6 +211,11 @@ export interface NestedMarket {
   archived?: boolean;
   groupItemTitle?: string;
   outcomes?: string[];
+  gameStartTime?: string;
+  sportsMarketType?: string;
+  acceptingOrders?: boolean;
+  enableOrderBook?: boolean;
+  orderMinSize?: string | number;
   // Kalshi-specific nested market fields
   yes_subtitle?: string;
   no_subtitle?: string;
@@ -276,6 +281,7 @@ export interface Market {
   _kalshiSearchScore?: number;
   _kalshiLastPrice?: number;
   _contextReason?: string;
+  _preferredOutcomeNames?: string[];
   _aiConfidence?: number;
 
   // Allow additional properties for API responses
@@ -361,4 +367,10 @@ export interface InjectedMarketEntry {
   timestamp: number;
   isInViewport?: boolean;
   lastVisibleAt?: number;
+  /**
+   * True for markets surfaced by a streaming surface (Twitch/YouTube) rather
+   * than the feed scan. These have no injected post card, so the stack treats
+   * them as always-active and skips DOM availability checks.
+   */
+  isStreamSurface?: boolean;
 }

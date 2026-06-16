@@ -13,6 +13,7 @@
  */
 
 import { createLogger } from "@knoww/logger";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { type Category, categorize } from "./category";
 import { parseOutcomes, type ResolvedOutcomes } from "./pnl";
@@ -177,6 +178,22 @@ interface KBCacheEntry {
 let kbCache: KBCacheEntry | null = null;
 let kbBuildPromise: Promise<ResolutionKnowledgeBase> | null = null;
 
+/**
+ * Keep a background promise alive past the response on Cloudflare Workers.
+ * Without waitUntil, detached work is killed when the response is sent —
+ * the KB build would be cancelled mid-crawl and re-triggered on every
+ * request without ever completing.
+ */
+function registerBackgroundWork(promise: Promise<unknown>): void {
+  try {
+    const { ctx } = getCloudflareContext();
+    ctx.waitUntil(promise);
+  } catch {
+    // Outside a Cloudflare request context (vitest, plain node): the
+    // promise still runs, it just isn't protected from teardown.
+  }
+}
+
 function triggerBackgroundBuild(opts: {
   minVolumeUsd?: number;
   maxPages?: number;
@@ -194,6 +211,9 @@ function triggerBackgroundBuild(opts: {
     .finally(() => {
       kbBuildPromise = null;
     });
+  // Swallow the rejection on the waitUntil copy — kb.build_failed is
+  // already logged above; waitUntil must not surface a second error.
+  registerBackgroundWork(kbBuildPromise.catch(() => undefined));
 }
 
 /**

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { extractPostIdFromLink } from "../../src/content/platforms/helpers";
 
 function createFakeAnchor(href: string): Element {

@@ -14,6 +14,7 @@ import type {
 import type { MarketLinkHint } from "../types/platform";
 import { KNOWW_CONFIG } from "./config";
 import {
+  buildMarketGateText,
   CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
   HIGH_SIGNAL_TOKENS,
 } from "./scoring-policy";
@@ -2143,10 +2144,18 @@ function testDeduplicationLogic(): DeduplicationTestResult | null {
 /**
  * Calculate relevance score between post content and market
  */
-function calculateRelevanceScore(postTexts: string[], market: Market): number {
+function calculateRelevanceScore(
+  postTexts: string[],
+  market: Market,
+  options: { includeNestedMarketContext?: boolean } = {}
+): number {
   const { STOP_WORDS } = window.KNOWW_UTILS;
   const combinedText = postTexts.join(" ").toLowerCase();
-  const marketTitle = (market.title || "").toLowerCase();
+  const marketTitle = (
+    options.includeNestedMarketContext === true
+      ? buildMarketGateText(market, { includeNestedMarkets: true })
+      : market.title || ""
+  ).toLowerCase();
   const marketTags = (market.tags || []).map((t) =>
     (t.slug || t.label || "").toLowerCase()
   );

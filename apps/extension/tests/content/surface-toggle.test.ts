@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "vitest";
 
 declare const process: { cwd(): string };
-declare function require(moduleName: string): unknown;
-
-const { readFileSync } = require("node:fs") as {
-  readFileSync(path: string, options: { encoding: "utf8" }): string;
-};
-const { join } = require("node:path") as {
-  join(...parts: string[]): string;
-};
 
 function readSource(path: string): string {
   return readFileSync(join(process.cwd(), path), { encoding: "utf8" });

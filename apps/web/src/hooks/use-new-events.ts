@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 import type { EventFilterParams } from "./use-paginated-events";
 
@@ -85,17 +86,9 @@ export function useNewEvents(
         if (filters.endDateTo) params.set("end_date_max", filters.endDateTo);
       }
 
-      const response = await fetch(`/api/events/new?${params.toString()}`);
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch new events");
-      }
-
-      const result = (await response.json()) as NewEventsResponse;
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to fetch new events");
-      }
+      const result = await fetchJson<NewEventsResponse>(
+        `/api/events/new?${params.toString()}`
+      );
 
       return {
         events: result.data || [],

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stream betting panel preview</title>
+<link rel="stylesheet" href="../src/content/knoww-inline.css" />
+<style>
+  body {
+    margin: 0; background: #0e0e10; color: #efeff1;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: 28px; display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start;
+  }
+  .col { display: flex; flex-direction: column; gap: 22px; }
+  .label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #adadb8; margin-bottom: 8px; }
+  #knoww-notification-stack { width: 340px; }
+</style>
+</head>
+<body>
+
+<!-- Collapsed pill now shows the market TITLE only (no cents). Long titles wrap
+     to at most two lines so the complete title is visible. -->
+
+<div class="col">
+  <div>
+    <div class="label">A1 · Collapsed · short title (held)</div>
+    <div id="knoww-notification-stack">
+      <div class="knoww-notification-item knoww-notification-item--stream knoww-source-polymarket">
+        <div class="knoww-notification-icon" style="background:#2a2540;color:#c9b8ff;">🎮</div>
+        <div class="knoww-notification-content">
+          <div class="knoww-stream-pill">
+            <span class="knoww-stream-pill-title">FURIA vs MOUZ</span>
+            <span class="knoww-stream-pill-hold">5 FURIA</span>
+            <span class="knoww-stream-pill-chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+        <div class="knoww-stream-bet"></div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="label">A2 · Collapsed · long title <em style="text-transform:none;color:#a8d196;">(complete, wraps to 2 lines)</em></div>
+    <div id="knoww-notification-stack">
+      <div class="knoww-notification-item knoww-notification-item--stream knoww-source-polymarket">
+        <div class="knoww-notification-icon" style="background:#c9742a;color:#fff;">🔫</div>
+        <div class="knoww-notification-content">
+          <div class="knoww-stream-pill">
+            <span class="knoww-stream-pill-title">Counter-Strike: Donstu Esports vs INFURITY Gaming</span>
+            <span class="knoww-stream-pill-chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+        <div class="knoww-stream-bet"></div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="label">B · Expanded · BUY · holding</div>
+    <div id="knoww-notification-stack">
+      <div class="knoww-notification-item knoww-notification-item--stream knoww-source-polymarket expanded">
+        <div class="knoww-notification-icon" style="background:#2a2540;color:#c9b8ff;">🎮</div>
+        <div class="knoww-notification-content">
+          <div class="knoww-stream-pill">
+            <span class="knoww-stream-pill-title">FURIA vs MOUZ</span>
+            <span class="knoww-stream-pill-hold">5 FURIA</span>
+            <span class="knoww-stream-pill-chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+        <div class="knoww-stream-bet">
+          <div class="knoww-stream-head">
+            <div class="knoww-stream-buysell">
+              <button type="button" class="knoww-stream-bs-opt sel">BUY</button>
+              <button type="button" class="knoww-stream-bs-opt">SELL</button>
+            </div>
+          </div>
+          <div class="knoww-stream-seg-row">
+            <button type="button" class="knoww-stream-seg yes sel">
+              <span class="knoww-stream-seg-name">FURIA</span><span class="knoww-stream-seg-price">60¢</span>
+            </button>
+            <button type="button" class="knoww-stream-seg no">
+              <span class="knoww-stream-seg-name">MOUZ</span><span class="knoww-stream-seg-price">41¢</span>
+            </button>
+          </div>
+          <div class="knoww-stream-actionrow">
+            <div class="knoww-stream-stepper">
+              <button type="button" class="knoww-stream-step-btn" disabled>−</button>
+              <span class="knoww-stream-step-val">$1</span>
+              <button type="button" class="knoww-stream-step-btn">+</button>
+            </div>
+            <div class="knoww-stream-action">
+              <button type="button" class="knoww-stream-trade green">
+                <span>Trade $1</span><span class="knoww-stream-trade-sub">FURIA · 60¢</span>
+              </button>
+            </div>
+          </div>
+          <div class="knoww-stream-hint-host"></div>
+          <div class="knoww-stream-hold">
+            <span class="knoww-stream-hold-text"><span class="knoww-stream-hold-label">YOU HOLD </span><span class="knoww-stream-hold-val">5 FURIA · $3.00</span></span>
+            <button type="button" class="knoww-stream-hold-sell">Sell</button>
+          </div>
+          <div class="knoww-stream-deposit-host"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="col">
+  <div>
+    <div class="label">C · Expanded · long title · NO holding</div>
+    <div id="knoww-notification-stack">
+      <div class="knoww-notification-item knoww-notification-item--stream knoww-source-polymarket expanded">
+        <div class="knoww-notification-icon" style="background:#c9742a;color:#fff;">🔫</div>
+        <div class="knoww-notification-content">
+          <div class="knoww-stream-pill">
+            <span class="knoww-stream-pill-title">Counter-Strike: Donstu Esports vs INFURITY Gaming</span>
+            <span class="knoww-stream-pill-chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+        <div class="knoww-stream-bet">
+          <div class="knoww-stream-head knoww-stream-hidden">
+            <div class="knoww-stream-buysell knoww-stream-hidden"></div>
+          </div>
+          <div class="knoww-stream-seg-row">
+            <button type="button" class="knoww-stream-seg yes sel">
+              <span class="knoww-stream-seg-name">Donstu Esports</span><span class="knoww-stream-seg-price">100¢</span>
+            </button>
+            <button type="button" class="knoww-stream-seg no">
+              <span class="knoww-stream-seg-name">INFURITY Gaming</span><span class="knoww-stream-seg-price">0¢</span>
+            </button>
+          </div>
+          <div class="knoww-stream-actionrow">
+            <div class="knoww-stream-stepper">
+              <button type="button" class="knoww-stream-step-btn">−</button>
+              <span class="knoww-stream-step-val">$5</span>
+              <button type="button" class="knoww-stream-step-btn">+</button>
+            </div>
+            <div class="knoww-stream-action">
+              <button type="button" class="knoww-stream-trade deposit">Deposit to trade $5</button>
+            </div>
+          </div>
+          <div class="knoww-stream-hint-host">
+            <div class="knoww-stream-hint">Balance $3.03 · add funds to place this trade</div>
+          </div>
+          <div class="knoww-stream-hold knoww-stream-hidden"></div>
+          <div class="knoww-stream-deposit-host"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

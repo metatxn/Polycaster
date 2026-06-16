@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { TokenPricesResponse } from "@/app/api/price/tokens/route";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -32,18 +33,10 @@ export const TOKEN_PRICES_QUERY_KEY = ["token-prices"] as const;
  * Fetch token prices from the API
  */
 async function fetchTokenPrices(): Promise<TokenPricesResponse> {
-  const response = await fetch("/api/price/tokens", {
+  return fetchJson<TokenPricesResponse>("/api/price/tokens", {
     method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
+    headers: { Accept: "application/json" },
   });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch token prices: ${response.status}`);
-  }
-
-  return response.json();
 }
 
 /**

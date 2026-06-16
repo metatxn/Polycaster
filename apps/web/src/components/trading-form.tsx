@@ -1,8 +1,8 @@
 "use client";
 
 import { formatTradingFormError } from "@knoww/shared-types/trading-errors";
-import { useAppKit } from "@reown/appkit/react";
-import { AnimatePresence, motion } from "framer-motion";
+import Decimal from "decimal.js";
+import { AnimatePresence, m } from "framer-motion";
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -21,7 +21,9 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DepositModal } from "@/components/deposit-modal";
 import { useOnboarding } from "@/context/onboarding-context";
+import { formatCents, formatProfitLabel } from "@/lib/formatters";
 import { formatSlippageDisplay } from "@/lib/slippage";
+import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
 import { useTradingFormState } from "./trading/hooks/use-trading-form-state";
 import { LimitExpiration } from "./trading/limit-expiration";
 import { MergeSharesModal } from "./trading/merge-shares-modal";
@@ -121,6 +123,28 @@ function LimitQueueStatusInline({
   );
 }
 
+function formatUsd(amount: number): string {
+  try {
+    const value = new Decimal(amount);
+    return value.isFinite() ? `$${value.toFixed(2)}` : "$0.00";
+  } catch {
+    return "$0.00";
+  }
+}
+
+function formatShareQuantity(quantity: number): string {
+  try {
+    const value = new Decimal(quantity);
+    if (!value.isFinite()) return "0";
+    const rounded = value.toDecimalPlaces(4);
+    return rounded.isInteger()
+      ? rounded.toFixed(0)
+      : rounded.toFixed().replace(/\.?0+$/, "");
+  } catch {
+    return "0";
+  }
+}
+
 /**
  * TradingForm Component (Refactored)
  *
@@ -141,9 +165,20 @@ export function TradingForm(props: TradingFormProps) {
     disableSticky = false,
   } = props;
 
-  const { open } = useAppKit();
   const { setShowOnboarding } = useOnboarding();
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      await openWalletModal();
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -214,7 +249,6 @@ export function TradingForm(props: TradingFormProps) {
   const slippageExceedsMax = slippageResult
     ? slippageResult.slippagePercent > maxSlippagePercent
     : false;
-  const formatCents = (price: number) => `${(price * 100).toFixed(1)}¢`;
 
   // LIMIT orders enforce min_order_size on both sides; MARKET sells can fill smaller.
   const belowLimitMin = orderType === "LIMIT" && shares < minShares;
@@ -243,6 +277,13 @@ export function TradingForm(props: TradingFormProps) {
     const next = Math.max(0.1, Math.min(99.9, limitPriceCents + deltaCents));
     setLimitPrice(next / 100);
   };
+  const profitLabel = formatProfitLabel(
+    calculations.potentialWin,
+    calculations.total
+  );
+  const totalLabel = formatUsd(calculations.total);
+  const shareQuantityLabel = formatShareQuantity(shares);
+  const orderActionLabel = side === "BUY" ? "Buy" : "Sell";
 
   return (
     <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
@@ -327,7 +368,7 @@ export function TradingForm(props: TradingFormProps) {
                 </button>
                 <AnimatePresence>
                   {showMoreMenu && (
-                    <motion.div
+                    <m.div
                       initial={{ opacity: 0, y: -8, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.95 }}
@@ -357,7 +398,7 @@ export function TradingForm(props: TradingFormProps) {
                         <Merge className="h-3.5 w-3.5 text-(--kwm-ink-3)" />
                         Merge
                       </button>
-                    </motion.div>
+                    </m.div>
                   )}
                 </AnimatePresence>
               </div>
@@ -391,6 +432,12 @@ export function TradingForm(props: TradingFormProps) {
                 const isYes = idx === 0;
                 const isSelected = selectedOutcomeIndex === idx;
                 const priceCents = (outcome.price ?? 0) * 100;
+                const rawLabel = outcome.name?.trim();
+                const normalizedLabel = rawLabel?.toLowerCase();
+                const label =
+                  normalizedLabel === "yes" || normalizedLabel === "no"
+                    ? normalizedLabel.toUpperCase()
+                    : rawLabel || (isYes ? "YES" : "NO");
                 return (
                   <button
                     key={outcome.tokenId ?? idx}
@@ -398,7 +445,7 @@ export function TradingForm(props: TradingFormProps) {
                     onClick={() => onOutcomeChange(idx)}
                     className={`tk-price ${isSelected ? "on" : ""} ${isYes ? "yes" : "no"}`}
                   >
-                    <span className="lbl">{isYes ? "YES" : "NO"}</span>
+                    <span className="lbl">{label}</span>
                     <span className="v tabular-nums">
                       {priceCents.toFixed(1)}
                       <span className="cent">¢</span>
@@ -548,6 +595,7 @@ export function TradingForm(props: TradingFormProps) {
             <input
               type="text"
               inputMode="numeric"
+              name="shares"
               className="tk-step-input"
               value={shares}
               onChange={(e) => {
@@ -601,6 +649,16 @@ export function TradingForm(props: TradingFormProps) {
             <div className="tk-summary">
               <div className="tk-sum-row">
                 <span className="l">
+                  {side === "BUY" ? "Cost" : "Proceeds"}
+                </span>
+                <span
+                  className={`v tabular-nums ${side === "SELL" ? "up" : ""}`}
+                >
+                  {totalLabel}
+                </span>
+              </div>
+              <div className="tk-sum-row">
+                <span className="l">
                   Return if {selectedOutcome?.name?.toUpperCase() ?? "YES"}
                 </span>
                 <span className="v up tabular-nums">
@@ -610,9 +668,12 @@ export function TradingForm(props: TradingFormProps) {
               <div className="tk-sum-row profit">
                 <span className="l">Profit</span>
                 <span className="v tabular-nums">
-                  ${(calculations.potentialWin - calculations.total).toFixed(2)}
+                  {profitLabel}
                   {calculations.total > 0 && (
-                    <span className="ret">({calculations.returnPercent}%)</span>
+                    <span className="ret">
+                      {" "}
+                      ({calculations.returnPercent}%)
+                    </span>
                   )}
                 </span>
               </div>
@@ -623,7 +684,7 @@ export function TradingForm(props: TradingFormProps) {
               variants so colors track the active theme. */}
           <AnimatePresence>
             {error && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -634,11 +695,11 @@ export function TradingForm(props: TradingFormProps) {
                     {formatTradingFormError(error.message)}
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {side === "SELL" && maxSellShares <= 0 && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -649,11 +710,11 @@ export function TradingForm(props: TradingFormProps) {
                     No {selectedOutcome?.name || "shares"} to sell
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {belowLimitMin && shares > 0 && !error && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -665,11 +726,11 @@ export function TradingForm(props: TradingFormProps) {
                     {minShares === 1 ? "" : "s"} minimum
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {hasInsufficientBalance && side === "BUY" && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -689,11 +750,11 @@ export function TradingForm(props: TradingFormProps) {
                     {(calculations.total - (effectiveBalance ?? 0)).toFixed(2)}
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {needsApproval && !hasInsufficientBalance && (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -710,7 +771,7 @@ export function TradingForm(props: TradingFormProps) {
                     </span>
                   </span>
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
 
@@ -721,10 +782,13 @@ export function TradingForm(props: TradingFormProps) {
               <button
                 type="button"
                 className="tk-cta ready"
-                onClick={() => open()}
+                disabled={connecting}
+                onMouseEnter={preloadWalletModal}
+                onFocus={preloadWalletModal}
+                onClick={() => void handleConnect()}
               >
                 <Wallet className="h-4 w-4" />
-                Connect Wallet to Trade
+                {connecting ? "Connecting…" : "Connect Wallet to Trade"}
               </button>
             ) : !hasCredentials ? (
               <button
@@ -860,10 +924,8 @@ export function TradingForm(props: TradingFormProps) {
                     ) : (
                       <TrendingDown className="h-4 w-4" />
                     )}
-                    {side === "BUY" ? "Buy" : "Sell"} {shares} @{" "}
-                    {orderType === "LIMIT"
-                      ? `${(limitPrice * 100).toFixed(1)}¢`
-                      : "Market"}
+                    {orderActionLabel} {shareQuantityLabel} shares for{" "}
+                    {totalLabel}
                   </>
                 )}
               </button>

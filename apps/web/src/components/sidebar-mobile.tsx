@@ -1,6 +1,5 @@
 "use client";
 
-import { useAppKit } from "@reown/appkit/react";
 import { Menu, Wallet } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -18,6 +17,7 @@ import {
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
 import { cn } from "@/lib/utils";
+import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
 
 /** Primary destinations — mirror of PRIMARY_LINKS in top-nav. */
 const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
@@ -49,9 +49,19 @@ export function SidebarMobile() {
   const router = useRouter();
   const pathname = usePathname();
   const { isConnected } = useConnection();
-  const { open } = useAppKit();
   const [isOpen, setIsOpen] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      await openWalletModal();
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const {
     proxyAddress: proxyWalletAddress,
@@ -215,14 +225,17 @@ export function SidebarMobile() {
             ) : !isConnected ? (
               <button
                 type="button"
+                disabled={connecting}
+                onMouseEnter={preloadWalletModal}
+                onFocus={preloadWalletModal}
                 onClick={() => {
-                  open();
+                  void handleConnect();
                   setIsOpen(false);
                 }}
                 className="w-full flex items-center justify-center gap-2 bg-foreground text-background px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.18em] hover:bg-foreground/90 transition-colors"
               >
                 <Wallet className="h-3.5 w-3.5" />
-                Connect Wallet
+                {connecting ? "Connecting…" : "Connect Wallet"}
               </button>
             ) : null}
           </div>

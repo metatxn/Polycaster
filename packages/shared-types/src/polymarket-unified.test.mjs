@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   adaptUnifiedSecureClientForLegacyClob,
+  createUnifiedPolymarketCredentialsOnlySigner,
   createUnifiedPolymarketSecureClient,
   createUnifiedPolymarketViemSigner,
   fetchUnifiedClobBuilderFeeRates,
@@ -268,6 +269,39 @@ test("createUnifiedPolymarketSecureClient maps app credentials to SDK credential
     apiKey: "key",
     apiSecret: "secret",
     apiPassphrase: "passphrase",
+  });
+});
+
+test("createUnifiedPolymarketSecureClient can block fresh auth when reusing credentials", async () => {
+  const calls = [];
+  const signer = createUnifiedPolymarketCredentialsOnlySigner("0xwallet");
+
+  await assert.rejects(
+    createUnifiedPolymarketSecureClient({
+      signer,
+      wallet: "0xwallet",
+      credentials: {
+        apiKey: "key",
+        apiSecret: "secret",
+        apiPassphrase: "passphrase",
+      },
+      allowFreshAuthentication: false,
+      createSecureClientImpl: async (options) => {
+        calls.push(options);
+        assert.equal(await options.signer.getAddress(), "0xwallet");
+        await options.signer.signTypedData({ primaryType: "ClobAuth" });
+      },
+    }),
+    {
+      name: "PolymarketFreshAuthenticationRequiredError",
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].credentials, {
+    key: "key",
+    secret: "secret",
+    passphrase: "passphrase",
   });
 });
 

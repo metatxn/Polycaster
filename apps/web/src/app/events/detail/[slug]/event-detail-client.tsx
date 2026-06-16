@@ -2,22 +2,21 @@
 
 import { createLogger } from "@knoww/logger";
 import {
-  fetchClobOrderBook,
-  fetchClobOrderBooks,
-} from "@knoww/shared-types/clob";
-import {
   getGammaYesNoMarketFields,
   resolveNegRisk,
 } from "@knoww/shared-types/polymarket";
-import Decimal from "decimal.js";
-
-const log = createLogger("event-detail");
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ChromeHeader } from "@/components/app-layout";
 import { CommentsSection } from "@/components/comments";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -26,7 +25,6 @@ import type { TimeRange } from "@/components/market-price-chart";
 import { Navbar } from "@/components/navbar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CLOB_BASE_URL } from "@/constants/polymarket";
 import type { Event } from "@/hooks/use-event-detail";
 import { useEventDetail } from "@/hooks/use-event-detail";
 import {
@@ -41,7 +39,7 @@ import { type Position, useUserPositions } from "@/hooks/use-user-positions";
 import { ensureReadableSeriesColors } from "@/lib/chart-colors";
 import { formatVolume } from "@/lib/formatters";
 import { getMarketShortLabel } from "@/lib/market-labels";
-import { SPORT_GROUPS } from "@/lib/sport-categories";
+import { qk } from "@/lib/query-keys";
 import { matchSportsEventToGame } from "@/lib/sports-event-match";
 import {
   type CachedSportsLiveGame,
@@ -55,11 +53,36 @@ import { applyLiveTradingOutcomeQuotes } from "@/lib/trading-outcome-quotes";
 import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
 import { CandidateTicker } from "./candidate-ticker";
+import {
+  CANDIDATE_PALETTE,
+  isLiveSportsEventForChart,
+  toDisplayPercentagePointChange,
+} from "./chart-range";
 import { FieldTiles } from "./field-tiles";
 import { HeaderSection } from "./header-section";
 import { MatchupOutcomes } from "./matchup-outcomes";
+import {
+  buildMatchupTradingOutcomes,
+  compactMatchupOutcomeName,
+} from "./matchup-trading-outcomes";
+import {
+  type BookSnapshot,
+  fetchBookSnapshot,
+  fetchBookSnapshots,
+  MAX_MARKETS_WITH_REST_QUOTES,
+  type TradingPanelOrderBookSnapshot,
+} from "./order-book-api";
+import {
+  findOutcomeIndexFromUrl,
+  getSportsRailActiveSlug,
+  matchupMoneylineLabel,
+  matchupMoneylineRank,
+} from "./outcome-matching";
 import { OutcomesTable } from "./outcomes-table";
 import { isTeamMatchupEvent, TeamMatchupHero } from "./team-matchup-hero";
+import { useChartRangeHistory } from "./use-chart-range-history";
+
+const log = createLogger("event-detail");
 
 // Lazy load heavy components - they're code-split into separate chunks
 const MarketPriceChart = dynamic(
@@ -98,334 +121,6 @@ interface EventDetailClientProps {
   initialEvent?: Event | null;
 }
 
-// Cap list-row REST quote hydration so large events do not fan out hundreds of
-// CLOB /book requests on first paint.
-const MAX_MARKETS_WITH_REST_QUOTES = 20;
-
-type BookSnapshot = {
-  market?: string;
-  asset_id?: string;
-  bids: Array<{ price: string; size: string }>;
-  asks: Array<{ price: string; size: string }>;
-  min_order_size?: string;
-  tick_size?: string;
-};
-
-type PriceHistoryPoint = {
-  t: number;
-  p: number;
-};
-
-type PriceHistoryBatchResponse = {
-  success: boolean;
-  histories: Array<{
-    tokenId: string;
-    history: PriceHistoryPoint[];
-  }>;
-};
-
-/**
- * Per-outcome palette for the multi-series chart, the field tiles, and the
- * outcomes table — single source of truth so a contender's color is the
- * same everywhere on the page. 5 colors chosen to read on both light and
- * dark themes; cycles for events with more than 5 outcomes.
- */
-const CANDIDATE_PALETTE = [
-  "hsl(221, 83%, 53%)", // Blue
-  "hsl(25, 95%, 53%)", // Orange
-  "hsl(280, 70%, 55%)", // Purple
-  "hsl(142, 76%, 36%)", // Green
-  "hsl(340, 82%, 52%)", // Rose
-];
-
-const chartTimeRangeToStartTsOffset: Record<TimeRange, number> = {
-  "30M": 30 * 60,
-  "1H": 60 * 60,
-  "2H": 2 * 60 * 60,
-  "3H": 3 * 60 * 60,
-  "6H": 6 * 60 * 60,
-  "1D": 24 * 60 * 60,
-  "1W": 7 * 24 * 60 * 60,
-  "1M": 30 * 24 * 60 * 60,
-  ALL: 365 * 24 * 60 * 60,
-};
-
-const chartTimeRangeToFidelity: Record<Exclude<TimeRange, "ALL">, number> = {
-  "30M": 1,
-  "1H": 1,
-  "2H": 1,
-  "3H": 1,
-  "6H": 1,
-  "1D": 5,
-  "1W": 30,
-  "1M": 120,
-};
-
-function computeAllRangeFidelity(spanSeconds: number): number {
-  const spanMinutes = spanSeconds / 60;
-  const raw = Math.max(1, Math.round(spanMinutes / 400));
-  const buckets = [1, 5, 15, 30, 60, 120, 240, 360, 720, 1440];
-  for (const bucket of buckets) {
-    if (raw <= bucket) return bucket;
-  }
-  return 1440;
-}
-
-function getChartRangePriceHistoryRequest(
-  timeRange: TimeRange,
-  startDate: string | undefined
-): { startTs: number; fidelity: number } {
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  if (timeRange === "ALL") {
-    const parsedStart = startDate
-      ? Math.floor(new Date(startDate).getTime() / 1000)
-      : Number.NaN;
-    const fallback = nowSec - chartTimeRangeToStartTsOffset.ALL;
-    const startTs = Number.isFinite(parsedStart)
-      ? Math.min(parsedStart, nowSec)
-      : fallback;
-
-    return {
-      startTs,
-      fidelity: computeAllRangeFidelity(Math.max(60, nowSec - startTs)),
-    };
-  }
-
-  return {
-    startTs: nowSec - chartTimeRangeToStartTsOffset[timeRange],
-    fidelity: chartTimeRangeToFidelity[timeRange],
-  };
-}
-
-function isLiveSportsEventForChart(event: Event | null | undefined): boolean {
-  if (
-    !event ||
-    !isTeamMatchupEvent(event.teams) ||
-    event.closed === true ||
-    event.archived === true
-  ) {
-    return false;
-  }
-
-  if (event.live === true || event.score || event.period || event.elapsed) {
-    return true;
-  }
-
-  const kickoffMs = event.startTime ? new Date(event.startTime).getTime() : NaN;
-  if (!Number.isFinite(kickoffMs)) return false;
-
-  const elapsedMs = Date.now() - kickoffMs;
-  return elapsedMs >= 0 && elapsedMs < 8 * 60 * 60 * 1000;
-}
-
-async function fetchBookSnapshot(
-  tokenId: string
-): Promise<BookSnapshot | null> {
-  try {
-    return await fetchClobOrderBook(tokenId, { host: CLOB_BASE_URL });
-  } catch {
-    return null;
-  }
-}
-
-async function fetchBookSnapshots(tokenIds: string[]): Promise<BookSnapshot[]> {
-  if (tokenIds.length === 0) return [];
-
-  try {
-    return await fetchClobOrderBooks(tokenIds, { host: CLOB_BASE_URL });
-  } catch {
-    return [];
-  }
-}
-
-async function fetchPriceHistoryBatch(
-  tokenIds: string[],
-  startTs: number,
-  fidelity: number
-): Promise<PriceHistoryBatchResponse["histories"]> {
-  if (tokenIds.length === 0) return [];
-
-  const response = await fetch("/api/markets/price-history/batch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tokenIds, startTs, fidelity }),
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch price history");
-  }
-
-  const data = (await response.json()) as PriceHistoryBatchResponse;
-  return data.success ? data.histories : [];
-}
-
-function toDisplayPercentagePointChange(changeFraction: number): number {
-  if (!Number.isFinite(changeFraction)) return 0;
-
-  const percentagePoints = new Decimal(changeFraction).mul(100);
-  const rounded = percentagePoints
-    .toDecimalPlaces(
-      percentagePoints.abs().lt(1) ? 1 : 0,
-      Decimal.ROUND_HALF_UP
-    )
-    .toNumber();
-
-  return Object.is(rounded, -0) ? 0 : rounded;
-}
-
-function normalizeOutcomeName(value: unknown): string {
-  if (value == null) return "";
-
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function getSportsRailActiveSlug(event: Event | null | undefined): string {
-  if (!event) return "sports";
-
-  const searchableValues = [
-    event.slug,
-    event.title,
-    ...(event.tags ?? []),
-    ...(event.markets ?? []).flatMap((market) => [
-      market.slug,
-      market.question,
-      market.groupItemTitle,
-      market.parentEventTitle,
-      market.sportsMarketType,
-    ]),
-    ...(event.teams ?? []).flatMap((team) => [
-      team.name,
-      team.abbreviation,
-      team.alias,
-      team.league,
-    ]),
-  ]
-    .map(normalizeOutcomeName)
-    .filter(Boolean);
-
-  for (const group of SPORT_GROUPS) {
-    for (const league of group.leagues) {
-      const leagueCandidates = [league.slug, league.label, league.tagSlug].map(
-        normalizeOutcomeName
-      );
-
-      if (
-        leagueCandidates.some((candidate) =>
-          searchableValues.some((value) => value.includes(candidate))
-        )
-      ) {
-        return league.slug;
-      }
-    }
-
-    const groupCandidates = [group.slug, group.label, group.tagSlug].map(
-      normalizeOutcomeName
-    );
-    if (
-      groupCandidates.some((candidate) =>
-        searchableValues.some((value) => value.includes(candidate))
-      )
-    ) {
-      return group.slug;
-    }
-  }
-
-  return "sports";
-}
-
-function findOutcomeIndexFromUrl(
-  rawOutcome: string | undefined,
-  outcomes: OutcomeData[],
-  selectedMarket: { groupItemTitle?: string; question?: string } | null,
-  event: Event | null
-): number {
-  const target = normalizeOutcomeName(rawOutcome);
-  if (!target) return -1;
-
-  const directIndex = outcomes.findIndex(
-    (outcome) => normalizeOutcomeName(outcome.name) === target
-  );
-  if (directIndex !== -1) return directIndex;
-
-  if (
-    selectedMarket &&
-    normalizeOutcomeName(selectedMarket.groupItemTitle) === target
-  ) {
-    return 0;
-  }
-
-  if (event?.teams?.length) {
-    const teamIndex = event.teams.findIndex((team) => {
-      const names = [team.name, team.abbreviation, team.alias].map(
-        normalizeOutcomeName
-      );
-      return names.some((name) => name && name === target);
-    });
-    if (teamIndex !== -1) {
-      const marketText = normalizeOutcomeName(
-        `${selectedMarket?.groupItemTitle ?? ""} ${
-          selectedMarket?.question ?? ""
-        }`
-      );
-      const team = event.teams[teamIndex];
-      const teamNames = [team.name, team.abbreviation, team.alias]
-        .map(normalizeOutcomeName)
-        .filter(Boolean);
-      if (teamNames.some((name) => marketText.includes(name))) return 0;
-    }
-  }
-
-  return -1;
-}
-
-function matchupMoneylineRank(
-  rawLabel: string | undefined,
-  teams: NonNullable<Event["teams"]>
-): number {
-  const label = normalizeOutcomeName(rawLabel);
-  if (!label) return 3;
-  if (label.startsWith("draw")) return 1;
-
-  const teamIndex = teams.findIndex((team) => {
-    const names = [team.name, team.abbreviation, team.alias]
-      .map(normalizeOutcomeName)
-      .filter(Boolean);
-    return names.some(
-      (name) => label === name || label.includes(name) || name.includes(label)
-    );
-  });
-
-  if (teamIndex === 0) return 0;
-  if (teamIndex === 1) return 2;
-  return 3;
-}
-
-function matchupMoneylineLabel(
-  rawLabel: string | undefined,
-  teams: NonNullable<Event["teams"]>
-): string {
-  const rank = matchupMoneylineRank(rawLabel, teams);
-  if (rank === 0) return teams[0]?.name.trim() || "Team A";
-  if (rank === 1) return "Draw";
-  if (rank === 2) return teams[1]?.name.trim() || "Team B";
-  return (rawLabel || "Moneyline").replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
-
-// Dedicated trading-panel order book snapshot shape.
-// Keep this separate from other ["orderBook", tokenId] query consumers so the
-// trading form never reads an incompatible cached payload and waits for staleness.
-interface TradingPanelOrderBookSnapshot {
-  bids: Array<{ price: string; size: string }>;
-  asks: Array<{ price: string; size: string }>;
-  min_order_size: string;
-  tick_size: string;
-}
-
 export default function EventDetailClient({
   slug: eventSlugOrId,
   initialEvent,
@@ -442,9 +137,11 @@ export default function EventDetailClient({
   // Parse initial values from URL
   const initialSide: TradingSide | undefined =
     urlSide === "SELL" || urlSide === "BUY" ? urlSide : undefined;
-  const initialShares: number | undefined = urlShares
-    ? Number.parseFloat(urlShares)
-    : undefined;
+  const parsedShares = urlShares ? Number.parseFloat(urlShares) : Number.NaN;
+  const initialShares: number | undefined =
+    Number.isFinite(parsedShares) && parsedShares > 0
+      ? parsedShares
+      : undefined;
   const initialOutcomeFromUrl = urlOutcome?.toLowerCase();
 
   const [selectedMarketId, setSelectedMarketId] = useState<string>("");
@@ -462,12 +159,13 @@ export default function EventDetailClient({
   >(null);
   // Outcome table collapse state - using Tailwind's 'lg' breakpoint (1024px)
   // Collapsed below lg (covers iPad Air 820px), expanded at lg and above
-  const [isOutcomeTableExpanded, setIsOutcomeTableExpanded] = useState(() => {
-    if (typeof window !== "undefined") {
-      return window.matchMedia("(min-width: 1024px)").matches; // Tailwind 'lg' breakpoint
-    }
-    return true; // Default to expanded for SSR
-  });
+  // Must match the server-rendered value (true) on the first client render,
+  // or hydration fails below the lg breakpoint; the real viewport check runs
+  // pre-paint after mount.
+  const [isOutcomeTableExpanded, setIsOutcomeTableExpanded] = useState(true);
+  useLayoutEffect(() => {
+    setIsOutcomeTableExpanded(window.matchMedia("(min-width: 1024px)").matches);
+  }, []);
   const [isScrolled, setIsScrolled] = useState(false);
   const [cachedLiveGame, setCachedLiveGame] =
     useState<CachedSportsLiveGame | null>(null);
@@ -526,7 +224,7 @@ export default function EventDetailClient({
       if (!tokenId) return;
       try {
         const data = await queryClient.fetchQuery<BookSnapshot>({
-          queryKey: ["orderBook", tokenId],
+          queryKey: qk.orderBook(tokenId),
           queryFn: async () => {
             const snapshot = await fetchBookSnapshot(tokenId);
             if (!snapshot) {
@@ -1112,12 +810,23 @@ export default function EventDetailClient({
   // Seed the outcome-table inline quotes from REST before any row is clicked.
   // The websocket subscription below is intentionally narrower; it switches on
   // for the market the user selects or expands.
-  const restQuoteTokenIds = useMemo(
+  const chartQuoteTokenIds = useMemo(
     () => [
       ...new Set(
         sortedMarketData
           .slice(0, MAX_MARKETS_WITH_REST_QUOTES)
           .map((market) => market.yesTokenId)
+          .filter((tokenId): tokenId is string => Boolean(tokenId))
+      ),
+    ],
+    [sortedMarketData]
+  );
+  const restQuoteTokenIds = useMemo(
+    () => [
+      ...new Set(
+        sortedMarketData
+          .slice(0, MAX_MARKETS_WITH_REST_QUOTES)
+          .flatMap((market) => [market.yesTokenId, market.noTokenId])
           .filter((tokenId): tokenId is string => Boolean(tokenId))
       ),
     ],
@@ -1157,58 +866,12 @@ export default function EventDetailClient({
     return earliest;
   }, [allMarkets, event?.startTime]);
 
-  const chartRangeHistoryRequest = useMemo(
-    () => getChartRangePriceHistoryRequest(chartTimeRange, earliestCreatedAt),
-    [chartTimeRange, earliestCreatedAt]
+  const { chartRangeChangeByTokenId } = useChartRangeHistory(
+    chartTimeRange,
+    chartQuoteTokenIds,
+    earliestCreatedAt,
+    sortedMarketData
   );
-
-  const { data: chartRangePriceHistories } = useQuery({
-    queryKey: [
-      "priceHistory",
-      "outcome-table",
-      chartTimeRange,
-      restQuoteTokenIds,
-      chartRangeHistoryRequest.startTs,
-      chartRangeHistoryRequest.fidelity,
-    ],
-    queryFn: () =>
-      fetchPriceHistoryBatch(
-        restQuoteTokenIds,
-        chartRangeHistoryRequest.startTs,
-        chartRangeHistoryRequest.fidelity
-      ),
-    enabled: restQuoteTokenIds.length > 0,
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-  });
-
-  const chartRangeChangeByTokenId = useMemo(() => {
-    const map = new Map<string, number>();
-
-    if (!chartRangePriceHistories) return map;
-
-    const currentPriceByTokenId = new Map(
-      sortedMarketData.map((market) => [
-        market.yesTokenId,
-        Number.parseFloat(market.yesPrice),
-      ])
-    );
-
-    for (const entry of chartRangePriceHistories) {
-      const history = entry.history || [];
-      const reference = history.find((point) => Number.isFinite(point.p));
-      const current = currentPriceByTokenId.get(entry.tokenId);
-
-      if (!reference || !Number.isFinite(current)) continue;
-
-      const change = toDisplayPercentagePointChange(
-        (current ?? 0) - reference.p
-      );
-      map.set(entry.tokenId, change);
-    }
-
-    return map;
-  }, [chartRangePriceHistories, sortedMarketData]);
 
   const sortedMarketDataWithChartRangeChange = useMemo(
     () =>
@@ -1222,8 +885,8 @@ export default function EventDetailClient({
   const displayQuoteTokenIds = useMemo(
     () =>
       sortedMarketDataWithChartRangeChange
-        .filter((market) => market.negRisk && market.yesTokenId)
-        .map((market) => market.yesTokenId),
+        .flatMap((market) => [market.yesTokenId, market.noTokenId])
+        .filter((tokenId): tokenId is string => Boolean(tokenId)),
     [sortedMarketDataWithChartRangeChange]
   );
   const displayQuoteBestAskKey = useOrderBookStore((state) =>
@@ -1245,20 +908,25 @@ export default function EventDetailClient({
   const matchupMarketDataWithDisplayQuotes = useMemo(
     () =>
       sortedMarketDataWithChartRangeChange.map((market) => {
-        if (!market.negRisk || !market.yesTokenId) return market;
+        const yesBestAsk = displayQuoteBestAskByTokenId.get(market.yesTokenId);
+        const noBestAsk = displayQuoteBestAskByTokenId.get(market.noTokenId);
+        const hasYesBestAsk =
+          yesBestAsk !== null &&
+          yesBestAsk !== undefined &&
+          Number.isFinite(yesBestAsk);
+        const hasNoBestAsk =
+          noBestAsk !== null &&
+          noBestAsk !== undefined &&
+          Number.isFinite(noBestAsk);
 
-        const bestAsk = displayQuoteBestAskByTokenId.get(market.yesTokenId);
-        if (
-          bestAsk === null ||
-          bestAsk === undefined ||
-          !Number.isFinite(bestAsk)
-        ) {
+        if (!hasYesBestAsk && !hasNoBestAsk) {
           return market;
         }
 
         return {
           ...market,
-          displayYesPrice: String(bestAsk),
+          ...(hasYesBestAsk ? { displayYesPrice: String(yesBestAsk) } : {}),
+          ...(hasNoBestAsk ? { displayNoPrice: String(noBestAsk) } : {}),
         };
       }),
     [displayQuoteBestAskByTokenId, sortedMarketDataWithChartRangeChange]
@@ -1272,7 +940,7 @@ export default function EventDetailClient({
     const seedBooks = async () => {
       try {
         const books = await queryClient.fetchQuery<BookSnapshot[]>({
-          queryKey: ["orderBooks", restQuoteTokenIds],
+          queryKey: qk.orderBooks(restQuoteTokenIds),
           queryFn: () => fetchBookSnapshots(restQuoteTokenIds),
           staleTime: 30_000,
         });
@@ -1368,7 +1036,7 @@ export default function EventDetailClient({
   // was seeded by another call site.
   const { data: orderBookData } =
     useQuery<TradingPanelOrderBookSnapshot | null>({
-      queryKey: ["orderBook", currentTokenId],
+      queryKey: qk.orderBook(currentTokenId),
       queryFn: async (): Promise<TradingPanelOrderBookSnapshot | null> => {
         if (!currentTokenId) return null;
         // Uses the shared V2→V1 fallback helper: during pre-cutover, V2
@@ -1728,6 +1396,50 @@ export default function EventDetailClient({
     : isSingleMarketEvent
       ? chartMarket?.yesTokenId
       : chartMarket?.yesTokenId;
+  const matchupTradingMoneylineMarkets = isMatchup
+    ? matchupMarketDataWithDisplayQuotes
+        .filter((m) => (m.sportsMarketType ?? "").toLowerCase() === "moneyline")
+        .sort(
+          (a, b) =>
+            matchupMoneylineRank(a.groupItemTitle, matchupTeams) -
+            matchupMoneylineRank(b.groupItemTitle, matchupTeams)
+        )
+    : [];
+  const isGroupedMoneylineTradingPanel =
+    isMatchup &&
+    selectedMarket?.sportsMarketType?.toLowerCase() === "moneyline" &&
+    matchupTradingMoneylineMarkets.length > 1;
+  const isMatchupMoneylineTradingPanel =
+    isMatchup &&
+    selectedMarket?.sportsMarketType?.toLowerCase() === "moneyline";
+  const tradingFormOutcomes = isGroupedMoneylineTradingPanel
+    ? buildMatchupTradingOutcomes(matchupTradingMoneylineMarkets, matchupTeams)
+    : isMatchupMoneylineTradingPanel
+      ? tradingOutcomes.map((outcome) => ({
+          ...outcome,
+          name: compactMatchupOutcomeName(outcome.name, matchupTeams),
+        }))
+      : tradingOutcomes;
+  const tradingFormSelectedOutcomeIndex = isGroupedMoneylineTradingPanel
+    ? Math.max(
+        0,
+        matchupTradingMoneylineMarkets.findIndex(
+          (market) => market.id === selectedMarket?.id
+        )
+      )
+    : selectedOutcomeIndex;
+  const handleTradingFormOutcomeChange = (nextIndex: number) => {
+    if (isGroupedMoneylineTradingPanel) {
+      const nextMarket = matchupTradingMoneylineMarkets[nextIndex];
+      if (nextMarket) {
+        setSelectedMarketId(nextMarket.id);
+        setSelectedOutcomeIndex(0);
+        return;
+      }
+    }
+
+    setSelectedOutcomeIndex(nextIndex);
+  };
   const sportsRailActiveSlug = isTeamMatchupEvent(event.teams)
     ? getSportsRailActiveSlug(event)
     : undefined;
@@ -1930,7 +1642,7 @@ export default function EventDetailClient({
 
               {/* Trading Panel - Sticky on desktop, spans both rows so it sticks alongside comments too */}
               <div className="lg:col-span-1 lg:row-span-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
-                {selectedMarket && tradingOutcomes.length > 0 && (
+                {selectedMarket && tradingFormOutcomes.length > 0 && (
                   <ErrorBoundary name="Trading Form">
                     <TradingForm
                       marketTitle={
@@ -1939,11 +1651,12 @@ export default function EventDetailClient({
                           : selectedMarket.groupItemTitle || event.title
                       }
                       tokenId={
-                        tradingOutcomes[selectedOutcomeIndex]?.tokenId || ""
+                        tradingFormOutcomes[tradingFormSelectedOutcomeIndex]
+                          ?.tokenId || ""
                       }
-                      outcomes={tradingOutcomes}
-                      selectedOutcomeIndex={selectedOutcomeIndex}
-                      onOutcomeChange={setSelectedOutcomeIndex}
+                      outcomes={tradingFormOutcomes}
+                      selectedOutcomeIndex={tradingFormSelectedOutcomeIndex}
+                      onOutcomeChange={handleTradingFormOutcomeChange}
                       negRisk={resolveNegRisk(selectedMarket, event)}
                       tickSize={tickSize}
                       minOrderSize={minOrderSize}

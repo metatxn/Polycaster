@@ -153,15 +153,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const counts = await mapWithConcurrency(
-      slugs,
-      COUNT_FETCH_CONCURRENCY,
-      (slug) => fetchCount(COUNT_FILTERS_BY_TAG_SLUG.get(slug), false)
-    );
-    const liveCount = await fetchCount(
-      COUNT_FILTERS_BY_TAG_SLUG.get(ALL_SPORTS_TAG_SLUG),
-      true
-    );
+    // Run the live count concurrently with the per-slug pool instead of
+    // paying one extra serial round-trip after it.
+    const [counts, liveCount] = await Promise.all([
+      mapWithConcurrency(slugs, COUNT_FETCH_CONCURRENCY, (slug) =>
+        fetchCount(COUNT_FILTERS_BY_TAG_SLUG.get(slug), false)
+      ),
+      fetchCount(COUNT_FILTERS_BY_TAG_SLUG.get(ALL_SPORTS_TAG_SLUG), true),
+    ]);
 
     const byTagSlug: Record<string, number> = {};
     let sportsTotal = 0;
@@ -237,11 +236,13 @@ async function fetchCount(
         continue;
       }
 
+      // Counting pages may be up to 60s stale — acceptable for a count
+      // badge that's already edge-cached for 60s (s-maxage).
       const page = await fetchGammaKeysetPage<SportsEventActivityCandidate>(
         {
           endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
           params,
-          cache: "no-store",
+          revalidate: CACHE_DURATION.EVENTS,
         },
         ["events", "data"]
       );

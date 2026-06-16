@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "vitest";
 
 declare const process: { cwd(): string };
-declare function require(moduleName: string): unknown;
-
-const { readFileSync } = require("node:fs") as {
-  readFileSync(path: string, options: { encoding: "utf8" }): string;
-};
-const { join } = require("node:path") as {
-  join(...parts: string[]): string;
-};
 
 function readInlineCss(): string {
   return readFileSync(join(process.cwd(), "src/content/knoww-inline.css"), {
@@ -59,7 +53,7 @@ test("notification monetary display calculations use Decimal.js", () => {
   const volumeFormatter = extractFunctionSource(uiSource, "formatMarketVolume");
   const priceRenderer = extractFunctionSource(uiSource, "renderEditorialPrice");
 
-  assert.equal(/import Decimal from "decimal\.js";/.test(uiSource), true);
+  assert.equal(/import \{ Decimal \} from "decimal\.js";/.test(uiSource), true);
   assert.equal(/toDecimal\(/.test(volumeFormatter), true);
   assert.equal(/toDecimal\(prices\[[^\]]+\]\)/.test(priceRenderer), true);
   assert.equal(
@@ -324,7 +318,7 @@ test("notification click scrolls to cards without any highlight pulse", () => {
   assert.equal(/classList\.remove\("knoww-highlight"\)/.test(uiSource), false);
 });
 
-test("notification panel see all expands the in-page list", () => {
+test("notification panel does not expose the footer see all control", () => {
   const css = readInlineCss();
   const uiSource = readSource("src/content/ui.ts");
 
@@ -352,12 +346,10 @@ test("notification panel see all expands the in-page list", () => {
     ),
     true
   );
-  assert.equal(
-    /seeAll\.textContent\s*=\s*formatSeeAllLabel\(expanded,\s*0,\s*0\)/.test(
-      uiSource
-    ),
-    true
-  );
+  assert.equal(/knoww-stack-footer-see-all/.test(uiSource), false);
+  assert.equal(/knoww-stack-footer-see-all/.test(css), false);
+  assert.equal(/notification_stack_see_all_clicked/.test(uiSource), false);
+  assert.equal(/formatSeeAllLabel/.test(uiSource), false);
   assert.equal(
     /window\.open\(\s*KNOWW_APP_URL\s*\|\|\s*"https:\/\/knoww\.app"/.test(
       uiSource
@@ -366,7 +358,24 @@ test("notification panel see all expands the in-page list", () => {
   );
 });
 
-test("notification panel uses user-facing seen earlier copy and count-aware footer", () => {
+test("notification panel shows trending between active and seen earlier", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const updateSource = extractFunctionSource(
+    uiSource,
+    "updateNotificationStack"
+  );
+  const activeIndex = updateSource.indexOf('"Active now"');
+  const trendingIndex = updateSource.indexOf("appendTrendingSection(");
+  const seenIndex = updateSource.indexOf('"Seen earlier"');
+
+  assert.notEqual(activeIndex, -1);
+  assert.notEqual(trendingIndex, -1);
+  assert.notEqual(seenIndex, -1);
+  assert.equal(activeIndex < trendingIndex, true);
+  assert.equal(trendingIndex < seenIndex, true);
+});
+
+test("notification panel uses user-facing seen earlier copy without count-aware footer", () => {
   const uiSource = readSource("src/content/ui.ts");
 
   assert.equal(/"Seen earlier"/.test(uiSource), true);
@@ -375,14 +384,17 @@ test("notification panel uses user-facing seen earlier copy and count-aware foot
     /function formatSeeAllLabel\(\s*expanded:\s*boolean,\s*totalAvailable:\s*number,\s*totalDisplayed:\s*number\s*\):\s*string/.test(
       uiSource
     ),
-    true
+    false
   );
-  assert.equal(/return `See all \$\{totalAvailable\} →`;/.test(uiSource), true);
+  assert.equal(
+    /return `See all \$\{totalAvailable\} →`;/.test(uiSource),
+    false
+  );
   assert.equal(
     /updateStackSeeAllButton\(\s*cachedStackExpanded,\s*totalAvailable,\s*totalDisplayed\s*\)/.test(
       uiSource
     ),
-    true
+    false
   );
 });
 

@@ -20,6 +20,7 @@ import {
 } from "lightweight-charts";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { qk } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
 /**
@@ -401,12 +402,11 @@ export function MarketPriceChart({
     isFetching,
     error,
   } = useQuery({
-    queryKey: [
-      "priceHistory",
+    queryKey: qk.market.priceHistory(
       allFetchTokens.map((t) => t.tokenId),
       timeRange,
-      fidelity,
-    ],
+      fidelity
+    ),
     queryFn: async () => {
       const byToken = await fetchPriceHistoryBatch(
         allFetchTokens.map((t) => t.tokenId),

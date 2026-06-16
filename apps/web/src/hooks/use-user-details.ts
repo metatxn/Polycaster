@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -68,14 +69,9 @@ async function fetchUserDetails(
     category: options.category || "overall",
   });
 
-  const response = await fetch(`/api/user/details?${params.toString()}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch user details");
-  }
-
-  return response.json() as Promise<UserDetailsResponse>;
+  return fetchJson<UserDetailsResponse>(
+    `/api/user/details?${params.toString()}`
+  );
 }
 
 /**

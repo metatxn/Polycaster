@@ -1,5 +1,6 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { runBacktest } from "@/lib/insider/backtest";
 
@@ -128,21 +129,13 @@ export async function GET(request: NextRequest) {
     };
 
     if (options.minDaysAgo >= options.maxDaysAgo) {
-      return NextResponse.json(
-        { error: "minDaysAgo must be less than maxDaysAgo" },
-        { status: 400 }
-      );
+      return jsonError("minDaysAgo must be less than maxDaysAgo", 400);
     }
 
     const result = await runBacktest(options);
     return NextResponse.json(result);
   } catch (error) {
     log.error("run.failed", { error });
-    return NextResponse.json(
-      {
-        error: "Backtest failed",
-      },
-      { status: 500 }
-    );
+    return jsonError("Backtest failed", 500);
   }
 }

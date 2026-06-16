@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -67,14 +68,9 @@ async function fetchLeaderboard(
   if (options.user) params.set("user", options.user);
   if (options.userName) params.set("userName", options.userName);
 
-  const response = await fetch(`/api/leaderboard?${params.toString()}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch leaderboard");
-  }
-
-  return response.json();
+  return fetchJson<LeaderboardResponse>(
+    `/api/leaderboard?${params.toString()}`
+  );
 }
 
 export function useLeaderboard(options: UseLeaderboardOptions = {}) {
@@ -112,6 +108,12 @@ export function useLeaderboard(options: UseLeaderboardOptions = {}) {
     enabled,
     staleTime: 60 * 1000, // 1 minute
     refetchInterval: 60 * 1000, // Refetch every minute
+    // When the queryKey changes (filter/page change) keep serving the
+    // previous key's rows (`isPlaceholderData: true`) while the new fetch
+    // is in flight. Consumers can then keep the old list on screen instead
+    // of collapsing to a skeleton — an uncached filter change otherwise
+    // shrinks the document and the browser clamps scrollY to 0.
+    placeholderData: keepPreviousData,
   });
 }
 

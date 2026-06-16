@@ -40,6 +40,19 @@ interface TagEventsContentProps {
   initialTag?: InitialTagData | null;
 }
 
+function getVolumeOrderField(volumeWindow: string) {
+  switch (volumeWindow) {
+    case "1wk":
+      return "volume1wk";
+    case "1mo":
+      return "volume1mo";
+    case "1yr":
+      return "volume1yr";
+    default:
+      return "volume24hr";
+  }
+}
+
 export function TagEventsContent({
   tagSlug,
   initialData,
@@ -51,6 +64,11 @@ export function TagEventsContent({
 
   const { filters, hasActiveFilters, serverFilterParams, apiQueryParams } =
     useEventFilters();
+
+  const volumeOrderField = useMemo(
+    () => getVolumeOrderField(filters.volumeWindow),
+    [filters.volumeWindow]
+  );
 
   const applyDateFilter = useCallback(
     <T extends EventWithDates>(events: T[]): T[] => {
@@ -92,7 +110,7 @@ export function TagEventsContent({
   } = usePaginatedEvents({
     tagSlug: canonicalTagSlug,
     limit: 20,
-    order: "volume24hr",
+    order: volumeOrderField,
     ascending: false,
     closed: apiQueryParams.closed,
     filters: serverFilterParams,
@@ -145,6 +163,8 @@ export function TagEventsContent({
       <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
+        <h1 className="sr-only">{tagLabel} markets</h1>
+
         <ProductHero
           breadcrumbs={[
             { label: "Markets", href: "/markets" },
@@ -174,7 +194,7 @@ export function TagEventsContent({
           }
         />
 
-        <EventFilterBar />
+        <EventFilterBar showTags={false} />
 
         <div className="animate-in fade-in duration-500">
           {error && (

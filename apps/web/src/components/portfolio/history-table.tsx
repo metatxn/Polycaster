@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { BarChart3, ExternalLink, Loader2, Trash2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -222,7 +222,7 @@ export function HistoryTable({
               : "text-red-600 dark:text-red-400";
 
           return (
-            <motion.div
+            <m.div
               key={trade.id}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -321,7 +321,7 @@ export function HistoryTable({
                   </a>
                 )}
               </div>
-            </motion.div>
+            </m.div>
           );
         })}
       </div>
@@ -343,7 +343,7 @@ export function HistoryTable({
               : "text-red-600 dark:text-red-400";
 
           return (
-            <motion.div
+            <m.div
               key={trade.id}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -418,7 +418,7 @@ export function HistoryTable({
                   </a>
                 )}
               </div>
-            </motion.div>
+            </m.div>
           );
         })}
       </div>

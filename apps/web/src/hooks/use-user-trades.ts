@@ -2,6 +2,7 @@
 
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -117,14 +118,7 @@ async function fetchTrades(
     params.set("endDate", options.endDate);
   }
 
-  const response = await fetch(`/api/user/trades?${params.toString()}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch trades");
-  }
-
-  return response.json() as Promise<TradesResponse>;
+  return fetchJson<TradesResponse>(`/api/user/trades?${params.toString()}`);
 }
 
 /**

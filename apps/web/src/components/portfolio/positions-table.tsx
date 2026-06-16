@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { BarChart3 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -224,7 +224,7 @@ export function PositionsTable({
                 : "text-muted-foreground";
 
           return (
-            <motion.div
+            <m.div
               key={position.id}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -312,7 +312,7 @@ export function PositionsTable({
                   </span>
                 </Link>
               </div>
-            </motion.div>
+            </m.div>
           );
         })}
 
@@ -371,7 +371,7 @@ export function PositionsTable({
                 : "text-muted-foreground";
 
           return (
-            <motion.div
+            <m.div
               key={position.id}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -467,7 +467,7 @@ export function PositionsTable({
                   </span>
                 </Link>
               </div>
-            </motion.div>
+            </m.div>
           );
         })}
 

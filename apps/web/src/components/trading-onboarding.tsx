@@ -3,7 +3,6 @@
 import { createLogger } from "@knoww/logger";
 import { SHOW_EOA_OPTION } from "@knoww/shared-types/polymarket";
 import { formatTradingOnboardingError } from "@knoww/shared-types/trading-errors";
-import { useAppKit } from "@reown/appkit/react";
 import Decimal from "decimal.js";
 import { Key, Loader2, Wallet, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -14,6 +13,7 @@ import { useRelayerClient } from "@/hooks/use-relayer-client";
 import { useTradingWalletMode } from "@/hooks/use-trading-wallet-mode";
 import { checkAllApprovals } from "@/lib/approvals";
 import { cn } from "@/lib/utils";
+import { openWalletModalStrict } from "@/lib/wallet-modal";
 
 const log = createLogger("trading-onboarding");
 
@@ -126,7 +126,6 @@ export function TradingOnboarding({
   onClose,
 }: TradingOnboardingProps) {
   const { isConnected } = useConnection();
-  const { open } = useAppKit();
   const {
     mode: walletMode,
     setMode: setWalletMode,
@@ -287,7 +286,7 @@ export function TradingOnboarding({
   const handleConnectWallet = useCallback(async () => {
     updateStepStatus("connect", "in_progress");
     try {
-      await open();
+      await openWalletModalStrict();
     } catch (err) {
       updateStepStatus(
         "connect",
@@ -295,7 +294,7 @@ export function TradingOnboarding({
         formatTradingOnboardingError(err, "Failed to connect wallet")
       );
     }
-  }, [open, updateStepStatus]);
+  }, [updateStepStatus]);
 
   const handleDeploySafe = useCallback(async () => {
     if (walletMode === "eoa") {

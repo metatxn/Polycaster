@@ -1,5 +1,5 @@
 import { formatOrderExpiration } from "@knoww/shared-types/orders";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Coins, Loader2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -191,7 +191,7 @@ export function OrdersTable({
             order.market?.question || `Token ${order.tokenId.slice(0, 8)}…`;
 
           return (
-            <motion.div
+            <m.div
               key={order.id}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -276,7 +276,7 @@ export function OrdersTable({
                   )}
                 </button>
               </div>
-            </motion.div>
+            </m.div>
           );
         })}
       </div>
@@ -292,7 +292,7 @@ export function OrdersTable({
             order.market?.question || `Token ${order.tokenId.slice(0, 8)}…`;
 
           return (
-            <motion.div
+            <m.div
               key={order.id}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -388,7 +388,7 @@ export function OrdersTable({
                   )}
                 </button>
               </div>
-            </motion.div>
+            </m.div>
           );
         })}
       </div>

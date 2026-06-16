@@ -110,19 +110,22 @@ async function getTraderXProfileIndex(): Promise<Map<string, TraderXProfile>> {
 async function refreshTraderXProfileIndex(): Promise<
   Map<string, TraderXProfile>
 > {
-  const traders: unknown[] = [];
-
-  for (const orderBy of LEADERBOARD_ORDERS) {
-    for (
-      let offset = 0;
-      offset <= LEADERBOARD_MAX_OFFSET;
-      offset += LEADERBOARD_LIMIT
-    ) {
-      const page = await fetchLeaderboardPage(orderBy, offset);
-      traders.push(...page);
-      if (page.length < LEADERBOARD_LIMIT) break;
-    }
+  // All page coordinates are known up front — fetch them concurrently
+  // instead of ~42 serial round-trips. Later offsets past the end of the
+  // leaderboard return short/empty pages, which buildTraderXProfileIndex
+  // already tolerates.
+  const offsets: number[] = [];
+  for (let o = 0; o <= LEADERBOARD_MAX_OFFSET; o += LEADERBOARD_LIMIT) {
+    offsets.push(o);
   }
+  // fetchLeaderboardPage already returns [] on any fetch/non-ok error,
+  // so no extra .catch() wrapper is needed.
+  const pages = await Promise.all(
+    LEADERBOARD_ORDERS.flatMap((orderBy) =>
+      offsets.map((offset) => fetchLeaderboardPage(orderBy, offset))
+    )
+  );
+  const traders: unknown[] = pages.flat();
 
   const index = buildTraderXProfileIndex(traders);
   cachedIndex = {

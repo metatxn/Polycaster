@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import {
   Activity,
   TrendingDown,
@@ -11,6 +11,7 @@ import {
 import { useMemo } from "react";
 import { useLastTrade, useOrderBook } from "@/hooks/use-orderbook-store";
 import type { ConnectionState } from "@/hooks/use-shared-websocket";
+import { formatPrice } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 /**
@@ -32,11 +33,12 @@ export interface OrderBookSummaryProps {
 }
 
 /**
- * Format price as cents (e.g., 0.725 -> "72.5¢")
+ * Order-book price cell: canonical 1dp cents via `formatPrice`,
+ * with the book's "—" placeholder when there is no price.
  */
-function formatCents(price: number | null): string {
+function bookPrice(price: number | null): string {
   if (price === null) return "—";
-  return `${(price * 100).toFixed(1)}¢`;
+  return formatPrice(price);
 }
 
 /**
@@ -152,8 +154,8 @@ export function OrderBookSummary({
     }
 
     return {
-      bestBid: formatCents(orderBook.bestBid),
-      bestAsk: formatCents(orderBook.bestAsk),
+      bestBid: bookPrice(orderBook.bestBid),
+      bestAsk: bookPrice(orderBook.bestAsk),
       spread: formatSpread(orderBook.spread),
       totalBidSize: formatSize(orderBook.totalBidSize),
       totalAskSize: formatSize(orderBook.totalAskSize),
@@ -200,7 +202,7 @@ export function OrderBookSummary({
   }
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className={cn(
@@ -277,7 +279,7 @@ export function OrderBookSummary({
                 lastTrade.side === "BUY" ? "text-emerald-500" : "text-red-500"
               )}
             >
-              {formatCents(lastTrade.price)}
+              {bookPrice(lastTrade.price)}
             </span>
             <span className="text-[10px] text-muted-foreground">
               ({formatSize(lastTrade.size)})
@@ -292,7 +294,7 @@ export function OrderBookSummary({
           No orders in book
         </div>
       )}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -315,9 +317,9 @@ export function OrderBookInline({
 
   return (
     <div className={cn("flex items-center gap-2 font-mono text-xs", className)}>
-      <span className="text-emerald-500">{formatCents(bestBid ?? null)}</span>
+      <span className="text-emerald-500">{bookPrice(bestBid ?? null)}</span>
       <span className="text-muted-foreground">/</span>
-      <span className="text-red-500">{formatCents(bestAsk ?? null)}</span>
+      <span className="text-red-500">{bookPrice(bestAsk ?? null)}</span>
       {connectionState === "connected" && (
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
       )}

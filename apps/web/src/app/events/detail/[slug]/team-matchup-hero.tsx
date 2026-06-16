@@ -1,8 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EventTeam } from "@/hooks/use-event-detail";
+import { useNow } from "@/hooks/use-now";
 
 /**
  * Polymarket only ships team metadata (`event.teams`) for team-vs-team sports
@@ -106,37 +107,54 @@ function buildCountdownLabel(diffMs: number): string | null {
   return `STARTS IN ${minutes}M ${remainingSeconds}S`;
 }
 
+const COUNTDOWN_CLASS_BASE =
+  "font-mono text-[10px] sm:text-[11px] uppercase tracking-[0.14em] tabular-nums";
+const COUNTDOWN_CLASS_IDLE = `${COUNTDOWN_CLASS_BASE} text-muted-foreground/90 font-semibold`;
+
 function MatchCountdown({ kickoffAt }: { kickoffAt: string }) {
-  // Initial state must be deterministic for SSR. Computing on first render
-  // would diverge between server and client clocks; instead we render the
-  // server-side approximation (current at SSR moment) and let the effect
-  // re-tick once mounted.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    // Tick every second when <1h away (so the seconds digit moves), every
-    // minute otherwise (so we don't burn cycles for a label that only
-    // changes every 60s).
-    const target = new Date(kickoffAt).getTime();
-    const diff = target - Date.now();
-    const interval = diff < 60 * 60 * 1000 ? 1000 : 60 * 1000;
-    const id = window.setInterval(() => setNow(Date.now()), interval);
-    return () => window.clearInterval(id);
+  // Tick every second when <1h away (so the seconds digit moves), every
+  // minute otherwise (so we don't burn cycles for a label that only
+  // changes every 60s). Like the setInterval block this replaces, the
+  // cadence is picked once per kickoffAt.
+  const tickMs = useMemo(() => {
+    const diff = new Date(kickoffAt).getTime() - Date.now();
+    return diff < 60 * 60 * 1000 ? 1_000 : 60 * 1000;
   }, [kickoffAt]);
+  const now = useNow(tickMs);
+
+  // Mount gate: the label can structurally flip between LIVE (has a dot
+  // child span) and a countdown string (no dot). suppressHydrationWarning
+  // cannot cover structural changes, so we render a blank placeholder that
+  // matches the non-live shape until after hydration, then reveal the real
+  // label. This is a LEAF-level guard — only the text node changes post-mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const target = new Date(kickoffAt).getTime();
   if (!Number.isFinite(target)) return null;
+
+  if (!mounted) {
+    // Render the non-live shape (no dot span) with empty text so the DOM
+    // structure is stable across server/client on first paint. This must come
+    // before any clock-derived branching (label nullness depends on `now`,
+    // which can differ between server and client).
+    return <span className={COUNTDOWN_CLASS_IDLE} />;
+  }
 
   const label = buildCountdownLabel(target - now);
   if (!label) return null;
 
   const isLive = label === "LIVE";
+
   return (
     <span
-      className={`font-mono text-[10px] sm:text-[11px] uppercase tracking-[0.14em] tabular-nums ${
+      className={
         isLive
-          ? "text-red-500 font-semibold"
-          : "text-muted-foreground/90 font-semibold"
-      }`}
+          ? `${COUNTDOWN_CLASS_BASE} text-red-500 font-semibold`
+          : COUNTDOWN_CLASS_IDLE
+      }
     >
       {isLive && (
         <span
@@ -206,13 +224,23 @@ export function TeamMatchupHero({
           </>
         ) : kickoff ? (
           <>
-            <span className="font-mono text-xs sm:text-sm tabular-nums font-semibold text-foreground">
+            {/* suppressHydrationWarning: toLocale* formats in the SERVER's
+                locale/timezone (Workers = UTC) but must be viewer-local, so
+                this text legitimately differs on hydration. Text-only — do
+                not copy this onto elements whose STRUCTURE can differ. */}
+            <span
+              suppressHydrationWarning
+              className="font-mono text-xs sm:text-sm tabular-nums font-semibold text-foreground"
+            >
               {kickoff.time}
             </span>
             {kickoffAt ? (
               <MatchCountdown kickoffAt={kickoffAt} />
             ) : (
-              <span className="font-mono text-[10px] sm:text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+              <span
+                suppressHydrationWarning
+                className="font-mono text-[10px] sm:text-[11px] uppercase tracking-[0.12em] text-muted-foreground"
+              >
                 {kickoff.day}
               </span>
             )}

@@ -3,6 +3,7 @@
 import { Ban, CheckCircle2, Clock, Gavel, ShoppingCart, X } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import { relativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import {
   type MarketResolvedPayload,
@@ -99,26 +100,6 @@ function formatNotificationMessage(notification: Notification): string {
 }
 
 /**
- * Format relative time (e.g., "2 min ago", "1 hour ago")
- */
-function formatRelativeTime(timestamp?: number): string {
-  if (!timestamp) return "";
-
-  const now = Date.now();
-  const diff = now - timestamp * 1000; // Convert seconds to milliseconds
-
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  if (minutes > 0) return `${minutes}m ago`;
-  return "Just now";
-}
-
-/**
  * Individual notification item component
  */
 export function NotificationItem({
@@ -135,8 +116,13 @@ export function NotificationItem({
     () => formatNotificationMessage(notification),
     [notification]
   );
+  // Notification timestamps arrive as unix seconds; `relativeTime` expects
+  // ms. Missing timestamps stay "" so the time element doesn't render.
   const timeAgo = useMemo(
-    () => formatRelativeTime(notification.timestamp),
+    () =>
+      notification.timestamp
+        ? relativeTime(notification.timestamp * 1000, "verbose")
+        : "",
     [notification.timestamp]
   );
 

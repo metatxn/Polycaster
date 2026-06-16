@@ -1,4 +1,4 @@
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 import { type Address, encodeFunctionData, erc20Abi, type Hex } from "viem";
 import { COLLATERAL_ONRAMP_ABI } from "./abi.ts";
 import {

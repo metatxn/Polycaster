@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "wagmi";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -115,14 +116,7 @@ async function fetchPnL(
     includeHistory: (options.includeHistory || false).toString(),
   });
 
-  const response = await fetch(`/api/user/pnl?${params.toString()}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch P&L");
-  }
-
-  return response.json() as Promise<PnLResponse>;
+  return fetchJson<PnLResponse>(`/api/user/pnl?${params.toString()}`);
 }
 
 /**

@@ -28,10 +28,10 @@ export function getLiveTradingOutcomePrice(
   if (!quote) return null;
 
   const livePrice =
-    normalizePrice(quote.lastTradePrice) ??
+    normalizePrice(quote.bestAsk) ??
     normalizePrice(quote.midpoint) ??
-    normalizePrice(quote.bestBid) ??
-    normalizePrice(quote.bestAsk);
+    normalizePrice(quote.lastTradePrice) ??
+    normalizePrice(quote.bestBid);
 
   return livePrice;
 }

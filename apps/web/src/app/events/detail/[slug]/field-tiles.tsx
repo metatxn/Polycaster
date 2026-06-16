@@ -5,6 +5,7 @@ import {
   type PriceHistoryPoint,
   useBatchPriceHistory,
 } from "@/hooks/use-price-history-batch";
+import { formatCents, formatCurrencyCompact } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,7 +31,7 @@ export interface FieldTilesMarket {
   yesPrice: string;
   /** 24h price change in *percentage points* of the YES price
    *  (e.g. 1.1 = +1.1¢, -30 = -30¢). Matches the value already produced
-   *  by `toDisplayPercentagePointChange` in `event-detail-client.tsx`. */
+   *  by `toDisplayPercentagePointChange` in `chart-range.ts`. */
   change: number;
   /** Whether the change field has a real upstream value (vs the default 0). */
   hasOneDayPriceChange?: boolean;
@@ -110,12 +111,6 @@ function formatPctBig(pct0to1: number): string {
   return Math.round(clamped * 100).toString();
 }
 
-function formatCents(price: string): string {
-  const n = Number.parseFloat(price);
-  if (!Number.isFinite(n)) return "—";
-  return `${(n * 100).toFixed(1)}¢`;
-}
-
 function formatPayoutOdds(yesPrice: string): string {
   const p = Number.parseFloat(yesPrice);
   if (!Number.isFinite(p) || p <= 0) return "—";
@@ -125,13 +120,12 @@ function formatPayoutOdds(yesPrice: string): string {
   return `${odds.toFixed(1)}×`;
 }
 
-function formatVolume(volume: string): string {
+/** Tile volume cell: canonical compact money, with the tile design's
+ *  "—" placeholder when volume is missing or zero. */
+function tileVolume(volume: string): string {
   const n = Number.parseFloat(volume);
   if (!Number.isFinite(n) || n <= 0) return "—";
-  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(2)}K`;
-  return `$${n.toFixed(0)}`;
+  return formatCurrencyCompact(n);
 }
 
 /** Format the 24h change as a tiny cents delta — design displays this
@@ -169,7 +163,7 @@ function FieldTile({
   const big = formatPctBig(market.yesProbability / 100);
   const cents = formatCents(market.yesPrice);
   const odds = formatPayoutOdds(market.yesPrice);
-  const vol = formatVolume(market.volume);
+  const vol = tileVolume(market.volume);
   // Always render the change pill so all tiles share the same vertical
   // rhythm. When the upstream `oneDayPriceChange` is missing we show a
   // dimmed em-dash placeholder rather than collapsing the row, which
@@ -207,7 +201,13 @@ function FieldTile({
         // column — clipped under the trading panel. Filling the track makes
         // the inner truncate clamp instead. Below lg it stays a min-width
         // scroll tile.
-        "flex flex-col gap-1 px-2.5 py-2 min-w-[170px] lg:min-w-0 lg:w-full"
+        // `h-full` + the foot row's `mt-auto`: the middle row's change pill
+        // wraps to a second line only on tiles whose content is wide (e.g.
+        // "10.5¢ ▼ 0.4"), which made those tiles taller than their grid-row
+        // siblings. Stretching every tile to the row height and pinning the
+        // payout row to the bottom keeps the five tiles aligned regardless
+        // of per-tile wrapping.
+        "flex flex-col gap-1 px-2.5 py-2 min-w-[170px] lg:min-w-0 lg:w-full h-full"
       )}
       style={{
         borderColor: isSelected ? "var(--kwm-hl-3)" : "var(--kwm-hl)",
@@ -271,7 +271,7 @@ function FieldTile({
           </span>
           <span
             className="font-mono tabular-nums"
-            style={{ color: "var(--kwm-ink-3)", fontSize: "11px" }}
+            style={{ color: "var(--kwm-ink-3)", fontSize: "12px" }}
           >
             <b style={{ color: "var(--kwm-ink-2)", fontWeight: 500 }}>
               {cents}
@@ -283,7 +283,7 @@ function FieldTile({
             style={{
               color: toneColor,
               background: toneBg,
-              fontSize: "10px",
+              fontSize: "12px",
               letterSpacing: "0.04em",
             }}
             title={
@@ -308,11 +308,12 @@ function FieldTile({
         </div>
       </div>
 
-      {/* Foot row: payout odds + volume */}
+      {/* Foot row: payout odds + volume — mt-auto pins it to the tile
+          bottom so payout rows align across equal-height tiles. */}
       <div
-        className="flex items-baseline justify-between font-mono pl-1.5 pt-0.5"
+        className="mt-auto flex items-baseline justify-between font-mono pl-1.5 pt-0.5"
         style={{
-          fontSize: "10px",
+          fontSize: "12px",
           color: "var(--kwm-ink-dim)",
           letterSpacing: "0.04em",
         }}
@@ -377,7 +378,7 @@ export function FieldTiles({
           className="m-0 font-mono"
           style={{
             color: "var(--kwm-ink-2)",
-            fontSize: "11px",
+            fontSize: "12px",
             fontWeight: 500,
             letterSpacing: "0.18em",
             textTransform: "uppercase",
@@ -394,7 +395,7 @@ export function FieldTiles({
           className="font-mono flex items-center gap-1.5"
           style={{
             color: "var(--kwm-ink-dim)",
-            fontSize: "10px",
+            fontSize: "12px",
             letterSpacing: "0.16em",
             textTransform: "uppercase",
           }}

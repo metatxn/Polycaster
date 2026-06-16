@@ -25,6 +25,7 @@ const clobCredentialsState = vi.hoisted(() => ({
     apiPassphrase: "api-passphrase",
   },
   hasCredentials: true,
+  clearCredentials: vi.fn(),
 }));
 
 const viemWalletClientMock = vi.hoisted(() => ({
@@ -37,10 +38,16 @@ const notificationClient = vi.hoisted(() => ({
 }));
 
 const unifiedSdkMock = vi.hoisted(() => ({
+  createUnifiedPolymarketCredentialsOnlySigner: vi.fn((address: string) => ({
+    address,
+    getAddress: vi.fn().mockResolvedValue(address),
+    signTypedData: vi.fn(),
+  })),
   createUnifiedPolymarketSecureClient: vi.fn(),
   createUnifiedPolymarketViemSigner: vi.fn((signer: unknown) => ({
     signer,
   })),
+  isPolymarketFreshAuthenticationRequiredError: vi.fn(() => false),
 }));
 
 vi.mock("@knoww/logger", () => ({
@@ -85,6 +92,7 @@ describe("useNotifications", () => {
     proxyWalletState.isDeployed = false;
     clobCredentialsState.credentials = credentials;
     clobCredentialsState.hasCredentials = true;
+    clobCredentialsState.clearCredentials.mockReset();
 
     viemWalletClientMock.getViemWalletClient.mockResolvedValue({
       requestAddresses: vi.fn().mockResolvedValue([]),
@@ -123,13 +131,13 @@ describe("useNotifications", () => {
       unifiedSdkMock.createUnifiedPolymarketSecureClient
     ).toHaveBeenCalledWith({
       signer: expect.objectContaining({
-        signer: expect.objectContaining({
-          requestAddresses: expect.any(Function),
-        }),
+        address: wagmiState.address,
       }),
       wallet: proxyWalletState.proxyAddress,
       credentials,
+      allowFreshAuthentication: false,
     });
+    expect(viemWalletClientMock.getViemWalletClient).not.toHaveBeenCalled();
     expect(result.current.notifications.map((item) => item.id)).toEqual([
       11, 10,
     ]);

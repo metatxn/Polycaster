@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ComponentProps, useMemo, useState } from "react";
 import { ChromeHeader } from "@/components/app-layout";
 import { Navbar } from "@/components/navbar";
 import { ProductFooter } from "@/components/product-footer";
@@ -11,6 +11,7 @@ import {
   sortInsiderActivities,
   useInsiderActivity,
 } from "@/hooks/use-insider-activity";
+import { useNow } from "@/hooks/use-now";
 import {
   getWhaleActivityStats,
   useWhaleActivity,
@@ -39,6 +40,20 @@ import {
 } from "./_lib/constants";
 
 type ViewTab = "whales" | "insiders";
+
+/** Ticking "updated Xs ago" hero leaf — re-renders only the hero strip
+ *  (every 5s) instead of the whole whales page (every second). */
+function TickingWhaleHero({
+  lastUpdated,
+  ...heroProps
+}: { lastUpdated: string | null } & Omit<
+  ComponentProps<typeof WhaleHero>,
+  "dataAgeMs"
+>) {
+  const now = useNow(5_000);
+  const dataAgeMs = lastUpdated ? now - new Date(lastUpdated).getTime() : null;
+  return <WhaleHero dataAgeMs={dataAgeMs} {...heroProps} />;
+}
 
 export default function WhalesPage() {
   // Global cross-ledger filters
@@ -148,22 +163,13 @@ export default function WhalesPage() {
     return sortInsiderActivities(insiderData.activities, insiderSortMode);
   }, [insiderData?.activities, insiderSortMode]);
 
-  // Tick-down ticker for the hero's "updated Xs ago" indicator.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const lastUpdatedMs = (() => {
-    if (activeTab === "whales") {
-      return whaleData?.lastUpdated
-        ? now - new Date(whaleData.lastUpdated).getTime()
-        : null;
-    }
-    return insiderData?.lastUpdated
-      ? now - new Date(insiderData.lastUpdated).getTime()
-      : null;
-  })();
+  // Source timestamp for the hero's "updated Xs ago" indicator. The
+  // ticking lives in the TickingWhaleHero leaf so it doesn't re-render
+  // the whole page every second.
+  const lastUpdated =
+    (activeTab === "whales"
+      ? whaleData?.lastUpdated
+      : insiderData?.lastUpdated) ?? null;
 
   const handleSortWhale = (col: WhaleSortColumn) => {
     setWhaleSort((prev) =>
@@ -195,11 +201,13 @@ export default function WhalesPage() {
       <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 xl:pb-8">
-        <WhaleHero
+        <h1 className="sr-only">Whale Activity</h1>
+
+        <TickingWhaleHero
           section={
             activeTab === "whales" ? "Whale Activity" : "Insider Detection"
           }
-          dataAgeMs={lastUpdatedMs}
+          lastUpdated={lastUpdated}
           isLive={activeTab === "whales" ? isLiveConnected : null}
           isFetching={isFetching}
           onRefresh={handleRefresh}

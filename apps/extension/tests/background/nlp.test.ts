@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { nlpContextGate } from "../../src/background/nlp";
 
 test("nlpContextGate treats party as a meaningful political overlap", () => {

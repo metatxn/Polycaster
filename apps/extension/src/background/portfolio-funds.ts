@@ -44,7 +44,7 @@ import {
   derivePolymarketSafe,
   type RelayerTransaction,
 } from "@knoww/shared-types/relayer";
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 import {
   type Address,
   createPublicClient,

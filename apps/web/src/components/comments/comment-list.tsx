@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { Loader2, MessageSquareOff } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
@@ -136,7 +136,7 @@ CommentListProps) {
 
   if (commentTree.length === 0) {
     return (
-      <motion.div
+      <m.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         className={cn(
@@ -153,7 +153,7 @@ CommentListProps) {
         <p className="text-xs text-(--kwm-ink-dim) mt-1">
           Be the first to share your thoughts here
         </p>
-      </motion.div>
+      </m.div>
     );
   }
 
@@ -161,7 +161,7 @@ CommentListProps) {
     <div className={cn("space-y-4", className)}>
       <AnimatePresence mode="popLayout">
         {commentTree.map((comment, index) => (
-          <motion.div
+          <m.div
             key={comment.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -184,7 +184,7 @@ CommentListProps) {
             {index < commentTree.length - 1 && (
               <div className="border-b border-(--kwm-hl) mt-4" />
             )}
-          </motion.div>
+          </m.div>
         ))}
       </AnimatePresence>
 

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -32,14 +33,7 @@ export interface TraderProfile {
 }
 
 async function fetchTraderProfile(address: string): Promise<TraderProfile> {
-  const response = await fetch(`/api/profile/${address}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch profile");
-  }
-
-  return response.json();
+  return fetchJson<TraderProfile>(`/api/profile/${address}`);
 }
 
 export function useTraderProfile(address?: string) {

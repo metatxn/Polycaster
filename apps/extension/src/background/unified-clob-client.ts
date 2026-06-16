@@ -17,8 +17,13 @@ type ExtensionUnifiedClobClientDeps = {
 };
 
 async function loadDefaultExtensionUnifiedClobClientDeps(): Promise<ExtensionUnifiedClobClientDeps> {
-  const moduleName = "@knoww/shared-types/polymarket-unified";
-  const sdk = await import(moduleName);
+  // NOTE: must be a string LITERAL, not a variable. A variable request makes
+  // webpack treat this as an expression dependency ("Critical dependency: the
+  // request of a dependency is an expression") and it does NOT bundle the
+  // module — so at runtime every order fails with "Cannot find module
+  // '@knoww/shared-types/polymarket-unified'". The literal lets webpack
+  // code-split it into a loadable chunk.
+  const sdk = await import("@knoww/shared-types/polymarket-unified");
   return {
     createSecureClient: sdk.createUnifiedPolymarketSecureClient,
     createViemSigner: sdk.createUnifiedPolymarketViemSigner,

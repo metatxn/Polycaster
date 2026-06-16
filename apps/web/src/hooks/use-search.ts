@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 export interface TopOutcome {
@@ -88,13 +89,7 @@ async function fetchSearchResults(
     params.set("tag_slugs", tagSlug);
   }
 
-  const response = await fetch(`/api/search?${params.toString()}`);
-
-  if (!response.ok) {
-    throw new Error("Failed to search");
-  }
-
-  return response.json();
+  return fetchJson<SearchResponse>(`/api/search?${params.toString()}`);
 }
 
 export function useSearch(query: string, limit = 10, tagSlug?: string) {

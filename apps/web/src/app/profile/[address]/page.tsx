@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { ArrowLeft, Check, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -21,13 +21,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useNow } from "@/hooks/use-now";
 import { useTraderProfile } from "@/hooks/use-trader-profile";
-import { formatCurrencyCompact } from "@/lib/formatters";
+import { formatAddress, formatCurrencyCompact } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-
-function formatAddress(address: string) {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
 
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -78,12 +75,21 @@ function RankCaption({
   const pnlStr = `${sign}${formatCurrencyCompact(Math.abs(pnlValue))}`;
   return (
     <>
-      {pnlStr}
+      {/* nowrap: browsers can break after the minus sign, orphaning it on
+          its own line in narrow ranking cells. */}
+      <span className="whitespace-nowrap">{pnlStr}</span>
       <span className="mx-1.5 text-border/80">·</span>
       <span className="opacity-60 mr-1">VOL</span>
       {formatCurrencyCompact(volValue)}
     </>
   );
+}
+
+/** Ticking "updated Xs ago" leaf — re-renders only this label (every 5s)
+ *  instead of the whole profile page (every second). */
+function ProfileDataAge({ updatedAt }: { updatedAt: number }) {
+  const now = useNow(5_000);
+  return <ProductDataAge dataAgeMs={now - updatedAt} />;
 }
 
 export default function ProfilePage() {
@@ -100,15 +106,41 @@ export default function ProfilePage() {
     dataUpdatedAt,
   } = useTraderProfile(address);
 
-  // Tick the "updated Xs ago" meta so it counts forward between refetches.
-  const [now, setNow] = useState(() => Date.now());
-  const [mountedAt] = useState(() => Date.now());
+  // Title active before this route's own <title> committed — captured in
+  // the first render (render phase runs before DOM mutations), so on soft
+  // navigation it's the PREVIOUS route's metadata title (e.g.
+  // /leaderboard's). Capturing inside the effect below is too late: Next
+  // swaps the title for this route as soon as the navigation commits,
+  // well before the profile data arrives.
+  const [previousTitle] = useState(() =>
+    typeof document === "undefined" ? "" : document.title
+  );
+
+  // Per-trader document title — set once the profile data arrives.
+  // Cleanup restores the pre-navigation title instead of a hardcoded site
+  // default (which clobbered e.g. /leaderboard's own metadata title on
+  // Back). Restore only while we still own the title: on forward
+  // navigation Next applies the destination route's metadata BEFORE this
+  // passive cleanup runs, and overwriting it would clobber that route's
+  // title; on Back, Next does NOT re-render the title, so this restore is
+  // what brings the previous route's title back.
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
+    if (!profile) return;
+    const name = profile.userName || formatAddress(profile.proxyWallet);
+    const title = `${name} | Knoww`;
+    document.title = title;
+    return () => {
+      if (previousTitle && document.title === title) {
+        document.title = previousTitle;
+      }
+    };
+  }, [profile, previousTitle]);
+
+  // The "updated Xs ago" ticking lives in the ProfileDataAge leaf so it
+  // doesn't re-render the whole page every second. Fall back to the mount
+  // timestamp until the first client fetch lands.
+  const [mountedAt] = useState(() => Date.now());
   const effectiveUpdatedAt = dataUpdatedAt || mountedAt;
-  const dataAgeMs = now - effectiveUpdatedAt;
 
   // The API returns a valid empty profile for any 0x address. Treat a
   // trader with zero volume, no username, and no rankings at all as a
@@ -205,6 +237,11 @@ export default function ProfilePage() {
 
       <main className="relative z-10 flex-1 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
         <div className="max-w-4xl mx-auto">
+          <h1 className="sr-only">
+            {profile.userName || formatAddress(profile.proxyWallet)} — Trader
+            Profile
+          </h1>
+
           <ProductHero
             breadcrumbs={[
               { label: "Leaderboard", href: "/leaderboard" },
@@ -215,7 +252,7 @@ export default function ProfilePage() {
             ]}
             rightSlot={
               <>
-                <ProductDataAge dataAgeMs={dataAgeMs} />
+                <ProfileDataAge updatedAt={effectiveUpdatedAt} />
                 <ProductRefreshButton
                   onRefresh={() => refetch()}
                   isFetching={isFetching}
@@ -354,7 +391,7 @@ export default function ProfilePage() {
           </div>
 
           {/* Related — editorial mono links to adjacent surfaces */}
-          <motion.div
+          <m.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
@@ -393,7 +430,7 @@ export default function ProfilePage() {
                 </li>
               ))}
             </ul>
-          </motion.div>
+          </m.div>
         </div>
       </main>
 

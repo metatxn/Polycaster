@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 import type { EventFilterParams } from "./use-paginated-events";
 
@@ -85,17 +86,9 @@ export function useTrendingEvents(
         if (filters.endDateTo) params.set("end_date_max", filters.endDateTo);
       }
 
-      const response = await fetch(`/api/events/trending?${params.toString()}`);
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch trending events");
-      }
-
-      const result = (await response.json()) as TrendingEventsResponse;
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to fetch trending events");
-      }
+      const result = await fetchJson<TrendingEventsResponse>(
+        `/api/events/trending?${params.toString()}`
+      );
 
       const pagination = result.pagination ?? {
         hasMore: false,

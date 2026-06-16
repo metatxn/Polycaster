@@ -7,18 +7,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Product hero — DeFi/financial-terminal counterpart to `EditorialHero`.
- *
- * Mirrors EditorialHero's prop API so product routes can swap one for the
- * other without rewiring callers. Differences:
- *
- *  - Title is small mono-caps (not 7xl italic Fraunces). The hero competes
- *    less with the data below it.
- *  - Subtitle is a single muted line, not an editorial pull quote.
- *  - Breadcrumb + right meta share the same mono micro-caps rhythm so the
- *    surface reads as one consolidated utility row.
- *  - Bottom hairline uses the `--kwm-hl` token from `.kw-app` so it tracks
- *    the active theme.
+ * Product hero for DeFi/financial-terminal surfaces.
  *
  * Must be rendered inside a `.kw-app` ancestor to pick up Geist + the
  * scoped token system.

@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import type { TokenBalance } from "@/hooks/use-wallet-tokens";
@@ -119,7 +119,7 @@ export function MethodSelection({
     : "Connect wallet";
 
   return (
-    <motion.div
+    <m.div
       key="method"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
@@ -198,6 +198,6 @@ export function MethodSelection({
         }
         comingSoon
       />
-    </motion.div>
+    </m.div>
   );
 }

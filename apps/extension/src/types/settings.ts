@@ -1,4 +1,6 @@
 export interface PlatformSettings {
+  // Streaming surfaces (companion Live Markets card)
+  twitch: boolean;
   // Core social / community
   twitter: boolean;
   linkedin: boolean;
@@ -75,9 +77,37 @@ export interface UserSettings {
   personalizationEnabled: boolean;
   themeOverride: "auto" | "dark" | "light" | "dim";
   debugMode: boolean;
+  /** One-click betting prefs for the streaming Live Markets card. */
+  streamTrading: StreamTradingSettings;
 }
 
+/**
+ * Streaming-surface one-click betting preferences. These drive the quick-trade
+ * UI on stream cards (default stake) and gate the instant-placement fast-path.
+ */
+export interface StreamTradingSettings {
+  /** Default USD stake pre-selected on each card. */
+  defaultAmount: number;
+  /** Master toggle for the inline quick-trade UI on stream cards. */
+  oneClickEnabled: boolean;
+  /**
+   * When true, the Trade button opens the confirm panel instead of placing
+   * instantly. Safety default ON — instant placement requires opting out.
+   */
+  confirmBeforeTrade: boolean;
+}
+
+export const DEFAULT_STREAM_TRADING_SETTINGS: StreamTradingSettings = {
+  defaultAmount: 5,
+  oneClickEnabled: true,
+  confirmBeforeTrade: true,
+};
+
+/** Amount presets shown as chips on the stream quick-trade UI. */
+export const STREAM_TRADE_AMOUNT_PRESETS = [1, 5, 25, 100];
+
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
+  twitch: true,
   twitter: true,
   linkedin: true,
   reddit: true,
@@ -146,6 +176,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   personalizationEnabled: true,
   themeOverride: "auto",
   debugMode: false,
+  streamTrading: { ...DEFAULT_STREAM_TRADING_SETTINGS },
 };
 
 /**

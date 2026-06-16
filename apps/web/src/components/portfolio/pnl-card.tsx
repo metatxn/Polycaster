@@ -4,6 +4,7 @@ import { useState } from "react";
 import { InteractiveLineChart } from "@/components/pnl-chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { type PnLInterval, usePnLHistory } from "@/hooks/use-pnl-history";
+import { formatCurrencyCompact, formatPercent } from "@/lib/formatters";
 
 const INTERVAL_OPTIONS: { value: PnLInterval; label: string }[] = [
   { value: "6h", label: "6H" },
@@ -13,22 +14,6 @@ const INTERVAL_OPTIONS: { value: PnLInterval; label: string }[] = [
   { value: "1m", label: "1M" },
   { value: "all", label: "All" },
 ];
-
-function formatCurrency(value: number): string {
-  const absValue = Math.abs(value);
-  const sign = value < 0 ? "-" : "";
-  if (absValue >= 1_000_000) {
-    return `${sign}$${(absValue / 1_000_000).toFixed(2)}M`;
-  }
-  if (absValue >= 1000) {
-    return `${sign}$${(absValue / 1000).toFixed(2)}K`;
-  }
-  return `${sign}$${absValue.toFixed(2)}`;
-}
-
-function formatPercent(value: number): string {
-  return `${value.toFixed(2)}%`;
-}
 
 const INTERVAL_LABEL: Record<PnLInterval, string> = {
   "6h": "6h",
@@ -125,7 +110,7 @@ export function PortfolioPnlCard({
                 isPositive ? "text-emerald-500" : "text-red-500"
               }`}
             >
-              {formatCurrency(periodChange)}
+              {formatCurrencyCompact(periodChange)}
             </span>
             <span
               className={`font-mono text-[11px] uppercase tracking-[0.12em] tabular-nums ${

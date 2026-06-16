@@ -1,6 +1,7 @@
 import { createLogger } from "@knoww/logger";
 import { RELAYER_API_ORIGIN } from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { requireExtensionSession } from "@/lib/auth/extension-session";
 import { checkOriginAndFetchSite } from "@/lib/origin-guard";
@@ -189,19 +190,13 @@ async function proxy(
   // Layer 3a: path allow-list
   const head = pathSegments[0] ?? "";
   if (!ALLOWED_PATHS.has(head)) {
-    return NextResponse.json(
-      { error: `Path not allowed: /${head}` },
-      { status: 400 }
-    );
+    return jsonError(`Path not allowed: /${head}`, 400);
   }
 
   // Layer 3b: oversize body fast-reject
   const contentLength = getContentLength(request);
   if (contentLength !== null && contentLength > MAX_BODY_SIZE) {
-    return NextResponse.json(
-      { error: "Request body too large" },
-      { status: 413 }
-    );
+    return jsonError("Request body too large", 413);
   }
 
   // Layer 3c: streamed body with hard byte cap
@@ -210,20 +205,14 @@ async function proxy(
   if (method === "POST") {
     const rawBody = await readBodyWithLimit(request, MAX_BODY_SIZE);
     if (rawBody === null) {
-      return NextResponse.json(
-        { error: "Request body too large" },
-        { status: 413 }
-      );
+      return jsonError("Request body too large", 413);
     }
     // Validate JSON shape so we don't forward garbage, and keep the parsed
     // form for selecting the correct upstream auth scheme below.
     try {
       parsedBody = JSON.parse(rawBody) as Record<string, unknown>;
     } catch {
-      return NextResponse.json(
-        { error: "Invalid JSON payload" },
-        { status: 400 }
-      );
+      return jsonError("Invalid JSON payload", 400);
     }
     body = rawBody;
   }
@@ -270,20 +259,14 @@ async function proxy(
     } else {
       const apiKeyHeaders = getRelayerApiKeyHeaders();
       if (!apiKeyHeaders) {
-        return NextResponse.json(
-          { error: "Relayer not configured" },
-          { status: 503 }
-        );
+        return jsonError("Relayer not configured", 503);
       }
       Object.assign(upstreamHeaders, apiKeyHeaders);
     }
   } else {
     const apiKeyHeaders = getRelayerApiKeyHeaders();
     if (!apiKeyHeaders) {
-      return NextResponse.json(
-        { error: "Relayer not configured" },
-        { status: 503 }
-      );
+      return jsonError("Relayer not configured", 503);
     }
     Object.assign(upstreamHeaders, apiKeyHeaders);
   }
@@ -308,10 +291,7 @@ async function proxy(
           method,
           path: pathSegments.join("/"),
         });
-        return NextResponse.json(
-          { error: "Relayer request timed out" },
-          { status: 504 }
-        );
+        return jsonError("Relayer request timed out", 504);
       }
       throw fetchError;
     }
@@ -386,10 +366,7 @@ async function proxy(
       path: pathSegments.join("/"),
       err: error,
     });
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return jsonError("Internal server error", 500);
   } finally {
     clearTimeout(timeoutId);
   }

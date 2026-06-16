@@ -1,5 +1,5 @@
 import { isPusdToken } from "@knoww/shared-types/bridge";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import type { TokenBalance } from "@/hooks/use-wallet-tokens";
@@ -23,7 +23,7 @@ export function TokenSelection({
   getMinDepositForToken,
 }: TokenSelectionProps) {
   return (
-    <motion.div
+    <m.div
       key="token"
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -132,6 +132,6 @@ export function TokenSelection({
           </div>
         </>
       )}
-    </motion.div>
+    </m.div>
   );
 }

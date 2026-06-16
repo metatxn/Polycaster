@@ -1,7 +1,10 @@
 import { createLogger } from "@knoww/logger";
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
+import type {
+  LeaderboardCategory,
+  LeaderboardOrderBy,
+  LeaderboardTimePeriod,
+} from "@/hooks/use-leaderboard";
 import { buildPageMetadata } from "@/lib/seo";
 import { getInitialLeaderboard } from "@/lib/server-cache";
 import { LeaderboardContent } from "./leaderboard-content";
@@ -20,29 +23,45 @@ export const metadata: Metadata = buildPageMetadata({
  *
  * React 19 optimization: Pre-fetches the default leaderboard view
  * on the server (Cloudflare edge) to eliminate loading state on initial render.
+ *
+ * searchParams are read here on the server and passed as props to the client
+ * component. This means LeaderboardContent does NOT need useSearchParams(),
+ * which would cause the Suspense boundary to re-suspend on every URL change
+ * and reset scroll position to 0.
  */
-export default async function LeaderboardPage() {
-  // Pre-fetch initial leaderboard data on the server
+export default async function LeaderboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+
+  const initialCategory = (params.category as LeaderboardCategory) || "OVERALL";
+  const initialTimePeriod =
+    (params.timePeriod as LeaderboardTimePeriod) || "DAY";
+  const initialOrderBy = (params.orderBy as LeaderboardOrderBy) || "PNL";
+
+  // Pre-fetch initial leaderboard data on the server (only for the default view)
   let initialData = null;
-  try {
-    initialData = await getInitialLeaderboard();
-  } catch (error) {
-    log.error("prefetch.failed", { error });
-    // Continue with null - client will fetch on mount
+  if (
+    initialCategory === "OVERALL" &&
+    initialTimePeriod === "DAY" &&
+    initialOrderBy === "PNL"
+  ) {
+    try {
+      initialData = await getInitialLeaderboard();
+    } catch (error) {
+      log.error("prefetch.failed", { error });
+      // Continue with null - client will fetch on mount
+    }
   }
 
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="space-y-3 text-center">
-            <Skeleton className="h-10 w-48 mx-auto rounded-none" />
-            <Skeleton className="h-3 w-32 mx-auto rounded-none" />
-          </div>
-        </div>
-      }
-    >
-      <LeaderboardContent initialData={initialData} />
-    </Suspense>
+    <LeaderboardContent
+      initialData={initialData}
+      initialCategory={initialCategory}
+      initialTimePeriod={initialTimePeriod}
+      initialOrderBy={initialOrderBy}
+    />
   );
 }

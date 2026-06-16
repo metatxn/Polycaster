@@ -9,7 +9,7 @@
  * don't need to depend on Decimal directly.
  */
 
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 
 export interface OrderBookLevel {
   price: string;

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Decimal from "decimal.js";
+import { fetchJson } from "@/lib/fetch-json";
 import { qk } from "@/lib/query-keys";
 
 export interface WhaleTrader {
@@ -77,14 +78,9 @@ async function fetchWhaleActivity(
     params.set("timePeriod", options.timePeriod);
   }
 
-  const response = await fetch(`/api/whales/activity?${params.toString()}`);
-
-  if (!response.ok) {
-    const errorData = (await response.json()) as { error?: string };
-    throw new Error(errorData.error || "Failed to fetch whale activity");
-  }
-
-  return response.json();
+  return fetchJson<WhaleActivityResponse>(
+    `/api/whales/activity?${params.toString()}`
+  );
 }
 
 export function useWhaleActivity(options: UseWhaleActivityOptions = {}) {

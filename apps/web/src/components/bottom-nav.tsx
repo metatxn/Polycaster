@@ -62,7 +62,7 @@ export function BottomNav() {
 
   return (
     <nav className="xl:hidden fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur border-t border-border/60 safe-area-pb">
-      <div className="flex items-stretch h-14">
+      <div className="flex items-stretch h-(--spacing-bottom-nav)">
         {visibleItems.map((item) => {
           const isActive = isItemActive(item);
           const showsBalance =

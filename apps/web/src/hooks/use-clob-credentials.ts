@@ -1,6 +1,5 @@
 "use client";
 
-import { createLogger } from "@knoww/logger";
 import {
   type ApiKeyCreds,
   type ApiKeyCredsLike,
@@ -8,124 +7,216 @@ import {
   isCompleteApiKeyCreds,
   normalizeApiKeyCreds,
 } from "@knoww/shared-types/polymarket";
-import {
-  createUnifiedPolymarketSecureClient,
-  createUnifiedPolymarketViemSigner,
-} from "@knoww/shared-types/polymarket-unified";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 
-const log = createLogger("clob-credentials");
-
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
 
-/**
- * Storage key prefix for credentials
- */
-const CREDS_STORAGE_KEY = "polymarket_api_creds";
+/** Storage key for Knoww's local CLOB API credential map. */
+const CREDS_STORAGE_KEY = "knoww_clob_api_key_map";
+const LEGACY_SESSION_CREDS_STORAGE_KEY = "polymarket_api_creds";
+const CREDS_STORAGE_VERSION = 1;
+const CREDS_STORAGE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-/**
- * Module-level cache for credentials to avoid repeated sessionStorage reads
- * and JSON parsing across multiple component mounts.
- * Cache is invalidated when credentials are stored or cleared.
- */
-const credentialsCache = new Map<string, ApiKeyCreds | null>();
+const credentialDerivationPromises = new Map<string, Promise<ApiKeyCreds>>();
+
+type StoredCredentialsEntry = {
+  credentials: ApiKeyCredsLike;
+  createdAt: number;
+  expiresAt: number;
+};
+
+type StoredCredentialsMap = {
+  version: typeof CREDS_STORAGE_VERSION;
+  entries: Record<string, StoredCredentialsEntry>;
+};
 
 function getCacheKey(address: string): string {
   return `${CLOB_BASE_URL}_${address.toLowerCase()}`;
 }
 
-/**
- * Get the storage key for a specific address
- */
-function getStorageKey(address: string): string {
-  return `${CREDS_STORAGE_KEY}_${CLOB_BASE_URL}_${address.toLowerCase()}`;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isFiniteTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isStoredCredentialsEntry(
+  value: unknown
+): value is StoredCredentialsEntry {
+  if (!isRecord(value)) return false;
+  const createdAt = value.createdAt;
+  const expiresAt = value.expiresAt;
+  return (
+    isCompleteApiKeyCreds(value.credentials) &&
+    isFiniteTimestamp(createdAt) &&
+    isFiniteTimestamp(expiresAt) &&
+    expiresAt > createdAt
+  );
 }
 
 /**
- * Get stored credentials from sessionStorage (cleared when browser closes)
- * Uses module-level cache to avoid repeated storage reads and JSON parsing.
- * This provides better security than localStorage as credentials don't persist indefinitely.
+ * Get the old sessionStorage key for a specific address. Kept only so the
+ * localStorage migration can remove stale tab-scoped credential copies.
+ */
+function getLegacySessionStorageKey(address: string): string {
+  return `${LEGACY_SESSION_CREDS_STORAGE_KEY}_${CLOB_BASE_URL}_${address.toLowerCase()}`;
+}
+
+function emptyStoredCredentialsMap(): StoredCredentialsMap {
+  return { version: CREDS_STORAGE_VERSION, entries: {} };
+}
+
+function parseStoredCredentialsMap(
+  stored: string
+): { map: StoredCredentialsMap; didDropEntry: boolean } | null {
+  try {
+    const parsed = JSON.parse(stored) as unknown;
+    if (
+      !isRecord(parsed) ||
+      parsed.version !== CREDS_STORAGE_VERSION ||
+      !isRecord(parsed.entries)
+    ) {
+      return null;
+    }
+
+    const entries: Record<string, StoredCredentialsEntry> = {};
+    let didDropEntry = false;
+    const now = Date.now();
+    for (const [key, value] of Object.entries(parsed.entries)) {
+      if (isStoredCredentialsEntry(value) && value.expiresAt > now) {
+        entries[key] = value;
+      } else {
+        didDropEntry = true;
+      }
+    }
+
+    const map: StoredCredentialsMap = {
+      version: CREDS_STORAGE_VERSION,
+      entries,
+    };
+    return { map, didDropEntry };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredCredentialsMap(map: StoredCredentialsMap): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (Object.keys(map.entries).length === 0) {
+      localStorage.removeItem(CREDS_STORAGE_KEY);
+      return;
+    }
+
+    // lgtm[js/clear-text-storage-of-sensitive-data]
+    localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage may throw if quota is exceeded or persistence is blocked.
+  }
+}
+
+function readStoredCredentialsMap(): StoredCredentialsMap {
+  if (typeof window === "undefined") return emptyStoredCredentialsMap();
+
+  const currentStored = localStorage.getItem(CREDS_STORAGE_KEY);
+
+  if (currentStored) {
+    const parsed = parseStoredCredentialsMap(currentStored);
+    if (parsed) {
+      if (parsed.didDropEntry) {
+        writeStoredCredentialsMap(parsed.map);
+      }
+      return parsed.map;
+    }
+
+    localStorage.removeItem(CREDS_STORAGE_KEY);
+  }
+
+  return emptyStoredCredentialsMap();
+}
+
+function removeLegacySessionCredentials(address: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(getLegacySessionStorageKey(address));
+  } catch {
+    // Ignore blocked sessionStorage.
+  }
+}
+
+/**
+ * Get stored credentials from localStorage.
+ * Expired or malformed entries are removed instead of being used.
  */
 function getStoredCredentials(address: string): ApiKeyCreds | null {
   if (typeof window === "undefined") return null;
 
   const cacheKey = getCacheKey(address);
 
-  // Return cached value if available (defensive copy to prevent cache corruption)
-  if (credentialsCache.has(cacheKey)) {
-    const cached = credentialsCache.get(cacheKey);
-    return cached ? { ...cached } : null;
-  }
+  removeLegacySessionCredentials(address);
 
-  try {
-    const stored = sessionStorage.getItem(getStorageKey(address));
-    if (stored) {
-      const parsed = JSON.parse(stored) as unknown;
-      if (!isCompleteApiKeyCreds(parsed)) {
-        sessionStorage.removeItem(getStorageKey(address));
-        credentialsCache.set(cacheKey, null);
-        return null;
-      }
-      credentialsCache.set(cacheKey, parsed);
-      // Return defensive copy to prevent cache corruption from caller mutations
-      return { ...parsed };
+  const map = readStoredCredentialsMap();
+  const entry = map.entries[cacheKey];
+  if (!entry || entry.expiresAt <= Date.now()) {
+    if (entry) {
+      delete map.entries[cacheKey];
+      writeStoredCredentialsMap(map);
     }
-  } catch {
-    // Ignore parse errors
+    return null;
   }
 
-  credentialsCache.set(cacheKey, null);
-  return null;
+  const credentials = normalizeApiKeyCreds(entry.credentials);
+  // Return defensive copy to prevent cache corruption from caller mutations
+  return { ...credentials };
 }
 
 /**
- * Store credentials in sessionStorage (cleared when browser closes)
- * Updates the module-level cache for consistency.
- * This provides better security than localStorage as credentials don't persist indefinitely.
+ * Store credentials in localStorage with an expiry.
  *
  * Security: CodeQL flags this as clear-text storage of sensitive data.
- * sessionStorage is origin-locked, tab-scoped, and cleared on tab close.
- * These are re-derivable CLOB API credentials (not passwords); encrypting them
- * here adds no real protection since XSS can access the decryption key in the
- * same JS context. This matches the standard Polymarket credential flow.
+ * localStorage is origin-locked but readable by same-origin JavaScript, so CSP
+ * hardening and strict validation are the main browser-side controls. These are
+ * re-derivable CLOB API credentials, not wallet private keys.
  */
 function storeCredentials(address: string, creds: ApiKeyCreds): void {
   if (typeof window === "undefined") return;
   const cacheKey = getCacheKey(address);
-  try {
-    // lgtm[js/clear-text-storage-of-sensitive-data]
-    sessionStorage.setItem(getStorageKey(address), JSON.stringify(creds));
-    // Store shallow copy to prevent external mutations from corrupting cache
-    // Only update cache if sessionStorage write succeeded
-    credentialsCache.set(cacheKey, { ...creds });
-  } catch {
-    // sessionStorage may throw if quota exceeded or in private browsing
-    // Still update in-memory cache for current session functionality
-    credentialsCache.set(cacheKey, { ...creds });
-  }
+  const now = Date.now();
+  const map = readStoredCredentialsMap();
+  map.entries[cacheKey] = {
+    credentials: creds,
+    createdAt: now,
+    expiresAt: now + CREDS_STORAGE_TTL_MS,
+  };
+  writeStoredCredentialsMap(map);
+  removeLegacySessionCredentials(address);
 }
 
 /**
- * Clear stored credentials from sessionStorage
- * Also clears the module-level cache.
+ * Clear stored credentials from localStorage.
  */
 function clearStoredCredentials(address: string): void {
   if (typeof window === "undefined") return;
   const cacheKey = getCacheKey(address);
-  sessionStorage.removeItem(getStorageKey(address));
-  credentialsCache.delete(cacheKey);
+  const map = readStoredCredentialsMap();
+  delete map.entries[cacheKey];
+  writeStoredCredentialsMap(map);
+  removeLegacySessionCredentials(address);
 }
 
 /**
  * Hook for managing Polymarket CLOB API credentials
  *
  * This hook handles:
- * 1. Checking for existing stored credentials in sessionStorage
- * 2. Deriving new credentials via the SDK's createOrDeriveApiKey()
- * 3. Storing credentials in sessionStorage for the current browser session
+ * 1. Checking for existing stored credentials in localStorage
+ * 2. Deriving new credentials through the server API route
+ * 3. Storing credentials in localStorage with an expiry
  *
  * Users need valid API credentials to post orders to the CLOB.
  * Credentials are derived by signing an EIP-712 message.
@@ -137,17 +228,33 @@ export function useClobCredentials() {
   const { data: walletClient } = useWalletClient();
 
   const [credentials, setCredentials] = useState<ApiKeyCreds | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isDerivingCredentials, setIsDerivingCredentials] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  // Load stored credentials when address changes
+  // Load stored credentials when address changes.
   useEffect(() => {
-    if (address) {
-      const stored = getStoredCredentials(address);
-      setCredentials(stored);
-    } else {
+    if (!address) {
       setCredentials(null);
+      return;
     }
+
+    setCredentials(getStoredCredentials(address));
+  }, [address]);
+
+  useEffect(() => {
+    if (!address || typeof window === "undefined") return;
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.storageArea && event.storageArea !== localStorage) return;
+      if (event.key !== CREDS_STORAGE_KEY && event.key !== null) return;
+
+      setCredentials(getStoredCredentials(address));
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+    };
   }, [address]);
 
   /**
@@ -184,8 +291,7 @@ export function useClobCredentials() {
   }, [address, walletClient]);
 
   /**
-   * Fallback: Derive credentials via server-side API route
-   * Used when SDK methods fail (e.g., due to network issues or CORS)
+   * Derive credentials via the server-side API route.
    */
   const deriveCredentialsViaApi =
     useCallback(async (): Promise<ApiKeyCreds> => {
@@ -223,12 +329,11 @@ export function useClobCredentials() {
     }, [address, generateL1Signature]);
 
   /**
-   * Create or derive API credentials using the SDK
+   * Create or derive API credentials through the server API route.
    *
-   * Uses our server API route first so expected Polymarket 400s do not show
-   * up as browser console errors from the SDK's internal Axios handler. The
-   * route implements the same create-or-derive L1 auth flow and the SDK stays
-   * as a fallback.
+   * The route implements the create-or-derive L1 auth flow. Keeping this to a
+   * single path prevents one user action from opening multiple wallet signing
+   * prompts if fallback attempts also need `ClobAuth`.
    *
    * Reference: https://docs.polymarket.com/developers/CLOB/clients/methods-l1#createorderiveapikey
    */
@@ -241,44 +346,30 @@ export function useClobCredentials() {
       throw new Error("No wallet provider found");
     }
 
-    setIsLoading(true);
+    const cacheKey = getCacheKey(address);
+    const inFlight = credentialDerivationPromises.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    setIsDerivingCredentials(true);
     setError(null);
 
-    try {
-      try {
-        return await deriveCredentialsViaApi();
-      } catch (apiErr) {
-        log.warn("api_credentials_route.failed.fallback_to_sdk", apiErr);
-      }
+    const derivation = deriveCredentialsViaApi()
+      .catch((err) => {
+        const error =
+          err instanceof Error
+            ? err
+            : new Error("Failed to derive credentials");
+        setError(error);
+        throw error;
+      })
+      .finally(() => {
+        credentialDerivationPromises.delete(cacheKey);
+        setIsDerivingCredentials(false);
+      });
 
-      try {
-        log.debug("unified_sdk_credentials.attempt");
-        const signer = await getViemWalletClient(
-          walletClient,
-          address as `0x${string}`
-        );
-        const { appCredentials } = await createUnifiedPolymarketSecureClient({
-          signer: createUnifiedPolymarketViemSigner(signer),
-        });
-        log.debug("unified_sdk_credentials.success");
-
-        storeCredentials(address, appCredentials);
-        setCredentials(appCredentials);
-
-        return appCredentials;
-      } catch (sdkErr) {
-        log.warn("unified_sdk_credentials.failed.fallback_to_api", sdkErr);
-        return await deriveCredentialsViaApi();
-      }
-    } catch (err) {
-      const error =
-        err instanceof Error ? err : new Error("Failed to derive credentials");
-      setError(error);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [address, deriveCredentialsViaApi, walletClient]);
+    credentialDerivationPromises.set(cacheKey, derivation);
+    return derivation;
+  }, [address, deriveCredentialsViaApi]);
 
   /**
    * Clear stored credentials and reset state
@@ -301,15 +392,11 @@ export function useClobCredentials() {
   }, [address]);
 
   /**
-   * Refresh credentials from sessionStorage
+   * Refresh credentials from localStorage
    * Useful after completing onboarding to ensure state is up to date.
-   * Forces a read from storage by clearing the cache entry first.
    */
   const refresh = useCallback(() => {
     if (address) {
-      // Clear cache to force reading from sessionStorage
-      const cacheKey = getCacheKey(address);
-      credentialsCache.delete(cacheKey);
       const stored = getStoredCredentials(address);
       setCredentials(stored);
     }
@@ -319,6 +406,7 @@ export function useClobCredentials() {
    * Check if credentials exist
    */
   const hasCredentials = useMemo(() => credentials !== null, [credentials]);
+  const isLoading = isDerivingCredentials;
 
   return {
     // State

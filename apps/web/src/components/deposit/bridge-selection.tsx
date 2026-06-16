@@ -1,5 +1,5 @@
 import type { SupportedAsset } from "@knoww/shared-types/bridge";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { ChevronRight, Loader2, Search } from "lucide-react";
 
 interface BridgeSelectionProps {
@@ -20,7 +20,7 @@ export function BridgeSelection({
   onSelectAsset,
 }: BridgeSelectionProps) {
   return (
-    <motion.div
+    <m.div
       key="bridge-select"
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -82,6 +82,6 @@ export function BridgeSelection({
           ))}
         </div>
       )}
-    </motion.div>
+    </m.div>
   );
 }

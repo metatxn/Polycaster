@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import {
   requireExtensionSession,
@@ -28,9 +29,7 @@ export async function POST(request: NextRequest) {
   try {
     const { session, response } = await requireExtensionSession(request);
     if (response || !session) {
-      const res =
-        response ??
-        NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      const res = response ?? jsonError("Unauthorized", 401);
       for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
       return res;
     }
@@ -39,9 +38,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true }, { status: 200, headers: cors });
   } catch {
-    return NextResponse.json(
-      { error: "Failed to revoke extension session" },
-      { status: 503, headers: cors }
-    );
+    const res = jsonError("Failed to revoke extension session", 503);
+    for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+    return res;
   }
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const globals = readFileSync("src/app/globals.css", "utf8");
-const landing = readFileSync("src/app/landing-page-client.tsx", "utf8");
+const landing = readFileSync("src/app/page.tsx", "utf8");
 const sections = readFileSync(
   "src/components/landing/knoww-sections.tsx",
   "utf8"

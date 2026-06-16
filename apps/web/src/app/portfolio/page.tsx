@@ -1,7 +1,6 @@
 "use client";
 
-import { useAppKit } from "@reown/appkit/react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConnection } from "wagmi";
@@ -34,6 +33,7 @@ import { useUserDetails } from "@/hooks/use-user-details";
 import { useUserPnL } from "@/hooks/use-user-pnl";
 import { useUserPositions } from "@/hooks/use-user-positions";
 import { useUserTrades } from "@/hooks/use-user-trades";
+import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
 
 function areClosedTimesEqual(
   prev: Record<string, string>,
@@ -48,10 +48,21 @@ function areClosedTimesEqual(
 
 export default function PortfolioPage() {
   const { isConnected, address } = useConnection();
-  const { open } = useAppKit();
   const [activeTab, setActiveTab] = useState<TabType>("positions");
   const [searchQuery, setSearchQuery] = useState("");
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      await openWalletModal();
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
 
   // Deep-link support: `/portfolio?fund=deposit|withdraw` opens the matching
@@ -363,6 +374,8 @@ export default function PortfolioPage() {
         <Navbar />
         <ChromeHeader />
         <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-8">
+          <h1 className="sr-only">Portfolio</h1>
+
           <ProductHero
             breadcrumbs={[
               { label: "Markets", href: "/markets" },
@@ -370,7 +383,7 @@ export default function PortfolioPage() {
             ]}
           />
 
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.1 }}
@@ -390,7 +403,10 @@ export default function PortfolioPage() {
             </p>
             <button
               type="button"
-              onClick={() => open()}
+              disabled={connecting}
+              onMouseEnter={preloadWalletModal}
+              onFocus={preloadWalletModal}
+              onClick={() => void handleConnect()}
               className="inline-flex items-center gap-2 pt-1 px-3 h-8 rounded-md border font-mono text-[11px] uppercase tracking-[0.14em] transition-colors"
               style={{
                 color: "var(--kwm-up)",
@@ -399,9 +415,9 @@ export default function PortfolioPage() {
               }}
             >
               <span className="kwm-pulse" />
-              <span>Connect wallet</span>
+              <span>{connecting ? "Connecting…" : "Connect wallet"}</span>
             </button>
-          </motion.div>
+          </m.div>
         </main>
         <ProductFooter context="Portfolio" />
       </div>
@@ -412,11 +428,13 @@ export default function PortfolioPage() {
     <div className="kw-app min-h-screen bg-(--kwm-bg) relative overflow-x-hidden selection:bg-(--kwm-ink)/15">
       <Navbar />
       <ChromeHeader />
-      <motion.main
+      <m.main
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-24 xl:pb-8"
       >
+        <h1 className="sr-only">Portfolio</h1>
+
         <PortfolioUtilityRow
           proxyAddress={proxyAddress ?? undefined}
           hasProxyWallet={hasProxyWallet}
@@ -470,7 +488,7 @@ export default function PortfolioPage() {
 
           <AnimatePresence mode="wait">
             {activeTab === "positions" && (
-              <motion.div
+              <m.div
                 key="positions"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -486,11 +504,11 @@ export default function PortfolioPage() {
                   onSort={handleSort}
                   onSell={handleSellPosition}
                 />
-              </motion.div>
+              </m.div>
             )}
 
             {activeTab === "orders" && (
-              <motion.div
+              <m.div
                 key="orders"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -503,11 +521,11 @@ export default function PortfolioPage() {
                   onCancel={handleCancelOrder}
                   cancellingOrderId={cancellingOrderId}
                 />
-              </motion.div>
+              </m.div>
             )}
 
             {activeTab === "history" && (
-              <motion.div
+              <m.div
                 key="history"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -520,11 +538,11 @@ export default function PortfolioPage() {
                   onCloseLostPosition={handleCloseLostPosition}
                   closingPositionId={closingConditionId}
                 />
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
         </section>
-      </motion.main>
+      </m.main>
 
       {/* Deposit Modal */}
       <DepositModal

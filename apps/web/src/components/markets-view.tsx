@@ -6,12 +6,13 @@ import {
 } from "@knoww/shared-types/polymarket";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useNow } from "@/hooks/use-now";
 import {
   type PriceHistoryPoint,
   useBatchPriceHistory,
 } from "@/hooks/use-price-history-batch";
-import { formatVolume } from "@/lib/formatters";
+import { formatCents, formatVolume, relativeTime } from "@/lib/formatters";
 
 /**
  * Markets view — DeFi/trading-terminal aesthetic for /markets at lg+.
@@ -70,6 +71,7 @@ interface SubMarket {
   title: string;
   yes: number;
   no: number;
+  tokenId?: string;
 }
 
 type MarketViewTab = "categories" | "trending" | "breaking" | "new";
@@ -109,17 +111,16 @@ const DUMMY_SPARK_DATA: PriceHistoryPoint[] = [
 // ============================================================
 // Data helpers — unchanged from the previous implementation.
 // ============================================================
-function formatCents(price: number | string | null | undefined): string {
-  if (price === undefined || price === null) return "—";
-  const n = typeof price === "string" ? Number.parseFloat(price) : price;
-  if (Number.isNaN(n)) return "—";
-  return `${Math.round(n * 100)}¢`;
-}
-
 function toNumber(v: number | string | undefined): number {
   if (v === undefined || v === null) return 0;
   const n = typeof v === "string" ? Number.parseFloat(v) : v;
   return Number.isNaN(n) ? 0 : n;
+}
+
+function isGenericPlaceholderCandidate(title: string): boolean {
+  return /^(?:team|app|car|player|candidate|option|choice)\s+[a-z]$/i.test(
+    title.trim()
+  );
 }
 
 function extractTopMarkets(event: MarketViewEvent, limit = 3): SubMarket[] {
@@ -131,15 +132,21 @@ function extractTopMarkets(event: MarketViewEvent, limit = 3): SubMarket[] {
     const yes = prices[0];
     const no = prices[1];
     if (Number.isNaN(yes) || Number.isNaN(no)) continue;
+    const title = m.groupItemTitle || m.question || "Outcome";
     parsed.push({
       id: m.id,
-      title: m.groupItemTitle || m.question || "Outcome",
+      title,
       yes,
       no,
+      tokenId: parseGammaStringArray(m.clobTokenIds)[0],
     });
   }
-  parsed.sort((a, b) => b.yes - a.yes);
-  return parsed.slice(0, limit);
+  const namedCandidates = parsed.filter(
+    (market) => !isGenericPlaceholderCandidate(market.title)
+  );
+  const candidates = namedCandidates.length > 0 ? namedCandidates : parsed;
+  candidates.sort((a, b) => b.yes - a.yes);
+  return candidates.slice(0, limit);
 }
 
 function summarizeEvent(event: MarketViewEvent): {
@@ -157,23 +164,7 @@ function summarizeEvent(event: MarketViewEvent): {
  *  when the event has no parseable markets or the leader's token
  *  list is missing. */
 function leaderTokenId(event: MarketViewEvent): string | null {
-  const markets = event.markets ?? [];
-  if (markets.length === 0) return null;
-  // Find the market with the highest YES price (mirrors extractTopMarkets).
-  let bestIdx = -1;
-  let bestYes = -1;
-  for (let i = 0; i < markets.length; i++) {
-    const prices = parseGammaNumberArray(markets[i].outcomePrices);
-    if (prices.length < 2) continue;
-    const yes = prices[0];
-    if (Number.isFinite(yes) && yes > bestYes) {
-      bestYes = yes;
-      bestIdx = i;
-    }
-  }
-  if (bestIdx === -1) return null;
-  const ids = parseGammaStringArray(markets[bestIdx].clobTokenIds);
-  return ids[0] ?? null;
+  return extractTopMarkets(event, 1)[0]?.tokenId ?? null;
 }
 
 // ============================================================
@@ -293,31 +284,24 @@ function UtilityBar({
 
 /** Compact "Xs / Xm / Xh / Xd" formatter — matches the design's
  *  terminal-tight "Updated 1s ago" style instead of date-fns'
- *  verbose "less than a minute ago" phrasing. */
-function compactAgo(timestamp: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+ *  verbose "less than a minute ago" phrasing. Sub-minute keeps the
+ *  seconds granularity the design calls for; minute-and-above
+ *  delegates to the canonical `relativeTime` compact style. */
+function compactAgo(now: number, timestamp: number): string {
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
   if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
+  return relativeTime(timestamp, "compact", now);
 }
 
 /** Relative-time indicator that re-renders every 5s so the displayed
  *  value stays fresh ("1s" → "6s" → "11s" → "1m"). */
 function UpdatedAgo({ timestamp }: { timestamp: number }) {
-  const [, force] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => force((n) => n + 1), 5000);
-    return () => clearInterval(id);
-  }, []);
+  const now = useNow(5_000);
   return (
     <span className="text-[11px]" style={{ color: "var(--kwm-ink-3)" }}>
       Updated{" "}
       <span className="tabular-nums" style={{ color: "var(--kwm-ink-2)" }}>
-        {compactAgo(timestamp)}
+        {compactAgo(now, timestamp)}
       </span>{" "}
       ago
     </span>
@@ -585,9 +569,11 @@ function FeaturedCard({
           : [0, 1, 2, 3].map((i) => <OutcomeRowSkeleton key={i} />)}
       </div>
 
-      {/* Footer */}
+      {/* Footer — mt-auto pins it to the card bottom so the three
+          equal-height grid cards align even when titles wrap to two
+          lines and push the content block taller. */}
       <div
-        className="flex items-center justify-between px-4 py-3.5 border-t font-(family-name:--font-geist-mono)"
+        className="mt-auto flex items-center justify-between px-4 py-3.5 border-t font-(family-name:--font-geist-mono)"
         style={{
           borderColor: "var(--kwm-hl)",
           background: "var(--kwm-bg-2)",

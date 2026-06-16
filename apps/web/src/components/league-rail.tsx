@@ -10,6 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { qk } from "@/lib/query-keys";
 import { SPORT_GROUPS, type SportGroup } from "@/lib/sport-categories";
 import { cn } from "@/lib/utils";
 
@@ -59,7 +60,7 @@ function getCountTagSlugs(openGroupSlugs: ReadonlySet<string>) {
 
 function useLeagueCounts(tagSlugs: string[], enabled = true) {
   return useQuery<LeagueCounts>({
-    queryKey: ["league-counts", tagSlugs.join(",")],
+    queryKey: qk.sports.leagueCounts(tagSlugs.join(",")),
     queryFn: async () => {
       const params = new URLSearchParams();
       for (const slug of tagSlugs) params.append("slug", slug);
@@ -147,6 +148,7 @@ function RailGroup({
       <Link
         href={`/events/sports/${group.slug}`}
         onClick={onNavigate}
+        aria-current={groupActive ? "page" : undefined}
         className={cn(
           "flex items-center justify-between gap-2 px-3 py-2 text-[14px] transition-colors",
           groupActive
@@ -200,6 +202,7 @@ function RailGroup({
                 key={league.slug}
                 href={`/events/sports/${league.slug}`}
                 onClick={onNavigate}
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "flex items-center justify-between gap-2 pl-9 pr-3 py-1.5 text-[13px] transition-colors",
                   isActive
@@ -291,6 +294,7 @@ export function LeagueRail({
         <Link
           href="/events/sports/live"
           onClick={onNavigate}
+          aria-current={isLiveActive ? "page" : undefined}
           className={cn(
             "flex items-center justify-between gap-2 px-3 py-2 text-[14px] transition-colors",
             isLiveActive

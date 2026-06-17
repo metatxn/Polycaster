@@ -37,6 +37,7 @@ import {
 import { qk } from "@/lib/query-keys";
 import { SPORT_GROUPS } from "@/lib/sport-categories";
 import { getSportRailOpenGroupSlugsFromEvents } from "@/lib/sport-rail-open-groups";
+import { mergeChildSportsMarkets } from "@/lib/sports-event-grouping";
 import {
   getInitialCompanionMarketSlugs,
   shouldFetchScheduledSportsFallback,
@@ -376,12 +377,15 @@ export default function LiveMarketsPage() {
 
   const rawEvents = useMemo(() => {
     const seen = new Set<string>();
-    const base = [...rawEventsBase, ...recentlyStartedEventsBase].filter(
-      (e) => {
-        if (seen.has(e.id)) return false;
-        seen.add(e.id);
-        return !e.title.toLowerCase().includes("more markets");
+    const deduped = [...rawEventsBase, ...recentlyStartedEventsBase].filter(
+      (event) => {
+        if (seen.has(event.id)) return false;
+        seen.add(event.id);
+        return true;
       }
+    );
+    const base = mergeChildSportsMarkets(deduped).filter(
+      (e) => !e.title.toLowerCase().includes("more markets")
     );
     if (!companionMarketMap) return base;
     return base.map((e) => {
@@ -396,7 +400,7 @@ export default function LiveMarketsPage() {
   }, [rawEventsBase, companionMarketMap, recentlyStartedEventsBase]);
 
   const scheduledEvents = useMemo(() => {
-    const base = scheduledEventsBase.filter(
+    const base = mergeChildSportsMarkets(scheduledEventsBase).filter(
       (e) => !e.title.toLowerCase().includes("more markets")
     );
     if (!companionMarketMap) return base;

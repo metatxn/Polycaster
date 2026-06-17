@@ -1,18 +1,5 @@
-import Decimal from "decimal.js";
 import type { EventTeam } from "@/hooks/use-event-detail";
 import type { OutcomeData } from "@/types/market";
-
-export interface MatchupTradingMarket {
-  id: string;
-  groupItemTitle: string;
-  yesTokenId: string;
-  yesPrice: string;
-  displayYesPrice?: string;
-}
-
-export interface MatchupTradingOutcome extends OutcomeData {
-  marketId: string;
-}
 
 function normalizeText(value: string): string {
   return value
@@ -51,13 +38,6 @@ function matchTeam(
   });
 }
 
-function outcomeLabel(
-  market: MatchupTradingMarket,
-  teams: readonly EventTeam[] | undefined
-): string {
-  return compactMatchupOutcomeName(market.groupItemTitle, teams) || "YES";
-}
-
 export function compactMatchupOutcomeName(
   rawName: string,
   teams: readonly EventTeam[] | undefined
@@ -68,24 +48,12 @@ export function compactMatchupOutcomeName(
   return rawName.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
-function parsePrice(value: string | undefined): number {
-  const parsed = Number.parseFloat(value ?? "");
-  return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0.5;
-}
-
-export function buildMatchupTradingOutcomes(
-  markets: readonly MatchupTradingMarket[],
+export function compactMatchupTradingOutcomes(
+  outcomes: readonly OutcomeData[],
   teams?: readonly EventTeam[]
-): MatchupTradingOutcome[] {
-  return markets.map((market) => {
-    const price = parsePrice(market.displayYesPrice ?? market.yesPrice);
-
-    return {
-      marketId: market.id,
-      name: outcomeLabel(market, teams),
-      tokenId: market.yesTokenId,
-      price,
-      probability: new Decimal(price).mul(100).round().toNumber(),
-    };
-  });
+): OutcomeData[] {
+  return outcomes.map((outcome) => ({
+    ...outcome,
+    name: compactMatchupOutcomeName(outcome.name, teams),
+  }));
 }

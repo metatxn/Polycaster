@@ -1,26 +1,62 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildMatchupTradingOutcomes,
   compactMatchupOutcomeName,
+  compactMatchupTradingOutcomes,
 } from "./matchup-trading-outcomes";
 
-describe("buildMatchupTradingOutcomes", () => {
-  it("builds sports moneyline ticket outcomes from each team's YES token", () => {
-    const outcomes = buildMatchupTradingOutcomes(
+describe("compactMatchupTradingOutcomes", () => {
+  it("keeps separate binary moneyline tickets labeled yes/no", () => {
+    const outcomes = compactMatchupTradingOutcomes(
       [
         {
-          id: "india-market",
-          groupItemTitle: "India",
-          yesTokenId: "india-yes",
-          yesPrice: "0.64",
-          displayYesPrice: "0.6",
+          name: "Yes",
+          tokenId: "draw-yes",
+          price: 0.24,
+          probability: 24,
         },
         {
-          id: "afghanistan-market",
-          groupItemTitle: "Afghanistan",
-          yesTokenId: "afghanistan-yes",
-          yesPrice: "0.37",
-          displayYesPrice: "0.42",
+          name: "No",
+          tokenId: "draw-no",
+          price: 0.77,
+          probability: 77,
+        },
+      ],
+      [
+        { name: "Austria", abbreviation: "AUT" },
+        { name: "Jordan", abbreviation: "JOR" },
+      ]
+    );
+
+    expect(outcomes).toEqual([
+      {
+        name: "Yes",
+        tokenId: "draw-yes",
+        price: 0.24,
+        probability: 24,
+      },
+      {
+        name: "No",
+        tokenId: "draw-no",
+        price: 0.77,
+        probability: 77,
+      },
+    ]);
+  });
+
+  it("compacts named team outcomes using abbreviations", () => {
+    const outcomes = compactMatchupTradingOutcomes(
+      [
+        {
+          name: "India",
+          tokenId: "india-token",
+          price: 0.6,
+          probability: 60,
+        },
+        {
+          name: "Afghanistan",
+          tokenId: "afghanistan-token",
+          price: 0.42,
+          probability: 42,
         },
       ],
       [
@@ -31,22 +67,22 @@ describe("buildMatchupTradingOutcomes", () => {
 
     expect(outcomes).toEqual([
       {
-        marketId: "india-market",
         name: "IND4",
-        tokenId: "india-yes",
+        tokenId: "india-token",
         price: 0.6,
         probability: 60,
       },
       {
-        marketId: "afghanistan-market",
         name: "AFG2",
-        tokenId: "afghanistan-yes",
+        tokenId: "afghanistan-token",
         price: 0.42,
         probability: 42,
       },
     ]);
   });
+});
 
+describe("compactMatchupOutcomeName", () => {
   it("compacts named matchup outcomes using team abbreviations", () => {
     expect(
       compactMatchupOutcomeName("India", [

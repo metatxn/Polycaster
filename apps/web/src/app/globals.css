@@ -3350,6 +3350,58 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   }
 }
 
+/* FIFA nav callout — quick attention pulse without adding another nav item. */
+.kw-fifa-nav-link {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 3px;
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--foreground) 52%, transparent);
+  background: color-mix(in oklch, var(--accent) 72%, transparent);
+  animation: kwFifaNavPulse 1.8s ease-in-out infinite;
+}
+.kw-fifa-nav-link::before {
+  content: "";
+  position: absolute;
+  inset: 1px -40%;
+  z-index: -1;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in oklch, var(--foreground) 18%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-62%);
+  animation: kwFifaNavSweep 1.8s ease-in-out infinite;
+}
+@keyframes kwFifaNavPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--foreground) 0%, transparent);
+  }
+  42% {
+    box-shadow: 0 0 0 4px
+      color-mix(in oklch, var(--foreground) 10%, transparent);
+  }
+}
+@keyframes kwFifaNavSweep {
+  0%,
+  18% {
+    transform: translateX(-62%);
+  }
+  58%,
+  100% {
+    transform: translateX(62%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kw-fifa-nav-link,
+  .kw-fifa-nav-link::before {
+    animation: none;
+  }
+}
+
 /* Top of Book — outcome row progress fill */
 .kw-app .kwm-track {
   height: 3px;

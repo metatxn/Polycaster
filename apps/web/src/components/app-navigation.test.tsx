@@ -96,16 +96,51 @@ describe("app navigation", () => {
 
     const primaryNav = screen.getByRole("navigation", { name: "Primary" });
     const fifaLink = within(primaryNav).getByRole("link", { name: "FIFA" });
+    const primaryLabels = within(primaryNav)
+      .getAllByRole("link")
+      .map((link) => link.textContent);
 
     expect(fifaLink).toHaveAttribute("href", "/events/sports/fifa-world-cup");
+    expect(primaryLabels).toEqual([
+      "Markets",
+      "Live",
+      "Whales",
+      "Leaderboard",
+      "Portfolio",
+      "FIFA",
+    ]);
+    expect(fifaLink).toHaveClass("kw-fifa-nav-link");
   });
 
   it("surfaces FIFA World Cup in the mobile drawer primary destinations", () => {
     render(<SidebarMobile />);
 
+    const primaryButtons = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent?.replace("→", ""))
+      .filter((label) =>
+        [
+          "Markets",
+          "Live",
+          "Whales",
+          "Leaderboard",
+          "Portfolio",
+          "FIFA",
+          "Search",
+        ].includes(label ?? "")
+      );
     const fifaButton = screen.getByRole("button", { name: "FIFA" });
     fireEvent.click(fifaButton);
 
+    expect(primaryButtons).toEqual([
+      "Markets",
+      "Live",
+      "Whales",
+      "Leaderboard",
+      "Portfolio",
+      "FIFA",
+      "Search",
+    ]);
     expect(navigationState.push).toHaveBeenCalledWith(
       "/events/sports/fifa-world-cup"
     );

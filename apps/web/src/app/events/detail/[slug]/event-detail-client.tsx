@@ -61,10 +61,7 @@ import {
 import { FieldTiles } from "./field-tiles";
 import { HeaderSection } from "./header-section";
 import { MatchupOutcomes } from "./matchup-outcomes";
-import {
-  buildMatchupTradingOutcomes,
-  compactMatchupOutcomeName,
-} from "./matchup-trading-outcomes";
+import { compactMatchupTradingOutcomes } from "./matchup-trading-outcomes";
 import {
   type BookSnapshot,
   fetchBookSnapshot,
@@ -1396,48 +1393,14 @@ export default function EventDetailClient({
     : isSingleMarketEvent
       ? chartMarket?.yesTokenId
       : chartMarket?.yesTokenId;
-  const matchupTradingMoneylineMarkets = isMatchup
-    ? matchupMarketDataWithDisplayQuotes
-        .filter((m) => (m.sportsMarketType ?? "").toLowerCase() === "moneyline")
-        .sort(
-          (a, b) =>
-            matchupMoneylineRank(a.groupItemTitle, matchupTeams) -
-            matchupMoneylineRank(b.groupItemTitle, matchupTeams)
-        )
-    : [];
-  const isGroupedMoneylineTradingPanel =
-    isMatchup &&
-    selectedMarket?.sportsMarketType?.toLowerCase() === "moneyline" &&
-    matchupTradingMoneylineMarkets.length > 1;
   const isMatchupMoneylineTradingPanel =
     isMatchup &&
     selectedMarket?.sportsMarketType?.toLowerCase() === "moneyline";
-  const tradingFormOutcomes = isGroupedMoneylineTradingPanel
-    ? buildMatchupTradingOutcomes(matchupTradingMoneylineMarkets, matchupTeams)
-    : isMatchupMoneylineTradingPanel
-      ? tradingOutcomes.map((outcome) => ({
-          ...outcome,
-          name: compactMatchupOutcomeName(outcome.name, matchupTeams),
-        }))
-      : tradingOutcomes;
-  const tradingFormSelectedOutcomeIndex = isGroupedMoneylineTradingPanel
-    ? Math.max(
-        0,
-        matchupTradingMoneylineMarkets.findIndex(
-          (market) => market.id === selectedMarket?.id
-        )
-      )
-    : selectedOutcomeIndex;
+  const tradingFormOutcomes = isMatchupMoneylineTradingPanel
+    ? compactMatchupTradingOutcomes(tradingOutcomes, matchupTeams)
+    : tradingOutcomes;
+  const tradingFormSelectedOutcomeIndex = selectedOutcomeIndex;
   const handleTradingFormOutcomeChange = (nextIndex: number) => {
-    if (isGroupedMoneylineTradingPanel) {
-      const nextMarket = matchupTradingMoneylineMarkets[nextIndex];
-      if (nextMarket) {
-        setSelectedMarketId(nextMarket.id);
-        setSelectedOutcomeIndex(0);
-        return;
-      }
-    }
-
     setSelectedOutcomeIndex(nextIndex);
   };
   const sportsRailActiveSlug = isTeamMatchupEvent(event.teams)

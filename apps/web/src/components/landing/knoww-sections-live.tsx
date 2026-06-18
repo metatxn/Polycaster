@@ -32,7 +32,7 @@ export function ExtensionPopup() {
   const yes = useTickingOdds(42.6, [40, 46]);
   const no = Math.round((100 - yes) * 10) / 10;
   return (
-    <div className="relative z-1 w-[320px] overflow-hidden rounded-[14px] border border-(--kw-fg)/15 bg-(--kw-bg-card) shadow-[0_30px_80px_-20px_rgba(0,0,0,0.5)]">
+    <div className="kw-glass relative z-1 w-[320px] overflow-hidden rounded-[14px]">
       <div className="flex items-center gap-3 border-b border-(--kw-fg)/10 px-4 py-3.5">
         <span
           className="relative h-7 w-7 rounded-[8px]"
@@ -110,7 +110,7 @@ function useTickingNumber(initial: number, range: number, ms = 1500) {
 export function AgentDashboard() {
   const conf = useTickingNumber(78, 4);
   return (
-    <div className="overflow-hidden rounded-[18px] border border-(--kw-fg)/15 bg-(--kw-bg-card)/60 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.45)]">
+    <div className="kw-glass overflow-hidden rounded-[18px]">
       <div className="flex items-center justify-between border-b border-(--kw-fg)/10 px-4 py-3.5 font-mono text-[11.5px] uppercase tracking-[0.06em] text-(--kw-fg)/70">
         <span>Knoww Agent · Live Monitor</span>
         <span className="flex items-center gap-2 text-(--kw-accent-text)">

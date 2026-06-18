@@ -44,7 +44,7 @@ export default function LandingPage() {
     <LandingShell>
       <TickerBar />
 
-      <header className="border-b border-(--kw-fg)/10 bg-(--kw-bg)">
+      <header className="kw-glass-bar border-b border-(--kw-fg)/10">
         <div className="max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
@@ -106,6 +106,7 @@ export default function LandingPage() {
             no background grid. */}
         <section className="relative flex min-h-[calc(100svh-109px)] items-center border-b border-(--kw-fg)/10 overflow-hidden">
           <div className="kw-stage-glow" />
+          <div className="kw-grain" />
           <div className="kw-hero-inner relative z-1 w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 py-14 sm:px-8 md:py-20 min-[1024px]:max-[1279px]:landscape:py-8">
             {/* Top-align on landscape tablets so the CTA never gets pushed
               below the fold by the tall side-by-side card; desktop (xl) keeps

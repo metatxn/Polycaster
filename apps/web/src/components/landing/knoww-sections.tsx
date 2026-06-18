@@ -92,7 +92,7 @@ export function ProblemSection() {
 
           {/* Chaos → probability visual */}
           <div
-            className="kw-reveal relative h-[440px] overflow-hidden rounded-[20px] border border-(--kw-fg)/10 bg-(--kw-bg-card)/60"
+            className="kw-reveal kw-glass relative h-[440px] overflow-hidden rounded-[20px]"
             style={{
               backgroundImage:
                 "radial-gradient(600px 300px at 50% 0%, color-mix(in srgb, var(--kw-danger-bright) 9%, transparent), transparent 60%)",
@@ -173,7 +173,7 @@ function FeatureCard({
   desc: string;
 }) {
   return (
-    <div className="kw-reveal kw-card-lift relative overflow-hidden rounded-[18px] border border-(--kw-fg)/10 bg-(--kw-bg-card)/50 p-7">
+    <div className="kw-reveal kw-card-lift kw-glass relative overflow-hidden rounded-[18px] p-7">
       <span className="absolute right-5 top-5 font-mono text-[11px] tracking-[0.08em] text-(--kw-fg)/30">
         {num}
       </span>
@@ -344,7 +344,7 @@ export function HowItWorks() {
           {STEPS.map((s) => (
             <div
               key={s.n}
-              className="kw-reveal rounded-[16px] border border-(--kw-fg)/10 bg-(--kw-bg-card)/50 p-6"
+              className="kw-reveal kw-card-lift kw-glass rounded-[16px] p-6"
             >
               <div className="font-mono text-[11px] tracking-widest text-(--kw-accent-text)">
                 STEP {s.n}
@@ -684,7 +684,7 @@ const METRICS = [
   { label: "Markets", v: "14K+", sub: "via Polymarket" },
   { label: "Latency", v: "< 500ms", sub: "detect-to-render" },
   { label: "Agent layer", v: "Alpha", sub: "internal testing" },
-  { label: "Waitlist", v: "7,400", sub: "and growing" },
+  { label: "Pricing", v: "Free", sub: "one-click install" },
   { label: "Public launch", v: "Soon", sub: "2026" },
 ];
 
@@ -710,7 +710,7 @@ export function TractionSection() {
           {METRICS.map((m) => (
             <div
               key={m.label}
-              className="kw-reveal rounded-[16px] border border-(--kw-fg)/10 bg-(--kw-bg-card)/50 p-5"
+              className="kw-reveal kw-card-lift kw-glass rounded-[16px] p-5"
             >
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-(--kw-fg)/70">
                 {m.label}
@@ -748,40 +748,43 @@ export function FinalCTASection({
               "radial-gradient(600px 300px at 50% 0%, var(--kw-accent-soft), transparent 60%), var(--kw-bg-card)",
           }}
         >
-          <span className="inline-flex items-center gap-2 rounded-full border border-(--kw-fg)/15 bg-(--kw-fg)/2 px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kw-fg)/70">
-            <span className="kw-signal-dot h-1.5 w-1.5" />
-            Closed beta · 7,400 on the waitlist
-          </span>
-          <h2 className="mx-auto mt-6 max-w-[900px] text-4xl font-bold leading-[1.04] tracking-[-0.035em] md:text-6xl">
-            The future won’t just be discussed.
-            <br />
-            <span className="kw-editorial italic text-(--kw-accent-text)">
-              It’ll be priced.
+          <div className="kw-grain" />
+          <div className="relative z-1">
+            <span className="inline-flex items-center gap-2 rounded-full border border-(--kw-fg)/15 bg-(--kw-fg)/2 px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kw-fg)/70">
+              <span className="kw-signal-dot h-1.5 w-1.5" />
+              Closed beta
             </span>
-          </h2>
-          <p className="mx-auto mt-5 max-w-[60ch] text-base leading-[1.6] text-(--kw-fg)/80">
-            Join Knoww and get real-time prediction markets wherever the
-            internet debates what happens next.
-          </p>
-          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <a
-              href={chromeStoreUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group inline-flex items-center gap-2.5 bg-(--kw-fg) px-7 py-4 text-[14px] font-semibold text-(--kw-bg) transition-colors hover:bg-(--kw-fg)/90"
-            >
-              Get Early Access
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-            </a>
-            <a
-              href={chromeStoreUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 border-b border-(--kw-fg)/20 px-5 py-4 text-[14px] font-medium text-(--kw-fg)/70 transition-colors hover:border-(--kw-fg) hover:text-(--kw-fg)"
-            >
-              <Activity className="h-4 w-4" />
-              Install Extension Soon
-            </a>
+            <h2 className="mx-auto mt-6 max-w-[900px] text-4xl font-bold leading-[1.04] tracking-[-0.035em] md:text-6xl">
+              The future won’t just be discussed.
+              <br />
+              <span className="kw-editorial italic text-(--kw-accent-text)">
+                It’ll be priced.
+              </span>
+            </h2>
+            <p className="mx-auto mt-5 max-w-[60ch] text-base leading-[1.6] text-(--kw-fg)/80">
+              Join Knoww and get real-time prediction markets wherever the
+              internet debates what happens next.
+            </p>
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <a
+                href={chromeStoreUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group inline-flex items-center gap-2.5 bg-(--kw-fg) px-7 py-4 text-[14px] font-semibold text-(--kw-bg) transition-colors hover:bg-(--kw-fg)/90"
+              >
+                Get Early Access
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </a>
+              <a
+                href={chromeStoreUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 border-b border-(--kw-fg)/20 px-5 py-4 text-[14px] font-medium text-(--kw-fg)/70 transition-colors hover:border-(--kw-fg) hover:text-(--kw-fg)"
+              >
+                <Activity className="h-4 w-4" />
+                Install Extension Soon
+              </a>
+            </div>
           </div>
         </div>
       </div>

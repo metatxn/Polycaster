@@ -817,6 +817,14 @@ html.softpop {
   position: relative;
   z-index: 1;
 }
+/* Header docks to the top of the landing's own scroll container and frosts
+   the content scrolling under it (see `.kw-glass-bar`). Same specificity as
+   the rule above but later in source order, so it wins for the header. */
+.kw-landing > header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
 
 /* Editorial display serif for italic accents. Falls back to Georgia
  * (not Times) for a more refined default. */
@@ -1085,66 +1093,6 @@ body
   }
 }
 
-/* Coverage orbit reveal — one-shot build animation that runs when the
-   diagram enters the viewport. Rings scale + fade in inner→middle→
-   outer; pills fade up ring-by-ring shortly after. After the reveal
-   completes, the diagram is fully static (no looping ambient motion).
-   `transform-box: fill-box` anchors each ellipse's scale origin to its
-   own bounding-box centre even though the SVG uses
-   preserveAspectRatio="none". */
-.kw-orbit-ring {
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-  transform: scale(0.6);
-}
-.kw-orbit-pill {
-  opacity: 0;
-}
-.kw-orbit-pill > span {
-  display: inline-block;
-  transform: translateY(8px);
-}
-
-@keyframes kwOrbitRingReveal {
-  0% {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-@keyframes kwOrbitPillReveal {
-  0% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-@keyframes kwOrbitPillSpanLift {
-  0% {
-    transform: translateY(8px);
-  }
-  100% {
-    transform: translateY(0);
-  }
-}
-
-.kw-coverage-built .kw-orbit-ring {
-  animation: kwOrbitRingReveal 800ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
-}
-.kw-coverage-built .kw-orbit-pill {
-  animation: kwOrbitPillReveal 600ms ease-out forwards;
-}
-.kw-coverage-built .kw-orbit-pill > span {
-  animation: kwOrbitPillSpanLift 600ms ease-out forwards;
-  /* Inherit the parent's animation-delay so lift + fade stay in sync. */
-  animation-delay: inherit;
-}
-
 @media (prefers-reduced-motion: reduce) {
   /* Reduced-motion overrides must win regardless of specificity or
      source order — users opting out of motion get a guaranteed
@@ -1161,10 +1109,6 @@ body
   .kw-tilt:hover {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     transform: none !important;
-  }
-  .kw-orbit-ring {
-    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
-    animation: none !important;
   }
   .kw-cursor-glow {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
@@ -1275,13 +1219,119 @@ body
 /* Card hover lift — feature, use-case, platform tiles. */
 .kw-card-lift {
   transition:
-    transform 0.22s ease,
-    border-color 0.22s ease,
-    background 0.22s ease;
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.28s ease,
+    box-shadow 0.28s ease,
+    background 0.28s ease;
 }
-.kw-card-lift:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--kw-fg) 22%, transparent);
+/* `.kw-landing` prefix keeps these above `.kw-glass` (same component, equal
+   base specificity) so the hover shadow wins on tiles that carry both. */
+.kw-landing .kw-card-lift:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--kw-accent) 32%, transparent);
+  /* Float harder + pick up a faint accent halo so the lift reads as a
+     physical glass tile catching light, not just a translate. */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent),
+    0 1px 2px color-mix(in srgb, #000 24%, transparent),
+    0 26px 50px -24px color-mix(in srgb, #000 58%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--kw-accent) 14%, transparent),
+    0 18px 60px -28px var(--kw-accent-glow);
+}
+[data-scheme="light"] .kw-landing .kw-card-lift:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px color-mix(in srgb, var(--kw-fg) 8%, transparent),
+    0 24px 48px -24px color-mix(in srgb, var(--kw-fg) 26%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--kw-accent) 16%, transparent),
+    0 16px 50px -28px var(--kw-accent-glow);
+}
+
+/* ============================================================
+ * GLASSMORPHISM — frosted surfaces (landing only)
+ * Extracted from the hero `.kwt-card` recipe so every floating
+ * panel shares the same physical-glass language: a translucent
+ * fill that refracts the ambient cursor/stage glow behind it, a
+ * specular top edge, and a layered ambient shadow. Theme-aware —
+ * dark schemes lean on blur + saturation; the warm-paper light
+ * schemes lean on a brighter fill + shadow so glass never muddies.
+ * Scoped to `.kw-landing` so nothing leaks onto app surfaces.
+ * ============================================================ */
+.kw-landing .kw-glass {
+  position: relative;
+  background: color-mix(in srgb, var(--kw-bg-card) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kw-fg) 12%, transparent);
+  backdrop-filter: blur(16px) saturate(155%);
+  -webkit-backdrop-filter: blur(16px) saturate(155%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+    0 1px 2px color-mix(in srgb, #000 22%, transparent),
+    0 18px 44px -24px color-mix(in srgb, #000 55%, transparent);
+}
+[data-scheme="light"] .kw-glass {
+  background: color-mix(in srgb, var(--kw-bg-card) 68%, transparent);
+  border-color: color-mix(in srgb, var(--kw-fg) 8%, transparent);
+  backdrop-filter: blur(14px) saturate(135%) brightness(1.02);
+  -webkit-backdrop-filter: blur(14px) saturate(135%) brightness(1.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 1px 2px color-mix(in srgb, var(--kw-fg) 6%, transparent),
+    0 16px 40px -24px color-mix(in srgb, var(--kw-fg) 22%, transparent);
+}
+
+/* Sticky chrome — heavier blur since fast-scrolling content passes
+   directly beneath it. Pairs with a hairline base border on the
+   element itself. */
+.kw-landing .kw-glass-bar {
+  background: color-mix(in srgb, var(--kw-bg) 70%, transparent);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+}
+[data-scheme="light"] .kw-glass-bar {
+  background: color-mix(in srgb, var(--kw-bg) 78%, transparent);
+}
+
+/* Fine film grain — masks gradient banding on the big radial glows and
+   adds an "expensive printed paper" texture that suits the editorial
+   concept. Sits behind content (z-0) as a non-interactive overlay. */
+.kw-landing .kw-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 140px 140px;
+  opacity: 0.055;
+  mix-blend-mode: overlay;
+}
+[data-scheme="light"] .kw-grain {
+  opacity: 0.035;
+}
+
+/* Graceful degradation: solidify glass where the platform can't frost
+   (older engines) or the user asks for less transparency. */
+@supports not (
+    (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px))
+  ) {
+  .kw-landing .kw-glass {
+    background: var(--kw-bg-card);
+  }
+  .kw-landing .kw-glass-bar {
+    background: var(--kw-bg);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .kw-landing .kw-glass {
+    background: var(--kw-bg-card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .kw-landing .kw-glass-bar {
+    background: var(--kw-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 /* Animated confidence / progress fill. */
@@ -1315,53 +1365,6 @@ body
 }
 .kw-float {
   animation: kwFloatBob 4s ease-in-out infinite;
-}
-
-/* Scan line sweeping a panel as the extension "reads" context. */
-@keyframes kwScan {
-  0% {
-    transform: translateY(0);
-    opacity: 0;
-  }
-  12% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(var(--kw-scan-h, 120px));
-    opacity: 0;
-  }
-}
-.kw-scan-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--kw-accent),
-    transparent
-  );
-  box-shadow: 0 0 14px var(--kw-accent-glow);
-  animation: kwScan 3.6s ease-in-out infinite;
-}
-
-/* Market card slide-in under a detected post. */
-@keyframes kwCardIn {
-  0% {
-    transform: translateY(16px);
-    opacity: 0;
-    filter: blur(6px);
-  }
-  100% {
-    transform: translateY(0);
-    opacity: 1;
-    filter: blur(0);
-  }
-}
-.kw-card-in {
-  animation: kwCardIn 0.9s 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 /* ---- Probability radar ---- */
@@ -1494,15 +1497,16 @@ body
 @media (prefers-reduced-motion: reduce) {
   .kw-signal-dot,
   .kw-float,
-  .kw-scan-line,
   .kw-radar-sweep,
   .kw-radar-blip,
-  .kw-bar-fill,
-  .kw-card-in {
+  .kw-bar-fill {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     animation: none !important;
   }
-  .kw-card-lift:hover {
+  /* Scoped to match the `.kw-landing .kw-card-lift:hover` rule above so the
+     two stay at equal specificity (avoids a descending-specificity warning);
+     `!important` enforces the reduced-motion guarantee regardless. */
+  .kw-landing .kw-card-lift:hover {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     transform: none !important;
   }
@@ -3280,6 +3284,85 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   --color-orange-500: #b45309;
 }
 
+/* ============================================================
+ * MARKET TERMINAL — premium depth + frosted chrome (.kw-app)
+ * Deliberately NOT the landing's frosted-everything treatment:
+ * the terminal is a dense data surface, so cards/rows stay opaque
+ * and gain depth via shadow (legible + cheap to composite), while
+ * glass is reserved for the one sticky surface content scrolls
+ * under — the order-book header. Tokens track every theme via the
+ * --kwm-* system above.
+ * ============================================================ */
+
+/* Top-of-book cards — lift off the flat terminal background with a
+   layered ambient shadow, then float harder on hover with a crisp
+   edge ring. `transition-all` on the element animates the shadow. */
+.kw-app .kwm-tob-card {
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 7%, transparent),
+    0 10px 28px -18px color-mix(in oklch, var(--kwm-ink) 38%, transparent);
+}
+.kw-app .kwm-tob-card:hover {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 10%, transparent),
+    0 2px 4px color-mix(in oklch, var(--kwm-ink) 10%, transparent),
+    0 24px 50px -22px color-mix(in oklch, var(--kwm-ink) 55%, transparent),
+    0 0 0 1px var(--kwm-hl-3);
+}
+
+/* Event-detail "THE FIELD" contender tiles — a subtle static lift so they
+   read as raised chips, consistent with the terminal cards. Kept gentle
+   (5 sit in a tight row) and static: the inline selected-state boxShadow
+   (inset ring) intentionally overrides this for the active tile. */
+.kw-app .kwm-fld {
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 5%, transparent),
+    0 6px 16px -12px color-mix(in oklch, var(--kwm-ink) 28%, transparent);
+}
+
+/* Frosted chrome — applied ONLY to sticky surfaces (e.g. the order-book
+   header) so the rows dissolve under it as they scroll. Pair with a
+   translucent inline background on the element itself. */
+.kw-app .kwm-frost {
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+}
+
+/* Premium primary action (Connect / inline CTAs) — specular top edge +
+   a soft drop so the solid button reads as a raised, lit surface. */
+.kw-app .kwm-cta {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 18%, transparent),
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 28%, transparent),
+    0 8px 20px -10px color-mix(in oklch, var(--kwm-ink) 42%, transparent);
+  transition:
+    box-shadow 0.2s ease,
+    background-color 0.2s ease,
+    transform 0.12s ease;
+}
+.kw-app .kwm-cta:active {
+  transform: translateY(0.5px);
+}
+
+/* Degrade frost to opaque where the platform can't frost or the user
+   asks for less transparency (the translucent inline bg still reads as
+   a solid panel since the blur is what's removed). */
+@supports not (
+    (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px))
+  ) {
+  .kw-app .kwm-frost {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .kw-app .kwm-frost {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* Middle-dot separator between adjacent stat items in a row — used by
    the event-detail header so values like volume / date / markets /
    days-left read as distinct without the hard-stop feel of a vertical
@@ -3313,20 +3396,6 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   font-family:
     var(--font-geist), ui-sans-serif, system-ui, sans-serif !important;
   font-style: normal !important;
-}
-
-/* Typography helpers (used inline in markets-view.tsx) */
-.kw-app .kwm-mono {
-  font-family:
-    var(--font-geist-mono), ui-monospace, "JetBrains Mono", monospace;
-  font-variant-numeric: tabular-nums;
-}
-.kw-app .kwm-label {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--kwm-ink-3);
 }
 
 /* Pulse dot — green LIVE indicator */
@@ -4029,6 +4098,12 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
  * ===================================================================== */
 .kw-app .kw-ticket {
   @apply font-(family-name:--font-geist) text-(--kwm-ink);
+  /* Lift the sticky trade panel off the page as the focal action surface —
+     depth via shadow (it stays opaque; the form must read cleanly). Tracks
+     the theme via --kwm-ink, like the terminal cards. */
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 6%, transparent),
+    0 18px 44px -26px color-mix(in oklch, var(--kwm-ink) 38%, transparent);
 }
 
 /* Subject — outcome flag + name + meta (NEG RISK · pct · "Yes to win") */
@@ -4304,12 +4379,22 @@ html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
 }
 .kw-app .kw-ticket .tk-cta.ready {
   @apply bg-(--kwm-ink) text-(--kwm-bg) border-(--kwm-ink);
+  /* Specular top edge + soft drop so the primary action reads as a raised,
+     lit surface. */
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 20%, transparent),
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 26%, transparent),
+    0 8px 20px -10px color-mix(in oklch, var(--kwm-ink) 40%, transparent);
 }
 .kw-app .kw-ticket .tk-cta.ready:hover {
   @apply brightness-110;
 }
 .kw-app .kw-ticket .tk-cta.deposit {
   @apply bg-(--kwm-warn) text-(--kwm-bg) border-(--kwm-warn);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 22%, transparent),
+    0 1px 2px color-mix(in oklch, var(--kwm-warn) 30%, transparent),
+    0 8px 20px -10px color-mix(in oklch, var(--kwm-warn) 45%, transparent);
 }
 .kw-app .kw-ticket .tk-cta.deposit:hover {
   filter: brightness(1.08);

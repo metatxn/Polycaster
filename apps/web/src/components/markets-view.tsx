@@ -733,9 +733,9 @@ const BOOK_GRID =
 function BookHead() {
   return (
     <div
-      className={`${BOOK_GRID} sticky top-0 z-5 px-5 py-3.5 border-b font-(family-name:--font-geist-mono) text-[10px] font-medium uppercase tracking-[0.14em]`}
+      className={`${BOOK_GRID} kwm-frost sticky top-0 z-5 px-5 py-3.5 border-b font-(family-name:--font-geist-mono) text-[10px] font-medium uppercase tracking-[0.14em]`}
       style={{
-        background: "var(--kwm-bg-2)",
+        background: "color-mix(in oklch, var(--kwm-bg-2) 80%, transparent)",
         borderColor: "var(--kwm-hl)",
         color: "var(--kwm-ink-3)",
       }}

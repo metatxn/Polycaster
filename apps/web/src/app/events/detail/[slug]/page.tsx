@@ -4,8 +4,10 @@ import { serializeJsonLd } from "@/lib/json-ld";
 import {
   buildPageMetadata,
   buildPredictionMarketDescription,
+  buildPredictionMarketTitle,
   canonicalUrl,
   cleanMetaText,
+  shouldIndexEventPage,
   truncateMetaDescription,
 } from "@/lib/seo";
 import { getEvent } from "@/lib/server-cache";
@@ -23,17 +25,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return {
       title: "Event Not Found",
       description: "The requested event could not be found.",
+      robots: {
+        index: false,
+        follow: true,
+      },
     };
   }
 
+  const cleanTitle = cleanMetaText(event.title);
   return buildPageMetadata({
-    title: event.title,
+    title: buildPredictionMarketTitle(cleanTitle),
     description: buildPredictionMarketDescription({
-      title: event.title,
+      title: cleanTitle,
       fallback: event.description,
     }),
     path: `/events/detail/${slug}`,
     image: event.image,
+    index: shouldIndexEventPage(event),
   });
 }
 
@@ -68,6 +76,7 @@ export default async function EventDetailPage({ params }: Props) {
     description,
     url: canonicalUrl(`/events/detail/${slug}`),
     image: initialEvent.image,
+    dateModified: initialEvent.updatedAt,
     mainEntity: {
       "@type": "Question",
       name: initialEvent.title,

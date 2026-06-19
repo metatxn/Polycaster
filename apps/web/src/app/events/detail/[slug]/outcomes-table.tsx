@@ -82,6 +82,11 @@ interface MarketData {
   yesProbability: number;
   change: number;
   closed?: boolean;
+  description?: string;
+  endDate?: string;
+  createdAt?: string;
+  resolutionSource?: string;
+  resolvedBy?: string;
 }
 
 interface OutcomesTableProps {
@@ -112,21 +117,99 @@ interface OutcomesTableProps {
 interface MarketExpandedContentProps {
   isExpanded: boolean;
   userPositions: Position[];
-  market: {
-    id: string;
-    yesTokenId: string;
-    noTokenId: string;
-    yesPrice: string;
-    noPrice: string;
-    conditionId: string;
-    groupItemTitle: string;
-  };
+  market: MarketData;
   marketOutcomes: { name: string; tokenId: string; price: number }[];
   selectedOutcomeIndex: number;
   setSelectedOutcomeIndex: (val: number) => void;
   handlePriceClick: (price: number) => void;
   isSingleMarketEvent: boolean;
   onSellPosition: (position: Position) => void;
+}
+
+function formatDetailDate(value: string | undefined): string | null {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function MarketResolutionContent({ market }: { market: MarketData }) {
+  const description = market.description?.trim();
+  const openedAt = formatDetailDate(market.createdAt);
+  const endDate = formatDetailDate(market.endDate);
+
+  return (
+    <div className="space-y-5 text-sm leading-relaxed">
+      <div className="flex gap-3">
+        <div className="h-8 w-8 border border-(--kwm-hl-2) flex items-center justify-center shrink-0">
+          <Info className="h-4 w-4 text-(--kwm-ink)" />
+        </div>
+        <div className="max-w-3xl">
+          <h4 className="font-mono text-[11px] uppercase tracking-[0.16em] font-semibold mb-2 text-(--kwm-ink)">
+            Resolution Rules
+          </h4>
+          <div className="space-y-3 text-(--kwm-ink-3)">
+            {description ? (
+              description
+                .split(/\n{2,}/)
+                .filter(Boolean)
+                .map((paragraph) => <p key={paragraph}>{paragraph}</p>)
+            ) : (
+              <p>Rules are not available for this market yet.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {(openedAt ||
+        endDate ||
+        market.resolutionSource ||
+        market.resolvedBy) && (
+        <dl className="grid gap-3 border-t border-(--kwm-hl) pt-4 font-mono text-[11px] uppercase tracking-[0.12em] sm:grid-cols-2">
+          {openedAt && (
+            <div>
+              <dt className="text-(--kwm-ink-3)">Market Opened</dt>
+              <dd className="mt-1 text-(--kwm-ink) normal-case tracking-normal">
+                {openedAt}
+              </dd>
+            </div>
+          )}
+          {endDate && (
+            <div>
+              <dt className="text-(--kwm-ink-3)">End Date</dt>
+              <dd className="mt-1 text-(--kwm-ink) normal-case tracking-normal">
+                {endDate}
+              </dd>
+            </div>
+          )}
+          {market.resolutionSource && (
+            <div>
+              <dt className="text-(--kwm-ink-3)">Resolution Source</dt>
+              <dd className="mt-1 truncate text-(--kwm-ink) normal-case tracking-normal">
+                {market.resolutionSource}
+              </dd>
+            </div>
+          )}
+          {market.resolvedBy && (
+            <div>
+              <dt className="text-(--kwm-ink-3)">Resolver</dt>
+              <dd className="mt-1 truncate text-(--kwm-ink) normal-case tracking-normal">
+                {market.resolvedBy}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </div>
+  );
 }
 
 function MarketExpandedContent({
@@ -555,39 +638,7 @@ function MarketExpandedContent({
 
           {/* Resolution Tab Content */}
           <TabsContent value="resolution" className="m-0 p-6">
-            <div className="space-y-5 text-sm max-w-2xl">
-              <div className="flex gap-3">
-                <div className="h-8 w-8 border border-(--kwm-hl-2) flex items-center justify-center shrink-0">
-                  <Info className="h-4 w-4 text-(--kwm-ink)" />
-                </div>
-                <div>
-                  <h4 className="font-mono text-[11px] uppercase tracking-[0.16em] font-semibold mb-1">
-                    Resolution Source
-                  </h4>
-                  <p className="text-(--kwm-ink-3) leading-relaxed">
-                    Official announcement or verified news reports from
-                    established media organizations will be used to resolve this
-                    market.
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <div className="h-8 w-8 border border-(--kwm-hl-2) flex items-center justify-center shrink-0">
-                  <History className="h-4 w-4 text-(--kwm-ink)" />
-                </div>
-                <div>
-                  <h4 className="font-mono text-[11px] uppercase tracking-[0.16em] font-semibold mb-1">
-                    Resolution Rules
-                  </h4>
-                  <p className="text-(--kwm-ink-3) leading-relaxed">
-                    This market will resolve based on the first official
-                    reporting of the outcome. If no official outcome is reached
-                    by the expiration date, it may be extended or resolved based
-                    on available data.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <MarketResolutionContent market={market} />
           </TabsContent>
         </Tabs>
       </div>

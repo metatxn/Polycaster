@@ -2,7 +2,8 @@ import type { MetadataRoute } from "next";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
-import { SITE_URL } from "@/lib/seo";
+import { SITE_URL, shouldListEventInSitemap } from "@/lib/seo";
+import { SPORT_GROUPS } from "@/lib/sport-categories";
 
 const SITEMAP_REVALIDATE_SECONDS = 3600;
 const SITEMAP_PAGE_LIMIT = "10";
@@ -10,6 +11,18 @@ const SITEMAP_PAGE_LIMIT = "10";
 // the full catalog, but SEO should not ask crawlers to revisit thousands of
 // low-volume or duplicate market detail URLs every hour.
 const SITEMAP_MAX_EVENTS = 300;
+const CORE_EVENT_CATEGORY_SLUGS = [
+  "politics",
+  "crypto",
+  "sports",
+  "business",
+  "economics",
+  "technology",
+  "culture",
+  "elections",
+  "world",
+  "finance",
+] as const;
 
 async function fetchAllKeysetItems<T>(
   endpoint: string,
@@ -76,6 +89,38 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "daily",
       priority: 0.7,
     },
+    {
+      url: `${SITE_URL}/events/sports`,
+      lastModified: generatedAt,
+      changeFrequency: "daily",
+      priority: 0.8,
+    },
+    {
+      url: `${SITE_URL}/events/sports/live`,
+      lastModified: generatedAt,
+      changeFrequency: "hourly",
+      priority: 0.8,
+    },
+    ...CORE_EVENT_CATEGORY_SLUGS.map((slug) => ({
+      url: `${SITE_URL}/events/${slug}`,
+      lastModified: generatedAt,
+      changeFrequency: "daily" as const,
+      priority: 0.75,
+    })),
+    ...SPORT_GROUPS.flatMap((group) => [
+      {
+        url: `${SITE_URL}/events/sports/${group.slug}`,
+        lastModified: generatedAt,
+        changeFrequency: "daily" as const,
+        priority: 0.72,
+      },
+      ...group.leagues.map((league) => ({
+        url: `${SITE_URL}/events/sports/${league.slug}`,
+        lastModified: generatedAt,
+        changeFrequency: "daily" as const,
+        priority: 0.68,
+      })),
+    ]),
   ];
 
   // Fetch active events for dynamic routes
@@ -83,6 +128,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   try {
     const events = await fetchAllKeysetItems<{
       slug?: string;
+      title?: string;
+      active?: boolean;
+      closed?: boolean;
+      archived?: boolean;
+      ended?: boolean;
+      marketCount?: number;
+      markets?: Array<{
+        id?: string | number;
+        active?: boolean;
+        closed?: boolean;
+      }>;
       updatedAt?: string;
       startDate?: string;
       endDate?: string;
@@ -101,7 +157,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     );
 
     eventRoutes = events
-      .filter((e) => e.slug)
+      .filter((e) => shouldListEventInSitemap(e))
       .map((e) => ({
         url: `${SITE_URL}/events/detail/${e.slug}`,
         lastModified:

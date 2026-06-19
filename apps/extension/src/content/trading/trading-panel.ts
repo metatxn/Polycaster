@@ -24,7 +24,11 @@ import {
   POLYGON_CHAIN_ID_HEX,
   SHOW_EOA_OPTION,
 } from "@knoww/shared-types/polymarket";
-import { calculateSlippage, roundToTick } from "@knoww/shared-types/slippage";
+import {
+  calculateBuySlippageForAmount,
+  calculateSlippage,
+  roundToTick,
+} from "@knoww/shared-types/slippage";
 import {
   estimateFallbackFeeRaw,
   parsePusdUnits,
@@ -182,6 +186,7 @@ let activeSide: TradeSide = "buy";
 let activeView: ActiveView = "order";
 let orderMode: OrderMode = "market";
 let selectedShares = 10;
+let marketBuyAmount = 0;
 let limitPrice = 0;
 let expirationPreset: ExpirationPreset = "GTC";
 let splitMergeAmount = 0;
@@ -615,21 +620,84 @@ function getEffectivePrice(opts: PanelOptions): number {
   return orderMode === "limit" ? limitPrice || opts.price : opts.price;
 }
 
-function getMarketNotional(ctx: TradingContext): number | null {
-  if (orderMode !== "market" || !ctx.orderBook || selectedShares <= 0) {
-    return null;
-  }
+function isMarketBuyAmountOrder(): boolean {
+  return orderMode === "market" && activeSide === "buy";
+}
 
-  const side = activeSide === "sell" ? "SELL" : "BUY";
-  const slip = calculateSlippage(ctx.orderBook, side, selectedShares);
-  if (slip.fills.length === 0) {
-    return null;
+function formatShareQuantity(quantity: number): string {
+  try {
+    const value = new Decimal(quantity);
+    if (!value.isFinite()) return "0";
+    const rounded = value.toDecimalPlaces(4);
+    return rounded.isInteger()
+      ? rounded.toFixed(0)
+      : rounded.toFixed().replace(/\.?0+$/, "");
+  } catch {
+    return "0";
   }
+}
+
+function formatMarketBuyAmountInput(amount: number): string {
+  return amount > 0 ? String(amount) : "0";
+}
+
+function normalizeUsdInputAmount(amount: number | string): number {
+  try {
+    const value = new Decimal(amount || 0);
+    if (!value.isFinite() || value.lt(0)) return 0;
+    return value.toNumber();
+  } catch {
+    return 0;
+  }
+}
+
+function normalizeUsdChipAmount(amount: number | string): number {
+  try {
+    const value = new Decimal(amount || 0);
+    if (!value.isFinite() || value.lt(0)) return 0;
+    return value.toDecimalPlaces(2).toNumber();
+  } catch {
+    return 0;
+  }
+}
+
+function getMarketSlippage(ctx: TradingContext) {
+  if (orderMode !== "market" || !ctx.orderBook) return null;
+
+  const slip = isMarketBuyAmountOrder()
+    ? calculateBuySlippageForAmount(ctx.orderBook, marketBuyAmount)
+    : selectedShares > 0
+      ? calculateSlippage(
+          ctx.orderBook,
+          activeSide === "sell" ? "SELL" : "BUY",
+          selectedShares
+        )
+      : null;
+
+  if (!slip || slip.fills.length === 0) return null;
+  return slip;
+}
+
+function getOrderShareSize(_opts: PanelOptions, ctx: TradingContext): number {
+  if (!isMarketBuyAmountOrder()) return selectedShares;
+
+  const slip = getMarketSlippage(ctx);
+  return slip?.filledSize ?? 0;
+}
+
+function getMarketNotional(ctx: TradingContext): number | null {
+  const slip = getMarketSlippage(ctx);
+  if (!slip) return null;
 
   return new Decimal(slip.totalNotional).toNumber();
 }
 
 function getCost(opts: PanelOptions, ctx?: TradingContext): number {
+  if (isMarketBuyAmountOrder()) {
+    const marketNotional = ctx ? getMarketNotional(ctx) : null;
+    return marketNotional !== null ? marketNotional : marketBuyAmount;
+  }
+
   const marketNotional = ctx ? getMarketNotional(ctx) : null;
   if (marketNotional !== null) {
     return marketNotional;
@@ -659,9 +727,18 @@ function getPanelOrderType(): ClobOrderType {
 function getOrderApprovalPreviewKey(
   opts: PanelOptions,
   cost: number,
+  orderSize: number,
   isMarketableBuy: boolean | undefined
 ): string | null {
-  if (activeSide !== "buy" || !Number.isFinite(cost) || cost <= 0) return null;
+  if (
+    activeSide !== "buy" ||
+    !Number.isFinite(cost) ||
+    cost <= 0 ||
+    !Number.isFinite(orderSize) ||
+    orderSize <= 0
+  ) {
+    return null;
+  }
   const price =
     orderMode === "market" ? 0 : normalizePrice(limitPrice || opts.price);
   return [
@@ -669,7 +746,7 @@ function getOrderApprovalPreviewKey(
     opts.conditionId ?? "",
     activeSide,
     getPanelOrderType(),
-    selectedShares,
+    orderSize,
     price,
     new Decimal(cost).toDecimalPlaces(PUSD_DECIMALS).toFixed(),
     // Marketability flips the required collateral (taker vs maker builder
@@ -685,9 +762,15 @@ function getOrderApprovalPreviewKey(
 function ensureOrderApprovalPreview(
   opts: PanelOptions,
   cost: number,
+  orderSize: number,
   isMarketableBuy: boolean | undefined
 ): string | null {
-  const key = getOrderApprovalPreviewKey(opts, cost, isMarketableBuy);
+  const key = getOrderApprovalPreviewKey(
+    opts,
+    cost,
+    orderSize,
+    isMarketableBuy
+  );
   if (!key) return null;
   if (
     orderApprovalPreview?.key === key ||
@@ -712,7 +795,7 @@ function ensureOrderApprovalPreview(
     TradingService.getOrderPreflight({
       side: "BUY",
       price,
-      size: selectedShares,
+      size: orderSize,
       amount: cost,
       orderType,
       conditionId: opts.conditionId,
@@ -762,6 +845,22 @@ function refreshDynamicUI(): void {
   ) as HTMLInputElement | null;
   if (sharesInput && document.activeElement !== sharesInput) {
     sharesInput.value = String(selectedShares);
+  }
+
+  const amountInput = form.querySelector(
+    ".knoww-tp-amount-input"
+  ) as HTMLInputElement | null;
+  if (amountInput && document.activeElement !== amountInput) {
+    amountInput.value = formatMarketBuyAmountInput(marketBuyAmount);
+  }
+
+  const amountSub = form.querySelector(".knoww-tp-amount-sub");
+  if (amountSub) {
+    const shares = getOrderShareSize(opts, ctx);
+    amountSub.textContent =
+      marketBuyAmount > 0 && shares > 0
+        ? `≈ ${formatShareQuantity(shares)} shares`
+        : "";
   }
 
   const limitInput = form.querySelector(
@@ -859,8 +958,12 @@ function createPanel(opts: PanelOptions): HTMLElement {
   activeSide = opts.side === "SELL" ? "sell" : "buy";
   activeView = "order";
   orderMode = "market";
-  // Pre-fill shares from a USD stake when provided (one-click stream trades),
-  // else the default 10. The panel re-validates min shares / notional / funds.
+  // Keep limit orders share-based, but prefill market buys with the USD stake
+  // when provided (one-click stream trades).
+  marketBuyAmount =
+    opts.initialAmountUsd && opts.initialAmountUsd > 0
+      ? normalizeUsdChipAmount(opts.initialAmountUsd)
+      : 0;
   selectedShares =
     opts.initialAmountUsd && opts.price > 0
       ? Math.max(1, Math.round(opts.initialAmountUsd / opts.price))
@@ -1959,11 +2062,8 @@ function addSlippageInfo(
   _opts: PanelOptions,
   ctx: TradingContext
 ): void {
-  if (orderMode !== "market" || !ctx.orderBook || selectedShares <= 0) return;
-
-  const side = activeSide === "sell" ? "SELL" : "BUY";
-  const slip = calculateSlippage(ctx.orderBook, side, selectedShares);
-  if (slip.fills.length === 0) return;
+  const slip = getMarketSlippage(ctx);
+  if (!slip) return;
 
   const row = el("div", "knoww-tp-execution-info");
 
@@ -1994,11 +2094,122 @@ function addSlippageInfo(
 
 // ── Amount Section ──
 
+function addMarketBuyAmountSection(
+  form: HTMLElement,
+  opts: PanelOptions,
+  ctx: TradingContext
+): void {
+  const section = el("div", "knoww-tp-amount-section market-buy");
+  const availableCollateral = getAvailableTradingCollateral(ctx);
+  const shares = getOrderShareSize(opts, ctx);
+
+  const header = el("div", "knoww-tp-section-header");
+  header.appendChild(el("span", "knoww-tp-section-label", "Amount"));
+  header.appendChild(
+    el(
+      "span",
+      "knoww-tp-cash-display",
+      `$${new Decimal(availableCollateral).toFixed(2)} cash`
+    )
+  );
+  section.appendChild(header);
+
+  const inputWrap = el("div", "knoww-tp-amount-input-wrap");
+  inputWrap.appendChild(el("span", "knoww-tp-amount-currency", "$"));
+
+  const amountInput = document.createElement("input");
+  amountInput.className = "knoww-tp-amount-input";
+  amountInput.type = "text";
+  amountInput.inputMode = "decimal";
+  amountInput.name = "amount";
+  amountInput.value = formatMarketBuyAmountInput(marketBuyAmount);
+  amountInput.setAttribute("aria-label", "Order amount in dollars");
+  amountInput.onfocus = () => {
+    amountInput.select();
+  };
+  amountInput.oninput = () => {
+    const cleaned = amountInput.value
+      .replace(/[^0-9.]/g, "")
+      .replace(/(\..*)\./g, "$1");
+    if (cleaned !== amountInput.value) amountInput.value = cleaned;
+    marketBuyAmount = normalizeUsdInputAmount(cleaned);
+    trackPanelAnalytics("trading_form_amount_input", {
+      marketId: opts.market.id,
+      amount: marketBuyAmount,
+      method: "manual",
+      side: activeSide,
+    });
+    refreshDynamicUI();
+  };
+  amountInput.onblur = () => {
+    amountInput.value = formatMarketBuyAmountInput(marketBuyAmount);
+    refreshDynamicUI();
+  };
+  inputWrap.appendChild(amountInput);
+  section.appendChild(inputWrap);
+
+  const presets = el("div", "knoww-tp-amount-presets");
+  for (const delta of [1, 5, 10, 100]) {
+    const chip = el("button", "knoww-tp-amount-chip", `+$${delta}`);
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      marketBuyAmount = normalizeUsdChipAmount(
+        new Decimal(marketBuyAmount).add(delta).toString()
+      );
+      trackPanelAnalytics("trading_form_amount_adjusted", {
+        marketId: opts.market.id,
+        amount: marketBuyAmount,
+        delta,
+        method: "chip",
+        side: activeSide,
+      });
+      rerender();
+    };
+    presets.appendChild(chip);
+  }
+
+  const maxBtn = el("button", "knoww-tp-amount-chip max", "Max");
+  maxBtn.onclick = (e) => {
+    e.stopPropagation();
+    marketBuyAmount = normalizeUsdChipAmount(
+      new Decimal(availableCollateral)
+        .toDecimalPlaces(2, Decimal.ROUND_FLOOR)
+        .toString()
+    );
+    trackPanelAnalytics("trading_form_amount_max_clicked", {
+      marketId: opts.market.id,
+      amount: marketBuyAmount,
+      side: activeSide,
+    });
+    rerender();
+  };
+  if (availableCollateral <= 0) maxBtn.disabled = true;
+  presets.appendChild(maxBtn);
+  section.appendChild(presets);
+
+  section.appendChild(
+    el(
+      "div",
+      "knoww-tp-amount-sub",
+      marketBuyAmount > 0 && shares > 0
+        ? `≈ ${formatShareQuantity(shares)} shares`
+        : ""
+    )
+  );
+
+  form.appendChild(section);
+}
+
 function addAmountSection(
   form: HTMLElement,
   opts: PanelOptions,
   ctx: TradingContext
 ): void {
+  if (isMarketBuyAmountOrder()) {
+    addMarketBuyAmountSection(form, opts, ctx);
+    return;
+  }
+
   const section = el("div", "knoww-tp-amount-section");
   const effectivePrice = getEffectivePrice(opts);
   const isSell = activeSide === "sell";
@@ -2132,8 +2343,9 @@ function addOrderSummary(
   ctx: TradingContext
 ): void {
   const isBuy = activeSide === "buy";
+  const isMarketBuyAmount = isMarketBuyAmountOrder();
   const effectivePrice = getEffectivePrice(opts);
-  const shares = selectedShares;
+  const shares = getOrderShareSize(opts, ctx);
   const cost = getCost(opts, ctx);
   const minShares = Math.max(1, Math.ceil(ctx.minOrderSize));
   const positionSize = getPositionSize(opts);
@@ -2175,7 +2387,7 @@ function addOrderSummary(
   );
   summary.appendChild(r1);
 
-  if (isBuy && shares > 0 && shares < minShares) {
+  if (isBuy && !isMarketBuyAmount && shares > 0 && shares < minShares) {
     const minRow = el("div", "knoww-tp-summary-row knoww-tp-warn-row");
     minRow.appendChild(
       el(
@@ -2313,14 +2525,20 @@ function addSubmitButton(
   const side = activeSide === "sell" ? "SELL" : "BUY";
   const { state, minOrderSize, usdcAllowance, usdcAllowanceNegRisk } = ctx;
   const isSubmitting = state === "placing-order" || state === "approving";
+  const isMarketBuyAmount = isMarketBuyAmountOrder();
+  const marketSlippage = orderMode === "market" ? getMarketSlippage(ctx) : null;
   const cost = getCost(opts, ctx);
   const availableCollateral = getAvailableTradingCollateral(ctx);
   const noFunds = activeSide === "buy" && cost > availableCollateral;
   const missingFunds = new Decimal(cost).sub(availableCollateral);
-  const noShares = selectedShares <= 0;
-  const shares = selectedShares;
+  const shares = getOrderShareSize(opts, ctx);
+  const noAmount = isMarketBuyAmount && marketBuyAmount <= 0;
+  const noShares = !isMarketBuyAmount && shares <= 0;
   const minShares = Math.max(1, Math.ceil(minOrderSize));
-  const belowMinShares = activeSide === "buy" && shares < minShares;
+  const belowMinShares =
+    activeSide === "buy" && !isMarketBuyAmount && shares < minShares;
+  const hasInsufficientLiquidity =
+    orderMode === "market" && !noAmount && marketSlippage?.canFill !== true;
   const relevantAllowance = opts.negRisk ? usdcAllowanceNegRisk : usdcAllowance;
   // Compute marketability before the preflight call — it gates which builder
   // fee rate (taker vs maker) the gate sizes against, so it must be part of
@@ -2336,11 +2554,9 @@ function addSubmitButton(
         : bestAsk !== undefined
           ? limitPrice >= bestAsk
           : undefined;
-  const approvalPreviewKey = ensureOrderApprovalPreview(
-    opts,
-    cost,
-    isMarketableBuy
-  );
+  const approvalPreviewKey = hasInsufficientLiquidity
+    ? null
+    : ensureOrderApprovalPreview(opts, cost, shares, isMarketableBuy);
   const approvalRequirement =
     approvalPreviewKey && orderApprovalPreview?.key === approvalPreviewKey
       ? orderApprovalPreview.requiredCollateral
@@ -2355,8 +2571,9 @@ function addSubmitButton(
     cost > 0 &&
     !isCheckingApprovalRequirement &&
     relevantAllowance < approvalRequirement;
+  const marketableBuyNotional = isMarketBuyAmount ? marketBuyAmount : cost;
   const belowMinNotional =
-    isMarketableBuy && cost < MIN_MARKETABLE_BUY_NOTIONAL_USD;
+    isMarketableBuy && marketableBuyNotional < MIN_MARKETABLE_BUY_NOTIONAL_USD;
   const positionSize = getPositionSize(opts);
   const sellBalancesLoading = activeSide === "sell" && !outcomeBalancesLoaded;
   const noPosition =
@@ -2386,6 +2603,9 @@ function addSubmitButton(
     btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Checking allowance...`;
     btn.disabled = true;
     btn.classList.add("loading");
+  } else if (noAmount) {
+    btn.textContent = "Enter Amount";
+    btn.disabled = true;
   } else if (noShares) {
     btn.textContent = "Enter Shares";
     btn.disabled = true;
@@ -2394,6 +2614,9 @@ function addSubmitButton(
     btn.disabled = true;
   } else if (overPosition) {
     btn.textContent = `Max ${positionSize.toFixed(1)} shares`;
+    btn.disabled = true;
+  } else if (hasInsufficientLiquidity) {
+    btn.textContent = "Insufficient liquidity";
     btn.disabled = true;
   } else if (belowMinNotional) {
     btn.textContent = `Minimum order: $${MIN_MARKETABLE_BUY_NOTIONAL_USD}`;
@@ -2415,11 +2638,15 @@ function addSubmitButton(
     btn.classList.add("approve");
   } else {
     const icon = activeSide === "buy" ? I.up : I.down;
-    const modeLabel =
-      orderMode === "limit"
-        ? `${((limitPrice || opts.price) * 100).toFixed(1)}¢`
-        : "Market";
-    btn.innerHTML = `${icon} ${side} ${shares} @ ${modeLabel}`;
+    if (isMarketBuyAmount) {
+      btn.innerHTML = `${icon} BUY ${formatShareQuantity(shares)} for $${new Decimal(cost).toFixed(2)}`;
+    } else {
+      const modeLabel =
+        orderMode === "limit"
+          ? `${((limitPrice || opts.price) * 100).toFixed(1)}¢`
+          : "Market";
+      btn.innerHTML = `${icon} ${side} ${formatShareQuantity(shares)} @ ${modeLabel}`;
+    }
   }
 
   btn.onclick = async (e) => {
@@ -2432,9 +2659,11 @@ function addSubmitButton(
       else if (isSubmitting) reason = "submitting";
       else if (sellBalancesLoading) reason = "loading_position";
       else if (isCheckingApprovalRequirement) reason = "checking_allowance";
+      else if (noAmount) reason = "no_amount";
       else if (noShares) reason = "no_shares";
       else if (noPosition) reason = "no_position";
       else if (overPosition) reason = "over_position";
+      else if (hasInsufficientLiquidity) reason = "insufficient_liquidity";
       else if (belowMinNotional) reason = "below_min_notional";
       else if (belowMinShares) reason = "below_min_shares";
       else if (noFunds) reason = "insufficient_balance";
@@ -2442,7 +2671,7 @@ function addSubmitButton(
         marketId: opts.market.id,
         reason,
         side: activeSide,
-        shares: selectedShares,
+        shares,
       });
       return;
     }

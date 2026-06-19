@@ -122,6 +122,23 @@ function formatUnknownNotification(payload: Notification["payload"]): string {
   return "New notification";
 }
 
+function getNotificationMarketTitle(notification: Notification): string | null {
+  const { payload } = notification;
+  if (!payload || typeof payload !== "object") return null;
+
+  const p = payload as Record<string, unknown>;
+  for (const key of ["question", "name", "market", "title"]) {
+    const value = p[key];
+    if (typeof value !== "string") continue;
+
+    const title = value.trim();
+    if (!title || /^0x[a-fA-F0-9]{32,}$/.test(title)) continue;
+    return title;
+  }
+
+  return null;
+}
+
 /**
  * Individual notification item component
  */
@@ -137,6 +154,10 @@ export function NotificationItem({
   );
   const message = useMemo(
     () => formatNotificationMessage(notification),
+    [notification]
+  );
+  const marketTitle = useMemo(
+    () => getNotificationMarketTitle(notification),
     [notification]
   );
   // Notification timestamps arrive as unix seconds; `relativeTime` expects
@@ -189,6 +210,17 @@ export function NotificationItem({
             </span>
           )}
         </div>
+        {marketTitle && (
+          <p
+            className={cn(
+              "font-medium leading-snug text-foreground",
+              compact ? "text-xs" : "text-sm",
+              "line-clamp-2"
+            )}
+          >
+            {marketTitle}
+          </p>
+        )}
         <p
           className={cn(
             "text-muted-foreground leading-snug",

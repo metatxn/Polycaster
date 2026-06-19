@@ -9,6 +9,24 @@ function readSource(path: string): string {
   return readFileSync(join(process.cwd(), path), { encoding: "utf8" });
 }
 
+function extractFunctionSource(source: string, functionName: string): string {
+  const start = source.indexOf(`function ${functionName}`);
+  assert.notEqual(start, -1);
+  let depth = 0;
+  let opened = false;
+  for (let i = start; i < source.length; i++) {
+    const char = source[i];
+    if (char === "{") {
+      opened = true;
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      if (opened && depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`Unable to extract ${functionName}`);
+}
+
 test("extension declares and builds a Chrome side panel", () => {
   const manifest = JSON.parse(readSource("manifest.json")) as {
     permissions?: string[];
@@ -264,6 +282,23 @@ test("notification stack can move itself into the browser side panel", () => {
   assert.equal(/KNOWW_CLOSE_EXTENSION_SIDEPANEL/.test(sidepanelSource), true);
 });
 
+test("side panel shows trending markets before seen earlier", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const refreshSource = extractFunctionSource(
+    sidepanelSource,
+    "refreshSnapshot"
+  );
+  const activeIndex = refreshSource.indexOf('"Active now"');
+  const trendingIndex = refreshSource.indexOf('"Trending now"');
+  const seenIndex = refreshSource.indexOf('"Seen earlier"');
+
+  assert.notEqual(activeIndex, -1);
+  assert.notEqual(trendingIndex, -1);
+  assert.notEqual(seenIndex, -1);
+  assert.equal(activeIndex < trendingIndex, true);
+  assert.equal(trendingIndex < seenIndex, true);
+});
+
 test("side panel exposes a compact portfolio view without charts", () => {
   const sidepanelSource = readSource("src/sidepanel.ts");
   const backgroundSource = readSource("src/background.ts");
@@ -340,6 +375,138 @@ test("side panel exposes a compact portfolio view without charts", () => {
   assert.equal(/ExtensionSession\.ensureAuthorized/.test(uiSource), true);
   assert.equal(/TradingService\.deriveCredentials/.test(uiSource), true);
   assert.equal(/status:\s*"started"/.test(uiSource), true);
+});
+
+test("side panel portfolio fetches a full active positions page but displays compact rows", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /const PORTFOLIO_POSITIONS_FETCH_LIMIT = 50;/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /const PORTFOLIO_POSITIONS_DISPLAY_LIMIT = 5;/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /\/api\/user\/positions\?user=\$\{user\}&limit=\$\{PORTFOLIO_POSITIONS_FETCH_LIMIT\}&offset=0&active=true/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /\.slice\(0, PORTFOLIO_POSITIONS_DISPLAY_LIMIT\)/.test(sidepanelSource),
+    true
+  );
+});
+
+test("side panel portfolio refreshes while visible instead of keeping stale positions", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /const PORTFOLIO_REFRESH_INTERVAL_MS = 30_000;/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/function refreshVisiblePortfolio/.test(sidepanelSource), true);
+  assert.equal(
+    /if \(view === "portfolio"\) void loadPortfolio\(true\);/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /setInterval\(\(\) => refreshVisiblePortfolio\(\), PORTFOLIO_REFRESH_INTERVAL_MS\)/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /document\.addEventListener\("visibilitychange", \(\) => \{[\s\S]*refreshVisiblePortfolio\(\);/.test(
+      sidepanelSource
+    ),
+    true
+  );
+});
+
+test("side panel position rows expose exact inline action labels", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(/portfolioExpandedPositionId/.test(sidepanelSource), true);
+  assert.equal(/portfolioConfirmingSellPositionId/.test(sidepanelSource), true);
+  assert.equal(/data-portfolio-position-toggle/.test(sidepanelSource), true);
+  assert.equal(/data-portfolio-position-view/.test(sidepanelSource), true);
+  assert.equal(/data-portfolio-position-sell/.test(sidepanelSource), true);
+  assert.equal(
+    /data-portfolio-position-sell-confirm/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /data-portfolio-position-sell-cancel/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/data-portfolio-position-close/.test(sidepanelSource), true);
+  assert.equal(/>View</.test(sidepanelSource), true);
+  assert.equal(/>Sell Position</.test(sidepanelSource), true);
+  assert.equal(/>X</.test(sidepanelSource), true);
+  assert.equal(
+    /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.45fr\)\s+34px/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(/padding:\s*0 12px 11px;/.test(sidepanelSource), true);
+  assert.equal(/padding:\s*0 12px 11px 55px;/.test(sidepanelSource), false);
+});
+
+test("side panel confirms and sells the full selected position through a portfolio sell message", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /function requestPortfolioPositionSell/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/function sellPortfolioPosition/.test(sidepanelSource), true);
+  assert.equal(/window\.confirm/.test(sidepanelSource), false);
+  assert.equal(/KNOWW_SELL_PORTFOLIO_POSITION/.test(sidepanelSource), true);
+  assert.equal(/tokenId:\s*position\.asset/.test(sidepanelSource), true);
+  assert.equal(
+    /conditionId:\s*position\.conditionId/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /outcomeIndex:\s*position\.outcomeIndex/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/size:\s*position\.size/.test(sidepanelSource), true);
+  assert.equal(
+    /requestPortfolioPositionSell\(position\.id\)/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /void sellPortfolioPosition\(position\)/.test(sidepanelSource),
+    true
+  );
+});
+
+test("background mediates side panel portfolio sells through the existing order path", () => {
+  const backgroundSource = readSource("src/background.ts");
+
+  assert.equal(/KNOWW_SELL_PORTFOLIO_POSITION/.test(backgroundSource), true);
+  assert.equal(
+    /resolvePortfolioSigningTabId\(msg, sender\)/.test(backgroundSource),
+    true
+  );
+  assert.equal(
+    /forwardToOffscreen\(\s*\{[\s\S]*type:\s*"trading:place-order"[\s\S]*side:\s*"SELL"[\s\S]*orderType:\s*"FAK"/.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /proxyAddress:\s*msg\.proxyAddress/.test(backgroundSource),
+    true
+  );
+  assert.equal(/price:\s*0/.test(backgroundSource), true);
 });
 
 test("side panel clears portfolio state when trading disconnects", () => {

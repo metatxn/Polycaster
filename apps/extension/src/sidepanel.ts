@@ -51,11 +51,15 @@ type NotificationSnapshot = {
 
 type PortfolioPosition = {
   id: string;
+  asset?: string;
+  conditionId?: string;
+  outcomeIndex?: number;
   outcome: string;
   size: number;
   currentValue: number;
   unrealizedPnl: number;
   unrealizedPnlPercent: number;
+  negRisk?: boolean;
   market: {
     title: string;
     eventSlug?: string;
@@ -173,6 +177,9 @@ const SNAPSHOT_REFRESH_INTERVAL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 300;
 const PORTFOLIO_CONNECT_TIMEOUT_MS = 90_000;
 const PORTFOLIO_CONNECT_POLL_MS = 1_000;
+const PORTFOLIO_REFRESH_INTERVAL_MS = 30_000;
+const PORTFOLIO_POSITIONS_FETCH_LIMIT = 50;
+const PORTFOLIO_POSITIONS_DISPLAY_LIMIT = 5;
 const PORTFOLIO_HISTORY_PAGE_SIZE = 5;
 const PORTFOLIO_HISTORY_FETCH_LIMIT = 25;
 const PORTFOLIO_AMOUNT_DECIMALS = 6;
@@ -189,6 +196,11 @@ let portfolioTableView: PortfolioTableView = "positions";
 let portfolioHistoryPage = 0;
 let latestPortfolioData: PortfolioData | null = null;
 let portfolioWallets: PortfolioWallet[] | null = null;
+let portfolioExpandedPositionId: string | null = null;
+let portfolioConfirmingSellPositionId: string | null = null;
+let portfolioSellingPositionId: string | null = null;
+let portfolioSellErrorPositionId: string | null = null;
+let portfolioSellError: string | null = null;
 // Mobile-wallet (WalletConnect) pairing. The WalletConnect provider itself runs
 // in the content script (where the trading panel uses it); the side panel kicks
 // it off and polls for the pairing URI / status to render the QR here.
@@ -1059,6 +1071,123 @@ function renderPortfolioContent_inPlace(): void {
   const container = getPortfolioContainer();
   if (container && latestPortfolioData) {
     container.innerHTML = renderPortfolioContent(latestPortfolioData);
+  }
+}
+
+function findPortfolioPosition(positionId: string): PortfolioPosition | null {
+  return (
+    latestPortfolioData?.positions.positions?.find(
+      (position) => position.id === positionId
+    ) ?? null
+  );
+}
+
+function togglePortfolioPositionActions(positionId: string): void {
+  portfolioExpandedPositionId =
+    portfolioExpandedPositionId === positionId ? null : positionId;
+  portfolioConfirmingSellPositionId = null;
+  portfolioSellErrorPositionId = null;
+  portfolioSellError = null;
+  renderPortfolioContent_inPlace();
+}
+
+function closePortfolioPositionActions(): void {
+  portfolioExpandedPositionId = null;
+  portfolioConfirmingSellPositionId = null;
+  portfolioSellErrorPositionId = null;
+  portfolioSellError = null;
+  renderPortfolioContent_inPlace();
+}
+
+function requestPortfolioPositionSell(positionId: string): void {
+  portfolioExpandedPositionId = positionId;
+  portfolioConfirmingSellPositionId = positionId;
+  portfolioSellErrorPositionId = null;
+  portfolioSellError = null;
+  renderPortfolioContent_inPlace();
+}
+
+function cancelPortfolioPositionSell(): void {
+  portfolioConfirmingSellPositionId = null;
+  portfolioSellErrorPositionId = null;
+  portfolioSellError = null;
+  renderPortfolioContent_inPlace();
+}
+
+function viewPortfolioPosition(position: PortfolioPosition): void {
+  const url = portfolioMarketUrl(position.market);
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function getPortfolioSellErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (message === "NO_CONTENT_TAB") {
+    return "Open knoww.app in a tab to sign this sale.";
+  }
+  if (message && !/\n\s*at\s/.test(message)) return message;
+  return "Could not sell this position.";
+}
+
+function setPortfolioSellError(positionId: string, error: unknown): void {
+  portfolioSellingPositionId = null;
+  portfolioSellErrorPositionId = positionId;
+  portfolioSellError = getPortfolioSellErrorMessage(error);
+  renderPortfolioContent_inPlace();
+}
+
+async function sellPortfolioPosition(
+  position: PortfolioPosition
+): Promise<void> {
+  const data = latestPortfolioData;
+  if (!data) return;
+
+  if (
+    !position.asset ||
+    !position.conditionId ||
+    typeof position.outcomeIndex !== "number" ||
+    !Number.isFinite(position.size) ||
+    position.size <= 0
+  ) {
+    setPortfolioSellError(
+      position.id,
+      "This position cannot be sold from the side panel."
+    );
+    return;
+  }
+
+  portfolioExpandedPositionId = position.id;
+  portfolioConfirmingSellPositionId = position.id;
+  portfolioSellingPositionId = position.id;
+  portfolioSellErrorPositionId = null;
+  portfolioSellError = null;
+  renderPortfolioContent_inPlace();
+
+  try {
+    const walletMode = await readStoredWalletMode(data.ownerAddress);
+    const response = await sendRuntimeMessage({
+      type: "KNOWW_SELL_PORTFOLIO_POSITION",
+      address: data.ownerAddress,
+      proxyAddress: data.address,
+      walletMode,
+      tokenId: position.asset,
+      conditionId: position.conditionId,
+      outcomeIndex: position.outcomeIndex,
+      size: position.size,
+      negRisk: position.negRisk === true,
+    });
+
+    if (response.ok === false) {
+      throw new Error(response.error || "Could not sell this position.");
+    }
+
+    portfolioExpandedPositionId = null;
+    portfolioConfirmingSellPositionId = null;
+    portfolioSellingPositionId = null;
+    portfolioSellErrorPositionId = null;
+    portfolioSellError = null;
+    await loadPortfolio(true);
+  } catch (error) {
+    setPortfolioSellError(position.id, error);
   }
 }
 
@@ -2243,7 +2372,7 @@ async function fetchPortfolioData(
   const [positions, trades, details, tradingStatus, cashBalance] =
     await Promise.all([
       fetchKnowwJson<PortfolioPositionsResponse>(
-        `/api/user/positions?user=${user}&limit=5&offset=0`
+        `/api/user/positions?user=${user}&limit=${PORTFOLIO_POSITIONS_FETCH_LIMIT}&offset=0&active=true`
       ),
       fetchKnowwJson<PortfolioTradesResponse>(
         `/api/user/trades?user=${user}&limit=${PORTFOLIO_HISTORY_FETCH_LIMIT}&offset=0`
@@ -2405,36 +2534,74 @@ function renderCompactPositions(positions: PortfolioPosition[] = []): string {
   }
 
   return positions
-    .slice(0, 5)
+    .slice(0, PORTFOLIO_POSITIONS_DISPLAY_LIMIT)
     .map((position) => {
       const pnlClass = position.unrealizedPnl >= 0 ? "positive" : "negative";
       const url = portfolioMarketUrl(position.market);
+      const expanded = portfolioExpandedPositionId === position.id;
+      const confirming = portfolioConfirmingSellPositionId === position.id;
+      const selling = portfolioSellingPositionId === position.id;
+      const sellError =
+        portfolioSellErrorPositionId === position.id
+          ? portfolioSellError
+          : null;
       return `
-        ${portfolioRowOpenTag(url)}
-          <div class="knoww-portfolio-row-icon">
+        <div class="knoww-portfolio-position-item ${expanded ? "is-expanded" : ""}">
+          <button
+            type="button"
+            class="knoww-portfolio-row knoww-portfolio-position-trigger"
+            data-portfolio-position-toggle
+            data-position-id="${escapeHtml(position.id)}"
+            aria-expanded="${String(expanded)}"
+          >
+            <div class="knoww-portfolio-row-icon">
+              ${
+                position.market.icon
+                  ? `<img src="${escapeHtml(position.market.icon)}" alt="" />`
+                  : `<span>${escapeHtml(position.outcome.slice(0, 1))}</span>`
+              }
+            </div>
+            <div class="knoww-portfolio-row-main">
+              <div class="knoww-portfolio-row-title">${escapeHtml(
+                position.market.title
+              )}</div>
+              <div class="knoww-portfolio-row-meta">${escapeHtml(
+                position.outcome
+              )} · ${escapeHtml(formatCompactNumber(position.size))} shares</div>
+            </div>
+            <div class="knoww-portfolio-row-value">
+              <strong>${escapeHtml(formatMoney(position.currentValue))}</strong>
+              <span class="${pnlClass}">${escapeHtml(
+                `${formatSignedMoney(position.unrealizedPnl)} (${formatPercent(
+                  position.unrealizedPnlPercent
+                )})`
+              )}</span>
+            </div>
+          </button>
+          ${
+            confirming
+              ? `<div class="knoww-portfolio-position-confirm">${escapeHtml(
+                  `Sell ${formatCompactNumber(position.size)} ${position.outcome} shares?`
+                )}</div>`
+              : ""
+          }
+          <div class="knoww-portfolio-position-actions" ${expanded ? "" : "hidden"}>
             ${
-              position.market.icon
-                ? `<img src="${escapeHtml(position.market.icon)}" alt="" />`
-                : `<span>${escapeHtml(position.outcome.slice(0, 1))}</span>`
+              confirming
+                ? `<button type="button" class="knoww-portfolio-position-action" data-portfolio-position-sell-cancel data-position-id="${escapeHtml(position.id)}">Cancel</button>`
+                : `<button type="button" class="knoww-portfolio-position-action" data-portfolio-position-view data-position-id="${escapeHtml(position.id)}" ${url ? "" : "disabled"}>View</button>`
             }
+            <button type="button" class="knoww-portfolio-position-action danger ${confirming ? "is-confirming" : ""}" ${confirming ? "data-portfolio-position-sell-confirm" : "data-portfolio-position-sell"} data-position-id="${escapeHtml(position.id)}" ${selling ? "disabled" : ""}>Sell Position</button>
+            <button type="button" class="knoww-portfolio-position-action icon" data-portfolio-position-close data-position-id="${escapeHtml(position.id)}">X</button>
           </div>
-          <div class="knoww-portfolio-row-main">
-            <div class="knoww-portfolio-row-title">${escapeHtml(
-              position.market.title
-            )}</div>
-            <div class="knoww-portfolio-row-meta">${escapeHtml(
-              position.outcome
-            )} · ${escapeHtml(formatCompactNumber(position.size))} shares</div>
-          </div>
-          <div class="knoww-portfolio-row-value">
-            <strong>${escapeHtml(formatMoney(position.currentValue))}</strong>
-            <span class="${pnlClass}">${escapeHtml(
-              `${formatSignedMoney(position.unrealizedPnl)} (${formatPercent(
-                position.unrealizedPnlPercent
-              )})`
-            )}</span>
-          </div>
-        ${portfolioRowCloseTag(url)}
+          ${
+            sellError
+              ? `<div class="knoww-portfolio-position-error">${escapeHtml(
+                  sellError
+                )}</div>`
+              : ""
+          }
+        </div>
       `;
     })
     .join("");
@@ -2948,7 +3115,16 @@ function setSidepanelView(view: "markets" | "portfolio"): void {
     tab.setAttribute("aria-selected", String(selected));
   });
 
-  if (view === "portfolio") void loadPortfolio();
+  if (view === "portfolio") void loadPortfolio(true);
+}
+
+function refreshVisiblePortfolio(): void {
+  const portfolio = root?.querySelector<HTMLElement>(
+    "[data-sidepanel-portfolio]"
+  );
+  if (!portfolio || portfolio.hidden || !latestPortfolioData) return;
+  if (portfolioFundView !== null) return;
+  void loadPortfolio(true);
 }
 
 function setPortfolioTableView(view: PortfolioTableView): void {
@@ -3023,12 +3199,6 @@ async function refreshSnapshot(): Promise<void> {
       "active",
       renderMarketRows(active, "active")
     )}
-    ${renderSection(
-      "Seen earlier",
-      seen.length,
-      "scrolled-out",
-      renderMarketRows(seen, "seen")
-    )}
     ${
       trending.length > 0
         ? renderSection(
@@ -3039,6 +3209,12 @@ async function refreshSnapshot(): Promise<void> {
           )
         : ""
     }
+    ${renderSection(
+      "Seen earlier",
+      seen.length,
+      "scrolled-out",
+      renderMarketRows(seen, "seen")
+    )}
   `;
 }
 
@@ -4410,6 +4586,104 @@ function render(): void {
         grid-template-columns: minmax(0, 1fr) auto;
       }
 
+      .knoww-portfolio-position-item {
+        border-bottom: 1px solid var(--pf-line);
+      }
+
+      .knoww-portfolio-position-item:last-child {
+        border-bottom: 0;
+      }
+
+      .knoww-portfolio-position-trigger {
+        appearance: none;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        margin: 0;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .knoww-portfolio-position-trigger:hover,
+      .knoww-portfolio-position-item.is-expanded
+        .knoww-portfolio-position-trigger {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .knoww-portfolio-position-trigger:focus-visible {
+        outline: none;
+        background: rgba(255, 255, 255, 0.05);
+        box-shadow: inset 0 0 0 1px var(--pf-line-2);
+      }
+
+      .knoww-portfolio-position-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) 34px;
+        gap: 8px;
+        padding: 0 12px 11px;
+      }
+
+      .knoww-portfolio-position-actions[hidden] {
+        display: none;
+      }
+
+      .knoww-portfolio-position-action {
+        appearance: none;
+        min-width: 0;
+        height: 28px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--pf-hi);
+        cursor: pointer;
+        font: 700 9px/1 var(--pf-mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        transition: background 0.14s ease, border-color 0.14s ease,
+          color 0.14s ease, opacity 0.14s ease;
+      }
+
+      .knoww-portfolio-position-action:hover:not(:disabled) {
+        border-color: rgba(255, 255, 255, 0.32);
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .knoww-portfolio-position-action.danger {
+        border-color: rgba(251, 113, 133, 0.45);
+        background: rgba(251, 113, 133, 0.12);
+        color: #ffd7df;
+      }
+
+      .knoww-portfolio-position-action.danger.is-confirming {
+        border-color: rgba(251, 113, 133, 0.68);
+        background: rgba(251, 113, 133, 0.24);
+        color: #fff5f7;
+      }
+
+      .knoww-portfolio-position-action.icon {
+        padding: 0;
+      }
+
+      .knoww-portfolio-position-action:disabled {
+        cursor: default;
+        opacity: 0.48;
+      }
+
+      .knoww-portfolio-position-error {
+        padding: 0 12px 11px;
+        color: var(--pf-neg);
+        font: 600 10px/1.35 var(--pf-sans);
+      }
+
+      .knoww-portfolio-position-confirm {
+        padding: 0 12px 8px;
+        color: rgba(255, 255, 255, 0.82);
+        font: 600 11px/1.3 var(--pf-sans);
+      }
+
       /* Open-order row: [market link][cancel]. The link reuses the compact
          two-column layout internally. */
       .knoww-portfolio-order {
@@ -5057,6 +5331,61 @@ function render(): void {
     // Any other click in the panel dismisses a pending cancel confirmation.
     disarmCancelOrder();
 
+    const portfolioPositionClose = (
+      event.target as Element | null
+    )?.closest<HTMLElement>("[data-portfolio-position-close]");
+    if (portfolioPositionClose) {
+      closePortfolioPositionActions();
+      return;
+    }
+
+    const portfolioPositionView = (
+      event.target as Element | null
+    )?.closest<HTMLElement>("[data-portfolio-position-view]");
+    if (portfolioPositionView) {
+      const positionId = portfolioPositionView.dataset.positionId;
+      const position = positionId ? findPortfolioPosition(positionId) : null;
+      if (position) viewPortfolioPosition(position);
+      return;
+    }
+
+    const portfolioPositionSellCancel = (
+      event.target as Element | null
+    )?.closest<HTMLElement>("[data-portfolio-position-sell-cancel]");
+    if (portfolioPositionSellCancel) {
+      cancelPortfolioPositionSell();
+      return;
+    }
+
+    const portfolioPositionSellConfirm = (
+      event.target as Element | null
+    )?.closest<HTMLElement>("[data-portfolio-position-sell-confirm]");
+    if (portfolioPositionSellConfirm) {
+      const positionId = portfolioPositionSellConfirm.dataset.positionId;
+      const position = positionId ? findPortfolioPosition(positionId) : null;
+      if (position) void sellPortfolioPosition(position);
+      return;
+    }
+
+    const portfolioPositionSell = (
+      event.target as Element | null
+    )?.closest<HTMLElement>("[data-portfolio-position-sell]");
+    if (portfolioPositionSell) {
+      const positionId = portfolioPositionSell.dataset.positionId;
+      const position = positionId ? findPortfolioPosition(positionId) : null;
+      if (position) requestPortfolioPositionSell(position.id);
+      return;
+    }
+
+    const portfolioPositionToggle = (
+      event.target as Element | null
+    )?.closest<HTMLElement>("[data-portfolio-position-toggle]");
+    if (portfolioPositionToggle) {
+      const positionId = portfolioPositionToggle.dataset.positionId;
+      if (positionId) togglePortfolioPositionActions(positionId);
+      return;
+    }
+
     const historyPrev = (event.target as Element | null)?.closest(
       "[data-portfolio-history-prev]"
     );
@@ -5254,6 +5583,10 @@ function render(): void {
   void setPagePanelVisibility(false);
   void refreshSnapshot();
   setInterval(() => void refreshSnapshot(), SNAPSHOT_REFRESH_INTERVAL_MS);
+  setInterval(() => refreshVisiblePortfolio(), PORTFOLIO_REFRESH_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshVisiblePortfolio();
+  });
 }
 
 chrome.runtime.onMessage.addListener((message: { type?: unknown }) => {

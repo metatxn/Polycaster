@@ -210,6 +210,95 @@ export function calculateSellSlippage(
   };
 }
 
+/**
+ * Slippage for a MARKET BUY expressed as a USD budget rather than a share
+ * count. Walks the ask side spending `amount` dollars, partial-filling the
+ * final level with whatever budget remains.
+ *
+ * This mirrors how Polymarket's `createMarketOrder` consumes a BUY — it takes a
+ * notional USDC `amount`, not a `size` — so a ticket that lets the user spend
+ * "$X" maps 1:1 to what is actually submitted on-chain. (SELL market orders
+ * stay size-based; use `calculateSellSlippage` for those.)
+ *
+ * `filledSize` is the (possibly fractional) number of shares the budget buys,
+ * and `totalNotional` is what is actually spent. `canFill` is true when the
+ * book had enough depth to deploy the whole budget; false means the amount
+ * exceeds available liquidity (surfaced as "Insufficient liquidity" upstream,
+ * exactly like the size-based path's `canFill`).
+ */
+export function calculateBuySlippageForAmount(
+  orderBook: OrderBook,
+  amount: number
+): SlippageResult {
+  if (!(amount > 0)) return createEmptyResult(0);
+
+  const sortedAsks = (orderBook.asks || [])
+    .map(parseLevel)
+    .filter((l): l is ParsedLevel => l !== null)
+    .sort((a, b) => a.price.cmp(b.price));
+
+  if (sortedAsks.length === 0) return createEmptyResult(0);
+
+  const bestPrice = sortedAsks[0].price;
+  let remainingBudget = new Decimal(amount);
+  let totalCost = new Decimal(0);
+  let totalShares = new Decimal(0);
+  let worstPrice = bestPrice;
+  const fills: SlippageResult["fills"] = [];
+
+  for (const level of sortedAsks) {
+    if (remainingBudget.lte(0)) break;
+    const levelCost = level.price.mul(level.size);
+    if (levelCost.lte(remainingBudget)) {
+      // Budget clears this entire level — take all of it.
+      fills.push({
+        price: level.price.toNumber(),
+        size: level.size.toNumber(),
+        notional: levelCost.toNumber(),
+      });
+      totalShares = totalShares.add(level.size);
+      totalCost = totalCost.add(levelCost);
+      remainingBudget = remainingBudget.sub(levelCost);
+      worstPrice = level.price;
+    } else {
+      // Final, partial level — buy as many shares as the remaining budget
+      // affords at this price, then stop.
+      const affordableShares = remainingBudget.div(level.price);
+      fills.push({
+        price: level.price.toNumber(),
+        size: affordableShares.toNumber(),
+        notional: remainingBudget.toNumber(),
+      });
+      totalShares = totalShares.add(affordableShares);
+      totalCost = totalCost.add(remainingBudget);
+      worstPrice = level.price;
+      remainingBudget = new Decimal(0);
+      break;
+    }
+  }
+
+  const avgFillPrice = totalShares.gt(0)
+    ? totalCost.div(totalShares)
+    : new Decimal(0);
+  const slippage = avgFillPrice.sub(bestPrice);
+  const slippagePercent = bestPrice.gt(0)
+    ? slippage.div(bestPrice).mul(HUNDRED)
+    : new Decimal(0);
+
+  return {
+    canFill: remainingBudget.lte(0),
+    avgFillPrice: avgFillPrice.toNumber(),
+    bestPrice: bestPrice.toNumber(),
+    worstPrice: worstPrice.toNumber(),
+    slippage: slippage.toNumber(),
+    slippagePercent: slippagePercent.toNumber(),
+    totalNotional: totalCost.toNumber(),
+    fills,
+    unfilledSize: 0,
+    filledSize: totalShares.toNumber(),
+  };
+}
+
 export function calculateSlippage(
   orderBook: OrderBook,
   side: "BUY" | "SELL",

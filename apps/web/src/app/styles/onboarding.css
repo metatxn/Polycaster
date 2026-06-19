@@ -1,0 +1,490 @@
+/* =====================================================================
+ * KNOWW · SETUP TRADING (onboarding modal)
+ * ---------------------------------------------------------------------
+ * Scoped under `.kw-onboarding`. The modal is portaled out of the page
+ * tree by Radix Dialog so we wrap the modal content in
+ * `.kw-app .kw-onboarding` to inherit the kwm token system.
+ *
+ * Source: design package `Knoww Setup Trading.html` + `setup-trading.css`
+ * (Claude Design handoff, 2026-05-27, chat7).
+ * ===================================================================== */
+.kw-onboarding {
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  color: var(--kwm-ink);
+  background: var(--kwm-panel);
+}
+
+/* Header */
+.kw-onboarding .kwo-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+  flex-wrap: wrap;
+}
+.kw-onboarding .kwo-eyebrow .kwo-sec {
+  color: var(--kwm-ink-2);
+}
+.kw-onboarding .kwo-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--kwm-up);
+  box-shadow: 0 0 0 0 color-mix(in oklch, var(--kwm-up) 50%, transparent);
+  animation: kwo-pulse 2s infinite;
+}
+@keyframes kwo-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--kwm-up) 50%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in oklch, var(--kwm-up) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--kwm-up) 0%, transparent);
+  }
+}
+.kw-onboarding .kwo-net {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--kwm-hl);
+  border-radius: 999px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--kwm-ink-2);
+  background: color-mix(in oklch, var(--kwm-ink) 4%, transparent);
+  text-transform: uppercase;
+}
+.kw-onboarding .kwo-net-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--kwm-up);
+}
+.kw-onboarding .kwo-title {
+  margin: 10px 0 0;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--kwm-ink);
+  line-height: 1.2;
+}
+.kw-onboarding .kwo-sub {
+  margin: 6px 0 0;
+  color: var(--kwm-ink-3);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 44ch;
+}
+.kw-onboarding .kwo-x {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--kwm-hl);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--kwm-ink-2);
+  cursor: pointer;
+}
+.kw-onboarding .kwo-x:hover {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-2);
+}
+
+/* Inline thin stepper */
+.kw-onboarding .kwo-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kw-onboarding .kwo-sb-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.kw-onboarding .kwo-sb-bullet {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--kwm-hl-2);
+  color: var(--kwm-ink-dim);
+  background: transparent;
+  flex-shrink: 0;
+}
+.kw-onboarding .kwo-sb-num {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+.kw-onboarding .kwo-sb-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+  white-space: nowrap;
+}
+.kw-onboarding .kwo-sb-line {
+  flex: 1;
+  height: 1px;
+  background: var(--kwm-hl-2);
+  min-width: 8px;
+}
+.kw-onboarding .kwo-sb-line.on {
+  background: var(--kwm-up);
+  opacity: 0.7;
+}
+.kw-onboarding .kwo-sb-node.done .kwo-sb-bullet {
+  background: var(--kwm-up);
+  border-color: var(--kwm-up);
+  color: var(--kwm-bg);
+}
+.kw-onboarding .kwo-sb-node.done .kwo-sb-label {
+  color: var(--kwm-up);
+}
+.kw-onboarding .kwo-sb-node.now .kwo-sb-bullet {
+  border-color: var(--kwm-ink);
+  color: var(--kwm-ink);
+  background: color-mix(in oklch, var(--kwm-ink) 6%, transparent);
+}
+.kw-onboarding .kwo-sb-node.now .kwo-sb-label {
+  color: var(--kwm-ink);
+}
+
+/* Step rows */
+.kw-onboarding .kwo-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px dashed var(--kwm-hl);
+}
+.kw-onboarding .kwo-step:last-child {
+  border-bottom: none;
+}
+.kw-onboarding .kwo-rail {
+  position: absolute;
+  left: -22px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+}
+.kw-onboarding .kwo-step.done .kwo-rail {
+  background: var(--kwm-up);
+  opacity: 0.55;
+}
+.kw-onboarding .kwo-step.now .kwo-rail {
+  background: var(--kwm-ink);
+}
+.kw-onboarding .kwo-icon {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--kwm-hl-2);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--kwm-ink-2);
+  background: color-mix(in oklch, var(--kwm-ink) 2.5%, transparent);
+  flex-shrink: 0;
+}
+.kw-onboarding .kwo-step.done .kwo-icon {
+  color: var(--kwm-up);
+  border-color: var(--kwm-up-border);
+  background: var(--kwm-up-soft);
+}
+.kw-onboarding .kwo-step.now .kwo-icon {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-3);
+  background: color-mix(in oklch, var(--kwm-ink) 6%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--kwm-ink) 4%, transparent);
+}
+.kw-onboarding .kwo-step.locked .kwo-icon {
+  color: var(--kwm-ink-dim);
+  background: transparent;
+}
+.kw-onboarding .kwo-body {
+  min-width: 0;
+}
+.kw-onboarding .kwo-step-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kwm-ink);
+  font-weight: 600;
+}
+.kw-onboarding .kwo-step.locked .kwo-step-title {
+  color: var(--kwm-ink-3);
+}
+/* Base index color first; the `.now` state override (higher specificity)
+   follows, so specificity ascends. */
+.kw-onboarding .kwo-step-title .kwo-idx {
+  color: var(--kwm-ink-3);
+}
+.kw-onboarding .kwo-step.now .kwo-step-title {
+  color: var(--kwm-ink);
+}
+.kw-onboarding .kwo-step.now .kwo-step-title .kwo-idx {
+  color: var(--kwm-ink-2);
+}
+.kw-onboarding .kwo-step.done .kwo-step-title {
+  color: var(--kwm-ink-2);
+}
+.kw-onboarding .kwo-step-desc {
+  margin-top: 4px;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--kwm-ink-3);
+  line-height: 1.45;
+}
+.kw-onboarding .kwo-tag {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--kwm-up);
+  padding: 1px 6px;
+  border: 1px solid var(--kwm-up-border);
+  border-radius: 999px;
+  text-transform: uppercase;
+  margin-left: 4px;
+  vertical-align: 2px;
+}
+.kw-onboarding .kwo-step-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-dim);
+}
+.kw-onboarding .kwo-step.done .kwo-step-state {
+  color: var(--kwm-up);
+}
+.kw-onboarding .kwo-ck {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--kwm-hl-2);
+  color: var(--kwm-ink-dim);
+}
+.kw-onboarding .kwo-step.done .kwo-ck {
+  background: var(--kwm-up);
+  color: var(--kwm-bg);
+  border-color: var(--kwm-up);
+}
+.kw-onboarding .kwo-step.locked .kwo-ck {
+  border-style: dashed;
+}
+
+/* Sign / Approve button */
+.kw-onboarding .kwo-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--kwm-ink);
+  color: var(--kwm-bg);
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.kw-onboarding .kwo-go:hover {
+  opacity: 0.92;
+}
+.kw-onboarding .kwo-go:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.kw-onboarding .kwo-arr {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* Inline approve form */
+.kw-onboarding .kwo-approve-form {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--kwm-hl);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.kw-onboarding .kwo-af-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+.kw-onboarding .kwo-af-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kw-onboarding .kwo-af-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+}
+.kw-onboarding .kwo-af-input {
+  display: inline-flex;
+  align-items: stretch;
+  background: color-mix(in oklch, var(--kwm-ink) 3%, transparent);
+  border: 1px solid var(--kwm-hl-2);
+  border-radius: 4px;
+  overflow: hidden;
+  height: 36px;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.kw-onboarding .kwo-af-input:focus-within {
+  border-color: var(--kwm-hl-3);
+  background: color-mix(in oklch, var(--kwm-ink) 5%, transparent);
+}
+.kw-onboarding .kwo-af-input input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0 12px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--kwm-ink);
+  width: 100%;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.kw-onboarding .kwo-af-unit {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--kwm-ink-3);
+  border-left: 1px solid var(--kwm-hl);
+  background: color-mix(in oklch, var(--kwm-ink) 2%, transparent);
+}
+.kw-onboarding .kwo-af-help {
+  margin: 0;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--kwm-ink-3);
+  line-height: 1.5;
+  max-width: 56ch;
+}
+
+/* Skip link footer */
+.kw-onboarding .kwo-skip {
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-3);
+  cursor: pointer;
+  text-decoration: none;
+  position: relative;
+}
+.kw-onboarding .kwo-skip::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 4px;
+  height: 1px;
+  background: var(--kwm-hl-2);
+  transition: background 0.15s;
+}
+.kw-onboarding .kwo-skip:hover {
+  color: var(--kwm-ink);
+}
+.kw-onboarding .kwo-skip:hover::after {
+  background: var(--kwm-ink);
+}
+
+/* Wallet mode picker (compact chips when more than one option) */
+.kw-onboarding .kwo-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.kw-onboarding .kwo-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--kwm-hl-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--kwm-ink-3);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+.kw-onboarding .kwo-mode-chip:hover {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-3);
+}
+.kw-onboarding .kwo-mode-chip.on {
+  color: var(--kwm-ink);
+  border-color: var(--kwm-ink);
+  background: color-mix(in oklch, var(--kwm-ink) 6%, transparent);
+}
+
+/* Error row */
+.kw-onboarding .kwo-error {
+  margin-top: 6px;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--kwm-down);
+  line-height: 1.45;
+}

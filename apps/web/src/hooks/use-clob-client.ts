@@ -24,6 +24,7 @@ import {
   createUnifiedPolymarketSecureClient,
   createUnifiedPolymarketViemSigner,
   isPolymarketFreshAuthenticationRequiredError,
+  type LegacyClobCompatibleClient,
   type UnifiedSdkTradingClient,
 } from "@knoww/shared-types/polymarket-unified";
 import {
@@ -34,7 +35,7 @@ import {
   planPusdAutoWrap,
 } from "@knoww/shared-types/trading";
 import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Address } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
 
@@ -124,6 +125,19 @@ type ClobBalanceAllowanceReadableClient = ClobBalanceAllowanceClient & {
   ) => Promise<{ balance?: string | number | bigint }>;
 };
 
+type ReadOnlyClientCache = {
+  key: string;
+  promise: Promise<LegacyClobCompatibleClient>;
+};
+
+function buildReadOnlyClientCacheKey(
+  signerAddress: string,
+  walletAddress: string,
+  apiKey: string
+): string {
+  return `${signerAddress.toLowerCase()}:${walletAddress.toLowerCase()}:${apiKey}`;
+}
+
 /**
  * Hook for interacting with Polymarket CLOB using the official SDK
  */
@@ -143,6 +157,7 @@ export function useClobClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [operationStep, setOperationStep] = useState<ClobOperationStep>("idle");
   const [error, setError] = useState<Error | null>(null);
+  const readOnlyClientCacheRef = useRef<ReadOnlyClientCache | null>(null);
 
   /**
    * Internal helper to initialize the ClobClient
@@ -181,18 +196,39 @@ export function useClobClient() {
     if (!address) throw new Error("Wallet not connected");
 
     const builderCode = process.env.NEXT_PUBLIC_POLY_BUILDER_CODE;
+    const walletAddress = isEoaMode ? address : proxyAddress;
+    const cacheKey = buildReadOnlyClientCacheKey(
+      address,
+      walletAddress,
+      credentials.apiKey
+    );
 
-    const { client } = await createUnifiedPolymarketSecureClient({
+    if (readOnlyClientCacheRef.current?.key === cacheKey) {
+      return readOnlyClientCacheRef.current.promise;
+    }
+
+    let promise: Promise<LegacyClobCompatibleClient>;
+    promise = createUnifiedPolymarketSecureClient({
       signer: createUnifiedPolymarketCredentialsOnlySigner(address),
-      wallet: isEoaMode ? address : proxyAddress,
+      wallet: walletAddress,
       credentials,
       allowFreshAuthentication: false,
-    });
+    })
+      .then(({ client }) =>
+        adaptUnifiedSecureClientForLegacyClob(
+          client as unknown as UnifiedSdkTradingClient,
+          { builderCode }
+        )
+      )
+      .catch((err) => {
+        if (readOnlyClientCacheRef.current?.promise === promise) {
+          readOnlyClientCacheRef.current = null;
+        }
+        throw err;
+      });
 
-    return adaptUnifiedSecureClientForLegacyClob(
-      client as unknown as UnifiedSdkTradingClient,
-      { builderCode }
-    );
+    readOnlyClientCacheRef.current = { key: cacheKey, promise };
+    return promise;
   }, [credentials, proxyAddress, isEoaMode, address]);
 
   /**
@@ -744,6 +780,7 @@ export function useClobClient() {
       return fetchOpenOrders(client);
     } catch (err) {
       if (isPolymarketFreshAuthenticationRequiredError(err)) {
+        readOnlyClientCacheRef.current = null;
         clearCredentials();
         log.debug("open_orders.fetch_skipped", {
           reason: "credentials_invalid",
@@ -945,6 +982,7 @@ export function useClobClient() {
         return checkOrderScoring(client, orderId);
       } catch (err) {
         if (isPolymarketFreshAuthenticationRequiredError(err)) {
+          readOnlyClientCacheRef.current = null;
           clearCredentials();
           log.debug("order_scoring.check_skipped", {
             reason: "credentials_invalid",
@@ -969,6 +1007,7 @@ export function useClobClient() {
         return checkOrdersScoring(client, orderIds);
       } catch (err) {
         if (isPolymarketFreshAuthenticationRequiredError(err)) {
+          readOnlyClientCacheRef.current = null;
           clearCredentials();
           log.debug("order_scoring.batch_check_skipped", {
             reason: "credentials_invalid",

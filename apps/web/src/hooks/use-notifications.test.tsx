@@ -84,13 +84,19 @@ vi.mock("@knoww/shared-types/polymarket-unified", () => unifiedSdkMock);
 import { useNotifications } from "./use-notifications";
 
 describe("useNotifications", () => {
+  let credentialsCounter = 0;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    credentialsCounter += 1;
     wagmiState.isConnected = true;
     proxyWalletState.proxyAddress =
       "0x0000000000000000000000000000000000000002";
     proxyWalletState.isDeployed = false;
-    clobCredentialsState.credentials = credentials;
+    clobCredentialsState.credentials = {
+      ...credentials,
+      apiKey: `api-key-${credentialsCounter}`,
+    };
     clobCredentialsState.hasCredentials = true;
     clobCredentialsState.clearCredentials.mockReset();
 
@@ -99,7 +105,7 @@ describe("useNotifications", () => {
     });
     unifiedSdkMock.createUnifiedPolymarketSecureClient.mockResolvedValue({
       client: notificationClient,
-      appCredentials: credentials,
+      appCredentials: clobCredentialsState.credentials,
     });
     notificationClient.fetchNotifications.mockResolvedValue([
       {
@@ -134,7 +140,7 @@ describe("useNotifications", () => {
         address: wagmiState.address,
       }),
       wallet: proxyWalletState.proxyAddress,
-      credentials,
+      credentials: clobCredentialsState.credentials,
       allowFreshAuthentication: false,
     });
     expect(viemWalletClientMock.getViemWalletClient).not.toHaveBeenCalled();
@@ -142,6 +148,37 @@ describe("useNotifications", () => {
       11, 10,
     ]);
     expect(result.current.unreadCount).toBe(2);
+  });
+
+  it("reuses the authenticated client across notification refreshes", async () => {
+    const { result } = renderHook(() => useNotifications());
+
+    await act(async () => {
+      await result.current.fetchNotifications();
+      await result.current.fetchNotifications();
+    });
+
+    expect(
+      unifiedSdkMock.createUnifiedPolymarketSecureClient
+    ).toHaveBeenCalledTimes(1);
+    expect(notificationClient.fetchNotifications).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares the authenticated client across mounted notification hooks", async () => {
+    const first = renderHook(() => useNotifications());
+    const second = renderHook(() => useNotifications());
+
+    await act(async () => {
+      await Promise.all([
+        first.result.current.fetchNotifications(),
+        second.result.current.fetchNotifications(),
+      ]);
+    });
+
+    expect(
+      unifiedSdkMock.createUnifiedPolymarketSecureClient
+    ).toHaveBeenCalledTimes(1);
+    expect(notificationClient.fetchNotifications).toHaveBeenCalledTimes(2);
   });
 
   it("drops notification ids as strings and removes them after success", async () => {

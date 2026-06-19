@@ -95,8 +95,31 @@ function formatNotificationMessage(notification: Notification): string {
       return `Market resolved: ${outcome}`;
     }
     default:
-      return "New notification";
+      return formatUnknownNotification(payload);
   }
+}
+
+/**
+ * Fallback formatter for notification types the CLOB API sends that aren't in
+ * our known enum (1/2/4). Rather than a blank "New notification", surface any
+ * human-readable text the payload carries so the user sees something useful.
+ */
+function formatUnknownNotification(payload: Notification["payload"]): string {
+  if (payload && typeof payload === "object") {
+    const p = payload as Record<string, unknown>;
+    // Prefer an explicit human-readable string the API may provide.
+    for (const key of ["message", "title", "text", "description", "body"]) {
+      const value = p[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    // Otherwise surface an outcome (e.g. resolution / redemption events).
+    if (typeof p.outcome === "string" && p.outcome.trim()) {
+      return `Outcome: ${p.outcome.trim()}`;
+    }
+  }
+  return "New notification";
 }
 
 /**

@@ -60,8 +60,8 @@ export function NotificationList({
         <div className="flex items-center justify-center h-12 w-12 rounded-full bg-muted mb-3">
           <Bell className="h-6 w-6" />
         </div>
-        <p className="text-sm font-medium">{emptyMessage}</p>
-        <p className="text-xs mt-1">
+        <p className="text-sm font-medium text-center">{emptyMessage}</p>
+        <p className="text-xs mt-1 text-center text-balance max-w-60">
           You&apos;ll see order fills, cancellations, and market resolutions
           here
         </p>

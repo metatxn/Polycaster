@@ -4835,6 +4835,11 @@
   font-weight: 600 !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
 }
+.knoww-tp-cash-display {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
 .knoww-tp-max-row {
   display: flex !important;
   justify-content: flex-end !important;
@@ -4921,6 +4926,82 @@
 .knoww-tp-shares-row .knoww-tp-max-btn {
   flex-shrink: 0 !important;
   margin-left: 2px !important;
+}
+
+.knoww-tp-amount-input-wrap {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  width: 100% !important;
+  padding: 8px 10px !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: 8px !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease !important;
+}
+.knoww-tp-amount-input-wrap:focus-within {
+  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+  background: rgba(29, 155, 240, 0.05) !important;
+}
+.knoww-tp-amount-currency {
+  flex: 0 0 auto !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+}
+.knoww-tp-amount-input {
+  flex: 1 !important;
+  min-width: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  font-family: "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
+  line-height: 1.2 !important;
+  outline: none !important;
+}
+.knoww-tp-amount-presets {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+  width: 100% !important;
+}
+.knoww-tp-amount-chip {
+  min-width: 0 !important;
+  padding: 6px 8px !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  cursor: pointer !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  transition: all 0.12s ease !important;
+}
+.knoww-tp-amount-chip:hover:not(:disabled) {
+  border-color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+.knoww-tp-amount-chip.max {
+  color: rgb(16, 185, 129) !important;
+}
+.knoww-tp-amount-chip:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.35 !important;
+}
+.knoww-tp-amount-sub {
+  min-height: 14px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  font-size: 12px !important;
+  line-height: 14px !important;
 }
 
 /* ── Order Summary ── */

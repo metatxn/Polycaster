@@ -95,8 +95,48 @@ function formatNotificationMessage(notification: Notification): string {
       return `Market resolved: ${outcome}`;
     }
     default:
-      return "New notification";
+      return formatUnknownNotification(payload);
   }
+}
+
+/**
+ * Fallback formatter for notification types the CLOB API sends that aren't in
+ * our known enum (1/2/4). Rather than a blank "New notification", surface any
+ * human-readable text the payload carries so the user sees something useful.
+ */
+function formatUnknownNotification(payload: Notification["payload"]): string {
+  if (payload && typeof payload === "object") {
+    const p = payload as Record<string, unknown>;
+    // Prefer an explicit human-readable string the API may provide.
+    for (const key of ["message", "title", "text", "description", "body"]) {
+      const value = p[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    // Otherwise surface an outcome (e.g. resolution / redemption events).
+    if (typeof p.outcome === "string" && p.outcome.trim()) {
+      return `Outcome: ${p.outcome.trim()}`;
+    }
+  }
+  return "New notification";
+}
+
+function getNotificationMarketTitle(notification: Notification): string | null {
+  const { payload } = notification;
+  if (!payload || typeof payload !== "object") return null;
+
+  const p = payload as Record<string, unknown>;
+  for (const key of ["question", "name", "market", "title"]) {
+    const value = p[key];
+    if (typeof value !== "string") continue;
+
+    const title = value.trim();
+    if (!title || /^0x[a-fA-F0-9]{32,}$/.test(title)) continue;
+    return title;
+  }
+
+  return null;
 }
 
 /**
@@ -114,6 +154,10 @@ export function NotificationItem({
   );
   const message = useMemo(
     () => formatNotificationMessage(notification),
+    [notification]
+  );
+  const marketTitle = useMemo(
+    () => getNotificationMarketTitle(notification),
     [notification]
   );
   // Notification timestamps arrive as unix seconds; `relativeTime` expects
@@ -166,6 +210,17 @@ export function NotificationItem({
             </span>
           )}
         </div>
+        {marketTitle && (
+          <p
+            className={cn(
+              "font-medium leading-snug text-foreground",
+              compact ? "text-xs" : "text-sm",
+              "line-clamp-2"
+            )}
+          >
+            {marketTitle}
+          </p>
+        )}
         <p
           className={cn(
             "text-muted-foreground leading-snug",

@@ -1,0 +1,420 @@
+/* =====================================================================
+ * KNOWW · PRODUCT APP (DeFi/trading surface)
+ * ---------------------------------------------------------------------
+ * Scoped under `.kw-app` so editorial pages (landing, privacy, terms)
+ * keep their warm cream/serif system. Every product route (markets,
+ * leaderboard, portfolio, whales, search, agent, events, profile) wraps
+ * its root in `.kw-app` to inherit this token system.
+ *
+ * Tokens derive from the active theme's existing variables
+ * (--background, --foreground, --card, --muted, --muted-foreground,
+ * --border) so Light, Sunset, Forest, Lavender, Dark, Midnight, Ocean,
+ * Slate, and Soft Pop all flow into product surfaces without further
+ * configuration. Only the signal colors (up/down) and the typography
+ * stack are constant across themes — green/red are universal trading
+ * conventions and Geist is the DeFi/financial type-system choice.
+ *
+ * Inner namespace `kwm-*` (tokens and helpers) is preserved from the
+ * original markets handoff to avoid churn — the `m` no longer reads
+ * literally as "markets" but as "knoww-mono/numeric" inside the system.
+ *
+ * Source: design package `Knoww Explore Markets.html` +
+ * `explore-markets.css` (Claude Design handoff, 2026-05-20).
+ * ===================================================================== */
+.kw-app {
+  /* Surface — map to existing theme tokens */
+  --kwm-bg: var(--background);
+  --kwm-bg-2: color-mix(in oklch, var(--background) 92%, var(--foreground));
+  --kwm-bg-3: color-mix(in oklch, var(--background) 86%, var(--foreground));
+  --kwm-panel: var(--card);
+  --kwm-panel-2: color-mix(in oklch, var(--card) 90%, var(--foreground));
+  --kwm-hover: color-mix(in oklch, var(--card) 85%, var(--foreground));
+
+  /* Ink — map to existing theme tokens */
+  --kwm-ink: var(--foreground);
+  --kwm-ink-2: color-mix(in oklch, var(--foreground) 80%, var(--background));
+  --kwm-ink-3: var(--muted-foreground);
+  /* The faint tier fades toward the FOREGROUND (not the background) so it
+     stays legible — fading toward bg dropped real text (addresses, terms,
+     timestamps) to ~3:1. Toward-fg raises contrast in both light & dark
+     schemes while keeping a subtle step below --kwm-ink-3. */
+  --kwm-ink-dim: color-mix(
+    in oklch,
+    var(--muted-foreground) 82%,
+    var(--foreground)
+  );
+
+  /* Hairlines — derive from border so they match the theme weight */
+  --kwm-hl: color-mix(in oklch, var(--border) 70%, transparent);
+  --kwm-hl-2: var(--border);
+  --kwm-hl-3: color-mix(in oklch, var(--border) 130%, var(--foreground));
+
+  /* Signal colors — light-family values are deepened so the SAME token can
+     carry both fills (3:1 graphical bar) and small text and still clear
+     WCAG AA (4.5:1) on the off-white/white surfaces. Measured on white:
+     up #15803d ≈ 5.0:1, down #c81e1e ≈ 5.7:1, warn #b45309 ≈ 5.0:1.
+     Dark-family themes override these with brighter values below. */
+  --kwm-up: #15803d;
+  --kwm-up-soft: color-mix(in oklch, var(--kwm-up) 10%, transparent);
+  --kwm-up-border: color-mix(in oklch, var(--kwm-up) 30%, transparent);
+  --kwm-down: #c81e1e;
+  --kwm-down-soft: color-mix(in oklch, var(--kwm-down) 10%, transparent);
+  --kwm-accent: #2563eb;
+  --kwm-warn: #b45309;
+  --kwm-warn-soft: color-mix(in oklch, var(--kwm-warn) 10%, transparent);
+  --kwm-warn-border: color-mix(in oklch, var(--kwm-warn) 30%, transparent);
+  --kwm-down-border: color-mix(in oklch, var(--kwm-down) 30%, transparent);
+  --kwm-accent-soft: color-mix(in oklch, var(--kwm-accent) 12%, transparent);
+
+  background: var(--kwm-bg);
+  color: var(--kwm-ink);
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "ss02", "cv11", "tnum";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Dark-family themes get the brighter DeFi signal palette so green/red
+   pop against near-black backgrounds. Light themes use deeper greens
+   and reds so they retain WCAG AA contrast against off-white. */
+.dark .kw-app,
+.midnight .kw-app,
+.ocean .kw-app,
+.slate .kw-app,
+.softpop .kw-app {
+  --kwm-up: #4ade80;
+  --kwm-down: #f87171;
+  --kwm-accent: #60a5fa;
+  --kwm-warn: #fbbf24;
+}
+
+/* Light-family contrast floor for hardcoded Tailwind accent utilities.
+   Components scattered across the app use `text-emerald-500`/`text-red-500`
+   directly for YES/NO prices, order-book rows, P&L sparklines, etc. The
+   default 500 ramp sits at ~2.5–3.8:1 on the off-white surfaces (fails AA).
+   We remap the underlying Tailwind color vars to the AA-safe 700-ish shades
+   ONLY for light-family themes (html without a dark-scheme class); the
+   dark-family themes keep Tailwind's brighter defaults, which already pass
+   on near-black. Fills and borders deepen slightly too — a net win for
+   the previously-faint depth bars. */
+html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
+  --color-emerald-500: #047857;
+  --color-green-500: #15803d;
+  --color-red-500: #c81e1e;
+  --color-rose-500: #be123c;
+  --color-amber-500: #b45309;
+  --color-orange-500: #b45309;
+}
+
+/* ============================================================
+ * MARKET TERMINAL — premium depth + frosted chrome (.kw-app)
+ * Deliberately NOT the landing's frosted-everything treatment:
+ * the terminal is a dense data surface, so cards/rows stay opaque
+ * and gain depth via shadow (legible + cheap to composite), while
+ * glass is reserved for the one sticky surface content scrolls
+ * under — the order-book header. Tokens track every theme via the
+ * --kwm-* system above.
+ * ============================================================ */
+
+/* Top-of-book cards — lift off the flat terminal background with a
+   layered ambient shadow, then float harder on hover with a crisp
+   edge ring. `transition-all` on the element animates the shadow. */
+.kw-app .kwm-tob-card {
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 7%, transparent),
+    0 10px 28px -18px color-mix(in oklch, var(--kwm-ink) 38%, transparent);
+}
+.kw-app .kwm-tob-card:hover {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 10%, transparent),
+    0 2px 4px color-mix(in oklch, var(--kwm-ink) 10%, transparent),
+    0 24px 50px -22px color-mix(in oklch, var(--kwm-ink) 55%, transparent),
+    0 0 0 1px var(--kwm-hl-3);
+}
+
+/* Event-detail "THE FIELD" contender tiles — a subtle static lift so they
+   read as raised chips, consistent with the terminal cards. Kept gentle
+   (5 sit in a tight row) and static: the inline selected-state boxShadow
+   (inset ring) intentionally overrides this for the active tile. */
+.kw-app .kwm-fld {
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 5%, transparent),
+    0 6px 16px -12px color-mix(in oklch, var(--kwm-ink) 28%, transparent);
+}
+
+/* Frosted chrome — applied ONLY to sticky surfaces (e.g. the order-book
+   header) so the rows dissolve under it as they scroll. Pair with a
+   translucent inline background on the element itself. */
+.kw-app .kwm-frost {
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+}
+
+/* Premium primary action (Connect / inline CTAs) — specular top edge +
+   a soft drop so the solid button reads as a raised, lit surface. */
+.kw-app .kwm-cta {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 18%, transparent),
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 28%, transparent),
+    0 8px 20px -10px color-mix(in oklch, var(--kwm-ink) 42%, transparent);
+  transition:
+    box-shadow 0.2s ease,
+    background-color 0.2s ease,
+    transform 0.12s ease;
+}
+.kw-app .kwm-cta:active {
+  transform: translateY(0.5px);
+}
+
+/* Degrade frost to opaque where the platform can't frost or the user
+   asks for less transparency (the translucent inline bg still reads as
+   a solid panel since the blur is what's removed). */
+@supports not (
+    (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px))
+  ) {
+  .kw-app .kwm-frost {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .kw-app .kwm-frost {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Middle-dot separator between adjacent stat items in a row — used by
+   the event-detail header so values like volume / date / markets /
+   days-left read as distinct without the hard-stop feel of a vertical
+   bar. Matches the existing dot already used inside grouped sub-values
+   (e.g. `48 open · 2 closed`), so the row has one consistent separator
+   grammar from the design handoff. Inserts before every child after the
+   first via `::before` so the rule works regardless of conditional
+   rendering. Tracks every theme via `--kwm-ink-dim`. */
+.kw-app .kwm-stat-row > *:not(:first-child)::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--kwm-ink-dim);
+  font-weight: 400;
+}
+
+/* Neutralize editorial type inside product surfaces. If any descendant
+   uses the editorial font/italic (e.g. legacy `font-editorial italic`
+   classes from the editorial component library), fall back to the
+   product type system so the surface stays coherent. */
+.kw-app .font-editorial,
+.kw-app [class*="font-editorial"] {
+  font-family:
+    var(--font-geist), ui-sans-serif, system-ui, sans-serif !important;
+  font-style: normal !important;
+}
+/* Same treatment for ::placeholder pseudo-elements — Tailwind
+   `placeholder:font-editorial` compiles to a pseudo-selector that the
+   class match above can't reach. */
+.kw-app input::placeholder,
+.kw-app textarea::placeholder {
+  font-family:
+    var(--font-geist), ui-sans-serif, system-ui, sans-serif !important;
+  font-style: normal !important;
+}
+
+/* Pulse dot — green LIVE indicator */
+.kw-app .kwm-pulse {
+  width: 6px;
+  height: 6px;
+  background: var(--kwm-up);
+  border-radius: 999px;
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6);
+  animation: kwm-pulse 2s infinite;
+}
+@keyframes kwm-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(74, 222, 128, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+  }
+}
+
+/* FIFA nav callout — quick attention pulse without adding another nav item. */
+.kw-fifa-nav-link {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 3px;
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--foreground) 52%, transparent);
+  background: color-mix(in oklch, var(--accent) 72%, transparent);
+  animation: kwFifaNavPulse 1.8s ease-in-out infinite;
+}
+.kw-fifa-nav-link::before {
+  content: "";
+  position: absolute;
+  inset: 1px -40%;
+  z-index: -1;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in oklch, var(--foreground) 18%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-62%);
+  animation: kwFifaNavSweep 1.8s ease-in-out infinite;
+}
+@keyframes kwFifaNavPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--foreground) 0%, transparent);
+  }
+  42% {
+    box-shadow: 0 0 0 4px
+      color-mix(in oklch, var(--foreground) 10%, transparent);
+  }
+}
+@keyframes kwFifaNavSweep {
+  0%,
+  18% {
+    transform: translateX(-62%);
+  }
+  58%,
+  100% {
+    transform: translateX(62%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kw-fifa-nav-link,
+  .kw-fifa-nav-link::before {
+    animation: none;
+  }
+}
+
+/* Top of Book — outcome row progress fill */
+.kw-app .kwm-track {
+  height: 3px;
+  background: rgba(231, 234, 240, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+.kw-app .kwm-track .kwm-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--kwm-up);
+  opacity: 0.85;
+  border-radius: 2px;
+}
+.kw-app .kwm-track.kwm-down .kwm-fill {
+  background: var(--kwm-down);
+}
+
+/* Hairline divider for utility bar / filter pills */
+.kw-app .kwm-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--kwm-hl);
+}
+
+/* ============ Filter pills — terminal-style ============
+ * Overrides the editorial FilterChip's stripped-down look (text only)
+ * with the DeFi pill aesthetic from the design package:
+ * bordered, padded, rounded, mono caps. Green tint on active.
+ * Targets `<FilterChip>` button via the .kwm-pills wrapper class. */
+.kw-app .kwm-pills > button[type="button"],
+.kw-app .kwm-pills > div > button[type="button"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--kwm-hl);
+  border-radius: 6px;
+  background: var(--kwm-bg-2);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  /* 12px readability floor — was 11px */
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--kwm-ink-2);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.kw-app .kwm-pills > button[type="button"]:hover,
+.kw-app .kwm-pills > div > button[type="button"]:hover {
+  background: var(--kwm-bg-3);
+  color: var(--kwm-ink);
+  border-color: var(--kwm-hl-2);
+}
+/* Active state — FilterChip appends an absolute-positioned underline
+   span when isActive. Use :has() to detect it and apply the green
+   tint, then hide the underline since the border now carries state. */
+.kw-app .kwm-pills > button[type="button"]:has(> span.absolute),
+.kw-app .kwm-pills > div > button[type="button"]:has(> span.absolute) {
+  color: var(--kwm-up);
+  border-color: var(--kwm-up-border);
+  background: var(--kwm-up-soft);
+}
+.kw-app .kwm-pills > button[type="button"] > span.absolute,
+.kw-app .kwm-pills > div > button[type="button"] > span.absolute {
+  display: none;
+}
+/* Label span — dimmer, with a trailing colon (LABEL: VALUE). */
+.kw-app .kwm-pills button[type="button"] > span.font-mono {
+  /* 12px readability floor — was 11px */
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.kw-app .kwm-pills button[type="button"] > span.font-mono::after {
+  content: ":";
+}
+.kw-app .kwm-pills button[type="button"]:has(> span.absolute) > span.font-mono {
+  opacity: 0.85;
+}
+/* Value span — normalize weight so it doesn't break the mono rhythm. */
+.kw-app .kwm-pills button[type="button"] > span:not(.absolute):not(.font-mono) {
+  font-weight: 400;
+  /* 12px readability floor — was 11px */
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+/* Leading icon (first svg) — tint with ink-3 normally, green on active. */
+.kw-app .kwm-pills button[type="button"] > svg:first-of-type {
+  width: 12px;
+  height: 12px;
+  opacity: 1;
+  color: var(--kwm-ink-3);
+}
+.kw-app
+  .kwm-pills
+  button[type="button"]:has(> span.absolute)
+  > svg:first-of-type {
+  color: var(--kwm-up);
+}
+/* Chevron — slightly smaller and dimmer. */
+.kw-app .kwm-pills button[type="button"] > svg:last-of-type {
+  width: 10px;
+  height: 10px;
+  opacity: 0.6;
+  margin-left: 2px;
+}
+
+/* Clear-filters button (red X) — let it stay distinct from the pill row. */
+.kw-app .kwm-pills > button[type="button"][title="Clear all filters"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--kwm-down);
+  height: 32px;
+  width: 32px;
+  padding: 0;
+}
+.kw-app .kwm-pills > button[type="button"][title="Clear all filters"]:hover {
+  background: var(--kwm-down-soft);
+  border-color: transparent;
+}

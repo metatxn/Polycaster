@@ -1,0 +1,164 @@
+/* ===== APP TYPOGRAPHY TOKENS =====
+ * App screens are operational surfaces, so tiny uppercase mono labels must
+ * stay readable. Keep landing-page marketing typography separate via the
+ * `.kw-landing` guard.
+ */
+:root {
+  --ui-label-size: 12px;
+  --ui-label-line-height: 1rem;
+  --ui-label-letter-spacing: 0.08em;
+  --ui-label-muted: color-mix(
+    in oklch,
+    var(--muted-foreground) 88%,
+    var(--foreground) 12%
+  );
+}
+
+.ui-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+  text-transform: uppercase;
+  letter-spacing: var(--ui-label-letter-spacing);
+  color: var(--ui-label-muted);
+}
+
+.ui-label-strong {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+  text-transform: uppercase;
+  letter-spacing: var(--ui-label-letter-spacing);
+  color: var(--foreground);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    .uppercase[class*="text-[8px]"],
+    .uppercase[class*="text-[9px]"],
+    .uppercase[class*="text-[10px]"],
+    .uppercase[class*="text-[11px]"],
+    .font-mono.uppercase[class*="text-[8px]"],
+    .font-mono.uppercase[class*="text-[9px]"],
+    .font-mono.uppercase[class*="text-[10px]"],
+    .font-mono.uppercase[class*="text-[11px]"],
+    .font-mono.uppercase.text-xs
+  ) {
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    .uppercase[class*="tracking-[0.1"],
+    .uppercase[class*="tracking-[0.2"],
+    .uppercase.tracking-wider,
+    .uppercase.tracking-widest,
+    .font-mono.uppercase[class*="tracking-[0.1"],
+    .font-mono.uppercase[class*="tracking-[0.2"],
+    .font-mono.uppercase.tracking-wider,
+    .font-mono.uppercase.tracking-widest
+  ) {
+  letter-spacing: var(--ui-label-letter-spacing);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    [class*="text-[9px]"][class*="text-muted-foreground"],
+    [class*="text-[10px]"][class*="text-muted-foreground"],
+    [class*="text-[11px]"][class*="text-muted-foreground"],
+    .font-mono.uppercase[class*="text-muted-foreground"],
+    .font-mono[class*="text-[9px]"][class*="text-muted-foreground"],
+    .font-mono[class*="text-[10px]"][class*="text-muted-foreground"],
+    .font-mono[class*="text-[11px]"][class*="text-muted-foreground"]
+  ) {
+  color: var(--ui-label-muted);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    [class*="text-[9px]"][class*="text-muted-foreground"],
+    [class*="text-[10px]"][class*="text-muted-foreground"],
+    [class*="text-[11px]"][class*="text-muted-foreground"]
+  ) {
+  font-size: var(--ui-label-size);
+  line-height: var(--ui-label-line-height);
+}
+
+body:not(:has(.kw-landing))
+  :where(
+    .font-mono.uppercase.opacity-50,
+    .font-mono.uppercase.opacity-60,
+    .font-mono.uppercase.opacity-70
+  ) {
+  opacity: 0.9;
+}
+
+/* ===== READABILITY FLOOR =====
+   App screens never render text below 12px: micro-labels authored at
+   8-11px compute to 12px. The landing page (.kw-landing) is exempt —
+   its editorial scale stays untouched. Keep the selector list in sync
+   with the text-[*px] utilities actually used in TSX. */
+body
+:is(
+  .text-\[8px\],
+  .text-\[9px\],
+  .text-\[10px\],
+  .text-\[10\.5px\],
+  .text-\[11px\],
+  .text-\[11\.5px\]
+):not(.kw-landing *) {
+  /* biome-ignore lint/complexity/noImportantStyles: readability floor must beat utility specificity */
+  font-size: 12px !important;
+}
+
+/* Word-stagger entry animation — each word gets its own delay. */
+.kw-stagger {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: kwStaggerIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes kwStaggerIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Ticker infinite-scroll keyframe. */
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Reduced-motion overrides must win regardless of specificity or
+     source order — users opting out of motion get a guaranteed
+     still UI. */
+  .kw-stagger,
+  .kw-reveal {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    opacity: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    transform: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    animation: none !important;
+  }
+  .kw-tilt:hover {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    transform: none !important;
+  }
+  .kw-cursor-glow {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    display: none !important;
+  }
+  .animate-\[ticker_60s_linear_infinite\] {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    animation: none !important;
+  }
+}

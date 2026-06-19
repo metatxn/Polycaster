@@ -1,0 +1,391 @@
+/* ============================================================
+ * LANDING REDESIGN — futuristic prediction-layer sections
+ * Adapts the "Knoww.App — Landing" handoff design into the
+ * editorial --kw- token system. Scoped to .kw-landing so nothing
+ * leaks into app surfaces. The accent glow / soft fills derive
+ * from --kw-accent via color-mix, so every effect tracks the
+ * light/dark toggle automatically.
+ * ============================================================ */
+.kw-landing {
+  /* Landing-only "spark" accent — brighter / electric than the restrained
+   * brand green used on the other --kw- surfaces (privacy, terms). Scoped
+   * here so only the marketing landing pops. `--kw-accent` is the decorative,
+   * high-voltage hue (signal dots, glows, icon chips, radar, borders);
+   * `--kw-accent-text` stays contrast-safe for real text on each theme.
+   * These match the specificity of the base .kw-page rules and sit later in
+   * source order, so they win on the `.kw-page.kw-landing` element. */
+  --kw-accent: #22c55e;
+  --kw-accent-text: #166534;
+  --kw-accent-glow: color-mix(in srgb, var(--kw-accent) 60%, transparent);
+  --kw-accent-soft: color-mix(in srgb, var(--kw-accent) 20%, transparent);
+}
+.kw-landing[data-theme="dark"] {
+  --kw-accent: #4ade80;
+  --kw-accent-text: #6ee7a0;
+  --kw-accent-inv: #1f9d57;
+  --kw-accent-glow: color-mix(in srgb, var(--kw-accent) 62%, transparent);
+  --kw-accent-soft: color-mix(in srgb, var(--kw-accent) 22%, transparent);
+}
+.kw-landing[data-theme="midnight"],
+.kw-landing[data-theme="ocean"],
+.kw-landing[data-theme="slate"],
+.kw-landing[data-theme="softpop"] {
+  --kw-accent-glow: color-mix(in srgb, var(--kw-accent) 62%, transparent);
+  --kw-accent-soft: color-mix(in srgb, var(--kw-accent) 22%, transparent);
+}
+.kw-landing[data-theme="midnight"] {
+  --kw-accent: #818cf8;
+  --kw-accent-text: #a5b4fc;
+  --kw-accent-inv: #312e81;
+}
+.kw-landing[data-theme="ocean"] {
+  --kw-accent: #38bdf8;
+  --kw-accent-text: #7dd3fc;
+  --kw-accent-inv: #075985;
+}
+.kw-landing[data-theme="slate"] {
+  --kw-accent: #94a3b8;
+  --kw-accent-text: #cbd5e1;
+  --kw-accent-inv: #334155;
+}
+.kw-landing[data-theme="softpop"] {
+  --kw-accent: #00ffd1;
+  --kw-accent-text: #67ffe1;
+  --kw-accent-inv: #006b5f;
+}
+.kw-landing[data-theme="sunset"],
+.kw-landing[data-theme="forest"],
+.kw-landing[data-theme="lavender"] {
+  --kw-accent-glow: color-mix(in srgb, var(--kw-accent) 58%, transparent);
+  --kw-accent-soft: color-mix(in srgb, var(--kw-accent) 18%, transparent);
+}
+.kw-landing[data-theme="sunset"] {
+  --kw-accent: #f97316;
+  --kw-accent-text: #c2410c;
+  --kw-accent-inv: #fed7aa;
+}
+.kw-landing[data-theme="forest"] {
+  --kw-accent: #16a34a;
+  --kw-accent-text: #166534;
+  --kw-accent-inv: #bbf7d0;
+}
+.kw-landing[data-theme="lavender"] {
+  --kw-accent: #8b5cf6;
+  --kw-accent-text: #6d28d9;
+  --kw-accent-inv: #ddd6fe;
+}
+
+/* Pulsing "live signal" dot — used on eyebrows, status chips, alerts. */
+@keyframes kwSignalPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.6);
+  }
+}
+.kw-signal-dot {
+  border-radius: 50%;
+  background: var(--kw-accent);
+  box-shadow: 0 0 10px var(--kw-accent-glow);
+  animation: kwSignalPulse 2.2s ease-in-out infinite;
+}
+
+/* Card hover lift — feature, use-case, platform tiles. */
+.kw-card-lift {
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.28s ease,
+    box-shadow 0.28s ease,
+    background 0.28s ease;
+}
+/* `.kw-landing` prefix keeps these above `.kw-glass` (same component, equal
+   base specificity) so the hover shadow wins on tiles that carry both. */
+.kw-landing .kw-card-lift:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--kw-accent) 32%, transparent);
+  /* Float harder + pick up a faint accent halo so the lift reads as a
+     physical glass tile catching light, not just a translate. */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent),
+    0 1px 2px color-mix(in srgb, #000 24%, transparent),
+    0 26px 50px -24px color-mix(in srgb, #000 58%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--kw-accent) 14%, transparent),
+    0 18px 60px -28px var(--kw-accent-glow);
+}
+[data-scheme="light"] .kw-landing .kw-card-lift:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px color-mix(in srgb, var(--kw-fg) 8%, transparent),
+    0 24px 48px -24px color-mix(in srgb, var(--kw-fg) 26%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--kw-accent) 16%, transparent),
+    0 16px 50px -28px var(--kw-accent-glow);
+}
+
+/* ============================================================
+ * GLASSMORPHISM — frosted surfaces (landing only)
+ * Extracted from the hero `.kwt-card` recipe so every floating
+ * panel shares the same physical-glass language: a translucent
+ * fill that refracts the ambient cursor/stage glow behind it, a
+ * specular top edge, and a layered ambient shadow. Theme-aware —
+ * dark schemes lean on blur + saturation; the warm-paper light
+ * schemes lean on a brighter fill + shadow so glass never muddies.
+ * Scoped to `.kw-landing` so nothing leaks onto app surfaces.
+ * ============================================================ */
+.kw-landing .kw-glass {
+  position: relative;
+  background: color-mix(in srgb, var(--kw-bg-card) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kw-fg) 12%, transparent);
+  backdrop-filter: blur(16px) saturate(155%);
+  -webkit-backdrop-filter: blur(16px) saturate(155%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+    0 1px 2px color-mix(in srgb, #000 22%, transparent),
+    0 18px 44px -24px color-mix(in srgb, #000 55%, transparent);
+}
+[data-scheme="light"] .kw-glass {
+  background: color-mix(in srgb, var(--kw-bg-card) 68%, transparent);
+  border-color: color-mix(in srgb, var(--kw-fg) 8%, transparent);
+  backdrop-filter: blur(14px) saturate(135%) brightness(1.02);
+  -webkit-backdrop-filter: blur(14px) saturate(135%) brightness(1.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 1px 2px color-mix(in srgb, var(--kw-fg) 6%, transparent),
+    0 16px 40px -24px color-mix(in srgb, var(--kw-fg) 22%, transparent);
+}
+
+/* Sticky chrome — heavier blur since fast-scrolling content passes
+   directly beneath it. Pairs with a hairline base border on the
+   element itself. */
+.kw-landing .kw-glass-bar {
+  background: color-mix(in srgb, var(--kw-bg) 70%, transparent);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+}
+[data-scheme="light"] .kw-glass-bar {
+  background: color-mix(in srgb, var(--kw-bg) 78%, transparent);
+}
+
+/* Fine film grain — masks gradient banding on the big radial glows and
+   adds an "expensive printed paper" texture that suits the editorial
+   concept. Sits behind content (z-0) as a non-interactive overlay. */
+.kw-landing .kw-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 140px 140px;
+  opacity: 0.055;
+  mix-blend-mode: overlay;
+}
+[data-scheme="light"] .kw-grain {
+  opacity: 0.035;
+}
+
+/* Graceful degradation: solidify glass where the platform can't frost
+   (older engines) or the user asks for less transparency. */
+@supports not (
+    (backdrop-filter: blur(1px)) or
+    (-webkit-backdrop-filter: blur(1px))
+  ) {
+  .kw-landing .kw-glass {
+    background: var(--kw-bg-card);
+  }
+  .kw-landing .kw-glass-bar {
+    background: var(--kw-bg);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .kw-landing .kw-glass {
+    background: var(--kw-bg-card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .kw-landing .kw-glass-bar {
+    background: var(--kw-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Animated confidence / progress fill. */
+@keyframes kwBarIn {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.kw-bar-fill {
+  transform-origin: left center;
+  background: linear-gradient(
+    90deg,
+    var(--kw-accent),
+    color-mix(in srgb, var(--kw-accent) 55%, var(--kw-fg))
+  );
+  animation: kwBarIn 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Gentle float — chaotic comment cloud + floating context labels. */
+@keyframes kwFloatBob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.kw-float {
+  animation: kwFloatBob 4s ease-in-out infinite;
+}
+
+/* ---- Probability radar ---- */
+.kw-radar {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  max-width: 420px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at center,
+    var(--kw-accent-soft) 0%,
+    transparent 70%
+  );
+}
+.kw-radar-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--kw-fg) 14%, transparent);
+}
+.kw-radar-ring.r2 {
+  inset: 14%;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--kw-fg) 10%, transparent);
+}
+.kw-radar-ring.r3 {
+  inset: 28%;
+}
+.kw-radar-ring.r4 {
+  inset: 42%;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--kw-fg) 10%, transparent);
+}
+.kw-radar-cross::before,
+.kw-radar-cross::after {
+  content: "";
+  position: absolute;
+  background: color-mix(in srgb, var(--kw-fg) 10%, transparent);
+}
+.kw-radar-cross::before {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.kw-radar-cross::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.kw-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--kw-accent-glow) 50deg,
+    transparent 70deg
+  );
+  animation: kwSweep 4s linear infinite;
+}
+@keyframes kwSweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.kw-radar-blip {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--kw-accent);
+  box-shadow: 0 0 14px var(--kw-accent-glow);
+  transform: translate(-50%, -50%);
+  animation: kwBlip 3s infinite;
+}
+@keyframes kwBlip {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  30% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+.kw-radar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    color-mix(in srgb, var(--kw-accent) 70%, white),
+    var(--kw-accent)
+  );
+  box-shadow:
+    0 0 50px var(--kw-accent-glow),
+    inset 0 0 0 1px color-mix(in srgb, white 25%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Soft accent halo behind product artifacts (extension popup, agent). */
+.kw-glow-halo {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at center,
+    var(--kw-accent-soft),
+    transparent 60%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kw-signal-dot,
+  .kw-float,
+  .kw-radar-sweep,
+  .kw-radar-blip,
+  .kw-bar-fill {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    animation: none !important;
+  }
+  /* Scoped to match the `.kw-landing .kw-card-lift:hover` rule above so the
+     two stay at equal specificity (avoids a descending-specificity warning);
+     `!important` enforces the reduced-motion guarantee regardless. */
+  .kw-landing .kw-card-lift:hover {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    transform: none !important;
+  }
+}

@@ -23,7 +23,8 @@ import { calculatePotentialPnL, OrderSide } from "@/lib/polymarket";
 import { qk } from "@/lib/query-keys";
 import { clearBalanceCache } from "@/lib/rpc";
 import {
-  calculateSlippage,
+  calculateBuySlippageForAmount,
+  calculateSellSlippage,
   roundDownToTick,
   roundUpToTick,
 } from "@/lib/slippage";
@@ -32,6 +33,11 @@ import type { TradingFormProps } from "../types";
 
 const DEFAULT_MAX_SLIPPAGE_PERCENT = 2;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+// Default USD budget for a MARKET BUY. Market buys are denominated in dollars
+// (Polymarket's `createMarketOrder` takes a notional `amount`, not a share
+// count). Opens at $0 — an empty state the user fills via the input or a quick
+// preset; the summary stays hidden until the amount clears the $1 minimum.
+const DEFAULT_MARKET_BUY_AMOUNT_USD = 0;
 const APPROVAL_CHECK_BUCKET_RAW = BigInt(10) ** BigInt(PUSD_DECIMALS);
 const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
   DEFAULT_APPROVAL_AMOUNT
@@ -101,6 +107,12 @@ export function useTradingFormState({
   const [orderType, setOrderType] = useState<OrderTypeSelection>("MARKET");
   const [limitPrice, setLimitPrice] = useState<number>(0.5);
   const [shares, setShares] = useState<number>(initialShares ?? 10);
+  // USD budget for MARKET BUY orders. Independent of `shares` (which still
+  // drives LIMIT orders and MARKET SELLs); for a market buy the user spends a
+  // dollar amount and the filled share count is derived from the book.
+  const [marketBuyAmount, setMarketBuyAmount] = useState<number>(
+    DEFAULT_MARKET_BUY_AMOUNT_USD
+  );
   const [allowPartialFill, setAllowPartialFill] = useState<boolean>(true);
   const [isUpdatingAllowance, setIsUpdatingAllowance] = useState(false);
   const [hasUserEditedPrice, setHasUserEditedPrice] = useState(false);
@@ -195,13 +207,21 @@ export function useTradingFormState({
   }, []);
 
   const slippageResult = useMemo(() => {
-    if (!orderBook || orderType !== "MARKET" || shares <= 0) return null;
+    if (!orderBook || orderType !== "MARKET") return null;
     try {
-      return calculateSlippage(orderBook, side, shares);
+      // MARKET BUY walks the book by USD budget (matches on-chain
+      // `createMarketOrder`, which takes a notional amount). MARKET SELL walks
+      // by share count out of the user's position.
+      if (side === "BUY") {
+        if (marketBuyAmount <= 0) return null;
+        return calculateBuySlippageForAmount(orderBook, marketBuyAmount);
+      }
+      if (shares <= 0) return null;
+      return calculateSellSlippage(orderBook, shares);
     } catch {
       return null;
     }
-  }, [orderBook, orderType, side, shares]);
+  }, [orderBook, orderType, side, shares, marketBuyAmount]);
 
   const marketOrderPrice = useMemo(() => {
     if (slippageResult?.canFill) {
@@ -252,7 +272,12 @@ export function useTradingFormState({
   const calculations = useMemo(() => {
     const price = orderType === "MARKET" ? marketOrderPrice : limitPrice;
     const orderSide = side === "BUY" ? OrderSide.BUY : OrderSide.SELL;
-    const pnl = calculatePotentialPnL(price, shares, orderSide);
+    // For a MARKET BUY the user controls the dollar budget, so the share count
+    // is whatever that budget fills on the book. Everywhere else the share
+    // count is the canonical input.
+    const isMarketBuy = orderType === "MARKET" && side === "BUY";
+    const size = isMarketBuy ? (slippageResult?.filledSize ?? 0) : shares;
+    const pnl = calculatePotentialPnL(price, size, orderSide);
     const total =
       orderType === "MARKET" && slippageResult
         ? slippageResult.totalNotional
@@ -263,6 +288,7 @@ export function useTradingFormState({
     return {
       price,
       total,
+      size,
       potentialWin: pnl.potentialWin,
       potentialLoss: pnl.potentialLoss,
       returnPercent:
@@ -478,15 +504,16 @@ export function useTradingFormState({
 
       const orderPrice = orderType === "MARKET" ? marketOrderPrice : limitPrice;
 
+      // MARKET BUY submits a notional `amount` (USD); the on-chain
+      // `createMarketOrder` derives the size from it, so `size` here is the
+      // informational filled-share estimate. SELL/LIMIT submit the share count.
+      const isMarketBuy = orderType === "MARKET" && side === "BUY";
       const result = await createOrder({
         tokenId: selectedOutcome.tokenId,
         conditionId,
         price: orderPrice,
-        size: shares,
-        amount:
-          orderType === "MARKET" && side === "BUY"
-            ? calculations.total
-            : undefined,
+        size: isMarketBuy ? calculations.size : shares,
+        amount: isMarketBuy ? calculations.total : undefined,
         side: side === "BUY" ? Side.BUY : Side.SELL,
         orderType: clobOrderType,
         expiration,
@@ -496,6 +523,7 @@ export function useTradingFormState({
       if (result.success) {
         onOrderSuccess?.(result.order);
         setShares(initialShares ?? 10);
+        setMarketBuyAmount(DEFAULT_MARKET_BUY_AMOUNT_USD);
         if (proxyAddress) {
           // Clear the RPC-level balance cache FIRST before any refetching
           clearBalanceCache(proxyAddress);
@@ -625,6 +653,7 @@ export function useTradingFormState({
     onOrderError,
     initialShares,
     calculations.total,
+    calculations.size,
     refreshProxyWallet,
     refetchAllowance,
     refetchTradingApprovals,
@@ -639,6 +668,9 @@ export function useTradingFormState({
     setLimitPrice: handleLimitPriceChange,
     shares,
     setShares,
+    marketBuyAmount,
+    setMarketBuyAmount,
+    minBuyAmount: MIN_MARKETABLE_BUY_NOTIONAL_USD,
     allowPartialFill,
     setAllowPartialFill,
     expirationType,

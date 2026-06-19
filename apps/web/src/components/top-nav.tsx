@@ -139,7 +139,7 @@ export function TopNav() {
               onMouseEnter={preloadWalletModal}
               onFocus={preloadWalletModal}
               onClick={() => void handleConnect()}
-              className="flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-foreground/90 transition-colors"
+              className="kwm-cta flex items-center gap-2 bg-foreground text-background px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-foreground/90"
             >
               <Wallet className="h-3.5 w-3.5" />
               {connecting ? "Connecting…" : "Connect"}

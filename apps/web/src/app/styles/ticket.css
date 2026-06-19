@@ -1,0 +1,422 @@
+/* =====================================================================
+ * KNOWW · TRADE TICKET (event-detail right-rail trading panel)
+ * ---------------------------------------------------------------------
+ * Mirrors the `Knoww Market Detail` design package's `.tk-*` classes.
+ * Theme-safe via `--kwm-*` tokens inside `.kw-app`. Rules are composed
+ * via Tailwind `@apply` so design styling stays expressed in utility
+ * vocabulary; raw CSS only appears for pseudo-element content + custom
+ * properties Tailwind doesn't model. Apply by wrapping the trade form
+ * in `.kw-ticket`.
+ * ===================================================================== */
+.kw-app .kw-ticket {
+  @apply font-(family-name:--font-geist) text-(--kwm-ink);
+  /* Lift the sticky trade panel off the page as the focal action surface —
+     depth via shadow (it stays opaque; the form must read cleanly). Tracks
+     the theme via --kwm-ink, like the terminal cards. */
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 6%, transparent),
+    0 18px 44px -26px color-mix(in oklch, var(--kwm-ink) 38%, transparent);
+}
+
+/* Subject — outcome flag + name + meta (NEG RISK · pct · "Yes to win") */
+.kw-app .kw-ticket .tk-subject {
+  @apply flex items-center gap-2.5 pb-3 border-b border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-flag {
+  background: var(--tk-flag-color, var(--kwm-accent));
+  @apply w-[30px] h-[30px] rounded-[5px] border border-(--kwm-hl-2) shrink-0 relative overflow-hidden;
+}
+.kw-app .kw-ticket .tk-flag::before {
+  content: "";
+  @apply absolute inset-0 bg-[linear-gradient(135deg,rgba(0,0,0,0.10),rgba(255,255,255,0.10))];
+}
+.kw-app .kw-ticket .tk-subject-info {
+  @apply min-w-0;
+}
+.kw-app .kw-ticket .tk-subject-info .nm {
+  @apply text-base font-medium text-(--kwm-ink) tracking-[-0.01em];
+}
+.kw-app .kw-ticket .tk-subject-info .meta {
+  @apply flex items-center gap-1.5 mt-0.5 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.10em] uppercase text-(--kwm-ink-3);
+}
+.kw-app .kw-ticket .tk-subject-info .meta .neg {
+  @apply text-(--kwm-warn) border border-(--kwm-warn-border) bg-(--kwm-warn-soft) px-1.5 py-0.5 rounded-[3px];
+}
+.kw-app .kw-ticket .tk-subject-info .meta .pct {
+  @apply text-(--kwm-ink);
+}
+
+/* Tabs — Market / Limit */
+.kw-app .kw-ticket .tk-tabs {
+  @apply grid grid-cols-2 mt-3 border border-(--kwm-hl) rounded-md overflow-hidden;
+}
+.kw-app .kw-ticket .tk-tab {
+  @apply bg-transparent border-0 px-3 py-1.5 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
+}
+.kw-app .kw-ticket .tk-tab.on {
+  @apply text-(--kwm-ink) bg-(--kwm-bg-3);
+}
+.kw-app .kw-ticket .tk-tab + .tk-tab {
+  @apply border-l border-(--kwm-hl);
+}
+
+/* Side — Buy / Sell */
+.kw-app .kw-ticket .tk-side {
+  @apply grid grid-cols-2 mt-2 border border-(--kwm-hl) rounded-md overflow-hidden;
+}
+.kw-app .kw-ticket .tk-side button {
+  @apply bg-transparent border-0 px-3 py-2 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.12em] uppercase text-(--kwm-ink-3) cursor-pointer;
+}
+.kw-app .kw-ticket .tk-side button + button {
+  @apply border-l border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-side button.on.buy {
+  @apply text-(--kwm-up) bg-(--kwm-up-soft) shadow-[inset_0_-2px_0_var(--kwm-up)];
+}
+.kw-app .kw-ticket .tk-side button.on.sell {
+  @apply text-(--kwm-down) bg-(--kwm-down-soft) shadow-[inset_0_-2px_0_var(--kwm-down)];
+}
+
+/* Prices — YES / NO tile pair */
+.kw-app .kw-ticket .tk-prices {
+  @apply grid grid-cols-2 gap-2 mt-2.5;
+}
+.kw-app .kw-ticket .tk-price {
+  @apply relative grid grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 items-baseline px-3 py-2 border border-(--kwm-hl-2) rounded-md bg-(--kwm-bg-2) cursor-pointer text-left transition-[border-color,background-color] duration-150;
+}
+.kw-app .kw-ticket .tk-price:hover {
+  @apply border-(--kwm-hl-3);
+}
+.kw-app .kw-ticket .tk-price.on.yes {
+  @apply border-(--kwm-up-border) bg-(--kwm-up-soft);
+}
+.kw-app .kw-ticket .tk-price.on.no {
+  @apply border-(--kwm-down-border) bg-(--kwm-down-soft);
+}
+.kw-app .kw-ticket .tk-price .lbl {
+  @apply font-(family-name:--font-geist-mono) text-[12px] tracking-[0.16em] uppercase text-(--kwm-ink-3) col-start-1 row-start-1;
+}
+.kw-app .kw-ticket .tk-price.on.yes .lbl {
+  @apply text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-price.on.no .lbl {
+  @apply text-(--kwm-down);
+}
+.kw-app .kw-ticket .tk-price .v {
+  @apply text-[20px] font-medium tracking-[-0.025em] text-(--kwm-ink) leading-none col-start-1 row-start-2;
+}
+.kw-app .kw-ticket .tk-price .v .cent {
+  @apply text-[12px] text-(--kwm-ink-3) ml-px;
+}
+.kw-app .kw-ticket .tk-price .delta {
+  @apply font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-dim) col-start-2 row-start-2 text-right self-end;
+}
+.kw-app .kw-ticket .tk-price.on .delta {
+  color: inherit;
+}
+
+/* Limit-mode block — bid/ask refs + ± stepper + queue status */
+.kw-app .kw-ticket .tk-limit {
+  @apply mt-3 p-3 border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2) flex flex-col gap-2;
+}
+.kw-app .kw-ticket .tk-limit-head {
+  @apply flex justify-between items-center gap-2 text-xs text-(--kwm-ink-2);
+}
+.kw-app .kw-ticket .tk-limit-head .lbl-row {
+  @apply text-(--kwm-ink) font-medium whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-limit-head .bidask {
+  @apply inline-flex gap-2.5 font-(family-name:--font-geist-mono) text-[12px];
+}
+.kw-app .kw-ticket .tk-limit-head .ba {
+  @apply inline-flex items-baseline gap-1;
+}
+.kw-app .kw-ticket .tk-limit-head .ba-l {
+  @apply text-(--kwm-ink-dim) text-[12px] tracking-[0.14em] uppercase;
+}
+.kw-app .kw-ticket .tk-limit-head .ba-v {
+  @apply font-medium;
+}
+.kw-app .kw-ticket .tk-limit-head .ba-v.up {
+  @apply text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-limit-head .ba-v.down {
+  @apply text-(--kwm-down);
+}
+.kw-app .kw-ticket .tk-limit-input {
+  @apply grid grid-cols-[auto_1fr_auto] items-stretch border border-(--kwm-hl-2) rounded-md bg-(--kwm-bg) overflow-hidden;
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn {
+  @apply bg-transparent border-0 w-[38px] font-(family-name:--font-geist-mono) text-sm text-(--kwm-ink-2) cursor-pointer transition-colors duration-150;
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn:first-child {
+  @apply border-r border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn:last-child {
+  @apply border-l border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-limit-input .lim-btn:hover {
+  @apply bg-(--kwm-bg-3) text-(--kwm-ink);
+}
+.kw-app .kw-ticket .tk-limit-input .lim-val {
+  @apply flex items-center justify-center text-lg font-medium tracking-[-0.02em] text-(--kwm-ink) tabular-nums px-1 py-2;
+}
+.kw-app .kw-ticket .tk-limit-input .lim-unit {
+  @apply font-(family-name:--font-geist-mono) text-xs text-(--kwm-ink-3) ml-0.5;
+}
+.kw-app .kw-ticket .tk-limit-status {
+  @apply flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] font-(family-name:--font-geist-mono) text-[12px] tracking-[0.04em] border border-(--kwm-hl) bg-(--kwm-bg) text-(--kwm-ink-2);
+}
+.kw-app .kw-ticket .tk-limit-status .dot {
+  @apply w-1.5 h-1.5 rounded-full bg-(--kwm-ink-3) shrink-0;
+}
+.kw-app .kw-ticket .tk-limit-status .tick {
+  @apply ml-auto text-(--kwm-ink-dim) text-[12px] tracking-[0.14em] uppercase;
+}
+.kw-app .kw-ticket .tk-limit-status.ok {
+  @apply border-(--kwm-up-border) bg-(--kwm-up-soft) text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-limit-status.ok .dot {
+  @apply bg-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-limit-status.warn {
+  @apply border-(--kwm-warn-border) bg-(--kwm-warn-soft) text-(--kwm-warn);
+}
+.kw-app .kw-ticket .tk-limit-status.warn .dot {
+  @apply bg-(--kwm-warn);
+}
+.kw-app .kw-ticket .tk-limit-status.info {
+  @apply border-[color-mix(in_oklch,var(--kwm-accent)_35%,transparent)] bg-(--kwm-accent-soft) text-(--kwm-accent);
+}
+.kw-app .kw-ticket .tk-limit-status.info .dot {
+  @apply bg-(--kwm-accent);
+}
+.kw-app .kw-ticket .tk-limit-status.muted {
+  @apply text-(--kwm-ink-3);
+}
+.kw-app .kw-ticket .tk-limit-status.muted .dot {
+  @apply bg-(--kwm-ink-dim);
+}
+
+/* Execution info row — Avg Price + Slippage (MARKET orders only) */
+.kw-app .kw-ticket .tk-summary-row {
+  @apply flex justify-between items-baseline mt-2 py-1.5 border-t border-dashed border-(--kwm-hl) font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-3) tracking-[0.04em];
+}
+.kw-app .kw-ticket .tk-summary-row .num {
+  @apply text-(--kwm-ink);
+}
+.kw-app .kw-ticket .tk-summary-row .dim {
+  @apply text-(--kwm-ink-dim);
+}
+
+/* Shares stepper */
+.kw-app .kw-ticket .tk-shares-lbl {
+  @apply mt-2 flex justify-between items-center font-(family-name:--font-geist-mono) text-[12px] tracking-[0.16em] uppercase text-(--kwm-ink-dim);
+}
+.kw-app .kw-ticket .tk-shares-lbl .max {
+  @apply text-(--kwm-accent) cursor-pointer tracking-[0.12em];
+}
+.kw-app .kw-ticket .tk-stepper {
+  @apply grid grid-cols-[auto_auto_1fr_auto_auto] items-stretch mt-2 border border-(--kwm-hl-2) rounded-md overflow-hidden;
+}
+.kw-app .kw-ticket .tk-step-btn {
+  @apply bg-transparent border-0 px-2.5 h-9 min-w-9 font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-2) cursor-pointer border-r border-(--kwm-hl) tracking-[0.05em];
+}
+.kw-app .kw-ticket .tk-step-btn:hover {
+  @apply bg-(--kwm-bg-3) text-(--kwm-ink);
+}
+.kw-app .kw-ticket .tk-step-btn:last-child {
+  @apply border-r-0 border-l border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-step-input {
+  @apply bg-transparent border-0 outline-0 text-center text-lg font-medium tracking-[-0.02em] text-(--kwm-ink) w-full px-2 tabular-nums border-r border-(--kwm-hl);
+}
+
+/* Amount entry (MARKET BUY). The label + cash balance sit above a slim input
+   box that holds only the typed $ value, with quick-add chips beneath. The
+   amount entered IS the order cost, so it isn't repeated in the summary. */
+.kw-app .kw-ticket .amt-lbl {
+  @apply mt-2 flex items-baseline justify-between gap-2;
+}
+.kw-app .kw-ticket .amt-lbl .cap {
+  @apply text-sm font-medium text-(--kwm-ink);
+}
+.kw-app .kw-ticket .amt-lbl .cash {
+  @apply text-[12px] text-(--kwm-ink-dim) tabular-nums;
+}
+.kw-app .kw-ticket .tk-amount {
+  @apply flex items-center gap-1 mt-2 px-3 h-11 border border-(--kwm-hl-2) rounded-md;
+}
+.kw-app .kw-ticket .tk-amount .cur {
+  @apply text-xl font-medium leading-none text-(--kwm-ink-3) tabular-nums;
+}
+.kw-app .kw-ticket .tk-amount-input {
+  @apply bg-transparent border-0 outline-0 p-0 text-left text-xl font-semibold leading-none tracking-[-0.02em] text-(--kwm-ink) w-full min-w-0 tabular-nums;
+}
+.kw-app .kw-ticket .amt-presets {
+  @apply grid grid-cols-5 gap-2 mt-2;
+}
+.kw-app .kw-ticket .amt-chip {
+  @apply flex items-center justify-center h-9 font-(family-name:--font-geist-mono) text-[13px] text-(--kwm-ink-2) bg-(--kwm-bg-3) border border-(--kwm-hl-2) rounded-lg cursor-pointer tracking-[0.04em] tabular-nums transition-colors;
+}
+.kw-app .kw-ticket .amt-chip:hover {
+  @apply bg-(--kwm-bg) text-(--kwm-ink);
+}
+.kw-app .kw-ticket .amt-chip.max {
+  @apply border-[color-mix(in_oklch,var(--kwm-accent)_35%,transparent)] bg-(--kwm-accent-soft) text-(--kwm-accent);
+}
+.kw-app .kw-ticket .tk-amount-sub {
+  @apply mt-1.5 font-(family-name:--font-geist-mono) text-[11px] tracking-[0.08em] text-(--kwm-ink-dim);
+}
+
+/* "Return if …" / "Proceeds" hero — the single attention-grabbing number for
+   MARKET orders (Cost/Profit are dropped to keep the panel simple). Label on
+   the left, big value on the right. */
+.kw-app .kw-ticket .tk-return-hero {
+  @apply flex items-baseline justify-between gap-3 mt-2 pt-3 border-t border-dashed border-(--kwm-hl);
+}
+.kw-app .kw-ticket .tk-return-hero .l {
+  @apply font-(family-name:--font-geist-mono) text-[11px] tracking-[0.14em] uppercase text-(--kwm-ink-dim);
+}
+.kw-app .kw-ticket .tk-return-hero .row {
+  @apply flex items-baseline gap-2;
+}
+.kw-app .kw-ticket .tk-return-hero .v {
+  @apply text-2xl leading-none font-semibold tabular-nums text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-return-hero .gain {
+  @apply font-(family-name:--font-geist-mono) text-[13px] font-medium tabular-nums text-(--kwm-up);
+}
+
+/* Allow-partial-fill / Expiration toggle row */
+.kw-app .kw-ticket .tk-toggle {
+  @apply flex items-center justify-between gap-3 mt-2.5 pl-3 pr-2.5 py-[7px] border border-(--kwm-hl) rounded-md bg-(--kwm-bg-2);
+}
+.kw-app .kw-ticket .tk-toggle .info {
+  @apply min-w-0 inline-flex items-baseline gap-2 flex-wrap;
+}
+/* `.tk-sum-row .l` (lower specificity) is declared here, before the
+   higher-specificity `.tk-toggle .info .l`, so the shared `.l` leaf ascends
+   in specificity. They match different elements, so order has no visual
+   effect — this purely satisfies noDescendingSpecificity. */
+.kw-app .kw-ticket .tk-sum-row .l {
+  @apply text-(--kwm-ink-3) whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-toggle .info .l {
+  @apply text-xs text-(--kwm-ink) whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-toggle .info .s {
+  @apply font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-ink-dim) tracking-[0.04em];
+}
+.kw-app .kw-ticket .tk-switch {
+  @apply relative w-9 h-5 rounded-full bg-(--kwm-bg) border border-(--kwm-hl-2) cursor-pointer shrink-0 transition-[background-color,border-color] duration-150;
+}
+.kw-app .kw-ticket .tk-switch::after {
+  content: "";
+  @apply absolute top-px left-px w-4 h-4 rounded-full bg-(--kwm-ink-2) transition-[transform,background-color] duration-150;
+}
+.kw-app .kw-ticket .tk-switch.on {
+  @apply bg-(--kwm-up-soft) border-(--kwm-up-border);
+}
+.kw-app .kw-ticket .tk-switch.on::after {
+  @apply bg-(--kwm-up) translate-x-4;
+}
+
+/* Summary — Return + Profit */
+.kw-app .kw-ticket .tk-summary {
+  @apply mt-2.5 pt-2 border-t border-(--kwm-hl) flex flex-col gap-1;
+}
+.kw-app .kw-ticket .tk-sum-row {
+  @apply flex justify-between items-baseline gap-3 text-xs;
+}
+.kw-app .kw-ticket .tk-sum-row .v {
+  @apply font-(family-name:--font-geist-mono) font-medium text-(--kwm-ink) text-[13px] whitespace-nowrap text-right;
+}
+.kw-app .kw-ticket .tk-sum-row .v.up {
+  @apply text-(--kwm-up);
+}
+.kw-app .kw-ticket .tk-sum-row .v.up .ret {
+  @apply text-(--kwm-up) ml-1.5 text-[12px];
+}
+.kw-app .kw-ticket .tk-sum-row.profit .v {
+  @apply text-(--kwm-up) text-[15px];
+}
+
+/* CTA — main action button */
+.kw-app .kw-ticket .tk-cta {
+  @apply mt-2.5 w-full p-[13px] border border-(--kwm-hl-2) bg-(--kwm-bg-2) text-(--kwm-ink-dim) font-(family-name:--font-geist-mono) text-xs tracking-[0.12em] uppercase rounded-md cursor-pointer font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap;
+}
+.kw-app .kw-ticket .tk-cta .ic {
+  @apply font-(family-name:--font-geist-mono);
+}
+.kw-app .kw-ticket .tk-cta.ready {
+  @apply bg-(--kwm-ink) text-(--kwm-bg) border-(--kwm-ink);
+  /* Specular top edge + soft drop so the primary action reads as a raised,
+     lit surface. */
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 20%, transparent),
+    0 1px 2px color-mix(in oklch, var(--kwm-ink) 26%, transparent),
+    0 8px 20px -10px color-mix(in oklch, var(--kwm-ink) 40%, transparent);
+}
+.kw-app .kw-ticket .tk-cta.ready:hover {
+  @apply brightness-110;
+}
+.kw-app .kw-ticket .tk-cta.deposit {
+  @apply bg-(--kwm-warn) text-(--kwm-bg) border-(--kwm-warn);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, #fff 22%, transparent),
+    0 1px 2px color-mix(in oklch, var(--kwm-warn) 30%, transparent),
+    0 8px 20px -10px color-mix(in oklch, var(--kwm-warn) 45%, transparent);
+}
+.kw-app .kw-ticket .tk-cta.deposit:hover {
+  filter: brightness(1.08);
+}
+.kw-app .kw-ticket .tk-cta:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+.kw-app .kw-ticket .tk-terms {
+  @apply mt-2.5 text-center text-[12px] text-(--kwm-ink-dim);
+}
+.kw-app .kw-ticket .tk-terms a {
+  @apply text-(--kwm-ink-3) border-b border-(--kwm-hl);
+}
+
+/* Warning banner — design's `.tk-warn`. Three tones via modifier:
+   base = amber (warn), `.error` = red (destructive), `.info` = neutral
+   (informational). Mono micro-caps for the message column. */
+.kw-app .kw-ticket .tk-warn {
+  @apply mt-3 px-3 py-2.5 border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-start gap-2.5 font-(family-name:--font-geist-mono) text-[12px] tracking-[0.04em] text-(--kwm-warn) leading-snug;
+}
+.kw-app .kw-ticket .tk-warn.error {
+  @apply border-[color-mix(in_oklch,var(--kwm-down)_30%,transparent)] bg-(--kwm-down-soft) text-(--kwm-down);
+}
+.kw-app .kw-ticket .tk-warn.info {
+  @apply border-(--kwm-hl-2) bg-[color-mix(in_oklch,var(--kwm-ink)_3%,transparent)] text-(--kwm-ink-2);
+}
+.kw-app .kw-ticket .tk-warn .ic {
+  @apply shrink-0 mt-px;
+}
+.kw-app .kw-ticket .tk-warn .body {
+  @apply min-w-0 flex-1;
+}
+.kw-app .kw-ticket .tk-warn .body .sub {
+  @apply block mt-0.5 text-(--kwm-ink-3) text-[12px] tracking-[0.04em];
+}
+
+/* Balance context strip — design's `.tk-warn-bal`. Slim amber strip
+   showing the shortfall, sits above the merged Deposit CTA. */
+.kw-app .kw-ticket .tk-warn-bal {
+  @apply mt-3 px-2.5 py-[7px] border border-(--kwm-warn-border) bg-(--kwm-warn-soft) rounded-md flex items-center justify-between gap-2 font-(family-name:--font-geist-mono) text-[12px] text-(--kwm-warn) tracking-[0.04em];
+}
+.kw-app .kw-ticket .tk-warn-bal .h {
+  @apply text-(--kwm-warn) font-medium;
+}
+.kw-app .kw-ticket .tk-warn-bal .dim {
+  @apply text-[color-mix(in_oklch,var(--kwm-warn)_70%,var(--kwm-ink-3))];
+}
+
+/* Expiration block sits directly under tk-toggle; keep it tight. */
+.kw-app .kw-ticket .tk-expire {
+  @apply mt-1;
+}

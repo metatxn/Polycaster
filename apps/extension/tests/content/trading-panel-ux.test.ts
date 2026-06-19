@@ -80,6 +80,37 @@ test("order summary uses clearer decision labels", () => {
   assert.equal(/`Profit if \$\{opts\.outcomeName\}`/.test(source), false);
 });
 
+test("market buy uses amount input and derived filled shares", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(/calculateBuySlippageForAmount/.test(source), true);
+  assert.equal(
+    /function isMarketBuyAmountOrder\(\): boolean \{[\s\S]*orderMode === "market" && activeSide === "buy"/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(/let marketBuyAmount = 0;/.test(source), true);
+  assert.equal(/function addMarketBuyAmountSection/.test(source), true);
+  assert.equal(/"knoww-tp-amount-input"/.test(source), true);
+  assert.equal(/"Order amount in dollars"/.test(source), true);
+  assert.equal(
+    /const shares = getOrderShareSize\(opts, ctx\);/.test(source),
+    true
+  );
+  assert.equal(/size: effectiveSize,[\s\S]*amount: cost/.test(source), true);
+});
+
+test("market buy amount controls are styled in the extension panel", () => {
+  const css = readInlineCss();
+
+  assert.equal(/\.knoww-tp-amount-input-wrap\s*\{/.test(css), true);
+  assert.equal(/\.knoww-tp-amount-input\s*\{/.test(css), true);
+  assert.equal(/\.knoww-tp-amount-presets\s*\{/.test(css), true);
+  assert.equal(/\.knoww-tp-amount-chip\s*\{/.test(css), true);
+  assert.equal(/\.knoww-tp-amount-sub\s*\{/.test(css), true);
+});
+
 test("deposit token list whitelists direct pUSD deposits", () => {
   const source = readSource("src/content/trading/trading-panel.ts");
 

@@ -14,11 +14,19 @@ const log = createLogger("notifications");
 
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
-import type {
-  DropNotificationParams,
-  Notification,
-  NotificationFilter,
+import {
+  type DropNotificationParams,
+  type Notification,
+  type NotificationFilter,
+  NotificationType,
 } from "@/types/notifications";
+
+/** Notification types we render with bespoke copy; anything else is logged. */
+const KNOWN_NOTIFICATION_TYPES = new Set<number>([
+  NotificationType.ORDER_CANCELLATION,
+  NotificationType.ORDER_FILL,
+  NotificationType.MARKET_RESOLVED,
+]);
 
 /**
  * Raw notification from the SDK (may have different shape than docs)
@@ -40,6 +48,25 @@ interface UnifiedNotificationClient {
   dropNotifications(params?: DropNotificationParams): Promise<void>;
 }
 
+type NotificationClientCache = {
+  key: string;
+  promise: Promise<UnifiedPolymarketSecureClient & UnifiedNotificationClient>;
+};
+
+const authenticatedClientCache = new Map<string, NotificationClientCache>();
+
+function buildNotificationClientCacheKey(
+  signerAddress: string,
+  walletAddress: string,
+  apiKey: string
+): string {
+  return `${signerAddress.toLowerCase()}:${walletAddress.toLowerCase()}:${apiKey}`;
+}
+
+function clearNotificationClientCache(cacheKey: string): void {
+  authenticatedClientCache.delete(cacheKey);
+}
+
 /**
  * Transform raw API notification to our typed Notification
  */
@@ -47,9 +74,23 @@ function transformNotification(
   raw: RawNotification,
   index: number
 ): Notification {
+  // Coerce defensively: the API has been observed to send `type` as a string,
+  // which silently breaks the numeric switch in the UI and shows "New
+  // notification" for everything.
+  const type = Number(raw.type);
+
+  // Surface any type outside our known enum so we can map it precisely (e.g.
+  // the "winning position redeemed" event Polymarket shows on its own site).
+  if (!KNOWN_NOTIFICATION_TYPES.has(type)) {
+    log.warn("notification.unrecognized_type", {
+      type: raw.type,
+      payload: raw.payload,
+    });
+  }
+
   return {
     id: raw.id ?? index, // Use index as fallback ID if not provided
-    type: raw.type,
+    type,
     owner: raw.owner,
     payload: raw.payload as Notification["payload"],
     timestamp: raw.timestamp,
@@ -120,14 +161,39 @@ export function useNotifications() {
       throw new Error("Wallet not connected");
     }
 
-    const { client } = await createUnifiedPolymarketSecureClient({
+    const cacheKey = buildNotificationClientCacheKey(
+      address,
+      proxyAddress,
+      credentials.apiKey
+    );
+
+    const cachedClient = authenticatedClientCache.get(cacheKey);
+    if (cachedClient) {
+      return cachedClient.promise;
+    }
+
+    let promise: Promise<
+      UnifiedPolymarketSecureClient & UnifiedNotificationClient
+    >;
+    promise = createUnifiedPolymarketSecureClient({
       signer: createUnifiedPolymarketCredentialsOnlySigner(address),
       wallet: proxyAddress,
       credentials,
       allowFreshAuthentication: false,
-    });
+    })
+      .then(
+        ({ client }) =>
+          client as UnifiedPolymarketSecureClient & UnifiedNotificationClient
+      )
+      .catch((err) => {
+        if (authenticatedClientCache.get(cacheKey)?.promise === promise) {
+          clearNotificationClientCache(cacheKey);
+        }
+        throw err;
+      });
 
-    return client as UnifiedPolymarketSecureClient & UnifiedNotificationClient;
+    authenticatedClientCache.set(cacheKey, { key: cacheKey, promise });
+    return promise;
   }, [address, credentials, proxyAddress]);
 
   /**
@@ -168,6 +234,15 @@ export function useNotifications() {
         err instanceof Error ? err : new Error("Failed to fetch notifications");
       setError(error);
       if (isPolymarketFreshAuthenticationRequiredError(err)) {
+        if (address && proxyAddress && credentials) {
+          clearNotificationClientCache(
+            buildNotificationClientCacheKey(
+              address,
+              proxyAddress,
+              credentials.apiKey
+            )
+          );
+        }
         clearCredentials();
         log.debug("fetch.skipped", { reason: "credentials_invalid" });
       } else if (isExpectedClobReadFailure(err)) {
@@ -178,7 +253,15 @@ export function useNotifications() {
     } finally {
       setIsLoading(false);
     }
-  }, [hasCredentials, isConnected, getAuthenticatedClient, clearCredentials]);
+  }, [
+    hasCredentials,
+    isConnected,
+    getAuthenticatedClient,
+    clearCredentials,
+    address,
+    proxyAddress,
+    credentials,
+  ]);
 
   /**
    * Dismiss (drop) specific notifications

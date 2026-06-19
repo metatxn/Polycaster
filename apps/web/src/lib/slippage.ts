@@ -6,6 +6,7 @@
  */
 export {
   calculateBuySlippage,
+  calculateBuySlippageForAmount,
   calculateMarketOrderPrice,
   calculateSellSlippage,
   calculateSlippage,

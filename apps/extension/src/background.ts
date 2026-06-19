@@ -891,6 +891,11 @@ chrome.runtime.onMessage.addListener(
       value?: unknown;
       token?: string;
       tokenId?: string;
+      proxyAddress?: string;
+      conditionId?: string;
+      outcomeIndex?: number;
+      size?: number;
+      negRisk?: boolean;
       marketId?: string;
       query?: string;
       walletUuid?: string;
@@ -1176,6 +1181,56 @@ chrome.runtime.onMessage.addListener(
           ok: false,
           error: error instanceof Error ? error.message : String(error),
         } as BackgroundResponse);
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_SELL_PORTFOLIO_POSITION") {
+      if (
+        typeof msg.address !== "string" ||
+        typeof msg.proxyAddress !== "string" ||
+        typeof msg.tokenId !== "string" ||
+        typeof msg.conditionId !== "string" ||
+        typeof msg.outcomeIndex !== "number" ||
+        typeof msg.size !== "number" ||
+        !Number.isFinite(msg.size) ||
+        msg.size <= 0
+      ) {
+        sendResponse({
+          ok: false,
+          error: "Invalid sell position request.",
+        } as BackgroundResponse);
+        return true;
+      }
+
+      void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          sendResponse({
+            ok: false,
+            error: "NO_CONTENT_TAB",
+          } as BackgroundResponse);
+          return;
+        }
+
+        forwardToOffscreen(
+          {
+            type: "trading:place-order",
+            tokenId: msg.tokenId,
+            conditionId: msg.conditionId,
+            outcomeIndex: msg.outcomeIndex,
+            side: "SELL",
+            price: 0,
+            size: msg.size,
+            amount: msg.size,
+            orderType: "FAK",
+            negRisk: msg.negRisk === true,
+            address: msg.address,
+            proxyAddress: msg.proxyAddress,
+            walletMode: msg.walletMode,
+          },
+          { ...sender, tab: { id: tabId } as chrome.tabs.Tab },
+          sendResponse
+        );
       });
       return true;
     }

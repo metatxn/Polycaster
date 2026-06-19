@@ -154,6 +154,23 @@ describe("useClobClient", () => {
     expect(orders).toEqual([{ id: "order-1", asset_id: "token-1" }]);
   });
 
+  it("reuses the read-only secure client across passive order reads", async () => {
+    const { result } = renderHook(() => useClobClient());
+
+    await act(async () => {
+      await result.current.getOpenOrders();
+      await result.current.getOpenOrders();
+    });
+
+    expect(
+      unifiedSdkMock.createUnifiedPolymarketSecureClient
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      unifiedSdkMock.adaptUnifiedSecureClientForLegacyClob
+    ).toHaveBeenCalledTimes(1);
+    expect(legacyClient.getOpenOrders).toHaveBeenCalledTimes(2);
+  });
+
   it("cancels orders through the unified SDK compatibility adapter", async () => {
     const { result } = renderHook(() => useClobClient());
 

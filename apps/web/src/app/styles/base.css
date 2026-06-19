@@ -1,0 +1,282 @@
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    overflow-x: clip;
+  }
+  body {
+    @apply bg-background text-foreground;
+    overflow-x: clip;
+    width: 100%;
+  }
+  /* Tailwind v4 dropped the preflight rule that set `cursor: pointer` on
+     buttons. Restore it so interactive controls feel clickable. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  /* Atmospheric grain — a fixed SVG noise layer tiled at low opacity.
+     Sits above the body background, below all content (content elements
+     paint their own backgrounds so the grain only shows through the
+     page gutters). Disabled on dark themes where the cream body color
+     doesn't apply. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-size: 160px 160px;
+  }
+  html.dark body::before,
+  html.midnight body::before,
+  html.ocean body::before,
+  html.slate body::before,
+  html.softpop body::before {
+    display: none;
+  }
+}
+
+/* Scrollbar styling for all dark themes - must be outside @layer for specificity */
+html.dark,
+html.midnight,
+html.ocean,
+html.slate,
+html.softpop {
+  color-scheme: dark;
+}
+
+/* Custom scrollbar for webkit browsers (Chrome, Safari, Edge) */
+html.dark::-webkit-scrollbar,
+html.midnight::-webkit-scrollbar,
+html.ocean::-webkit-scrollbar,
+html.slate::-webkit-scrollbar,
+html.softpop::-webkit-scrollbar,
+.dark ::-webkit-scrollbar,
+.midnight ::-webkit-scrollbar,
+.ocean ::-webkit-scrollbar,
+.slate ::-webkit-scrollbar,
+.softpop ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: var(--background);
+}
+
+html.dark::-webkit-scrollbar-track,
+html.midnight::-webkit-scrollbar-track,
+html.ocean::-webkit-scrollbar-track,
+html.slate::-webkit-scrollbar-track,
+html.softpop::-webkit-scrollbar-track,
+.dark ::-webkit-scrollbar-track,
+.midnight ::-webkit-scrollbar-track,
+.ocean ::-webkit-scrollbar-track,
+.slate ::-webkit-scrollbar-track,
+.softpop ::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+html.dark::-webkit-scrollbar-thumb,
+html.midnight::-webkit-scrollbar-thumb,
+html.ocean::-webkit-scrollbar-thumb,
+html.slate::-webkit-scrollbar-thumb,
+html.softpop::-webkit-scrollbar-thumb,
+.dark ::-webkit-scrollbar-thumb,
+.midnight ::-webkit-scrollbar-thumb,
+.ocean ::-webkit-scrollbar-thumb,
+.slate ::-webkit-scrollbar-thumb,
+.softpop ::-webkit-scrollbar-thumb {
+  background: oklch(0.35 0.01 250);
+  border-radius: 4px;
+  border: 2px solid var(--background);
+}
+
+html.dark::-webkit-scrollbar-thumb:hover,
+html.midnight::-webkit-scrollbar-thumb:hover,
+html.ocean::-webkit-scrollbar-thumb:hover,
+html.slate::-webkit-scrollbar-thumb:hover,
+html.softpop::-webkit-scrollbar-thumb:hover,
+.dark ::-webkit-scrollbar-thumb:hover,
+.midnight ::-webkit-scrollbar-thumb:hover,
+.ocean ::-webkit-scrollbar-thumb:hover,
+.slate ::-webkit-scrollbar-thumb:hover,
+.softpop ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.45 0.01 250);
+}
+
+/* Firefox scrollbar styling */
+html.dark,
+html.midnight,
+html.ocean,
+html.slate,
+html.softpop {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.35 0.01 250) var(--background);
+}
+
+.dark,
+.midnight,
+.ocean,
+.slate,
+.softpop {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.35 0.01 250) var(--background);
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mask-fade-sides {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black 5%,
+      black 95%,
+      transparent
+    );
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      black 5%,
+      black 95%,
+      transparent
+    );
+  }
+
+  .animate-gradient-x {
+    background-size: 200% 200%;
+    animation: gradient-x 3s ease infinite;
+  }
+
+  .bg-noise {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  }
+
+  /* Safe area utilities for mobile devices with notches/home indicators */
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-area-pt {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-area-inset-bottom {
+    bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Touch-friendly minimum tap target */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Smooth momentum scrolling for iOS */
+  .scroll-smooth-touch {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
+  /* Prevent text selection on interactive elements */
+  .no-select {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Paper-grain skeleton — used on /markets loading state so cards feel
+   * like they're developing in from texture rather than popping out of
+   * flat muted blocks. Same fractalNoise SVG as the marketing pages,
+   * reduced alpha so it only whispers. Works over the existing muted
+   * background; skeleton shimmer animation still runs on top. */
+  .skeleton-grain {
+    background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+    background-repeat: repeat;
+  }
+  :is(.dark, .midnight, .ocean, .slate, .softpop) .skeleton-grain {
+    background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Skeleton card dissolves on unmount — the grain fades out as real
+   * cards fade in, so the transition reads as "developing" rather than
+   * a hard cut. */
+  @keyframes skeletonDissolve {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      filter: blur(2px);
+    }
+  }
+  .skeleton-dissolve-exit {
+    animation: skeletonDissolve 280ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  /* Snap scroll for horizontal carousels */
+  .snap-x {
+    scroll-snap-type: x mandatory;
+  }
+
+  .snap-start {
+    scroll-snap-align: start;
+  }
+
+  .snap-center {
+    scroll-snap-align: center;
+  }
+}
+
+/*
+ * Sportsbook wide-viewport grid overrides.
+ *
+ * Column schemes at >=1440px:
+ *   Live:      score | avatar | team | moneyline | spread | total
+ *   Scheduled: avatar | team | moneyline | spread | total
+ *
+ * The sub-1440 base templates use arbitrary grid-cols classes defined inline
+ * in event-rows.tsx and sections.tsx (event-grid-live / event-grid-scheduled).
+ * The spread and total columns are toggled with `3xl:` (hidden below, flex/
+ * inline above) — the `3xl:` breakpoint is declared as --breakpoint-3xl in
+ * the @theme inline block above and must stay in sync with this query's
+ * min-width value.
+ */
+@media (min-width: 1440px) {
+  .event-grid-live {
+    grid-template-columns: auto auto minmax(100px, 1fr) auto auto auto;
+  }
+  .event-grid-scheduled {
+    grid-template-columns: auto minmax(100px, 1fr) auto auto auto;
+  }
+}
+
+@keyframes gradient-x {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}

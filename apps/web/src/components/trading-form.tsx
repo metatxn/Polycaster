@@ -145,6 +145,10 @@ function formatShareQuantity(quantity: number): string {
   }
 }
 
+function formatMarketBuyAmountInput(amount: number): string {
+  return amount > 0 ? String(amount) : "0";
+}
+
 /**
  * TradingForm Component (Refactored)
  *
@@ -211,6 +215,8 @@ export function TradingForm(props: TradingFormProps) {
     setLimitPrice,
     shares,
     setShares,
+    marketBuyAmount,
+    setMarketBuyAmount,
     allowPartialFill,
     setAllowPartialFill,
     expirationType,
@@ -241,6 +247,22 @@ export function TradingForm(props: TradingFormProps) {
   } = useTradingFormState(props);
 
   const selectedOutcome = outcomes[selectedOutcomeIndex];
+
+  // MARKET BUY orders are denominated in dollars (the user spends $X and the
+  // share count is derived from the book). MARKET SELL and LIMIT stay
+  // share-based, so the shares stepper renders for those.
+  const isMarketBuy = orderType === "MARKET" && side === "BUY";
+
+  // String mirror of the numeric `marketBuyAmount` so decimals type cleanly,
+  // while presets/MAX/reset still drive the canonical number in the hook. Zero
+  // renders as "0" (the default empty state), not a blank field.
+  const [amountText, setAmountText] = useState<string>("0");
+  const [isEditingAmount, setIsEditingAmount] = useState(false);
+  useEffect(() => {
+    if (!isEditingAmount) {
+      setAmountText(formatMarketBuyAmountInput(marketBuyAmount));
+    }
+  }, [marketBuyAmount, isEditingAmount]);
 
   // Slippage UI calculation
   const slippageDisplay = slippageResult
@@ -284,7 +306,12 @@ export function TradingForm(props: TradingFormProps) {
   const grossReturn = calculations.potentialWin + calculations.total;
   const profitLabel = formatProfitLabel(grossReturn, calculations.total);
   const totalLabel = formatUsd(calculations.total);
-  const shareQuantityLabel = formatShareQuantity(shares);
+  // For a MARKET BUY the displayed share count is the (fractional) quantity the
+  // dollar budget fills, not the `shares` input.
+  const displayShares = isMarketBuy
+    ? Math.round(calculations.size * 100) / 100
+    : shares;
+  const shareQuantityLabel = formatShareQuantity(displayShares);
   const orderActionLabel = side === "BUY" ? "Buy" : "Sell";
 
   return (
@@ -544,84 +571,165 @@ export function TradingForm(props: TradingFormProps) {
             </div>
           )}
 
-          {/* Shares label + ± stepper — design's `.tk-shares-lbl` +
-              `.tk-stepper` grid (−10 / −1 / input / +1 / +10). */}
-          <div className="tk-shares-lbl">
-            <span>
-              {orderType === "LIMIT"
-                ? `Shares · limit ${formatCents(limitPrice)}`
-                : `Shares · avg ${slippageDisplay?.avgPrice || formatCents(calculations.price)}`}
-            </span>
-            {side === "BUY" && effectiveBalance && effectiveBalance > 0 && (
-              <button
-                type="button"
-                className="max"
-                onClick={() => {
-                  // Max-buy: take the lesser of (balance/price floored)
-                  // and remaining capacity. Subtracts 1 for safety margin.
-                  if (!calculations.price || calculations.price <= 0) return;
-                  const maxByBalance = Math.floor(
-                    (effectiveBalance ?? 0) / calculations.price
-                  );
-                  setShares(Math.max(minShares, maxByBalance));
-                }}
-              >
-                MAX
-              </button>
-            )}
-            {side === "SELL" && maxSellShares > 0 && (
-              <button
-                type="button"
-                className="max"
-                onClick={() => setShares(Math.floor(maxSellShares))}
-              >
-                MAX
-              </button>
-            )}
-          </div>
-          <div className="tk-stepper">
-            <button
-              type="button"
-              className="tk-step-btn"
-              onClick={() => setShares(Math.max(minShares, shares - 10))}
-            >
-              −10
-            </button>
-            <button
-              type="button"
-              className="tk-step-btn"
-              onClick={() => setShares(Math.max(minShares, shares - 1))}
-            >
-              −1
-            </button>
-            <input
-              type="text"
-              inputMode="numeric"
-              name="shares"
-              className="tk-step-input"
-              value={shares}
-              onChange={(e) => {
-                const raw = e.target.value.replace(/[^0-9]/g, "");
-                const n = Number.parseInt(raw || "0", 10);
-                setShares(Number.isFinite(n) ? n : 0);
-              }}
-              aria-label="Share quantity"
-            />
-            <button
-              type="button"
-              className="tk-step-btn"
-              onClick={() => setShares(shares + 1)}
-            >
-              +1
-            </button>
-            <button
-              type="button"
-              className="tk-step-btn"
-              onClick={() => setShares(shares + 10)}
-            >
-              +10
-            </button>
-          </div>
+          {/* Quantity input. MARKET BUY is dollar-denominated (spend $X →
+              derive shares); MARKET SELL and LIMIT use the share stepper. */}
+          {isMarketBuy ? (
+            <>
+              {/* Amount label + cash balance — above the input box. */}
+              <div className="amt-lbl">
+                <span className="cap">Amount</span>
+                <span className="cash tabular-nums">
+                  ${(effectiveBalance ?? 0).toFixed(2)} cash
+                </span>
+              </div>
+              {/* Slim input box — just the typed $ value (the order cost). */}
+              <div className="tk-amount">
+                <span className="cur">$</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  name="amount"
+                  className="tk-amount-input"
+                  value={amountText}
+                  onFocus={(e) => {
+                    setIsEditingAmount(true);
+                    e.target.select();
+                  }}
+                  onBlur={() => {
+                    setIsEditingAmount(false);
+                    setAmountText(formatMarketBuyAmountInput(marketBuyAmount));
+                  }}
+                  onChange={(e) => {
+                    // Keep digits + a single decimal point.
+                    const cleaned = e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1");
+                    setIsEditingAmount(true);
+                    setAmountText(cleaned);
+                    const n = Number.parseFloat(cleaned);
+                    setMarketBuyAmount(Number.isFinite(n) ? n : 0);
+                  }}
+                  aria-label="Order amount in dollars"
+                />
+              </div>
+              {/* Quick-add chips — each adds to the current amount; Max fills
+                  to the spendable balance. */}
+              <div className="amt-presets">
+                {[1, 5, 10, 100].map((delta) => (
+                  <button
+                    key={delta}
+                    type="button"
+                    className="amt-chip"
+                    onClick={() =>
+                      setMarketBuyAmount(
+                        Math.round((marketBuyAmount + delta) * 100) / 100
+                      )
+                    }
+                  >
+                    +${delta}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="amt-chip max"
+                  onClick={() =>
+                    setMarketBuyAmount(
+                      Math.floor((effectiveBalance ?? 0) * 100) / 100
+                    )
+                  }
+                >
+                  Max
+                </button>
+              </div>
+              {marketBuyAmount > 0 && (
+                <div className="tk-amount-sub">
+                  ≈ {shareQuantityLabel} shares
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Shares label + ± stepper — design's `.tk-shares-lbl` +
+                  `.tk-stepper` grid (−10 / −1 / input / +1 / +10). */}
+              <div className="tk-shares-lbl">
+                <span>
+                  {orderType === "LIMIT"
+                    ? `Shares · limit ${formatCents(limitPrice)}`
+                    : `Shares · avg ${slippageDisplay?.avgPrice || formatCents(calculations.price)}`}
+                </span>
+                {/* LIMIT BUY only — MARKET BUY has its own dollar MAX above. */}
+                {side === "BUY" && effectiveBalance && effectiveBalance > 0 && (
+                  <button
+                    type="button"
+                    className="max"
+                    onClick={() => {
+                      // Max-buy: balance / limit price, floored.
+                      if (!calculations.price || calculations.price <= 0)
+                        return;
+                      const maxByBalance = Math.floor(
+                        (effectiveBalance ?? 0) / calculations.price
+                      );
+                      setShares(Math.max(minShares, maxByBalance));
+                    }}
+                  >
+                    MAX
+                  </button>
+                )}
+                {side === "SELL" && maxSellShares > 0 && (
+                  <button
+                    type="button"
+                    className="max"
+                    onClick={() => setShares(maxSellShares)}
+                  >
+                    MAX
+                  </button>
+                )}
+              </div>
+              <div className="tk-stepper">
+                <button
+                  type="button"
+                  className="tk-step-btn"
+                  onClick={() => setShares(Math.max(minShares, shares - 10))}
+                >
+                  −10
+                </button>
+                <button
+                  type="button"
+                  className="tk-step-btn"
+                  onClick={() => setShares(Math.max(minShares, shares - 1))}
+                >
+                  −1
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  name="shares"
+                  className="tk-step-input"
+                  value={shares}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, "");
+                    const n = Number.parseInt(raw || "0", 10);
+                    setShares(Number.isFinite(n) ? n : 0);
+                  }}
+                  aria-label="Share quantity"
+                />
+                <button
+                  type="button"
+                  className="tk-step-btn"
+                  onClick={() => setShares(shares + 1)}
+                >
+                  +1
+                </button>
+                <button
+                  type="button"
+                  className="tk-step-btn"
+                  onClick={() => setShares(shares + 10)}
+                >
+                  +10
+                </button>
+              </div>
+            </>
+          )}
 
           {/* Allow-partial-fill toggle — MARKET only. Design's `.tk-toggle`
               + `.tk-switch` pill with translateX animation. */}
@@ -642,49 +750,72 @@ export function TradingForm(props: TradingFormProps) {
             </div>
           )}
 
-          {/* Summary — Return + Profit. Design's `.tk-summary` with
-              dashed top border (handled by `.tk-summary` rule in
-              globals.css via the `border-top: 1px solid var(--kwm-hl)`).
-              `OrderSummary` previously rendered this; we inline it now
-              for design fidelity. */}
-          {!isBelowMarketableBuyMinNotional && (
-            <div className="tk-summary">
-              <div className="tk-sum-row">
+          {/* Summary. MARKET orders are deliberately minimal — the amount you
+              type IS the cost, so we drop Cost/Profit and lead with one big
+              number: the gross Return if the outcome wins (BUY) or the
+              Proceeds you'd receive now (SELL). LIMIT keeps the full breakdown
+              (Cost + Return + Profit) since its cost isn't typed directly. */}
+          {!isBelowMarketableBuyMinNotional &&
+            (orderType === "MARKET" ? (
+              <div className="tk-return-hero">
                 <span className="l">
-                  {side === "BUY" ? "Cost" : "Proceeds"}
+                  {side === "BUY"
+                    ? `Return if ${selectedOutcome?.name?.toUpperCase() ?? "YES"}`
+                    : "Proceeds"}
                 </span>
-                <span
-                  className={`v tabular-nums ${side === "SELL" ? "up" : ""}`}
-                >
-                  {totalLabel}
+                <span className="row">
+                  <span className="v tabular-nums">
+                    $
+                    {side === "BUY"
+                      ? grossReturn.toFixed(2)
+                      : calculations.total.toFixed(2)}
+                  </span>
+                  {side === "BUY" && calculations.total > 0 && (
+                    <span className="gain tabular-nums">
+                      {calculations.returnPercent}%
+                    </span>
+                  )}
                 </span>
               </div>
-              {side === "BUY" && (
-                <>
-                  <div className="tk-sum-row">
-                    <span className="l">
-                      Return if {selectedOutcome?.name?.toUpperCase() ?? "YES"}
-                    </span>
-                    <span className="v up tabular-nums">
-                      ${grossReturn.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="tk-sum-row profit">
-                    <span className="l">Profit</span>
-                    <span className="v up tabular-nums">
-                      {profitLabel}
-                      {calculations.total > 0 && (
-                        <span className="ret">
-                          {" "}
-                          ({calculations.returnPercent}%)
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+            ) : (
+              <div className="tk-summary">
+                <div className="tk-sum-row">
+                  <span className="l">
+                    {side === "BUY" ? "Cost" : "Proceeds"}
+                  </span>
+                  <span
+                    className={`v tabular-nums ${side === "SELL" ? "up" : ""}`}
+                  >
+                    {totalLabel}
+                  </span>
+                </div>
+                {side === "BUY" && (
+                  <>
+                    <div className="tk-sum-row">
+                      <span className="l">
+                        Return if{" "}
+                        {selectedOutcome?.name?.toUpperCase() ?? "YES"}
+                      </span>
+                      <span className="v up tabular-nums">
+                        ${grossReturn.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="tk-sum-row profit">
+                      <span className="l">Profit</span>
+                      <span className="v up tabular-nums">
+                        {profitLabel}
+                        {calculations.total > 0 && (
+                          <span className="ret">
+                            {" "}
+                            ({calculations.returnPercent}%)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
 
           {/* Conditional UI Sections — all use the design's `.tk-warn`
               variants so colors track the active theme. */}
@@ -849,7 +980,7 @@ export function TradingForm(props: TradingFormProps) {
                     return;
                   }
 
-                  const submittedShares = shares;
+                  const submittedShares = displayShares;
                   const submittedSide = side;
                   const submittedOrderType = orderType;
                   const submittedOutcome = selectedOutcome?.name;

@@ -7,6 +7,25 @@ export const DEFAULT_SEO_DESCRIPTION =
   "Discover live prediction markets, compare odds, and track market-moving opinions across politics, crypto, sports, business, and culture.";
 
 const DESCRIPTION_MAX_LENGTH = 155;
+const PREDICTION_MARKET_TITLE_PATTERN =
+  /\b(prediction market|prediction markets|live odds)\b/i;
+
+type SeoMarketInput = {
+  id?: string | number;
+  active?: boolean;
+  closed?: boolean;
+};
+
+type SeoEventInput = {
+  slug?: string | null;
+  title?: string | null;
+  active?: boolean;
+  closed?: boolean;
+  archived?: boolean;
+  ended?: boolean;
+  marketCount?: number | null;
+  markets?: SeoMarketInput[] | null;
+};
 
 export function canonicalUrl(path = "/") {
   return `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
@@ -33,6 +52,19 @@ export function truncateMetaDescription(value: string | undefined | null) {
   return `${text}…`;
 }
 
+export function buildPredictionMarketTitle(title: string | undefined | null) {
+  const cleaned = cleanMetaText(title);
+  if (!cleaned) {
+    return "Prediction Markets";
+  }
+
+  if (PREDICTION_MARKET_TITLE_PATTERN.test(cleaned)) {
+    return cleaned;
+  }
+
+  return `${cleaned} Prediction Market & Live Odds`;
+}
+
 export function buildPredictionMarketDescription({
   title,
   fallback,
@@ -53,6 +85,58 @@ export function buildPredictionMarketDescription({
   }
 
   return `Track live odds, outcomes, and market context for ${title} on Knoww.`;
+}
+
+export function shouldIndexEventPage(event: SeoEventInput | null | undefined) {
+  if (!event) {
+    return false;
+  }
+
+  if (!cleanMetaText(event.title)) {
+    return false;
+  }
+
+  if (
+    event.archived === true ||
+    event.closed === true ||
+    event.ended === true ||
+    event.active === false
+  ) {
+    return false;
+  }
+
+  return hasIndexableOpenMarket(event);
+}
+
+export function shouldListEventInSitemap(
+  event: SeoEventInput | null | undefined
+) {
+  if (!event?.slug) {
+    return false;
+  }
+
+  return shouldIndexEventPage(event);
+}
+
+function hasIndexableOpenMarket(event: SeoEventInput) {
+  if (Array.isArray(event.markets)) {
+    return event.markets.some(
+      (market) =>
+        market &&
+        market.id !== undefined &&
+        market.active !== false &&
+        market.closed !== true
+    );
+  }
+
+  if (typeof event.marketCount === "number") {
+    return event.marketCount > 0;
+  }
+
+  // List endpoints do not always include market details. If the event-level
+  // active/closed/archive signals are clean, avoid excluding it from sitemap
+  // consideration solely because the keyset payload is slim.
+  return true;
 }
 
 export function buildPageMetadata({

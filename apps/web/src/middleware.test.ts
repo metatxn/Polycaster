@@ -13,4 +13,11 @@ describe("middleware security headers", () => {
     expect(permissionsPolicy).toContain("geolocation=()");
     expect(permissionsPolicy).not.toContain("interest-cohort");
   });
+
+  it("marks API responses as noindex without blocking crawler rendering", () => {
+    const request = new NextRequest("https://knoww.app/api/events/test-slug");
+    const response = middleware(request);
+
+    expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  });
 });

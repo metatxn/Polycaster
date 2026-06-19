@@ -1173,6 +1173,11 @@ export default function EventDetailClient({
           change: 0,
           volume: market.volume || "0",
           closed: true,
+          description: market.description,
+          endDate: market.endDate,
+          createdAt: market.createdAt,
+          resolutionSource: market.resolutionSource,
+          resolvedBy: market.resolvedBy,
         };
       }),
     [closedMarkets, event?.title]

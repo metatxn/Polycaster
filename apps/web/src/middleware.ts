@@ -102,6 +102,10 @@ function isAgentOnlyPath(pathname: string): boolean {
   return false;
 }
 
+function isApiPath(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/");
+}
+
 export function middleware(request: NextRequest) {
   const requestId = request.headers.get("cf-ray") || crypto.randomUUID();
   const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
@@ -112,7 +116,11 @@ export function middleware(request: NextRequest) {
     url.protocol = "https:";
     url.port = "";
 
-    return applyGlobalHeaders(NextResponse.redirect(url, 301), requestId);
+    return applyGlobalHeaders(
+      NextResponse.redirect(url, 301),
+      requestId,
+      request.nextUrl.pathname
+    );
   }
 
   // Block agent tooling in production. Returns a 404 so the surface is
@@ -123,17 +131,30 @@ export function middleware(request: NextRequest) {
   ) {
     return applyGlobalHeaders(
       new NextResponse("Not Found", { status: 404 }),
-      requestId
+      requestId,
+      request.nextUrl.pathname
     );
   }
 
-  return applyGlobalHeaders(NextResponse.next(), requestId);
+  return applyGlobalHeaders(
+    NextResponse.next(),
+    requestId,
+    request.nextUrl.pathname
+  );
 }
 
-function applyGlobalHeaders(response: NextResponse, requestId: string) {
+function applyGlobalHeaders(
+  response: NextResponse,
+  requestId: string,
+  pathname: string
+) {
   // Apply security headers to all responses
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(key, value);
+  }
+
+  if (isApiPath(pathname)) {
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
 
   // Add request ID for tracing

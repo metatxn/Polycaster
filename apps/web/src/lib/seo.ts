@@ -9,11 +9,14 @@ export const DEFAULT_SEO_DESCRIPTION =
 const DESCRIPTION_MAX_LENGTH = 155;
 const PREDICTION_MARKET_TITLE_PATTERN =
   /\b(prediction market|prediction markets|live odds)\b/i;
+const RESOLVED_MARKET_STATUS_PATTERN = /\b(proposed|resolved)\b/;
 
 type SeoMarketInput = {
   id?: string | number;
   active?: boolean;
   closed?: boolean;
+  umaResolutionStatus?: string | null;
+  umaResolutionStatuses?: string | null;
 };
 
 type SeoEventInput = {
@@ -125,7 +128,8 @@ function hasIndexableOpenMarket(event: SeoEventInput) {
         market &&
         market.id !== undefined &&
         market.active !== false &&
-        market.closed !== true
+        market.closed !== true &&
+        !hasResolvedMarketStatus(market)
     );
   }
 
@@ -137,6 +141,26 @@ function hasIndexableOpenMarket(event: SeoEventInput) {
   // active/closed/archive signals are clean, avoid excluding it from sitemap
   // consideration solely because the keyset payload is slim.
   return true;
+}
+
+function hasResolvedMarketStatus(market: SeoMarketInput) {
+  return (
+    hasResolutionStatus(market.umaResolutionStatus) ||
+    hasResolutionStatus(market.umaResolutionStatuses)
+  );
+}
+
+function hasResolutionStatus(value?: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === "[]" || normalized === "null") {
+    return false;
+  }
+
+  return RESOLVED_MARKET_STATUS_PATTERN.test(normalized);
 }
 
 export function buildPageMetadata({

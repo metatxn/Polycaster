@@ -3,7 +3,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { LazyMotion } from "framer-motion";
 import dynamic from "next/dynamic";
-import { ThemeProvider } from "next-themes";
 import { type ReactNode, useState } from "react";
 import { type Config, cookieToInitialState, WagmiProvider } from "wagmi";
 import { wagmiAdapter } from "@/config";
@@ -29,19 +28,6 @@ const ReactQueryDevtools =
         { ssr: false }
       );
 
-// All available themes for next-themes
-const ALL_THEMES = [
-  "light",
-  "dark",
-  "midnight",
-  "ocean",
-  "slate",
-  "softpop",
-  "sunset",
-  "forest",
-  "lavender",
-];
-
 function ContextProvider({
   children,
   cookies,
@@ -64,25 +50,18 @@ function ContextProvider({
       initialState={initialState}
     >
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="light"
-          themes={ALL_THEMES}
-          disableTransitionOnChange
-        >
-          <LazyMotion features={loadMotionFeatures} strict>
-            <WalletProvider>
-              <EventFilterProvider>
-                <OnboardingProvider>
-                  <TradingProvider>{children}</TradingProvider>
-                </OnboardingProvider>
-              </EventFilterProvider>
-            </WalletProvider>
-          </LazyMotion>
-          {process.env.NODE_ENV === "development" && (
-            <ReactQueryDevtools initialIsOpen={false} />
-          )}
-        </ThemeProvider>
+        <LazyMotion features={loadMotionFeatures} strict>
+          <WalletProvider>
+            <EventFilterProvider>
+              <OnboardingProvider>
+                <TradingProvider>{children}</TradingProvider>
+              </OnboardingProvider>
+            </EventFilterProvider>
+          </WalletProvider>
+        </LazyMotion>
+        {process.env.NODE_ENV === "development" && (
+          <ReactQueryDevtools initialIsOpen={false} />
+        )}
       </QueryClientProvider>
     </WagmiProvider>
   );

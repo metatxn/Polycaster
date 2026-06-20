@@ -7,10 +7,9 @@ import {
   Plus_Jakarta_Sans,
 } from "next/font/google";
 import { headers } from "next/headers";
-import { MainContent } from "@/components/main-content";
-import { ThemedToaster } from "@/components/themed-toaster";
+import { RootRouteShell } from "@/components/root-route-shell";
+import { ThemeProviders } from "@/components/theme-providers";
 import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
-import ContextProvider from "@/context";
 import { serializeJsonLd } from "@/lib/json-ld";
 import { DEFAULT_SEO_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/seo";
 import "./globals.css";
@@ -117,8 +116,8 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cookieHeader = await headers();
-  const cookies = cookieHeader.get("cookie");
+  const requestHeaders = await headers();
+  const cookies = requestHeaders.get("cookie");
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -153,10 +152,9 @@ export default async function RootLayout({
       <body
         className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} ${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        <ContextProvider cookies={cookies}>
-          <MainContent>{children}</MainContent>
-          <ThemedToaster />
-        </ContextProvider>
+        <ThemeProviders>
+          <RootRouteShell cookies={cookies}>{children}</RootRouteShell>
+        </ThemeProviders>
       </body>
     </html>
   );

@@ -26,6 +26,24 @@ import type { GammaEvent } from "@/types/gamma-api";
  */
 
 // Types for initial home data
+export interface InitialMarket {
+  id: string;
+  question?: string;
+  outcomes?: string;
+  outcomePrices?: string;
+  groupItemTitle?: string;
+  image?: string;
+  icon?: string;
+  clobTokenIds?: string[];
+  conditionId?: string;
+  gameStartTime?: string;
+  sportsMarketType?: string;
+  umaResolutionStatus?: string;
+  umaResolutionStatuses?: string;
+  parentEventId?: number | string;
+  parentEventTitle?: string;
+}
+
 export interface InitialEvent {
   id: string;
   slug: string;
@@ -46,7 +64,7 @@ export interface InitialEvent {
   competitive?: number;
   live?: boolean;
   ended?: boolean;
-  markets?: Array<{ id: string }>;
+  markets?: InitialMarket[];
   tags?: Array<string | { id?: string; slug?: string; label?: string }>;
   negRisk?: boolean;
 }
@@ -105,11 +123,13 @@ async function fetchInitialEventPage(
     ["events", "data"]
   );
 
-  const slimEvents = page.items.map((event) => toSlimGammaEvent(event));
+  const initialEvents = page.items.map((event) =>
+    toSlimGammaEvent(event, true)
+  );
 
   return {
-    events: slimEvents,
-    totalResults: page.totalResults ?? slimEvents.length,
+    events: initialEvents,
+    totalResults: page.totalResults ?? initialEvents.length,
     hasMore: Boolean(page.nextCursor),
   };
 }

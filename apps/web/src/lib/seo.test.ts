@@ -53,6 +53,87 @@ describe("shouldIndexEventPage", () => {
       })
     ).toBe(false);
   });
+
+  it("keeps live, upcoming, closed, and resolved markets in the expected SEO states", () => {
+    const cases = [
+      {
+        name: "live",
+        event: {
+          slug: "fifa-live",
+          title: "FIFA Live",
+          active: true,
+          closed: false,
+          live: true,
+          markets: [{ id: "1", active: true, closed: false }],
+        },
+        indexable: true,
+      },
+      {
+        name: "upcoming",
+        event: {
+          slug: "fifa-upcoming",
+          title: "FIFA Upcoming",
+          active: true,
+          closed: false,
+          ended: false,
+          markets: [{ id: "1", active: true, closed: false }],
+        },
+        indexable: true,
+      },
+      {
+        name: "closed",
+        event: {
+          slug: "fifa-closed",
+          title: "FIFA Closed",
+          active: false,
+          closed: true,
+          markets: [{ id: "1", active: false, closed: true }],
+        },
+        indexable: false,
+      },
+      {
+        name: "resolved",
+        event: {
+          slug: "fifa-resolved",
+          title: "FIFA Resolved",
+          active: true,
+          closed: false,
+          markets: [
+            {
+              id: "1",
+              active: true,
+              closed: false,
+              umaResolutionStatus: "resolved",
+            },
+          ],
+        },
+        indexable: false,
+      },
+      {
+        name: "unresolved",
+        event: {
+          slug: "fifa-unresolved",
+          title: "FIFA Unresolved",
+          active: true,
+          closed: false,
+          markets: [
+            {
+              id: "1",
+              active: true,
+              closed: false,
+              umaResolutionStatus: "unresolved",
+            },
+          ],
+        },
+        indexable: true,
+      },
+    ];
+
+    for (const { event, indexable } of cases) {
+      expect(shouldIndexEventPage(event)).toBe(indexable);
+      expect(shouldListEventInSitemap(event)).toBe(indexable);
+    }
+  });
 });
 
 describe("shouldListEventInSitemap", () => {

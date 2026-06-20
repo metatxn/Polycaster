@@ -34,6 +34,7 @@ import { useUserPnL } from "@/hooks/use-user-pnl";
 import { useUserPositions } from "@/hooks/use-user-positions";
 import { useUserTrades } from "@/hooks/use-user-trades";
 import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
+import { buildPortfolioTabUrl, parsePortfolioTab } from "./url-state";
 
 function areClosedTimesEqual(
   prev: Record<string, string>,
@@ -64,6 +65,12 @@ export default function PortfolioPage() {
   };
 
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const tab = parsePortfolioTab(window.location.search);
+    setActiveTab((current) => (current === tab ? current : tab));
+  }, []);
 
   // Deep-link support: `/portfolio?fund=deposit|withdraw` opens the matching
   // funding modal on load. The browser-extension portfolio links here so its
@@ -172,6 +179,19 @@ export default function PortfolioPage() {
       setSortDirection("desc");
     }
   };
+
+  const handleTabChange = useCallback((tab: TabType) => {
+    setActiveTab(tab);
+    setSearchQuery("");
+
+    if (typeof window === "undefined") return;
+    const url = buildPortfolioTabUrl(
+      window.location.pathname,
+      window.location.search,
+      tab
+    );
+    window.history.replaceState(null, "", url);
+  }, []);
 
   const handleCloseLostPosition = async (conditionId: string) => {
     if (!tradingAddress || isRedeemingLost) return;
@@ -294,9 +314,22 @@ export default function PortfolioPage() {
     }
 
     const conditionIds = [...new Set(lostPositions.map((p) => p.conditionId))];
+    const eventSlugsByConditionId = new Map(
+      lostPositions.map((position) => [
+        position.conditionId,
+        position.market.eventSlug || position.market.slug,
+      ])
+    );
+    const params = new URLSearchParams({ ids: conditionIds.join(",") });
+    const eventSlugs = conditionIds.map(
+      (id) => eventSlugsByConditionId.get(id) ?? ""
+    );
+    if (eventSlugs.some(Boolean)) {
+      params.set("slugs", eventSlugs.join(","));
+    }
     let cancelled = false;
 
-    fetch(`/api/markets/closed-time?ids=${conditionIds.join(",")}`)
+    fetch(`/api/markets/closed-time?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         const payload = data as { closedTimes?: Record<string, string> } | null;
@@ -474,10 +507,7 @@ export default function PortfolioPage() {
         <section>
           <PortfolioLedgerHeader
             activeTab={activeTab}
-            onTabChange={(tab) => {
-              setActiveTab(tab);
-              setSearchQuery("");
-            }}
+            onTabChange={handleTabChange}
             positionCount={positionsData?.summary.positionCount}
             orderCount={ordersData?.count}
             searchQuery={searchQuery}

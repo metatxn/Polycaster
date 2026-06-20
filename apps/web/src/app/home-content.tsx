@@ -386,9 +386,9 @@ export function HomeContent({ initialData }: HomeContentProps) {
     tagSlug: apiQueryParams.tagSlug,
     filters: serverFilterParams,
     enabled: viewMode === "categories",
-    // Terminal view needs sub-market details (groupItemTitle,
-    // outcomePrices) to render top-candidate rows; card grid only
-    // needs market count.
+    // Both terminal and mobile card views need sub-market details on first
+    // paint; if SSR strips outcomePrices, card outcome rows appear after the
+    // client fetch and cause a mobile layout shift.
     fullMarkets: true,
   });
 

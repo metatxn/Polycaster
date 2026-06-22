@@ -3424,6 +3424,8 @@
   align-items: center !important;
   gap: 10px !important;
   width: 100% !important;
+  height: auto !important;
+  min-height: 50px !important;
   padding: 10px 12px !important;
   border-radius: 8px !important;
   border: 1px solid rgba(255, 255, 255, 0.06) !important;
@@ -3433,6 +3435,8 @@
     background 0.15s,
     border-color 0.15s !important;
   text-align: left !important;
+  overflow: visible !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-token-row:hover {
   background: rgba(255, 255, 255, 0.06) !important;
@@ -3451,6 +3455,7 @@
 .knoww-tp-deposit-token-sym {
   font-size: 13px !important;
   font-weight: 600 !important;
+  line-height: 1.2 !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   flex: 1 !important;
 }
@@ -3589,6 +3594,8 @@
   align-items: center !important;
   gap: 8px !important;
   width: 100% !important;
+  height: auto !important;
+  min-height: 60px !important;
   padding: 12px !important;
   border-radius: 10px !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -3600,6 +3607,8 @@
   text-align: left !important;
   font-family: inherit !important;
   color: inherit !important;
+  overflow: visible !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-method-btn:hover:not(.disabled) {
   background: rgba(255, 255, 255, 0.06) !important;
@@ -3644,12 +3653,15 @@
 .knoww-tp-deposit-method-info {
   display: flex !important;
   flex-direction: column !important;
+  justify-content: center !important;
   gap: 2px !important;
   min-width: 0 !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-method-name {
   font-size: 13px !important;
   font-weight: 600 !important;
+  line-height: 1.2 !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   white-space: nowrap !important;
   overflow: hidden !important;
@@ -3657,6 +3669,7 @@
 }
 .knoww-tp-deposit-method-sub {
   font-size: 12px !important;
+  line-height: 1.25 !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
 }
 .knoww-tp-deposit-method-chevron {
@@ -3718,11 +3731,14 @@
 .knoww-tp-deposit-token-info {
   display: flex !important;
   flex-direction: column !important;
+  justify-content: center !important;
   gap: 1px !important;
   flex: 1 !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-token-amt {
   font-size: 11px !important;
+  line-height: 1.25 !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
 }
 .knoww-tp-deposit-token-right {
@@ -5490,13 +5506,13 @@
   margin: -1px 0 8px 0 !important;
   max-width: 100% !important;
   min-width: 0 !important;
-  overflow: hidden !important;
+  overflow: visible !important;
 }
 
 .knoww-platform-reddit .knoww-tp-form {
   padding: 10px 10px 12px !important;
   max-width: 100% !important;
-  overflow: hidden !important;
+  overflow: visible !important;
 }
 
 .knoww-platform-reddit .knoww-tp-header {

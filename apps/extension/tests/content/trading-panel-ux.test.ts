@@ -292,6 +292,112 @@ test("deposit ERC20 transfers use viem encoding helpers", () => {
   assert.equal(/ERC20_TRANSFER_SELECTOR/.test(source), false);
 });
 
+test("deposit opener leaves loading state without waiting for bridge assets", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(
+    /const DEPOSIT_BALANCE_LOAD_TIMEOUT_MS = 8000;/.test(source),
+    true
+  );
+  assert.equal(
+    /withDepositLoadTimeout\(\s*fetchEoaBalancesViaWallet\(eoaAddress\),\s*DEPOSIT_BALANCE_LOAD_TIMEOUT_MS/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /Promise\.all\(\[loadBalances, loadAssets\]\)/.test(source),
+    false
+  );
+  assert.equal(
+    /void loadBalances\.finally\(\(\) => \{[\s\S]*depositState = "ready";[\s\S]*rerender\(\);[\s\S]*\}\);/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /void fetchSupportedAssets\(\)[\s\S]*depositBridgeAssets = assets;[\s\S]*if \(depositState === "ready"\) rerender\(\);/.test(
+      source
+    ),
+    true
+  );
+});
+
+test("Reddit deposit panel allows vertical overflow for deposit options", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-platform-reddit \.knoww-trading-panel\s*\{[^}]*overflow:\s*visible\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-platform-reddit \.knoww-tp-form\s*\{[^}]*overflow:\s*visible\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+});
+
+test("deposit method rows reset host page button and text metrics", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-tp-deposit-method-btn\s*\{[^}]*height:\s*auto\s*!important;[^}]*min-height:\s*60px\s*!important;[^}]*overflow:\s*visible\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-method-info\s*\{[^}]*justify-content:\s*center\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-method-name\s*\{[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-method-sub\s*\{[^}]*line-height:\s*1\.25\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+});
+
+test("deposit token rows reset host page button and text metrics", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-tp-deposit-token-row\s*\{[^}]*height:\s*auto\s*!important;[^}]*min-height:\s*50px\s*!important;[^}]*overflow:\s*visible\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-token-info\s*\{[^}]*justify-content:\s*center\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-token-sym\s*\{[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-token-amt\s*\{[^}]*line-height:\s*1\.25\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+});
+
 test("deposit amount validation and max use exact raw token balances", () => {
   const source = readSource("src/content/trading/trading-panel.ts");
 
@@ -332,6 +438,31 @@ test("WalletConnect QR path forces a fresh pairing session", () => {
   assert.equal(/forceNew\?: boolean/.test(walletConnectSource), true);
   assert.equal(/disconnectExistingSession/.test(walletConnectSource), true);
   assert.equal(/if \(forceNew\)/.test(walletConnectSource), true);
+});
+
+test("WalletConnect uses direct Polygon RPC for read-only balance calls", () => {
+  const source = readSource("src/content/trading/walletconnect-bridge.ts");
+
+  assert.equal(/async function polygonRpcRequest/.test(source), true);
+  assert.equal(/READ_ONLY_RPC_TIMEOUT_MS/.test(source), true);
+  assert.equal(
+    /async ethCall\(to: string, data: string\): Promise<string> \{[\s\S]*return polygonRpcRequest<string>\("eth_call", \[\{ to, data \}, "latest"\]\);[\s\S]*\}/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /async getBalance\(address: string\): Promise<string> \{[\s\S]*return polygonRpcRequest<string>\("eth_getBalance", \[address, "latest"\]\);[\s\S]*\}/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /return polygonRpcRequest<\{ status: string; blockNumber: string \} \| null>\(\s*"eth_getTransactionReceipt"/.test(
+      source
+    ),
+    true
+  );
 });
 
 test("WalletConnect re-entrant connect aborts the stale pairing instead of reusing it", () => {

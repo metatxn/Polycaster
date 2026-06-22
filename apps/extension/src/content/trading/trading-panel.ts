@@ -244,6 +244,7 @@ const LIVE_PANEL_REFRESH_INTERVAL = 10000;
 const DEPOSIT_POLL_INTERVAL = 2000;
 const DEPOSIT_BALANCE_SYNC_TIMEOUT = 8000;
 const DEPOSIT_BALANCE_SYNC_INTERVAL = 1500;
+const DEPOSIT_BALANCE_LOAD_TIMEOUT_MS = 8000;
 let livePanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let livePanelRefreshEnabled = false;
 
@@ -3534,6 +3535,29 @@ async function fetchEoaBalancesViaWallet(
   return tokens;
 }
 
+function withDepositLoadTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
 function startDepositFlow(eoaAddress: string): void {
   resetDepositState();
   depositState = "loading-balances";
@@ -3541,7 +3565,11 @@ function startDepositFlow(eoaAddress: string): void {
   trackPanelAnalytics("deposit_opened");
   rerender();
 
-  const loadBalances = fetchEoaBalancesViaWallet(eoaAddress)
+  const loadBalances = withDepositLoadTimeout(
+    fetchEoaBalancesViaWallet(eoaAddress),
+    DEPOSIT_BALANCE_LOAD_TIMEOUT_MS,
+    "Wallet balance request timed out. Try again, or use Transfer Crypto."
+  )
     .then((tokens) => {
       depositTokens = tokens;
     })
@@ -3550,18 +3578,21 @@ function startDepositFlow(eoaAddress: string): void {
         err instanceof Error ? err.message : "Failed to load balances";
     });
 
-  const loadAssets = fetchSupportedAssets()
+  void loadBalances.finally(() => {
+    if (depositState === "loading-balances") {
+      depositState = "ready";
+      rerender();
+    }
+  });
+
+  void fetchSupportedAssets()
     .then((assets) => {
       depositBridgeAssets = assets;
+      if (depositState === "ready") rerender();
     })
     .catch(() => {
       // Non-critical: bridge selection will just show empty list
     });
-
-  Promise.all([loadBalances, loadAssets]).then(() => {
-    depositState = "ready";
-    rerender();
-  });
 }
 
 function toHex(n: bigint): string {

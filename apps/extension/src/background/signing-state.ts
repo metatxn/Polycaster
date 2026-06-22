@@ -12,13 +12,63 @@
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
+  tabId: number;
 };
 
 const pendingRequests = new Map<string, PendingRequest>();
+const USER_MEDIATED_WALLET_METHODS = new Set([
+  "eth_requestAccounts",
+  "eth_signTypedData_v4",
+  "personal_sign",
+  "eth_sendTransaction",
+  "wallet_switchEthereumChain",
+]);
+const DEFAULT_SIGNING_REQUEST_TIMEOUT_MS = 120_000;
+// Wallet prompts can survive laptop sleep; keep this much longer than normal
+// RPC timeouts, but finite so lost signing responses cannot leak forever.
+const USER_MEDIATED_SIGNING_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 let currentTabId: number | null = null;
+let tabRemovalCleanupRegistered = false;
+
+function getSigningRequestTimeoutMs(method: string): number {
+  return USER_MEDIATED_WALLET_METHODS.has(method)
+    ? USER_MEDIATED_SIGNING_REQUEST_TIMEOUT_MS
+    : DEFAULT_SIGNING_REQUEST_TIMEOUT_MS;
+}
+
+function rejectPendingRequest(id: string, error: Error): void {
+  const pending = pendingRequests.get(id);
+  if (!pending) return;
+
+  pendingRequests.delete(id);
+  if (pending.timeoutId) clearTimeout(pending.timeoutId);
+  pending.reject(error);
+}
+
+export function rejectSigningRequestsForTab(tabId: number, error: Error): void {
+  for (const [id, pending] of pendingRequests) {
+    if (pending.tabId === tabId) {
+      rejectPendingRequest(id, error);
+    }
+  }
+}
+
+function registerTabRemovalCleanup(): void {
+  if (tabRemovalCleanupRegistered) return;
+  if (typeof chrome.tabs?.onRemoved?.addListener !== "function") return;
+
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    if (currentTabId === tabId) currentTabId = null;
+    rejectSigningRequestsForTab(tabId, new Error("Signing tab was closed"));
+  });
+  tabRemovalCleanupRegistered = true;
+}
 
 export function initBridgeWallet(): void {
+  registerTabRemovalCleanup();
+
   chrome.runtime.onMessage.addListener(
     (message: unknown, _sender, sendResponse) => {
       const msg = message as {
@@ -32,10 +82,11 @@ export function initBridgeWallet(): void {
       const pending = pendingRequests.get(msg.id);
       if (!pending) return false;
 
-      pendingRequests.delete(msg.id);
       if (msg.error) {
-        pending.reject(new Error(msg.error));
+        rejectPendingRequest(msg.id, new Error(msg.error));
       } else {
+        pendingRequests.delete(msg.id);
+        if (pending.timeoutId) clearTimeout(pending.timeoutId);
         pending.resolve(msg.result);
       }
 
@@ -56,16 +107,25 @@ export function sendSigningRequest(
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const id = generateId();
-    pendingRequests.set(id, { resolve, reject });
+    const pendingRequest: PendingRequest = { resolve, reject, tabId };
+    pendingRequests.set(id, pendingRequest);
 
     const signingMsg = { type: "trading:signing-request", id, method, params };
 
-    const onError = () => {
+    const rejectBridgeError = (message?: string) => {
+      rejectPendingRequest(
+        id,
+        new Error(`Signing bridge error: ${message || "Unknown error"}`)
+      );
+    };
+
+    const onError = (response?: { ok?: boolean; error?: string }) => {
       if (chrome.runtime.lastError) {
-        pendingRequests.delete(id);
-        reject(
-          new Error(`Signing bridge error: ${chrome.runtime.lastError.message}`)
-        );
+        rejectBridgeError(chrome.runtime.lastError.message);
+        return;
+      }
+      if (response?.ok === false) {
+        rejectBridgeError(response.error);
       }
     };
 
@@ -79,12 +139,9 @@ export function sendSigningRequest(
       );
     }
 
-    setTimeout(() => {
-      if (pendingRequests.has(id)) {
-        pendingRequests.delete(id);
-        reject(new Error("Signing request timed out (120s)"));
-      }
-    }, 120_000);
+    pendingRequest.timeoutId = setTimeout(() => {
+      rejectPendingRequest(id, new Error("Signing request timed out"));
+    }, getSigningRequestTimeoutMs(method));
   });
 }
 

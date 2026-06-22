@@ -39,6 +39,14 @@
     }
   ],
 
+  "services": [
+    {
+      // Required by OpenNext's memory queue for ISR/stale-page revalidation.
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "knoww"
+    }
+  ],
+
   "d1_databases": [
     {
       "binding": "AGENT_DB",

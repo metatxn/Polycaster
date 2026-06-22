@@ -245,6 +245,81 @@
   animation: kwFloatBob 4s ease-in-out infinite;
 }
 
+/* Hero aurora — SVG fractal-noise (fbm) clouds tinted with --kw-accent, the CSS
+   analogue of the old WebGL shader. Each layer fills the area with the accent
+   colour, then an feTurbulence noise mask punches it into soft clouds. Two
+   layers drift/scale in opposite directions and blend additively, so the
+   interference reads as slowly morphing aurora. */
+.kw-hero-aurora-noise {
+  position: absolute;
+  inset: -50%;
+  background: radial-gradient(
+    circle at 45% 40%,
+    var(--kw-accent),
+    color-mix(in srgb, var(--kw-accent) 60%, transparent) 55%,
+    transparent 78%
+  );
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='a'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.014' numOctaves='4' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1.2 0 0 0 -0.36'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23a)'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='a'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.014' numOctaves='4' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1.2 0 0 0 -0.36'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23a)'/%3E%3C/svg%3E");
+  -webkit-mask-size: 80% 80%;
+  mask-size: 80% 80%;
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+  filter: blur(14px);
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+.kw-hero-aurora-noise-a {
+  opacity: 0.65;
+  animation: kwAuroraFlowA 42s ease-in-out infinite alternate;
+}
+.kw-hero-aurora-noise-b {
+  opacity: 0.45;
+  animation: kwAuroraFlowB 58s ease-in-out infinite alternate;
+}
+@keyframes kwAuroraFlowA {
+  from {
+    transform: translate3d(-5%, -4%, 0) scale(1.05) rotate(0deg);
+  }
+  to {
+    transform: translate3d(6%, 5%, 0) scale(1.3) rotate(8deg);
+  }
+}
+@keyframes kwAuroraFlowB {
+  from {
+    transform: translate3d(5%, 4%, 0) scale(1.28) rotate(0deg);
+  }
+  to {
+    transform: translate3d(-6%, -5%, 0) scale(1.05) rotate(-9deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kw-hero-aurora-noise {
+    animation: none;
+  }
+}
+/* Additive `screen` blend reads as glowing light on dark themes but washes out
+   over a light background — fall back to normal tinting there. */
+[data-scheme="light"] .kw-hero-aurora-noise {
+  mix-blend-mode: normal;
+  opacity: 0.4;
+}
+
+/* The hero tweet-card is a glass panel sitting over the aurora; the accent
+   clouds behind it bled through and washed its text. Scoped to the landing
+   hero: firm up the fill and dial back the saturation boost so the card reads
+   clean while keeping its frosted blur. */
+.kw-landing .kwt-card {
+  backdrop-filter: blur(28px) saturate(118%);
+  -webkit-backdrop-filter: blur(28px) saturate(118%);
+}
+.kw-landing[data-scheme="dark"] .kwt-card {
+  background: rgba(0, 0, 0, 0.85);
+}
+.kw-landing[data-scheme="light"] .kwt-card {
+  background: rgba(255, 255, 255, 0.9);
+}
+
 /* ---- Probability radar ---- */
 .kw-radar {
   position: relative;

@@ -74,3 +74,4 @@ apps/extension/.embedding-benchmark-cache/
 .readability/
 .design-preview/
 .design-review*/
+.fallow/

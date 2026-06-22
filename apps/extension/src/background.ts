@@ -16,6 +16,12 @@ import {
   queueAnalyticsEvent,
 } from "./background/analytics";
 import {
+  clearClobCredentialDerivationsForTab,
+  endClobCredentialDerivation,
+  getClobCredentialDerivationStatus,
+  resolveClobCredentialDerivationBegin,
+} from "./background/clob-credential-derivation-lock";
+import {
   hasClobCredentials,
   loadClobCredentials,
   storeClobCredentials,
@@ -475,6 +481,9 @@ void flushAnalyticsQueue();
 // drained and every signature times out. The offscreen doc registers its own
 // copy for trading; the two are keyed by request id so they don't collide.
 initBridgeWallet();
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearClobCredentialDerivationsForTab(tabId);
+});
 
 // ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
 
@@ -1509,6 +1518,89 @@ chrome.runtime.onMessage.addListener(
             data: { hasCredentials: false },
           } as BackgroundResponse);
         });
+      return true;
+    }
+    if (msg?.type === "creds:derive-begin" && typeof msg.key === "string") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
+      const address = msg.key.slice(TRADING_CREDS_STORAGE_PREFIX.length);
+      void resolveClobCredentialDerivationBegin(address, {
+        hasCredentials: () => hasClobCredentials(address),
+        ownerTabId: sender.tab?.id,
+      })
+        .then((data) => {
+          sendResponse({
+            ok: true,
+            data,
+          } as BackgroundResponse);
+        })
+        .catch(() => {
+          sendResponse({
+            ok: false,
+            error: "Failed to check credential state",
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+    if (msg?.type === "creds:derive-status" && typeof msg.key === "string") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
+      const address = msg.key.slice(TRADING_CREDS_STORAGE_PREFIX.length);
+      void hasClobCredentials(address)
+        .then((hasCredentials) => {
+          sendResponse({
+            ok: true,
+            data: hasCredentials
+              ? { status: "present" }
+              : getClobCredentialDerivationStatus(address),
+          } as BackgroundResponse);
+        })
+        .catch(() => {
+          sendResponse({
+            ok: true,
+            data: getClobCredentialDerivationStatus(address),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+    if (
+      msg?.type === "creds:derive-end" &&
+      typeof msg.key === "string" &&
+      typeof msg.token === "string"
+    ) {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject) {
+        sendResponse(senderReject as BackgroundResponse);
+        return true;
+      }
+      const keyReject = checkCredsKey(msg.key);
+      if (keyReject) {
+        sendResponse(keyReject as BackgroundResponse);
+        return true;
+      }
+      const address = msg.key.slice(TRADING_CREDS_STORAGE_PREFIX.length);
+      sendResponse({
+        ok: true,
+        data: {
+          released: endClobCredentialDerivation(address, msg.token),
+        },
+      } as BackgroundResponse);
       return true;
     }
     if (msg?.type === "creds:remove" && typeof msg.key === "string") {

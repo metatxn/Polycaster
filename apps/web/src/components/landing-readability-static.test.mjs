@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const globals = readFileSync("src/app/globals.css", "utf8");
+const globals = [
+  "src/app/globals.css",
+  "src/app/styles/base.css",
+  "src/app/styles/marketing.css",
+  "src/app/styles/landing.css",
+  "src/app/styles/tweet-overlay.css",
+]
+  .map((path) => readFileSync(path, "utf8"))
+  .join("\n");
 const landing = readFileSync("src/app/page.tsx", "utf8");
 const sections = readFileSync(
   "src/components/landing/knoww-sections.tsx",

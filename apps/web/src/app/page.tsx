@@ -105,14 +105,31 @@ export default function LandingPage() {
         {/* HERO — heading + right-side artifact preserved per design direction;
             no background grid. */}
         <section className="relative flex min-h-[calc(100svh-109px)] items-center border-b border-(--kw-fg)/10 overflow-hidden">
+          {/* Hero aurora — SVG fractal-noise (fbm) clouds tinted with the accent,
+              the CSS analogue of the old WebGL shader. Two layers drift in
+              opposite directions and blend additively (hero-scoped, no WebGL). */}
+          <div
+            className="kw-hero-aurora pointer-events-none absolute inset-0 z-0 overflow-hidden"
+            aria-hidden="true"
+          >
+            <div className="kw-hero-aurora-noise kw-hero-aurora-noise-a" />
+            <div className="kw-hero-aurora-noise kw-hero-aurora-noise-b" />
+          </div>
           <div className="kw-stage-glow" />
           <div className="kw-grain" />
+          {/* Legibility scrim — a light left-side veil so the aurora still
+              shows through on the left; the per-text shadow below does the
+              heavy lifting for WCAG contrast. */}
+          <div
+            className="pointer-events-none absolute inset-0 z-0 bg-linear-to-r from-(--kw-bg)/55 via-(--kw-bg)/30 via-50% to-transparent to-80%"
+            aria-hidden="true"
+          />
           <div className="kw-hero-inner relative z-1 w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 py-14 sm:px-8 md:py-20 min-[1024px]:max-[1279px]:landscape:py-8">
             {/* Top-align on landscape tablets so the CTA never gets pushed
               below the fold by the tall side-by-side card; desktop (xl) keeps
               the balanced vertical centering. */}
             <div className="grid grid-cols-12 gap-8 xl:gap-12 items-center min-[1024px]:max-[1279px]:landscape:items-start">
-              <div className="col-span-12 lg:landscape:col-span-7 xl:col-span-7">
+              <div className="col-span-12 lg:landscape:col-span-7 xl:col-span-7 [text-shadow:0_2px_22px_var(--kw-bg),0_0_8px_var(--kw-bg)]">
                 <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-(--kw-fg)/60 mb-6">
                   <span className="kw-signal-dot w-1.5 h-1.5" />
                   Issue № 01 — The Prediction Layer
@@ -158,7 +175,7 @@ export default function LandingPage() {
                     href={CHROME_STORE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2.5 bg-(--kw-fg) text-(--kw-bg) px-7 py-4 text-[14px] font-semibold hover:bg-(--kw-fg)/90 transition-colors group"
+                    className="inline-flex items-center gap-2.5 bg-(--kw-fg) text-(--kw-bg) px-7 py-4 text-[14px] font-semibold hover:bg-(--kw-fg)/90 transition-colors group [text-shadow:none]"
                   >
                     <Download className="w-4 h-4" />
                     Install Knoww — Free
@@ -324,7 +341,7 @@ function TickerBar() {
           </span>
         </div>
         <div className="flex-1 min-w-0 overflow-hidden relative kw-ticker-track">
-          <div className="flex gap-12 animate-[ticker_60s_linear_infinite] whitespace-nowrap hover:[animation-play-state:paused] focus-within:[animation-play-state:paused] motion-reduce:animate-none">
+          <div className="flex gap-12 animate-[ticker_60s_linear_infinite] whitespace-nowrap hover:paused focus-within:paused motion-reduce:animate-none">
             {items.map((t, i) => (
               <span
                 key={`${t.label}-${i}`}

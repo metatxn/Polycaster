@@ -40,9 +40,21 @@ interface BridgeResponse {
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
 };
 
 const pending = new Map<string, PendingRequest>();
+const USER_MEDIATED_WALLET_METHODS = new Set([
+  "eth_requestAccounts",
+  "eth_signTypedData_v4",
+  "personal_sign",
+  "eth_sendTransaction",
+  "wallet_switchEthereumChain",
+]);
+const DEFAULT_WALLET_REQUEST_TIMEOUT_MS = 120_000;
+// Wallet prompts can survive laptop sleep; keep this much longer than normal
+// RPC timeouts, but finite so lost page-bridge responses cannot leak forever.
+const USER_MEDIATED_WALLET_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 let initialized = false;
 let wallets: DiscoveredWallet[] = [];
@@ -104,6 +116,12 @@ function requestWalletDiscovery(): void {
   );
 }
 
+function getWalletRequestTimeoutMs(method: string): number {
+  return USER_MEDIATED_WALLET_METHODS.has(method)
+    ? USER_MEDIATED_WALLET_REQUEST_TIMEOUT_MS
+    : DEFAULT_WALLET_REQUEST_TIMEOUT_MS;
+}
+
 function init(): void {
   if (initialized) return;
   initialized = true;
@@ -128,6 +146,7 @@ function init(): void {
       const p = pending.get(data.id);
       if (!p) return;
       pending.delete(data.id);
+      if (p.timeoutId) clearTimeout(p.timeoutId);
       if (data.error) {
         p.reject(new Error(data.error));
       } else {
@@ -228,7 +247,8 @@ function request(
   const uuid = walletUuid ?? selectedWalletUuid;
   return new Promise((resolve, reject) => {
     const id = generateId();
-    pending.set(id, { resolve, reject });
+    const pendingRequest: PendingRequest = { resolve, reject };
+    pending.set(id, pendingRequest);
 
     window.postMessage(
       {
@@ -242,12 +262,12 @@ function request(
       window.location.origin
     );
 
-    setTimeout(() => {
+    pendingRequest.timeoutId = setTimeout(() => {
       if (pending.has(id)) {
         pending.delete(id);
         reject(new Error(`Wallet request timed out: ${method}`));
       }
-    }, 120_000);
+    }, getWalletRequestTimeoutMs(method));
   });
 }
 

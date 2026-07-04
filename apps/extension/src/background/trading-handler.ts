@@ -8,9 +8,9 @@ import { logInfo, logWarn } from "@knoww/logger";
 import {
   buildFullTradingApprovalTransactions,
   buildTradingApprovalTransactions,
+  readClobOrderPusdAllowance,
   readErc20Allowance,
   readErc1155Approval,
-  readPusdExchangeAllowance,
   readTradingApprovalStatus,
 } from "@knoww/shared-types/approvals";
 import {
@@ -26,14 +26,12 @@ import {
 import {
   COLLATERAL_ONRAMP_ADDRESS,
   CTF_APPROVAL_OPERATORS,
-  NEG_RISK_ADAPTER_ADDRESS,
   PUSD_ADDRESS,
   PUSD_APPROVAL_TARGETS,
   PUSD_CTF_APPROVAL_TARGET,
   USDC_E_ADDRESS,
 } from "@knoww/shared-types/contracts";
 import {
-  planCtfOperationTransaction,
   planCtfOperationTransactions,
   readCtfOutcomeBalances,
 } from "@knoww/shared-types/ctf";
@@ -45,7 +43,6 @@ import {
   createOrDeriveClobApiKey,
   getClobPostOrderError,
   getPolymarketSignatureType,
-  normalizeTradingWalletMode,
   POLYMARKET_API,
   syncClobBalanceAllowance,
 } from "@knoww/shared-types/polymarket";
@@ -71,6 +68,7 @@ import {
   http,
   type WalletClient,
 } from "viem";
+import { normalizeExtensionTradingWalletMode } from "../content/trading/setup-gates";
 import type {
   TradingDeploySafeMessage,
   TradingDeriveCredentialsMessage,
@@ -104,6 +102,7 @@ import {
   deployProxyWallet,
   executeViaDepositWallet,
   executeViaRelayer,
+  isRelayerWalletDeployed,
 } from "./relayer-client";
 import { setActiveTab } from "./signing-state";
 import { createExtensionLegacyClobClient } from "./unified-clob-client";
@@ -200,7 +199,7 @@ function deriveTradingWalletAddress(
   ownerAddress: Address,
   walletMode?: TradingWalletMode
 ): Address {
-  const mode = normalizeTradingWalletMode(walletMode);
+  const mode = normalizeExtensionTradingWalletMode(walletMode);
   if (mode === "eoa") return ownerAddress;
   if (mode === "deposit") return derivePolymarketDepositWallet(ownerAddress);
   return derivePolymarketSafe(ownerAddress);
@@ -223,7 +222,7 @@ async function executeWalletModeTransactions(
   transactions: RelayerTransaction[],
   walletAddress?: Address
 ): Promise<{ txHash: string }> {
-  const mode = normalizeTradingWalletMode(walletMode);
+  const mode = normalizeExtensionTradingWalletMode(walletMode);
   if (mode === "eoa") {
     return executeDirectTransactions(walletClient, transactions);
   }
@@ -375,8 +374,9 @@ async function handlePlaceOrder(
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
 
   const builderCode = process.env.POLY_BUILDER_CODE;
+  const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
   const funderAddress =
-    normalizeTradingWalletMode(msg.walletMode) === "eoa"
+    walletMode === "eoa"
       ? ownerAddress
       : (getAddress(msg.proxyAddress) as Address);
 
@@ -427,27 +427,17 @@ async function handlePlaceOrder(
       msg.walletMode
     );
 
-    const exchangeAllowance = await readPusdExchangeAllowance(
+    // CLOB V2 also pulls pUSD via the neg-risk adapter for neg-risk markets;
+    // the shared reader owns the min(exchange, adapter) rule, so verify the
+    // effective allowance up-front instead of relying on the server's
+    // misleading "not enough balance / allowance" rejection.
+    const orderAllowance = await readClobOrderPusdAllowance(
       publicClient,
       funderAddress,
       msg.negRisk,
       { fallbackRaw: 0n }
     );
-    // CLOB V2 also pulls pUSD via the neg-risk adapter for neg-risk markets, so
-    // verify that allowance up-front instead of relying on the server's misleading
-    // "not enough balance / allowance" rejection.
-    const adapterAllowance = msg.negRisk
-      ? await readErc20Allowance(
-          publicClient,
-          funderAddress,
-          NEG_RISK_ADAPTER_ADDRESS as Address,
-          { fallbackRaw: 0n }
-        )
-      : requiredCollateralPusd;
-    if (
-      exchangeAllowance < requiredCollateralPusd ||
-      adapterAllowance < requiredCollateralPusd
-    ) {
+    if (orderAllowance < requiredCollateralPusd) {
       return fail(
         `Approval too low for this order. Approve at least ${formatUnits(requiredCollateralPusd, 6)} pUSD and retry.`
       );
@@ -554,10 +544,28 @@ async function handleDeriveProxyAddress(
   msg: TradingDeriveProxyAddressMessage
 ): Promise<TradingResponse> {
   const owner = getAddress(msg.eoaAddress) as Address;
-  const proxyAddress = deriveTradingWalletAddress(owner, msg.walletMode);
+  const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
+  const proxyAddress = deriveTradingWalletAddress(owner, walletMode);
 
   const code = await publicClient.getBytecode({ address: proxyAddress });
-  return ok({ proxyAddress, isDeployed: !!code && code !== "0x" });
+  let isDeployed = !!code && code !== "0x";
+  if (
+    !isDeployed &&
+    walletMode !== "eoa" &&
+    msg.skipRelayerDeploymentFallback !== true
+  ) {
+    const walletType = walletMode === "safe" ? "SAFE" : "WALLET";
+    try {
+      isDeployed = await isRelayerWalletDeployed(proxyAddress, walletType);
+    } catch (error) {
+      logWarn("relayer.deployment-status-fallback.failed", {
+        proxyAddress,
+        walletType,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return ok({ proxyAddress, isDeployed });
 }
 
 // ── Allowance ──
@@ -566,26 +574,14 @@ async function handleGetAllowance(
   msg: TradingGetAllowanceMessage
 ): Promise<TradingResponse> {
   const owner = getAddress(msg.ownerAddress) as Address;
-  const exchangeAllowance = await readPusdExchangeAllowance(
+  // min(exchange, adapter-if-negrisk) — the shared reader owns the rule and
+  // runs the two reads in parallel.
+  const allowance = await readClobOrderPusdAllowance(
     publicClient,
     owner,
     msg.negRisk,
     { fallbackRaw: 0n }
   );
-  // For neg-risk markets, CLOB V2 also pulls pUSD via the neg-risk adapter, so
-  // the binding allowance is min(exchange, adapter). Reporting the minimum keeps
-  // the trading panel's approval CTA in sync with what the order pre-flight
-  // requires.
-  const adapterAllowance = msg.negRisk
-    ? await readErc20Allowance(
-        publicClient,
-        owner,
-        NEG_RISK_ADAPTER_ADDRESS as Address,
-        { fallbackRaw: 0n }
-      )
-    : exchangeAllowance;
-  const allowance =
-    exchangeAllowance < adapterAllowance ? exchangeAllowance : adapterAllowance;
   return ok({
     allowance: Number(formatUnits(allowance, 6)),
     allowanceRaw: allowance.toString(),
@@ -602,34 +598,60 @@ async function handleGetAllAllowances(
   const erc1155Operators = [...CTF_APPROVAL_OPERATORS];
 
   const allowances: Record<string, number> = {};
+  const degradedKeys: string[] = [];
+
+  // Per-read fallbacks ride the shared helpers' error path (fallbackRaw /
+  // fallbackApproved) — onFallback records the failed key for the degraded
+  // signal without duplicating the catch-and-default logic locally.
+  const readAllowanceOrZero = (
+    key: string,
+    spender: Address,
+    options: { token?: Address } = {}
+  ): Promise<bigint> =>
+    readErc20Allowance(publicClient, owner, spender, {
+      ...options,
+      fallbackRaw: 0n,
+      onFallback: (err) => {
+        degradedKeys.push(key);
+        logWarn("trading.allowance-read-degraded", { spender, error: err });
+      },
+    });
+
+  const readApprovalOrFalse = (
+    key: string,
+    operator: Address
+  ): Promise<boolean> =>
+    readErc1155Approval(publicClient, owner, operator, {
+      fallbackApproved: false,
+      onFallback: (err) => {
+        degradedKeys.push(key);
+        logWarn("trading.erc1155-approval-read-degraded", {
+          operator,
+          error: err,
+        });
+      },
+    });
 
   const [pusdCtf, usdcOnramp, pusdResults, erc1155Results] = await Promise.all([
-    readErc20Allowance(
-      publicClient,
-      owner,
-      PUSD_CTF_APPROVAL_TARGET as Address,
-      {
-        fallbackRaw: 0n,
-      }
+    readAllowanceOrZero(
+      `pusd:${PUSD_CTF_APPROVAL_TARGET}`,
+      PUSD_CTF_APPROVAL_TARGET as Address
     ),
-    readErc20Allowance(
-      publicClient,
-      owner,
+    readAllowanceOrZero(
+      `usdce:${COLLATERAL_ONRAMP_ADDRESS}`,
       COLLATERAL_ONRAMP_ADDRESS as Address,
-      { token: USDC_E_ADDRESS as Address, fallbackRaw: 0n }
+      {
+        token: USDC_E_ADDRESS as Address,
+      }
     ),
     Promise.all(
       pusdSpenders.map((spender) =>
-        readErc20Allowance(publicClient, owner, spender as Address, {
-          fallbackRaw: 0n,
-        })
+        readAllowanceOrZero(`pusd:${spender}`, spender as Address)
       )
     ),
     Promise.all(
       erc1155Operators.map((operator) =>
-        readErc1155Approval(publicClient, owner, operator as Address, {
-          fallbackApproved: false,
-        })
+        readApprovalOrFalse(`erc1155:${operator}`, operator as Address)
       )
     ),
   ]);
@@ -649,7 +671,11 @@ async function handleGetAllAllowances(
     allowances[`erc1155:${erc1155Operators[i]}`] = erc1155Results[i] ? 1 : 0;
   }
 
-  return ok({ allowances });
+  return ok({
+    allowances,
+    degraded: degradedKeys.length > 0,
+    degradedKeys,
+  });
 }
 
 // ── Order Book ──
@@ -743,7 +769,8 @@ async function syncBalancesAfterCTF(msg: {
   if (!msg.credentials || !msg.proxyAddress) return;
   const credentials = msg.credentials;
 
-  const signatureType: number = getPolymarketSignatureType(msg.walletMode);
+  const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
+  const signatureType: number = getPolymarketSignatureType(walletMode);
   for (const target of buildClobBalanceAllowanceTargets({
     tokenIds: [msg.yesTokenId, msg.noTokenId],
   })) {
@@ -772,7 +799,7 @@ async function handleSplitPosition(
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
 
-  const walletMode = normalizeTradingWalletMode(msg.walletMode);
+  const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
   const proxyAddress =
     walletMode === "eoa"
       ? ownerAddress
@@ -827,7 +854,7 @@ async function handleMergePositions(
 
   const ownerAddress = getAddress(msg.address) as Address;
   const walletClient = createBridgeWalletClient(ownerAddress, tabId);
-  const walletMode = normalizeTradingWalletMode(msg.walletMode);
+  const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
   const proxyAddress =
     walletMode === "eoa"
       ? ownerAddress
@@ -835,12 +862,24 @@ async function handleMergePositions(
           msg.proxyAddress ?? deriveProxyAddressSync(msg.address, walletMode)
         ) as Address);
 
-  const plan = planCtfOperationTransaction({
+  const plan = await planCtfOperationTransactions({
     operation: "mergePositions",
     conditionId: msg.conditionId,
     amount: String(msg.amount),
     negRisk: msg.negRisk,
+    client: publicClient,
+    collateralOwner: getAddress(proxyAddress) as Address,
+    fallbackToApproval: true,
   });
+  if (plan.approvalTransaction) {
+    await executeWalletModeTransactions(
+      walletClient,
+      ownerAddress,
+      walletMode,
+      [plan.approvalTransaction],
+      proxyAddress
+    );
+  }
 
   const result = await executeWalletModeTransactions(
     walletClient,
@@ -872,7 +911,7 @@ async function handleDeploySafe(
   sender: chrome.runtime.MessageSender
 ): Promise<TradingResponse> {
   const ownerAddress = getAddress(msg.address) as Address;
-  const walletMode = normalizeTradingWalletMode(msg.walletMode);
+  const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
 
   logInfo("trading.deploy-wallet.submit", {
     address: msg.address,
@@ -936,7 +975,7 @@ async function handleRelayerApprove(
     requestedApprovalAmount > defaultApprovalAmount
       ? requestedApprovalAmount
       : defaultApprovalAmount;
-  const walletMode = normalizeTradingWalletMode(msg.walletMode);
+  const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
   const proxyAddress =
     walletMode === "eoa"
       ? ownerAddress
@@ -999,8 +1038,6 @@ async function ensurePusdSufficient(
     estimatedFeeRaw: estimatedFee,
   });
 
-  if (!wrapPlan.needsWrap) return;
-
   if (!wrapPlan.hasEnoughBaseCollateral) {
     // Format raw 6-decimal base units to USD — otherwise the message reads
     // "need 1000000 more pUSD" (raw) instead of "need $1.00 more".
@@ -1008,6 +1045,8 @@ async function ensurePusdSufficient(
       `Insufficient collateral: need ${formatUsd6(wrapPlan.baseShortfallRaw)} more pUSD (or USDC.e to wrap), have ${formatUsd6(wrapPlan.availablePusdRaw)} pUSD + ${formatUsd6(usdcBalance)} USDC.e`
     );
   }
+
+  if (!wrapPlan.needsWrap) return;
 
   const txns = buildPusdAutoWrapTransactions(owner, wrapPlan.wrapAmountRaw);
 

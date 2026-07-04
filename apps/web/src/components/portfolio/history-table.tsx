@@ -21,11 +21,13 @@ type ActivityTone = "profit" | "loss" | "in" | "out" | "neutral";
 function getActivity(
   type: string,
   side?: string | null,
-  amount?: number
+  amount?: number,
+  isLostPosition = false
 ): { label: string; tone: ActivityTone } {
   if (type === "REDEEM") {
+    if (isLostPosition) return { label: "Lost", tone: "loss" };
     if (amount && amount > 0) return { label: "Claimed", tone: "profit" };
-    return { label: "Lost", tone: "loss" };
+    return { label: "Redeemed", tone: "neutral" };
   }
   if (type === "DEPOSIT") return { label: "Deposited", tone: "in" };
   if (type === "WITHDRAW") return { label: "Withdrew", tone: "out" };
@@ -139,13 +141,20 @@ export function HistoryTable({
   isLoading,
   searchQuery,
   onCloseLostPosition,
-  closingPositionId,
+  closingPositionIds,
+  closedPositionIds,
 }: {
   trades: Trade[];
   isLoading: boolean;
   searchQuery: string;
-  onCloseLostPosition?: (conditionId: string) => void;
-  closingPositionId?: string | null;
+  onCloseLostPosition?: (conditionId: string, negRisk?: boolean) => void;
+  closingPositionIds?: ReadonlySet<string>;
+  /**
+   * Conditions already redeemed this session. The synthetic lost row outlives
+   * a successful close by the Data API's 10–30s indexing window; keeping the
+   * button disabled prevents a duplicate (0-payout) redeem submission.
+   */
+  closedPositionIds?: ReadonlySet<string>;
 }) {
   const filteredTrades = trades.filter((t) =>
     t.market.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -211,11 +220,19 @@ export function HistoryTable({
           const activity = getActivity(
             trade.type,
             trade.side,
-            trade.usdcAmount
+            trade.usdcAmount,
+            trade.isLostPosition === true
           );
           const href = tradeHref(trade);
-          const isLost = activity.label === "Lost";
-          const isClosing = closingPositionId === trade.market.conditionId;
+          const isLost = trade.isLostPosition === true;
+          const isClosing = Boolean(
+            trade.market.conditionId &&
+              closingPositionIds?.has(trade.market.conditionId)
+          );
+          const isClosed = Boolean(
+            trade.market.conditionId &&
+              closedPositionIds?.has(trade.market.conditionId)
+          );
           const outcomeColor =
             trade.outcome === "Yes"
               ? "text-emerald-600 dark:text-emerald-400"
@@ -291,10 +308,11 @@ export function HistoryTable({
                         type="button"
                         onClick={() =>
                           onCloseLostPosition(
-                            trade.market.conditionId as string
+                            trade.market.conditionId as string,
+                            trade.market.negRisk ?? false
                           )
                         }
-                        disabled={isClosing}
+                        disabled={isClosing || isClosed}
                         className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                         aria-label="Close lost position"
                       >
@@ -332,11 +350,19 @@ export function HistoryTable({
           const activity = getActivity(
             trade.type,
             trade.side,
-            trade.usdcAmount
+            trade.usdcAmount,
+            trade.isLostPosition === true
           );
           const href = tradeHref(trade);
-          const isLost = activity.label === "Lost";
-          const isClosing = closingPositionId === trade.market.conditionId;
+          const isLost = trade.isLostPosition === true;
+          const isClosing = Boolean(
+            trade.market.conditionId &&
+              closingPositionIds?.has(trade.market.conditionId)
+          );
+          const isClosed = Boolean(
+            trade.market.conditionId &&
+              closedPositionIds?.has(trade.market.conditionId)
+          );
           const outcomeColor =
             trade.outcome === "Yes"
               ? "text-emerald-600 dark:text-emerald-400"
@@ -394,9 +420,12 @@ export function HistoryTable({
                   <button
                     type="button"
                     onClick={() =>
-                      onCloseLostPosition(trade.market.conditionId as string)
+                      onCloseLostPosition(
+                        trade.market.conditionId as string,
+                        trade.market.negRisk ?? false
+                      )
                     }
-                    disabled={isClosing}
+                    disabled={isClosing || isClosed}
                     aria-label="Close lost position"
                     className="shrink-0 inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                   >

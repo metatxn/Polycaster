@@ -9,6 +9,7 @@ import { DepositModal } from "@/components/deposit-modal";
 import { Navbar } from "@/components/navbar";
 import { HistoryTable } from "@/components/portfolio/history-table";
 import { PortfolioLedgerHeader } from "@/components/portfolio/ledger-header";
+import { mergePortfolioHistory } from "@/components/portfolio/merge-history";
 import { OrdersTable } from "@/components/portfolio/orders-table";
 import { PortfolioPnlCard } from "@/components/portfolio/pnl-card";
 import { PositionsTable } from "@/components/portfolio/positions-table";
@@ -146,10 +147,19 @@ export default function PortfolioPage() {
 
   const { mutate: cancelOrder } = useCancelOrder();
   const [cancellingOrderId, setCancellingOrderId] = useState<string>();
-  const { redeemPositions, isLoading: isRedeemingLost } = useCtfOperations();
-  const [closingConditionId, setClosingConditionId] = useState<string | null>(
-    null
-  );
+  const { redeemPositions } = useCtfOperations();
+  const [closingConditionIds, setClosingConditionIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  // Conditions successfully redeemed this session — the synthetic lost row
+  // survives the Data API's 10–30s indexing window, and its Close button must
+  // stay disabled or a re-click submits a duplicate (0-payout) redeem.
+  const [closedConditionIds, setClosedConditionIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const [redeemingPositionIds, setRedeemingPositionIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
 
   // Sell position modal state
   const [sellPosition, setSellPosition] = useState<Position | null>(null);
@@ -193,12 +203,31 @@ export default function PortfolioPage() {
     window.history.replaceState(null, "", url);
   }, []);
 
-  const handleCloseLostPosition = async (conditionId: string) => {
-    if (!tradingAddress || isRedeemingLost) return;
-    setClosingConditionId(conditionId);
+  const handleCloseLostPosition = async (
+    conditionId: string,
+    negRisk = false
+  ) => {
+    // Per-id set (not a single slot): a shared slot lets a second row's click
+    // steal it and its `finally` re-enable the first row mid-flight, allowing
+    // duplicate concurrent redeems of the same condition.
+    if (!tradingAddress || closingConditionIds.has(conditionId)) return;
+    setClosingConditionIds((current) => {
+      const next = new Set(current);
+      next.add(conditionId);
+      return next;
+    });
     try {
-      const result = await redeemPositions(conditionId, tradingAddress);
+      const result = await redeemPositions(
+        conditionId,
+        tradingAddress,
+        negRisk
+      );
       if (result.success) {
+        setClosedConditionIds((current) => {
+          const next = new Set(current);
+          next.add(conditionId);
+          return next;
+        });
         toast.success("Position closed successfully");
         refetchTrades();
         refetchPositions();
@@ -209,7 +238,53 @@ export default function PortfolioPage() {
     } catch {
       toast.error("Failed to close position");
     } finally {
-      setClosingConditionId(null);
+      setClosingConditionIds((current) => {
+        const next = new Set(current);
+        next.delete(conditionId);
+        return next;
+      });
+    }
+  };
+
+  const handleRedeemPosition = async (position: Position) => {
+    if (
+      !tradingAddress ||
+      !position.conditionId ||
+      redeemingPositionIds.has(position.id)
+    ) {
+      return;
+    }
+
+    setRedeemingPositionIds((current) => {
+      const next = new Set(current);
+      next.add(position.id);
+      return next;
+    });
+    try {
+      const result = await redeemPositions(
+        position.conditionId,
+        tradingAddress,
+        position.negRisk ?? false
+      );
+
+      if (result.success) {
+        toast.success("Winnings redeemed successfully");
+        refetchTrades();
+        refetchPositions();
+        refetchPnl();
+        refetchUserDetails();
+        refreshProxyWallet();
+      } else {
+        toast.error(result.error || "Failed to redeem winnings");
+      }
+    } catch {
+      toast.error("Failed to redeem winnings");
+    } finally {
+      setRedeemingPositionIds((current) => {
+        const next = new Set(current);
+        next.delete(position.id);
+        return next;
+      });
     }
   };
 
@@ -351,53 +426,7 @@ export default function PortfolioPage() {
 
   const mergedHistory = useMemo<Trade[]>(() => {
     const trades: Trade[] = tradesData?.trades || [];
-    if (!lostPositions.length) return trades;
-
-    const syntheticLost: Trade[] = lostPositions.map((lp) => {
-      const resolvedTimestamp = closedTimes[lp.conditionId] || lp.endDate;
-      const timestamp = resolvedTimestamp.includes("T")
-        ? resolvedTimestamp
-        : `${resolvedTimestamp}T23:59:59Z`;
-
-      return {
-        id: `lost-${lp.conditionId}-${lp.outcomeIndex}`,
-        timestamp,
-        type: "REDEEM",
-        side: null,
-        size: lp.size,
-        price: lp.avgPrice,
-        usdcAmount: 0,
-        outcome: lp.outcome,
-        transactionHash: "",
-        market: {
-          conditionId: lp.conditionId,
-          title: lp.market.title,
-          slug: lp.market.slug,
-          eventSlug: lp.market.eventSlug,
-          icon: lp.market.icon,
-        },
-      };
-    });
-
-    // Avoid duplicate entries if activity already contains a matching redeem row.
-    const knownLostKeys = new Set(
-      trades
-        .filter((t) => t.type === "REDEEM")
-        .map((t) => `${t.market.conditionId}-${t.outcome}`)
-    );
-
-    const merged = [
-      ...trades,
-      ...syntheticLost.filter(
-        (t) => !knownLostKeys.has(`${t.market.conditionId}-${t.outcome}`)
-      ),
-    ];
-
-    merged.sort(
-      (a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
-    return merged;
+    return mergePortfolioHistory({ trades, lostPositions, closedTimes });
   }, [tradesData?.trades, lostPositions, closedTimes]);
 
   // Not connected state
@@ -533,6 +562,8 @@ export default function PortfolioPage() {
                   sortDirection={sortDirection}
                   onSort={handleSort}
                   onSell={handleSellPosition}
+                  onRedeem={handleRedeemPosition}
+                  redeemingPositionIds={redeemingPositionIds}
                 />
               </m.div>
             )}
@@ -566,7 +597,8 @@ export default function PortfolioPage() {
                   isLoading={loadingTrades || loadingPositions}
                   searchQuery={searchQuery}
                   onCloseLostPosition={handleCloseLostPosition}
-                  closingPositionId={closingConditionId}
+                  closingPositionIds={closingConditionIds}
+                  closedPositionIds={closedConditionIds}
                 />
               </m.div>
             )}

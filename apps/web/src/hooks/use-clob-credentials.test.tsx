@@ -19,6 +19,10 @@ const viemWalletClientMock = vi.hoisted(() => ({
   getViemWalletClient: vi.fn(),
 }));
 
+const walletModalMock = vi.hoisted(() => ({
+  closeWalletModal: vi.fn(async () => undefined),
+}));
+
 const unifiedSdkMock = vi.hoisted(() => ({
   createUnifiedPolymarketSecureClient: vi.fn(),
   createUnifiedPolymarketViemSigner: vi.fn((signer: unknown) => ({
@@ -46,6 +50,7 @@ vi.mock("wagmi", () => ({
 }));
 
 vi.mock("@/lib/viem-wallet-client", () => viemWalletClientMock);
+vi.mock("@/lib/wallet-modal", () => walletModalMock);
 
 vi.mock("@knoww/shared-types/polymarket-unified", () => unifiedSdkMock);
 
@@ -75,6 +80,7 @@ describe("useClobCredentials", () => {
     wagmiState.address = walletAddress;
     wagmiState.isConnected = true;
     wagmiState.walletClient = { request: vi.fn() };
+    walletModalMock.closeWalletModal.mockResolvedValue(undefined);
 
     viemWalletClientMock.getViemWalletClient.mockResolvedValue({
       signTypedData: vi.fn().mockResolvedValue("0xsigned"),
@@ -119,6 +125,50 @@ describe("useClobCredentials", () => {
     expect(sessionStorage.length).toBe(0);
     expect(storedEntryFor()?.credentials).toEqual(credentials);
     expect(storedEntryFor()?.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it("closes the AppKit handoff modal after the credential signature succeeds", async () => {
+    const signer = {
+      signTypedData: vi.fn().mockResolvedValue("0xsigned"),
+    };
+    viemWalletClientMock.getViemWalletClient.mockResolvedValue(signer);
+    globalThis.fetch = vi.fn(async () => {
+      expect(walletModalMock.closeWalletModal).toHaveBeenCalledTimes(1);
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          credentials,
+        }),
+      };
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useClobCredentials());
+
+    await act(async () => {
+      await result.current.deriveCredentials();
+    });
+
+    expect(signer.signTypedData).toHaveBeenCalledTimes(1);
+    expect(walletModalMock.closeWalletModal).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the AppKit handoff modal when the credential signature fails", async () => {
+    const signer = {
+      signTypedData: vi.fn().mockRejectedValue(new Error("User rejected")),
+    };
+    viemWalletClientMock.getViemWalletClient.mockResolvedValue(signer);
+
+    const { result } = renderHook(() => useClobCredentials());
+
+    await act(async () => {
+      await expect(result.current.deriveCredentials()).rejects.toThrow(
+        "User rejected"
+      );
+    });
+
+    expect(walletModalMock.closeWalletModal).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("shares one in-flight credential derivation across concurrent callers", async () => {

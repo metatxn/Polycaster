@@ -3,6 +3,7 @@ import {
   encodeFunctionData,
   erc20Abi,
   type Hex,
+  maxUint256,
   type PublicClient,
 } from "viem";
 import {
@@ -29,11 +30,15 @@ export interface ApprovalTransaction {
 export interface ReadErc20AllowanceOptions {
   token?: Address;
   fallbackRaw?: bigint;
+  /** Called when a read fails and the fallback value is returned. */
+  onFallback?: (error: unknown) => void;
 }
 
 export interface ReadErc1155ApprovalOptions {
   token?: Address;
   fallbackApproved?: boolean;
+  /** Called when a read fails and the fallback value is returned. */
+  onFallback?: (error: unknown) => void;
 }
 
 export interface TradingApprovalStatus {
@@ -46,7 +51,12 @@ export interface TradingApprovalStatus {
   pusdNegRiskAdapter: boolean;
   pusdCtfCollateralAdapter: boolean;
   pusdNegRiskCtfCollateralAdapter: boolean;
-  /** USDC.e approval to CollateralOnramp for wrap(). */
+  /**
+   * USDC.e approval to CollateralOnramp for wrap(). Informational only: the
+   * auto-wrap batch bundles its own exact approve and consumes it entirely,
+   * zeroing any standing allowance — so this must not gate trading readiness
+   * or setup completion (it would re-fail after every wrap-funded BUY).
+   */
   usdcOnramp: boolean;
   /** ERC1155 outcome token operator approvals for CLOB/adapter operations. */
   ctfExchangeApproval: boolean;
@@ -64,6 +74,11 @@ export interface TradingApprovalStatus {
   ctfOperationsApproved: boolean;
   /** True when neg-risk conversion adapter approvals are complete. */
   negRiskConversionApproved: boolean;
+}
+
+export interface ClobOrderApprovalRequirement {
+  side: "BUY" | "SELL";
+  negRisk?: boolean;
 }
 
 const ERC1155_APPROVAL_ABI = [
@@ -112,6 +127,77 @@ export function getPusdExchangeApprovalSpender(negRisk?: boolean): Address {
   ) as Address;
 }
 
+export function isClobOrderApproved(
+  status: TradingApprovalStatus,
+  requirement: ClobOrderApprovalRequirement
+): boolean {
+  if (requirement.side === "SELL") {
+    // Neg-risk settlement moves outcome tokens through the adapter as well as
+    // the exchange — same operator pair clobTradingApproved requires.
+    return requirement.negRisk
+      ? status.ctfNegRiskExchangeApproval && status.ctfNegRiskAdapterApproval
+      : status.ctfExchangeApproval;
+  }
+
+  // No standing USDC.e→onramp allowance is required for a BUY: the auto-wrap
+  // batch (buildPusdAutoWrapTransactions) carries its own exact approve and
+  // consumes it whole, zeroing any standing allowance — gating orders on it
+  // would re-fail after every wrap-funded BUY.
+  return requirement.negRisk
+    ? status.pusdNegRiskExchange && status.pusdNegRiskAdapter
+    : status.pusdCtfExchange;
+}
+
+export function buildClobOrderApprovalTransactions(
+  status: TradingApprovalStatus,
+  requirement: ClobOrderApprovalRequirement
+): ApprovalTransaction[] {
+  const txns: ApprovalTransaction[] = [];
+
+  if (requirement.side === "SELL") {
+    const operatorTargets: Array<[boolean, Address]> = requirement.negRisk
+      ? [
+          [
+            status.ctfNegRiskExchangeApproval,
+            NEG_RISK_CTF_EXCHANGE_ADDRESS as Address,
+          ],
+          [
+            status.ctfNegRiskAdapterApproval,
+            NEG_RISK_ADAPTER_ADDRESS as Address,
+          ],
+        ]
+      : [[status.ctfExchangeApproval, CTF_EXCHANGE_ADDRESS as Address]];
+    for (const [approved, operator] of operatorTargets) {
+      if (!approved) {
+        txns.push(buildErc1155ApprovalTransaction(operator));
+      }
+    }
+    return txns;
+  }
+
+  const pusdTargets: Array<[boolean, Address, bigint]> = requirement.negRisk
+    ? [
+        [
+          status.pusdNegRiskExchange,
+          NEG_RISK_CTF_EXCHANGE_ADDRESS as Address,
+          maxUint256,
+        ],
+        [
+          status.pusdNegRiskAdapter,
+          NEG_RISK_ADAPTER_ADDRESS as Address,
+          maxUint256,
+        ],
+      ]
+    : [[status.pusdCtfExchange, CTF_EXCHANGE_ADDRESS as Address, maxUint256]];
+
+  appendMissingPusdApprovalTransactions(txns, pusdTargets);
+
+  // Deliberately no USDC.e→onramp grant here: the auto-wrap batch approves the
+  // exact wrap amount itself, so a standing allowance is never consumed as a
+  // prerequisite — granting one per order would just be an extra signature.
+  return txns;
+}
+
 export async function readErc20Allowance(
   client: PublicClient,
   owner: Address,
@@ -126,7 +212,10 @@ export async function readErc20Allowance(
       args: [owner, spender],
     });
   } catch (err) {
-    if (options.fallbackRaw !== undefined) return options.fallbackRaw;
+    if (options.fallbackRaw !== undefined) {
+      options.onFallback?.(err);
+      return options.fallbackRaw;
+    }
     throw err;
   }
 }
@@ -145,6 +234,37 @@ export function readPusdExchangeAllowance(
   );
 }
 
+/**
+ * Effective pUSD allowance available to a CLOB order: the exchange allowance,
+ * and for neg-risk markets the minimum of the exchange and NegRiskAdapter
+ * allowances (CLOB V2 pulls collateral through both). This is the single
+ * owner of the "which spenders must cover a neg-risk order" rule for on-chain
+ * reads; the same rule over an allowance map lives in the extension's
+ * setup-flow `getTradingOrderAllowance`.
+ */
+export async function readClobOrderPusdAllowance(
+  client: PublicClient,
+  owner: Address,
+  negRisk?: boolean,
+  options: Omit<ReadErc20AllowanceOptions, "token"> = {}
+): Promise<bigint> {
+  const [exchangeAllowance, adapterAllowance] = await Promise.all([
+    readPusdExchangeAllowance(client, owner, negRisk, options),
+    negRisk
+      ? readErc20Allowance(
+          client,
+          owner,
+          NEG_RISK_ADAPTER_ADDRESS as Address,
+          options
+        )
+      : Promise.resolve(null),
+  ]);
+  if (adapterAllowance === null) return exchangeAllowance;
+  return exchangeAllowance < adapterAllowance
+    ? exchangeAllowance
+    : adapterAllowance;
+}
+
 export async function readErc1155Approval(
   client: PublicClient,
   owner: Address,
@@ -160,6 +280,7 @@ export async function readErc1155Approval(
     });
   } catch (err) {
     if (options.fallbackApproved !== undefined) {
+      options.onFallback?.(err);
       return options.fallbackApproved;
     }
     throw err;
@@ -291,7 +412,11 @@ export async function readTradingApprovalStatus(
     pusdNegRiskAdapter &&
     ctfNegRiskAdapterApproval &&
     ctfNegRiskCollateralAdapterApproval;
-  const allApproved = clobTradingApproved && autoWrapApproved;
+  // autoWrapApproved is deliberately excluded: every auto-wrap zeroes the
+  // standing onramp allowance (exact self-approve, fully consumed), so
+  // including it would flip "all approved" back to false after the first
+  // wrap-funded BUY and re-trigger setup/approval prompts forever.
+  const allApproved = clobTradingApproved;
 
   return {
     pusdCtf,
@@ -355,30 +480,45 @@ export function buildCtfCollateralApprovalTransaction(
   );
 }
 
+function appendMissingPusdApprovalTransactions(
+  txns: ApprovalTransaction[],
+  targets: Array<[boolean, Address, bigint]>
+): void {
+  for (const [approved, spender, amountRaw] of targets) {
+    if (!approved) {
+      txns.push(
+        buildErc20ApprovalTransaction(
+          PUSD_ADDRESS as Address,
+          spender,
+          amountRaw
+        )
+      );
+    }
+  }
+}
+
 export function buildTradingApprovalTransactions(
   status: TradingApprovalStatus,
   approvalAmountRaw: bigint
 ): ApprovalTransaction[] {
   const txns: ApprovalTransaction[] = [];
 
-  const pusdTargets: Array<[boolean, Address]> = [
-    [status.pusdCtf, PUSD_CTF_APPROVAL_TARGET as Address],
-    [status.pusdCtfExchange, CTF_EXCHANGE_ADDRESS as Address],
-    [status.pusdNegRiskExchange, NEG_RISK_CTF_EXCHANGE_ADDRESS as Address],
+  const pusdTargets: Array<[boolean, Address, bigint]> = [
+    [status.pusdCtf, PUSD_CTF_APPROVAL_TARGET as Address, approvalAmountRaw],
+    [status.pusdCtfExchange, CTF_EXCHANGE_ADDRESS as Address, maxUint256],
+    [
+      status.pusdNegRiskExchange,
+      NEG_RISK_CTF_EXCHANGE_ADDRESS as Address,
+      maxUint256,
+    ],
     // CLOB V2 pulls pUSD via the neg-risk adapter for neg-risk market orders.
-    [status.pusdNegRiskAdapter, NEG_RISK_ADAPTER_ADDRESS as Address],
+    [
+      status.pusdNegRiskAdapter,
+      NEG_RISK_ADAPTER_ADDRESS as Address,
+      maxUint256,
+    ],
   ];
-  for (const [approved, spender] of pusdTargets) {
-    if (!approved) {
-      txns.push(
-        buildErc20ApprovalTransaction(
-          PUSD_ADDRESS as Address,
-          spender,
-          approvalAmountRaw
-        )
-      );
-    }
-  }
+  appendMissingPusdApprovalTransactions(txns, pusdTargets);
 
   if (!status.usdcOnramp) {
     txns.push(

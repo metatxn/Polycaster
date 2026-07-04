@@ -55,6 +55,8 @@ export async function getViemWalletClient(
     walletClient as unknown as RequestProvider,
     account
   );
-  await client.requestAddresses();
+  if (!account) {
+    await client.requestAddresses();
+  }
   return client;
 }

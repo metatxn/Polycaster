@@ -194,19 +194,27 @@ Request body
 | Field | Type | Required | Validation |
 | --- | --- | --- | --- |
 | `watchlistItemIds` | `string[]` | No | UUIDs, max 25. |
-| `portfolio.bankrollUsd` | `string` | No | Non-negative decimal string. |
-| `portfolio.cashUsd` | `string` | No | Non-negative decimal string. |
-| `portfolio.maxPositionUsd` | `string` | No | Non-negative decimal string. |
-| `portfolio.maxTradeUsd` | `string` | No | Non-negative decimal string. |
-| `portfolio.maxDrawdownPct` | `string` | No | Non-negative decimal string. |
-| `portfolio.realizedPnlUsd` | `string` | No | Signed decimal string. |
+| `portfolio` | `object` | No | Optional overall. When provided, all nested fields below are required by the current Zod schema. |
+| `portfolio.bankrollUsd` | `string` | Yes, if `portfolio` is provided | Non-negative decimal string. |
+| `portfolio.cashUsd` | `string` | Yes, if `portfolio` is provided | Non-negative decimal string. |
+| `portfolio.maxPositionUsd` | `string` | Yes, if `portfolio` is provided | Non-negative decimal string. |
+| `portfolio.maxTradeUsd` | `string` | Yes, if `portfolio` is provided | Non-negative decimal string. |
+| `portfolio.maxDrawdownPct` | `string` | Yes, if `portfolio` is provided | Non-negative decimal string. |
+| `portfolio.realizedPnlUsd` | `string` | Yes, if `portfolio` is provided | Signed decimal string. |
 | `executionMode` | `"paper" \| "live"` | No | Optional override. |
 
 Success `200`
 
 - Schema:
   - `success: true`
-  - `run: { id: string, status: "RUNNING" | "COMPLETED" | "FAILED", startedAt: string, completedAt: string | null, itemCount: number, tradeCount: number, blockedCount: number }`
+  - `run: RunDetail`
+  - `RunDetail` extends the run summary fields and adds `items`, where each item contains:
+    - `watchlistItem: AgentWatchlistItem`
+    - `evidence: object`
+    - `votes: object[]`
+    - `decision: { action, approved, majorityAction, confidence, fairProbability, sizeUsd, reason, riskFlags, validVotes, invalidVotes }`
+    - `fill: object | null`
+    - `resolution: { tokenId, conditionId?, marketSlug?, outcomeYes: 0 | 1, settlementPrice: string, resolvedAt: string } | null`
 
 Errors
 
@@ -418,7 +426,7 @@ Request body
 
 - None
 
-Success `200`
+Success `204`
 
 - Empty body
 - Returns extension CORS headers from `handleExtensionPreflight()`
@@ -467,8 +475,9 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Missing or invalid 'text' field" }` or structured fallback body with `success: false` when JSON parsing fails.
+- `400`: `{ success: false, error: "Missing or invalid 'text' field" }` or the structured fallback body `{ success: false, category: "other", entities: [], tags: [], topics: [], searchQuery: "", keywords: "", confidence: 0, inputLength: 0, truncated: false, fallbackReason: "provider-error", error: "Invalid request payload" }` when JSON parsing fails.
 - `401`: Returned only when bearer auth is supplied but invalid or expired.
+- `403`: `{ error: "Forbidden" }` when neither a valid bearer token nor an allowed extension `Origin` / app `Referer` is present.
 - `404`: Not used by this handler.
 - `500`: Not emitted directly; provider failures fail open into a `200` body with `success: false`, `fallbackReason`, and `error`.
 
@@ -521,8 +530,9 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Missing 'text' query parameter", usage: "GET /api/ai/extract-topics?text=your+text+here" }`
+- `400`: `{ success: false, error: "Missing 'text' query parameter", usage: "GET /api/ai/extract-topics?text=your+text+here" }`
 - `401`: Returned only when bearer auth is supplied but invalid or expired.
+- `403`: `{ error: "Forbidden" }` when neither a valid bearer token nor an allowed extension `Origin` / app `Referer` is present.
 - `404`: Not used.
 - `500`: Not emitted directly; extraction failures return `200` fallback bodies.
 
@@ -564,7 +574,7 @@ Request body
 
 - None
 
-Success `200`
+Success `204`
 
 - Empty body
 - Returns extension CORS headers from `handleExtensionPreflight()`
@@ -609,10 +619,11 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Missing 'postText' or 'marketTitle'" }` or fallback body `{ relevant: true, reason: "", confidence: 0, error: "Invalid request body" }`
+- `400`: `{ success: false, error: "Missing 'postText' or 'marketTitle'" }` or fallback body `{ success: false, relevant: true, reason: "", confidence: 0, error: "Invalid request body" }`
 - `401`: Returned only when bearer auth is supplied but invalid or expired.
+- `403`: `{ error: "Forbidden" }` when neither a valid bearer token nor an allowed extension `Origin` / app `Referer` is present.
 - `404`: Not used.
-- `500`: Unexpected handler failures return `{ relevant: true, reason: "", confidence: 0, error: "Internal server error" }`
+- `500`: Unexpected handler failures return `{ success: false, relevant: true, reason: "", confidence: 0, error: "Internal server error" }`
 
 Rate limiting
 
@@ -655,7 +666,7 @@ Request body
 
 - None
 
-Success `200`
+Success `204`
 
 - Empty body
 - Returns extension CORS headers from `handleExtensionPreflight()`
@@ -834,11 +845,11 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Invalid request payload", details: formattedZodError }` or `{ error: "Invalid request payload" }`
+- `400`: `{ success: false, error: "Invalid request payload", details: formattedZodError }` or `{ success: false, error: "Invalid request payload" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: Not used.
-- `503`: `{ error: "Extension session secret is not configured" }`
+- `503`: `{ success: false, error: "Extension session secret is not configured" }`
 
 Rate limiting
 
@@ -891,11 +902,11 @@ Success `200`
 
 Errors
 
-- `400`: `{ error: "Invalid request payload", details: formattedZodError }` or `{ error: "Invalid request payload" }`
-- `401`: `{ error: "Invalid or expired challenge" }` or `{ error: "Invalid signature" }`
+- `400`: `{ success: false, error: "Invalid request payload", details: formattedZodError }` or `{ success: false, error: "Invalid request payload" }`
+- `401`: `{ success: false, error: "Invalid or expired challenge" }`, `{ success: false, error: "Invalid signature" }`, or `{ success: false, error: "Invalid signature or expired challenge" }`
 - `404`: Not used.
 - `500`: Not used.
-- `503`: `{ error: "Extension session secret is not configured" }` or `{ error: "Failed to establish extension session" }`
+- `503`: `{ success: false, error: "Extension session secret is not configured" }` or `{ success: false, error: "Failed to establish extension session" }`
 
 Rate limiting
 
@@ -979,7 +990,7 @@ Request body
 
 - None
 
-Success `200`
+Success `204`
 
 - Empty body
 - Returns extension CORS headers from `handleExtensionPreflight()`
@@ -3586,7 +3597,7 @@ Query parameters
 | `whaleCount`     | `number`                              | No       | Parsed integer, clamped to `5..100`, default `25`.                                                           |
 | `minTradeSize`   | `number`                              | No       | Parsed float, defaults to `100` if invalid or negative.                                                      |
 | `tradesPerWhale` | `number`                              | No       | Parsed integer, clamped to `1..100`, default `50`. Multiplied by `2` for `MONTH` and `ALL`, capped at `100`. |
-| `timePeriod`     | `"DAY" \| "WEEK" \| "MONTH" \| "ALL"` | No       | Invalid values fall back to `WEEK`.                                                                          |
+| `timePeriod`     | `"DAY" \| "WEEK" \| "MONTH" \| "ALL"` | No       | Must match the enum when present; omitted values default to `WEEK`.                                          |
 
 Success `200`
 
@@ -3601,7 +3612,7 @@ Success `200`
 
 Errors
 
-- `400`: Not used.
+- `400`: `{ success: false, error: string }` when query validation fails, such as an invalid `timePeriod`.
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, activities: [], whaleCount: 0, totalTrades: 0, lastUpdated: string, dataAge: number, error: string }`

@@ -120,10 +120,10 @@ flowchart LR
 | Sports by league | `apps/web/src/app/events/sports/[sport]/page.tsx` | League- or sport-specific sports browsing |
 | Sports live | `apps/web/src/app/events/sports/live/page.tsx` | Primary live sports view with websocket-backed game state |
 | Markets index | `apps/web/src/app/markets/page.tsx` | Top-level market browsing and discovery page |
-| Market detail | `apps/web/src/app/markets/[slug]/page.tsx` | Detailed market trading and order book UI |
+| Market detail redirect | `apps/web/src/app/markets/[slug]/page.tsx` | Legacy route that permanently redirects old market-detail URLs to `/markets`; the canonical public detail surface is `apps/web/src/app/events/detail/[slug]/page.tsx` |
 | Portfolio | `apps/web/src/app/portfolio/page.tsx` | Positions, orders, trades, P&L, deposit/withdraw |
-| Live alias | `apps/web/src/app/live/page.tsx` | Shortcut route for the live sports experience |
-| Sports live alias | `apps/web/src/app/sports/live/page.tsx` | Additional alias route for the live sports experience |
+| Live alias redirect | `apps/web/src/app/live/page.tsx` | Permanent redirect from the legacy `/live` path to the canonical `/events/sports/live` route |
+| Sports live alias redirect | `apps/web/src/app/sports/live/page.tsx` | Permanent redirect from the intermediate `/sports/live` alias to `/events/sports/live` |
 | Search | `apps/web/src/app/search/page.tsx` | Client-side market discovery with recent-search persistence |
 | Whales | `apps/web/src/app/whales/page.tsx` | Whale activity and suspicious/insider activity analysis |
 | Whale backtest | `apps/web/src/app/whales/backtest/page.tsx` | Runs the insider-detector backtest UI against recently resolved markets |

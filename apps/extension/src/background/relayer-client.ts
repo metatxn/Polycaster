@@ -16,6 +16,7 @@ import {
   executeSafeRelayerTransaction,
   isRetryableSafeNonceRaceError,
   type RelayerExecutionTransport,
+  type RelayerNonceType,
   type RelayerSigner,
   type RelayerSubmitResponse,
   type RelayerTransaction,
@@ -241,6 +242,14 @@ const relayerTransport: RelayerExecutionTransport = {
   getTransaction: (id) => relayerGet("/transaction", { id }),
 };
 
+export async function isRelayerWalletDeployed(
+  walletAddress: Address,
+  type: RelayerNonceType
+): Promise<boolean> {
+  const address = getAddress(walletAddress) as Address;
+  return relayerTransport.getDeployed?.(address, type) ?? false;
+}
+
 function toRelayerSigner(walletClient: BridgeWalletClient): RelayerSigner {
   return walletClient as unknown as RelayerSigner;
 }
@@ -315,7 +324,10 @@ export async function executeViaDepositWallet(
     walletAddress: depositWallet,
   });
 
-  const deployed = await relayerTransport.getDeployed?.(depositWallet);
+  const deployed = await relayerTransport.getDeployed?.(
+    depositWallet,
+    "WALLET"
+  );
   if (!deployed) {
     throw new Error(
       "Your deposit wallet is not deployed. Complete trading wallet setup first."
@@ -414,23 +426,16 @@ export async function deployDepositWallet(ownerAddress: Address): Promise<{
     walletAddress,
   });
 
-  const deployed = await relayerTransport.getDeployed?.(walletAddress);
-  if (deployed) {
-    logInfo("relayer.deploy-deposit-wallet.already-deployed", {
-      walletAddress,
-    });
-    return {
-      transactionID: "",
-      txHash: "",
-      proxyAddress: walletAddress,
-      alreadyDeployed: true,
-    };
-  }
-
   const result = await deployDepositWalletRelayerWallet({
     transport: relayerTransport,
     ownerAddress: owner,
     options: {
+      checkDeployed: true,
+      onAlreadyDeployed: (deployedWalletAddress) => {
+        logInfo("relayer.deploy-deposit-wallet.already-deployed", {
+          walletAddress: deployedWalletAddress,
+        });
+      },
       onSubmitted: ({ transactionID, state }) => {
         logInfo("relayer.deploy-deposit-wallet.submitted", {
           transactionID,
@@ -446,5 +451,6 @@ export async function deployDepositWallet(ownerAddress: Address): Promise<{
     transactionID: result.transactionID,
     txHash: result.transactionHash,
     proxyAddress: result.walletAddress,
+    ...(result.alreadyDeployed ? { alreadyDeployed: true } : {}),
   };
 }

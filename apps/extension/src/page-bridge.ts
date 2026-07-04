@@ -12,6 +12,11 @@
 
 type EIP1193Provider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (
+    event: string,
+    listener: (...args: unknown[]) => void
+  ) => void;
 };
 
 type LegacyWalletProvider = EIP1193Provider & {
@@ -43,6 +48,7 @@ interface EIP6963Detail {
 
 const ALLOWED_METHODS = new Set([
   "eth_requestAccounts",
+  "wallet_requestPermissions",
   "eth_accounts",
   "eth_chainId",
   "eth_signTypedData_v4",
@@ -56,6 +62,7 @@ const ALLOWED_METHODS = new Set([
 
 const discoveredWallets = new Map<string, EIP6963Detail>();
 const discoveredWalletProviderMap = new Map<LegacyWalletProvider, string>();
+const subscribedProviders = new WeakSet<EIP1193Provider>();
 const LEGACY_INJECTED_UUID = "__injected__";
 
 /** The provider the user chose (or the only one available). */
@@ -80,6 +87,7 @@ function discoverWallets(): void {
       detail.provider as LegacyWalletProvider,
       detail.info.uuid
     );
+    subscribeToProviderEvents(detail.provider);
     broadcastWallets();
   });
   window.dispatchEvent(new Event("eip6963:requestProvider"));
@@ -114,6 +122,7 @@ function discoverLegacyWallets(): void {
 
     if (existingNames.has(displayName.toLowerCase())) {
       discoveredWalletProviderMap.set(provider, providerUuid);
+      subscribeToProviderEvents(provider);
       return;
     }
 
@@ -129,8 +138,51 @@ function discoverLegacyWallets(): void {
 
     discoveredWallets.set(providerUuid, detail);
     discoveredWalletProviderMap.set(provider, providerUuid);
+    subscribeToProviderEvents(provider);
     existingNames.add(displayName.toLowerCase());
   });
+}
+
+function normalizeAccounts(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((account): account is string => typeof account === "string")
+    : [];
+}
+
+function postAccountsChanged(
+  provider: EIP1193Provider,
+  accounts: unknown
+): void {
+  window.postMessage(
+    stamp({
+      type: "KNOWW_WALLET_ACCOUNTS_CHANGED" as const,
+      walletUuid: discoveredWalletProviderMap.get(
+        provider as LegacyWalletProvider
+      ),
+      active: activeProvider === provider,
+      accounts: normalizeAccounts(accounts),
+    }),
+    window.location.origin
+  );
+}
+
+function subscribeToProviderEvents(provider: EIP1193Provider): void {
+  if (subscribedProviders.has(provider) || typeof provider.on !== "function") {
+    return;
+  }
+  subscribedProviders.add(provider);
+
+  try {
+    provider.on("accountsChanged", (accounts: unknown) => {
+      postAccountsChanged(provider, accounts);
+    });
+    provider.on("disconnect", () => {
+      postAccountsChanged(provider, []);
+    });
+  } catch {
+    // Some injected wallets expose a partial event API. Discovery/request
+    // forwarding should keep working even if event subscription is unavailable.
+  }
 }
 
 function deriveLegacyWalletName(
@@ -281,17 +333,29 @@ function getLegacyProvider(): EIP1193Provider | null {
 
 function getProvider(uuid?: string): EIP1193Provider | null {
   if (uuid) {
-    if (uuid === LEGACY_INJECTED_UUID) return getLegacyProvider();
+    if (uuid === LEGACY_INJECTED_UUID) {
+      const provider = getLegacyProvider();
+      if (provider) subscribeToProviderEvents(provider);
+      return provider;
+    }
     const w = discoveredWallets.get(uuid);
+    if (w) subscribeToProviderEvents(w.provider);
     return w ? w.provider : null;
   }
-  if (activeProvider) return activeProvider;
-
-  if (discoveredWallets.size > 0) {
-    return [...discoveredWallets.values()][0].provider;
+  if (activeProvider) {
+    subscribeToProviderEvents(activeProvider);
+    return activeProvider;
   }
 
-  return getLegacyProvider();
+  if (discoveredWallets.size > 0) {
+    const provider = [...discoveredWallets.values()][0].provider;
+    subscribeToProviderEvents(provider);
+    return provider;
+  }
+
+  const provider = getLegacyProvider();
+  if (provider) subscribeToProviderEvents(provider);
+  return provider;
 }
 
 function postError(id: string, message: string, code?: number): void {
@@ -309,8 +373,16 @@ function postResult(id: string, result: unknown): void {
 }
 
 (() => {
-  if (window.__KNOWW_BRIDGE__) return;
-  window.__KNOWW_BRIDGE__ = true;
+  // Keyed by injection nonce so a re-injected bridge (extension update on a
+  // live tab, via reinjectContentScript) installs alongside a stale one
+  // instead of deferring to it — the stale listener keeps dropping
+  // mismatched-nonce messages, so it goes inert. Old bridges stored `true`,
+  // which never equals a nonce key, so takeover proceeds past them. A stale
+  // PRE-nonce bridge may still double-handle allowlisted requests, but its
+  // unstamped responses are dropped by the content script's nonce check.
+  const takeoverKey = BRIDGE_NONCE ?? true;
+  if (window.__KNOWW_BRIDGE__ === takeoverKey) return;
+  window.__KNOWW_BRIDGE__ = takeoverKey;
 
   discoverWallets();
 
@@ -395,6 +467,12 @@ function postResult(id: string, result: unknown): void {
 
       try {
         const result = await eth.request({ method, params });
+        if (
+          method === "eth_requestAccounts" &&
+          normalizeAccounts(result).length > 0
+        ) {
+          activeProvider = eth;
+        }
         postResult(id, result);
       } catch (err: unknown) {
         const e = err as { message?: string; code?: number };
@@ -412,7 +490,8 @@ function postResult(id: string, result: unknown): void {
 
 declare global {
   interface Window {
-    __KNOWW_BRIDGE__?: boolean;
+    /** Nonce of the installed bridge; legacy versions stored `true`. */
+    __KNOWW_BRIDGE__?: boolean | string;
   }
 }
 

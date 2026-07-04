@@ -165,13 +165,16 @@
   @apply font-(family-name:--font-geist-mono) text-xs text-(--kwm-ink-3) ml-0.5;
 }
 .kw-app .kw-ticket .tk-limit-status {
-  @apply flex items-center gap-2 px-2.5 py-[7px] rounded-[5px] font-(family-name:--font-geist-mono) text-[12px] tracking-[0.04em] border border-(--kwm-hl) bg-(--kwm-bg) text-(--kwm-ink-2);
+  @apply grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 px-2.5 py-[7px] rounded-[5px] font-(family-name:--font-geist-mono) text-[12px] tracking-[0.04em] leading-snug border border-(--kwm-hl) bg-(--kwm-bg) text-(--kwm-ink-2);
 }
 .kw-app .kw-ticket .tk-limit-status .dot {
   @apply w-1.5 h-1.5 rounded-full bg-(--kwm-ink-3) shrink-0;
 }
+.kw-app .kw-ticket .tk-limit-status .msg {
+  @apply min-w-0 whitespace-normal break-words;
+}
 .kw-app .kw-ticket .tk-limit-status .tick {
-  @apply ml-auto text-(--kwm-ink-dim) text-[12px] tracking-[0.14em] uppercase;
+  @apply hidden justify-self-end self-end text-right text-(--kwm-ink-dim) text-[12px] tracking-[0.14em] uppercase whitespace-nowrap;
 }
 .kw-app .kw-ticket .tk-limit-status.ok {
   @apply border-(--kwm-up-border) bg-(--kwm-up-soft) text-(--kwm-up);

@@ -17,6 +17,7 @@ import { setCspSafeImageSrc } from "./image-proxy";
 import { prioritizeByPreferredOutcomeNames } from "./market-context";
 import { WALLETCONNECT_WALLET_UUID, WalletBridge } from "./trading/bridge";
 import { ExtensionSession } from "./trading/extension-session";
+import { isTradingWalletDeploymentRequired } from "./trading/setup-gates";
 import {
   canSellHolding,
   clampStake,
@@ -88,6 +89,18 @@ function formatWalletPromptError(error: unknown): string {
   return message || "Wallet request failed.";
 }
 
+function openTradingSetupSidePanel(): void {
+  void window.KNOWW_UTILS.safeSendMessage({
+    type: "KNOWW_OPEN_EXTENSION_SIDEPANEL",
+    view: "portfolio",
+  }).then((response?: { ok?: boolean; error?: string }) => {
+    if (response?.ok === true) return;
+    showScrollToast(
+      response?.error || "Open the Knoww side panel to finish trading setup."
+    );
+  });
+}
+
 async function connectAndAuthorizePortfolioWallet(
   walletUuid?: string
 ): Promise<string> {
@@ -95,6 +108,16 @@ async function connectAndAuthorizePortfolioWallet(
   const address = TradingService.getContext().address;
   if (!address) {
     throw new Error("Wallet connection was cancelled.");
+  }
+  await ExtensionSession.ensureAuthorized(address);
+  return address;
+}
+
+async function switchAndAuthorizePortfolioWallet(): Promise<string> {
+  await TradingService.switchWallet();
+  const address = TradingService.getContext().address;
+  if (!address) {
+    throw new Error("Wallet switch was cancelled.");
   }
   await ExtensionSession.ensureAuthorized(address);
   return address;
@@ -2411,10 +2434,7 @@ function createNotificationStack(): HTMLElement {
           <span></span><span></span><span></span>
         </span>
       </div>
-      <span class="knoww-stack-empty-sub">Scroll your feed to discover matches, or browse trending markets.</span>
-      <button type="button" class="knoww-stack-empty-action" data-knoww-browse-trending>
-        Browse trending
-      </button>
+      <span class="knoww-stack-empty-sub">Scroll your feed to discover matches &mdash; browse markets from the Knoww sidebar.</span>
     </div>
   `;
 
@@ -2432,9 +2452,6 @@ function createNotificationStack(): HTMLElement {
   );
   const welcomeDismissBtn = emptyState.querySelector<HTMLButtonElement>(
     "[data-knoww-welcome-dismiss]"
-  );
-  const browseTrendingBtn = emptyState.querySelector<HTMLButtonElement>(
-    "[data-knoww-browse-trending]"
   );
 
   const dismissWelcome = () => {
@@ -2467,18 +2484,6 @@ function createNotificationStack(): HTMLElement {
   liveLabel.textContent = formatLiveTimeLabel();
 
   applyStackExpandedState(container, cachedStackExpanded);
-
-  browseTrendingBtn?.addEventListener("click", () => {
-    cachedStackFilter = "trending";
-    if (container.classList.contains("knoww-stack-minimized")) {
-      cachedStackMinimized = false;
-      applyMinimizedState(container, minimizeToggle, false);
-      persistStackMinimized(false);
-    }
-    setStackExpanded(container, true);
-    updateStackTabsState();
-    void window.KNOWW_ANALYTICS?.track("notification_empty_browse_trending");
-  });
 
   footer.appendChild(liveLabel);
 
@@ -3623,6 +3628,7 @@ function buildStreamBetting(market: Market): HTMLElement {
       | "placed"
       | "failed"
       | "connect"
+      | "setup"
       | "enable"
       | "insufficient"
       | "approve"
@@ -3632,6 +3638,7 @@ function buildStreamBetting(market: Market): HTMLElement {
     else if (txStatus === "placed") kind = "placed";
     else if (txStatus === "failed") kind = "failed";
     else if (!ctx.address) kind = "connect";
+    else if (isTradingWalletDeploymentRequired(ctx)) kind = "setup";
     else if (!ctx.hasCredentials || ctx.state !== "ready") kind = "enable";
     else if (stake > ctx.balance) kind = "insufficient";
     else {
@@ -3665,6 +3672,15 @@ function buildStreamBetting(market: Market): HTMLElement {
           e.stopPropagation();
           // Inline: triggers the wallet's own connect + signature popups.
           runSetup("Connecting…", () => TradingService.ensureReady());
+        };
+        break;
+      case "setup":
+        btn.classList.add("ghost");
+        btn.textContent = "Set up trading";
+        hint.textContent = "Create your trading wallet in the side panel";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          openTradingSetupSidePanel();
         };
         break;
       case "enable":
@@ -4290,7 +4306,7 @@ function showNotificationContent(view: "empty" | "items"): void {
 /**
  * Rewrite the empty state for a streaming surface: it's not "scanning a feed",
  * it's "this game has no markets". Shows a static message and drops the feed-
- * oriented loading dots + "Browse trending" CTA (trending is suppressed here).
+ * oriented loading dots (trending is suppressed here).
  */
 function applyStreamEmptyState(emptyState: HTMLElement): void {
   const welcome = emptyState.querySelector<HTMLElement>("[data-knoww-welcome]");
@@ -4311,9 +4327,6 @@ function applyStreamEmptyState(emptyState: HTMLElement): void {
       .querySelector<HTMLElement>(sel)
       ?.style.setProperty("display", "none", "important");
   }
-  emptyState
-    .querySelector<HTMLElement>("[data-knoww-browse-trending]")
-    ?.style.setProperty("display", "none", "important");
 }
 
 /**
@@ -5232,6 +5245,25 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         return true;
       }
 
+      if (message?.type === "KNOWW_GET_PORTFOLIO_CONNECTED_WALLET") {
+        void (async () => {
+          const hadCachedAddress = Boolean(TradingService.getContext().address);
+          const address = await TradingService.getConnectedWalletAddress();
+          sendResponse({
+            success: true,
+            data: {
+              address,
+              status: address
+                ? "connected"
+                : hadCachedAddress
+                  ? "disconnected"
+                  : "unavailable",
+            },
+          });
+        })();
+        return true;
+      }
+
       if (message?.type === "KNOWW_CONNECT_PORTFOLIO_WALLET") {
         if (message.walletUuid === WALLETCONNECT_WALLET_UUID) {
           sendResponse({ success: true, data: { status: "started" } });
@@ -5251,6 +5283,21 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             const address = await connectAndAuthorizePortfolioWallet(
               message.walletUuid
             );
+            sendResponse({ success: true, data: { address } });
+          } catch (err) {
+            sendResponse({
+              success: false,
+              data: { error: formatWalletPromptError(err) },
+            });
+          }
+        })();
+        return true;
+      }
+
+      if (message?.type === "KNOWW_SWITCH_PORTFOLIO_WALLET") {
+        void (async () => {
+          try {
+            const address = await switchAndAuthorizePortfolioWallet();
             sendResponse({ success: true, data: { address } });
           } catch (err) {
             sendResponse({
@@ -5347,6 +5394,54 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
           await TradingService.deriveCredentials();
         })().catch(() => {});
         return false;
+      }
+
+      if (message?.type === "KNOWW_APPROVE_PORTFOLIO_TRADING") {
+        const requestedAddress =
+          typeof message.address === "string" ? message.address : "";
+        const rawApprovalAmount = (message as { approvalAmount?: unknown })
+          .approvalAmount;
+        const rawAmount =
+          typeof rawApprovalAmount === "string" ? rawApprovalAmount : "";
+        void (async () => {
+          if (!requestedAddress) {
+            throw new Error("Missing wallet address");
+          }
+
+          const currentAddress = TradingService.getContext().address;
+          if (
+            !currentAddress ||
+            currentAddress.toLowerCase() !== requestedAddress.toLowerCase()
+          ) {
+            await TradingService.connectWallet();
+          }
+
+          const connectedAddress = TradingService.getContext().address;
+          if (
+            !connectedAddress ||
+            connectedAddress.toLowerCase() !== requestedAddress.toLowerCase()
+          ) {
+            throw new Error("Connected wallet does not match portfolio wallet");
+          }
+
+          const amount = Number(rawAmount);
+          await TradingService.approveUsdc(
+            false,
+            Number.isFinite(amount) && amount > 0 ? amount : undefined
+          );
+          sendResponse({
+            success: true,
+            data: { status: "approved" },
+          });
+        })().catch((err) => {
+          sendResponse({
+            success: false,
+            data: {
+              error: err instanceof Error ? err.message : "Approval failed",
+            },
+          });
+        });
+        return true;
       }
 
       return false;

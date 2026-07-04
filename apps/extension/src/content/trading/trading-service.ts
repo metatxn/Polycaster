@@ -7,10 +7,11 @@
  */
 
 import { createLogger } from "@knoww/logger";
+import { sameAddress } from "@knoww/shared-types/bridge";
 import {
   type ClobOrderType,
-  normalizeTradingWalletMode,
   POLYGON_CHAIN_ID_HEX,
+  resolvePreferredTradingWalletMode,
 } from "@knoww/shared-types/polymarket";
 import type { OrderBook } from "@knoww/shared-types/slippage";
 
@@ -20,6 +21,7 @@ const WALLET_MODE_STORAGE_KEY = "knoww_trading_wallet_mode";
 import {
   EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
+  TRADING_WALLET_CONNECTED_MESSAGE,
   type TradingBalanceData,
   type TradingGetOrderPreflightResponse,
   type TradingWalletMode,
@@ -29,6 +31,17 @@ import { CredentialManager } from "./credentials";
 import { ExtensionSession } from "./extension-session";
 import type { OutcomeBalances } from "./outcome-balances";
 import { ProxyWallet } from "./proxy-wallet";
+import {
+  fetchTradingSetupApprovalStatus,
+  isWithinDegradedSetupTrustWindow,
+  type TradingSetupAllowanceReadStatus,
+} from "./setup-flow";
+import {
+  hasDeployedTradingWallet,
+  isTradingWalletDeploymentRequired,
+  normalizeExtensionTradingWalletMode,
+  TRADING_WALLET_SETUP_REQUIRED_MESSAGE,
+} from "./setup-gates";
 
 export type TradingState =
   | "disconnected"
@@ -82,8 +95,10 @@ export interface TradingContext {
   orderBookError: string | null;
   minOrderSize: number;
   tickSize: number;
+  hasTradingApproval: boolean;
   usdcAllowance: number;
   usdcAllowanceNegRisk: number;
+  approvalReadStatus: TradingSetupAllowanceReadStatus | "unknown";
 }
 
 type StateListener = (ctx: TradingContext) => void;
@@ -109,12 +124,23 @@ function createDisconnectedContext(): TradingContext {
     orderBookError: null,
     minOrderSize: 1,
     tickSize: 0.01,
+    hasTradingApproval: false,
     usdcAllowance: 0,
     usdcAllowanceNegRisk: 0,
+    approvalReadStatus: "unknown",
   };
 }
 
 let ctx: TradingContext = createDisconnectedContext();
+let walletSwitchInProgress = false;
+// Last accountsChanged swallowed while a deliberate switch is in flight —
+// replayed once the switch settles so a failed switch can't strand ctx on an
+// account the provider has already moved past.
+let pendingAccountsChangedDuringSwitch: string[] | null = null;
+// Card-side counterpart of the side panel's degraded latch: bounds how long
+// refreshBalance preserves last-known-good approval state under degraded
+// allowance reads (shared trust window from setup-flow).
+let consecutiveDegradedApprovalReads = 0;
 
 function tokenBalance(
   tokenBalances: TokenBalanceEntry[] | undefined,
@@ -165,7 +191,9 @@ async function readStoredWalletMode(
       }
       const stored = result?.[key];
       resolve(
-        typeof stored === "string" ? normalizeTradingWalletMode(stored) : null
+        typeof stored === "string"
+          ? normalizeExtensionTradingWalletMode(stored)
+          : null
       );
     });
   });
@@ -179,7 +207,8 @@ async function storeWalletMode(
   await new Promise<void>((resolve) => {
     chrome.storage.local.set(
       {
-        [walletModeStorageKey(address)]: normalizeTradingWalletMode(walletMode),
+        [walletModeStorageKey(address)]:
+          normalizeExtensionTradingWalletMode(walletMode),
       },
       () => resolve()
     );
@@ -193,29 +222,53 @@ type ResolvedTradingWallet = {
   usdcEBalance: number;
   polBalance: number;
   tokenBalances: TokenBalanceEntry[];
-  isDeployed: boolean;
+  /** null = deployment unknown (reads failed) — never guessed as false. */
+  isDeployed: boolean | null;
 };
+
+async function resolveTradingWalletAddress(
+  address: string,
+  walletMode: TradingWalletMode
+): Promise<string> {
+  const normalizedMode = normalizeExtensionTradingWalletMode(walletMode);
+  return normalizedMode === "eoa"
+    ? address
+    : await ProxyWallet.deriveAddress(address, normalizedMode);
+}
 
 async function resolveTradingWallet(
   address: string,
   walletMode: TradingWalletMode
 ): Promise<ResolvedTradingWallet> {
-  const normalizedMode = normalizeTradingWalletMode(walletMode);
-  const proxyAddress =
-    normalizedMode === "eoa"
-      ? address
-      : await ProxyWallet.deriveAddress(address, normalizedMode);
+  const normalizedMode = normalizeExtensionTradingWalletMode(walletMode);
+  if (normalizedMode === "eoa") {
+    const balData = normalizeBalanceData(await ProxyWallet.getBalance(address));
+    return {
+      proxyAddress: address,
+      balance: balData.balance,
+      pusdBalance: balData.pusdBalance,
+      usdcEBalance: balData.usdcEBalance,
+      polBalance: balData.polBalance ?? 0,
+      tokenBalances: balData.tokenBalances ?? [],
+      isDeployed: true,
+    };
+  }
+  // The derive handler owns deployment truth (bytecode + relayer /deployed
+  // fallback); the balance read's bytecode-only answer is only a fallback,
+  // and unknown stays null. A hard `false` from a silently-failed read sent
+  // already-deployed users back to "Create trading vault" after a switch.
+  const derived = await ProxyWallet.resolveDeployment(address, normalizedMode);
   const balData = normalizeBalanceData(
-    await ProxyWallet.getBalance(proxyAddress)
+    await ProxyWallet.getBalance(derived.proxyAddress)
   );
   return {
-    proxyAddress,
+    proxyAddress: derived.proxyAddress,
     balance: balData.balance,
     pusdBalance: balData.pusdBalance,
     usdcEBalance: balData.usdcEBalance,
     polBalance: balData.polBalance ?? 0,
     tokenBalances: balData.tokenBalances ?? [],
-    isDeployed: normalizedMode === "eoa" ? true : (balData.isDeployed ?? false),
+    isDeployed: derived.isDeployed ?? balData.isDeployed ?? null,
   };
 }
 
@@ -223,13 +276,15 @@ async function resolveExistingSafeWallet(
   address: string
 ): Promise<ResolvedTradingWallet | null> {
   try {
-    const safeAddress = await ProxyWallet.deriveAddress(address, "safe");
+    // Deployment decided by the derive handler (bytecode + relayer fallback):
+    // a transient bytecode failure must not read as "no legacy safe".
+    const derived = await ProxyWallet.resolveDeployment(address, "safe");
+    if (derived.isDeployed !== true) return null;
     const safeBalance = normalizeBalanceData(
-      await ProxyWallet.getBalance(safeAddress)
+      await ProxyWallet.getBalance(derived.proxyAddress)
     );
-    if (!safeBalance.isDeployed) return null;
     return {
-      proxyAddress: safeAddress,
+      proxyAddress: derived.proxyAddress,
       balance: safeBalance.balance,
       pusdBalance: safeBalance.pusdBalance,
       usdcEBalance: safeBalance.usdcEBalance,
@@ -240,24 +295,6 @@ async function resolveExistingSafeWallet(
   } catch (err) {
     log.warn("legacy_safe.detect_failed", { error: err });
     return null;
-  }
-}
-
-async function preferExistingSafeMode(address: string): Promise<boolean> {
-  const safeWallet = await resolveExistingSafeWallet(address);
-  if (!safeWallet) return false;
-
-  try {
-    update({
-      walletMode: "safe",
-      legacySafeAvailable: true,
-      ...safeWallet,
-    });
-    await storeWalletMode(address, "safe");
-    return true;
-  } catch (err) {
-    log.warn("legacy_safe.detect_failed", { error: err });
-    return false;
   }
 }
 
@@ -283,6 +320,33 @@ function notify(): void {
 function update(partial: Partial<TradingContext>): void {
   ctx = { ...ctx, ...partial };
   notify();
+}
+
+function openTradingSetupSidePanel(): void {
+  if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+  chrome.runtime.sendMessage(
+    { type: "KNOWW_OPEN_EXTENSION_SIDEPANEL", view: "portfolio" },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
+}
+
+function broadcastWalletConnected(address: string): void {
+  if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
+  chrome.runtime.sendMessage(
+    { type: TRADING_WALLET_CONNECTED_MESSAGE, address },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
+}
+
+function accountListIncludesAddress(
+  accounts: string[],
+  address: string
+): boolean {
+  return accounts.some((account) => sameAddress(account, address));
 }
 
 function sendMsg<T>(
@@ -373,6 +437,120 @@ async function runWithAuthRetry<T>(
   }
 }
 
+async function applyConnectedWalletAccounts(
+  accounts: string[] | undefined,
+  walletUuid: string | undefined,
+  analyticsEvent: "wallet_connected" | "wallet_switched"
+): Promise<void> {
+  if (!accounts || accounts.length === 0) {
+    update({ state: "error", error: "No accounts returned" });
+    return;
+  }
+
+  const address = accounts[0];
+  const storedWalletMode = await readStoredWalletMode(address);
+  const initialWalletMode = resolvePreferredTradingWalletMode({
+    storedMode: storedWalletMode,
+    legacySafeDeployed: false,
+  });
+  update({
+    address,
+    legacySafeAvailable: false,
+    approvalReadStatus: "unknown",
+    walletMode: initialWalletMode,
+  });
+  broadcastWalletConnected(address);
+  trackTradingAnalytics(analyticsEvent, {
+    hasMultipleWallets: walletUuid !== undefined,
+  });
+
+  update({ state: "switching-chain" });
+  try {
+    const chainId = await WalletBridge.getChainId();
+    if (chainId !== POLYGON_CHAIN_ID_HEX) {
+      await WalletBridge.switchChain(POLYGON_CHAIN_ID_HEX);
+    }
+  } catch (err) {
+    trackTradingAnalytics("wallet_chain_switch_failed", {
+      chainId: POLYGON_CHAIN_ID_HEX,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    log.warn("chain.switch_failed", { error: err });
+  }
+
+  update({ state: "connected" });
+
+  try {
+    const existingSafe = await resolveExistingSafeWallet(address);
+    const preferredWalletMode = resolvePreferredTradingWalletMode({
+      storedMode: storedWalletMode,
+      legacySafeDeployed: Boolean(existingSafe),
+    });
+    if (preferredWalletMode !== storedWalletMode) {
+      await storeWalletMode(address, preferredWalletMode);
+    }
+    update({
+      walletMode: preferredWalletMode,
+      legacySafeAvailable: Boolean(existingSafe),
+    });
+
+    if (preferredWalletMode === "safe" && existingSafe) {
+      update(existingSafe);
+    } else {
+      const walletData = await resolveTradingWallet(
+        address,
+        preferredWalletMode
+      );
+      update(walletData);
+    }
+  } catch (err) {
+    log.warn("trading_wallet.resolve_failed", { error: err });
+    const fallbackProxyAddress =
+      ctx.proxyAddress ??
+      (await resolveTradingWalletAddress(address, ctx.walletMode).catch(
+        () => null
+      ));
+    update({
+      ...(fallbackProxyAddress
+        ? {
+            proxyAddress: fallbackProxyAddress,
+            isDeployed: ctx.walletMode === "eoa" ? true : ctx.isDeployed,
+          }
+        : {}),
+      balance: 0,
+      pusdBalance: 0,
+      usdcEBalance: 0,
+      polBalance: 0,
+      tokenBalances: [],
+    });
+  }
+
+  const hasCreds = await CredentialManager.has(address);
+  if (hasCreds) {
+    update({
+      hasCredentials: true,
+      state: hasDeployedTradingWallet(ctx) ? "ready" : "connected",
+    });
+  } else {
+    update({ state: "connected" });
+  }
+}
+
+async function clearPreviousWalletSession(address: string): Promise<void> {
+  try {
+    await sendMsg<null>(
+      { type: "auth:logout" },
+      "Failed to clear switched wallet session",
+      15_000
+    );
+  } catch (err) {
+    log.warn("wallet.switch_logout_failed", {
+      address,
+      error: err,
+    });
+  }
+}
+
 export const TradingService = {
   getContext(): TradingContext {
     return ctx;
@@ -390,79 +568,56 @@ export const TradingService = {
     return ExtensionSession.hasSession();
   },
 
+  async getConnectedWalletAddress(): Promise<string | null> {
+    if (!ctx.address) return null;
+    const accounts = await WalletBridge.getSelectedAccounts();
+    await this.handleExternalWalletAccountsChanged(accounts);
+    return ctx.address;
+  },
+
+  async handleExternalWalletAccountsChanged(accounts: string[]): Promise<void> {
+    if (walletSwitchInProgress) {
+      pendingAccountsChangedDuringSwitch = accounts;
+      return;
+    }
+    if (!ctx.address) return;
+    if (accounts.length === 0) {
+      // An empty list means the wallet is locked or the provider dropped its
+      // connection (EIP-1193 `disconnect`), not that the user removed the
+      // account — keep the session. A genuine account switch/removal arrives
+      // as a non-empty list that excludes ctx.address.
+      return;
+    }
+    if (accountListIncludesAddress(accounts, ctx.address)) return;
+
+    const disconnectedAddress = ctx.address;
+    WalletBridge.resetAfterDisconnect();
+    this.reset();
+
+    try {
+      await sendMsg<null>(
+        { type: "auth:logout" },
+        "Failed to clear disconnected wallet session",
+        15_000
+      );
+    } catch (err) {
+      log.warn("wallet.external_disconnect_logout_failed", {
+        address: disconnectedAddress,
+        error: err,
+      });
+    }
+  },
+
   async connectWallet(walletUuid?: string): Promise<void> {
     update({ state: "connecting", error: null });
 
     try {
       const accounts = await WalletBridge.connect(walletUuid);
-
-      if (!accounts || accounts.length === 0) {
-        update({ state: "error", error: "No accounts returned" });
-        return;
-      }
-
-      const address = accounts[0];
-      const storedWalletMode = await readStoredWalletMode(address);
-      update({
-        address,
-        legacySafeAvailable: storedWalletMode === "safe",
-        ...(storedWalletMode ? { walletMode: storedWalletMode } : {}),
-      });
-      trackTradingAnalytics("wallet_connected", {
-        hasMultipleWallets: walletUuid !== undefined,
-      });
-
-      update({ state: "switching-chain" });
-      try {
-        const chainId = await WalletBridge.getChainId();
-        if (chainId !== POLYGON_CHAIN_ID_HEX) {
-          await WalletBridge.switchChain(POLYGON_CHAIN_ID_HEX);
-        }
-      } catch (err) {
-        trackTradingAnalytics("wallet_chain_switch_failed", {
-          chainId: POLYGON_CHAIN_ID_HEX,
-          errorMessage: err instanceof Error ? err.message : String(err),
-        });
-        log.warn("chain.switch_failed", { error: err });
-      }
-
-      update({ state: "connected" });
-
-      try {
-        if (ctx.walletMode !== "deposit" && !ctx.legacySafeAvailable) {
-          const existingSafe = await resolveExistingSafeWallet(address);
-          if (existingSafe) {
-            update({ legacySafeAvailable: true });
-          }
-        }
-        const shouldUseLegacySafe =
-          ctx.walletMode === "deposit"
-            ? await preferExistingSafeMode(address)
-            : false;
-        if (!shouldUseLegacySafe) {
-          const walletData = await resolveTradingWallet(
-            address,
-            ctx.walletMode
-          );
-          update(walletData);
-        }
-      } catch (err) {
-        log.warn("trading_wallet.resolve_failed", { error: err });
-        update({
-          balance: 0,
-          pusdBalance: 0,
-          usdcEBalance: 0,
-          polBalance: 0,
-          tokenBalances: [],
-        });
-      }
-
-      const hasCreds = await CredentialManager.has(address);
-      if (hasCreds) {
-        update({ hasCredentials: true, state: "ready" });
-      } else {
-        update({ state: "connected" });
-      }
+      await applyConnectedWalletAccounts(
+        accounts,
+        walletUuid,
+        "wallet_connected"
+      );
     } catch (err) {
       trackTradingAnalytics("wallet_connect_failed", {
         errorMessage: err instanceof Error ? err.message : String(err),
@@ -474,9 +629,75 @@ export const TradingService = {
     }
   },
 
+  async switchWallet(walletUuid?: string): Promise<void> {
+    const previousContext = { ...ctx };
+    walletSwitchInProgress = true;
+    update({ state: "connecting", error: null });
+
+    try {
+      const accounts = await WalletBridge.switchWallet(walletUuid);
+      const nextAddress = accounts?.[0] ?? null;
+      const didChangeAddress =
+        previousContext.address !== null &&
+        nextAddress !== null &&
+        !accountListIncludesAddress([nextAddress], previousContext.address);
+
+      if (didChangeAddress && previousContext.address) {
+        await clearPreviousWalletSession(previousContext.address);
+        ctx = createDisconnectedContext();
+        notify();
+      }
+
+      await applyConnectedWalletAccounts(
+        accounts,
+        walletUuid,
+        "wallet_switched"
+      );
+    } catch (err) {
+      trackTradingAnalytics("wallet_switch_failed", {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+      ctx = {
+        ...previousContext,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      notify();
+      throw err;
+    } finally {
+      // Replay the last event swallowed mid-switch: on the failure path the
+      // provider may already be on the new account (permissions granted, then
+      // eth_requestAccounts rejected) while ctx was restored to the old one —
+      // the replay reconciles exactly like the next wallet poll would.
+      walletSwitchInProgress = false;
+      const buffered = pendingAccountsChangedDuringSwitch;
+      pendingAccountsChangedDuringSwitch = null;
+      if (buffered) {
+        void this.handleExternalWalletAccountsChanged(buffered);
+      }
+    }
+  },
+
   async deriveCredentials(): Promise<void> {
     if (!ctx.address) {
       update({ state: "error", error: "Wallet not connected" });
+      return;
+    }
+
+    // Re-read when deployment is unknown OR cached false: the user may have
+    // deployed the vault from the side panel wizard, which never notifies
+    // content tabs — gating on a stale `false` would bounce this action back
+    // to the side panel forever. Deployment is monotonic, so re-checking is
+    // always safe.
+    if (!ctx.proxyAddress || ctx.isDeployed !== true) {
+      await this.refreshBalance();
+    }
+
+    if (isTradingWalletDeploymentRequired(ctx)) {
+      update({
+        state: "connected",
+        error: TRADING_WALLET_SETUP_REQUIRED_MESSAGE,
+      });
+      openTradingSetupSidePanel();
       return;
     }
 
@@ -492,7 +713,7 @@ export const TradingService = {
       );
       update({
         hasCredentials: true,
-        state: "ready",
+        state: hasDeployedTradingWallet(ctx) ? "ready" : "connected",
       });
 
       if (!ctx.proxyAddress || ctx.isDeployed === null) {
@@ -510,7 +731,12 @@ export const TradingService = {
   },
 
   async ensureReady(): Promise<boolean> {
-    if (ctx.state === "ready" && ctx.hasCredentials) return true;
+    if (
+      ctx.state === "ready" &&
+      ctx.hasCredentials &&
+      hasDeployedTradingWallet(ctx)
+    )
+      return true;
     // A prior rejected signature leaves state="error"; a fresh user-initiated
     // ensureReady must clear it and retry, otherwise the button is dead until
     // reload. Reset to the closest non-error state before re-prompting.
@@ -523,17 +749,45 @@ export const TradingService = {
     if (!ctx.address) await this.connectWallet();
     // Connect genuinely failed (no account / rejected the connect itself).
     if (!ctx.address) return false;
+    // `!== true` (not `=== null`): a stale cached `false` must also be
+    // re-read — see the matching gate in deriveCredentials.
+    let refreshedThisCall = false;
+    if (!ctx.proxyAddress || ctx.isDeployed !== true) {
+      await this.refreshBalance();
+      refreshedThisCall = true;
+    }
+    if (isTradingWalletDeploymentRequired(ctx)) {
+      update({
+        state: "connected",
+        error: TRADING_WALLET_SETUP_REQUIRED_MESSAGE,
+      });
+      openTradingSetupSidePanel();
+      return false;
+    }
     if (!ctx.hasCredentials) await this.deriveCredentials();
+    // Credentials + deployed vault = ready; the state label can lag behind
+    // (e.g. "connected" cached before a side-panel deploy was re-read above)
+    // and would otherwise report a fully-set-up user as unready.
+    if (
+      ctx.state !== "ready" &&
+      ctx.hasCredentials &&
+      hasDeployedTradingWallet(ctx)
+    ) {
+      update({ state: "ready", error: null });
+    }
     // For a returning user `connectWallet` reaches "ready" without refreshing
     // balance/allowance (only `deriveCredentials` refreshes, and it's skipped
     // when creds already exist). Without this, callers that read ctx right after
     // — e.g. the stream card — see allowance 0 and show a false "Approve".
-    if (ctx.state === "ready") await this.refreshBalance();
-    return ctx.state === "ready";
+    // Skip when this call already ran the full refresh fan-out above.
+    if (ctx.state === "ready" && !refreshedThisCall) {
+      await this.refreshBalance();
+    }
+    return ctx.state === "ready" && hasDeployedTradingWallet(ctx);
   },
 
   async setWalletMode(walletMode: TradingWalletMode): Promise<void> {
-    const normalizedMode = normalizeTradingWalletMode(walletMode);
+    const normalizedMode = normalizeExtensionTradingWalletMode(walletMode);
     if (ctx.walletMode === normalizedMode) return;
 
     let legacySafeWallet: ResolvedTradingWallet | null = null;
@@ -558,8 +812,10 @@ export const TradingService = {
       usdcEBalance: 0,
       polBalance: 0,
       tokenBalances: [],
+      hasTradingApproval: false,
       usdcAllowance: 0,
       usdcAllowanceNegRisk: 0,
+      approvalReadStatus: "unknown",
       error: null,
       state: ctx.address ? "connected" : ctx.state,
     });
@@ -573,7 +829,11 @@ export const TradingService = {
         );
         update(walletData);
         await this.refreshBalance();
-        if (ctx.hasCredentials) update({ state: "ready" });
+        if (ctx.hasCredentials) {
+          update({
+            state: hasDeployedTradingWallet(ctx) ? "ready" : "connected",
+          });
+        }
       } catch (err) {
         update({
           state: "error",
@@ -584,12 +844,13 @@ export const TradingService = {
   },
 
   async refreshBalance(): Promise<void> {
+    const walletMode = normalizeExtensionTradingWalletMode(ctx.walletMode);
     if (!ctx.proxyAddress && ctx.address) {
       try {
         const proxyAddress =
-          ctx.walletMode === "eoa"
+          walletMode === "eoa"
             ? ctx.address
-            : await ProxyWallet.deriveAddress(ctx.address, ctx.walletMode);
+            : await ProxyWallet.deriveAddress(ctx.address, walletMode);
         update({ proxyAddress });
       } catch (err) {
         log.warn("proxy.derive_failed_during_refresh", { error: err });
@@ -607,42 +868,71 @@ export const TradingService = {
         polBalance: nextBalance.polBalance ?? 0,
         tokenBalances: nextBalance.tokenBalances ?? [],
         // Piggybacks on the balance fetch (background returns code presence
-        // from the same provider). Keeps the UI in sync with deployment
-        // without an extra RPC round-trip.
+        // from the same provider). Deployment is monotonic on-chain and ctx
+        // resets on account switch, so a known-deployed wallet never
+        // downgrades here — a lagging/pruned RPC node serving empty code must
+        // not bounce the user back to "Create trading vault". Failed reads
+        // omit the flag entirely, so `??` keeps the last known value.
         isDeployed:
-          ctx.walletMode === "eoa"
+          walletMode === "eoa"
             ? true
-            : (balData.isDeployed ?? ctx.isDeployed),
+            : ctx.isDeployed === true
+              ? true
+              : (balData.isDeployed ?? ctx.isDeployed),
       });
     } catch (err) {
       log.warn("balance.refresh_failed", { error: err });
     }
 
     try {
-      const [allowanceData, negRiskAllowanceData] = await Promise.all([
-        sendMsg<{ allowance: number }>(
-          {
-            type: "trading:get-allowance",
-            ownerAddress: ctx.proxyAddress,
-            negRisk: false,
-          },
-          "Allowance check"
-        ),
-        sendMsg<{ allowance: number }>(
-          {
-            type: "trading:get-allowance",
-            ownerAddress: ctx.proxyAddress,
-            negRisk: true,
-          },
-          "NegRisk allowance check"
-        ),
-      ]);
+      const approvalStatus = await fetchTradingSetupApprovalStatus(
+        ctx.proxyAddress,
+        (ownerAddress) =>
+          sendMsg<{
+            allowances: Record<string, number>;
+            degraded?: boolean;
+            degradedKeys?: string[];
+          }>(
+            {
+              type: "trading:get-all-allowances",
+              ownerAddress,
+            },
+            "Setup allowance check"
+          )
+      );
+      if (approvalStatus.allowanceReadStatus === "degraded") {
+        consecutiveDegradedApprovalReads++;
+        if (
+          isWithinDegradedSetupTrustWindow(consecutiveDegradedApprovalReads)
+        ) {
+          // Preserve last-known-good approval state for a bounded window.
+          update({ approvalReadStatus: "degraded" });
+          return;
+        }
+        // Past the trust limit: apply the degraded read as authoritative
+        // (reported "complete" so the surface resolver stops trusting the
+        // persisted latch) — a persistent outage, or an on-chain revoke
+        // hiding behind one, must eventually re-surface the approve step.
+        // Mirrors the side panel's bound on its durable latch.
+        update({
+          hasTradingApproval: approvalStatus.hasTradingApproval,
+          usdcAllowance: approvalStatus.usdcAllowance,
+          usdcAllowanceNegRisk: approvalStatus.usdcAllowanceNegRisk,
+          approvalReadStatus: "complete",
+        });
+        return;
+      }
+      consecutiveDegradedApprovalReads = 0;
       update({
-        usdcAllowance: allowanceData.allowance,
-        usdcAllowanceNegRisk: negRiskAllowanceData.allowance,
+        hasTradingApproval: approvalStatus.hasTradingApproval,
+        usdcAllowance: approvalStatus.usdcAllowance,
+        usdcAllowanceNegRisk: approvalStatus.usdcAllowanceNegRisk,
+        approvalReadStatus: approvalStatus.allowanceReadStatus,
       });
-    } catch {
-      // Non-critical — don't block trading if allowance check fails
+    } catch (err) {
+      log.warn("approval.refresh_failed", { error: err });
+      consecutiveDegradedApprovalReads++;
+      update({ approvalReadStatus: "degraded" });
     }
   },
 
@@ -764,7 +1054,7 @@ export const TradingService = {
    */
   async deployWallet(): Promise<{ txHash: string; alreadyDeployed: boolean }> {
     if (!ctx.address) throw new Error("Wallet not connected");
-    if (ctx.walletMode === "eoa") {
+    if (normalizeExtensionTradingWalletMode(ctx.walletMode) === "eoa") {
       update({
         state: ctx.hasCredentials ? "ready" : "connected",
         isDeployed: true,
@@ -803,8 +1093,11 @@ export const TradingService = {
         alreadyDeployed: result.alreadyDeployed,
       };
     } catch (err) {
+      // "error" (not "ready" — the vault isn't deployed) so the wizard's
+      // inline error branch and the error toast actually render; the next
+      // "Create vault" click resets to "deploying" and clears the error.
       update({
-        state: "ready",
+        state: "error",
         error: err instanceof Error ? err.message : String(err),
       });
       throw err;
@@ -818,6 +1111,11 @@ export const TradingService = {
     approvalAmount?: number
   ): Promise<string> {
     if (!ctx.address) throw new Error("Wallet not connected");
+    if (ctx.state === "approving") {
+      throw new Error(
+        "Approval already in progress — confirm the wallet prompt."
+      );
+    }
 
     update({ state: "approving", error: null });
 
@@ -840,15 +1138,16 @@ export const TradingService = {
         )
       );
 
-      update({ state: "ready" });
-      // Refresh so the on-chain allowance lands back in ctx — otherwise callers
-      // that re-render off `getContext()` (e.g. the stream card's inline action)
-      // keep seeing the stale pre-approval allowance and show "Approve" forever.
+      // Refresh BEFORE flipping to "ready": callers re-render off
+      // `getContext()`, and a "ready" state with the stale pre-approval
+      // allowance re-renders a clickable Approve (double-submit window) until
+      // the refreshed allowance lands.
       await this.refreshBalance();
+      update({ state: "ready" });
       return result.txHash;
     } catch (err) {
       update({
-        state: "ready",
+        state: "error",
         error: err instanceof Error ? err.message : String(err),
       });
       throw err;
@@ -967,6 +1266,7 @@ export const TradingService = {
 
   reset(): void {
     ctx = createDisconnectedContext();
+    consecutiveDegradedApprovalReads = 0;
     notify();
   },
 
@@ -980,8 +1280,16 @@ export const TradingService = {
 };
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  WalletBridge.onAccountsChanged((accounts) => {
+    void TradingService.handleExternalWalletAccountsChanged(accounts);
+  });
+
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type !== TRADING_SESSION_DISCONNECTED_MESSAGE) {
+      return false;
+    }
+
+    if (walletSwitchInProgress) {
       return false;
     }
 

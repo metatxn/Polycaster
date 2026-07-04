@@ -22,13 +22,99 @@ export function getErrorMessage(error: unknown, fallback = ""): string {
   return String(error);
 }
 
+function getEip1193ErrorCode(error: unknown): unknown {
+  if (!error || typeof error !== "object") return undefined;
+  const candidate = error as {
+    code?: unknown;
+    cause?: { code?: unknown };
+  };
+  return candidate.code ?? candidate.cause?.code;
+}
+
+function getEip1193ErrorText(error: unknown): string {
+  if (error instanceof Error) {
+    const candidate = error as Error & {
+      details?: unknown;
+      shortMessage?: unknown;
+    };
+    return [candidate.message, candidate.shortMessage, candidate.details]
+      .filter((value): value is string => typeof value === "string")
+      .join(" ");
+  }
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      details?: unknown;
+      message?: unknown;
+      shortMessage?: unknown;
+    };
+    return [candidate.message, candidate.shortMessage, candidate.details]
+      .filter((value): value is string => typeof value === "string")
+      .join(" ");
+  }
+  return "";
+}
+
+export function isEip1193UserRejectedError(error: unknown): boolean {
+  const code = getEip1193ErrorCode(error);
+  const message = getEip1193ErrorText(error);
+  // Patterns must stay user-anchored. Bare "denied" / "request rejected" /
+  // "transaction signature" also match infrastructure errors — a WAF 403
+  // "Access denied", the relayer proxy's "Relayer create request rejected",
+  // a node's "invalid transaction signature" — and would surface them as
+  // "you declined the wallet prompt". ("user denied" still covers MetaMask's
+  // classic "User denied transaction signature.")
+  return (
+    code === 4001 ||
+    /user rejected|rejected the request|user denied|user cancel/i.test(message)
+  );
+}
+
+export function isEip1193UnsupportedMethodError(error: unknown): boolean {
+  const code = getEip1193ErrorCode(error);
+  // -32002 is a *pending* request (a wallet prompt is already open), never an
+  // unsupported method — viem's rewrite ("Requested resource not available.")
+  // would otherwise match a bare "not available" pattern.
+  if (code === -32002) return false;
+  const message = getEip1193ErrorText(error);
+  // "method not allowed" is the repo's own bridge allowlist rejection (page
+  // bridge + WalletConnect shim); stale pre-nonce bridges answer new methods
+  // with it, and callers must treat that as method-unsupported fallback.
+  // "method not available" stays method-anchored: the bare form also matched
+  // viem's -32002 rewrite.
+  return (
+    code === 4200 ||
+    code === -32601 ||
+    /unsupported|not supported|does not exist|method not available|method not found|method not allowed|unrecognized/i.test(
+      message
+    )
+  );
+}
+
+export function isEip1193PendingRequestError(error: unknown): boolean {
+  const code = getEip1193ErrorCode(error);
+  const message = getEip1193ErrorText(error);
+  // -32002: the wallet is already showing (or queueing) a prompt for this
+  // request type. Raw MetaMask says "Request of type '…' already pending";
+  // viem rewrites it to "Requested resource not available."
+  return (
+    code === -32002 ||
+    /already pending|already processing|resource not available|resource unavailable/i.test(
+      message
+    )
+  );
+}
+
 export function isWalletRejectionError(error: unknown): boolean {
+  if (isEip1193UserRejectedError(error)) return true;
   const lower = getErrorMessage(error).toLowerCase();
+  // No bare "transaction signature" here: it steals CLOB/node signature
+  // errors ("invalid transaction signature") from their real branches, and
+  // MetaMask's classic rejection is already covered by "user denied".
   return (
     lower.includes("user rejected") ||
     lower.includes("rejected the request") ||
     lower.includes("user denied") ||
-    lower.includes("transaction signature") ||
     lower.includes('"code":4001') ||
     lower.includes("code: 4001")
   );
@@ -87,11 +173,12 @@ export function mapTradingError(
   if (
     lower.includes("safe) is not deployed") ||
     lower.includes("safe is not deployed") ||
-    lower.includes("proxy wallet not deployed")
+    lower.includes("proxy wallet not deployed") ||
+    lower.includes("deposit wallet is not deployed")
   ) {
     return {
       title: "Trading wallet not set up",
-      body: "Finish the one-click onboarding on knoww.app, then retry here.",
+      body: "Create your trading vault in the Knoww setup flow, then retry.",
       raw,
     };
   }

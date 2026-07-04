@@ -560,8 +560,11 @@ test("notification empty and seen-earlier states expose clearer actions", () => 
   const css = readInlineCss();
 
   assert.equal(/No markets found on this page yet/.test(uiSource), true);
-  assert.equal(/data-knoww-browse-trending/.test(uiSource), true);
-  assert.equal(/Browse trending/.test(uiSource), true);
+  // The "Browse trending" CTA was removed from the empty state (market
+  // browsing lives in the sidebar now) — lock the removal so the dead
+  // affordance doesn't creep back without its handler.
+  assert.equal(/data-knoww-browse-trending/.test(uiSource), false);
+  assert.equal(/Browse trending/.test(uiSource), false);
   assert.equal(/knoww-notification-action-label/.test(uiSource), true);
   assert.equal(/Restore/.test(uiSource), true);
   assert.equal(

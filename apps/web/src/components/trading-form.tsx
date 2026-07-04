@@ -117,7 +117,7 @@ function LimitQueueStatusInline({
   return (
     <div role="status" className={`tk-limit-status ${tone}`}>
       <span className="dot" aria-hidden="true" />
-      <span className="truncate">{label}</span>
+      <span className="msg">{label}</span>
       <span className="tick">Tick {tickLabel}</span>
     </div>
   );
@@ -822,6 +822,7 @@ export function TradingForm(props: TradingFormProps) {
           <AnimatePresence>
             {error && (
               <m.div
+                key="trading-error"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -837,6 +838,7 @@ export function TradingForm(props: TradingFormProps) {
 
             {side === "SELL" && maxSellShares <= 0 && (
               <m.div
+                key="no-sell-position"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -852,6 +854,7 @@ export function TradingForm(props: TradingFormProps) {
 
             {belowLimitMin && shares > 0 && !error && (
               <m.div
+                key="below-limit-minimum"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -868,6 +871,7 @@ export function TradingForm(props: TradingFormProps) {
 
             {hasInsufficientBalance && side === "BUY" && (
               <m.div
+                key="insufficient-balance"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -892,6 +896,7 @@ export function TradingForm(props: TradingFormProps) {
 
             {needsApproval && !hasInsufficientBalance && (
               <m.div
+                key="trading-approval"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}

@@ -26,6 +26,7 @@ export interface Trade {
     eventSlug: string;
     icon: string;
     asset: string;
+    negRisk?: boolean;
   };
 }
 

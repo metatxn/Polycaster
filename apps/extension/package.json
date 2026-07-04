@@ -1,6 +1,6 @@
 {
   "name": "@knoww/extension",
-  "version": "2.5.45",
+  "version": "2.5.48",
   "private": true,
   "type": "module",
   "scripts": {
@@ -34,17 +34,17 @@
   "devDependencies": {
     "@fontsource/fraunces": "^5.2.9",
     "@fontsource/jetbrains-mono": "^5.2.8",
-    "@types/chrome": "0.1.43",
+    "@types/chrome": "0.2.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "buffer": "6.0.3",
     "copy-webpack-plugin": "14.0.0",
     "dotenv": "17.4.2",
     "process": "0.11.10",
-    "ts-loader": "9.6.0",
+    "ts-loader": "9.6.2",
     "typescript": "catalog:",
     "vite": "8.0.16",
-    "vitest": "^4.1.8",
+    "vitest": "^4.1.9",
     "webpack": "5.107.2",
     "webpack-cli": "7.0.3"
   }

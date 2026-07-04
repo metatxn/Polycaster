@@ -1,3 +1,5 @@
+import { sameAddress } from "@knoww/shared-types/bridge";
+
 import type {
   BackgroundResponse,
   FetchJsonSuccessResponse,
@@ -25,6 +27,11 @@ interface VerifyResponse {
   success?: boolean;
 }
 
+interface SessionInfo {
+  address?: string | null;
+  loggedIn?: boolean;
+}
+
 function getApiErrorMessage(payload: unknown): string | null {
   if (
     payload &&
@@ -36,6 +43,17 @@ function getApiErrorMessage(payload: unknown): string | null {
   }
 
   return null;
+}
+
+function addressesMatch(
+  left: string | null | undefined,
+  right: string | null | undefined
+): boolean {
+  return (
+    typeof left === "string" &&
+    typeof right === "string" &&
+    sameAddress(left, right)
+  );
 }
 
 function sendAuthMessage<T>(
@@ -131,15 +149,19 @@ async function fetchJson<T>(
 }
 
 export const ExtensionSession = {
+  async getInfo(): Promise<SessionInfo> {
+    return sendAuthMessage<SessionInfo>(
+      { type: "auth:get-session-info" },
+      "Failed to get session info"
+    );
+  },
+
   /**
    * Whether a knoww session exists. The raw bearer token stays in the
    * background worker; content only learns presence.
    */
   async hasSession(): Promise<boolean> {
-    const info = await sendAuthMessage<{ loggedIn?: boolean }>(
-      { type: "auth:get-session-info" },
-      "Failed to get session info"
-    );
+    const info = await this.getInfo();
     return info?.loggedIn === true;
   },
 
@@ -151,8 +173,12 @@ export const ExtensionSession = {
   },
 
   async ensureAuthorized(address: string): Promise<void> {
-    if (await this.hasSession()) {
+    const info = await this.getInfo();
+    if (info?.loggedIn === true && addressesMatch(info.address, address)) {
       return;
+    }
+    if (info?.loggedIn === true) {
+      await this.clear();
     }
 
     void window.KNOWW_ANALYTICS?.track("extension_session_started");

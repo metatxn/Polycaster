@@ -22,8 +22,7 @@ const log = createLogger("api.relayer");
  * Auth strategy:
  *   - SAFE-CREATE and WALLET-CREATE deploy requests prefer builder-HMAC
  *     headers, matching the published Polymarket builder SDK's deploy paths,
- *     and fall back to RELAYER_API_KEY auth where the relayer environment
- *     expects V2 key auth.
+ *     and fail closed when builder auth is unavailable.
  *   - All other upstream relayer calls use RELAYER_API_KEY +
  *     RELAYER_API_KEY_ADDRESS headers.
  *
@@ -242,7 +241,6 @@ async function proxy(
 
   const upstreamHeaders: Record<string, string> = {};
   const builderCodeHeaders = getBuilderCodeHeaders();
-  let usedBuilderHmac = false;
   if (method === "POST") {
     upstreamHeaders["Content-Type"] = "application/json";
   }
@@ -255,13 +253,8 @@ async function proxy(
     );
     if (hmacHeaders) {
       Object.assign(upstreamHeaders, hmacHeaders);
-      usedBuilderHmac = true;
     } else {
-      const apiKeyHeaders = getRelayerApiKeyHeaders();
-      if (!apiKeyHeaders) {
-        return jsonError("Relayer not configured", 503);
-      }
-      Object.assign(upstreamHeaders, apiKeyHeaders);
+      return jsonError("Relayer create auth not configured", 503);
     }
   } else {
     const apiKeyHeaders = getRelayerApiKeyHeaders();
@@ -298,26 +291,16 @@ async function proxy(
 
     upstreamBody = await upstream.text();
 
-    if (upstream.status === 400 && safeCreateBody !== null && usedBuilderHmac) {
-      log.warn("create.builderHmac.rejected.retryingRelayerKey", {
+    if (
+      safeCreateBody !== null &&
+      (upstream.status < 200 || upstream.status >= 300)
+    ) {
+      log.error("create.upstream.non2xx", {
         path: pathSegments.join("/"),
         status: upstream.status,
         type: submitType,
       });
-      const apiKeyHeaders = getRelayerApiKeyHeaders();
-      if (apiKeyHeaders) {
-        upstream = await fetch(upstreamUrl, {
-          method,
-          headers: {
-            "Content-Type": "application/json",
-            ...apiKeyHeaders,
-            ...builderCodeHeaders,
-          },
-          body: safeCreateBody,
-          signal: controller.signal,
-        });
-        upstreamBody = await upstream.text();
-      }
+      return jsonError("Relayer create request rejected", upstream.status);
     }
 
     if (upstream.status === 400 && safeSubmitBody !== null) {
@@ -331,17 +314,32 @@ async function proxy(
         safeSubmitBody
       );
       if (hmacHeaders) {
-        upstream = await fetch(upstreamUrl, {
-          method,
-          headers: {
-            "Content-Type": "application/json",
-            ...hmacHeaders,
-            ...builderCodeHeaders,
-          },
-          body: safeSubmitBody,
-          signal: controller.signal,
-        });
-        upstreamBody = await upstream.text();
+        try {
+          upstream = await fetch(upstreamUrl, {
+            method,
+            headers: {
+              "Content-Type": "application/json",
+              ...hmacHeaders,
+              ...builderCodeHeaders,
+            },
+            body: safeSubmitBody,
+            signal: controller.signal,
+          });
+          upstreamBody = await upstream.text();
+        } catch (fetchError) {
+          if (fetchError instanceof Error && fetchError.name === "AbortError") {
+            log.error("upstream.timeout", {
+              method,
+              path: pathSegments.join("/"),
+            });
+            return jsonError("Relayer request timed out", 504);
+          }
+          log.error("safe.hmac_retry.failed", {
+            method,
+            path: pathSegments.join("/"),
+            err: fetchError,
+          });
+        }
       }
     }
 

@@ -13,6 +13,8 @@ export interface Position {
   initialValue: number;
   unrealizedPnl: number;
   unrealizedPnlPercent: number;
+  /** Resolved position that can be redeemed through CTF */
+  redeemable?: boolean;
   /** Token ID (asset) for the position */
   asset?: string;
   /** Condition ID for the market */
@@ -60,12 +62,14 @@ export interface Trade {
   usdcAmount: number;
   outcome: string;
   transactionHash: string;
+  isLostPosition?: boolean;
   market: {
     conditionId?: string;
     title: string;
     slug: string;
     eventSlug?: string;
     icon: string;
+    negRisk?: boolean;
   };
 }
 

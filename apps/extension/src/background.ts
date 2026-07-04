@@ -83,6 +83,9 @@ const CONTENT_SCRIPT_ID = "knoww-content";
 const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
 const SETTINGS_STORAGE_KEY = "knowwSettings";
 const CONTENT_SCRIPT_REINJECT_SETTLE_MS = 500;
+const SIDEPANEL_REQUESTED_VIEW_KEY = "knoww_sidepanel_requested_view";
+
+type SidePanelView = "markets" | "portfolio";
 
 type ChromeSidePanelApi = {
   open: (options: { tabId?: number; windowId?: number }) => Promise<void>;
@@ -250,6 +253,26 @@ async function closeKnowwSidePanel(context: {
   }
 
   throw new Error("No side panel context is available to close.");
+}
+
+function setRequestedSidePanelView(view?: SidePanelView): Promise<void> {
+  if (!view) return Promise.resolve();
+  return new Promise((resolve) => {
+    chrome.storage.session.set({ [SIDEPANEL_REQUESTED_VIEW_KEY]: view }, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    });
+  });
+}
+
+function notifyRequestedSidePanelView(view?: SidePanelView): void {
+  if (!view) return;
+  chrome.runtime.sendMessage(
+    { type: "KNOWW_SHOW_EXTENSION_SIDEPANEL_VIEW", view },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
 }
 
 function sendOpenFloatingPanel(tabId: number): void {
@@ -441,6 +464,32 @@ function forwardToResolvedContentTab(
       return;
     }
 
+    sendMessageToContentTab(tabId, contentMessage, sendResponse);
+  });
+}
+
+/**
+ * Like forwardToResolvedContentTab, but for wallet-signing messages: they must
+ * reach the tab holding the wallet session (portfolioSigningTabId), not
+ * whatever tab happens to be active — otherwise the signature prompt lands on
+ * a tab with no connected wallet context.
+ */
+function forwardToPortfolioSigningTab(
+  msg: { tabId?: number },
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: BackgroundResponse) => void,
+  contentMessage: Record<string, unknown>
+): void {
+  void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
+    if (typeof tabId !== "number") {
+      sendResponse({
+        ok: false,
+        error: "No active content tab is available.",
+      } as BackgroundResponse);
+      return;
+    }
+
+    portfolioSigningTabId = tabId;
     sendMessageToContentTab(tabId, contentMessage, sendResponse);
   });
 }
@@ -715,13 +764,23 @@ function isPortfolioWithdrawQuoteResponse(
   );
 }
 
+// Broadcast-only "trading:" types are consumed directly by extension pages
+// (side panel / content) — forwarding them would spin up the heavy offscreen
+// document just to get back "Unknown trading message type".
+const TRADING_BROADCAST_TYPES = new Set<string>([
+  "trading:signing-response",
+  "trading:session-disconnected",
+  "trading:credentials-updated",
+  "trading:wallet-connected",
+]);
+
 function isTradingMessage(message: unknown): boolean {
   return (
     typeof message === "object" &&
     message !== null &&
     typeof (message as { type: string }).type === "string" &&
     (message as { type: string }).type.startsWith("trading:") &&
-    (message as { type: string }).type !== "trading:signing-response"
+    !TRADING_BROADCAST_TYPES.has((message as { type: string }).type)
   );
 }
 
@@ -923,6 +982,7 @@ chrome.runtime.onMessage.addListener(
       bridgeAddress?: string;
       quote?: unknown;
       surface?: "sidebar" | "floating";
+      view?: SidePanelView;
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -940,14 +1000,26 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_OPEN_EXTENSION_SIDEPANEL") {
-      void persistNotificationPanelSurface("sidebar");
-      void openKnowwSidePanel({
+      const requestedView =
+        msg.view === "markets" || msg.view === "portfolio"
+          ? msg.view
+          : undefined;
+      const openPromise = openKnowwSidePanel({
         ...(typeof sender.tab?.id === "number" ? { tabId: sender.tab.id } : {}),
         ...(typeof sender.tab?.windowId === "number"
           ? { windowId: sender.tab.windowId }
           : {}),
-      })
+      });
+
+      // `chrome.sidePanel.open()` must be the first awaited side-effect in this
+      // user-gesture path. Async storage writes before it can consume Chrome's
+      // activation token and trigger "may only be called in response to a user
+      // gesture" even though the click came from our floating panel.
+      void persistNotificationPanelSurface("sidebar");
+      void setRequestedSidePanelView(requestedView);
+      void openPromise
         .then(() => {
+          notifyRequestedSidePanelView(requestedView);
           if (typeof sender.tab?.id === "number") {
             chrome.tabs.sendMessage(
               sender.tab.id,
@@ -1046,6 +1118,39 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (msg?.type === "KNOWW_GET_PORTFOLIO_CONNECTED_WALLET") {
+      // The wallet session lives in the tab it was connected on — prefer the
+      // remembered signing tab (with active-tab fallback in the resolver), or
+      // the lookup asks a session-less tab and the side panel renders
+      // "Connect a wallet" next to a connected trading card.
+      void resolvePortfolioSigningTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          sendResponse({
+            ok: false,
+            error: "No active content tab is available.",
+          } as BackgroundResponse);
+          return;
+        }
+
+        sendMessageToContentTab(
+          tabId,
+          { type: "KNOWW_GET_PORTFOLIO_CONNECTED_WALLET" },
+          (response) => {
+            const envelope = response as { ok?: boolean; data?: unknown };
+            const content = envelope.data as
+              | { success?: boolean; data?: { address?: unknown } }
+              | undefined;
+            const address = content?.data?.address;
+            if (content?.success === true && typeof address === "string") {
+              portfolioSigningTabId = tabId;
+            }
+            sendResponse(response);
+          }
+        );
+      });
+      return true;
+    }
+
     if (msg?.type === "KNOWW_CONNECT_PORTFOLIO_WALLET") {
       void resolveContentTargetTabId(msg, sender).then((tabId) => {
         if (typeof tabId !== "number") {
@@ -1063,6 +1168,25 @@ chrome.runtime.onMessage.addListener(
             type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
             walletUuid: msg.walletUuid,
           },
+          sendResponse
+        );
+      });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_SWITCH_PORTFOLIO_WALLET") {
+      void resolveContentTargetTabId(msg, sender).then((tabId) => {
+        if (typeof tabId !== "number") {
+          sendResponse({
+            ok: false,
+            error: "No active content tab is available.",
+          } as BackgroundResponse);
+          return;
+        }
+        portfolioSigningTabId = tabId;
+        sendMessageToContentTab(
+          tabId,
+          { type: "KNOWW_SWITCH_PORTFOLIO_WALLET" },
           sendResponse
         );
       });
@@ -1152,9 +1276,24 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_ENABLE_PORTFOLIO_TRADING" &&
       typeof msg.address === "string"
     ) {
-      forwardToResolvedContentTab(msg, sender, sendResponse, {
+      forwardToPortfolioSigningTab(msg, sender, sendResponse, {
         type: "KNOWW_ENABLE_PORTFOLIO_TRADING",
         address: msg.address,
+      });
+      return true;
+    }
+
+    if (
+      msg?.type === "KNOWW_APPROVE_PORTFOLIO_TRADING" &&
+      typeof msg.address === "string"
+    ) {
+      const approvalAmount = (msg as { approvalAmount?: unknown })
+        .approvalAmount;
+      forwardToPortfolioSigningTab(msg, sender, sendResponse, {
+        type: "KNOWW_APPROVE_PORTFOLIO_TRADING",
+        address: msg.address,
+        approvalAmount:
+          typeof approvalAmount === "string" ? approvalAmount : undefined,
       });
       return true;
     }
@@ -1754,6 +1893,18 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ ok: true, data: null } as BackgroundResponse)
         );
       return true;
+    }
+
+    // A card-side wallet connect is broadcast (not forwarded to offscreen);
+    // it is also the only signal telling the SW which tab holds the wallet
+    // session when the user never touched a side-panel flow — latch it so
+    // signing forwards and the connected-wallet lookup target that tab.
+    if (
+      (message as { type?: unknown })?.type === "trading:wallet-connected" &&
+      typeof sender.tab?.id === "number"
+    ) {
+      portfolioSigningTabId = sender.tab.id;
+      return false;
     }
 
     // Trading messages — forward to offscreen document

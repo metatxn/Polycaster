@@ -2,6 +2,7 @@
 
 import {
   normalizeTradingWalletMode,
+  resolvePreferredTradingWalletMode,
   type TradingWalletMode,
 } from "@knoww/shared-types/polymarket";
 import { derivePolymarketSafe } from "@knoww/shared-types/relayer";
@@ -25,15 +26,14 @@ function readStoredMode(address?: string | null): TradingWalletMode {
   const key = getStorageKey(address);
   if (!key) return "deposit";
   const stored = window.localStorage.getItem(key);
-  if (!stored) return "deposit";
-  return normalizeTradingWalletMode(stored);
-}
-
-function hasStoredMode(address?: string | null): boolean {
-  if (typeof window === "undefined") return false;
-  const key = getStorageKey(address);
-  if (!key) return false;
-  return window.localStorage.getItem(key) !== null;
+  // A stored "safe" is only ever written after a successful on-chain legacy
+  // Safe detection, so honor it synchronously — otherwise legacy-Safe users
+  // run in deposit mode (wrong proxy, $0 balances) until the async check
+  // lands, and indefinitely if that RPC check fails.
+  return resolvePreferredTradingWalletMode({
+    storedMode: stored,
+    legacySafeDeployed: stored === "safe",
+  });
 }
 
 export function useTradingWalletMode() {
@@ -57,7 +57,6 @@ export function useTradingWalletMode() {
   useEffect(() => {
     if (!address) return;
     const connectedAddress = address;
-    const storedModeExists = hasStoredMode(connectedAddress);
 
     let cancelled = false;
     async function detectLegacySafe() {
@@ -67,16 +66,32 @@ export function useTradingWalletMode() {
         const safeAddress = derivePolymarketSafe(ownerAddress);
         const safeDeployed = await checkIsDeployed(safeAddress);
         if (cancelled) return;
+        const key = getStorageKey(connectedAddress);
+        const storedMode =
+          typeof window !== "undefined" && key
+            ? window.localStorage.getItem(key)
+            : null;
+        // checkIsDeployed swallows RPC failures into `false`, so a stored
+        // "safe" (only ever written after a successful detection) counts as
+        // legacy-Safe evidence — without it, one failed read would downgrade
+        // the whole session to deposit mode.
+        const legacySafeDeployed = safeDeployed || storedMode === "safe";
+        const preferredMode = resolvePreferredTradingWalletMode({
+          storedMode,
+          legacySafeDeployed,
+        });
 
-        setHasLegacySafe(safeDeployed);
-        setLegacySafeAddress(safeDeployed ? safeAddress : null);
+        setHasLegacySafe(legacySafeDeployed);
+        setLegacySafeAddress(legacySafeDeployed ? safeAddress : null);
+        setModeState(preferredMode);
 
-        if (safeDeployed && !storedModeExists) {
-          setModeState("safe");
-          if (typeof window !== "undefined") {
-            const key = getStorageKey(connectedAddress);
-            if (key) window.localStorage.setItem(key, "safe");
-          }
+        if (
+          typeof window !== "undefined" &&
+          key &&
+          safeDeployed &&
+          storedMode === null
+        ) {
+          window.localStorage.setItem(key, preferredMode);
         }
       } catch {
         if (!cancelled) {
@@ -112,12 +127,22 @@ export function useTradingWalletMode() {
       ) {
         return;
       }
-      setModeState(normalizeTradingWalletMode(detail.mode));
+      setModeState(
+        resolvePreferredTradingWalletMode({
+          storedMode: detail.mode,
+          legacySafeDeployed: hasLegacySafe || detail.mode === "safe",
+        })
+      );
     };
 
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== getStorageKey(address)) return;
-      setModeState(normalizeTradingWalletMode(event.newValue));
+      setModeState(
+        resolvePreferredTradingWalletMode({
+          storedMode: event.newValue,
+          legacySafeDeployed: hasLegacySafe || event.newValue === "safe",
+        })
+      );
     };
 
     window.addEventListener(MODE_CHANGE_EVENT, handleModeChange);
@@ -126,7 +151,7 @@ export function useTradingWalletMode() {
       window.removeEventListener(MODE_CHANGE_EVENT, handleModeChange);
       window.removeEventListener("storage", handleStorage);
     };
-  }, [address]);
+  }, [address, hasLegacySafe]);
 
   const setMode = useCallback(
     (nextMode: TradingWalletMode) => {

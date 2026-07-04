@@ -9,6 +9,7 @@ import { useCallback } from "react";
 import { type Address, getAddress } from "viem";
 import { useConnection } from "wagmi";
 import { qk } from "@/lib/query-keys";
+import { getDeployed as relayerGetDeployed } from "@/lib/relayer-client";
 import {
   clearBalanceCache,
   clearDeploymentCache,
@@ -60,7 +61,17 @@ async function fetchWalletData(
       : derivePolymarketSafe(ownerAddress);
 
   // Step 2: Check if the derived Safe is actually deployed on-chain
-  const isDeployed = await rpcCheckIsDeployed(proxyAddress);
+  let isDeployed = await rpcCheckIsDeployed(proxyAddress, { skipCache });
+  if (!isDeployed) {
+    try {
+      isDeployed = await relayerGetDeployed(
+        proxyAddress,
+        mode === "deposit" ? "WALLET" : "SAFE"
+      );
+    } catch {
+      // Keep the RPC result when the relayer deployment status is unavailable.
+    }
+  }
 
   if (!isDeployed) {
     return {

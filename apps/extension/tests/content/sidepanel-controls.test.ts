@@ -282,6 +282,99 @@ test("notification stack can move itself into the browser side panel", () => {
   assert.equal(/KNOWW_CLOSE_EXTENSION_SIDEPANEL/.test(sidepanelSource), true);
 });
 
+test("portfolio sidebar can resolve an already-connected content wallet", () => {
+  const messagesSource = readSource("src/types/chrome-messages.ts");
+  const tradingServiceSource = readSource(
+    "src/content/trading/trading-service.ts"
+  );
+  const uiSource = readSource("src/content/ui.ts");
+  const backgroundSource = readSource("src/background.ts");
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(/TRADING_WALLET_CONNECTED_MESSAGE/.test(messagesSource), true);
+  assert.equal(
+    /TRADING_WALLET_CONNECTED_MESSAGE[\s\S]*chrome\.runtime\.sendMessage/.test(
+      tradingServiceSource
+    ),
+    true
+  );
+  assert.equal(/KNOWW_GET_PORTFOLIO_CONNECTED_WALLET/.test(uiSource), true);
+  assert.equal(
+    /KNOWW_GET_PORTFOLIO_CONNECTED_WALLET[\s\S]*portfolioSigningTabId = tabId/.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /function getPortfolioConnectedWalletState/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /getPortfolioSessionAddress[\s\S]*getPortfolioConnectedWalletState/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(/TRADING_WALLET_CONNECTED_MESSAGE/.test(sidepanelSource), true);
+});
+
+test("trading setup opens the side panel portfolio onboarding", () => {
+  const uiSource = readSource("src/content/ui.ts");
+  const backgroundSource = readSource("src/background.ts");
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(/openTradingSetupSidePanel/.test(uiSource), true);
+  assert.equal(/view:\s*"portfolio"/.test(uiSource), true);
+  assert.equal(/SIDEPANEL_REQUESTED_VIEW_KEY/.test(backgroundSource), true);
+  assert.equal(
+    /KNOWW_SHOW_EXTENSION_SIDEPANEL_VIEW/.test(sidepanelSource),
+    true
+  );
+});
+
+test("side panel portfolio onboarding deploys the trading wallet before credentials", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const setupViewSource = readSource(
+    "src/content/trading/portfolio-setup-view.ts"
+  );
+  const setupFlowSource = readSource("src/content/trading/setup-flow.ts");
+
+  assert.equal(/hasDeployedTradingWallet/.test(sidepanelSource), true);
+  assert.equal(/hasTradingWallet/.test(sidepanelSource), true);
+  assert.equal(/deployPortfolioTradingWallet/.test(sidepanelSource), true);
+  // The guided setup wizard renders both the deploy and the enable affordances.
+  assert.equal(
+    /data-deploy-portfolio-trading-wallet/.test(setupViewSource),
+    true
+  );
+  assert.equal(/data-enable-portfolio-trading/.test(setupViewSource), true);
+  // The shared step model gates credentials behind vault deployment: the
+  // "vault" step is ordered before the "credentials" step.
+  assert.equal(
+    setupFlowSource.indexOf('id: "vault"') <
+      setupFlowSource.indexOf('id: "credentials"'),
+    true
+  );
+  assert.equal(
+    /ctx\.state === "ready" && ctx\.hasCredentials\) return true/.test(
+      serviceSource
+    ),
+    false
+  );
+  assert.equal(/hasDeployedTradingWallet\(ctx\)/.test(serviceSource), true);
+});
+
+test("background trading handler uses extension wallet mode gates", () => {
+  const handlerSource = readSource("src/background/trading-handler.ts");
+
+  assert.equal(/normalizeExtensionTradingWalletMode/.test(handlerSource), true);
+  assert.equal(
+    /normalizeTradingWalletMode\(msg\.walletMode\)/.test(handlerSource),
+    false
+  );
+});
+
 test("side panel shows trending markets before seen earlier", () => {
   const sidepanelSource = readSource("src/sidepanel.ts");
   const refreshSource = extractFunctionSource(
@@ -322,8 +415,8 @@ test("side panel exposes a compact portfolio view without charts", () => {
   assert.equal(/data-connect-portfolio-wallet/.test(sidepanelSource), true);
   assert.equal(/data-enable-portfolio-trading/.test(sidepanelSource), true);
   assert.equal(/renderPortfolioWalletChoices/.test(sidepanelSource), true);
-  assert.equal(/renderPortfolioTradingGate/.test(sidepanelSource), true);
-  assert.equal(/resolvePortfolioAddress/.test(sidepanelSource), true);
+  assert.equal(/renderPortfolioSetupSurface/.test(sidepanelSource), true);
+  assert.equal(/resolvePortfolioWallet/.test(sidepanelSource), true);
   assert.equal(/trading:derive-proxy-address/.test(sidepanelSource), true);
   assert.equal(/\/api\/user\/positions/.test(sidepanelSource), true);
   assert.equal(/\/api\/user\/trades/.test(sidepanelSource), true);
@@ -377,6 +470,192 @@ test("side panel exposes a compact portfolio view without charts", () => {
   assert.equal(/status:\s*"started"/.test(uiSource), true);
 });
 
+test("portfolio approval forwarding reports async approval failures", () => {
+  const uiSource = readSource("src/content/ui.ts");
+
+  assert.equal(
+    /KNOWW_APPROVE_PORTFOLIO_TRADING[\s\S]*await TradingService\.approveUsdc[\s\S]*sendResponse\(\{[\s\S]*success: true,[\s\S]*status: "approved"[\s\S]*\}\);[\s\S]*catch\(\(err\)[\s\S]*sendResponse\(\{[\s\S]*success: false/.test(
+      uiSource
+    ),
+    true
+  );
+});
+
+test("portfolio approval polling uses the shared setup approval check with backoff", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const hasApprovalSource = extractFunctionSource(
+    sidepanelSource,
+    "hasPortfolioApproval"
+  );
+  const waitSource = extractFunctionSource(
+    sidepanelSource,
+    "waitForPortfolioApproval"
+  );
+
+  assert.equal(/trading:get-all-allowances/.test(hasApprovalSource), true);
+  assert.equal(/fetchTradingSetupApprovalStatus/.test(hasApprovalSource), true);
+  assert.equal(/allowanceReadStatus/.test(hasApprovalSource), true);
+  assert.equal(/Promise<boolean \| null>/.test(hasApprovalSource), true);
+  assert.equal(/return null;/.test(hasApprovalSource), true);
+  assert.equal(
+    /deriveTradingSetupApprovalStatus/.test(hasApprovalSource),
+    false
+  );
+  assert.equal(/isTradingSetupApprovalComplete/.test(hasApprovalSource), false);
+  assert.equal(/getTradingOrderAllowance/.test(hasApprovalSource), false);
+  assert.equal(/trading:get-allowance/.test(hasApprovalSource), false);
+  assert.equal(/scalarApproval/.test(hasApprovalSource), false);
+  // The wait rides the shared pollUntil loop (which defaults to the shared
+  // backoff cadence) instead of hand-rolling a deadline/backoff loop.
+  assert.equal(/pollUntil\(/.test(waitSource), true);
+  assert.equal(/PORTFOLIO_CONNECT_TIMEOUT_MS/.test(waitSource), true);
+  assert.equal(/PORTFOLIO_CONNECT_POLL_MS/.test(waitSource), false);
+});
+
+test("post-create deployment wait requires on-chain bytecode, not the relayer record", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const deploySource = extractFunctionSource(
+    sidepanelSource,
+    "deployPortfolioTradingWallet"
+  );
+
+  // The relayer's /deployed answer may be record-based and flip true before
+  // code exists on-chain; the wizard must not advance to Approve on it. The
+  // poll skips the relayer fallback so only a bytecode read resolves the wait.
+  assert.equal(
+    /waitForPortfolioTradingWalletDeployment/.test(deploySource),
+    true
+  );
+  assert.equal(/skipRelayerDeploymentFallback: true/.test(deploySource), true);
+});
+
+test("switch-wallet failure surfaces in the loaded portfolio view", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const switchSource = extractFunctionSource(
+    sidepanelSource,
+    "switchPortfolioWallet"
+  );
+
+  // With a portfolio loaded, the error must render through the portfolio's
+  // own error channel (the signed-out channel renders nothing here and the
+  // stored message would leak into a later signed-out render).
+  assert.equal(
+    /portfolioTradingError = message;[\s\S]{0,120}loadPortfolio\(true\)/.test(
+      switchSource
+    ),
+    true
+  );
+  assert.equal(
+    /portfolioConnectError = message;[\s\S]{0,240}renderPortfolioSignedOut\(\)/.test(
+      switchSource
+    ),
+    true
+  );
+});
+
+test("approval wait maps an unresolvable poll address to unverified, not rejected", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /\? await waitForPortfolioApproval\(proxyAddress\)\s*:\s*"unverified"/.test(
+      sidepanelSource
+    ),
+    true
+  );
+});
+
+test("connected-wallet lookup prefers the remembered wallet-session tab", () => {
+  const backgroundSource = readSource("src/background.ts");
+
+  // The wallet session lives in the tab it was connected on, not whatever tab
+  // is active when the side panel asks — same routing rule as the signing
+  // forwards. The active-tab fallback stays inside the resolver.
+  assert.equal(
+    /KNOWW_GET_PORTFOLIO_CONNECTED_WALLET"\) \{[\s\S]{0,400}?void resolvePortfolioSigningTabId\(msg, sender\)/.test(
+      backgroundSource
+    ),
+    true
+  );
+  assert.equal(
+    /KNOWW_GET_PORTFOLIO_CONNECTED_WALLET"\) \{[\s\S]{0,400}?void resolveContentTargetTabId\(/.test(
+      backgroundSource
+    ),
+    false
+  );
+  // A card-side connect is the only signal telling the SW which tab holds the
+  // session when the user never used a side-panel flow — latch the broadcast.
+  assert.equal(
+    /"trading:wallet-connected"[\s\S]{0,300}portfolioSigningTabId = sender\.tab\.id/.test(
+      backgroundSource
+    ),
+    true
+  );
+});
+
+test("live view-switch consumes the persisted requested view", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  // The background persists the view for a boot-time consume AND notifies an
+  // already-open panel; the live path must also clear the key or the leftover
+  // value hijacks the next toolbar open.
+  assert.equal(
+    /KNOWW_SHOW_EXTENSION_SIDEPANEL_VIEW[\s\S]{0,400}session\.remove\(\s*SIDEPANEL_REQUESTED_VIEW_KEY/.test(
+      sidepanelSource
+    ),
+    true
+  );
+});
+
+test("portfolio setup completion is not cleared when approval status is unknown", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const renderSource = extractFunctionSource(
+    sidepanelSource,
+    "renderPortfolioSetupSurface"
+  );
+
+  assert.equal(
+    /function isPortfolioSetupCompletionUnknown/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/hasApproval: true/.test(sidepanelSource), true);
+  assert.equal(/approvalReadStatus !== "degraded"/.test(sidepanelSource), true);
+  assert.equal(
+    /liveCompleteKnown: !isPortfolioSetupCompletionUnknown\(data\)/.test(
+      renderSource
+    ),
+    true
+  );
+  assert.equal(
+    /!isPortfolioSetupCompletionUnknown\(data\)/.test(sidepanelSource),
+    true
+  );
+});
+
+test("get-all-allowances reports degraded partial reads instead of hiding them", () => {
+  const backgroundSource = readSource("src/background/trading-handler.ts");
+  const getAllAllowancesSource = extractFunctionSource(
+    backgroundSource,
+    "handleGetAllAllowances"
+  );
+
+  assert.equal(/degraded/.test(getAllAllowancesSource), true);
+  // Per-read fallbacks are acceptable ONLY because onFallback records each
+  // failed key into degradedKeys — a bare fallback with no recording would
+  // reintroduce round-4's silently-hidden partial reads (R4-1).
+  assert.equal(/fallbackRaw:\s*0n/.test(getAllAllowancesSource), true);
+  assert.equal(/fallbackApproved:\s*false/.test(getAllAllowancesSource), true);
+  assert.equal(/onFallback/.test(getAllAllowancesSource), true);
+  assert.equal(/degradedKeys\.push/.test(getAllAllowancesSource), true);
+});
+
+test("side panel removes unused setup rail css", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(/knoww-pf-setup-rail/.test(sidepanelSource), false);
+  assert.equal(/knoww-pf-setup-node/.test(sidepanelSource), false);
+  assert.equal(/knoww-pf-setup-active/.test(sidepanelSource), false);
+});
+
 test("side panel portfolio fetches a full active positions page but displays compact rows", () => {
   const sidepanelSource = readSource("src/sidepanel.ts");
 
@@ -422,6 +701,132 @@ test("side panel portfolio refreshes while visible instead of keeping stale posi
   );
   assert.equal(
     /document\.addEventListener\("visibilitychange", \(\) => \{[\s\S]*refreshVisiblePortfolio\(\);/.test(
+      sidepanelSource
+    ),
+    true
+  );
+});
+
+test("side panel portfolio refresh ignores stale in-flight responses", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(/let portfolioLoadGeneration = 0;/.test(sidepanelSource), true);
+  assert.equal(
+    /const loadGeneration = \+\+portfolioLoadGeneration;/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    (sidepanelSource.match(/loadGeneration !== portfolioLoadGeneration/g) ?? [])
+      .length >= 4,
+    true
+  );
+  assert.equal(
+    /portfolioOwnerAddressValue = data\.ownerAddress;/.test(sidepanelSource),
+    true
+  );
+});
+
+test("side panel resolves wallet mode from deployed legacy Safe before portfolio actions", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /resolvePreferredPortfolioWalletMode/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/resolvePreferredTradingWalletMode/.test(sidepanelSource), true);
+  assert.equal(
+    /trading:derive-proxy-address[\s\S]*walletMode:\s*"safe"/.test(
+      sidepanelSource
+    ),
+    true
+  );
+});
+
+test("side panel treats a failed legacy-Safe probe as unknown, not missing", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  // hasPortfolioLegacySafe must return null (unknown) on probe failure...
+  assert.equal(
+    /async function hasPortfolioLegacySafe\([\s\S]*?Promise<boolean \| null>/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  // ...and an unknown probe must honor the stored mode without writing it
+  // back, so one transient blip can't run a legacy-Safe user's action against
+  // the empty deposit wallet or clobber their stored "safe".
+  assert.equal(
+    /if \(legacySafeDeployed === null\) \{[\s\S]*?return storedMode;[\s\S]*?\}/.test(
+      sidepanelSource
+    ),
+    true
+  );
+});
+
+test("side panel never clears persisted setup completion from degraded approval reads", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const clearIndex = sidepanelSource.indexOf(
+    "await writeSetupComplete(data.ownerAddress, false);"
+  );
+  assert.notEqual(clearIndex, -1);
+  const clearWindow = sidepanelSource.slice(
+    Math.max(0, clearIndex - 220),
+    clearIndex + 80
+  );
+
+  assert.equal(
+    /isSetupCompletionUnknownFromDegradedRead/.test(sidepanelSource),
+    true
+  );
+  // One shared trust-window predicate; the preserve decision passes counter+1
+  // (the read being judged counts) so it can't drift from the post-increment
+  // completion-unknown check.
+  assert.equal(/isWithinDegradedSetupTrustWindow/.test(sidepanelSource), true);
+  assert.equal(
+    /isSetupCompletionUnknownFromDegradedRead\(\{[\s\S]*consecutiveDegradedReads: portfolioSetupConsecutiveDegradedReads/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /let portfolioSetupConsecutiveDegradedReads = 0;/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /preserveDegradedApproval: isWithinDegradedSetupTrustWindow\([\s\S]{0,200}portfolioSetupConsecutiveDegradedReads \+ 1/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /data\.approvalReadStatus !== "degraded"[\s\S]*writeSetupComplete\(data\.ownerAddress, false\)/.test(
+      clearWindow
+    ),
+    true
+  );
+});
+
+test("side panel setup renderer returns mode metadata instead of searching html", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /type PortfolioSetupSurfaceRender = \{[\s\S]*html: string;[\s\S]*mode: SetupSurfaceMode;[\s\S]*\};/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /function renderPortfolioSetupSurface\([\s\S]*data: PortfolioData[\s\S]*\): PortfolioSetupSurfaceRender/.test(
+      sidepanelSource
+    ),
+    true
+  );
+  assert.equal(
+    /\.includes\("data-portfolio-setup"\)/.test(sidepanelSource),
+    false
+  );
+  assert.equal(
+    /const wizardExpanded = setupSurface\.mode === "wizard";/.test(
       sidepanelSource
     ),
     true
@@ -542,6 +947,39 @@ test("side panel clears portfolio state when trading disconnects", () => {
   );
 });
 
+test("side panel does not fall back to an auth session after wallet revocation", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  assert.equal(
+    /type PortfolioConnectedWalletState/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/status: "disconnected"/.test(sidepanelSource), true);
+  assert.equal(
+    /async function getPortfolioConnectedWalletState/.test(sidepanelSource),
+    true
+  );
+  assert.equal(
+    /const connectedWallet = await getPortfolioConnectedWalletState\(\);[\s\S]*if \(connectedWallet\.status === "connected"\) return connectedWallet\.address;[\s\S]*if \(connectedWallet\.status === "disconnected"\) return null;/.test(
+      sidepanelSource
+    ),
+    true
+  );
+});
+
+test("portfolio side panel exposes wallet switch and forwards it to content", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+  const uiSource = readSource("src/content/ui.ts");
+  const typesSource = readSource("src/types/chrome-messages.ts");
+
+  assert.equal(/data-portfolio-switch-wallet/.test(sidepanelSource), true);
+  assert.equal(/function switchPortfolioWallet\(/.test(sidepanelSource), true);
+  assert.equal(/KNOWW_SWITCH_PORTFOLIO_WALLET/.test(sidepanelSource), true);
+  assert.equal(/KNOWW_SWITCH_PORTFOLIO_WALLET/.test(uiSource), true);
+  assert.equal(/TradingService\.switchWallet\(\)/.test(uiSource), true);
+  assert.equal(/KNOWW_SWITCH_PORTFOLIO_WALLET/.test(typesSource), true);
+});
+
 test("trading preflight market info uses direct CLOB fetch fallback", () => {
   const source = readSource("src/background/trading-handler.ts");
 
@@ -653,4 +1091,17 @@ test("offscreen trading handler never accesses session storage directly", () => 
   const handlerSource = readSource("src/background/trading-handler.ts");
   assert.equal(/chrome\.storage\.session/.test(handlerSource), false);
   assert.equal(/clob-credentials-store/.test(handlerSource), false);
+});
+
+test("approval wait distinguishes unverified reads from a confirmed non-approval", () => {
+  const sidepanelSource = readSource("src/sidepanel.ts");
+
+  // A window of only degraded/null reads must not claim the approval "didn't
+  // complete" (it may have landed) — that message prompts a redundant
+  // re-approval.
+  assert.equal(
+    /sawCleanRead \? "not-approved" : "unverified"/.test(sidepanelSource),
+    true
+  );
+  assert.equal(/Couldn't verify the approval yet/.test(sidepanelSource), true);
 });

@@ -459,4 +459,58 @@ describe("TradingForm", () => {
 
     expect(setShares).toHaveBeenCalledWith(1.5873);
   });
+
+  it("renders simultaneous warning banners without duplicate React keys", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    useTradingFormStateMock.mockReturnValue(
+      makeTradingFormState({
+        isConnected: true,
+        hasCredentials: true,
+        error: new Error("Approval failed"),
+        hasMissingTradingApprovals: true,
+      })
+    );
+
+    try {
+      render(
+        <TradingForm
+          marketTitle="Portugal"
+          tokenId="portugal-token"
+          outcomes={[
+            {
+              name: "Portugal",
+              tokenId: "portugal-token",
+              price: 0.08,
+              probability: 8,
+            },
+            {
+              name: "Field",
+              tokenId: "field-token",
+              price: 0.92,
+              probability: 92,
+            },
+          ]}
+          selectedOutcomeIndex={0}
+          onOutcomeChange={() => {}}
+          bestBid={0.079}
+          bestAsk={0.08}
+          disableSticky
+        />
+      );
+
+      expect(
+        consoleError.mock.calls.some((args) =>
+          args.some(
+            (arg) =>
+              typeof arg === "string" &&
+              arg.includes("Encountered two children with the same key")
+          )
+        )
+      ).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 });

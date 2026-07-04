@@ -11,6 +11,7 @@ import {
   WITHDRAW_CHAIN_IDS,
   WITHDRAW_TOKEN_CONFIGS,
 } from "@knoww/shared-types/bridge";
+import { resolvePreferredTradingWalletMode } from "@knoww/shared-types/polymarket";
 import { Decimal } from "decimal.js";
 import {
   formatPortfolioTokenBaseUnitAmount,
@@ -18,15 +19,53 @@ import {
   type PortfolioWithdrawDestination,
 } from "./background/portfolio-withdraw-flow";
 import {
+  pollUntil,
+  resolvePortfolioApprovalPollAddress,
+  waitForPortfolioTradingWalletDeployment,
+} from "./content/trading/portfolio-approval";
+import {
+  renderSetupBanner,
+  renderSetupFocused,
+  renderSetupWizard,
+} from "./content/trading/portfolio-setup-view";
+import {
+  deriveSetupFlow,
+  fetchTradingSetupApprovalStatus,
+  isSetupCompletionUnknownFromDegradedRead,
+  isWithinDegradedSetupTrustWindow,
+  resolveSetupSurfaceMode,
+  SETUP_APPROVAL_DEFAULT,
+  type SetupFlowState,
+  type SetupSurfaceMode,
+  type TradingSetupAllowanceReadStatus,
+} from "./content/trading/setup-flow";
+import {
+  markSetupComplete,
+  readSetupComplete,
+  readSetupDismissed,
+  writeSetupComplete,
+  writeSetupDismissed,
+} from "./content/trading/setup-flow-storage";
+import {
+  hasDeployedTradingWallet,
+  normalizeExtensionTradingWalletMode,
+} from "./content/trading/setup-gates";
+import {
   EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_CREDENTIALS_UPDATED_MESSAGE,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
+  TRADING_WALLET_CONNECTED_MESSAGE,
 } from "./types/chrome-messages";
 
 type RuntimeResponse = {
   ok?: boolean;
   error?: string;
   data?: unknown;
+};
+
+type PortfolioSetupSurfaceRender = {
+  html: string;
+  mode: SetupSurfaceMode;
 };
 
 type SnapshotMarket = {
@@ -143,7 +182,11 @@ type PortfolioOpenOrdersResponse = {
 type PortfolioData = {
   address: string;
   ownerAddress: string;
+  walletMode: TradingWalletMode;
+  hasTradingWallet: boolean;
   hasTradingCredentials: boolean;
+  hasApproval: boolean; // full setup approval, with scalar allowance fallback
+  approvalReadStatus: TradingSetupAllowanceReadStatus;
   cashBalance: number;
   openOrders: PortfolioOpenOrdersResponse;
   positions: PortfolioPositionsResponse;
@@ -159,6 +202,7 @@ type PortfolioWallet = {
 };
 
 type TradingWalletMode = "deposit" | "safe" | "eoa";
+type SidePanelView = "markets" | "portfolio";
 type PortfolioTableView = "positions" | "orders" | "history";
 
 const STACK_MINIMIZE_ICON_HTML = `
@@ -187,11 +231,17 @@ const KNOWW_APP_URL = __DEV_MODE__
   ? "http://localhost:8000"
   : "https://knoww.app";
 const WALLET_MODE_STORAGE_KEY = "knoww_trading_wallet_mode";
+const SIDEPANEL_REQUESTED_VIEW_KEY = "knoww_sidepanel_requested_view";
 
 const root = document.getElementById("root");
 let portfolioLoaded = false;
+let portfolioLoadGeneration = 0;
 let portfolioConnectError: string | null = null;
 let portfolioTradingError: string | null = null;
+let portfolioSetupDismissed = false;
+let portfolioSetupComplete = false;
+let portfolioSetupConsecutiveDegradedReads = 0;
+let portfolioOwnerAddressValue: string | null = null;
 let portfolioTableView: PortfolioTableView = "positions";
 let portfolioHistoryPage = 0;
 let latestPortfolioData: PortfolioData | null = null;
@@ -341,8 +391,8 @@ function formatOrderExpiration(expiration: string): string {
 }
 
 function normalizePortfolioWalletMode(value: unknown): TradingWalletMode {
-  return value === "safe" || value === "eoa" || value === "deposit"
-    ? value
+  return typeof value === "string"
+    ? normalizeExtensionTradingWalletMode(value)
     : "deposit";
 }
 
@@ -362,6 +412,66 @@ function readStoredWalletMode(address: string): Promise<TradingWalletMode> {
       );
     });
   });
+}
+
+function writeStoredWalletMode(
+  address: string,
+  walletMode: TradingWalletMode
+): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(
+      // Normalize on write like trading-service's storeWalletMode — two
+      // writers of the same shared key must not diverge on accepted values.
+      {
+        [getWalletModeStorageKey(address)]:
+          normalizePortfolioWalletMode(walletMode),
+      },
+      () => resolve()
+    );
+  });
+}
+
+/** `null` means the probe failed — "unknown", not "no safe deployed". */
+async function hasPortfolioLegacySafe(
+  ownerAddress: string
+): Promise<boolean | null> {
+  try {
+    const response = await sendRuntimeMessage({
+      type: "trading:derive-proxy-address",
+      eoaAddress: ownerAddress,
+      walletMode: "safe",
+      // Existence probe: bytecode is authoritative; the relayer fallback is a
+      // guaranteed-miss round-trip for every user without a legacy safe.
+      skipRelayerDeploymentFallback: true,
+    });
+    if (!response.ok) return null;
+    const payload = response.data as { isDeployed?: unknown } | undefined;
+    return payload?.isDeployed === true;
+  } catch {
+    return null;
+  }
+}
+
+async function resolvePreferredPortfolioWalletMode(
+  ownerAddress: string
+): Promise<TradingWalletMode> {
+  const storedMode = await readStoredWalletMode(ownerAddress);
+  const legacySafeDeployed = await hasPortfolioLegacySafe(ownerAddress);
+  if (legacySafeDeployed === null) {
+    // Transient probe failure: honor the stored mode (a stored "safe" is only
+    // ever written after a successful on-chain detection) and skip the
+    // write-back so one blip can't clobber it — otherwise the coinciding
+    // action would run against the wrong (empty) deposit wallet.
+    return storedMode;
+  }
+  const preferredMode = resolvePreferredTradingWalletMode({
+    storedMode,
+    legacySafeDeployed,
+  });
+  if (preferredMode !== storedMode) {
+    await writeStoredWalletMode(ownerAddress, preferredMode);
+  }
+  return preferredMode;
 }
 
 function formatLiveTimeLabel(): string {
@@ -544,6 +654,51 @@ async function disconnectPortfolioWallet(
     portfolioDisconnecting = false;
     button.classList.remove("is-busy");
     button.title = "Disconnect wallet";
+  }
+}
+
+let portfolioSwitching = false;
+async function switchPortfolioWallet(button: HTMLButtonElement): Promise<void> {
+  if (portfolioSwitching) return;
+  portfolioSwitching = true;
+  button.classList.add("is-busy");
+  button.title = "Switching wallet…";
+  void sendRuntimeMessage({
+    type: "analytics:track",
+    event: "wallet_switch_clicked",
+  });
+
+  try {
+    const response = await sendRuntimeMessage({
+      type: "KNOWW_SWITCH_PORTFOLIO_WALLET",
+    });
+    const payload = response.data as
+      | { success?: boolean; data?: { error?: string } }
+      | undefined;
+
+    if (response.ok === false || payload?.success === false) {
+      const message =
+        payload?.data?.error || response.error || "Failed to switch wallet.";
+      if (latestPortfolioData) {
+        // With a portfolio loaded the signed-out channel never renders — the
+        // spinner would just stop silently and the stored message would leak
+        // into a later signed-out render. Use the portfolio's error line.
+        portfolioTradingError = message;
+        await loadPortfolio(true);
+      } else {
+        portfolioConnectError = message;
+        portfolioLoaded = false;
+        const container = getPortfolioContainer();
+        if (container) container.innerHTML = renderPortfolioSignedOut();
+      }
+      return;
+    }
+
+    await loadPortfolio(true);
+  } finally {
+    portfolioSwitching = false;
+    button.classList.remove("is-busy");
+    button.title = "Switch wallet";
   }
 }
 
@@ -1163,7 +1318,9 @@ async function sellPortfolioPosition(
   renderPortfolioContent_inPlace();
 
   try {
-    const walletMode = await readStoredWalletMode(data.ownerAddress);
+    const walletMode = await resolvePreferredPortfolioWalletMode(
+      data.ownerAddress
+    );
     const response = await sendRuntimeMessage({
       type: "KNOWW_SELL_PORTFOLIO_POSITION",
       address: data.ownerAddress,
@@ -1681,7 +1838,9 @@ async function submitPortfolioFund(action: PortfolioFundAction): Promise<void> {
 
   setPortfolioFundStatus("info", "Confirm the transaction in your wallet…");
 
-  const walletMode = await readStoredWalletMode(data.ownerAddress);
+  const walletMode = await resolvePreferredPortfolioWalletMode(
+    data.ownerAddress
+  );
   const sendFundRequest = (): Promise<RuntimeResponse> =>
     sendRuntimeMessage({
       type:
@@ -2050,6 +2209,180 @@ function cancelPortfolioWalletConnect(): void {
   if (container) container.innerHTML = renderPortfolioSignedOut();
 }
 
+async function deployPortfolioTradingWallet(
+  ownerAddress: string
+): Promise<void> {
+  const container = root?.querySelector<HTMLElement>(
+    "[data-sidepanel-portfolio]"
+  );
+  if (container) {
+    container.innerHTML = `
+      <div class="knoww-portfolio-loading">Creating trading wallet...</div>
+    `;
+  }
+
+  const walletMode = await resolvePreferredPortfolioWalletMode(ownerAddress);
+  const response = await sendRuntimeMessage({
+    type: "trading:deploy-safe",
+    address: ownerAddress,
+    walletMode,
+  });
+
+  if (response.ok === false) {
+    portfolioLoaded = false;
+    portfolioTradingError =
+      response.error || "Failed to create trading wallet.";
+    if (container) await loadPortfolio(true);
+    return;
+  }
+
+  const payload = response.data as
+    | { proxyAddress?: unknown; alreadyDeployed?: unknown }
+    | undefined;
+  const proxyAddress =
+    typeof payload?.proxyAddress === "string" ? payload.proxyAddress : null;
+  if (payload?.alreadyDeployed !== true) {
+    if (container) {
+      container.innerHTML = `
+        <div class="knoww-portfolio-loading">Confirming trading wallet...</div>
+      `;
+    }
+    const deployed = await waitForPortfolioTradingWalletDeployment({
+      ownerAddress,
+      expectedProxyAddress: proxyAddress,
+      // Narrow poll: the wallet mode is already resolved above, so each
+      // attempt is a single derive-proxy-address deployment check — not the
+      // full resolvePortfolioWallet (stored-mode read + legacy-safe probe +
+      // derive) fan-out on every tick of a 90s wait.
+      resolvePortfolioWallet: async (owner: string) => {
+        const pollResponse = await sendRuntimeMessage({
+          type: "trading:derive-proxy-address",
+          eoaAddress: owner,
+          walletMode,
+          // The relayer's /deployed record can flip true before code exists
+          // on-chain; advancing to Approve then runs against a code-less
+          // wallet. Only a bytecode read may resolve this wait.
+          skipRelayerDeploymentFallback: true,
+        });
+        const pollPayload = pollResponse.data as
+          | { proxyAddress?: unknown; isDeployed?: unknown }
+          | undefined;
+        return {
+          address:
+            typeof pollPayload?.proxyAddress === "string"
+              ? pollPayload.proxyAddress
+              : null,
+          isDeployed:
+            typeof pollPayload?.isDeployed === "boolean"
+              ? pollPayload.isDeployed
+              : null,
+        };
+      },
+      timeoutMs: PORTFOLIO_CONNECT_TIMEOUT_MS,
+      sleep,
+    });
+    if (!deployed) {
+      portfolioLoaded = false;
+      portfolioTradingError =
+        "Trading wallet creation is still confirming. Refresh in a moment.";
+      if (container) await loadPortfolio(true);
+      return;
+    }
+  }
+
+  portfolioLoaded = false;
+  portfolioTradingError = null;
+  await loadPortfolio(true);
+}
+
+type PortfolioApprovalWaitResult = "approved" | "not-approved" | "unverified";
+
+async function waitForPortfolioApproval(
+  proxyAddress: string
+): Promise<PortfolioApprovalWaitResult> {
+  // Distinguish "every read cleanly said not-approved" from "we never got a
+  // clean read" (hasPortfolioApproval returns null on degraded reads) — the
+  // approval may well have landed during a degraded window, and telling the
+  // user it "didn't complete" prompts a redundant re-approval.
+  let sawCleanRead = false;
+  const approved = await pollUntil(
+    async () => {
+      const result = await hasPortfolioApproval(proxyAddress);
+      if (result) return true;
+      if (result === false) sawCleanRead = true;
+      return null;
+    },
+    { timeoutMs: PORTFOLIO_CONNECT_TIMEOUT_MS }
+  );
+  if (approved) return "approved";
+  return sawCleanRead ? "not-approved" : "unverified";
+}
+
+async function approvePortfolioTrading(
+  ownerAddress: string,
+  approvalAmount: string
+): Promise<void> {
+  const container = root?.querySelector<HTMLElement>(
+    "[data-sidepanel-portfolio]"
+  );
+  if (container) {
+    container.innerHTML = `
+      <div class="knoww-portfolio-loading">Approve the permissions signature...</div>
+    `;
+  }
+
+  // The signature has to be produced in a content tab (where the wallet is
+  // injected) — the side panel is not a tab, so a direct relayer-approve fails
+  // with "No active tab for signing". Forward to the resolved content tab, which
+  // runs TradingService.approveUsdc and bridges the signature to the wallet —
+  // the same rail KNOWW_ENABLE_PORTFOLIO_TRADING uses.
+  const response = await sendRuntimeMessage({
+    type: "KNOWW_APPROVE_PORTFOLIO_TRADING",
+    address: ownerAddress,
+    approvalAmount,
+  });
+  const payload = response.data as
+    | { success?: boolean; data?: { error?: string } }
+    | undefined;
+
+  if (response.ok === false || payload?.success === false) {
+    portfolioLoaded = false;
+    portfolioTradingError =
+      payload?.data?.error ||
+      response.error ||
+      "Failed to approve trading permissions.";
+    if (container) await loadPortfolio(true);
+    return;
+  }
+
+  // The content tab opens the wallet and submits via the relayer asynchronously;
+  // poll the on-chain allowance until it lands, then refresh.
+  const proxyAddress = await resolvePortfolioApprovalPollAddress({
+    ownerAddress,
+    currentProxyAddress: latestPortfolioData?.address,
+    resolvePortfolioWallet,
+  });
+  // A null poll address means the trading-wallet derive failed (non-EOA) —
+  // the approval may well have landed, so report "couldn't verify" rather
+  // than polling the owner EOA and claiming it was rejected.
+  const waitResult = proxyAddress
+    ? await waitForPortfolioApproval(proxyAddress)
+    : "unverified";
+  if (waitResult !== "approved") {
+    portfolioLoaded = false;
+    portfolioTradingError =
+      waitResult === "unverified"
+        ? "Couldn't verify the approval yet — it may still be confirming. Refresh in a moment."
+        : "Approval didn't complete. Approve the wallet signature and try again.";
+    if (container) await loadPortfolio(true);
+    return;
+  }
+
+  portfolioTradingError = null;
+  portfolioLoaded = false;
+  await loadPortfolio(true);
+}
+
 async function enablePortfolioTrading(ownerAddress: string): Promise<void> {
   const container = root?.querySelector<HTMLElement>(
     "[data-sidepanel-portfolio]"
@@ -2106,7 +2439,16 @@ async function searchMarkets(query: string): Promise<SnapshotMarket[]> {
   return getSearchResultsPayload(response);
 }
 
+type PortfolioConnectedWalletState =
+  | { status: "connected"; address: string }
+  | { status: "disconnected" }
+  | { status: "unavailable" };
+
 async function getPortfolioSessionAddress(): Promise<string | null> {
+  const connectedWallet = await getPortfolioConnectedWalletState();
+  if (connectedWallet.status === "connected") return connectedWallet.address;
+  if (connectedWallet.status === "disconnected") return null;
+
   const response = await sendRuntimeMessage({
     type: "auth:get-session-info",
   });
@@ -2146,6 +2488,38 @@ async function getPortfolioTradingStatus(
   const payload = response.data as { hasCredentials?: unknown } | undefined;
   return { hasCredentials: payload?.hasCredentials === true };
 }
+
+async function getPortfolioConnectedWalletState(): Promise<PortfolioConnectedWalletState> {
+  const response = await sendRuntimeMessage({
+    type: "KNOWW_GET_PORTFOLIO_CONNECTED_WALLET",
+  });
+  if (response.ok === false) return { status: "unavailable" };
+
+  const payload = response.data as
+    | {
+        success?: boolean;
+        data?: { address?: unknown; status?: unknown };
+      }
+    | undefined;
+  if (payload?.success !== true) return { status: "unavailable" };
+  if (payload.data?.status === "disconnected") {
+    return { status: "disconnected" };
+  }
+  if (payload.data?.status === "unavailable") {
+    return { status: "unavailable" };
+  }
+
+  const address = payload.data?.address;
+  return typeof address === "string" && address.length > 0
+    ? { status: "connected", address }
+    : { status: "unavailable" };
+}
+
+type ResolvedPortfolioWallet = {
+  address: string;
+  walletMode: TradingWalletMode;
+  isDeployed: boolean;
+};
 
 async function getPortfolioCashBalance(
   portfolioAddress: string
@@ -2339,19 +2713,57 @@ async function performOrderCancel(button: HTMLButtonElement): Promise<void> {
   }, 4000);
 }
 
-async function resolvePortfolioAddress(ownerAddress: string): Promise<string> {
-  const walletMode = await readStoredWalletMode(ownerAddress);
-  if (walletMode === "eoa") return ownerAddress;
+async function resolvePortfolioWallet(
+  ownerAddress: string
+): Promise<ResolvedPortfolioWallet> {
+  const walletMode = await resolvePreferredPortfolioWalletMode(ownerAddress);
+  if (walletMode === "eoa") {
+    return { address: ownerAddress, walletMode, isDeployed: true };
+  }
 
   const response = await sendRuntimeMessage({
     type: "trading:derive-proxy-address",
     eoaAddress: ownerAddress,
     walletMode,
   });
-  const payload = response.data as { proxyAddress?: unknown } | undefined;
-  return typeof payload?.proxyAddress === "string"
-    ? payload.proxyAddress
-    : ownerAddress;
+  const payload = response.data as
+    | { proxyAddress?: unknown; isDeployed?: unknown }
+    | undefined;
+  return {
+    address:
+      typeof payload?.proxyAddress === "string"
+        ? payload.proxyAddress
+        : ownerAddress,
+    walletMode,
+    isDeployed: payload?.isDeployed === true,
+  };
+}
+
+async function hasPortfolioApproval(
+  proxyAddress: string
+): Promise<boolean | null> {
+  try {
+    const status = await fetchTradingSetupApprovalStatus(
+      proxyAddress,
+      async (ownerAddress) => {
+        const allAllowances = await sendRuntimeMessage({
+          type: "trading:get-all-allowances",
+          ownerAddress,
+        });
+        return allAllowances.data as
+          | {
+              allowances?: Record<string, number>;
+              degraded?: boolean;
+              degradedKeys?: string[];
+            }
+          | undefined;
+      }
+    );
+    if (status.allowanceReadStatus === "degraded") return null;
+    return status.hasTradingApproval;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchKnowwJson<T>(path: string): Promise<T | null> {
@@ -2366,23 +2778,52 @@ async function fetchKnowwJson<T>(path: string): Promise<T | null> {
 async function fetchPortfolioData(
   ownerAddress: string,
   address: string,
-  previous: PortfolioData | null
+  wallet: ResolvedPortfolioWallet,
+  previous: PortfolioData | null,
+  options: { preserveDegradedApproval?: boolean } = {}
 ): Promise<PortfolioData> {
+  const hasTradingWallet = hasDeployedTradingWallet({
+    address: ownerAddress,
+    proxyAddress: wallet.address,
+    walletMode: wallet.walletMode,
+    isDeployed: wallet.isDeployed,
+  });
+
   const user = encodeURIComponent(address);
-  const [positions, trades, details, tradingStatus, cashBalance] =
-    await Promise.all([
-      fetchKnowwJson<PortfolioPositionsResponse>(
-        `/api/user/positions?user=${user}&limit=${PORTFOLIO_POSITIONS_FETCH_LIMIT}&offset=0&active=true`
-      ),
-      fetchKnowwJson<PortfolioTradesResponse>(
-        `/api/user/trades?user=${user}&limit=${PORTFOLIO_HISTORY_FETCH_LIMIT}&offset=0`
-      ),
-      fetchKnowwJson<PortfolioDetailsResponse>(
-        `/api/user/details?user=${user}&timePeriod=all`
-      ),
-      getPortfolioTradingStatus(ownerAddress),
-      getPortfolioCashBalance(address),
-    ]);
+  // One concurrent batch: the approval fan-out and open-orders fetch used to
+  // run as serial stages after this Promise.all, roughly doubling
+  // time-to-render. Open orders chain off the (fast, local) credentials
+  // check; everything else is independent.
+  const tradingStatusPromise = getPortfolioTradingStatus(ownerAddress);
+  const [
+    positions,
+    trades,
+    details,
+    tradingStatus,
+    cashBalance,
+    approval,
+    openOrders,
+  ] = await Promise.all([
+    fetchKnowwJson<PortfolioPositionsResponse>(
+      `/api/user/positions?user=${user}&limit=${PORTFOLIO_POSITIONS_FETCH_LIMIT}&offset=0&active=true`
+    ),
+    fetchKnowwJson<PortfolioTradesResponse>(
+      `/api/user/trades?user=${user}&limit=${PORTFOLIO_HISTORY_FETCH_LIMIT}&offset=0`
+    ),
+    fetchKnowwJson<PortfolioDetailsResponse>(
+      `/api/user/details?user=${user}&timePeriod=all`
+    ),
+    tradingStatusPromise,
+    getPortfolioCashBalance(address),
+    hasTradingWallet
+      ? hasPortfolioApproval(wallet.address)
+      : Promise.resolve<boolean | null>(false),
+    tradingStatusPromise.then((status) =>
+      status.hasCredentials && hasTradingWallet
+        ? getPortfolioOpenOrders(ownerAddress)
+        : { orders: [], count: 0 }
+    ),
+  ]);
 
   // A `null` here means the upstream call returned a non-2xx (timeout, 5xx,
   // rate-limit) — a *transient failure*, NOT an empty account. An account with
@@ -2393,9 +2834,21 @@ async function fetchPortfolioData(
     throw new Error("portfolio-refresh-failed");
   }
 
-  const openOrders = tradingStatus.hasCredentials
-    ? await getPortfolioOpenOrders(ownerAddress)
-    : { orders: [], count: 0 };
+  let hasApproval = false;
+  let approvalReadStatus: TradingSetupAllowanceReadStatus = "complete";
+  if (hasTradingWallet) {
+    if (approval === null) {
+      approvalReadStatus = "degraded";
+      hasApproval =
+        options.preserveDegradedApproval &&
+        previous &&
+        previous.address === address
+          ? previous.hasApproval
+          : false;
+    } else {
+      hasApproval = approval;
+    }
+  }
 
   // History is non-critical: if only the trades call blipped, reuse the last
   // good history (for the same address) rather than emptying the list.
@@ -2405,7 +2858,11 @@ async function fetchPortfolioData(
   return {
     address,
     ownerAddress,
+    walletMode: wallet.walletMode,
+    hasTradingWallet,
     hasTradingCredentials: tradingStatus.hasCredentials,
+    hasApproval,
+    approvalReadStatus,
     cashBalance,
     openOrders,
     details,
@@ -2440,6 +2897,9 @@ function renderPortfolioSummary(data: PortfolioData): string {
           <button type="button" class="knoww-portfolio-open" data-open-portfolio>
             <span>Open</span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"></path></svg>
+          </button>
+          <button type="button" class="knoww-pf-hero-disconnect" data-portfolio-switch-wallet title="Switch wallet" aria-label="Switch wallet">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
           </button>
           <button type="button" class="knoww-pf-hero-disconnect" data-portfolio-disconnect title="Disconnect wallet" aria-label="Disconnect wallet">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
@@ -2820,14 +3280,18 @@ function renderPortfolioTable(data: PortfolioData): string {
         ${portfolioTableView === "orders" ? "" : "hidden"}
       >
         ${
-          data.hasTradingCredentials
+          data.hasTradingWallet && data.hasTradingCredentials
             ? renderCompactOpenOrders(
                 data.openOrders.orders || [],
                 data.ownerAddress
               )
             : renderPortfolioEmpty(
-                "Trading not enabled",
-                "Enable trading above to place and track open orders.",
+                data.hasTradingWallet
+                  ? "Trading not enabled"
+                  : "Trading wallet not ready",
+                data.hasTradingWallet
+                  ? "Enable trading above to place and track open orders."
+                  : "Create your trading wallet above to continue setup.",
                 `<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>`
               )
         }
@@ -2860,16 +3324,83 @@ function renderPortfolioFundActions(): string {
   `;
 }
 
+function portfolioOwnerAddress(): string | null {
+  return portfolioOwnerAddressValue;
+}
+
+function portfolioSetupState(data: PortfolioData): SetupFlowState {
+  return {
+    hasSession: true, // PortfolioData only exists once a session is resolved
+    address: data.ownerAddress,
+    proxyAddress: data.address,
+    walletMode: data.walletMode,
+    isDeployed: data.hasTradingWallet,
+    hasApproval: data.hasApproval,
+    hasCredentials: data.hasTradingCredentials,
+    cashBalance: data.cashBalance,
+  };
+}
+
+function isPortfolioSetupCompletionUnknown(data: PortfolioData): boolean {
+  if (data.approvalReadStatus !== "degraded") return false;
+  return isSetupCompletionUnknownFromDegradedRead({
+    consecutiveDegradedReads: portfolioSetupConsecutiveDegradedReads,
+    flowAssumingApproval: deriveSetupFlow({
+      ...portfolioSetupState(data),
+      hasApproval: true,
+    }),
+  });
+}
+
+function renderPortfolioSetupSurface(
+  data: PortfolioData
+): PortfolioSetupSurfaceRender {
+  const flow = deriveSetupFlow(portfolioSetupState(data));
+  const mode = resolveSetupSurfaceMode({
+    flow,
+    persistedComplete: portfolioSetupComplete,
+    dismissed: portfolioSetupDismissed,
+    liveCompleteKnown: !isPortfolioSetupCompletionUnknown(data),
+  });
+  if (mode === "complete") return { html: "", mode };
+  if (mode === "banner") return { html: renderSetupBanner(flow), mode };
+  // Returning user — they already have a trading vault, so don't replay the
+  // whole onboarding. Show a focused prompt for what's left (usually generating
+  // CLOB API keys) and keep their portfolio visible behind it.
+  if (data.hasTradingWallet) {
+    return {
+      html: renderSetupFocused({
+        flow,
+        ownerAddress: data.ownerAddress,
+        error: portfolioTradingError,
+      }),
+      mode: "banner",
+    };
+  }
+  // New user — guided onboarding checklist.
+  return {
+    html: renderSetupWizard({
+      flow,
+      ownerAddress: data.ownerAddress,
+      error: portfolioTradingError,
+      walletPicker: "", // signed-in wizard never lands on the connect step
+    }),
+    mode: "wizard",
+  };
+}
+
 function renderPortfolioContent(
   data: PortfolioData,
   options: { stale?: boolean } = {}
 ): string {
+  const setupSurface = renderPortfolioSetupSurface(data);
+  const wizardExpanded = setupSurface.mode === "wizard";
   return `
     ${options.stale ? renderPortfolioStaleNotice() : ""}
     ${renderPortfolioSummary(data)}
-    ${renderPortfolioFundActions()}
-    ${renderPortfolioTradingGate(data)}
-    ${renderPortfolioTable(data)}
+    ${wizardExpanded ? "" : renderPortfolioFundActions()}
+    ${setupSurface.html}
+    ${wizardExpanded ? "" : renderPortfolioTable(data)}
   `;
 }
 
@@ -2880,31 +3411,6 @@ function renderPortfolioStaleNotice(): string {
       <span class="knoww-pf-stale-text">Couldn't refresh — showing last update</span>
       <button type="button" class="knoww-pf-stale-retry" data-refresh-portfolio>
         Retry
-      </button>
-    </div>
-  `;
-}
-
-function renderPortfolioTradingGate(data: PortfolioData): string {
-  if (data.hasTradingCredentials) return "";
-
-  return `
-    <div class="knoww-portfolio-trading-gate">
-      <div>
-        <strong>Enable trading</strong>
-        <span>${
-          portfolioTradingError
-            ? escapeHtml(portfolioTradingError)
-            : "Sign once to unlock market orders and open orders."
-        }</span>
-      </div>
-      <button
-        type="button"
-        class="knoww-portfolio-open primary"
-        data-enable-portfolio-trading
-        data-owner-address="${escapeHtml(data.ownerAddress)}"
-      >
-        Enable
       </button>
     </div>
   `;
@@ -2977,6 +3483,8 @@ function renderPortfolioWalletChoices(wallets: PortfolioWallet[] = []): string {
 }
 
 function renderPortfolioSignedOut(): string {
+  // Pre-connect: just a clean wallet picker. We can't tell a new user from a
+  // returning one until they connect, so we don't surface any setup steps yet.
   const wallets = portfolioWallets || [];
   const hasError = Boolean(portfolioConnectError);
   return `
@@ -3009,9 +3517,12 @@ async function refreshPortfolioWalletChoicesAfterDisconnect(): Promise<void> {
 }
 
 function clearPortfolioSessionState(): void {
+  portfolioLoadGeneration++;
   portfolioLoaded = false;
+  portfolioOwnerAddressValue = null;
   portfolioConnectError = null;
   portfolioTradingError = null;
+  portfolioSetupConsecutiveDegradedReads = 0;
   portfolioHistoryPage = 0;
   latestPortfolioData = null;
   portfolioWallets = null;
@@ -3036,6 +3547,7 @@ async function loadPortfolio(force = false): Promise<void> {
     "[data-sidepanel-portfolio]"
   );
   if (!container) return;
+  const loadGeneration = ++portfolioLoadGeneration;
 
   // Only show the loading wipe on the very first load. On a refresh we keep the
   // current render in place so a transient failure never flashes an empty hero.
@@ -3047,23 +3559,70 @@ async function loadPortfolio(force = false): Promise<void> {
   }
 
   const address = await getPortfolioSessionAddress();
+  if (loadGeneration !== portfolioLoadGeneration) return;
   if (!address) {
     portfolioLoaded = false;
     latestPortfolioData = null;
+    portfolioOwnerAddressValue = null;
+    portfolioSetupConsecutiveDegradedReads = 0;
     if (!portfolioWallets) {
       portfolioWallets = await getPortfolioWallets();
+      if (loadGeneration !== portfolioLoadGeneration) return;
     }
     container.innerHTML = renderPortfolioSignedOut();
     return;
   }
 
   try {
-    const portfolioAddress = await resolvePortfolioAddress(address);
-    const data = await fetchPortfolioData(address, portfolioAddress, previous);
+    const portfolioWallet = await resolvePortfolioWallet(address);
+    const data = await fetchPortfolioData(
+      address,
+      portfolioWallet.address,
+      portfolioWallet,
+      previous,
+      {
+        // +1: if this read turns out degraded it will be the (n+1)-th
+        // consecutive one — the same window the post-increment checks use.
+        preserveDegradedApproval: isWithinDegradedSetupTrustWindow(
+          portfolioSetupConsecutiveDegradedReads + 1
+        ),
+      }
+    );
+    const [setupDismissed, setupComplete] = await Promise.all([
+      readSetupDismissed(data.ownerAddress),
+      readSetupComplete(data.ownerAddress),
+    ]);
+    if (loadGeneration !== portfolioLoadGeneration) return;
+
+    portfolioOwnerAddressValue = data.ownerAddress;
+    portfolioSetupDismissed = setupDismissed;
+    portfolioSetupComplete = setupComplete;
+    if (data.approvalReadStatus === "degraded") {
+      portfolioSetupConsecutiveDegradedReads++;
+    } else {
+      portfolioSetupConsecutiveDegradedReads = 0;
+    }
+    const flow = deriveSetupFlow(portfolioSetupState(data));
+    if (flow.isComplete) {
+      if (!portfolioSetupComplete) {
+        await markSetupComplete(data.ownerAddress);
+      }
+      portfolioSetupComplete = true;
+    } else if (
+      portfolioSetupComplete &&
+      // Only a clean (non-degraded) read may clear the durable latch —
+      // isPortfolioSetupCompletionUnknown is tautologically false here, so
+      // this single condition is the whole guard.
+      data.approvalReadStatus !== "degraded"
+    ) {
+      await writeSetupComplete(data.ownerAddress, false);
+      portfolioSetupComplete = false;
+    }
     portfolioLoaded = true;
     latestPortfolioData = data;
     container.innerHTML = renderPortfolioContent(data);
   } catch {
+    if (loadGeneration !== portfolioLoadGeneration) return;
     // Transient refresh failure (upstream timeout / 5xx / rate-limit). Keep the
     // last good snapshot visible with a subtle "couldn't refresh" notice rather
     // than wiping the hero to $0 — an empty render is indistinguishable from an
@@ -3116,6 +3675,23 @@ function setSidepanelView(view: "markets" | "portfolio"): void {
   });
 
   if (view === "portfolio") void loadPortfolio(true);
+}
+
+function consumeRequestedSidePanelView(): Promise<SidePanelView | null> {
+  return new Promise((resolve) => {
+    chrome.storage.session.get(SIDEPANEL_REQUESTED_VIEW_KEY, (result) => {
+      const value = result[SIDEPANEL_REQUESTED_VIEW_KEY];
+      chrome.storage.session.remove(SIDEPANEL_REQUESTED_VIEW_KEY, () => {
+        void chrome.runtime.lastError;
+      });
+      resolve(value === "markets" || value === "portfolio" ? value : null);
+    });
+  });
+}
+
+async function restoreRequestedSidePanelView(): Promise<void> {
+  const view = await consumeRequestedSidePanelView();
+  if (view) setSidepanelView(view);
 }
 
 function refreshVisiblePortfolio(): void {
@@ -5095,6 +5671,274 @@ function render(): void {
       .negative {
         color: #fb7185 !important;
       }
+
+      /* ---- Setup wizard (knoww-pf-setup-*) ---- */
+
+      .knoww-pf-setup {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 16px;
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.045),
+          rgba(255, 255, 255, 0.012)
+        );
+        padding: 15px 16px;
+      }
+
+      .knoww-pf-setup-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .knoww-pf-setup-kicker {
+        font: 600 10px/1 var(--pf-mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--pf-mid);
+      }
+
+      .knoww-pf-setup-skip {
+        border: 0;
+        background: transparent;
+        color: var(--pf-dim);
+        cursor: pointer;
+        font: 500 11px/1 var(--pf-sans);
+        padding: 0;
+        transition: color 0.14s ease;
+      }
+
+      .knoww-pf-setup-skip:hover {
+        color: var(--pf-mid);
+      }
+
+      .knoww-pf-setup-error {
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(251, 113, 133, 0.1);
+        border: 1px solid rgba(251, 113, 133, 0.3);
+        color: #fb7185;
+        font: 500 12px/1.4 var(--pf-sans);
+      }
+
+      .knoww-pf-setup-action {
+        margin-top: 4px;
+      }
+
+      /* Approve step: labelled input + button */
+      .knoww-pf-setup-approve {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      /* Approve button: compact, centred in the column with a centred label. */
+      .knoww-pf-setup-approve .knoww-portfolio-open {
+        align-self: center;
+        justify-content: center;
+        min-width: 132px;
+      }
+
+      .knoww-pf-setup-approve-label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font: 600 10.5px/1 var(--pf-mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--pf-mid);
+      }
+
+      .knoww-pf-setup-approve-field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--pf-line-2);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.18);
+        padding: 0 10px;
+        transition: border-color 0.14s ease, box-shadow 0.14s ease;
+      }
+
+      .knoww-pf-setup-approve-field:focus-within {
+        border-color: rgba(52, 211, 153, 0.5);
+        box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.1);
+      }
+
+      .knoww-pf-setup-approve-input {
+        flex: 1;
+        min-width: 0;
+        height: 40px;
+        border: 0;
+        outline: none;
+        background: transparent;
+        color: var(--pf-hi);
+        font: 500 16px/1 var(--pf-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .knoww-pf-setup-approve-unit {
+        font: 600 11px/1 var(--pf-mono);
+        color: var(--pf-dim);
+      }
+
+      /* Numbered step list (collapsed summary) */
+      .knoww-pf-setup-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .knoww-pf-setup-step {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 5px 0;
+      }
+
+      .knoww-pf-setup-step-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .knoww-pf-setup-step-helper {
+        color: var(--pf-mid);
+        font: 500 11.5px/1.45 var(--pf-sans);
+      }
+
+      .knoww-pf-setup-step-index {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        font: 700 10px/1 var(--pf-mono);
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+      }
+
+      .knoww-pf-setup-step.is-done .knoww-pf-setup-step-index {
+        background: #34d399;
+        border: 1px solid #34d399;
+        color: #fff;
+      }
+
+      .knoww-pf-setup-step.is-now .knoww-pf-setup-step-index {
+        background: transparent;
+        border: 1px solid rgba(52, 211, 153, 0.8);
+        color: #34d399;
+      }
+
+      .knoww-pf-setup-step.is-pending .knoww-pf-setup-step-index {
+        background: transparent;
+        border: 1px solid var(--pf-line-2);
+        color: var(--pf-dim);
+      }
+
+      .knoww-pf-setup-step-label {
+        display: flex;
+        align-items: center;
+        min-height: 20px;
+        font: 500 12px/1 var(--pf-sans);
+      }
+
+      .knoww-pf-setup-step.is-done .knoww-pf-setup-step-label {
+        color: var(--pf-mid);
+      }
+
+      .knoww-pf-setup-step.is-now .knoww-pf-setup-step-label {
+        color: var(--pf-hi);
+        font-weight: 600;
+      }
+
+      .knoww-pf-setup-step.is-pending .knoww-pf-setup-step-label {
+        color: var(--pf-dim);
+      }
+
+      /* Returning-user focused prompt (vault already deployed) */
+      .knoww-pf-setup-focused {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        border: 1px solid rgba(52, 211, 153, 0.24);
+        border-radius: 14px;
+        background: linear-gradient(
+          180deg,
+          rgba(52, 211, 153, 0.11),
+          rgba(52, 211, 153, 0.03)
+        );
+        padding: 13px 14px;
+      }
+
+      .knoww-pf-setup-focused-text strong {
+        display: block;
+        color: rgba(255, 255, 255, 0.95);
+        font: 600 13px/1.2 var(--pf-sans);
+      }
+
+      .knoww-pf-setup-focused-text span {
+        display: block;
+        margin-top: 4px;
+        color: var(--pf-mid);
+        font: 500 11.5px/1.45 var(--pf-sans);
+      }
+
+      /* Dismissible resume banner */
+      .knoww-pf-setup-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        border: 1px solid rgba(52, 211, 153, 0.24);
+        border-radius: 12px;
+        background: linear-gradient(
+          135deg,
+          rgba(52, 211, 153, 0.08),
+          rgba(52, 211, 153, 0.03)
+        );
+        padding: 10px 12px;
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.14s ease, background 0.14s ease;
+      }
+
+      .knoww-pf-setup-banner:hover {
+        border-color: rgba(52, 211, 153, 0.4);
+        background: linear-gradient(
+          135deg,
+          rgba(52, 211, 153, 0.13),
+          rgba(52, 211, 153, 0.06)
+        );
+      }
+
+      .knoww-pf-setup-banner svg {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+        fill: none;
+        stroke: #34d399;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .knoww-pf-setup-banner-text {
+        flex: 1;
+        font: 600 11px/1.3 var(--pf-sans);
+        color: #34d399;
+      }
     </style>
     <div
       id="knoww-notification-stack"
@@ -5447,6 +6291,15 @@ function render(): void {
       return;
     }
 
+    const portfolioTradingDeploy = (
+      event.target as Element | null
+    )?.closest<HTMLElement>("[data-deploy-portfolio-trading-wallet]");
+    if (portfolioTradingDeploy) {
+      const ownerAddress = portfolioTradingDeploy.dataset.ownerAddress;
+      if (ownerAddress) void deployPortfolioTradingWallet(ownerAddress);
+      return;
+    }
+
     const portfolioTradingEnable = (
       event.target as Element | null
     )?.closest<HTMLElement>("[data-enable-portfolio-trading]");
@@ -5456,11 +6309,62 @@ function render(): void {
       return;
     }
 
+    const setupApprove = (event.target as HTMLElement)?.closest<HTMLElement>(
+      "[data-setup-approve]"
+    );
+    if (setupApprove) {
+      const ownerAddress = setupApprove.dataset.ownerAddress;
+      const input = root?.querySelector<HTMLInputElement>(
+        "[data-setup-approve-input]"
+      );
+      const amount = (input?.value || "").trim() || SETUP_APPROVAL_DEFAULT;
+      if (ownerAddress) void approvePortfolioTrading(ownerAddress, amount);
+      return;
+    }
+
+    const setupFunds = (event.target as HTMLElement)?.closest<HTMLElement>(
+      "[data-setup-add-funds]"
+    );
+    if (setupFunds) {
+      openPortfolioFunds("deposit");
+      return;
+    }
+
+    const dismissSetup = (event.target as HTMLElement)?.closest<HTMLElement>(
+      "[data-dismiss-setup]"
+    );
+    if (dismissSetup) {
+      const owner = portfolioOwnerAddress();
+      portfolioSetupDismissed = true;
+      if (owner) void writeSetupDismissed(owner, true);
+      renderPortfolioContent_inPlace();
+      return;
+    }
+
+    const resumeSetup = (event.target as HTMLElement)?.closest<HTMLElement>(
+      "[data-resume-setup]"
+    );
+    if (resumeSetup) {
+      const owner = portfolioOwnerAddress();
+      portfolioSetupDismissed = false;
+      if (owner) void writeSetupDismissed(owner, false);
+      renderPortfolioContent_inPlace();
+      return;
+    }
+
     const portfolioOpen = (event.target as Element | null)?.closest(
       "[data-open-portfolio]"
     );
     if (portfolioOpen) {
       openPortfolioPage();
+      return;
+    }
+
+    const portfolioSwitch = (
+      event.target as Element | null
+    )?.closest<HTMLButtonElement>("[data-portfolio-switch-wallet]");
+    if (portfolioSwitch) {
+      void switchPortfolioWallet(portfolioSwitch);
       return;
     }
 
@@ -5589,25 +6493,54 @@ function render(): void {
   });
 }
 
-chrome.runtime.onMessage.addListener((message: { type?: unknown }) => {
-  if (message?.type === TRADING_SESSION_DISCONNECTED_MESSAGE) {
-    clearPortfolioSessionState();
-    return false;
-  }
-
-  if (message?.type === TRADING_CREDENTIALS_UPDATED_MESSAGE) {
-    portfolioLoaded = false;
-    portfolioTradingError = null;
-    const container = root?.querySelector<HTMLElement>(
-      "[data-sidepanel-portfolio]"
-    );
-    if (container && !container.hidden) {
-      void loadPortfolio(true);
+chrome.runtime.onMessage.addListener(
+  (message: { type?: unknown; view?: unknown }) => {
+    if (message?.type === TRADING_SESSION_DISCONNECTED_MESSAGE) {
+      clearPortfolioSessionState();
+      return false;
     }
+
+    if (message?.type === TRADING_WALLET_CONNECTED_MESSAGE) {
+      portfolioLoaded = false;
+      portfolioConnectError = null;
+      portfolioTradingError = null;
+      const container = root?.querySelector<HTMLElement>(
+        "[data-sidepanel-portfolio]"
+      );
+      if (container && !container.hidden && portfolioFundView === null) {
+        void loadPortfolio(true);
+      }
+      return false;
+    }
+
+    if (message?.type === "KNOWW_SHOW_EXTENSION_SIDEPANEL_VIEW") {
+      // The background also persisted this view for a boot-time consume; with
+      // the panel already open, consume it here too or the leftover value
+      // hijacks the next toolbar open.
+      chrome.storage.session.remove(SIDEPANEL_REQUESTED_VIEW_KEY, () => {
+        void chrome.runtime.lastError;
+      });
+      if (message.view === "markets" || message.view === "portfolio") {
+        setSidepanelView(message.view);
+      }
+      return false;
+    }
+
+    if (message?.type === TRADING_CREDENTIALS_UPDATED_MESSAGE) {
+      portfolioLoaded = false;
+      portfolioTradingError = null;
+      const container = root?.querySelector<HTMLElement>(
+        "[data-sidepanel-portfolio]"
+      );
+      if (container && !container.hidden) {
+        void loadPortfolio(true);
+      }
+      return false;
+    }
+
     return false;
   }
-
-  return false;
-});
+);
 
 render();
+void restoreRequestedSidePanelView();

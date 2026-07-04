@@ -16,7 +16,9 @@ import {
 import {
   type ApprovalTransaction,
   buildCtfCollateralApprovalTransaction,
+  buildErc1155ApprovalTransaction,
   readErc20Allowance,
+  readErc1155Approval,
 } from "./approvals.ts";
 import {
   CTF_ADDRESS,
@@ -345,6 +347,28 @@ export async function planCtfOperationTransactions(
       plan.collateralApproval.amountRaw,
       { fallbackToApproval: input.fallbackToApproval }
     );
+  }
+
+  if (
+    !approvalTransaction &&
+    plan.operation !== "splitPosition" &&
+    input.client &&
+    input.collateralOwner
+  ) {
+    // Same degrade rule as the ERC20 collateral path above: with
+    // fallbackToApproval set, a failed read plans the idempotent approval
+    // instead of failing the whole operation.
+    const approved = await readErc1155Approval(
+      input.client,
+      input.collateralOwner,
+      plan.transaction.to,
+      input.fallbackToApproval ? { fallbackApproved: false } : {}
+    );
+    if (!approved) {
+      approvalTransaction = buildErc1155ApprovalTransaction(
+        plan.transaction.to
+      );
+    }
   }
 
   return {

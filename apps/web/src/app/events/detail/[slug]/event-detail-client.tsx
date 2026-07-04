@@ -34,13 +34,12 @@ import {
 import { usePriceAlertDetection } from "@/hooks/use-price-alerts";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useOrderBookWebSocket } from "@/hooks/use-shared-websocket";
-import { useSportsWebSocket } from "@/hooks/use-sports-websocket";
+import { useMatchedSportsLiveGame } from "@/hooks/use-sports-websocket";
 import { type Position, useUserPositions } from "@/hooks/use-user-positions";
 import { ensureReadableSeriesColors } from "@/lib/chart-colors";
 import { formatVolume } from "@/lib/formatters";
 import { getMarketShortLabel } from "@/lib/market-labels";
 import { qk } from "@/lib/query-keys";
-import { matchSportsEventToGame } from "@/lib/sports-event-match";
 import {
   type CachedSportsLiveGame,
   readCachedSportsLiveGame,
@@ -250,13 +249,9 @@ export default function EventDetailClient({
     error,
   } = useEventDetail(eventSlugOrId, initialEvent);
   const hasTeamMatchup = isTeamMatchupEvent(event?.teams);
-  const { games: liveSportsGames } = useSportsWebSocket({
+  const { game: liveGame } = useMatchedSportsLiveGame(event, {
     enabled: hasTeamMatchup,
   });
-  const liveGame = useMemo(
-    () => (event ? matchSportsEventToGame(event, liveSportsGames) : null),
-    [event, liveSportsGames]
-  );
   const liveGameCacheKey = useMemo(() => {
     const keySource = event?.slug ?? eventSlugOrId;
     return keySource ? sportsLiveGameCacheKey(keySource) : null;

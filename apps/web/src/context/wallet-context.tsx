@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
 } from "react";
 import { createPublicClient, http, type PublicClient } from "viem";
@@ -15,7 +16,7 @@ import {
 } from "wagmi";
 import { polygon } from "@/lib/chains";
 import { getRpcUrl } from "@/lib/rpc";
-import { openWalletModal } from "@/lib/wallet-modal";
+import { closeWalletModal, openWalletModal } from "@/lib/wallet-modal";
 
 /**
  * Wallet context value
@@ -70,6 +71,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // EOA address
   const eoaAddress = address || null;
+
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    void closeWalletModal();
+  }, [isConnected, address]);
 
   // Connect wallet via AppKit modal (lazily initialized on first use)
   const connect = useCallback(() => {

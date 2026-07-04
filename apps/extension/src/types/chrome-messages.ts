@@ -9,6 +9,7 @@ export const TRADING_SESSION_DISCONNECTED_MESSAGE =
   "trading:session-disconnected";
 export const TRADING_CREDENTIALS_UPDATED_MESSAGE =
   "trading:credentials-updated";
+export const TRADING_WALLET_CONNECTED_MESSAGE = "trading:wallet-connected";
 
 // ── Existing fetch messages ──
 
@@ -84,6 +85,13 @@ export interface TradingDeriveProxyAddressMessage {
   type: "trading:derive-proxy-address";
   eoaAddress: string;
   walletMode?: TradingWalletMode;
+  /**
+   * Skip the relayer getDeployed fallback when on-chain bytecode is absent.
+   * Existence probes (e.g. the legacy-safe check) set this — for users
+   * without the wallet the fallback is a guaranteed-miss relayer round-trip
+   * on every probe.
+   */
+  skipRelayerDeploymentFallback?: boolean;
 }
 
 export interface TradingPlaceOrderMessage {
@@ -222,6 +230,10 @@ export interface AnalyticsTrackMessage {
   properties?: Record<string, string | number | boolean | null | undefined>;
 }
 
+export interface PortfolioSwitchWalletMessage {
+  type: "KNOWW_SWITCH_PORTFOLIO_WALLET";
+}
+
 // ── Union types ──
 
 export type TradingMessage =
@@ -247,7 +259,8 @@ export type BackgroundMessage =
   | ScoringPrewarmMessage
   | TradingMessage
   | SigningResponseMessage
-  | AnalyticsTrackMessage;
+  | AnalyticsTrackMessage
+  | PortfolioSwitchWalletMessage;
 
 // ── Responses ──
 

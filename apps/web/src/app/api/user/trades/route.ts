@@ -33,6 +33,7 @@ interface PolymarketActivity {
   icon: string;
   eventSlug: string;
   outcome: string;
+  negativeRisk?: boolean;
   name: string;
   pseudonym: string;
   bio: string;
@@ -237,6 +238,7 @@ export async function GET(request: NextRequest) {
         eventSlug: t.eventSlug,
         icon: t.icon,
         asset: t.asset,
+        negRisk: t.negativeRisk,
       },
     }));
 

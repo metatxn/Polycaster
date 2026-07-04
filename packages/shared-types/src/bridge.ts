@@ -301,7 +301,12 @@ function normalizeAddress(address: string): string {
   return address.trim().toLowerCase();
 }
 
-function sameAddress(left: string, right: string): boolean {
+/**
+ * Case-insensitive EVM address equality (trims, requires 0x prefix). The one
+ * comparator to use everywhere — ad-hoc `a.toLowerCase() === b.toLowerCase()`
+ * copies drift on trim/prefix handling.
+ */
+export function sameAddress(left: string, right: string): boolean {
   return (
     left.startsWith("0x") &&
     right.startsWith("0x") &&

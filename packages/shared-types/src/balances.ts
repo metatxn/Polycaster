@@ -110,7 +110,7 @@ export async function readTradingWalletBalance(
 ): Promise<TradingWalletBalance> {
   const tokens = options.tokens ?? TRADING_COLLATERAL_TOKENS;
 
-  const [results, polBalanceRaw, safeCode] = await Promise.all([
+  const [results, polBalanceRaw, deploymentRead] = await Promise.all([
     client.multicall({
       allowFailure: true,
       contracts: tokens.map((token) => ({
@@ -123,9 +123,16 @@ export async function readTradingWalletBalance(
     options.includeNative
       ? client.getBalance({ address: owner }).catch(() => BigInt(0))
       : Promise.resolve(BigInt(0)),
+    // getBytecode resolves `undefined` for a successful no-code read, so a
+    // caught error must not collapse into the same value — track read success
+    // separately and omit `isDeployed` entirely when the read failed, or a
+    // deployed wallet reads as "not deployed" during any RPC hiccup.
     options.includeDeployment
-      ? client.getBytecode({ address: owner }).catch(() => undefined)
-      : Promise.resolve(undefined),
+      ? client
+          .getBytecode({ address: owner })
+          .then((code) => ({ ok: true as const, code }))
+          .catch(() => ({ ok: false as const, code: undefined }))
+      : Promise.resolve({ ok: false as const, code: undefined }),
   ]);
 
   let pusdRaw = BigInt(0);
@@ -177,8 +184,8 @@ export async function readTradingWalletBalance(
     polBalance,
     polBalanceRaw: polBalanceRaw.toString(),
     tokenBalances,
-    ...(options.includeDeployment
-      ? { isDeployed: !!safeCode && safeCode !== "0x" }
+    ...(options.includeDeployment && deploymentRead.ok
+      ? { isDeployed: !!deploymentRead.code && deploymentRead.code !== "0x" }
       : {}),
   };
 }

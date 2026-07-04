@@ -381,8 +381,23 @@ function addPriceHistory(
   const now = Date.now();
   const cutoff = now - PRICE_HISTORY_MAX_AGE_MS;
 
-  // Add new entry and filter old ones
-  const updated = [...history, entry].filter((h) => h.timestamp > cutoff);
+  const updated: PriceHistoryEntry[] = [];
+  let inserted = false;
+
+  for (const item of history) {
+    if (item.timestamp <= cutoff) continue;
+
+    if (!inserted && entry.timestamp < item.timestamp) {
+      updated.push(entry);
+      inserted = true;
+    }
+
+    updated.push(item);
+  }
+
+  if (!inserted && entry.timestamp > cutoff) {
+    updated.push(entry);
+  }
 
   // Cap the array size
   if (updated.length > PRICE_HISTORY_MAX_ENTRIES) {
@@ -402,14 +417,11 @@ function getPriceAtTimestamp(
 ): number | null {
   if (history.length === 0) return null;
 
-  // Ensure history is sorted by timestamp ascending (handles out-of-order events)
-  const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
-
   // Find the two entries that bracket the target timestamp
   let before: PriceHistoryEntry | null = null;
   let after: PriceHistoryEntry | null = null;
 
-  for (const entry of sortedHistory) {
+  for (const entry of history) {
     if (entry.timestamp <= targetTs) {
       before = entry;
     } else if (!after) {

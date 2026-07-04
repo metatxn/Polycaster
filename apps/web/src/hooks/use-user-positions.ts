@@ -22,6 +22,7 @@ export interface Position {
   unrealizedPnl: number;
   unrealizedPnlPercent: number;
   realizedPnl: number;
+  redeemable: boolean;
   /** Multi-outcome negative-risk market — required for order signing */
   negRisk?: boolean;
   market: {
@@ -45,6 +46,7 @@ export interface LostPosition {
   avgPrice: number;
   initialValue: number;
   endDate: string;
+  negRisk?: boolean;
   market: {
     title: string;
     slug: string;

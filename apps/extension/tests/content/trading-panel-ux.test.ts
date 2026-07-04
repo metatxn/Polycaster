@@ -55,6 +55,19 @@ test("deposit CTA replaces redundant insufficient-balance warning", () => {
   );
 });
 
+test("trading panel keeps the deployment-check spinner even after credentials exist", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(
+    /ctx\.isDeployed === null &&\s*ctx\.proxyAddress\s*\)/.test(source),
+    true
+  );
+  assert.equal(
+    /ctx\.isDeployed === null &&[\s\S]{0,120}!ctx\.hasCredentials/.test(source),
+    false
+  );
+});
+
 test("trading panel keeps spacing around dynamic summary and CTA", () => {
   const css = readInlineCss();
 
@@ -292,6 +305,202 @@ test("deposit ERC20 transfers use viem encoding helpers", () => {
   assert.equal(/ERC20_TRANSFER_SELECTOR/.test(source), false);
 });
 
+test("deposit opener leaves loading state without waiting for bridge assets", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(
+    /const DEPOSIT_BALANCE_LOAD_TIMEOUT_MS = 8000;/.test(source),
+    true
+  );
+  assert.equal(
+    /withDepositLoadTimeout\(\s*fetchEoaBalancesViaWallet\(eoaAddress\),\s*DEPOSIT_BALANCE_LOAD_TIMEOUT_MS/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /Promise\.all\(\[loadBalances, loadAssets\]\)/.test(source),
+    false
+  );
+  assert.equal(
+    /void loadBalances\.finally\(\(\) => \{[\s\S]*depositState = "ready";[\s\S]*rerender\(\);[\s\S]*\}\);/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /void fetchSupportedAssets\(\)[\s\S]*depositBridgeAssets = assets;[\s\S]*if \(depositState === "ready"\) rerender\(\);/.test(
+      source
+    ),
+    true
+  );
+});
+
+test("trading balance refresh checks setup approval with one allowance request", () => {
+  const source = readSource("src/content/trading/trading-service.ts");
+  const refreshStart = source.indexOf("async refreshBalance");
+  assert.notEqual(refreshStart, -1);
+  const refreshEnd = source.indexOf("// ── Order Book", refreshStart);
+  assert.notEqual(refreshEnd, -1);
+  const refreshSource = source.slice(refreshStart, refreshEnd);
+
+  assert.equal(/trading:get-all-allowances/.test(refreshSource), true);
+  assert.equal(/fetchTradingSetupApprovalStatus/.test(refreshSource), true);
+  assert.equal(/deriveTradingSetupApprovalStatus/.test(refreshSource), false);
+  assert.equal(/allowanceReadStatus/.test(refreshSource), true);
+  assert.equal(/hasTradingApproval:\s*false/.test(refreshSource), false);
+  assert.equal(/isTradingSetupApprovalComplete/.test(refreshSource), false);
+  assert.equal(/getTradingOrderAllowance/.test(refreshSource), false);
+  assert.equal(/trading:get-allowance/.test(refreshSource), false);
+  assert.equal(/scalarApproval/.test(refreshSource), false);
+});
+
+test("trading card keeps first degraded approval read in a checking state", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(/approvalReadStatus:\s*"unknown"/.test(serviceSource), true);
+  assert.equal(/approvalReadStatus:\s*"degraded"/.test(serviceSource), true);
+  assert.equal(
+    /approvalStatus\.allowanceReadStatus === "degraded"[\s\S]*approvalReadStatus:\s*"degraded"/.test(
+      serviceSource
+    ),
+    true
+  );
+  assert.equal(
+    /ctx\.approvalReadStatus !== "complete"[\s\S]*Checking approvals/.test(
+      panelSource
+    ),
+    true
+  );
+});
+
+test("trading card does not let approval spinner override persisted setup completion", () => {
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+  const renderStart = panelSource.indexOf("function render(");
+  assert.notEqual(renderStart, -1);
+  const renderSource = panelSource.slice(renderStart);
+  const spinnerIndex = renderSource.indexOf(
+    'addLoading(panel, "Checking approvals...'
+  );
+  const setupGateIndex = renderSource.indexOf('setupSurfaceMode === "wizard"');
+
+  assert.notEqual(spinnerIndex, -1);
+  assert.notEqual(setupGateIndex, -1);
+  assert.equal(spinnerIndex < setupGateIndex, true);
+  assert.equal(
+    /setupSurfaceMode !== "complete"[\s\S]*Checking approvals/.test(
+      renderSource
+    ),
+    true
+  );
+});
+
+test("trading panel computes card setup flow once and passes it into the setup view", () => {
+  const source = readSource("src/content/trading/trading-panel.ts");
+  const addSetupStart = source.indexOf("function addSetupFlow");
+  assert.notEqual(addSetupStart, -1);
+  const addSetupEnd = source.indexOf("function renderOrderForm", addSetupStart);
+  assert.notEqual(addSetupEnd, -1);
+  const addSetupSource = source.slice(addSetupStart, addSetupEnd);
+  const renderStart = source.indexOf("function render(");
+  assert.notEqual(renderStart, -1);
+  const renderEnd = source.length;
+  const renderSource = source.slice(renderStart, renderEnd);
+
+  assert.equal(/cardSetupFlow\(ctx\)/.test(addSetupSource), false);
+  assert.equal(
+    /const setupFlow = cardSetupFlow\(ctx\);/.test(renderSource),
+    true
+  );
+  assert.equal(/flow: setupFlow/.test(renderSource), true);
+});
+
+test("portfolio setup view imports the shared html escaper", () => {
+  const source = readSource("src/content/trading/portfolio-setup-view.ts");
+
+  assert.equal(
+    /import \{ escapeHtml \} from "\.\.\/utils";/.test(source),
+    true
+  );
+  assert.equal(/function escapeHtml/.test(source), false);
+});
+
+test("Reddit deposit panel allows vertical overflow for deposit options", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-platform-reddit \.knoww-trading-panel\s*\{[^}]*overflow:\s*visible\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-platform-reddit \.knoww-tp-form\s*\{[^}]*overflow:\s*visible\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+});
+
+test("deposit method rows reset host page button and text metrics", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-tp-deposit-method-btn\s*\{[^}]*height:\s*auto\s*!important;[^}]*min-height:\s*60px\s*!important;[^}]*overflow:\s*visible\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-method-info\s*\{[^}]*justify-content:\s*center\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-method-name\s*\{[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-method-sub\s*\{[^}]*line-height:\s*1\.25\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+});
+
+test("deposit token rows reset host page button and text metrics", () => {
+  const css = readInlineCss();
+
+  assert.equal(
+    /\.knoww-tp-deposit-token-row\s*\{[^}]*height:\s*auto\s*!important;[^}]*min-height:\s*50px\s*!important;[^}]*overflow:\s*visible\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-token-info\s*\{[^}]*justify-content:\s*center\s*!important;[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-token-sym\s*\{[^}]*line-height:\s*1\.2\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+  assert.equal(
+    /\.knoww-tp-deposit-token-amt\s*\{[^}]*line-height:\s*1\.25\s*!important;/s.test(
+      css
+    ),
+    true
+  );
+});
+
 test("deposit amount validation and max use exact raw token balances", () => {
   const source = readSource("src/content/trading/trading-panel.ts");
 
@@ -332,6 +541,31 @@ test("WalletConnect QR path forces a fresh pairing session", () => {
   assert.equal(/forceNew\?: boolean/.test(walletConnectSource), true);
   assert.equal(/disconnectExistingSession/.test(walletConnectSource), true);
   assert.equal(/if \(forceNew\)/.test(walletConnectSource), true);
+});
+
+test("WalletConnect uses direct Polygon RPC for read-only balance calls", () => {
+  const source = readSource("src/content/trading/walletconnect-bridge.ts");
+
+  assert.equal(/async function polygonRpcRequest/.test(source), true);
+  assert.equal(/READ_ONLY_RPC_TIMEOUT_MS/.test(source), true);
+  assert.equal(
+    /async ethCall\(to: string, data: string\): Promise<string> \{[\s\S]*return polygonRpcRequest<string>\("eth_call", \[\{ to, data \}, "latest"\]\);[\s\S]*\}/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /async getBalance\(address: string\): Promise<string> \{[\s\S]*return polygonRpcRequest<string>\("eth_getBalance", \[address, "latest"\]\);[\s\S]*\}/.test(
+      source
+    ),
+    true
+  );
+  assert.equal(
+    /return polygonRpcRequest<\{ status: string; blockNumber: string \} \| null>\(\s*"eth_getTransactionReceipt"/.test(
+      source
+    ),
+    true
+  );
 });
 
 test("WalletConnect re-entrant connect aborts the stale pairing instead of reusing it", () => {
@@ -399,6 +633,45 @@ test("session disconnect resets the wallet bridge before rendering choices", () 
   );
 });
 
+test("external wallet account revocation clears the cached trading session", () => {
+  const pageBridgeSource = readSource("src/page-bridge.ts");
+  const bridgeSource = readSource("src/content/trading/bridge.ts");
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  assert.equal(/KNOWW_WALLET_ACCOUNTS_CHANGED/.test(pageBridgeSource), true);
+  assert.equal(/accountsChanged/.test(pageBridgeSource), true);
+  assert.equal(/subscribeToProviderEvents/.test(pageBridgeSource), true);
+  assert.equal(/onAccountsChanged/.test(bridgeSource), true);
+  assert.equal(
+    /message\?\.type === "KNOWW_GET_PORTFOLIO_CONNECTED_WALLET"[\s\S]*await TradingService\.getConnectedWalletAddress\(\)/.test(
+      readSource("src/content/ui.ts")
+    ),
+    true
+  );
+  assert.equal(/handleExternalWalletAccountsChanged/.test(serviceSource), true);
+  assert.equal(
+    /WalletBridge\.onAccountsChanged\(\(accounts\) => \{[\s\S]*TradingService\.handleExternalWalletAccountsChanged\(accounts\)/.test(
+      serviceSource
+    ),
+    true
+  );
+  assert.equal(
+    /sendMsg<null>\(\{ type: "auth:logout" \}/.test(serviceSource),
+    true
+  );
+});
+
+test("setup approval failures surface as an error state", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  assert.equal(
+    /async approveUsdc[\s\S]*catch \(err\) \{[\s\S]*update\(\{[\s\S]*state: "error"[\s\S]*error: err instanceof Error \? err\.message : String\(err\),[\s\S]*\}\);/.test(
+      serviceSource
+    ),
+    true
+  );
+});
+
 test("installed wallet buttons reset Reddit host button and image styles", () => {
   const css = readInlineCss();
 
@@ -414,4 +687,289 @@ test("installed wallet buttons reset Reddit host button and image styles", () =>
     ),
     true
   );
+});
+
+test("extension wallet switch requests account permissions and reuses connection state", () => {
+  const pageBridgeSource = readSource("src/page-bridge.ts");
+  const bridgeSource = readSource("src/content/trading/bridge.ts");
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(/"wallet_requestPermissions"/.test(pageBridgeSource), true);
+  assert.equal(
+    /USER_MEDIATED_WALLET_METHODS[\s\S]*"wallet_requestPermissions"/.test(
+      bridgeSource
+    ),
+    true
+  );
+  assert.equal(/async switchWallet\(/.test(bridgeSource), true);
+  assert.equal(
+    /request\(\s*"wallet_requestPermissions",\s*\[\{ eth_accounts: \{\} \}\]/.test(
+      bridgeSource
+    ),
+    true
+  );
+  assert.equal(/async switchWallet\(/.test(serviceSource), true);
+  assert.equal(/WalletBridge\.switchWallet/.test(serviceSource), true);
+  assert.equal(/type: "auth:logout"/.test(serviceSource), true);
+  assert.equal(/title = "Switch wallet"/.test(panelSource), true);
+  assert.equal(/TradingService\.switchWallet\(\)/.test(panelSource), true);
+});
+
+test("extension wallet switch uses shared EIP-1193 unsupported-method classifier", () => {
+  const bridgeSource = readSource("src/content/trading/bridge.ts");
+
+  assert.match(bridgeSource, /@knoww\/shared-types\/trading-errors/);
+  assert.match(bridgeSource, /isEip1193UnsupportedMethodError/);
+  assert.doesNotMatch(
+    bridgeSource,
+    /function isUnsupportedWalletPermissionError/
+  );
+});
+
+test("intentional wallet switch ignores intermediate accountsChanged events", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  assert.equal(/let walletSwitchInProgress = false;/.test(serviceSource), true);
+  // Mid-switch events are buffered (not dropped) so a failed switch can't
+  // strand ctx on an account the provider has already moved past.
+  assert.equal(
+    /async handleExternalWalletAccountsChanged\(accounts: string\[\]\): Promise<void> \{\s*if \(walletSwitchInProgress\) \{\s*pendingAccountsChangedDuringSwitch = accounts;\s*return;/.test(
+      serviceSource
+    ),
+    true
+  );
+  assert.equal(
+    /async switchWallet\(walletUuid\?: string\): Promise<void> \{[\s\S]*walletSwitchInProgress = true;[\s\S]*finally \{[\s\S]*walletSwitchInProgress = false;/.test(
+      serviceSource
+    ),
+    true
+  );
+  assert.equal(
+    /message\?\.type !== TRADING_SESSION_DISCONNECTED_MESSAGE[\s\S]*if \(walletSwitchInProgress\) \{[\s\S]*return false;[\s\S]*WalletBridge\.resetAfterDisconnect/.test(
+      serviceSource
+    ),
+    true
+  );
+});
+
+test("accountsChanged buffered during a wallet switch is replayed after it settles", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  assert.equal(
+    /let pendingAccountsChangedDuringSwitch: string\[\] \| null = null;/.test(
+      serviceSource
+    ),
+    true
+  );
+  // switchWallet's finally clears the flag, then replays the buffered event
+  // so the failure path reconciles ctx with the provider's actual account.
+  assert.equal(
+    /walletSwitchInProgress = false;\s*const buffered = pendingAccountsChangedDuringSwitch;\s*pendingAccountsChangedDuringSwitch = null;\s*if \(buffered\) \{\s*void this\.handleExternalWalletAccountsChanged\(buffered\);/.test(
+      serviceSource
+    ),
+    true
+  );
+});
+
+test("wallet deployment state never hard-defaults to false from a bytecode-only read", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const proxySource = readSource("src/content/trading/proxy-wallet.ts");
+
+  // The derive handler owns deployment truth (bytecode + relayer /deployed
+  // fallback); resolve paths must consult it instead of defaulting a missing
+  // balance-read answer to `false` — that sent already-deployed users back to
+  // "Create trading vault" after a wallet switch.
+  assert.equal(/async resolveDeployment\(/.test(proxySource), true);
+  assert.equal(/balData\.isDeployed \?\? false/.test(serviceSource), false);
+  assert.equal(
+    /derived\.isDeployed \?\? balData\.isDeployed \?\? null/.test(
+      serviceSource
+    ),
+    true
+  );
+  // Legacy-safe detection decides via the relayer-backed derive answer too —
+  // a transient bytecode failure must not read as "no legacy safe".
+  assert.equal(
+    /resolveExistingSafeWallet[\s\S]{0,500}resolveDeployment\(address, "safe"\)/.test(
+      serviceSource
+    ),
+    true
+  );
+  // refreshBalance: deployment is monotonic on-chain and ctx resets on
+  // account switch — a known-deployed wallet never downgrades on a refresh.
+  assert.equal(
+    /ctx\.isDeployed === true\s*\?\s*true\s*:\s*\(balData\.isDeployed \?\? ctx\.isDeployed\)/.test(
+      serviceSource
+    ),
+    true
+  );
+});
+
+test("stalled wallet resolution times out to a retryable error, not an endless spinner", () => {
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(
+    /const WALLET_RESOLVE_SPINNER_TIMEOUT_MS = 15_000;/.test(panelSource),
+    true
+  );
+  // The isDeployed===null spinner branch tracks how long it has been shown
+  // and flips to an inline error with a Retry action past the deadline.
+  assert.equal(/walletResolveLoadingSince/.test(panelSource), true);
+  assert.equal(
+    /addWalletResolveTimeoutError\(panel\);/.test(panelSource),
+    true
+  );
+  assert.equal(/resetWalletResolveSpinnerTimeout\(\);/.test(panelSource), true);
+  // The branch schedules its own deadline re-render — recovery must not
+  // depend on an unrelated ctx update arriving.
+  assert.equal(
+    /walletResolveTimeoutTimer = setTimeout\(/.test(panelSource),
+    true
+  );
+});
+
+test("connected wallet mode starts from shared resolver before Safe probe", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  assert.equal(
+    /const initialWalletMode = resolvePreferredTradingWalletMode\(\{[\s\S]*storedMode: storedWalletMode,[\s\S]*legacySafeDeployed: false,[\s\S]*\}\);/.test(
+      serviceSource
+    ),
+    true
+  );
+  assert.equal(
+    /legacySafeAvailable: false,[\s\S]*walletMode: initialWalletMode,/.test(
+      serviceSource
+    ),
+    true
+  );
+});
+
+test("wallet lock or provider disconnect keeps the trading session", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  // An empty eth_accounts list (locked wallet / EIP-1193 disconnect) must not
+  // tear down the session — only a non-empty list excluding ctx.address may.
+  assert.equal(
+    /async handleExternalWalletAccountsChanged\(accounts: string\[\]\): Promise<void> \{[\s\S]*?if \(accounts\.length === 0\) \{[\s\S]*?return;[\s\S]*?\}[\s\S]*?accountListIncludesAddress/.test(
+      serviceSource
+    ),
+    true
+  );
+});
+
+test("error state keeps the order form for fully-onboarded users", () => {
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+
+  // A rejected order-time approval sets state "error"; with setup complete the
+  // render dispatch must still reach the form branch instead of blanking.
+  assert.equal(
+    /state === "error" && setupSurfaceMode === "complete"/.test(panelSource),
+    true
+  );
+});
+
+test("failed vault deploy surfaces an error instead of silently resetting", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const start = serviceSource.indexOf("async deployWallet()");
+  const end = serviceSource.indexOf("async approveUsdc(");
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const deployWalletSource = serviceSource.slice(start, end);
+
+  // The catch must set state "error" (the wizard's inline error and the error
+  // toast only render for that state) — "ready" would claim a deployed vault
+  // and re-render the pristine wizard with zero feedback.
+  assert.equal(
+    /catch \(err\) \{[\s\S]*?state: "error"/.test(deployWalletSource),
+    true
+  );
+  assert.equal(
+    /catch \(err\) \{[\s\S]*?state: "ready"/.test(deployWalletSource),
+    false
+  );
+});
+
+test("wizard approval in flight renders a loading state, not a clickable Approve", () => {
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(
+    /state === "approving" && setupSurfaceMode !== "complete"/.test(
+      panelSource
+    ),
+    true
+  );
+});
+
+test("approveUsdc guards re-entry and refreshes the allowance before flipping to ready", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const start = serviceSource.indexOf("async approveUsdc(");
+  const end = serviceSource.indexOf("async splitPosition(");
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const approveUsdcSource = serviceSource.slice(start, end);
+
+  // In-flight guard: a second click mid-signature must not start a second
+  // relayer approve flow.
+  assert.equal(
+    /if \(ctx\.state === "approving"\)/.test(approveUsdcSource),
+    true
+  );
+  // The stale pre-approval allowance re-renders a clickable Approve if state
+  // flips to "ready" before the refreshed allowance lands.
+  const refreshIdx = approveUsdcSource.indexOf("await this.refreshBalance()");
+  const readyIdx = approveUsdcSource.indexOf('update({ state: "ready" })');
+  assert.notEqual(refreshIdx, -1);
+  assert.notEqual(readyIdx, -1);
+  assert.equal(refreshIdx < readyIdx, true);
+});
+
+test("dismissed-but-incomplete setup renders a resume banner instead of an empty card", () => {
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(
+    /setupSurfaceMode === "banner"[\s\S]{0,400}addSetupBanner\(panel, ctx\)/.test(
+      panelSource
+    ),
+    true
+  );
+  // The banner's CTA clears the shared dismissal so the wizard can resume.
+  assert.equal(
+    /function addSetupBanner\([\s\S]*?writeSetupDismissed\(ctx\.address, false\)/.test(
+      panelSource
+    ),
+    true
+  );
+});
+
+test("sidepanel approve/enable signing messages route to the wallet-session tab", () => {
+  const bgSource = readSource("src/background.ts");
+
+  // Wallet-signing messages must reach the tab holding the wallet session
+  // (portfolioSigningTabId), not whatever tab happens to be active.
+  assert.equal(
+    /KNOWW_ENABLE_PORTFOLIO_TRADING"[\s\S]{0,200}forwardToPortfolioSigningTab\(/.test(
+      bgSource
+    ),
+    true
+  );
+  assert.equal(
+    /KNOWW_APPROVE_PORTFOLIO_TRADING"[\s\S]{0,400}forwardToPortfolioSigningTab\(/.test(
+      bgSource
+    ),
+    true
+  );
+});
+
+test("credential/order gates re-read a stale isDeployed=false before bouncing to setup", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+
+  // Deployment completed in the side panel is never broadcast to content
+  // tabs, so a cached `false` must be re-read (not just `null`) before the
+  // deployment-required gate fires.
+  const gates = serviceSource.match(
+    /if \(!ctx\.proxyAddress \|\| ctx\.isDeployed !== true\)/g
+  );
+  assert.equal((gates || []).length >= 2, true);
 });

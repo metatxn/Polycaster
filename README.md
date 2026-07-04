@@ -74,6 +74,7 @@ cp apps/extension/.env.example apps/extension/.env
 # Optional overrides:
 # DEV_MODE=false        # point the built extension at production
 # POLY_BUILDER_CODE=... # builder attribution code for extension orders
+# WALLETCONNECT_PROJECT_ID=... # required for WalletConnect/mobile wallet QR flows
 
 # Run the web app locally for extension API calls
 pnpm dev:web

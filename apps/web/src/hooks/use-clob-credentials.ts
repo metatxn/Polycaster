@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
+import { closeWalletModal } from "@/lib/wallet-modal";
 
 export type { ApiKeyCreds } from "@knoww/shared-types/polymarket";
 
@@ -278,10 +279,15 @@ export function useClobCredentials() {
       walletClient,
       address as `0x${string}`
     );
-    const signature = await signer.signTypedData({
-      account: address as `0x${string}`,
-      ...auth.typedData,
-    });
+    let signature: string;
+    try {
+      signature = await signer.signTypedData({
+        account: address as `0x${string}`,
+        ...auth.typedData,
+      });
+    } finally {
+      await closeWalletModal();
+    }
 
     return {
       signature,

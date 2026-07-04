@@ -606,6 +606,17 @@ export function normalizeTradingWalletMode(
   return TRADING_WALLET_MODES.SAFE;
 }
 
+export function resolvePreferredTradingWalletMode(args: {
+  storedMode?: string | null;
+  legacySafeDeployed: boolean;
+}): TradingWalletMode {
+  if (args.legacySafeDeployed) return TRADING_WALLET_MODES.SAFE;
+  if (args.storedMode === TRADING_WALLET_MODES.EOA && SHOW_EOA_OPTION) {
+    return TRADING_WALLET_MODES.EOA;
+  }
+  return TRADING_WALLET_MODES.DEPOSIT;
+}
+
 export function isEoaTradingWalletMode(mode?: string | null): boolean {
   return normalizeTradingWalletMode(mode) === TRADING_WALLET_MODES.EOA;
 }

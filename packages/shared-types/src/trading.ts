@@ -361,7 +361,7 @@ export function planPusdAutoWrap(
     shortfallRaw,
     baseShortfallRaw,
     wrapAmountRaw,
-    needsWrap: shortfallRaw > BigInt(0),
+    needsWrap: wrapAmountRaw > BigInt(0),
     hasEnoughBaseCollateral,
   };
 }

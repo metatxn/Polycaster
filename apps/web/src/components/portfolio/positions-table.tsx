@@ -1,5 +1,5 @@
 import { m } from "framer-motion";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, CircleDollarSign, Loader2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -64,6 +64,207 @@ function OutcomeLabel({ position }: { position: Position }) {
   );
 }
 
+function canRedeemPosition(position: Position): boolean {
+  return Boolean(position.redeemable && position.currentPrice > 0);
+}
+
+function positionMetrics(position: Position) {
+  return {
+    canRedeem: canRedeemPosition(position),
+    isProfit: position.unrealizedPnl >= 0,
+    toWin: position.size * (1 - position.avgPrice),
+    priceDrift:
+      position.currentPrice > position.avgPrice
+        ? "text-emerald-600 dark:text-emerald-400"
+        : position.currentPrice < position.avgPrice
+          ? "text-red-600 dark:text-red-400"
+          : "text-muted-foreground",
+  };
+}
+
+function PositionMarketLink({
+  position,
+  iconSize,
+  compact = false,
+}: {
+  position: Position;
+  iconSize: number;
+  compact?: boolean;
+}) {
+  return (
+    <Link
+      href={marketHref(position)}
+      className={cn(
+        "flex min-w-0 gap-3",
+        compact ? "items-start" : "items-center group"
+      )}
+    >
+      <MarketIcon position={position} size={iconSize} />
+      <div className={cn(compact ? "flex-1" : "", "min-w-0")}>
+        <p
+          className={cn(
+            "font-medium text-sm text-foreground",
+            compact
+              ? "line-clamp-2 leading-tight"
+              : "truncate group-hover:text-foreground transition-colors"
+          )}
+        >
+          {position.market.title}
+        </p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <OutcomeLabel position={position} />
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/80">
+            · {position.size.toFixed(1)} shares
+          </span>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function PricePair({
+  position,
+  priceDrift,
+  mobile = false,
+}: {
+  position: Position;
+  priceDrift: string;
+  mobile?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "font-mono tabular-nums text-xs",
+        mobile ? "flex items-center gap-1.5" : "text-center"
+      )}
+    >
+      {mobile ? (
+        <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/70">
+          Avg→Now
+        </span>
+      ) : null}
+      <span className="text-muted-foreground">
+        {formatPrice(position.avgPrice)}
+      </span>
+      <span className={cn("text-muted-foreground/60", mobile ? "" : "mx-1")}>
+        →
+      </span>
+      <span className={priceDrift}>{formatPrice(position.currentPrice)}</span>
+    </div>
+  );
+}
+
+function PositionValuePnl({
+  position,
+  isProfit,
+  compact = false,
+}: {
+  position: Position;
+  isProfit: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn("font-mono tabular-nums", compact ? "" : "text-right")}>
+      <div
+        className={cn(
+          compact ? "font-semibold text-sm" : "font-medium",
+          "text-foreground"
+        )}
+      >
+        {formatCurrency(position.currentValue)}
+      </div>
+      <div
+        className={cn(
+          "text-[11px] font-semibold",
+          compact ? "" : "whitespace-nowrap",
+          isProfit
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-red-600 dark:text-red-400"
+        )}
+      >
+        {formatCurrency(position.unrealizedPnl)}
+        <span className="ml-1 opacity-70">
+          ({formatPercent(position.unrealizedPnlPercent)})
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PositionActions({
+  position,
+  canRedeem,
+  isRedeemDisabled,
+  isRedeeming,
+  mobile = false,
+  onSell,
+  onRedeem,
+}: {
+  position: Position;
+  canRedeem: boolean;
+  isRedeemDisabled: boolean;
+  isRedeeming: boolean;
+  mobile?: boolean;
+  onSell?: (position: Position) => void;
+  onRedeem?: (position: Position) => void;
+}) {
+  if (canRedeem) {
+    return (
+      <div
+        className={cn(
+          "flex items-center",
+          mobile ? "pt-2 border-t border-border/30" : "justify-end"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => onRedeem?.(position)}
+          disabled={isRedeemDisabled}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 font-mono text-[11px] uppercase tracking-[0.14em] text-emerald-700 transition-colors hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-300"
+        >
+          {isRedeeming ? (
+            <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <CircleDollarSign aria-hidden="true" className="h-3.5 w-3.5" />
+          )}
+          Redeem
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex items-center",
+        mobile ? "gap-6 pt-2 border-t border-border/30" : "justify-end gap-4"
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => onSell?.(position)}
+        className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60"
+      >
+        Sell
+      </button>
+      <Link
+        href={marketHref(position)}
+        className="group inline-flex items-baseline gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
+      >
+        <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
+          Trade
+        </span>
+        <span
+          aria-hidden="true"
+          className="translate-y-px transition-transform group-hover:translate-x-0.5"
+        >
+          →
+        </span>
+      </Link>
+    </div>
+  );
+}
+
 export function PositionsTable({
   positions,
   isLoading,
@@ -73,6 +274,8 @@ export function PositionsTable({
   sortDirection,
   onSort,
   onSell,
+  onRedeem,
+  redeemingPositionIds = new Set<string>(),
 }: {
   positions: Position[];
   isLoading: boolean;
@@ -82,6 +285,8 @@ export function PositionsTable({
   sortDirection: SortDirection;
   onSort: (field: SortField) => void;
   onSell?: (position: Position) => void;
+  onRedeem?: (position: Position) => void;
+  redeemingPositionIds?: ReadonlySet<string>;
 }) {
   const filteredPositions = useMemo(() => {
     let result = positions.filter((p) =>
@@ -114,6 +319,15 @@ export function PositionsTable({
 
     return result;
   }, [positions, searchQuery, pnlFilter, sortField, sortDirection]);
+
+  const positionRows = useMemo(
+    () =>
+      filteredPositions.map((position) => ({
+        position,
+        metrics: positionMetrics(position),
+      })),
+    [filteredPositions]
+  );
 
   if (isLoading) {
     return (
@@ -158,20 +372,20 @@ export function PositionsTable({
     );
   }
 
-  const totalBet = filteredPositions.reduce(
-    (sum, p) => sum + p.initialValue,
+  const totalBet = positionRows.reduce(
+    (sum, row) => sum + row.position.initialValue,
     0
   );
-  const totalToWin = filteredPositions.reduce(
-    (sum, p) => sum + p.size * (1 - p.avgPrice),
+  const totalToWin = positionRows.reduce(
+    (sum, row) => sum + row.metrics.toWin,
     0
   );
-  const totalValue = filteredPositions.reduce(
-    (sum, p) => sum + p.currentValue,
+  const totalValue = positionRows.reduce(
+    (sum, row) => sum + row.position.currentValue,
     0
   );
-  const totalPnl = filteredPositions.reduce(
-    (sum, p) => sum + p.unrealizedPnl,
+  const totalPnl = positionRows.reduce(
+    (sum, row) => sum + row.position.unrealizedPnl,
     0
   );
   const totalPnlPercent = totalBet > 0 ? (totalPnl / totalBet) * 100 : 0;
@@ -213,15 +427,10 @@ export function PositionsTable({
           <span className="text-right">Actions</span>
         </div>
 
-        {filteredPositions.map((position, index) => {
-          const isProfit = position.unrealizedPnl >= 0;
-          const toWin = position.size * (1 - position.avgPrice);
-          const priceDrift =
-            position.currentPrice > position.avgPrice
-              ? "text-emerald-600 dark:text-emerald-400"
-              : position.currentPrice < position.avgPrice
-                ? "text-red-600 dark:text-red-400"
-                : "text-muted-foreground";
+        {positionRows.map(({ position, metrics }, index) => {
+          const { canRedeem, isProfit, priceDrift, toWin } = metrics;
+          const isRedeeming = redeemingPositionIds.has(position.id);
+          const isRedeemDisabled = !onRedeem || isRedeeming;
 
           return (
             <m.div
@@ -234,33 +443,9 @@ export function PositionsTable({
                 "px-3 py-3.5 border-b border-border/40 hover:bg-muted/30 transition-colors"
               )}
             >
-              <Link
-                href={marketHref(position)}
-                className="flex items-center gap-3 min-w-0 group"
-              >
-                <MarketIcon position={position} size={36} />
-                <div className="min-w-0">
-                  <p className="font-medium text-sm truncate text-foreground group-hover:text-foreground transition-colors">
-                    {position.market.title}
-                  </p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <OutcomeLabel position={position} />
-                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground/80">
-                      · {position.size.toFixed(1)} shares
-                    </span>
-                  </div>
-                </div>
-              </Link>
+              <PositionMarketLink position={position} iconSize={36} />
 
-              <div className="text-center font-mono tabular-nums text-xs">
-                <span className="text-muted-foreground">
-                  {formatPrice(position.avgPrice)}
-                </span>
-                <span className="mx-1 text-muted-foreground/60">→</span>
-                <span className={priceDrift}>
-                  {formatPrice(position.currentPrice)}
-                </span>
-              </div>
+              <PricePair position={position} priceDrift={priceDrift} />
 
               <div className="text-right font-mono tabular-nums text-sm text-foreground">
                 {formatCurrency(position.initialValue)}
@@ -270,48 +455,16 @@ export function PositionsTable({
                 {formatCurrency(toWin)}
               </div>
 
-              <div className="text-right font-mono tabular-nums">
-                <div className="text-sm font-medium text-foreground">
-                  {formatCurrency(position.currentValue)}
-                </div>
-                <div
-                  className={cn(
-                    "text-[11px] font-semibold whitespace-nowrap",
-                    isProfit
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-red-600 dark:text-red-400"
-                  )}
-                >
-                  {formatCurrency(position.unrealizedPnl)}
-                  <span className="ml-1 opacity-70">
-                    ({formatPercent(position.unrealizedPnlPercent)})
-                  </span>
-                </div>
-              </div>
+              <PositionValuePnl position={position} isProfit={isProfit} />
 
-              <div className="flex items-center justify-end gap-4">
-                <button
-                  type="button"
-                  onClick={() => onSell?.(position)}
-                  className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60"
-                >
-                  Sell
-                </button>
-                <Link
-                  href={marketHref(position)}
-                  className="group inline-flex items-baseline gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
-                >
-                  <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
-                    Trade
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="translate-y-px transition-transform group-hover:translate-x-0.5"
-                  >
-                    →
-                  </span>
-                </Link>
-              </div>
+              <PositionActions
+                position={position}
+                canRedeem={canRedeem}
+                isRedeemDisabled={isRedeemDisabled}
+                isRedeeming={isRedeeming}
+                onSell={onSell}
+                onRedeem={onRedeem}
+              />
             </m.div>
           );
         })}
@@ -360,15 +513,10 @@ export function PositionsTable({
 
       {/* Mobile — hairline stacked rows */}
       <div className="md:hidden border-t border-border/40">
-        {filteredPositions.map((position, index) => {
-          const isProfit = position.unrealizedPnl >= 0;
-          const toWin = position.size * (1 - position.avgPrice);
-          const priceDrift =
-            position.currentPrice > position.avgPrice
-              ? "text-emerald-600 dark:text-emerald-400"
-              : position.currentPrice < position.avgPrice
-                ? "text-red-600 dark:text-red-400"
-                : "text-muted-foreground";
+        {positionRows.map(({ position, metrics }, index) => {
+          const { canRedeem, isProfit, priceDrift, toWin } = metrics;
+          const isRedeeming = redeemingPositionIds.has(position.id);
+          const isRedeemDisabled = !onRedeem || isRedeeming;
 
           return (
             <m.div
@@ -378,54 +526,16 @@ export function PositionsTable({
               transition={{ delay: Math.min(index * 0.015, 0.3) }}
               className="border-b border-border/40 py-4 space-y-3"
             >
-              <Link
-                href={marketHref(position)}
-                className="flex items-start gap-3"
-              >
-                <MarketIcon position={position} size={44} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm line-clamp-2 leading-tight text-foreground">
-                    {position.market.title}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <OutcomeLabel position={position} />
-                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground/80">
-                      · {position.size.toFixed(1)} shares
-                    </span>
-                  </div>
-                </div>
-              </Link>
+              <PositionMarketLink position={position} iconSize={44} compact />
 
               <div className="flex items-baseline justify-between gap-3 font-mono tabular-nums text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/70">
-                    Avg→Now
-                  </span>
-                  <span className="text-muted-foreground">
-                    {formatPrice(position.avgPrice)}
-                  </span>
-                  <span className="text-muted-foreground/60">→</span>
-                  <span className={priceDrift}>
-                    {formatPrice(position.currentPrice)}
-                  </span>
-                </div>
+                <PricePair position={position} priceDrift={priceDrift} mobile />
                 <div className="text-right">
-                  <div className="text-sm font-semibold text-foreground">
-                    {formatCurrency(position.currentValue)}
-                  </div>
-                  <div
-                    className={cn(
-                      "text-[11px] font-semibold",
-                      isProfit
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-red-600 dark:text-red-400"
-                    )}
-                  >
-                    {formatCurrency(position.unrealizedPnl)}
-                    <span className="ml-1 opacity-70">
-                      ({formatPercent(position.unrealizedPnlPercent)})
-                    </span>
-                  </div>
+                  <PositionValuePnl
+                    position={position}
+                    isProfit={isProfit}
+                    compact
+                  />
                 </div>
               </div>
 
@@ -444,29 +554,15 @@ export function PositionsTable({
                 </span>
               </div>
 
-              <div className="flex items-center gap-6 pt-2 border-t border-border/30">
-                <button
-                  type="button"
-                  onClick={() => onSell?.(position)}
-                  className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors underline underline-offset-4 decoration-border hover:decoration-red-500/60"
-                >
-                  Sell
-                </button>
-                <Link
-                  href={marketHref(position)}
-                  className="group inline-flex items-baseline gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-foreground transition-colors hover:text-muted-foreground"
-                >
-                  <span className="underline underline-offset-4 decoration-border group-hover:decoration-foreground transition-colors">
-                    Trade
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="translate-y-px transition-transform group-hover:translate-x-0.5"
-                  >
-                    →
-                  </span>
-                </Link>
-              </div>
+              <PositionActions
+                position={position}
+                canRedeem={canRedeem}
+                isRedeemDisabled={isRedeemDisabled}
+                isRedeeming={isRedeeming}
+                mobile
+                onSell={onSell}
+                onRedeem={onRedeem}
+              />
             </m.div>
           );
         })}

@@ -59,6 +59,10 @@ const RECONNECT_LIMITS = {
 };
 
 const PONG_TIMEOUT_MS = 10_000;
+const DISCONNECT_GRACE_MS = 1_500;
+const ENDED_GAME_TTL_MS = 30 * 60 * 1000;
+const STALE_GAME_TTL_MS = 2 * 60 * 60 * 1000;
+const EVICTION_SWEEP_INTERVAL_MS = 60 * 1000;
 
 class SportsWebSocketManager {
   private static instance: SportsWebSocketManager | null = null;
@@ -67,10 +71,15 @@ class SportsWebSocketManager {
   private connectionState: ConnectionState = "disconnected";
   private reconnectAttempt = 0;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private disconnectGraceTimeout: ReturnType<typeof setTimeout> | null = null;
   private firstReconnectTime = 0;
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private consumerCount = 0;
+
+  private games: Map<string, SportResult> = new Map();
+  private gameReceivedAt: Map<string, number> = new Map();
+  private lastEvictionSweepAt = 0;
 
   private eventListeners: Set<SportEventCallback> = new Set();
   private connectionListeners: Set<ConnectionCallback> = new Set();
@@ -92,6 +101,11 @@ class SportsWebSocketManager {
     return this.connectionState === "connected";
   }
 
+  getGamesSnapshot(): Map<string, SportResult> {
+    this.evictStaleGames();
+    return new Map(this.games);
+  }
+
   addEventListener(callback: SportEventCallback): () => void {
     this.eventListeners.add(callback);
     return () => this.eventListeners.delete(callback);
@@ -108,6 +122,7 @@ class SportsWebSocketManager {
    * Returns an unregister function that disconnects when last consumer leaves.
    */
   addConsumer(): () => void {
+    this.clearDisconnectGraceTimeout();
     this.consumerCount++;
 
     if (this.consumerCount === 1 && this.connectionState === "disconnected") {
@@ -117,12 +132,13 @@ class SportsWebSocketManager {
     return () => {
       this.consumerCount = Math.max(0, this.consumerCount - 1);
       if (this.consumerCount === 0) {
-        this.disconnect();
+        this.scheduleDisconnect();
       }
     };
   }
 
   reconnect(): void {
+    this.clearDisconnectGraceTimeout();
     this.clearReconnectTimeout();
     this.clearPongTimeout();
     this.cleanupConnection();
@@ -134,9 +150,12 @@ class SportsWebSocketManager {
   }
 
   disconnect(): void {
+    this.clearDisconnectGraceTimeout();
     this.clearReconnectTimeout();
     this.clearPongTimeout();
     this.cleanupConnection();
+    this.games.clear();
+    this.gameReceivedAt.clear();
     this.updateConnectionState("disconnected");
   }
 
@@ -279,6 +298,23 @@ class SportsWebSocketManager {
     }
   }
 
+  private scheduleDisconnect(): void {
+    if (this.disconnectGraceTimeout) return;
+    this.disconnectGraceTimeout = setTimeout(() => {
+      this.disconnectGraceTimeout = null;
+      if (this.consumerCount === 0) {
+        this.disconnect();
+      }
+    }, DISCONNECT_GRACE_MS);
+  }
+
+  private clearDisconnectGraceTimeout(): void {
+    if (this.disconnectGraceTimeout) {
+      clearTimeout(this.disconnectGraceTimeout);
+      this.disconnectGraceTimeout = null;
+    }
+  }
+
   private cleanupConnection(): void {
     if (this.ws) {
       this.ws.onopen = null;
@@ -302,11 +338,45 @@ class SportsWebSocketManager {
   }
 
   private broadcastEvent(event: SportResult): void {
+    this.evictStaleGames();
+    const gameId = String(event.gameId);
+    this.games.set(gameId, event);
+    this.gameReceivedAt.set(gameId, Date.now());
     for (const cb of this.eventListeners) {
       try {
         cb(event);
       } catch (err) {
         log.error("listener.event.error", { error: err });
+      }
+    }
+  }
+
+  private evictStaleGames(now = Date.now()): void {
+    // The sweep walks the whole map and Date.parses per entry; callers invoke
+    // it on every websocket message and snapshot, so gate it to once per
+    // minute — the TTLs are 30min/2h, minute-level precision is plenty.
+    // A negative elapsed (clock moved backwards, e.g. fake timers) sweeps.
+    const elapsedSinceSweep = now - this.lastEvictionSweepAt;
+    if (
+      elapsedSinceSweep >= 0 &&
+      elapsedSinceSweep < EVICTION_SWEEP_INTERVAL_MS
+    ) {
+      return;
+    }
+    this.lastEvictionSweepAt = now;
+    for (const [gameId, event] of this.games) {
+      const upstreamUpdatedAt = Date.parse(
+        event.finished_timestamp ?? event.updatedAt ?? ""
+      );
+      const updatedAt = Number.isNaN(upstreamUpdatedAt)
+        ? this.gameReceivedAt.get(gameId)
+        : upstreamUpdatedAt;
+      if (updatedAt === undefined) continue;
+
+      const ttl = event.ended ? ENDED_GAME_TTL_MS : STALE_GAME_TTL_MS;
+      if (now - updatedAt > ttl) {
+        this.games.delete(gameId);
+        this.gameReceivedAt.delete(gameId);
       }
     }
   }

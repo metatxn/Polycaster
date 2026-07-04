@@ -16,6 +16,10 @@
  */
 
 import {
+  isEip1193UnsupportedMethodError,
+  isEip1193UserRejectedError,
+} from "@knoww/shared-types/trading-errors";
+import {
   WalletConnectBridge,
   type WalletConnectState,
 } from "./walletconnect-bridge";
@@ -46,6 +50,7 @@ type PendingRequest = {
 const pending = new Map<string, PendingRequest>();
 const USER_MEDIATED_WALLET_METHODS = new Set([
   "eth_requestAccounts",
+  "wallet_requestPermissions",
   "eth_signTypedData_v4",
   "personal_sign",
   "eth_sendTransaction",
@@ -59,6 +64,7 @@ const USER_MEDIATED_WALLET_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 let initialized = false;
 let wallets: DiscoveredWallet[] = [];
 let walletListeners: Array<(w: DiscoveredWallet[]) => void> = [];
+let accountListeners: Array<(accounts: string[]) => void> = [];
 let selectedWalletUuid: string | undefined;
 
 function isWalletConnectSelected(walletUuid?: string): boolean {
@@ -90,14 +96,10 @@ function getWalletErrorMessage(error: unknown): string {
 }
 
 function formatWalletSigningError(error: unknown): string {
-  const message = getWalletErrorMessage(error);
-  if (
-    /user rejected|request rejected|rejected the request|denied|4001/i.test(
-      message
-    )
-  ) {
+  if (isEip1193UserRejectedError(error)) {
     return "Transaction rejected.";
   }
+  const message = getWalletErrorMessage(error);
   return message || "Wallet request failed.";
 }
 
@@ -137,6 +139,13 @@ function init(): void {
           wallets: DiscoveredWallet[];
           _n?: string;
         }
+      | {
+          type: "KNOWW_WALLET_ACCOUNTS_CHANGED";
+          walletUuid?: string;
+          active?: boolean;
+          accounts?: unknown;
+          _n?: string;
+        }
       | undefined;
     if (!data?.type) return;
 
@@ -148,7 +157,9 @@ function init(): void {
       pending.delete(data.id);
       if (p.timeoutId) clearTimeout(p.timeoutId);
       if (data.error) {
-        p.reject(new Error(data.error));
+        const err = new Error(data.error) as Error & { code?: number };
+        if (typeof data.code === "number") err.code = data.code;
+        p.reject(err);
       } else {
         p.resolve(data.result);
       }
@@ -160,6 +171,31 @@ function init(): void {
       for (const fn of walletListeners) {
         try {
           fn(wallets);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    if (data.type === "KNOWW_WALLET_ACCOUNTS_CHANGED") {
+      if (
+        selectedWalletUuid &&
+        data.walletUuid &&
+        data.walletUuid !== selectedWalletUuid
+      ) {
+        return;
+      }
+      if (!selectedWalletUuid && data.walletUuid && data.active === false) {
+        return;
+      }
+      const accounts = Array.isArray(data.accounts)
+        ? data.accounts.filter(
+            (account): account is string => typeof account === "string"
+          )
+        : [];
+      for (const fn of accountListeners) {
+        try {
+          fn(accounts);
         } catch {
           /* ignore */
         }
@@ -286,6 +322,14 @@ export const WalletBridge = {
     };
   },
 
+  onAccountsChanged(fn: (accounts: string[]) => void): () => void {
+    init();
+    accountListeners.push(fn);
+    return () => {
+      accountListeners = accountListeners.filter((l) => l !== fn);
+    };
+  },
+
   selectWallet(uuid: string): void {
     selectedWalletUuid = uuid;
     if (uuid === WALLETCONNECT_WALLET_UUID) return;
@@ -314,6 +358,28 @@ export const WalletBridge = {
     return accounts;
   },
 
+  async switchWallet(walletUuid?: string): Promise<string[]> {
+    if (isWalletConnectSelected(walletUuid)) {
+      selectedWalletUuid = WALLETCONNECT_WALLET_UUID;
+      return WalletConnectBridge.connect({ forceNew: true });
+    }
+    if (walletUuid) {
+      this.selectWallet(walletUuid);
+    }
+
+    try {
+      await request(
+        "wallet_requestPermissions",
+        [{ eth_accounts: {} }],
+        walletUuid
+      );
+    } catch (err) {
+      if (!isEip1193UnsupportedMethodError(err)) throw err;
+    }
+
+    return this.connect(walletUuid);
+  },
+
   async getAccounts(): Promise<string[]> {
     if (isWalletConnectSelected()) {
       return WalletConnectBridge.getAccounts();
@@ -330,6 +396,17 @@ export const WalletBridge = {
       selectedWalletUuid = WALLETCONNECT_WALLET_UUID;
     }
     return mobileAccounts;
+  },
+
+  async getSelectedAccounts(): Promise<string[]> {
+    if (isWalletConnectSelected()) {
+      return WalletConnectBridge.getAccounts();
+    }
+    try {
+      return ((await request("eth_accounts")) as string[]) ?? [];
+    } catch {
+      return [];
+    }
   },
 
   async getChainId(): Promise<string> {

@@ -7,6 +7,7 @@ const POLYGON_CAIP_CHAIN_ID = "eip155:137";
 const POLYGON_CHAIN_ID_HEX = "0x89";
 const POLYGON_RPC_URL = "https://polygon-bor-rpc.publicnode.com";
 const STORAGE_PREFIX = "knoww_walletconnect_";
+const READ_ONLY_RPC_TIMEOUT_MS = 8000;
 
 const WALLETCONNECT_REQUIRED_METHODS = [
   "personal_sign",
@@ -92,6 +93,14 @@ type WalletConnectBridgeSharedState = {
   listeners: WalletConnectStateListener[];
   attachedProviders: WeakSet<UniversalProvider>;
 };
+
+interface JsonRpcResponse<T> {
+  result?: T;
+  error?: {
+    code?: number;
+    message?: string;
+  };
+}
 
 type WalletConnectGlobal = typeof globalThis & {
   __KNOWW_WALLETCONNECT_BRIDGE_STATE__?: WalletConnectBridgeSharedState;
@@ -250,6 +259,53 @@ async function request<T = unknown>(
   return provider.request<T>({ method, params }, POLYGON_CAIP_CHAIN_ID);
 }
 
+async function polygonRpcRequest<T>(
+  method: string,
+  params?: unknown[]
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, READ_ONLY_RPC_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(POLYGON_RPC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method,
+        params,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Polygon RPC ${method} failed: ${response.status}`);
+    }
+
+    const payload = (await response.json()) as JsonRpcResponse<T>;
+    if (payload.error) {
+      throw new Error(
+        payload.error.message || `Polygon RPC ${method} returned an error`
+      );
+    }
+    if (!("result" in payload)) {
+      throw new Error(`Polygon RPC ${method} returned no result`);
+    }
+
+    return payload.result as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Polygon RPC ${method} timed out`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function disconnectExistingSession(provider: UniversalProvider) {
   try {
     if (provider.session) {
@@ -395,17 +451,17 @@ export const WalletConnectBridge = {
   },
 
   async ethCall(to: string, data: string): Promise<string> {
-    return request<string>("eth_call", [{ to, data }, "latest"]);
+    return polygonRpcRequest<string>("eth_call", [{ to, data }, "latest"]);
   },
 
   async getBalance(address: string): Promise<string> {
-    return request<string>("eth_getBalance", [address, "latest"]);
+    return polygonRpcRequest<string>("eth_getBalance", [address, "latest"]);
   },
 
   async getTransactionReceipt(
     txHash: string
   ): Promise<{ status: string; blockNumber: string } | null> {
-    return request<{ status: string; blockNumber: string } | null>(
+    return polygonRpcRequest<{ status: string; blockNumber: string } | null>(
       "eth_getTransactionReceipt",
       [txHash]
     );

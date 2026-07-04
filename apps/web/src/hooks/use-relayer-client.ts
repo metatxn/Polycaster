@@ -12,7 +12,11 @@
 "use client";
 
 import { createLogger } from "@knoww/logger";
-import { buildTradingApprovalTransactions } from "@knoww/shared-types/approvals";
+import {
+  buildClobOrderApprovalTransactions,
+  buildTradingApprovalTransactions,
+  type ClobOrderApprovalRequirement,
+} from "@knoww/shared-types/approvals";
 import {
   normalizeApprovalAmount,
   parseApprovalAmountRaw,
@@ -177,6 +181,7 @@ export function useRelayerClient() {
         success: true,
         transactionHash: result.transactionHash,
         proxyAddress: safe,
+        ...(result.alreadyDeployed ? { alreadyDeployed: true } : {}),
       };
     } catch (deployErr) {
       const errMessage =
@@ -237,7 +242,10 @@ export function useRelayerClient() {
    * the check fails after a "successful" batch.
    */
   const approveUsdcForTrading = useCallback(
-    async (approvalAmount?: string) => {
+    async (
+      approvalAmount?: string,
+      options: { approvalScope?: ClobOrderApprovalRequirement } = {}
+    ) => {
       if (!walletClient || !address) {
         return { success: false, error: "Wallet not connected" };
       }
@@ -278,10 +286,12 @@ export function useRelayerClient() {
         );
         log.debug("approvals.status", approvalStatus);
 
-        const approvalTxs = buildTradingApprovalTransactions(
-          approvalStatus,
-          approvalAmountRaw
-        );
+        const approvalTxs = options.approvalScope
+          ? buildClobOrderApprovalTransactions(
+              approvalStatus,
+              options.approvalScope
+            )
+          : buildTradingApprovalTransactions(approvalStatus, approvalAmountRaw);
 
         if (approvalTxs.length === 0) {
           log.debug("approvals.already_set");
@@ -543,9 +553,10 @@ export function useRelayerClient() {
     try {
       // Step 1: Deploy Safe
       const deployResult = await deploySafe();
-      if (!deployResult.success) {
+      if (!deployResult.success || !("proxyAddress" in deployResult)) {
         return deployResult;
       }
+      const deployedProxyAddress = deployResult.proxyAddress;
 
       // Step 2: Approve V2 trading and CTF-operation allowances
       const approveResult = await approveUsdcForTrading();
@@ -553,13 +564,13 @@ export function useRelayerClient() {
         return {
           success: false,
           error: approveResult.error,
-          proxyAddress: deployResult.proxyAddress,
+          proxyAddress: deployedProxyAddress,
         };
       }
 
       return {
         success: true,
-        proxyAddress: deployResult.proxyAddress,
+        proxyAddress: deployedProxyAddress,
         message: "Onboarding complete! You can now trade on Polymarket.",
       };
     } catch (err) {

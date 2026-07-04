@@ -1,9 +1,8 @@
 "use client";
 
+import { isClobOrderApproved } from "@knoww/shared-types/approvals";
 import {
-  DEFAULT_APPROVAL_AMOUNT,
   estimateFallbackFeeRaw,
-  parseApprovalAmountRaw,
   parsePusdUnits,
 } from "@knoww/shared-types/trading";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,9 +38,6 @@ const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 // preset; the summary stays hidden until the amount clears the $1 minimum.
 const DEFAULT_MARKET_BUY_AMOUNT_USD = 0;
 const APPROVAL_CHECK_BUCKET_RAW = BigInt(10) ** BigInt(PUSD_DECIMALS);
-const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
-  DEFAULT_APPROVAL_AMOUNT
-);
 
 export function useTradingFormState({
   outcomes,
@@ -332,18 +328,6 @@ export function useTradingFormState({
     return requiredRaw + estimateFallbackFeeRaw(requiredRaw);
   }, [calculations.total, shares, side]);
 
-  const approvalGrantAmountRaw = useMemo(() => {
-    return requiredApprovalAmountRaw > DEFAULT_TRADING_APPROVAL_RAW
-      ? requiredApprovalAmountRaw
-      : DEFAULT_TRADING_APPROVAL_RAW;
-  }, [requiredApprovalAmountRaw]);
-
-  const approvalAmount = useMemo(() => {
-    return new Decimal(approvalGrantAmountRaw.toString())
-      .div(new Decimal(10).pow(PUSD_DECIMALS))
-      .toString();
-  }, [approvalGrantAmountRaw]);
-
   const bucketedRequiredApprovalAmountRaw = useMemo(() => {
     if (requiredApprovalAmountRaw <= BigInt(0)) return BigInt(0);
     return (
@@ -352,6 +336,12 @@ export function useTradingFormState({
       APPROVAL_CHECK_BUCKET_RAW
     );
   }, [requiredApprovalAmountRaw]);
+
+  const approvalAmount = useMemo(() => {
+    return new Decimal(bucketedRequiredApprovalAmountRaw.toString())
+      .div(new Decimal(10).pow(PUSD_DECIMALS))
+      .toString();
+  }, [bucketedRequiredApprovalAmountRaw]);
 
   // The market order notional can move on every order book tick. Keep approval
   // checks close to the actual required amount, but debounce and bucket them so
@@ -395,7 +385,10 @@ export function useTradingFormState({
   const hasMissingTradingApprovals =
     shouldCheckTradingApprovals &&
     tradingApprovalStatus !== undefined &&
-    !tradingApprovalStatus.allApproved;
+    !isClobOrderApproved(tradingApprovalStatus, {
+      side,
+      negRisk,
+    });
   const useAllowanceFallbackGate =
     side === "BUY" && tradingApprovalStatus === undefined;
   const hasEffectiveInsufficientAllowance =
@@ -417,7 +410,10 @@ export function useTradingFormState({
   const handleSetAllowance = useCallback(async () => {
     setIsUpdatingAllowance(true);
     try {
-      await updateAllowance(approvalAmount);
+      await updateAllowance(approvalAmount, {
+        side,
+        negRisk,
+      });
       await Promise.all([
         refreshProxyWallet(),
         refetchAllowance(),
@@ -458,6 +454,8 @@ export function useTradingFormState({
   }, [
     updateAllowance,
     approvalAmount,
+    side,
+    negRisk,
     refreshProxyWallet,
     refetchAllowance,
     refetchTradingApprovals,

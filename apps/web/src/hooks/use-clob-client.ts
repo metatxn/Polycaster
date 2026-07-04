@@ -2,10 +2,12 @@
 
 import { createLogger } from "@knoww/logger";
 import {
+  buildClobOrderApprovalTransactions,
   buildFullTradingApprovalTransactions,
-  getPusdExchangeApprovalSpender,
-  readErc1155Approval,
-  readPusdExchangeAllowance,
+  type ClobOrderApprovalRequirement,
+  isClobOrderApproved,
+  readClobOrderPusdAllowance,
+  readTradingApprovalStatus,
 } from "@knoww/shared-types/approvals";
 import {
   assertClobPostOrderSuccess,
@@ -304,7 +306,22 @@ export function useClobClient() {
         estimatedFeeRaw,
       });
 
-      if (!wrapPlan.needsWrap) return;
+      // Decision inputs/outputs only, raw units (the logger stringifies
+      // bigints); formatted duplicates are derivable and this runs on every
+      // BUY preflight.
+      log.debug("buy_collateral.preflight", {
+        proxyAddress,
+        walletMode,
+        pusdBalanceRaw: pusdBalanceOnChain,
+        usdcEBalanceRaw: usdcBalance,
+        requiredPusdRaw,
+        reservedPusdRaw,
+        estimatedFeeRaw,
+        shortfallRaw: wrapPlan.shortfallRaw,
+        wrapAmountRaw: wrapPlan.wrapAmountRaw,
+        needsWrap: wrapPlan.needsWrap,
+        hasEnoughBaseCollateral: wrapPlan.hasEnoughBaseCollateral,
+      });
 
       if (!wrapPlan.hasEnoughBaseCollateral) {
         const needed = formatUnits(wrapPlan.baseShortfallRaw, PUSD_DECIMALS);
@@ -323,6 +340,8 @@ export function useClobClient() {
             "please deposit more USDC.e or cancel open orders."
         );
       }
+
+      if (!wrapPlan.needsWrap) return;
 
       const txns = buildPusdAutoWrapTransactions(
         proxyAddress as `0x${string}`,
@@ -394,14 +413,19 @@ export function useClobClient() {
           chain: polygon,
           transport: http(getRpcUrl()),
         });
-        const allowance = await readPusdExchangeAllowance(
+        const orderAllowance = await readClobOrderPusdAllowance(
           client,
           proxyAddress as Address,
           required.negRisk
         );
-        hasRequiredPusdAllowance = allowance >= required.requiredPusdRaw;
+        hasRequiredPusdAllowance = orderAllowance >= required.requiredPusdRaw;
 
-        if (!(status.allApproved && hasRequiredPusdAllowance)) {
+        const orderApproved = isClobOrderApproved(status, {
+          side: "BUY",
+          negRisk: required.negRisk,
+        });
+
+        if (!(orderApproved && hasRequiredPusdAllowance)) {
           markApproving();
           const approvalAmountRaw =
             required.requiredPusdRaw > DEFAULT_TRADING_APPROVAL_RAW
@@ -436,34 +460,27 @@ export function useClobClient() {
 
   /**
    * SELL orders require ERC-1155 operator approval from the CTF contract to
-   * the exact exchange that will fill the order. Check that approval directly
-   * so a missing SELL allowance is repaired before CLOB returns its generic
-   * "not enough balance / allowance" rejection.
+   * every operator that moves outcome tokens for the fill — the exchange,
+   * plus the NegRiskAdapter for neg-risk markets. Gate on the shared
+   * `isClobOrderApproved` model (the single owner of that operator-pair rule)
+   * rather than a single-operator read, so a wallet with the exchange
+   * approved but the adapter missing is repaired before CLOB returns its
+   * generic "not enough balance / allowance" rejection.
    */
   const ensureSellCtfApproval = useCallback(
     async (negRisk?: boolean, onApprovalStart?: () => void) => {
       if (!proxyAddress) throw new Error("Proxy wallet not found");
 
-      const [{ createPublicClient, http }, { polygon }] = await Promise.all([
-        import("viem"),
-        import("@/lib/chains"),
-      ]);
-      const client = createPublicClient({
-        chain: polygon,
-        transport: http(getRpcUrl()),
-      });
-      const exchange = getPusdExchangeApprovalSpender(negRisk);
-      const approved = await readErc1155Approval(
-        client,
-        proxyAddress as Address,
-        exchange
-      );
-
-      if (approved) return;
+      const approvalScope: ClobOrderApprovalRequirement = {
+        side: "SELL",
+        negRisk,
+      };
+      const status = await checkAllApprovals(proxyAddress);
+      if (isClobOrderApproved(status, approvalScope)) return;
 
       onApprovalStart?.();
       setOperationStep("approving");
-      const result = await approveUsdcForTrading();
+      const result = await approveUsdcForTrading(undefined, { approvalScope });
       if (!result.success) {
         throw new Error(
           result.error ||
@@ -594,17 +611,17 @@ export function useClobClient() {
           });
         }
 
-        await ensureV2Approvals(
-          preflight.buy
-            ? {
-                requiredPusdRaw: preflight.buy.requiredCollateralRaw,
-                negRisk: params.negRisk,
-              }
-            : undefined,
-          () => {
-            activeStepRef.current = "approving";
-          }
-        );
+        if (preflight.buy) {
+          await ensureV2Approvals(
+            {
+              requiredPusdRaw: preflight.buy.requiredCollateralRaw,
+              negRisk: params.negRisk,
+            },
+            () => {
+              activeStepRef.current = "approving";
+            }
+          );
+        }
 
         // Wrap-on-trade pre-flight (BUY only). SELL receives pUSD and does
         // not need collateral wrapped beforehand.
@@ -805,7 +822,10 @@ export function useClobClient() {
    * manual EOA approvals.
    */
   const updateAllowance = useCallback(
-    async (approvalAmount?: string) => {
+    async (
+      approvalAmount?: string,
+      approvalScope?: ClobOrderApprovalRequirement
+    ) => {
       if (!address) throw new Error("Wallet not connected");
 
       setIsLoading(true);
@@ -814,7 +834,9 @@ export function useClobClient() {
 
       try {
         if (!isEoaMode) {
-          const result = await approveUsdcForTrading(approvalAmount);
+          const result = approvalScope
+            ? await approveUsdcForTrading(approvalAmount, { approvalScope })
+            : await approveUsdcForTrading(approvalAmount);
           if (!result.success) {
             throw new Error(
               result.error ||
@@ -846,8 +868,25 @@ export function useClobClient() {
           transport: http(getRpcUrl()),
         });
 
-        const approvalTxs =
-          buildFullTradingApprovalTransactions(approvalAmountRaw);
+        const approvalTxs = approvalScope
+          ? buildClobOrderApprovalTransactions(
+              await readTradingApprovalStatus(
+                publicClient,
+                address as Address,
+                {
+                  approvalAmountRaw,
+                }
+              ),
+              approvalScope
+            )
+          : buildFullTradingApprovalTransactions(approvalAmountRaw);
+        if (approvalTxs.length === 0) {
+          return {
+            success: true,
+            hashes: [],
+            message: "All approvals already set",
+          };
+        }
         const hashes: `0x${string}`[] = [];
         for (const tx of approvalTxs) {
           const hash = await approveWalletClient.sendTransaction({

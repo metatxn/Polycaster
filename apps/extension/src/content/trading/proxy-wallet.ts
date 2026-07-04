@@ -65,11 +65,30 @@ export const ProxyWallet = {
     eoaAddress: string,
     walletMode?: TradingWalletMode
   ): Promise<string> {
-    const data = await sendTradingMessage<{ proxyAddress: string }>(
+    return (await this.resolveDeployment(eoaAddress, walletMode)).proxyAddress;
+  },
+
+  /**
+   * Derives the trading wallet address AND its deployment state from the
+   * derive handler, which checks bytecode with a relayer /deployed fallback —
+   * strictly stronger than the bytecode-only answer piggybacked on balance
+   * reads. `isDeployed: null` means the handler did not report a boolean.
+   */
+  async resolveDeployment(
+    eoaAddress: string,
+    walletMode?: TradingWalletMode
+  ): Promise<{ proxyAddress: string; isDeployed: boolean | null }> {
+    const data = await sendTradingMessage<{
+      proxyAddress: string;
+      isDeployed?: boolean;
+    }>(
       { type: "trading:derive-proxy-address", eoaAddress, walletMode },
       "Failed to derive proxy address"
     );
-    return data.proxyAddress;
+    return {
+      proxyAddress: data.proxyAddress,
+      isDeployed: typeof data.isDeployed === "boolean" ? data.isDeployed : null,
+    };
   },
 
   async getBalance(proxyAddress: string): Promise<TradingBalanceData> {

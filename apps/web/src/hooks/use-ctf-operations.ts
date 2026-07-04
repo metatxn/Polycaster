@@ -17,7 +17,6 @@ import {
   type CtfOperationName,
   type CtfOperationTransaction,
   type CtfOutcomeBalances,
-  planCtfOperationTransaction,
   planCtfOperationTransactions,
   readCtfOutcomeBalances,
 } from "@knoww/shared-types/ctf";
@@ -46,6 +45,7 @@ export interface CTFOperationState {
 export type OutcomeTokenBalances = CtfOutcomeBalances;
 
 type OperationResult = { success: boolean; txHash?: string; error?: string };
+type CtfExecutableTransaction = CtfOperationTransaction | ApprovalTransaction;
 
 async function createCtfPublicClient() {
   const { createPublicClient, http } = await import("viem");
@@ -73,50 +73,15 @@ export function useCtfOperations() {
     txHash: null,
   });
 
-  const executeCtfApprovalTransaction = useCallback(
-    async (
-      approvalTx: ApprovalTransaction,
-      publicClient: Awaited<ReturnType<typeof createCtfPublicClient>>
-    ) => {
-      if (!walletClient || !address) {
-        throw new Error("Wallet not connected");
-      }
-
-      const { polygon } = await import("@/lib/chains");
-
-      if (isEoaMode) {
-        const hash = await walletClient.sendTransaction({
-          account: address as `0x${string}`,
-          chain: polygon,
-          to: approvalTx.to,
-          data: approvalTx.data,
-          value: BigInt(approvalTx.value),
-        });
-        await publicClient.waitForTransactionReceipt({ hash });
-        return;
-      }
-
-      if (walletMode === "deposit") {
-        await executeViaDepositWallet(walletClient, address as `0x${string}`, [
-          approvalTx,
-        ]);
-        return;
-      }
-
-      await executeViaRelayer(walletClient, address as `0x${string}`, [
-        approvalTx,
-      ]);
-    },
-    [walletClient, address, isEoaMode, walletMode]
-  );
-
   /**
-   * Execute a CTF operation via relayer with polling
+   * Execute a CTF operation via relayer with polling.
+   * Relayer/deposit-wallet paths submit the full plan as one batch so approval
+   * and action share the same wallet nonce and require one EOA signature.
    */
   const executeCTFOperation = useCallback(
     async (
       operationName: CtfOperationName,
-      transaction: CtfOperationTransaction
+      transactions: CtfExecutableTransaction[]
     ): Promise<OperationResult> => {
       setState({ isLoading: true, error: null, txHash: null });
 
@@ -128,16 +93,20 @@ export function useCtfOperations() {
         if (isEoaMode) {
           const { polygon } = await import("@/lib/chains");
           const { getPublicClient } = await import("@/lib/rpc");
-          const hash = await walletClient.sendTransaction({
-            account: address as `0x${string}`,
-            chain: polygon,
-            to: transaction.to,
-            data: transaction.data,
-            value: BigInt(transaction.value),
-          });
-          await getPublicClient().waitForTransactionReceipt({ hash });
-          setState({ isLoading: false, error: null, txHash: hash });
-          return { success: true, txHash: hash };
+          let lastHash: `0x${string}` | null = null;
+          for (const transaction of transactions) {
+            const hash = await walletClient.sendTransaction({
+              account: address as `0x${string}`,
+              chain: polygon,
+              to: transaction.to,
+              data: transaction.data,
+              value: BigInt(transaction.value),
+            });
+            await getPublicClient().waitForTransactionReceipt({ hash });
+            lastHash = hash;
+          }
+          setState({ isLoading: false, error: null, txHash: lastHash });
+          return { success: true, txHash: lastHash ?? undefined };
         }
 
         const result =
@@ -145,10 +114,10 @@ export function useCtfOperations() {
             ? await executeViaDepositWallet(
                 walletClient,
                 address as `0x${string}`,
-                [transaction]
+                transactions
               )
             : await executeViaRelayer(walletClient, address as `0x${string}`, [
-                transaction,
+                ...transactions,
               ]);
 
         const txHash = result.transactionHash;
@@ -213,16 +182,9 @@ export function useCtfOperations() {
         client: publicClient,
         collateralOwner: proxyAddress as `0x${string}`,
       });
-      if (plan.approvalTransaction) {
-        await executeCtfApprovalTransaction(
-          plan.approvalTransaction,
-          publicClient
-        );
-      }
-
-      return executeCTFOperation(plan.operation, plan.transaction);
+      return executeCTFOperation(plan.operation, plan.transactions);
     },
-    [executeCTFOperation, executeCtfApprovalTransaction]
+    [executeCTFOperation]
   );
 
   /**
@@ -233,16 +195,19 @@ export function useCtfOperations() {
     async (
       conditionId: string,
       amount: number,
-      _proxyAddress: string,
+      proxyAddress: string,
       negRisk = false
     ): Promise<OperationResult> => {
-      const plan = planCtfOperationTransaction({
+      const publicClient = await createCtfPublicClient();
+      const plan = await planCtfOperationTransactions({
         operation: "mergePositions",
         conditionId,
         amount: amount.toString(),
         negRisk,
+        client: publicClient,
+        collateralOwner: proxyAddress as `0x${string}`,
       });
-      return executeCTFOperation(plan.operation, plan.transaction);
+      return executeCTFOperation(plan.operation, plan.transactions);
     },
     [executeCTFOperation]
   );
@@ -253,15 +218,18 @@ export function useCtfOperations() {
   const redeemPositions = useCallback(
     async (
       conditionId: string,
-      _proxyAddress: string,
+      proxyAddress: string,
       negRisk = false
     ): Promise<OperationResult> => {
-      const plan = planCtfOperationTransaction({
+      const publicClient = await createCtfPublicClient();
+      const plan = await planCtfOperationTransactions({
         operation: "redeemPositions",
         conditionId,
         negRisk,
+        client: publicClient,
+        collateralOwner: proxyAddress as `0x${string}`,
       });
-      return executeCTFOperation(plan.operation, plan.transaction);
+      return executeCTFOperation(plan.operation, plan.transactions);
     },
     [executeCTFOperation]
   );

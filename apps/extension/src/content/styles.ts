@@ -1604,7 +1604,16 @@ function injectInlineStyles(): void {
  */
 function injectMetamaskBridge(): void {
   try {
-    if (document.getElementById("knoww-page-bridge")) return;
+    const existing = document.getElementById("knoww-page-bridge");
+    if (existing) {
+      // Injected by this content-script instance — nothing to do.
+      if (window.__KNOWW_BRIDGE_NONCE__) return;
+      // Stale tag from a previous incarnation (extension updated and the
+      // content script was re-injected into a live tab): its MAIN-world
+      // bridge drops our un-nonced messages, hanging every wallet request.
+      // Replace it so a fresh bridge takes over under this world's nonce.
+      existing.remove();
+    }
     const script = document.createElement("script");
     script.id = "knoww-page-bridge";
     script.type = "text/javascript";

@@ -39,7 +39,8 @@ test("theme picker accessible name includes the visible theme label", () => {
 });
 
 test("ticker exposes motion controls", () => {
-  assert.match(landing, /hover:\[animation-play-state:paused\]/);
+  assert.match(landing, /hover:paused/);
+  assert.match(landing, /focus-within:paused/);
   assert.match(landing, /motion-reduce:animate-none/);
 });
 

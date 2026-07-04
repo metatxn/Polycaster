@@ -16,8 +16,8 @@ import {
   zeroAddress,
 } from "viem";
 import {
+  DEPOSIT_WALLET_BEACON_ADDRESS,
   DEPOSIT_WALLET_FACTORY_ADDRESS,
-  DEPOSIT_WALLET_IMPLEMENTATION_ADDRESS,
   SAFE_FACTORY_ADDRESS,
   SAFE_INIT_CODE_HASH,
 } from "./contracts.ts";
@@ -30,11 +30,13 @@ export const SAFE_MULTISEND_ADDRESS: Address =
 export const SAFE_FACTORY_NAME = "Polymarket Contract Proxy Factory";
 export const DEPOSIT_WALLET_DOMAIN_NAME = "DepositWallet";
 export const DEPOSIT_WALLET_DOMAIN_VERSION = "1";
-const ERC1967_CONST1 =
-  "0xcc3735a920a3ca505d382bbc545af43d6000803e6038573d6000fd5b3d6000f3";
-const ERC1967_CONST2 =
-  "0x5155f3363d3d373d3d363d7f360894a13ba1a3210667c828492db98dca3e2076";
-const ERC1967_PREFIX = BigInt("0x61003d3d8160233d3973");
+const ERC1967_BEACON_PROXY_PREFIX = BigInt("0x6100523d8160233d3973");
+const ERC1967_BEACON_PROXY_CONST1 =
+  "0x60195155f3363d3d373d3d363d602036600436635c60da";
+const ERC1967_BEACON_PROXY_CONST2 =
+  "0x1b60e01b36527fa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6c";
+const ERC1967_BEACON_PROXY_CONST3 =
+  "0xb3582b35133d50545afa5036515af43d6000803e604d573d6000fd5b3d6000f3";
 
 export const RELAYER_SUCCESS_STATES = new Set([
   "STATE_EXECUTED",
@@ -271,13 +273,20 @@ export interface RelayerExecutionOptions {
   onSubmitted?: (event: RelayerSubmittedEvent) => void;
 }
 
-export interface RelayerDepositWalletDeployResult extends RelayerExecuteResult {
-  walletAddress: Address;
-}
-
 export interface RelayerSafeDeployOptions extends RelayerExecutionOptions {
   checkDeployed?: boolean;
   onAlreadyDeployed?: (safeAddress: Address) => void;
+}
+
+export interface RelayerDepositWalletDeployOptions
+  extends RelayerExecutionOptions {
+  checkDeployed?: boolean;
+  onAlreadyDeployed?: (walletAddress: Address) => void;
+}
+
+export interface RelayerDepositWalletDeployResult extends RelayerExecuteResult {
+  walletAddress: Address;
+  alreadyDeployed?: boolean;
 }
 
 export interface RelayerSafeDeployResult extends RelayerExecuteResult {
@@ -297,16 +306,16 @@ export function derivePolymarketSafe(eoaAddress: Address): Address {
   });
 }
 
-function initCodeHashERC1967(implementation: Address, args: Hex): Hex {
+function initCodeHashERC1967BeaconProxy(beacon: Address, args: Hex): Hex {
   const n = BigInt((args.length - 2) / 2);
-  const combined = ERC1967_PREFIX + (n << BigInt(56));
+  const combined = ERC1967_BEACON_PROXY_PREFIX + (n << BigInt(56));
   return keccak256(
     concat([
       toHex(combined, { size: 10 }),
-      implementation,
-      "0x6009",
-      ERC1967_CONST2,
-      ERC1967_CONST1,
+      beacon,
+      ERC1967_BEACON_PROXY_CONST1,
+      ERC1967_BEACON_PROXY_CONST2,
+      ERC1967_BEACON_PROXY_CONST3,
       args,
     ])
   );
@@ -315,7 +324,7 @@ function initCodeHashERC1967(implementation: Address, args: Hex): Hex {
 export function derivePolymarketDepositWallet(
   ownerAddress: Address,
   factory: Address = DEPOSIT_WALLET_FACTORY_ADDRESS,
-  implementation: Address = DEPOSIT_WALLET_IMPLEMENTATION_ADDRESS
+  beacon: Address = DEPOSIT_WALLET_BEACON_ADDRESS
 ): Address {
   const walletId = pad(ownerAddress, { dir: "left", size: 32 });
   const args = encodeAbiParameters(
@@ -323,7 +332,7 @@ export function derivePolymarketDepositWallet(
     [factory, walletId]
   );
   const salt = keccak256(args);
-  const bytecodeHash = initCodeHashERC1967(implementation, args);
+  const bytecodeHash = initCodeHashERC1967BeaconProxy(beacon, args);
   return getCreate2Address({ from: factory, salt, bytecodeHash });
 }
 
@@ -749,6 +758,41 @@ export async function executeSafeRelayerTransaction(args: {
   throw lastError ?? new Error("Relayer execution failed");
 }
 
+/**
+ * Submit a wallet-create request, reconciling the already-deployed race: if a
+ * concurrent deploy landed between the preflight and this submit, the relayer
+ * rejects the create — re-query deployment and report "already-deployed"
+ * instead of surfacing the error. One owner of this policy for BOTH wallet
+ * types (SAFE and deposit WALLET), so a fix to one path can't skip the other.
+ */
+async function submitRelayerWalletCreate(args: {
+  transport: Pick<RelayerExecutionTransport, "submit" | "getDeployed">;
+  request:
+    | RelayerSafeCreateSubmitRequest
+    | RelayerDepositWalletCreateSubmitRequest;
+  walletAddress: Address;
+  type: RelayerNonceType;
+  reconcileAlreadyDeployed: boolean;
+}): Promise<RelayerSubmitResponse | "already-deployed"> {
+  try {
+    const submitRes = await args.transport.submit(args.request);
+    assertRelayerSubmitAccepted(submitRes, "deploy");
+    return submitRes;
+  } catch (error) {
+    if (args.reconcileAlreadyDeployed && args.transport.getDeployed) {
+      try {
+        if (await args.transport.getDeployed(args.walletAddress, args.type)) {
+          return "already-deployed";
+        }
+      } catch {
+        // Preserve the original create failure. The follow-up deployment read
+        // is only a reconciliation fallback.
+      }
+    }
+    throw error;
+  }
+}
+
 export async function deploySafeRelayerWallet(args: {
   signer: RelayerSigner;
   transport: RelayerExecutionTransport;
@@ -756,22 +800,22 @@ export async function deploySafeRelayerWallet(args: {
   options?: RelayerSafeDeployOptions;
 }): Promise<RelayerSafeDeployResult> {
   const prepared = prepareSafeCreate({ eoaAddress: args.eoaAddress });
+  const alreadyDeployedResult: RelayerSafeDeployResult = {
+    transactionID: "",
+    transactionHash: "",
+    safeAddress: prepared.safeAddress,
+    alreadyDeployed: true,
+  };
   if (args.options?.checkDeployed) {
-    if (!args.transport.getDeployed) {
-      throw new Error("Relayer deployment preflight is not available");
-    }
-    const deployed = await args.transport.getDeployed(
-      prepared.safeAddress,
-      "SAFE"
-    );
+    const deployed = await getDeployedRelayerWallet({
+      transport: args.transport,
+      walletAddress: prepared.safeAddress,
+      type: "SAFE",
+      unavailableMessage: "Relayer deployment preflight is not available",
+    });
     if (deployed) {
       args.options.onAlreadyDeployed?.(prepared.safeAddress);
-      return {
-        transactionID: "",
-        transactionHash: "",
-        safeAddress: prepared.safeAddress,
-        alreadyDeployed: true,
-      };
+      return alreadyDeployedResult;
     }
   }
 
@@ -780,14 +824,21 @@ export async function deploySafeRelayerWallet(args: {
     ...prepared.typedData,
   });
 
-  const submitRes = await args.transport.submit(
-    buildSafeCreateSubmitRequest({
+  const submitRes = await submitRelayerWalletCreate({
+    transport: args.transport,
+    request: buildSafeCreateSubmitRequest({
       eoaAddress: args.eoaAddress,
       prepared,
       signature,
-    })
-  );
-  assertRelayerSubmitAccepted(submitRes, "deploy");
+    }),
+    walletAddress: prepared.safeAddress,
+    type: "SAFE",
+    reconcileAlreadyDeployed: Boolean(args.options?.checkDeployed),
+  });
+  if (submitRes === "already-deployed") {
+    args.options?.onAlreadyDeployed?.(prepared.safeAddress);
+    return alreadyDeployedResult;
+  }
   args.options?.onSubmitted?.({
     attempt: 0,
     transactionID: submitRes.transactionID,
@@ -896,16 +947,63 @@ export async function executeDepositWalletRelayerTransaction(args: {
   throw lastError ?? new Error("Relayer execution failed");
 }
 
+async function getDeployedRelayerWallet(args: {
+  transport: Pick<RelayerExecutionTransport, "getDeployed">;
+  walletAddress: Address;
+  type: RelayerNonceType;
+  unavailableMessage: string;
+}): Promise<boolean> {
+  if (!args.transport.getDeployed) {
+    throw new Error(args.unavailableMessage);
+  }
+  return args.transport.getDeployed(args.walletAddress, args.type);
+}
+
+function alreadyDeployedDepositWalletResult(
+  walletAddress: Address
+): RelayerDepositWalletDeployResult {
+  return {
+    transactionID: "",
+    transactionHash: "",
+    walletAddress,
+    alreadyDeployed: true,
+  };
+}
+
 export async function deployDepositWalletRelayerWallet(args: {
-  transport: Pick<RelayerExecutionTransport, "submit" | "getTransaction">;
+  transport: Pick<
+    RelayerExecutionTransport,
+    "submit" | "getTransaction" | "getDeployed"
+  >;
   ownerAddress: Address;
-  options?: RelayerExecutionOptions;
+  options?: RelayerDepositWalletDeployOptions;
 }): Promise<RelayerDepositWalletDeployResult> {
   const walletAddress = derivePolymarketDepositWallet(args.ownerAddress);
-  const submitRes = await args.transport.submit(
-    buildDepositWalletCreateSubmitRequest(args.ownerAddress)
-  );
-  assertRelayerSubmitAccepted(submitRes, "deploy");
+  if (args.options?.checkDeployed) {
+    const deployed = await getDeployedRelayerWallet({
+      transport: args.transport,
+      walletAddress,
+      type: "WALLET",
+      unavailableMessage: "Relayer deposit wallet preflight is not available",
+    });
+    if (deployed) {
+      args.options.onAlreadyDeployed?.(walletAddress);
+      return alreadyDeployedDepositWalletResult(walletAddress);
+    }
+  }
+
+  const submitRes = await submitRelayerWalletCreate({
+    transport: args.transport,
+    request: buildDepositWalletCreateSubmitRequest(args.ownerAddress),
+    walletAddress,
+    type: "WALLET",
+    reconcileAlreadyDeployed: Boolean(args.options?.checkDeployed),
+  });
+  if (submitRes === "already-deployed") {
+    args.options?.onAlreadyDeployed?.(walletAddress);
+    return alreadyDeployedDepositWalletResult(walletAddress);
+  }
+
   args.options?.onSubmitted?.({
     attempt: 0,
     transactionID: submitRes.transactionID,

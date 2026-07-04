@@ -3,6 +3,7 @@
 import { createLogger } from "@knoww/logger";
 import { SHOW_EOA_OPTION } from "@knoww/shared-types/polymarket";
 import { formatTradingOnboardingError } from "@knoww/shared-types/trading-errors";
+import { useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { Key, Loader2, Wallet, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -12,6 +13,7 @@ import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { useRelayerClient } from "@/hooks/use-relayer-client";
 import { useTradingWalletMode } from "@/hooks/use-trading-wallet-mode";
 import { checkAllApprovals } from "@/lib/approvals";
+import { qk } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { openWalletModalStrict } from "@/lib/wallet-modal";
 
@@ -126,10 +128,12 @@ export function TradingOnboarding({
   onClose,
 }: TradingOnboardingProps) {
   const { isConnected } = useConnection();
+  const queryClient = useQueryClient();
   const {
     mode: walletMode,
     setMode: setWalletMode,
     hasLegacySafe,
+    isCheckingLegacySafe,
   } = useTradingWalletMode();
   const {
     deploySafe,
@@ -297,6 +301,7 @@ export function TradingOnboarding({
   }, [updateStepStatus]);
 
   const handleDeploySafe = useCallback(async () => {
+    if (isCheckingLegacySafe) return;
     if (walletMode === "eoa") {
       updateStepStatus("deploy", "completed");
       setCurrentStep(2);
@@ -319,7 +324,13 @@ export function TradingOnboarding({
         formatTradingOnboardingError(err, "Failed to deploy wallet")
       );
     }
-  }, [deploySafe, updateStepStatus, forceRefreshProxyWallet, walletMode]);
+  }, [
+    deploySafe,
+    updateStepStatus,
+    forceRefreshProxyWallet,
+    walletMode,
+    isCheckingLegacySafe,
+  ]);
 
   const handleApproveUsdc = useCallback(async () => {
     if (!isApprovalAmountValid) {
@@ -334,6 +345,14 @@ export function TradingOnboarding({
     try {
       const result = await approveUsdcForTrading(approvalAmount);
       if (result.success) {
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: qk.wallet.allTradingApprovals(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: qk.wallet.allUsdcAllowances(),
+          }),
+        ]);
         updateStepStatus("approve", "completed");
         setHasUsdcApproval(true);
         setCurrentStep(3);
@@ -351,6 +370,7 @@ export function TradingOnboarding({
     approveUsdcForTrading,
     approvalAmount,
     isApprovalAmountValid,
+    queryClient,
     updateStepStatus,
   ]);
 
@@ -667,9 +687,17 @@ export function TradingOnboarding({
                       type="button"
                       className="kwo-go"
                       onClick={() => handleStepAction(s.id)}
-                      disabled={isLoading}
+                      aria-label={
+                        s.id === "deploy" && isCheckingLegacySafe
+                          ? "Checking wallet"
+                          : undefined
+                      }
+                      disabled={
+                        isLoading || (s.id === "deploy" && isCheckingLegacySafe)
+                      }
                     >
-                      {s.status === "in_progress" ? (
+                      {s.status === "in_progress" ||
+                      (s.id === "deploy" && isCheckingLegacySafe) ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : (
                         <>

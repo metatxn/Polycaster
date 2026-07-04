@@ -72,6 +72,18 @@ import {
   type OutcomeBalances,
   positionValueUsd,
 } from "./outcome-balances";
+import {
+  cardSetupFlow,
+  isSetupApprovalReadKnown,
+  resolveSetupSurfaceMode,
+  SETUP_APPROVAL_DEFAULT,
+  type SetupFlow,
+} from "./setup-flow";
+import {
+  readSetupComplete,
+  readSetupDismissed,
+  writeSetupDismissed,
+} from "./setup-flow-storage";
 import { type TradingContext, TradingService } from "./trading-service";
 
 const DEPOSIT_TOKENS: Array<{
@@ -204,6 +216,10 @@ let orderApprovalPreview: {
 } | null = null;
 let orderApprovalPreviewInFlightKey: string | null = null;
 let orderApprovalPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+let cardSetupStorageAddress: string | null = null;
+let cardSetupDismissed = false;
+let cardSetupComplete = false;
+let cardSetupStorageToken = 0;
 // Debounce window for the preflight call. The user typing in the shares input
 // would otherwise fire one round-trip per keystroke; the preview state stays
 // "Checking allowance..." during the debounce so the gate is never wrong.
@@ -244,6 +260,7 @@ const LIVE_PANEL_REFRESH_INTERVAL = 10000;
 const DEPOSIT_POLL_INTERVAL = 2000;
 const DEPOSIT_BALANCE_SYNC_TIMEOUT = 8000;
 const DEPOSIT_BALANCE_SYNC_INTERVAL = 1500;
+const DEPOSIT_BALANCE_LOAD_TIMEOUT_MS = 8000;
 let livePanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let livePanelRefreshEnabled = false;
 
@@ -325,6 +342,7 @@ const I = {
   merge: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6 4-4 4 4"/><path d="M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22"/><path d="m20 22-5-5"/></svg>`,
   close: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
   disconnect: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`,
+  switchWallet: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg>`,
   alert: `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>`,
   wallet: `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 7h-1V6a3 3 0 0 0-3-3H5a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-8a3 3 0 0 0-3-3ZM5 5h10a1 1 0 0 1 1 1v1H5a1 1 0 0 1 0-2Zm15 11h-2a2 2 0 0 1 0-4h2Z"/></svg>`,
   shield: `<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3Zm-1 14.5v-2h2v2h-2Zm0-4v-6h2v6h-2Z"/></svg>`,
@@ -439,6 +457,39 @@ function rerender(): void {
   }
   if (activePanel && panelOpts)
     render(activePanel, panelOpts, TradingService.getContext());
+}
+
+function syncCardSetupStorage(address: string | null): void {
+  if (!address) {
+    cardSetupStorageAddress = null;
+    cardSetupDismissed = false;
+    cardSetupComplete = false;
+    cardSetupStorageToken++;
+    return;
+  }
+
+  if (cardSetupStorageAddress === address) return;
+
+  cardSetupStorageAddress = address;
+  cardSetupDismissed = false;
+  cardSetupComplete = false;
+  const token = ++cardSetupStorageToken;
+
+  // The token is the whole staleness guard: it bumps on every mutation of
+  // cardSetupStorageAddress (including A→null→A resyncs, which an address
+  // comparison alone would wrongly pass).
+  void Promise.all([readSetupDismissed(address), readSetupComplete(address)])
+    .then(([dismissed, complete]) => {
+      if (token !== cardSetupStorageToken) return;
+      cardSetupDismissed = dismissed;
+      cardSetupComplete = complete;
+      rerender();
+    })
+    .catch(() => {
+      if (token !== cardSetupStorageToken) return;
+      cardSetupDismissed = false;
+      cardSetupComplete = false;
+    });
 }
 
 /** Re-render the deposit form into the inline host (stream card). */
@@ -1165,6 +1216,27 @@ function addHeader(
     };
     right.appendChild(refreshBtn);
 
+    const switchBtn = elHtml(
+      "button",
+      "knoww-tp-header-action",
+      I.switchWallet
+    );
+    switchBtn.title = "Switch wallet";
+    switchBtn.onclick = (e) => {
+      e.stopPropagation();
+      trackPanelAnalytics("wallet_switch_clicked");
+      switchBtn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block"></span>`;
+      switchBtn.style.pointerEvents = "none";
+      switchBtn.style.opacity = "0.7";
+      switchBtn.title = "Switching wallet…";
+      void TradingService.switchWallet()
+        .catch(() => {})
+        .finally(() => {
+          rerender();
+        });
+    };
+    right.appendChild(switchBtn);
+
     const dcBtn = elHtml("button", "knoww-tp-header-action", I.disconnect);
     dcBtn.title = "Disconnect wallet";
     dcBtn.onclick = (e) => {
@@ -1381,7 +1453,7 @@ function addMobileWalletPairing(p: HTMLElement): void {
   }
 
   if (mobileState.error) {
-    s.appendChild(el("div", "knoww-tp-enable-error", mobileState.error));
+    s.appendChild(buildInlineErrorParts("Couldn't connect", mobileState.error));
   }
 
   p.appendChild(s);
@@ -1491,7 +1563,7 @@ function addDisconnected(p: HTMLElement): void {
   }
 
   if (mobileState.error) {
-    s.appendChild(el("div", "knoww-tp-enable-error", mobileState.error));
+    s.appendChild(buildInlineErrorParts("Couldn't connect", mobileState.error));
   }
 
   disconnectedUnsub = WalletBridge.onWalletsChanged((newWallets) => {
@@ -1510,10 +1582,69 @@ function addLoading(p: HTMLElement, text: string): void {
   p.appendChild(s);
 }
 
+// Bounds the "Loading trading wallet…" spinner (isDeployed still unknown):
+// under a sustained RPC outage the resolve never settles, and without a
+// deadline a returning credentialed user is stuck on the spinner forever.
+const WALLET_RESOLVE_SPINNER_TIMEOUT_MS = 15_000;
+let walletResolveLoadingSince: number | null = null;
+let walletResolveTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+function resetWalletResolveSpinnerTimeout(): void {
+  walletResolveLoadingSince = null;
+  if (walletResolveTimeoutTimer !== null) {
+    clearTimeout(walletResolveTimeoutTimer);
+    walletResolveTimeoutTimer = null;
+  }
+}
+
+function addWalletResolveTimeoutError(p: HTMLElement): void {
+  const s = el("div", "knoww-tp-loading-section");
+  s.appendChild(
+    buildInlineErrorParts(
+      "Couldn't load your trading wallet",
+      "The network isn't responding. Check your connection and retry."
+    )
+  );
+  const btn = el("button", "knoww-tp-btn-enable", "Retry");
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    resetWalletResolveSpinnerTimeout();
+    void TradingService.refreshBalance();
+    rerender();
+  };
+  s.appendChild(btn);
+  p.appendChild(s);
+}
+
 function formatTradingPanelErrorMessage(
   message: string | null | undefined
 ): string {
   return formatTradingErrorLine(message);
+}
+
+// Structured inline error card: alert icon + bold title + muted body. Keeping
+// the title in alarm-red and the explanatory body in neutral text avoids the
+// flat wall-of-red block and mirrors the rich error toast's hierarchy.
+function buildInlineErrorParts(
+  title: string,
+  body?: string | null
+): HTMLElement {
+  const box = el("div", "knoww-tp-enable-error");
+  box.appendChild(elHtml("span", "knoww-tp-enable-error-icon", I.alert));
+  const bodyEl = el("div", "knoww-tp-enable-error-body");
+  bodyEl.appendChild(el("div", "knoww-tp-enable-error-title", title));
+  if (body) {
+    bodyEl.appendChild(el("div", "knoww-tp-enable-error-msg", body));
+  }
+  box.appendChild(bodyEl);
+  return box;
+}
+
+// Map a raw trading/relayer error into the structured card via the shared
+// title/body splitter (same source the rich toast uses).
+function buildInlineError(rawMessage: string | null | undefined): HTMLElement {
+  const mapped = mapTradingError(rawMessage ?? "");
+  return buildInlineErrorParts(mapped.title, mapped.body);
 }
 
 function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
@@ -1588,84 +1719,144 @@ function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
 }
 
 /**
- * Deploy wallet gate — rendered after wallet connect but before "Enable Trading".
+ * Guided setup flow — rendered after wallet connect, until trading is ready.
  *
- * Relayer-backed wallets must exist on-chain before CLOB credentials can be
- * useful because orders use the relayer wallet as funderAddress. Deploy is a
- * one-click gasless flow through the Polymarket relayer.
+ * Renders a compact version of the shared setup model (connect → vault →
+ * approve → credentials): a progress rail plus the current step's action. The
+ * same model drives the side panel portfolio, so both surfaces gate
+ * identically. Deploy-before-credentials falls out of the step order (orders
+ * use the relayer wallet as funderAddress, so the vault must exist before
+ * credentials are useful). The order-time "Approve pUSD" top-up and deposit
+ * prompts are separate ongoing paths.
  */
-function addDeploySafe(
+function addSetupFlow(
   p: HTMLElement,
   ctx: TradingContext,
-  options?: { errorMessage?: string | null }
+  options: { errorMessage: string | null; flow: SetupFlow }
 ): void {
-  const errorMessage = options?.errorMessage
-    ? formatTradingPanelErrorMessage(options.errorMessage)
-    : null;
-  const s = el("div", "knoww-tp-enable-section");
-  s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
-  addWalletModeSelector(s, ctx);
-  s.appendChild(
-    el(
-      "div",
-      "knoww-tp-enable-msg",
-      errorMessage
-        ? "Deploy failed. Retry to start a new signing request."
-        : "Deploy your Polymarket trading wallet — free and gasless."
-    )
-  );
-  if (errorMessage) {
-    s.appendChild(el("div", "knoww-tp-enable-error", errorMessage));
+  const flow = options.flow;
+  const rawError = options.errorMessage;
+
+  const s = el("div", "knoww-tp-setup");
+
+  // Returning users already have a trading vault — skip the multi-step rail and
+  // just show the single action that's left (usually generating CLOB API keys).
+  const isReturning =
+    flow.steps.find((step) => step.id === "vault")?.status === "done";
+
+  if (!isReturning) {
+    // Compact progress rail: one node per step, marked done / now / pending.
+    const rail = el("div", "knoww-tp-setup-rail");
+    for (const step of flow.steps) {
+      rail.appendChild(
+        el(
+          "span",
+          `knoww-tp-setup-node is-${step.status}`,
+          step.status === "done" ? "✓" : String(step.index)
+        )
+      );
+    }
+    s.appendChild(rail);
+    s.appendChild(
+      el(
+        "div",
+        "knoww-tp-setup-kicker",
+        `Set up trading · step ${flow.currentIndex} of ${flow.totalSteps}`
+      )
+    );
   }
-  const btn = el(
-    "button",
-    "knoww-tp-btn-enable",
-    errorMessage ? "Retry Deploy" : "Deploy Trading Wallet"
-  );
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    setButtonLoading(btn, "Waiting for signature…");
-    TradingService.deployWallet().catch(() => {
-      // Error flows through ctx.error via the state listener; the next render
-      // will surface it on this screen with a Retry button.
-    });
-  };
-  s.appendChild(btn);
+
+  const current = flow.steps.find((step) => step.id === flow.currentStepId);
+  if (current) {
+    s.appendChild(el("div", "knoww-tp-setup-title", current.label));
+    s.appendChild(el("div", "knoww-tp-setup-helper", current.helper));
+  }
+  if (rawError) {
+    s.appendChild(buildInlineError(rawError));
+  }
+
+  switch (flow.currentStepId) {
+    case "vault": {
+      addWalletModeSelector(s, ctx);
+      const btn = el("button", "knoww-tp-btn-enable", "Create vault");
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        setButtonLoading(btn, "Waiting for signature…");
+        TradingService.deployWallet().catch(() => {
+          // Error flows through ctx.error; the next render surfaces it here.
+        });
+      };
+      s.appendChild(btn);
+      break;
+    }
+    case "approve": {
+      const row = el("div", "knoww-tp-setup-approve");
+      const field = el("div", "knoww-tp-setup-approve-field");
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "1";
+      input.step = "1";
+      input.value = SETUP_APPROVAL_DEFAULT;
+      input.className = "knoww-tp-setup-approve-input";
+      field.appendChild(input);
+      field.appendChild(el("span", "knoww-tp-setup-approve-unit", "USDC"));
+      row.appendChild(field);
+      const btn = el("button", "knoww-tp-btn-enable", "Approve");
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const amount = Number((input.value || "").trim());
+        setButtonLoading(btn, "Waiting for signature…");
+        TradingService.approveUsdc(
+          false,
+          Number.isFinite(amount) && amount > 0
+            ? amount
+            : Number(SETUP_APPROVAL_DEFAULT)
+        ).catch(() => {
+          // Error flows through ctx.error; the next render surfaces it here.
+        });
+      };
+      row.appendChild(btn);
+      s.appendChild(row);
+      break;
+    }
+    case "credentials": {
+      const btn = el("button", "knoww-tp-btn-enable", "Generate API keys");
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        setButtonLoading(btn, "Waiting for signature…");
+        TradingService.deriveCredentials();
+      };
+      s.appendChild(btn);
+      break;
+    }
+    default:
+      break;
+  }
+
   p.appendChild(s);
 }
 
-function addEnableTrading(
-  p: HTMLElement,
-  ctx: TradingContext,
-  options?: { errorMessage?: string | null }
-): void {
-  const errorMessage = options?.errorMessage
-    ? formatTradingPanelErrorMessage(options.errorMessage)
-    : null;
-  const s = el("div", "knoww-tp-enable-section");
-  s.appendChild(elHtml("div", "knoww-tp-shield-icon", I.shield));
-  addWalletModeSelector(s, ctx);
+/**
+ * Compact resume-setup banner for setupSurfaceMode "banner": setup was
+ * dismissed ("Skip for now") but is incomplete, so the order form can't
+ * render — without this the card body would be empty with no CTA.
+ */
+function addSetupBanner(p: HTMLElement, ctx: TradingContext): void {
+  const s = el("div", "knoww-tp-setup");
+  s.appendChild(el("div", "knoww-tp-setup-title", "Finish setting up trading"));
   s.appendChild(
     el(
       "div",
-      "knoww-tp-enable-msg",
-      errorMessage
-        ? "Trading could not be enabled. Retry to start a new signing request."
-        : "Sign a message to enable trading on Polymarket"
+      "knoww-tp-setup-helper",
+      "A couple of quick signatures and you can trade right from this card."
     )
   );
-  if (errorMessage) {
-    s.appendChild(el("div", "knoww-tp-enable-error", errorMessage));
-  }
-  const btn = el(
-    "button",
-    "knoww-tp-btn-enable",
-    errorMessage ? "Retry" : "Enable Trading"
-  );
+  const btn = el("button", "knoww-tp-btn-enable", "Resume setup");
   btn.onclick = (e) => {
     e.stopPropagation();
-    setButtonLoading(btn, "Waiting for signature…");
-    TradingService.deriveCredentials();
+    cardSetupDismissed = false;
+    if (ctx.address) void writeSetupDismissed(ctx.address, false);
+    rerender();
   };
   s.appendChild(btn);
   p.appendChild(s);
@@ -3534,6 +3725,29 @@ async function fetchEoaBalancesViaWallet(
   return tokens;
 }
 
+function withDepositLoadTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
 function startDepositFlow(eoaAddress: string): void {
   resetDepositState();
   depositState = "loading-balances";
@@ -3541,7 +3755,11 @@ function startDepositFlow(eoaAddress: string): void {
   trackPanelAnalytics("deposit_opened");
   rerender();
 
-  const loadBalances = fetchEoaBalancesViaWallet(eoaAddress)
+  const loadBalances = withDepositLoadTimeout(
+    fetchEoaBalancesViaWallet(eoaAddress),
+    DEPOSIT_BALANCE_LOAD_TIMEOUT_MS,
+    "Wallet balance request timed out. Try again, or use Transfer Crypto."
+  )
     .then((tokens) => {
       depositTokens = tokens;
     })
@@ -3550,18 +3768,21 @@ function startDepositFlow(eoaAddress: string): void {
         err instanceof Error ? err.message : "Failed to load balances";
     });
 
-  const loadAssets = fetchSupportedAssets()
+  void loadBalances.finally(() => {
+    if (depositState === "loading-balances") {
+      depositState = "ready";
+      rerender();
+    }
+  });
+
+  void fetchSupportedAssets()
     .then((assets) => {
       depositBridgeAssets = assets;
+      if (depositState === "ready") rerender();
     })
     .catch(() => {
       // Non-critical: bridge selection will just show empty list
     });
-
-  Promise.all([loadBalances, loadAssets]).then(() => {
-    depositState = "ready";
-    rerender();
-  });
 }
 
 function toHex(n: bigint): string {
@@ -5086,9 +5307,7 @@ function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
       )
     );
     if (enableTradingError) {
-      noticeText.appendChild(
-        el("div", "knoww-tp-enable-error", enableTradingError)
-      );
+      noticeText.appendChild(buildInlineError(ctx.error));
     }
     notice.appendChild(noticeText);
     form.appendChild(notice);
@@ -5143,6 +5362,8 @@ function render(
   addHeader(panel, opts, ctx, address);
 
   if (state === "disconnected" || !address) {
+    syncCardSetupStorage(null);
+    resetWalletResolveSpinnerTimeout();
     addDisconnected(panel);
     return;
   }
@@ -5164,53 +5385,90 @@ function render(
   }
 
   addPortfolioBar(panel, ctx, opts);
+  syncCardSetupStorage(address);
+  const setupFlow = cardSetupFlow(ctx);
+  const setupSurfaceMode = resolveSetupSurfaceMode({
+    flow: setupFlow,
+    persistedComplete: cardSetupComplete,
+    dismissed: cardSetupDismissed,
+    liveCompleteKnown: isSetupApprovalReadKnown(ctx.approvalReadStatus),
+  });
+
+  if (ctx.isDeployed !== null || !ctx.proxyAddress) {
+    // Wallet resolution settled (or there is nothing to resolve) — clear the
+    // spinner deadline so a later resolve doesn't start already expired.
+    resetWalletResolveSpinnerTimeout();
+  }
 
   if (state === "deploying") {
     addLoading(panel, "Deploying your trading wallet…");
     return;
-  } else if (
-    ctx.isDeployed === null &&
-    ctx.proxyAddress &&
-    !ctx.hasCredentials
-  ) {
+  } else if (ctx.isDeployed === null && ctx.proxyAddress) {
     // Initial on-chain deployment check still in flight (first balance fetch).
-    // Show a neutral spinner instead of flashing the Deploy gate for ~500ms.
+    // Show a neutral spinner instead of flashing the Deploy gate for ~500ms —
+    // but not forever: past the deadline this flips to a retryable error.
+    if (walletResolveLoadingSince === null) {
+      walletResolveLoadingSince = Date.now();
+    }
+    const waitedMs = Date.now() - walletResolveLoadingSince;
+    if (waitedMs >= WALLET_RESOLVE_SPINNER_TIMEOUT_MS) {
+      addWalletResolveTimeoutError(panel);
+      return;
+    }
+    if (walletResolveTimeoutTimer === null) {
+      // Deadline re-render: recovery must not depend on an unrelated ctx
+      // update arriving while the RPC is down.
+      walletResolveTimeoutTimer = setTimeout(() => {
+        walletResolveTimeoutTimer = null;
+        rerender();
+      }, WALLET_RESOLVE_SPINNER_TIMEOUT_MS - waitedMs);
+    }
     addLoading(panel, "Loading trading wallet…");
     return;
-  } else if (ctx.isDeployed === false && ctx.proxyAddress) {
-    // Relayer wallet not deployed yet. This takes precedence over "Enable
-    // Trading" because CLOB orders use the relayer wallet as funderAddress.
-    addDeploySafe(panel, ctx, {
+  } else if (
+    ctx.proxyAddress &&
+    ctx.isDeployed === true &&
+    !ctx.hasTradingApproval &&
+    ctx.approvalReadStatus !== "complete" &&
+    setupSurfaceMode !== "complete"
+  ) {
+    addLoading(panel, "Checking approvals...");
+    return;
+  } else if (state === "deriving-credentials") {
+    // CLOB credential signing is in flight — show the neutral spinner, not the
+    // setup flow (which would otherwise render since credentials aren't set yet).
+    addLoading(panel, "Confirm signature in your wallet...");
+    return;
+  } else if (state === "approving" && setupSurfaceMode !== "complete") {
+    // Approval signature in flight from the setup wizard — a re-render must
+    // not rebuild a clickable Approve button mid-signature (double submit).
+    // Fully-onboarded users fall through to the order form instead.
+    addLoading(panel, "Confirm approval in your wallet...");
+    return;
+  } else if (setupSurfaceMode === "wizard" && activeView !== "deposit") {
+    // Guided setup (connect → vault → approve → credentials),
+    // driven by the shared setup-flow model so the card and the side panel
+    // portfolio gate identically. Deploy-before-credentials falls out of the
+    // step order. Deposit remains a separate view and contextual BUY prompt.
+    addSetupFlow(panel, ctx, {
       errorMessage: state === "error" ? error : null,
+      flow: setupFlow,
     });
     if (state !== "error") {
       return;
     }
   } else if (activeView === "deposit") {
     renderDepositForm(panel, ctx);
-  } else if (state === "deriving-credentials") {
-    addLoading(panel, "Confirm signature in your wallet...");
-    return;
-  } else if (!ctx.hasCredentials) {
-    // Credentials required before trading. Hit in two scenarios:
-    //   - right after Connect Wallet (state === "connected")
-    //   - right after Deploy Trading Wallet (state === "ready", wallet just
-    //     created but CLOB creds not yet derived)
-    // Earlier branches already handled the transient states (connecting,
-    // switching-chain, deploying, deriving-credentials), so reaching here
-    // with no credentials means the user needs to Enable Trading.
-    addEnableTrading(panel, ctx, {
-      errorMessage: state === "error" ? error : null,
-    });
-    if (state !== "error") {
-      return;
-    }
   } else if (
     state === "ready" ||
     state === "placing-order" ||
     state === "approving" ||
     state === "splitting" ||
-    state === "merging"
+    state === "merging" ||
+    // A failed action (e.g. a rejected order-time approval top-up) must not
+    // blank the panel for a fully-onboarded user: keep the form rendered and
+    // let the error toast below surface the failure.
+    (state === "error" && setupSurfaceMode === "complete")
   ) {
     if (activeView === "order") {
       renderOrderForm(panel, opts, ctx);
@@ -5219,6 +5477,11 @@ function render(
     } else if (activeView === "merge") {
       renderMergeForm(panel, opts, ctx);
     }
+  } else if (setupSurfaceMode === "banner") {
+    // Setup was dismissed ("Skip for now" in the side panel) but is still
+    // incomplete and no other surface matched (e.g. state "connected" with no
+    // credentials) — render a resume-setup banner instead of an empty body.
+    addSetupBanner(panel, ctx);
   }
 
   if (error) {

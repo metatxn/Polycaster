@@ -1,6 +1,13 @@
 "use client";
 
-import { ChevronRight, Copy, LogOut, PieChart, Plus } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ChevronRight,
+  Copy,
+  LogOut,
+  PieChart,
+  Plus,
+} from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
@@ -20,12 +27,15 @@ import {
   useDisconnect,
   useEnsAvatar,
   useEnsName,
+  useWalletClient,
 } from "wagmi";
 import { DepositModal } from "@/components/deposit-modal";
 import { PUSD_DECIMALS } from "@/constants/contracts";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
 import { mainnet, polygon } from "@/lib/chains";
 import { cn } from "@/lib/utils";
+import { openWalletModal } from "@/lib/wallet-modal";
+import { requestEoaWalletSwitch } from "@/lib/wallet-switch";
 
 /**
  * Custom dropdown for the connected-wallet account menu — replaces the
@@ -118,6 +128,7 @@ function WalletMenuPanel({
   const router = useRouter();
   const { address } = useConnection();
   const { disconnect } = useDisconnect();
+  const { data: walletClient } = useWalletClient();
 
   // ENS lookup forces mainnet because Polygon doesn't index ENS. wagmi
   // gracefully returns null when the user has no ENS record set.
@@ -164,6 +175,18 @@ function WalletMenuPanel({
   const handlePortfolio = () => {
     router.push("/portfolio");
     onClose();
+  };
+
+  const handleSwitchWallet = async () => {
+    onClose();
+    try {
+      const didOpenEoaWallet = await requestEoaWalletSwitch(walletClient);
+      if (!didOpenEoaWallet) {
+        await openWalletModal();
+      }
+    } catch {
+      toast.error("Couldn't open wallet switcher");
+    }
   };
 
   return (
@@ -269,6 +292,11 @@ function WalletMenuPanel({
           icon={<PieChart className="h-4 w-4" />}
           label="Portfolio"
           onClick={handlePortfolio}
+        />
+        <ActionRow
+          icon={<ArrowLeftRight className="h-4 w-4" />}
+          label="Switch wallet"
+          onClick={handleSwitchWallet}
         />
       </div>
 

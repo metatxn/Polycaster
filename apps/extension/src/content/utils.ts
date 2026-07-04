@@ -540,7 +540,9 @@ export const KNOWW_UTILS = {
   LRUSet,
 };
 
-window.KNOWW_UTILS = KNOWW_UTILS;
+if (typeof window !== "undefined") {
+  window.KNOWW_UTILS = KNOWW_UTILS;
+}
 
 // Re-export for direct ES module imports
 export { isExtensionContextValid, LRUSet, safeSendMessage, scheduleIdle };

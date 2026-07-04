@@ -1,6 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  matchSportsEventToGame,
+  type SportsEventMatchCandidate,
+} from "@/lib/sports-event-match";
 import {
   getSportsWebSocketManager,
   type SportResult,
@@ -27,6 +31,102 @@ interface UseSportsWebSocketOptions {
   enabled?: boolean;
   /** Filter to specific leagues (e.g. ["nfl", "nba"]). Empty = all. */
   leagues?: string[];
+}
+
+interface UseMatchedSportsLiveGameOptions {
+  enabled?: boolean;
+}
+
+/**
+ * League membership for filtered views. Some feed rows omit
+ * `leagueAbbreviation`; recover membership from the slug's league prefix
+ * (e.g. "nba-lal-bos-2026-07-03") instead of silently dropping the game
+ * from every league-filtered view.
+ */
+function gameMatchesLeagues(
+  game: SportResult,
+  leagueSet: Set<string>
+): boolean {
+  const league = game.leagueAbbreviation?.toLowerCase();
+  if (league) return leagueSet.has(league);
+  const slug = game.slug?.toLowerCase();
+  if (!slug) return false;
+  for (const candidate of leagueSet) {
+    if (slug.startsWith(`${candidate}-`)) return true;
+  }
+  return false;
+}
+
+function sportsEventKey(
+  event: SportsEventMatchCandidate | null | undefined
+): string {
+  if (!event) return "";
+
+  const teams = (event.teams ?? [])
+    .map(
+      (team) =>
+        `${team.name ?? ""}:${team.abbreviation ?? ""}:${team.alias ?? ""}:${
+          team.league ?? ""
+        }`
+    )
+    .join("|");
+  const marketStarts = (event.markets ?? [])
+    .map((market) => market.gameStartTime ?? "")
+    .join("|");
+
+  return [
+    event.id ?? "",
+    event.slug ?? "",
+    event.title ?? "",
+    event.startDate ?? "",
+    event.startTime ?? "",
+    teams,
+    marketStarts,
+  ].join("::");
+}
+
+function liveGameEquals(
+  a: LiveGameState | null,
+  b: LiveGameState | null
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+
+  return (
+    a.gameId === b.gameId &&
+    a.leagueAbbreviation === b.leagueAbbreviation &&
+    a.slug === b.slug &&
+    a.homeTeam === b.homeTeam &&
+    a.awayTeam === b.awayTeam &&
+    a.status === b.status &&
+    a.score === b.score &&
+    a.period === b.period &&
+    a.elapsed === b.elapsed &&
+    a.live === b.live &&
+    a.ended === b.ended &&
+    a.updatedAt === b.updatedAt
+  );
+}
+
+function toLiveGameState(
+  event: SportResult,
+  receivedAt: number
+): LiveGameState {
+  return {
+    ...event,
+    receivedAt,
+  };
+}
+
+function snapshotToLiveGames(
+  snapshot: Map<string, SportResult>,
+  receivedAt: number
+): Map<string, LiveGameState> {
+  const games = new Map<string, LiveGameState>();
+  for (const [gameId, event] of snapshot) {
+    games.set(gameId, toLiveGameState(event, receivedAt));
+  }
+  return games;
 }
 
 /**
@@ -127,15 +227,13 @@ export function useSportsWebSocket(options: UseSportsWebSocketOptions = {}) {
   const filteredLiveGames = useMemo(() => {
     if (!leagues || leagues.length === 0) return liveGames;
     const set = new Set(leagues.map((l) => l.toLowerCase()));
-    return liveGames.filter((g) =>
-      set.has(g.leagueAbbreviation?.toLowerCase())
-    );
+    return liveGames.filter((g) => gameMatchesLeagues(g, set));
   }, [liveGames, leagues]);
 
   const filteredAllGames = useMemo(() => {
     if (!leagues || leagues.length === 0) return allGames;
     const set = new Set(leagues.map((l) => l.toLowerCase()));
-    return allGames.filter((g) => set.has(g.leagueAbbreviation?.toLowerCase()));
+    return allGames.filter((g) => gameMatchesLeagues(g, set));
   }, [allGames, leagues]);
 
   return {
@@ -161,5 +259,123 @@ export function useSportsWebSocket(options: UseSportsWebSocketOptions = {}) {
       (gameId: string | number) => games.get(String(gameId)) ?? null,
       [games]
     ),
+  };
+}
+
+/**
+ * Single-event sports websocket subscription.
+ *
+ * The generic `useSportsWebSocket` hook keeps every sports game in React state,
+ * which is useful for board/list pages. Event-detail pages only need the one
+ * matching game, so this hook filters before touching React state and avoids a
+ * full detail-page render for unrelated live sports updates.
+ */
+export function useMatchedSportsLiveGame(
+  event: SportsEventMatchCandidate | null | undefined,
+  options: UseMatchedSportsLiveGameOptions = {}
+) {
+  const { enabled = true } = options;
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("disconnected");
+  const [game, setGame] = useState<LiveGameState | null>(null);
+  const eventRef = useRef<SportsEventMatchCandidate | null | undefined>(event);
+  const matchedGameIdRef = useRef<string | null>(null);
+  const eventKey = useMemo(() => sportsEventKey(event), [event]);
+  const previousEventKeyRef = useRef(eventKey);
+
+  useEffect(() => {
+    eventRef.current = event;
+    if (previousEventKeyRef.current !== eventKey) {
+      previousEventKeyRef.current = eventKey;
+      matchedGameIdRef.current = null;
+      setGame(null);
+    }
+  }, [event, eventKey]);
+
+  useEffect(() => {
+    if (!enabled || !eventKey) {
+      setConnectionState("disconnected");
+      return;
+    }
+
+    const manager = getSportsWebSocketManager();
+    const unsubscribe = manager.addConnectionListener((state) => {
+      setConnectionState(state);
+    });
+
+    return unsubscribe;
+  }, [enabled, eventKey]);
+
+  useEffect(() => {
+    if (!enabled || !eventKey) return;
+
+    const manager = getSportsWebSocketManager();
+    const removeConsumer = manager.addConsumer();
+    const removeListener = manager.addEventListener((eventUpdate) => {
+      const currentEvent = eventRef.current;
+      if (!currentEvent) return;
+
+      const receivedAt = Date.now();
+      const nextGame = toLiveGameState(eventUpdate, receivedAt);
+      const gameId = String(nextGame.gameId);
+      const alreadyMatched = matchedGameIdRef.current === gameId;
+      if (alreadyMatched) {
+        setGame((current) =>
+          liveGameEquals(current, nextGame) ? current : nextGame
+        );
+        return;
+      }
+
+      const incomingMatch = matchSportsEventToGame(
+        currentEvent,
+        new Map([[gameId, nextGame]])
+      );
+      if (!incomingMatch) return;
+
+      const candidateGames = snapshotToLiveGames(
+        manager.getGamesSnapshot(),
+        receivedAt
+      );
+      candidateGames.set(gameId, nextGame);
+      const bestMatch = matchSportsEventToGame(currentEvent, candidateGames);
+      const isBestIncomingMatch =
+        bestMatch && String(bestMatch.gameId) === gameId;
+
+      if (!isBestIncomingMatch) return;
+
+      matchedGameIdRef.current = gameId;
+      setGame((current) =>
+        liveGameEquals(current, nextGame) ? current : nextGame
+      );
+    });
+
+    const currentEvent = eventRef.current;
+    if (currentEvent) {
+      const receivedAt = Date.now();
+      const bestMatch = matchSportsEventToGame(
+        currentEvent,
+        snapshotToLiveGames(manager.getGamesSnapshot(), receivedAt)
+      );
+      if (bestMatch) {
+        matchedGameIdRef.current = String(bestMatch.gameId);
+        setGame((current) =>
+          liveGameEquals(current, bestMatch) ? current : bestMatch
+        );
+      }
+    }
+
+    return () => {
+      removeListener();
+      removeConsumer();
+    };
+  }, [enabled, eventKey]);
+
+  return {
+    connectionState,
+    isConnected: connectionState === "connected",
+    game,
+    reconnect: useCallback(() => {
+      getSportsWebSocketManager().reconnect();
+    }, []),
   };
 }

@@ -22,6 +22,7 @@ import {
   type RelayerExecuteResult,
   type RelayerExecutionTransport,
   type RelayerNonceType,
+  type RelayerSafeDeployResult,
   type RelayerSigner,
   type RelayerSubmitResponse,
   type RelayerTransaction,
@@ -104,6 +105,7 @@ export async function getTransaction(
 
 const relayerTransport: RelayerExecutionTransport = {
   getNonce,
+  getDeployed,
   submit: (request) => proxyPost<RelayerSubmitResponse>("submit", request),
   getTransaction,
 };
@@ -176,7 +178,7 @@ export async function executeViaRelayer(
 export async function deploySafe(
   walletClient: WalletClient,
   eoaAddress: Address
-): Promise<RelayerExecuteResult> {
+): Promise<RelayerSafeDeployResult> {
   return deploySafeRelayerWallet({
     signer: toRelayerSigner(walletClient),
     transport: relayerTransport,
@@ -214,9 +216,12 @@ export async function executeViaDepositWallet(
  */
 export async function deployDepositWallet(
   ownerAddress: Address
-): Promise<RelayerExecuteResult & { walletAddress: Address }> {
+): Promise<
+  RelayerExecuteResult & { walletAddress: Address; alreadyDeployed?: boolean }
+> {
   return deployDepositWalletRelayerWallet({
     transport: relayerTransport,
     ownerAddress,
+    options: { checkDeployed: true },
   });
 }

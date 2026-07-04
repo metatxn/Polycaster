@@ -40,6 +40,26 @@ test("background persists the surface preference on every switch", () => {
   );
 });
 
+test("background opens the side panel before async view persistence", () => {
+  const background = readSource("src/background.ts");
+  const handlerStart = background.indexOf(
+    'if (msg?.type === "KNOWW_OPEN_EXTENSION_SIDEPANEL")'
+  );
+  assert.notEqual(handlerStart, -1);
+
+  const handlerSource = background.slice(handlerStart, handlerStart + 1400);
+  const openIndex = handlerSource.indexOf("openKnowwSidePanel(");
+  const viewPersistIndex = handlerSource.indexOf("setRequestedSidePanelView(");
+
+  assert.notEqual(openIndex, -1);
+  assert.notEqual(viewPersistIndex, -1);
+  assert.equal(openIndex < viewPersistIndex, true);
+  assert.equal(
+    /then\(\(\)\s*=>\s*openKnowwSidePanel/.test(handlerSource),
+    false
+  );
+});
+
 test("side panel offers a dedicated switch-to-floating control", () => {
   const sidepanel = readSource("src/sidepanel.ts");
 

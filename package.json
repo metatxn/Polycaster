@@ -25,49 +25,7 @@
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "husky": "9.1.7",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.2",
     "typescript": "catalog:"
-  },
-  "pnpm": {
-    "packageExtensions": {
-      "@metamask/connect-multichain@0.12.1": {
-        "dependencies": {
-          "debug": "^4.4.3"
-        }
-      }
-    },
-    "peerDependencyRules": {
-      "allowedVersions": {
-        "typescript": "6"
-      }
-    },
-    "overrides": {
-      "typescript": "6.0.3",
-      "axios": "1.16.1",
-      "@isaacs/brace-expansion": "5.0.6",
-      "brace-expansion": "5.0.6",
-      "fast-xml-parser": "5.8.0",
-      "qs": "6.15.2",
-      "body-parser": "2.2.2",
-      "h3": "1.15.11",
-      "hono": "4.12.25",
-      "postcss": "8.5.15",
-      "minimatch": "10.2.5",
-      "lodash": "4.18.1",
-      "bn.js": "4.12.3",
-      "undici": "7.28.0",
-      "socket.io-parser": "4.2.6",
-      "path-to-regexp": "8.4.2",
-      "defu": "6.1.7",
-      "protobufjs": "7.6.4",
-      "uuid": "11.1.1",
-      "fast-uri": "3.1.2",
-      "ws": "8.21.0",
-      "shell-quote": "1.8.4",
-      "esbuild": "0.28.1",
-      "form-data": "4.0.6",
-      "vite": "8.0.16",
-      "dompurify": "3.4.8"
-    }
   }
 }

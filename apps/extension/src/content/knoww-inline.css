@@ -3424,6 +3424,8 @@
   align-items: center !important;
   gap: 10px !important;
   width: 100% !important;
+  height: auto !important;
+  min-height: 50px !important;
   padding: 10px 12px !important;
   border-radius: 8px !important;
   border: 1px solid rgba(255, 255, 255, 0.06) !important;
@@ -3433,6 +3435,8 @@
     background 0.15s,
     border-color 0.15s !important;
   text-align: left !important;
+  overflow: visible !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-token-row:hover {
   background: rgba(255, 255, 255, 0.06) !important;
@@ -3451,6 +3455,7 @@
 .knoww-tp-deposit-token-sym {
   font-size: 13px !important;
   font-weight: 600 !important;
+  line-height: 1.2 !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   flex: 1 !important;
 }
@@ -3589,6 +3594,8 @@
   align-items: center !important;
   gap: 8px !important;
   width: 100% !important;
+  height: auto !important;
+  min-height: 60px !important;
   padding: 12px !important;
   border-radius: 10px !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -3600,6 +3607,8 @@
   text-align: left !important;
   font-family: inherit !important;
   color: inherit !important;
+  overflow: visible !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-method-btn:hover:not(.disabled) {
   background: rgba(255, 255, 255, 0.06) !important;
@@ -3644,12 +3653,15 @@
 .knoww-tp-deposit-method-info {
   display: flex !important;
   flex-direction: column !important;
+  justify-content: center !important;
   gap: 2px !important;
   min-width: 0 !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-method-name {
   font-size: 13px !important;
   font-weight: 600 !important;
+  line-height: 1.2 !important;
   color: var(--knoww-text, rgb(231, 233, 234)) !important;
   white-space: nowrap !important;
   overflow: hidden !important;
@@ -3657,6 +3669,7 @@
 }
 .knoww-tp-deposit-method-sub {
   font-size: 12px !important;
+  line-height: 1.25 !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
 }
 .knoww-tp-deposit-method-chevron {
@@ -3718,11 +3731,14 @@
 .knoww-tp-deposit-token-info {
   display: flex !important;
   flex-direction: column !important;
+  justify-content: center !important;
   gap: 1px !important;
   flex: 1 !important;
+  line-height: 1.2 !important;
 }
 .knoww-tp-deposit-token-amt {
   font-size: 11px !important;
+  line-height: 1.25 !important;
   color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
 }
 .knoww-tp-deposit-token-right {
@@ -4142,16 +4158,58 @@
   line-height: 1.4 !important;
 }
 
+/* Inline error card (setup flow, enable-trading notice, mobile connect). Split
+   into an alert icon + alarm-red title + calm muted body so a long relayer
+   message reads as guidance, not a wall of red. Mirrors the rich-toast pattern. */
 .knoww-tp-enable-error {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 9px !important;
   width: 100% !important;
-  max-width: 280px !important;
-  padding: 10px 12px !important;
-  border-radius: 10px !important;
-  background: rgba(239, 68, 68, 0.1) !important;
-  border: 1px solid rgba(239, 68, 68, 0.22) !important;
+  max-width: 300px !important;
+  margin: 2px auto 0 !important;
+  padding: 11px 12px !important;
+  border-radius: 12px !important;
+  text-align: left !important;
+  background: rgba(239, 68, 68, 0.09) !important;
+  border: 1px solid rgba(239, 68, 68, 0.24) !important;
+  box-shadow: 0 8px 22px -14px rgba(239, 68, 68, 0.55) !important;
+  animation: knoww-toast-enter-tp 0.22s ease !important;
+}
+.knoww-tp-enable-error-icon {
+  flex-shrink: 0 !important;
+  display: flex !important;
+  margin-top: 0.5px !important;
   color: rgb(239, 68, 68) !important;
+}
+.knoww-tp-enable-error-icon svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+.knoww-tp-enable-error-body {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+}
+.knoww-tp-enable-error-title {
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+  color: rgb(239, 68, 68) !important;
+}
+.knoww-tp-enable-error-msg {
   font-size: 12px !important;
-  line-height: 1.4 !important;
+  font-weight: 400 !important;
+  line-height: 1.45 !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  overflow-wrap: anywhere !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .knoww-tp-enable-error {
+    animation: none !important;
+  }
 }
 
 .knoww-tp-wallet-mode {
@@ -4408,6 +4466,153 @@
 }
 .knoww-tp-btn-enable:active {
   transform: scale(0.97) !important;
+}
+
+/* ── Card setup wizard (knoww-tp-setup-*) ── */
+
+.knoww-tp-setup {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  padding: 16px 18px !important;
+  text-align: center !important;
+}
+
+/* Compact horizontal rail of step nodes */
+.knoww-tp-setup-rail {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+}
+
+.knoww-tp-setup-node {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 50% !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  font-family: inherit !important;
+  flex-shrink: 0 !important;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s !important;
+}
+
+.knoww-tp-setup-node.is-done {
+  background: var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  border: 1.5px solid var(--knoww-accent-green, rgb(0, 186, 124)) !important;
+  color: #fff !important;
+}
+
+.knoww-tp-setup-node.is-now {
+  background: transparent !important;
+  border: 1.5px solid var(--knoww-accent, rgb(29, 155, 240)) !important;
+  color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+}
+
+.knoww-tp-setup-node.is-pending {
+  background: transparent !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.18) !important;
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* Connector line between nodes */
+.knoww-tp-setup-rail .knoww-tp-setup-node + .knoww-tp-setup-node {
+  margin-left: 4px !important;
+}
+
+.knoww-tp-setup-kicker {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+
+.knoww-tp-setup-title {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  line-height: 1.2 !important;
+}
+
+.knoww-tp-setup-helper {
+  font-size: 12px !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  line-height: 1.4 !important;
+}
+
+/* Approve row: a roomy amount field + a compact Approve button, balanced as a
+   centred pair (not one tiny box + one full-width button). */
+.knoww-tp-setup-approve {
+  display: flex !important;
+  align-items: stretch !important;
+  justify-content: center !important;
+  gap: 12px !important;
+}
+
+.knoww-tp-setup-approve-field {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 1 1 0 !important;
+  min-width: 96px !important;
+  max-width: 180px !important;
+  height: 40px !important;
+  padding: 0 14px !important;
+  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
+  border-radius: 11px !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  box-sizing: border-box !important;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s !important;
+}
+
+.knoww-tp-setup-approve-field:focus-within {
+  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
+  box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.18) !important;
+}
+
+.knoww-tp-setup-approve-input {
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  font-variant-numeric: tabular-nums !important;
+  outline: none !important;
+  box-sizing: border-box !important;
+  text-align: left !important;
+}
+
+.knoww-tp-setup-approve-unit {
+  flex: 0 0 auto !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.05em !important;
+  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+}
+
+/* Compact, inline Approve button — about half the old full-width CTA, and it
+   matches the field height. Overrides the standalone-CTA auto-margin centering. */
+.knoww-tp-setup-approve .knoww-tp-btn-enable {
+  flex: 1 1 0 !important;
+  min-width: 120px !important;
+  max-width: 184px !important;
+  min-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 16px !important;
 }
 
 .knoww-tp-spinner {
@@ -5490,13 +5695,13 @@
   margin: -1px 0 8px 0 !important;
   max-width: 100% !important;
   min-width: 0 !important;
-  overflow: hidden !important;
+  overflow: visible !important;
 }
 
 .knoww-platform-reddit .knoww-tp-form {
   padding: 10px 10px 12px !important;
   max-width: 100% !important;
-  overflow: hidden !important;
+  overflow: visible !important;
 }
 
 .knoww-platform-reddit .knoww-tp-header {
@@ -6749,27 +6954,6 @@
 
 #knoww-notification-stack .knoww-stack-empty {
   color: var(--kse-ink-dim) !important;
-}
-
-#knoww-notification-stack .knoww-stack-empty-action {
-  background: var(--kse-control-hover) !important;
-  border: 1px solid var(--kse-hairline) !important;
-  border-radius: 999px !important;
-  color: var(--kse-ink) !important;
-  cursor: pointer !important;
-  font-family:
-    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
-  font-size: 8.5px !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.12em !important;
-  margin-top: 8px !important;
-  padding: 7px 10px !important;
-  text-transform: uppercase !important;
-}
-
-#knoww-notification-stack .knoww-stack-empty-action:hover {
-  background: var(--kse-control-active) !important;
-  border-color: var(--kse-hairline-2) !important;
 }
 
 .knoww-x-pnl-badge {

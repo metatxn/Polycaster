@@ -1,10 +1,6 @@
-@custom-variant dark (&:is(
-  .dark *,
-  .midnight *,
-  .ocean *,
-  .slate *,
-  .softpop *
-));
+@custom-variant dark (
+  &:is(.dark *, .midnight *, .ocean *, .slate *, .softpop *)
+);
 
 @theme inline {
   --color-background: var(--background);

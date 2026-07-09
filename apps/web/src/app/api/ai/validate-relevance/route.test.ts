@@ -1,7 +1,6 @@
 import { generateText } from "ai";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTopicExtractionModelName } from "./model-config";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
@@ -31,37 +30,17 @@ vi.mock("@/lib/openrouter", () => ({
 
 import { POST } from "./route";
 
-const originalOpenRouterLlmModel = process.env.OPENROUTER_LLM_MODEL;
-
 afterEach(() => {
-  if (originalOpenRouterLlmModel === undefined) {
-    delete process.env.OPENROUTER_LLM_MODEL;
-  } else {
-    process.env.OPENROUTER_LLM_MODEL = originalOpenRouterLlmModel;
-  }
   vi.clearAllMocks();
 });
 
-describe("getTopicExtractionModelName", () => {
-  it("uses OPENROUTER_LLM_MODEL when configured", () => {
-    process.env.OPENROUTER_LLM_MODEL = " anthropic/claude-haiku-4.5 ";
-
-    expect(getTopicExtractionModelName()).toBe("anthropic/claude-haiku-4.5");
-  });
-
-  it("falls back to the current extractor model when unset", () => {
-    delete process.env.OPENROUTER_LLM_MODEL;
-
-    expect(getTopicExtractionModelName()).toBe("openai/gpt-5.4-nano");
-  });
-});
-
-describe("POST /api/ai/extract-topics", () => {
+describe("POST /api/ai/validate-relevance", () => {
   it("rejects oversized request bodies before invoking the LLM", async () => {
-    const req = new NextRequest("https://knoww.app/api/ai/extract-topics", {
+    const req = new NextRequest("https://knoww.app/api/ai/validate-relevance", {
       method: "POST",
       body: JSON.stringify({
-        text: "Bitcoin ".repeat(3000),
+        postText: "x".repeat(20_000),
+        marketTitle: "Bitcoin above 100k?",
       }),
     });
 
@@ -74,10 +53,12 @@ describe("POST /api/ai/extract-topics", () => {
   });
 
   it("rejects bodies outside the strict request schema", async () => {
-    const req = new NextRequest("https://knoww.app/api/ai/extract-topics", {
+    const req = new NextRequest("https://knoww.app/api/ai/validate-relevance", {
       method: "POST",
       body: JSON.stringify({
-        text: "Bitcoin is running again",
+        postText: "Bitcoin is running again",
+        marketTitle: "Bitcoin above 100k?",
+        marketTags: ["bitcoin"],
         ignored: "not allowed",
       }),
     });

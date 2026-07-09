@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkAiRateLimit } from "@/lib/ai-rate-limit";
 import { jsonError } from "@/lib/api-error";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import {
   extensionCorsHeaders,
   handleExtensionPreflight,
@@ -16,6 +17,12 @@ const log = createLogger("api.ai.validate-relevance");
 const AI_TIMEOUT_MS = 5000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 500;
+const MAX_REQUEST_BODY_BYTES = 8 * 1024;
+const MAX_POST_TEXT_CHARS = 4000;
+const MAX_MARKET_TITLE_CHARS = 300;
+const MAX_MARKET_TAGS_CHARS = 1000;
+const MAX_MARKET_TAGS = 20;
+const MAX_MARKET_TAG_CHARS = 80;
 
 const ValidationSchema = z.object({
   relevant: z
@@ -33,6 +40,32 @@ const ValidationSchema = z.object({
     .max(1)
     .describe("How confident you are in this relevance judgment"),
 });
+
+const requestBodySchema = z
+  .object({
+    postText: z.string().trim().min(1).max(MAX_POST_TEXT_CHARS),
+    marketTitle: z.string().trim().min(1).max(MAX_MARKET_TITLE_CHARS),
+    marketTags: z
+      .union([
+        z.string().max(MAX_MARKET_TAGS_CHARS),
+        z
+          .array(z.string().trim().min(1).max(MAX_MARKET_TAG_CHARS))
+          .max(MAX_MARKET_TAGS),
+      ])
+      .optional()
+      .transform((value) => {
+        if (Array.isArray(value)) return value;
+        if (typeof value === "string") {
+          return value
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+            .slice(0, MAX_MARKET_TAGS);
+        }
+        return [];
+      }),
+  })
+  .strict();
 
 const SYSTEM_PROMPT = `You are a relevance judge for a prediction market Chrome extension.
 
@@ -222,10 +255,54 @@ Is this market relevant to what the post is discussing?`,
   }
 }
 
+/**
+ * @openapi
+ * /api/ai/validate-relevance:
+ *   options:
+ *     summary: Handle preflight for /api/ai/validate-relevance.
+ *     tags: [Ai]
+ *     responses:
+ *       200:
+ *         description: Preflight response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function OPTIONS(request: NextRequest) {
   return handleExtensionPreflight(request);
 }
 
+/**
+ * @openapi
+ * /api/ai/validate-relevance:
+ *   post:
+ *     summary: Create or proxy /api/ai/validate-relevance.
+ *     tags: [Ai]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function POST(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
@@ -246,36 +323,29 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = (await request.json()) as {
-      postText?: string;
-      marketTitle?: string;
-      marketTags?: string[] | string;
-    };
-
-    if (
-      !body.postText ||
-      typeof body.postText !== "string" ||
-      !body.marketTitle ||
-      typeof body.marketTitle !== "string"
-    ) {
-      const errRes = jsonError("Missing 'postText' or 'marketTitle'", 400);
+    const jsonBody = await readJsonBodyWithLimit(
+      request,
+      MAX_REQUEST_BODY_BYTES
+    );
+    if (!jsonBody.ok) {
+      const errRes = jsonError(jsonBody.error, jsonBody.status);
       for (const [k, v] of Object.entries(cors)) errRes.headers.set(k, v);
       return errRes;
     }
 
-    const tags = Array.isArray(body.marketTags)
-      ? body.marketTags
-      : typeof body.marketTags === "string"
-        ? body.marketTags
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean)
-        : [];
+    const parsed = requestBodySchema.safeParse(jsonBody.body);
+    if (!parsed.success) {
+      const errRes = jsonError("Invalid request body", 400);
+      for (const [k, v] of Object.entries(cors)) errRes.headers.set(k, v);
+      return errRes;
+    }
+
+    const body = parsed.data;
 
     const result = await validateRelevance(
       body.postText,
       body.marketTitle,
-      tags
+      body.marketTags
     );
     return NextResponse.json(result, { status: 200, headers: cors });
   } catch (error) {

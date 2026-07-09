@@ -46,3 +46,62 @@ describe("useOrderBookStore price history", () => {
     sortSpy.mockRestore();
   });
 });
+
+describe("useOrderBookStore market metadata", () => {
+  beforeEach(() => {
+    useOrderBookStore.getState().clearAllOrderBooks();
+  });
+
+  afterEach(() => {
+    useOrderBookStore.getState().clearAllOrderBooks();
+  });
+
+  it("preserves REST tick metadata for 0.25 cent World Cup markets", () => {
+    useOrderBookStore
+      .getState()
+      .setOrderBookFromRest(
+        "world-cup-token",
+        [{ price: "0.4350", size: "20" }],
+        [{ price: "0.4375", size: "20" }],
+        {
+          tickSize: "0.0025",
+          minOrderSize: "5",
+        }
+      );
+
+    const orderBook = useOrderBookStore
+      .getState()
+      .getOrderBook("world-cup-token");
+
+    expect(orderBook?.tickSize).toBe(0.0025);
+    expect(orderBook?.minOrderSize).toBe(5);
+  });
+
+  it("updates tick metadata from websocket tick size changes", () => {
+    useOrderBookStore
+      .getState()
+      .setOrderBookFromRest(
+        "token-with-tick-change",
+        [{ price: "0.04", size: "20" }],
+        [{ price: "0.05", size: "20" }],
+        {
+          tickSize: "0.01",
+        }
+      );
+
+    useOrderBookStore.getState().handleTickSizeChangeEvent({
+      event_type: "tick_size_change",
+      asset_id: "token-with-tick-change",
+      market: "market-1",
+      old_tick_size: "0.01",
+      new_tick_size: "0.0025",
+      side: "SELL",
+      timestamp: String(Date.now()),
+    });
+
+    expect(
+      useOrderBookStore.getState().getOrderBook("token-with-tick-change")
+        ?.tickSize
+    ).toBe(0.0025);
+  });
+});

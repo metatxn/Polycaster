@@ -41,6 +41,28 @@ interface PolymarketPriceHistoryResponse {
  *
  * Example: /api/markets/price-history/[tokenId]?startTs=1754353491&fidelity=720
  */
+/**
+ * @openapi
+ * /api/markets/price-history/{tokenId}:
+ *   get:
+ *     summary: Fetch /api/markets/price-history/{tokenId}.
+ *     tags: [Markets]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ tokenId: string }> }

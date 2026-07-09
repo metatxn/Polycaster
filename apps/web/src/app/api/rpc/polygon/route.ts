@@ -290,6 +290,28 @@ async function fetchFromEndpoint(
   }
 }
 
+/**
+ * @openapi
+ * /api/rpc/polygon:
+ *   post:
+ *     summary: Create or proxy /api/rpc/polygon.
+ *     tags: [Rpc]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function POST(request: NextRequest) {
   const requestOrigin = request.headers.get("origin");
 
@@ -390,6 +412,28 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * @openapi
+ * /api/rpc/polygon:
+ *   options:
+ *     summary: Handle preflight for /api/rpc/polygon.
+ *     tags: [Rpc]
+ *     responses:
+ *       200:
+ *         description: Preflight response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function OPTIONS(request: NextRequest) {
   const requestOrigin = request.headers.get("origin");
 

@@ -115,6 +115,28 @@ const FALLBACK_PRICES: Record<string, number> = {
  * - stale: boolean - Whether the cached data is expired (only on error)
  * - timestamp: number - When the prices were last fetched
  */
+/**
+ * @openapi
+ * /api/price/tokens:
+ *   get:
+ *     summary: Fetch /api/price/tokens.
+ *     tags: [Price]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   // Rate limit: 60 requests per minute
   const rateLimitResponse = checkRateLimit(request, {

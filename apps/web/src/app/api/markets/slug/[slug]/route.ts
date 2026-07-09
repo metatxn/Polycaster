@@ -9,6 +9,28 @@ const log = createLogger("api.markets.slug");
  * GET /api/markets/slug/:slug
  * Get market details by slug (recommended by Polymarket API team)
  */
+/**
+ * @openapi
+ * /api/markets/slug/{slug}:
+ *   get:
+ *     summary: Fetch /api/markets/slug/{slug}.
+ *     tags: [Markets]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> }

@@ -6,7 +6,12 @@
 // (buildStreamBetting in ui.ts) imports these and renders around them.
 // ============================================
 
+import {
+  parseGammaNumberArray,
+  parseGammaStringArray,
+} from "@knoww/shared-types/polymarket";
 import { Decimal } from "decimal.js";
+import type { Market, NestedMarket } from "../../types/market";
 import {
   balanceToNumber,
   hasDisplayPosition,
@@ -154,4 +159,187 @@ export function formatPillPrices(
     .slice(0, max)
     .map((o) => `${o.name} ${Math.round(o.price * 100)}¢`)
     .join(" / ");
+}
+
+export type PrimarySportsMoneyline = {
+  outcomes: string[];
+  prices: number[];
+  marketIndex: number;
+  multiOutcomeData?: PrimarySportsMoneylineOption[];
+};
+
+export type PrimarySportsMoneylineOption = {
+  name: string;
+  price: number;
+  marketIndex: number;
+  conditionId?: string;
+};
+
+function clampProbability(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function parseProbabilityArray(raw: NestedMarket["outcomePrices"]): number[] {
+  return parseGammaNumberArray(raw).map(clampProbability);
+}
+
+function isActiveMarket(market: NestedMarket): boolean {
+  return (
+    market.active !== false &&
+    market.closed !== true &&
+    market.archived !== true &&
+    market.acceptingOrders !== false
+  );
+}
+
+function hasSportsMarketSignals(nested: NestedMarket[]): boolean {
+  return nested.some(
+    (m) =>
+      Boolean(m.sportsMarketType) ||
+      Boolean(m.gameStartTime) ||
+      m.acceptingOrders !== undefined ||
+      m.enableOrderBook !== undefined
+  );
+}
+
+function isYesNoPair(outcomes: readonly string[]): boolean {
+  return (
+    outcomes.length === 2 &&
+    outcomes[0].toLowerCase() === "yes" &&
+    outcomes[1].toLowerCase() === "no"
+  );
+}
+
+function yesPriceForMoneylineSibling(market: NestedMarket): number | null {
+  const outcomes = parseGammaStringArray(market.outcomes);
+  if (!isYesNoPair(outcomes)) return null;
+
+  const prices = parseProbabilityArray(market.outcomePrices);
+  return prices.length >= 1 ? prices[0] : null;
+}
+
+function normalizeMoneylineSiblingLabel(label: string): string {
+  const trimmed = label.trim();
+  const withoutParenthetical = trimmed.replace(/\s*\([^)]*\)\s*$/u, "").trim();
+  return withoutParenthetical || trimmed;
+}
+
+function isDerivativeSportsMarket(market: NestedMarket): boolean {
+  const label = [
+    market.sportsMarketType,
+    market.groupItemTitle,
+    market.question,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    /\b(over|under|handicap|spread|total|o\/u|completed\s+match)\b/i.test(
+      label
+    ) ||
+    /\b(?:map|set)\s*\d+\b/i.test(label) ||
+    /_(?:map|set)_/i.test(label)
+  );
+}
+
+function isPrimaryMoneylineCandidate(
+  nestedMarket: NestedMarket,
+  eventTitle: string
+): boolean {
+  if (!isActiveMarket(nestedMarket) || isDerivativeSportsMarket(nestedMarket)) {
+    return false;
+  }
+
+  const outcomes = parseGammaStringArray(nestedMarket.outcomes);
+  const prices = parseProbabilityArray(nestedMarket.outcomePrices);
+  if (outcomes.length !== 2 || prices.length < 2 || isYesNoPair(outcomes)) {
+    return false;
+  }
+
+  const sportsMarketType = String(
+    nestedMarket.sportsMarketType ?? ""
+  ).toLowerCase();
+  const label = [nestedMarket.groupItemTitle, nestedMarket.question]
+    .filter(Boolean)
+    .join(" ");
+  if (
+    sportsMarketType.includes("moneyline") ||
+    /\b(match\s*winner|moneyline|series\s*winner|to\s*win)\b/i.test(label)
+  ) {
+    return true;
+  }
+
+  const normalizedTitle = eventTitle.trim().toLowerCase();
+  return (
+    normalizedTitle.length > 0 &&
+    (nestedMarket.question ?? "").trim().toLowerCase() === normalizedTitle
+  );
+}
+
+function resolveMoneylineSiblingMarkets(
+  nested: NestedMarket[]
+): PrimarySportsMoneyline | null {
+  const options: PrimarySportsMoneylineOption[] = [];
+
+  for (let marketIndex = 0; marketIndex < nested.length; marketIndex++) {
+    const nestedMarket = nested[marketIndex];
+    if (!isActiveMarket(nestedMarket)) continue;
+    if ((nestedMarket.sportsMarketType ?? "").toLowerCase() !== "moneyline") {
+      continue;
+    }
+
+    const rawName = nestedMarket.groupItemTitle?.trim();
+    if (!rawName) continue;
+
+    const price = yesPriceForMoneylineSibling(nestedMarket);
+    if (price === null) continue;
+
+    const option: PrimarySportsMoneylineOption = {
+      name: normalizeMoneylineSiblingLabel(rawName),
+      price,
+      marketIndex,
+    };
+    if (nestedMarket.conditionId) option.conditionId = nestedMarket.conditionId;
+    options.push(option);
+  }
+
+  if (options.length < 2) return null;
+
+  return {
+    outcomes: options.map((option) => option.name),
+    prices: options.map((option) => option.price),
+    marketIndex: options[0].marketIndex,
+    multiOutcomeData: options,
+  };
+}
+
+/**
+ * For sports events with derivative markets, use the primary moneyline so the
+ * betting row shows the competitors and their match prices.
+ */
+export function resolvePrimarySportsMoneyline(
+  market: Market
+): PrimarySportsMoneyline | null {
+  const nested = market.markets;
+  if (!nested || nested.length === 0 || !hasSportsMarketSignals(nested)) {
+    return null;
+  }
+
+  const marketIndex = nested.findIndex((nestedMarket) =>
+    isPrimaryMoneylineCandidate(nestedMarket, market.title)
+  );
+  if (marketIndex < 0) return resolveMoneylineSiblingMarkets(nested);
+
+  const selectedMarket = nested[marketIndex];
+  const outcomes = parseGammaStringArray(selectedMarket.outcomes);
+  const prices = parseProbabilityArray(selectedMarket.outcomePrices);
+  if (outcomes.length !== 2 || prices.length < 2) {
+    return resolveMoneylineSiblingMarkets(nested);
+  }
+
+  return {
+    outcomes,
+    prices: prices.slice(0, outcomes.length),
+    marketIndex,
+  };
 }

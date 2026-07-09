@@ -24,6 +24,7 @@ import {
   formatHoldingLine,
   parseStreamStakeInput,
   pickHolding,
+  resolvePrimarySportsMoneyline,
   type StreamHolding,
   sellButtonLabel,
   stepStake,
@@ -473,6 +474,20 @@ function parseMultiOutcomeData(market: Market): ParsedOutcomeData {
 }
 
 function resolveMarketDisplayData(market: Market): MarketDisplayData {
+  const primarySportsMoneyline = resolvePrimarySportsMoneyline(market);
+  if (primarySportsMoneyline) {
+    const primaryMoneylineOptions =
+      primarySportsMoneyline.multiOutcomeData ?? [];
+    return {
+      isMultiOutcome: primaryMoneylineOptions.length > 0,
+      outcomes: primarySportsMoneyline.outcomes,
+      prices: primarySportsMoneyline.prices,
+      multiOutcomeData: primaryMoneylineOptions,
+      firstActiveMarketIndex: primarySportsMoneyline.marketIndex,
+      hasMultipleOptions: primaryMoneylineOptions.length > 2,
+    };
+  }
+
   const parsed = parseMultiOutcomeData(market);
   let outcomes = parsed.outcomes;
   let prices: number[] = parsed.prices;
@@ -2903,52 +2918,16 @@ interface StreamBet {
  * bettor wants on the card — "Team A vs Team B" — not a stray over/under.
  */
 function getMatchWinnerBet(market: Market): StreamBet | null {
-  const nested = market.markets;
-  if (!nested || nested.length < 2) return null;
+  const primarySportsMoneyline = resolvePrimarySportsMoneyline(market);
+  if (!primarySportsMoneyline) return null;
+  const primaryMoneylineOptions = primarySportsMoneyline.multiOutcomeData ?? [];
 
-  const isMoneylineTitle = (g: string): boolean =>
-    /\b(match\s*winner|moneyline|series\s*winner|to\s*win)\b/i.test(g);
-  const isDerivative = (g: string, o: string[]): boolean =>
-    /over|under|handicap|total|o\/u|map\s*\d/i.test(g) ||
-    o.some((x) => /^(over|under)$/i.test(x));
-  // A head-to-head moneyline names the two TEAMS. Reject Yes/No sub-markets —
-  // those belong to outright "winner" events, which should use the top-N
-  // multi-outcome path (each team's price), not a single Yes/No.
-  const isTeamPair = (m: NestedMarket): boolean => {
-    const o = parseGammaStringArray(m.outcomes);
-    return (
-      o.length === 2 &&
-      !(o[0].toLowerCase() === "yes" && o[1].toLowerCase() === "no") &&
-      !isDerivative(m.groupItemTitle || "", o)
-    );
-  };
-
-  let idx = nested.findIndex(
-    (m) => isMoneylineTitle(m.groupItemTitle || "") && isTeamPair(m)
-  );
-  if (idx < 0) {
-    // The main market's question usually equals the event title.
-    const t = (market.title || "").trim().toLowerCase();
-    idx = nested.findIndex(
-      (m) => (m.question || "").trim().toLowerCase() === t && isTeamPair(m)
-    );
-  }
-  if (idx < 0) {
-    // Any clean two-team market that isn't an over/under or handicap.
-    idx = nested.findIndex(isTeamPair);
-  }
-  if (idx < 0) return null;
-
-  const m = nested[idx];
-  const outcomes = parseGammaStringArray(m.outcomes);
-  const prices = parseGammaPriceArray(m.outcomePrices);
-  if (outcomes.length < 2 || prices.length < 2) return null;
   return {
-    outcomes,
-    prices,
-    isMulti: false,
-    marketIndex: idx,
-    multiOutcomeData: [],
+    outcomes: primarySportsMoneyline.outcomes,
+    prices: primarySportsMoneyline.prices,
+    isMulti: primaryMoneylineOptions.length > 0,
+    marketIndex: primarySportsMoneyline.marketIndex,
+    multiOutcomeData: primaryMoneylineOptions,
   };
 }
 

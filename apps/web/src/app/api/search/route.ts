@@ -6,6 +6,10 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+import {
+  extensionCorsHeaders,
+  handleExtensionPreflight,
+} from "@/lib/extension-auth";
 import { normalizeTagSlug } from "@/lib/tag-slugs";
 import { sanitizeSearchQuery } from "@/lib/validation";
 
@@ -16,6 +20,7 @@ const SEARCH_CACHE_TTL_MS = 30 * 1000;
 const SEARCH_CACHE_STALE_TTL_MS = 2 * 60 * 1000;
 const SEARCH_CACHE_DEGRADED_TTL_MS = 15 * 1000;
 const SEARCH_UPSTREAM_TIMEOUT_MS = 8500;
+const SEARCH_UPSTREAM_FAILURE_STATUS = 502;
 const MAX_TAG_SLUGS = 2;
 const MAX_SEARCH_LIMIT = 20;
 const DEFAULT_SEARCH_LIMIT = 10;
@@ -162,9 +167,13 @@ function writeSearchCache(key: string, data: SearchResponseData): void {
 
 function createSearchHeaders(
   cacheState: "MISS" | "HIT" | "STALE",
-  degraded = false
+  degraded = false,
+  corsHeaders: Record<string, string> = {}
 ): Headers {
   const headers = new Headers(getCacheHeaders("search"));
+  for (const [key, value] of Object.entries(corsHeaders)) {
+    headers.set(key, value);
+  }
   headers.set("X-Knoww-Search-Cache", cacheState);
   if (degraded) {
     headers.set("X-Knoww-Search-Degraded", "true");
@@ -174,6 +183,20 @@ function createSearchHeaders(
     );
   }
   return headers;
+}
+
+function getSearchResponseStatus(data: SearchResponseData): number {
+  return data.degraded ? SEARCH_UPSTREAM_FAILURE_STATUS : 200;
+}
+
+function applyExtensionCorsHeaders(
+  response: NextResponse,
+  corsHeaders: Record<string, string>
+): NextResponse {
+  for (const [key, value] of Object.entries(corsHeaders)) {
+    response.headers.set(key, value);
+  }
+  return response;
 }
 
 function parseEventsPayload(payload: unknown): SearchEvent[] {
@@ -492,12 +515,44 @@ async function getSearchData(
  * Search markets, events, and profiles using Polymarket's public search API
  * @see https://docs.polymarket.com/api-reference/search/search-markets-events-and-profiles
  */
+/**
+ * @openapi
+ * /api/search:
+ *   get:
+ *     summary: Fetch /api/search.
+ *     tags: [Search]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ *       502:
+ *         description: Upstream search provider failed.
+ */
+export async function OPTIONS(request: NextRequest) {
+  return handleExtensionPreflight(request);
+}
+
 export async function GET(request: NextRequest) {
+  const corsHeaders = extensionCorsHeaders(request);
+
   // Rate limit: 60 searches per minute
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 60,
   });
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) {
+    return applyExtensionCorsHeaders(rateLimitResponse, corsHeaders);
+  }
 
   try {
     const { searchParams } = new URL(request.url);
@@ -511,7 +566,7 @@ export async function GET(request: NextRequest) {
     if (!query.trim() && tagSlugs.length === 0) {
       // Return empty results with same edge caching headers as successful responses
       return NextResponse.json(buildEmptySearchResponse(), {
-        headers: getCacheHeaders("search"),
+        headers: createSearchHeaders("MISS", false, corsHeaders),
       });
     }
 
@@ -519,7 +574,8 @@ export async function GET(request: NextRequest) {
     const cached = readFreshCache(cacheKey);
     if (cached) {
       return NextResponse.json(cached, {
-        headers: createSearchHeaders("HIT", cached.degraded),
+        status: getSearchResponseStatus(cached),
+        headers: createSearchHeaders("HIT", cached.degraded, corsHeaders),
       });
     }
 
@@ -528,7 +584,8 @@ export async function GET(request: NextRequest) {
     if (data.degraded && stale && stale.events.length > data.events.length) {
       const staleData = { ...stale, degraded: true };
       return NextResponse.json(staleData, {
-        headers: createSearchHeaders("STALE", true),
+        status: getSearchResponseStatus(staleData),
+        headers: createSearchHeaders("STALE", true, corsHeaders),
       });
     }
 
@@ -536,12 +593,14 @@ export async function GET(request: NextRequest) {
 
     // Cache search results at edge with TTL aligned to upstream fetch revalidate (30s)
     return NextResponse.json(data, {
-      headers: createSearchHeaders("MISS", data.degraded),
+      status: getSearchResponseStatus(data),
+      headers: createSearchHeaders("MISS", data.degraded, corsHeaders),
     });
   } catch (error) {
     log.error("fetch.failed", { error });
     return NextResponse.json(buildEmptySearchResponse(true), {
-      headers: createSearchHeaders("MISS", true),
+      status: 500,
+      headers: createSearchHeaders("MISS", true, corsHeaders),
     });
   }
 }

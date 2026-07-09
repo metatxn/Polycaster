@@ -3,9 +3,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.wallet.validate");
+const MAX_REQUEST_BODY_BYTES = 8 * 1024;
 
 // Validation schema
 const userAddressSchema = z.object({
@@ -22,6 +24,28 @@ const userAddressSchema = z.object({
  * Validate a user's wallet address and check if proxy wallet is deployed
  * This is useful for the frontend to check user setup status
  */
+/**
+ * @openapi
+ * /api/wallet/validate:
+ *   post:
+ *     summary: Create or proxy /api/wallet/validate.
+ *     tags: [Wallet]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function POST(request: NextRequest) {
   // Rate limit: 30 requests per minute
   const rateLimitResponse = checkRateLimit(request, {
@@ -30,15 +54,27 @@ export async function POST(request: NextRequest) {
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
-    const body = await request.json();
-    const parsed = userAddressSchema.safeParse(body);
+    const jsonBody = await readJsonBodyWithLimit(
+      request,
+      MAX_REQUEST_BODY_BYTES
+    );
+    if (!jsonBody.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: jsonBody.error,
+        },
+        { status: jsonBody.status }
+      );
+    }
+
+    const parsed = userAddressSchema.safeParse(jsonBody.body);
 
     if (!parsed.success) {
       return NextResponse.json(
         {
           success: false,
           error: "Invalid request body",
-          details: parsed.error.message,
         },
         { status: 400 }
       );

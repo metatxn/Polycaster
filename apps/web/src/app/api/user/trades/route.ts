@@ -102,6 +102,28 @@ const querySchema = z.object({
  * - totalVolume: Total trading volume
  * - count: Number of trades returned
  */
+/**
+ * @openapi
+ * /api/user/trades:
+ *   get:
+ *     summary: Fetch /api/user/trades.
+ *     tags: [User]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   // Rate limit: 60 requests per minute
   const rateLimitResponse = checkRateLimit(request, {
@@ -128,7 +150,6 @@ export async function GET(request: NextRequest) {
         {
           success: false,
           error: "Invalid query parameters",
-          details: parsed.error.message,
         },
         { status: 400 }
       );

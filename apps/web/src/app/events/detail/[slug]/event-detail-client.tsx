@@ -233,7 +233,11 @@ export default function EventDetailClient({
         // Still skip seeding if both endpoints returned empty — preserves
         // any WS-delivered data already in the store.
         if (data.bids.length === 0 && data.asks.length === 0) return;
-        setOrderBookFromRest(tokenId, data.bids, data.asks);
+        setOrderBookFromRest(tokenId, data.bids, data.asks, {
+          market: data.market,
+          tickSize: data.tick_size,
+          minOrderSize: data.min_order_size,
+        });
       } catch (err) {
         log.error("orderbook.preload_failed", { error: err });
       }
@@ -954,7 +958,11 @@ export default function EventDetailClient({
           const asks = book.asks || [];
           if (bids.length === 0 && asks.length === 0) continue;
           seededTokenIds.add(tokenId);
-          setOrderBookFromRest(tokenId, bids, asks);
+          setOrderBookFromRest(tokenId, bids, asks, {
+            market: book.market,
+            tickSize: book.tick_size,
+            minOrderSize: book.min_order_size,
+          });
         }
 
         for (const tokenId of restQuoteTokenIds) {
@@ -1064,7 +1072,10 @@ export default function EventDetailClient({
     const bids = orderBookData.bids || [];
     const asks = orderBookData.asks || [];
     if (bids.length === 0 && asks.length === 0) return;
-    setOrderBookFromRest(currentTokenId, bids, asks);
+    setOrderBookFromRest(currentTokenId, bids, asks, {
+      tickSize: orderBookData.tick_size,
+      minOrderSize: orderBookData.min_order_size,
+    });
   }, [orderBookData, currentTokenId, setOrderBookFromRest]);
 
   // STEP 3: Connect to shared WebSocket for real-time incremental updates
@@ -1083,11 +1094,17 @@ export default function EventDetailClient({
 
       // Use store data (seeded by REST, updated by WebSocket)
       if (storeOrderBook) {
+        const storeTickSize = storeOrderBook.tickSize ?? 0.01;
+        const storeMinOrderSize = Math.max(
+          marketMinOrderSize,
+          storeOrderBook.minOrderSize ?? 1
+        );
+
         return {
           bestBid: storeOrderBook.bestBid ?? undefined,
           bestAsk: storeOrderBook.bestAsk ?? undefined,
-          tickSize: 0.01, // Default tick size
-          minOrderSize: marketMinOrderSize,
+          tickSize: storeTickSize,
+          minOrderSize: storeMinOrderSize,
           orderBook: {
             bids: storeOrderBook.bids,
             asks: storeOrderBook.asks,

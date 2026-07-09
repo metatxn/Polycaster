@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkAiRateLimit } from "@/lib/ai-rate-limit";
 import { jsonError } from "@/lib/api-error";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import {
   extensionCorsHeaders,
   handleExtensionPreflight,
@@ -15,6 +16,8 @@ import { getTopicExtractionModelName } from "./model-config";
 const log = createLogger("api.ai.extract-topics");
 
 const MAX_INPUT_CHARS = 500;
+const MAX_REQUEST_TEXT_CHARS = 4000;
+const MAX_REQUEST_BODY_BYTES = 8 * 1024;
 const MIN_MEANINGFUL_CHARS = 20;
 const AI_TIMEOUT_MS = 7000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -52,6 +55,12 @@ const TopicExtractionSchema = z.object({
     .max(1)
     .describe("Confidence score for the extraction (0-1)"),
 });
+
+const requestBodySchema = z
+  .object({
+    text: z.string().trim().min(1).max(MAX_REQUEST_TEXT_CHARS),
+  })
+  .strict();
 
 // Common Polymarket tags for reference in the prompt
 const POLYMARKET_TAGS = [
@@ -452,10 +461,54 @@ ${truncatedText}
   }
 }
 
+/**
+ * @openapi
+ * /api/ai/extract-topics:
+ *   options:
+ *     summary: Handle preflight for /api/ai/extract-topics.
+ *     tags: [Ai]
+ *     responses:
+ *       200:
+ *         description: Preflight response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function OPTIONS(request: NextRequest) {
   return handleExtensionPreflight(request);
 }
 
+/**
+ * @openapi
+ * /api/ai/extract-topics:
+ *   post:
+ *     summary: Create or proxy /api/ai/extract-topics.
+ *     tags: [Ai]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function POST(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
@@ -476,14 +529,24 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = (await request.json()) as { text?: string };
-    const { text } = body;
-
-    if (!text || typeof text !== "string") {
-      const errRes = jsonError("Missing or invalid 'text' field", 400);
+    const jsonBody = await readJsonBodyWithLimit(
+      request,
+      MAX_REQUEST_BODY_BYTES
+    );
+    if (!jsonBody.ok) {
+      const errRes = jsonError(jsonBody.error, jsonBody.status);
       for (const [k, v] of Object.entries(cors)) errRes.headers.set(k, v);
       return errRes;
     }
+
+    const parsed = requestBodySchema.safeParse(jsonBody.body);
+    if (!parsed.success) {
+      const errRes = jsonError("Invalid request body", 400);
+      for (const [k, v] of Object.entries(cors)) errRes.headers.set(k, v);
+      return errRes;
+    }
+
+    const { text } = parsed.data;
 
     const extraction = await extractTopicsFromText(text);
     return NextResponse.json(extraction, {
@@ -503,13 +566,35 @@ export async function POST(request: NextRequest) {
         inputLength: 0,
         truncated: false,
         fallbackReason: "provider-error",
-        error: "Invalid request payload",
+        error: "Invalid request body",
       }),
       { status: 400, headers: cors }
     );
   }
 }
 
+/**
+ * @openapi
+ * /api/ai/extract-topics:
+ *   get:
+ *     summary: Fetch /api/ai/extract-topics.
+ *     tags: [Ai]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 

@@ -3,6 +3,7 @@ import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  JsonBodyError,
   jsonError,
   readJson,
   requireAgentAdmin,
@@ -186,12 +187,15 @@ export async function POST(request: NextRequest) {
     let body: unknown;
     try {
       body = await readJson(request);
-    } catch {
+    } catch (error) {
+      if (error instanceof JsonBodyError) {
+        return jsonError(error.message, error.status);
+      }
       return jsonError("Invalid JSON payload", 400);
     }
     const parsed = WatchlistInputSchema.safeParse(body);
     if (!parsed.success) {
-      return jsonError("Invalid watchlist input", 400, parsed.error.flatten());
+      return jsonError("Invalid watchlist input", 400);
     }
     const imported = parsed.data.polymarketUrl
       ? await resolvePolymarketEventWatchlistItem(parsed.data.polymarketUrl, {

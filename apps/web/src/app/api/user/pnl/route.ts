@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
@@ -79,6 +80,19 @@ const querySchema = z.object({
   includeHistory: optionalBoolean.pipe(z.boolean().optional().default(false)),
 });
 
+function toDecimal(value: string | number | null | undefined): Decimal {
+  try {
+    const decimal = new Decimal(value ?? 0);
+    return decimal.isFinite() ? decimal : new Decimal(0);
+  } catch {
+    return new Decimal(0);
+  }
+}
+
+function toNumber(value: Decimal): number {
+  return value.toNumber();
+}
+
 /**
  * GET /api/user/pnl
  *
@@ -95,6 +109,28 @@ const querySchema = z.object({
  * - totalPnl: Combined realized + unrealized P&L
  * - winRate: Percentage of winning trades
  * - history: Daily P&L breakdown (if includeHistory=true)
+ */
+/**
+ * @openapi
+ * /api/user/pnl:
+ *   get:
+ *     summary: Fetch /api/user/pnl.
+ *     tags: [User]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
  */
 export async function GET(request: NextRequest) {
   // Rate limit: 30 requests per minute (expensive endpoint)
@@ -119,7 +155,6 @@ export async function GET(request: NextRequest) {
         {
           success: false,
           error: "Invalid query parameters",
-          details: parsed.error.message,
         },
         { status: 400 }
       );
@@ -218,8 +253,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Try to get P&L from dedicated API, fallback to position-based calculation
-    let unrealizedPnl = 0;
-    let realizedPnlFromPositions = 0;
+    let unrealizedPnl = new Decimal(0);
+    let realizedPnlFromPositions = new Decimal(0);
     let pnlApiData: { t: number; p: number }[] | null = null;
 
     if (pnlApiResponse.ok) {
@@ -228,7 +263,7 @@ export async function GET(request: NextRequest) {
         // The P&L API returns an array of { t: timestamp, p: pnl_value }
         // The last value is the current P&L
         if (Array.isArray(pnlApiData) && pnlApiData.length > 0) {
-          const latestPnl = pnlApiData[pnlApiData.length - 1]?.p || 0;
+          const latestPnl = toDecimal(pnlApiData[pnlApiData.length - 1]?.p);
           // For now, treat the entire P&L as unrealized since we don't have a breakdown
           unrealizedPnl = latestPnl;
         }
@@ -239,15 +274,15 @@ export async function GET(request: NextRequest) {
     }
 
     // If P&L API didn't work, calculate from positions
-    if (unrealizedPnl === 0 && realizedPnlFromPositions === 0) {
+    if (unrealizedPnl.isZero() && realizedPnlFromPositions.isZero()) {
       unrealizedPnl = positions.reduce(
-        (sum, p) => sum + Number.parseFloat(p.unrealizedPnl || "0"),
-        0
+        (sum, p) => sum.add(toDecimal(p.unrealizedPnl)),
+        new Decimal(0)
       );
 
       realizedPnlFromPositions = positions.reduce(
-        (sum, p) => sum + Number.parseFloat(p.realizedPnl || "0"),
-        0
+        (sum, p) => sum.add(toDecimal(p.realizedPnl)),
+        new Decimal(0)
       );
     }
 
@@ -256,32 +291,32 @@ export async function GET(request: NextRequest) {
     const sellTrades = trades.filter((t) => t.side === "SELL");
 
     const totalBuyValue = buyTrades.reduce(
-      (sum, t) => sum + Number.parseFloat(t.usdcSize || "0"),
-      0
+      (sum, t) => sum.add(toDecimal(t.usdcSize)),
+      new Decimal(0)
     );
 
     const totalSellValue = sellTrades.reduce(
-      (sum, t) => sum + Number.parseFloat(t.usdcSize || "0"),
-      0
+      (sum, t) => sum.add(toDecimal(t.usdcSize)),
+      new Decimal(0)
     );
 
     // Calculate current portfolio value
     const currentPortfolioValue = positions.reduce(
-      (sum, p) => sum + Number.parseFloat(p.curValue || "0"),
-      0
+      (sum, p) => sum.add(toDecimal(p.curValue)),
+      new Decimal(0)
     );
 
     const initialInvestment = positions.reduce(
-      (sum, p) => sum + Number.parseFloat(p.initialValue || "0"),
-      0
+      (sum, p) => sum.add(toDecimal(p.initialValue)),
+      new Decimal(0)
     );
 
     // Calculate win rate (positions with positive P&L)
     const positionsWithPnl = positions.filter(
-      (p) => Number.parseFloat(p.unrealizedPnl || "0") !== 0
+      (p) => !toDecimal(p.unrealizedPnl).isZero()
     );
-    const winningPositions = positionsWithPnl.filter(
-      (p) => Number.parseFloat(p.unrealizedPnl || "0") > 0
+    const winningPositions = positionsWithPnl.filter((p) =>
+      toDecimal(p.unrealizedPnl).gt(0)
     );
     const winRate =
       positionsWithPnl.length > 0
@@ -304,9 +339,11 @@ export async function GET(request: NextRequest) {
 
           // Approximate realized P&L from trades
           // This is simplified - actual P&L requires matching buys/sells
-          const tradeValue = Number.parseFloat(trade.usdcSize || "0");
+          const tradeValue = toDecimal(trade.usdcSize);
           acc[date].trades++;
-          acc[date].volume += tradeValue;
+          acc[date].volume = toNumber(
+            toDecimal(acc[date].volume).add(tradeValue)
+          );
 
           return acc;
         },
@@ -318,15 +355,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate ROI
-    const totalPnl = unrealizedPnl + realizedPnlFromPositions;
-    const roi =
-      initialInvestment > 0 ? (totalPnl / initialInvestment) * 100 : 0;
+    const totalPnl = unrealizedPnl.add(realizedPnlFromPositions);
+    const roi = initialInvestment.gt(0)
+      ? toNumber(totalPnl.div(initialInvestment).mul(100))
+      : 0;
 
     // Best and worst performing positions
-    const sortedByPnl = [...positions].sort(
-      (a, b) =>
-        Number.parseFloat(b.unrealizedPnl || "0") -
-        Number.parseFloat(a.unrealizedPnl || "0")
+    const sortedByPnl = [...positions].sort((a, b) =>
+      toDecimal(b.unrealizedPnl).cmp(toDecimal(a.unrealizedPnl))
     );
 
     const bestPerformer = sortedByPnl[0];
@@ -337,20 +373,20 @@ export async function GET(request: NextRequest) {
       user,
       period,
       pnl: {
-        realized: realizedPnlFromPositions,
-        unrealized: unrealizedPnl,
-        total: totalPnl,
+        realized: toNumber(realizedPnlFromPositions),
+        unrealized: toNumber(unrealizedPnl),
+        total: toNumber(totalPnl),
         roi,
       },
       portfolio: {
-        currentValue: currentPortfolioValue,
-        initialInvestment,
+        currentValue: toNumber(currentPortfolioValue),
+        initialInvestment: toNumber(initialInvestment),
         positionCount: positions.length,
       },
       trading: {
-        totalBuyValue,
-        totalSellValue,
-        netFlow: totalBuyValue - totalSellValue,
+        totalBuyValue: toNumber(totalBuyValue),
+        totalSellValue: toNumber(totalSellValue),
+        netFlow: toNumber(totalBuyValue.sub(totalSellValue)),
         tradeCount: trades.length,
         uniqueMarkets: new Set(trades.map((t) => t.conditionId)).size,
       },
@@ -363,13 +399,14 @@ export async function GET(request: NextRequest) {
               title: bestPerformer.title,
               slug: bestPerformer.slug,
               outcome: bestPerformer.outcome,
-              pnl: Number.parseFloat(bestPerformer.unrealizedPnl || "0"),
-              pnlPercent:
-                Number.parseFloat(bestPerformer.initialValue || "0") > 0
-                  ? (Number.parseFloat(bestPerformer.unrealizedPnl || "0") /
-                      Number.parseFloat(bestPerformer.initialValue || "0")) *
-                    100
-                  : 0,
+              pnl: toNumber(toDecimal(bestPerformer.unrealizedPnl)),
+              pnlPercent: toDecimal(bestPerformer.initialValue).gt(0)
+                ? toNumber(
+                    toDecimal(bestPerformer.unrealizedPnl)
+                      .div(toDecimal(bestPerformer.initialValue))
+                      .mul(100)
+                  )
+                : 0,
             }
           : null,
         worstPerformer: worstPerformer
@@ -377,13 +414,14 @@ export async function GET(request: NextRequest) {
               title: worstPerformer.title,
               slug: worstPerformer.slug,
               outcome: worstPerformer.outcome,
-              pnl: Number.parseFloat(worstPerformer.unrealizedPnl || "0"),
-              pnlPercent:
-                Number.parseFloat(worstPerformer.initialValue || "0") > 0
-                  ? (Number.parseFloat(worstPerformer.unrealizedPnl || "0") /
-                      Number.parseFloat(worstPerformer.initialValue || "0")) *
-                    100
-                  : 0,
+              pnl: toNumber(toDecimal(worstPerformer.unrealizedPnl)),
+              pnlPercent: toDecimal(worstPerformer.initialValue).gt(0)
+                ? toNumber(
+                    toDecimal(worstPerformer.unrealizedPnl)
+                      .div(toDecimal(worstPerformer.initialValue))
+                      .mul(100)
+                  )
+                : 0,
             }
           : null,
       },

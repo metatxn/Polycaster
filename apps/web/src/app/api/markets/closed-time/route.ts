@@ -166,6 +166,28 @@ function pickFallbackMarketTime(data: ClobMarketTime | null): string | null {
  * the same timeline position as Polymarket's history table. CLOB market end
  * dates remain a fallback for older or unindexed markets.
  */
+/**
+ * @openapi
+ * /api/markets/closed-time:
+ *   get:
+ *     summary: Fetch /api/markets/closed-time.
+ *     tags: [Markets]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 60,

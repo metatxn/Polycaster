@@ -8,11 +8,13 @@ import {
   formatPillPrices,
   parseStreamStakeInput,
   pickHolding,
+  resolvePrimarySportsMoneyline,
   STREAM_STAKE_STEP,
   type StreamHolding,
   sellButtonLabel,
   stepStake,
 } from "../../src/content/trading/stream-bet-logic";
+import type { Market } from "../../src/types/market";
 
 test("STREAM_STAKE_STEP is $1", () => {
   assert.equal(STREAM_STAKE_STEP, 1);
@@ -179,4 +181,109 @@ test("pickHolding breaks an exact value tie by lowest outcome index", () => {
 test("formatPillPrices handles one outcome and an empty list", () => {
   assert.equal(formatPillPrices([{ name: "FURIA", price: 0.6 }]), "FURIA 60¢");
   assert.equal(formatPillPrices([]), "");
+});
+
+test("resolvePrimarySportsMoneyline prefers the match winner over tennis derivative markets", () => {
+  const market: Market = {
+    id: "673526",
+    title: "Contrexeville: Elina Avanesyan vs Alicia Herrero Linana",
+    source: "polymarket",
+    markets: [
+      {
+        id: "2818062",
+        question: "Contrexeville: Elina Avanesyan vs Alicia Herrero Linana",
+        outcomes: ["Elina Avanesyan", "Alicia Herrero Linana"],
+        outcomePrices: '["0.355", "0.645"]',
+        clobTokenIds: '["elina_yes","alicia_yes"]',
+        sportsMarketType: "moneyline",
+        active: true,
+        closed: false,
+        acceptingOrders: true,
+      },
+      {
+        id: "2819877",
+        question: "Set Handicap: Linana (-1.5) vs Avanesyan (+1.5)",
+        groupItemTitle:
+          "Contrexeville: Elina Avanesyan vs Alicia Herrero Linana Set Handicap +/-1.5",
+        outcomes: ["Linana", "Avanesyan"],
+        outcomePrices: '["0.49", "0.51"]',
+        clobTokenIds: '["linana_handicap","avanesyan_handicap"]',
+        sportsMarketType: "tennis_set_handicap",
+        active: true,
+        closed: false,
+        acceptingOrders: true,
+      },
+    ],
+  };
+
+  assert.deepEqual(resolvePrimarySportsMoneyline(market), {
+    outcomes: ["Elina Avanesyan", "Alicia Herrero Linana"],
+    prices: [0.355, 0.645],
+    marketIndex: 0,
+  });
+});
+
+test("resolvePrimarySportsMoneyline prefers soccer moneyline sibling markets over totals", () => {
+  const market: Market = {
+    id: "672774",
+    title: "Argentina vs. Egypt",
+    source: "polymarket",
+    markets: [
+      {
+        question: "Will Argentina win on 2026-07-07?",
+        groupItemTitle: "Argentina",
+        outcomes: ["Yes", "No"],
+        outcomePrices: '["0.735", "0.265"]',
+        clobTokenIds: '["argentina_yes","argentina_no"]',
+        sportsMarketType: "moneyline",
+        active: true,
+        closed: false,
+        acceptingOrders: true,
+      },
+      {
+        question: "Will Argentina vs. Egypt end in a draw?",
+        groupItemTitle: "Draw (Argentina vs. Egypt)",
+        outcomes: ["Yes", "No"],
+        outcomePrices: '["0.195", "0.805"]',
+        clobTokenIds: '["draw_yes","draw_no"]',
+        sportsMarketType: "moneyline",
+        active: true,
+        closed: false,
+        acceptingOrders: true,
+      },
+      {
+        question: "Will Egypt win on 2026-07-07?",
+        groupItemTitle: "Egypt",
+        outcomes: ["Yes", "No"],
+        outcomePrices: '["0.075", "0.925"]',
+        clobTokenIds: '["egypt_yes","egypt_no"]',
+        sportsMarketType: "moneyline",
+        active: true,
+        closed: false,
+        acceptingOrders: true,
+      },
+      {
+        question: "Argentina vs. Egypt: O/U 0.5",
+        groupItemTitle: "O/U 0.5",
+        outcomes: ["Over", "Under"],
+        outcomePrices: '["0.925", "0.075"]',
+        clobTokenIds: '["over_yes","under_yes"]',
+        sportsMarketType: "totals",
+        active: true,
+        closed: false,
+        acceptingOrders: true,
+      },
+    ],
+  };
+
+  assert.deepEqual(resolvePrimarySportsMoneyline(market), {
+    outcomes: ["Argentina", "Draw", "Egypt"],
+    prices: [0.735, 0.195, 0.075],
+    marketIndex: 0,
+    multiOutcomeData: [
+      { name: "Argentina", price: 0.735, marketIndex: 0 },
+      { name: "Draw", price: 0.195, marketIndex: 1 },
+      { name: "Egypt", price: 0.075, marketIndex: 2 },
+    ],
+  });
 });

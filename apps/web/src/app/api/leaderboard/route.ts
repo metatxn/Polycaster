@@ -54,6 +54,28 @@ const VALID_TIME_PERIODS = ["DAY", "WEEK", "MONTH", "ALL"] as const;
 // Valid order by options
 const VALID_ORDER_BY = ["PNL", "VOL"] as const;
 
+/**
+ * @openapi
+ * /api/leaderboard:
+ *   get:
+ *     summary: Fetch /api/leaderboard.
+ *     tags: [Leaderboard]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   // Rate limit: 60 requests per minute
   const rateLimitResponse = checkRateLimit(request, {

@@ -202,6 +202,28 @@ async function fetchCurrentPrice(tokenId: string): Promise<number | null> {
   }
 }
 
+/**
+ * @openapi
+ * /api/whales/suspicious:
+ *   get:
+ *     summary: Fetch /api/whales/suspicious.
+ *     tags: [Whales]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 10,

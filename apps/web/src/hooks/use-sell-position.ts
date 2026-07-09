@@ -24,6 +24,9 @@ import { calculateSlippage, roundDownToTick } from "@/lib/slippage";
 interface OrderBookData {
   bids: Array<{ price: string; size: string }>;
   asks: Array<{ price: string; size: string }>;
+  market?: string;
+  min_order_size?: string;
+  tick_size?: string;
 }
 
 interface SellResult {
@@ -80,7 +83,11 @@ export function useSellPosition({
       if (!tokenId) return null;
       try {
         const data = await fetchClobOrderBook(tokenId, { host: CLOB_BASE_URL });
-        setOrderBookFromRest(tokenId, data.bids, data.asks);
+        setOrderBookFromRest(tokenId, data.bids, data.asks, {
+          market: data.market,
+          tickSize: data.tick_size,
+          minOrderSize: data.min_order_size,
+        });
         return { bids: data.bids, asks: data.asks };
       } catch {
         return null;
@@ -158,6 +165,13 @@ export function useSellPosition({
     return Number.parseFloat(sortedBids[0].price);
   }, [orderBookData]);
 
+  const tickSize = useMemo(() => {
+    const rawTickSize = storeOrderBook?.tickSize;
+    return rawTickSize && Number.isFinite(rawTickSize) && rawTickSize > 0
+      ? rawTickSize
+      : 0.01;
+  }, [storeOrderBook?.tickSize]);
+
   const handleSharesChange = useCallback(
     (delta: number) => {
       const maxShares = position?.size ?? 0;
@@ -182,7 +196,6 @@ export function useSellPosition({
     setIsSubmitting(true);
 
     try {
-      const tickSize = 0.01;
       const buffer = new Decimal("0.995");
       let sellPrice: number;
 
@@ -305,6 +318,7 @@ export function useSellPosition({
     shares,
     sellEstimate,
     bestBid,
+    tickSize,
     position?.currentPrice,
     position?.negRisk,
     createOrder,

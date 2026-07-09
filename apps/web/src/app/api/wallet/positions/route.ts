@@ -10,6 +10,28 @@ import { checkRateLimit } from "@/lib/api-rate-limit";
  *
  * Use the `getOpenOrders()` method from the useClobClient hook instead.
  */
+/**
+ * @openapi
+ * /api/wallet/positions:
+ *   get:
+ *     summary: Fetch /api/wallet/positions.
+ *     tags: [Wallet]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   // Rate limit: 60 requests per minute
   const rateLimitResponse = checkRateLimit(request, {

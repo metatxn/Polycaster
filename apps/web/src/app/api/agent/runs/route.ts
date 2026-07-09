@@ -3,6 +3,7 @@ import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  JsonBodyError,
   jsonError,
   readJson,
   requireAgentAdmin,
@@ -120,13 +121,16 @@ export async function POST(request: NextRequest) {
     if (request.headers.get("content-length") !== "0") {
       try {
         body = await readJson(request);
-      } catch {
+      } catch (error) {
+        if (error instanceof JsonBodyError) {
+          return jsonError(error.message, error.status);
+        }
         return jsonError("Invalid JSON payload", 400);
       }
     }
     const parsed = RunInputSchema.safeParse(body);
     if (!parsed.success) {
-      return jsonError("Invalid run input", 400, parsed.error.flatten());
+      return jsonError("Invalid run input", 400);
     }
     const repository = await getAgentRepository();
     const run = await runPaperAgent(repository, parsed.data);

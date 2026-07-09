@@ -7,6 +7,7 @@
     "dev:ext": "pnpm --filter @knoww/extension dev",
     "build:web": "pnpm --filter @knoww/web build",
     "build:ext": "pnpm --filter @knoww/extension build",
+    "build:ext:dev": "pnpm --filter @knoww/extension build:dev",
     "release:ext": "pnpm --filter @knoww/extension run release",
     "build": "pnpm -r build",
     "preview": "pnpm --filter @knoww/web preview",

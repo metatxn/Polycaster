@@ -1,6 +1,6 @@
 import { createLogger } from "@knoww/logger";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { cookieStorage, createStorage, http } from "wagmi";
+import { cookieStorage, createStorage, http, type Transport } from "wagmi";
 import { polygon } from "@/lib/chains";
 
 const log = createLogger("config");
@@ -48,19 +48,20 @@ function getPolygonRpcUrl(): string {
 // Polymarket trading runs on Polygon. Keep AppKit scoped to Polygon so other
 // connected wallet chains do not look like supported trading networks.
 export const networks = [polygon] as [AppKitNetwork, ...AppKitNetwork[]];
+const polygonTransports = {
+  137: http(getPolygonRpcUrl()),
+} satisfies Record<typeof polygon.id, Transport>;
 
 // Set up the Wagmi Adapter (Config)
 // Configure custom transports to use Alchemy for Polygon
 export const wagmiAdapter = new WagmiAdapter({
-  storage: createStorage({
+  storage: createStorage<Record<string, unknown>>({
     storage: cookieStorage,
   }),
   ssr: true,
   projectId,
   networks,
-  transports: {
-    [polygon.id]: http(getPolygonRpcUrl()),
-  },
+  transports: polygonTransports,
 });
 
 export const config = wagmiAdapter.wagmiConfig;

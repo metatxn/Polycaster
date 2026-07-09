@@ -33,6 +33,28 @@ interface CoinMarketCapResponse {
 let cachedPrice: { price: number; timestamp: number } | null = null;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * @openapi
+ * /api/price/pol:
+ *   get:
+ *     summary: Fetch /api/price/pol.
+ *     tags: [Price]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   // Rate limit: 60 requests per minute
   const rateLimitResponse = checkRateLimit(request, {

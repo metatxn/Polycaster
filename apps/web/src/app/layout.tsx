@@ -62,7 +62,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Knoww — Polymarket Odds, Markets & Insights",
+    default: "Knoww — Prediction markets for every opinion",
     template: "%s | Knoww",
   },
   description: DEFAULT_SEO_DESCRIPTION,
@@ -88,7 +88,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     siteName: SITE_NAME,
-    title: "Knoww — Polymarket Odds, Markets & Insights",
+    title: "Knoww — Prediction markets for every opinion",
     description: DEFAULT_SEO_DESCRIPTION,
     images: [
       {
@@ -101,7 +101,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Knoww — Polymarket Odds, Markets & Insights",
+    title: "Knoww — Prediction markets for every opinion",
     description: DEFAULT_SEO_DESCRIPTION,
     images: ["/logo-512x512.png"],
   },

@@ -7,6 +7,7 @@
  * Reference: https://docs.polymarket.com/developers/CTF/overview
  */
 
+import { Decimal } from "decimal.js";
 import {
   type Address,
   encodeFunctionData,
@@ -155,6 +156,40 @@ export type CtfAmountOperationName = Extract<
 
 type CtfPusdAmountInput = Parameters<typeof parsePusdUnits>[0];
 
+const CTF_PUSD_AMOUNT_PATTERN = /^\d+(?:\.\d{1,6})?$/;
+
+/**
+ * Validate and canonicalize a positive pUSD amount without exponent notation
+ * or precision loss. CTF collateral and outcome tokens use six decimals.
+ */
+export function normalizeCtfPusdAmount(amount: string): string {
+  const trimmed = amount.trim();
+  if (!CTF_PUSD_AMOUNT_PATTERN.test(trimmed)) {
+    throw new Error(
+      "CTF amount must be a plain decimal with up to six decimal places"
+    );
+  }
+
+  const decimal = new Decimal(trimmed);
+  if (!decimal.isFinite() || decimal.lte(0)) {
+    throw new Error("CTF amount must be positive");
+  }
+
+  return decimal.toFixed();
+}
+
+export function isCtfPusdAmountOverBalance(
+  amount: string,
+  balance: string
+): boolean {
+  const canonicalAmount = normalizeCtfPusdAmount(amount);
+  const balanceDecimal = new Decimal(balance);
+  if (!balanceDecimal.isFinite() || balanceDecimal.lt(0)) {
+    throw new Error("CTF balance must be a finite non-negative decimal");
+  }
+  return new Decimal(canonicalAmount).gt(balanceDecimal);
+}
+
 export type CtfOperationTransactionInput =
   | {
       operation: "splitPosition" | "mergePositions";
@@ -286,7 +321,20 @@ function resolveCtfAmountRaw(input: {
   amountRaw?: bigint;
 }): bigint {
   if (input.amountRaw !== undefined) return input.amountRaw;
-  if (input.amount !== undefined) return parsePusdUnits(input.amount);
+  if (input.amount !== undefined) {
+    let amount: string;
+    try {
+      amount =
+        typeof input.amount === "string"
+          ? input.amount
+          : new Decimal(input.amount).toFixed();
+    } catch {
+      throw new Error(
+        "CTF amount must be a plain decimal with up to six decimal places"
+      );
+    }
+    return parsePusdUnits(normalizeCtfPusdAmount(amount));
+  }
   throw new Error("CTF operation amount is required");
 }
 

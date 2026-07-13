@@ -43,14 +43,39 @@ interface PositionData {
  * Trade data for P&L calculation
  */
 interface TradeData {
-  timestamp: string;
+  timestamp: string | number;
   side: "BUY" | "SELL";
-  size: string;
-  price: string;
-  usdcSize: string;
+  size: string | number;
+  price: string | number;
+  usdcSize: string | number;
   conditionId: string;
   outcome: string;
+  asset?: string;
+  id?: string;
+  transactionHash?: string;
+  type?: string;
 }
+
+interface NormalizedTradeData extends TradeData {
+  timestampMs: number | null;
+}
+
+interface ActivityResult {
+  trades: NormalizedTradeData[];
+  pagesFetched: number;
+  truncated: boolean;
+}
+
+interface PositionsResult {
+  positions: PositionData[];
+  pagesFetched: number;
+  truncated: boolean;
+}
+
+const ACTIVITY_PAGE_SIZE = 100;
+const MAX_ACTIVITY_PAGES = 10;
+const POSITIONS_PAGE_SIZE = 100;
+const MAX_POSITIONS_PAGES = 10;
 
 /**
  * Helper to convert null/empty to undefined for optional fields
@@ -91,6 +116,175 @@ function toDecimal(value: string | number | null | undefined): Decimal {
 
 function toNumber(value: Decimal): number {
   return value.toNumber();
+}
+
+function isFiniteDecimalValue(value: unknown): value is string | number {
+  if (typeof value !== "string" && typeof value !== "number") return false;
+  try {
+    return new Decimal(value).isFinite();
+  } catch {
+    return false;
+  }
+}
+
+function isTradeData(value: unknown): value is TradeData {
+  if (!value || typeof value !== "object") return false;
+  const trade = value as Partial<TradeData>;
+  if (trade.type !== undefined && trade.type !== "TRADE") return false;
+  return (
+    (typeof trade.timestamp === "string" ||
+      typeof trade.timestamp === "number") &&
+    normalizeActivityTimestamp(trade.timestamp) !== null &&
+    (trade.side === "BUY" || trade.side === "SELL") &&
+    isFiniteDecimalValue(trade.size) &&
+    isFiniteDecimalValue(trade.price) &&
+    isFiniteDecimalValue(trade.usdcSize) &&
+    typeof trade.conditionId === "string" &&
+    trade.conditionId.trim().length > 0 &&
+    typeof trade.outcome === "string"
+  );
+}
+
+function normalizeActivityTimestamp(value: string | number): number | null {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : value.trim() === ""
+        ? Number.NaN
+        : Number(value);
+
+  if (Number.isFinite(numericValue)) {
+    const timestampMs =
+      Math.abs(numericValue) < 1_000_000_000_000
+        ? numericValue * 1000
+        : numericValue;
+    return Number.isFinite(timestampMs) ? timestampMs : null;
+  }
+
+  if (typeof value !== "string") return null;
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs) ? timestampMs : null;
+}
+
+function getActivityIdentity(
+  trade: TradeData,
+  timestampMs: number | null
+): string {
+  if (trade.id) return `id:${trade.id}`;
+
+  return JSON.stringify([
+    trade.transactionHash ?? "",
+    trade.type ?? "",
+    trade.asset ?? "",
+    timestampMs ?? String(trade.timestamp),
+    trade.conditionId,
+    trade.side,
+    trade.size,
+    trade.price,
+    trade.usdcSize,
+    trade.outcome,
+  ]);
+}
+
+function pageCrossesStartDate(
+  timestamps: number[],
+  startTimestampMs: number | null
+): boolean {
+  if (startTimestampMs === null || timestamps.length === 0) return false;
+
+  const isNewestFirst = timestamps.every(
+    (timestamp, index) => index === 0 || timestamps[index - 1] >= timestamp
+  );
+  return isNewestFirst && timestamps[timestamps.length - 1] < startTimestampMs;
+}
+
+async function fetchActivity(
+  user: string,
+  startDate: Date | null
+): Promise<ActivityResult> {
+  const startTimestampMs = startDate?.getTime() ?? null;
+  const trades: NormalizedTradeData[] = [];
+  const seen = new Set<string>();
+  let pagesFetched = 0;
+
+  for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
+    const offset = page * ACTIVITY_PAGE_SIZE;
+    const response = await fetch(
+      `${DATA_API_BASE}/activity?user=${user.toLowerCase()}&limit=${ACTIVITY_PAGE_SIZE}&offset=${offset}`,
+      {
+        headers: { Accept: "application/json" },
+        next: { revalidate: 60 },
+      }
+    );
+
+    if (!response.ok) throw new Error("Failed to fetch trades");
+
+    const pageData: unknown = await response.json();
+    if (!Array.isArray(pageData)) throw new Error("Failed to fetch trades");
+    pagesFetched++;
+
+    const pageTimestamps: number[] = [];
+    for (const rawTrade of pageData) {
+      if (!isTradeData(rawTrade)) continue;
+      const timestampMs = normalizeActivityTimestamp(rawTrade.timestamp);
+      if (timestampMs !== null) pageTimestamps.push(timestampMs);
+
+      if (
+        startTimestampMs !== null &&
+        (timestampMs === null || timestampMs < startTimestampMs)
+      ) {
+        continue;
+      }
+
+      const identity = getActivityIdentity(rawTrade, timestampMs);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      trades.push({ ...rawTrade, timestampMs });
+    }
+
+    if (
+      pageData.length < ACTIVITY_PAGE_SIZE ||
+      pageCrossesStartDate(pageTimestamps, startTimestampMs)
+    ) {
+      return { trades, pagesFetched, truncated: false };
+    }
+  }
+
+  return { trades, pagesFetched, truncated: true };
+}
+
+async function fetchPositions(user: string): Promise<PositionsResult> {
+  const positions: PositionData[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 0; page < MAX_POSITIONS_PAGES; page++) {
+    const response = await fetch(
+      `${DATA_API_BASE}/positions?user=${user.toLowerCase()}&sizeThreshold=.1&limit=${POSITIONS_PAGE_SIZE}&offset=${page * POSITIONS_PAGE_SIZE}`,
+      {
+        headers: { Accept: "application/json" },
+        next: { revalidate: 60 },
+      }
+    );
+    if (!response.ok) throw new Error("Failed to fetch positions");
+
+    const pageData: unknown = await response.json();
+    if (!Array.isArray(pageData)) throw new Error("Failed to fetch positions");
+    for (const position of pageData as PositionData[]) {
+      const identity = `${position.slug ?? ""}:${position.outcome ?? ""}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      positions.push(position);
+    }
+    if (pageData.length < POSITIONS_PAGE_SIZE) {
+      return { positions, pagesFetched: page + 1, truncated: false };
+    }
+  }
+
+  return {
+    positions,
+    pagesFetched: MAX_POSITIONS_PAGES,
+    truncated: true,
+  };
 }
 
 /**
@@ -206,20 +400,8 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    // Fetch current positions (use same params as Polymarket)
-    const positionsResponse = await fetch(
-      `${DATA_API_BASE}/positions?user=${user.toLowerCase()}&sizeThreshold=.1&redeemable=true&limit=100&offset=0`,
-      {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 60 },
-      }
-    );
-
-    if (!positionsResponse.ok) {
-      throw new Error("Failed to fetch positions");
-    }
-
-    const allPositions: PositionData[] = await positionsResponse.json();
+    const positionsResult = await fetchPositions(user);
+    const allPositions = positionsResult.positions;
 
     // Filter to show only OPEN positions
     // - redeemable: false = market is still open/active
@@ -230,27 +412,8 @@ export async function GET(request: NextRequest) {
       return isOpenPosition || isWinningRedeemable;
     });
 
-    // Fetch trade history
-    const tradesResponse = await fetch(
-      `${DATA_API_BASE}/activity?user=${user.toLowerCase()}&limit=100`,
-      {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 60 },
-      }
-    );
-
-    if (!tradesResponse.ok) {
-      throw new Error("Failed to fetch trades");
-    }
-
-    let trades: TradeData[] = await tradesResponse.json();
-
-    // Filter trades by date range
-    if (startDate) {
-      trades = trades.filter(
-        (t) => new Date(t.timestamp).getTime() >= startDate.getTime()
-      );
-    }
+    const activity = await fetchActivity(user, startDate);
+    const trades = activity.trades;
 
     // Try to get P&L from dedicated API, fallback to position-based calculation
     let unrealizedPnl = new Decimal(0);
@@ -332,7 +495,8 @@ export async function GET(request: NextRequest) {
     if (includeHistory) {
       dailyHistory = trades.reduce(
         (acc, trade) => {
-          const date = new Date(trade.timestamp).toISOString().split("T")[0];
+          if (trade.timestampMs === null) return acc;
+          const date = new Date(trade.timestampMs).toISOString().split("T")[0];
           if (!acc[date]) {
             acc[date] = { realized: 0, trades: 0, volume: 0 };
           }
@@ -382,6 +546,9 @@ export async function GET(request: NextRequest) {
         currentValue: toNumber(currentPortfolioValue),
         initialInvestment: toNumber(initialInvestment),
         positionCount: positions.length,
+        positionsComplete: !positionsResult.truncated,
+        positionsPagesFetched: positionsResult.pagesFetched,
+        positionsTruncated: positionsResult.truncated,
       },
       trading: {
         totalBuyValue: toNumber(totalBuyValue),
@@ -389,6 +556,9 @@ export async function GET(request: NextRequest) {
         netFlow: toNumber(totalBuyValue.sub(totalSellValue)),
         tradeCount: trades.length,
         uniqueMarkets: new Set(trades.map((t) => t.conditionId)).size,
+        activityComplete: !activity.truncated,
+        activityPagesFetched: activity.pagesFetched,
+        activityTruncated: activity.truncated,
       },
       performance: {
         winRate,
@@ -434,8 +604,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error ? error.message : ERROR_MESSAGES.UNKNOWN_ERROR,
+        error: ERROR_MESSAGES.UNKNOWN_ERROR,
       },
       { status: 500 }
     );

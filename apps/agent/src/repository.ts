@@ -124,7 +124,8 @@ export interface AgentRepository {
       id?: string;
     }
   ): Promise<AgentWatchlistItem>;
-  createRun(): Promise<AgentRunSummary>;
+  createRun(id?: string, requestFingerprint?: string): Promise<AgentRunSummary>;
+  getRunRequestFingerprint(id: string): Promise<string | null>;
   completeRun(id: string, status: AgentRunSummary["status"]): Promise<void>;
   saveRunItem(input: {
     runId: string;
@@ -159,6 +160,7 @@ export interface AgentRepository {
   upsertLiveOrder(record: LiveOrderUpsert): Promise<LiveOrderRecord>;
   getLiveOrderByIdempotencyKey(key: string): Promise<LiveOrderRecord | null>;
   listLiveOrders(): Promise<LiveOrderRecord[]>;
+  hasUnresolvedLiveOrder(): Promise<boolean>;
   updateLiveOrderStatus(
     idempotencyKey: string,
     update: Partial<
@@ -175,12 +177,19 @@ export interface AgentRepository {
   tryAcquireSchedulerLock(
     input: AcquireSchedulerLockInput
   ): Promise<AgentSchedulerLock | null>;
+  renewSchedulerLock(
+    lockKey: string,
+    ownerId: string,
+    now: string,
+    leaseMs: number
+  ): Promise<boolean>;
   releaseSchedulerLock(lockKey: string, ownerId: string): Promise<void>;
 }
 
 const memory = {
   watchlist: new Map<string, AgentWatchlistItem>(),
   runs: new Map<string, AgentRunDetail>(),
+  runRequestFingerprints: new Map<string, string>(),
   resolutions: new Map<string, AgentResolution>(),
   positions: new Map<string, AgentPosition>(),
   liveOrders: new Map<string, LiveOrderRecord>(),
@@ -273,13 +282,6 @@ function addMs(iso: string, ms: number): string {
   return new Date(Date.parse(iso) + ms).toISOString();
 }
 
-function isDuplicateColumnError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /duplicate column name/i.test(`${error.message}\n${error.stack ?? ""}`)
-  );
-}
-
 function d1ChangeCount(result: unknown): number | null {
   if (!result || typeof result !== "object") return null;
   const meta = (result as { meta?: unknown }).meta;
@@ -331,9 +333,15 @@ class MemoryAgentRepository implements AgentRepository {
     return item;
   }
 
-  async createRun(): Promise<AgentRunSummary> {
+  async createRun(
+    id = crypto.randomUUID(),
+    requestFingerprint?: string
+  ): Promise<AgentRunSummary> {
+    if (memory.runs.has(id)) {
+      throw new Error(`Agent run already exists: ${id}`);
+    }
     const run: AgentRunDetail = {
-      id: crypto.randomUUID(),
+      id,
       status: "RUNNING",
       startedAt: now(),
       completedAt: null,
@@ -343,7 +351,14 @@ class MemoryAgentRepository implements AgentRepository {
       items: [],
     };
     memory.runs.set(run.id, run);
+    if (requestFingerprint) {
+      memory.runRequestFingerprints.set(run.id, requestFingerprint);
+    }
     return countRun(run);
+  }
+
+  async getRunRequestFingerprint(id: string): Promise<string | null> {
+    return memory.runRequestFingerprints.get(id) ?? null;
   }
 
   async completeRun(
@@ -622,6 +637,14 @@ class MemoryAgentRepository implements AgentRepository {
     );
   }
 
+  async hasUnresolvedLiveOrder(): Promise<boolean> {
+    return [...memory.liveOrders.values()].some(
+      (order) =>
+        !order.dryRun &&
+        (order.status === "POSTED" || order.status === "UNKNOWN")
+    );
+  }
+
   async updateLiveOrderStatus(
     idempotencyKey: string,
     update: Partial<
@@ -689,6 +712,24 @@ class MemoryAgentRepository implements AgentRepository {
     return record;
   }
 
+  async renewSchedulerLock(
+    lockKey: string,
+    ownerId: string,
+    renewedAt: string,
+    leaseMs: number
+  ): Promise<boolean> {
+    const existing = memory.schedulerLocks.get(lockKey);
+    if (existing?.ownerId !== ownerId || existing.expiresAt <= renewedAt) {
+      return false;
+    }
+    memory.schedulerLocks.set(lockKey, {
+      ...existing,
+      expiresAt: addMs(renewedAt, leaseMs),
+      updatedAt: renewedAt,
+    });
+    return true;
+  }
+
   async releaseSchedulerLock(lockKey: string, ownerId: string): Promise<void> {
     const existing = memory.schedulerLocks.get(lockKey);
     if (existing?.ownerId === ownerId) {
@@ -698,7 +739,6 @@ class MemoryAgentRepository implements AgentRepository {
 }
 
 class D1AgentRepository extends MemoryAgentRepository {
-  private schemaReady: Promise<void> | null = null;
   private readonly db: AgentD1Database;
 
   constructor(db: AgentD1Database) {
@@ -706,270 +746,7 @@ class D1AgentRepository extends MemoryAgentRepository {
     this.db = db;
   }
 
-  private async ensureSchema(): Promise<void> {
-    this.schemaReady ??= (async () => {
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_watchlist (
-            id TEXT PRIMARY KEY,
-            question TEXT NOT NULL,
-            token_id TEXT NOT NULL,
-            condition_id TEXT,
-            market_slug TEXT,
-            side TEXT NOT NULL DEFAULT 'YES',
-            outcome_label TEXT,
-            market_type TEXT,
-            event_type TEXT,
-            outcomes_json TEXT NOT NULL DEFAULT '[]',
-            opposite_outcome_label TEXT,
-            opposite_token_id TEXT,
-            event_market_count INTEGER,
-            event_start_time TEXT,
-            event_end_time TEXT,
-            resolution_source TEXT,
-            news_urls_json TEXT NOT NULL DEFAULT '[]',
-            social_notes_json TEXT NOT NULL DEFAULT '[]',
-            active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          )`
-        )
-        .run();
-      await this.ensureWatchlistMetadataColumns();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_watchlist_active ON agent_watchlist(active, created_at)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_runs (
-            id TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            completed_at TEXT
-          )`
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at ON agent_runs(started_at)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_run_items (
-            id TEXT PRIMARY KEY,
-            run_id TEXT NOT NULL,
-            watchlist_item_id TEXT NOT NULL,
-            evidence_json TEXT NOT NULL,
-            votes_json TEXT NOT NULL,
-            decision_json TEXT NOT NULL,
-            fill_json TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (watchlist_item_id) REFERENCES agent_watchlist(id)
-          )`
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_run_items_run_id ON agent_run_items(run_id, created_at)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_run_items_watchlist_item_id ON agent_run_items(watchlist_item_id, created_at)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_resolutions (
-            token_id TEXT PRIMARY KEY,
-            condition_id TEXT,
-            market_slug TEXT,
-            outcome_yes INTEGER NOT NULL,
-            settlement_price TEXT,
-            resolved_at TEXT NOT NULL,
-            raw_source TEXT
-          )`
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_resolutions_resolved_at ON agent_resolutions(resolved_at)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_positions (
-            id TEXT PRIMARY KEY,
-            watchlist_item_id TEXT NOT NULL,
-            token_id TEXT NOT NULL,
-            side TEXT NOT NULL DEFAULT 'BUY',
-            status TEXT NOT NULL DEFAULT 'OPEN',
-            entry_price TEXT NOT NULL,
-            shares TEXT NOT NULL,
-            entry_notional_usd TEXT NOT NULL,
-            exit_price TEXT,
-            exit_notional_usd TEXT,
-            realized_pnl_usd TEXT,
-            opened_at TEXT NOT NULL,
-            closed_at TEXT,
-            close_reason TEXT,
-            opened_run_id TEXT,
-            closed_run_id TEXT,
-            FOREIGN KEY (watchlist_item_id) REFERENCES agent_watchlist(id)
-          )`
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_positions_status ON agent_positions(status, opened_at)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_positions_token_status ON agent_positions(token_id, status)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_positions_watchlist_item ON agent_positions(watchlist_item_id, status)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_live_orders (
-            idempotency_key TEXT PRIMARY KEY,
-            run_id TEXT NOT NULL,
-            watchlist_item_id TEXT NOT NULL,
-            token_id TEXT NOT NULL,
-            side TEXT NOT NULL,
-            requested_size_usd TEXT NOT NULL,
-            price TEXT NOT NULL,
-            signed_order_hash TEXT,
-            order_id TEXT,
-            status TEXT NOT NULL,
-            submitted_at TEXT,
-            filled_at TEXT,
-            created_at TEXT NOT NULL,
-            filled_notional_usd TEXT NOT NULL DEFAULT '0',
-            filled_shares TEXT NOT NULL DEFAULT '0',
-            average_fill_price TEXT,
-            last_synced_at TEXT,
-            balance_snapshot_json TEXT,
-            dry_run INTEGER NOT NULL DEFAULT 1,
-            error TEXT
-          )`
-        )
-        .run();
-      await this.ensureLiveOrderColumns();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_live_orders_created_at ON agent_live_orders(created_at DESC)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_live_orders_status ON agent_live_orders(status, created_at DESC)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_clob_credentials (
-            credential_key TEXT PRIMARY KEY,
-            clob_host TEXT NOT NULL,
-            signer_address TEXT NOT NULL,
-            funder_address TEXT NOT NULL,
-            encrypted_credentials TEXT NOT NULL,
-            encryption_key_version TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            last_used_at TEXT
-          )`
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_clob_credentials_updated_at ON agent_clob_credentials(updated_at DESC)"
-        )
-        .run();
-      await this.db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS agent_scheduler_locks (
-            lock_key TEXT PRIMARY KEY,
-            owner_id TEXT NOT NULL,
-            locked_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          )`
-        )
-        .run();
-      await this.db
-        .prepare(
-          "CREATE INDEX IF NOT EXISTS idx_agent_scheduler_locks_expires_at ON agent_scheduler_locks(expires_at)"
-        )
-        .run();
-    })();
-    await this.schemaReady;
-  }
-
-  private async ensureWatchlistMetadataColumns(): Promise<void> {
-    const existing = await this.db
-      .prepare("PRAGMA table_info(agent_watchlist)")
-      .all<{ name: string }>();
-    const columns = new Set(existing.results.map((row) => row.name));
-    for (const [column, definition] of [
-      ["outcome_label", "TEXT"],
-      ["market_type", "TEXT"],
-      ["event_type", "TEXT"],
-      ["outcomes_json", "TEXT NOT NULL DEFAULT '[]'"],
-      ["opposite_outcome_label", "TEXT"],
-      ["opposite_token_id", "TEXT"],
-      ["event_market_count", "INTEGER"],
-      ["event_start_time", "TEXT"],
-      ["event_end_time", "TEXT"],
-      ["resolution_source", "TEXT"],
-    ] as const) {
-      if (!columns.has(column)) {
-        await this.db
-          .prepare(
-            `ALTER TABLE agent_watchlist ADD COLUMN ${column} ${definition}`
-          )
-          .run();
-      }
-    }
-  }
-
-  private async ensureLiveOrderColumns(): Promise<void> {
-    const existing = await this.db
-      .prepare("PRAGMA table_info(agent_live_orders)")
-      .all<{ name: string }>();
-    const columns = new Set(existing.results.map((row) => row.name));
-    for (const [column, definition] of [
-      ["filled_notional_usd", "TEXT NOT NULL DEFAULT '0'"],
-      ["filled_shares", "TEXT NOT NULL DEFAULT '0'"],
-      ["average_fill_price", "TEXT"],
-      ["last_synced_at", "TEXT"],
-      ["balance_snapshot_json", "TEXT"],
-    ] as const) {
-      if (!columns.has(column)) {
-        try {
-          await this.db
-            .prepare(
-              `ALTER TABLE agent_live_orders ADD COLUMN ${column} ${definition}`
-            )
-            .run();
-        } catch (error) {
-          if (!isDuplicateColumnError(error)) throw error;
-        }
-      }
-    }
-  }
-
   async listWatchlist(): Promise<AgentWatchlistItem[]> {
-    await this.ensureSchema();
     const result = await this.db
       .prepare("SELECT * FROM agent_watchlist ORDER BY created_at ASC")
       .all<Record<string, unknown>>();
@@ -981,7 +758,6 @@ class D1AgentRepository extends MemoryAgentRepository {
       id?: string;
     }
   ): Promise<AgentWatchlistItem> {
-    await this.ensureSchema();
     const existing = input.id
       ? await this.db
           .prepare("SELECT id, created_at FROM agent_watchlist WHERE id = ?")
@@ -1029,10 +805,12 @@ class D1AgentRepository extends MemoryAgentRepository {
     return { ...input, id, createdAt, updatedAt };
   }
 
-  async createRun(): Promise<AgentRunSummary> {
-    await this.ensureSchema();
+  async createRun(
+    id = crypto.randomUUID(),
+    requestFingerprint?: string
+  ): Promise<AgentRunSummary> {
     const run: AgentRunSummary = {
-      id: crypto.randomUUID(),
+      id,
       status: "RUNNING",
       startedAt: now(),
       completedAt: null,
@@ -1042,18 +820,25 @@ class D1AgentRepository extends MemoryAgentRepository {
     };
     await this.db
       .prepare(
-        "INSERT INTO agent_runs (id, status, started_at, completed_at) VALUES (?, ?, ?, ?)"
+        "INSERT INTO agent_runs (id, status, started_at, completed_at, request_fingerprint) VALUES (?, ?, ?, ?, ?)"
       )
-      .bind(run.id, run.status, run.startedAt, null)
+      .bind(run.id, run.status, run.startedAt, null, requestFingerprint ?? null)
       .run();
     return run;
+  }
+
+  async getRunRequestFingerprint(id: string): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT request_fingerprint FROM agent_runs WHERE id = ?")
+      .bind(id)
+      .first<{ request_fingerprint: string | null }>();
+    return row?.request_fingerprint ?? null;
   }
 
   async completeRun(
     id: string,
     status: AgentRunSummary["status"]
   ): Promise<void> {
-    await this.ensureSchema();
     await this.db
       .prepare(
         "UPDATE agent_runs SET status = ?, completed_at = ? WHERE id = ?"
@@ -1070,7 +855,6 @@ class D1AgentRepository extends MemoryAgentRepository {
     decision: QuorumDecision;
     fill: PaperFill | null;
   }): Promise<void> {
-    await this.ensureSchema();
     const runItemId = crypto.randomUUID();
     await this.db
       .prepare(
@@ -1092,7 +876,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async listRuns(): Promise<AgentRunSummary[]> {
-    await this.ensureSchema();
     const result = await this.db
       .prepare(
         `SELECT r.id, r.status, r.started_at, r.completed_at,
@@ -1110,7 +893,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async getRun(id: string): Promise<AgentRunDetail | null> {
-    await this.ensureSchema();
     const run = await this.db
       .prepare("SELECT * FROM agent_runs WHERE id = ?")
       .bind(id)
@@ -1154,7 +936,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async getMetrics(): Promise<AgentMetrics> {
-    await this.ensureSchema();
     const rows = await this.db
       .prepare(
         `SELECT decision_json, fill_json FROM agent_run_items ORDER BY created_at DESC LIMIT 500`
@@ -1183,7 +964,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async upsertResolution(resolution: AgentResolution): Promise<void> {
-    await this.ensureSchema();
     await this.db
       .prepare(
         `INSERT OR REPLACE INTO agent_resolutions
@@ -1205,7 +985,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   async getResolutionByTokenId(
     tokenId: string
   ): Promise<AgentResolution | null> {
-    await this.ensureSchema();
     const row = await this.db
       .prepare("SELECT * FROM agent_resolutions WHERE token_id = ?")
       .bind(tokenId)
@@ -1214,7 +993,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async listResolutions(): Promise<AgentResolution[]> {
-    await this.ensureSchema();
     const result = await this.db
       .prepare(
         "SELECT * FROM agent_resolutions ORDER BY resolved_at DESC LIMIT 500"
@@ -1224,7 +1002,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async openPosition(input: OpenPositionInput): Promise<AgentPosition> {
-    await this.ensureSchema();
     const position: AgentPosition = {
       id: crypto.randomUUID(),
       watchlistItemId: input.watchlistItemId,
@@ -1270,7 +1047,6 @@ class D1AgentRepository extends MemoryAgentRepository {
     id: string,
     input: ClosePositionInput
   ): Promise<AgentPosition | null> {
-    await this.ensureSchema();
     const existingRow = await this.db
       .prepare("SELECT * FROM agent_positions WHERE id = ?")
       .bind(id)
@@ -1322,7 +1098,6 @@ class D1AgentRepository extends MemoryAgentRepository {
     id: string,
     input: ReducePositionInput
   ): Promise<AgentPosition | null> {
-    await this.ensureSchema();
     const existingRow = await this.db
       .prepare("SELECT * FROM agent_positions WHERE id = ?")
       .bind(id)
@@ -1413,7 +1188,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   async getOpenPositionByWatchlistItem(
     watchlistItemId: string
   ): Promise<AgentPosition | null> {
-    await this.ensureSchema();
     const row = await this.db
       .prepare(
         "SELECT * FROM agent_positions WHERE watchlist_item_id = ? AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1"
@@ -1424,7 +1198,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async listOpenPositionsByToken(tokenId: string): Promise<AgentPosition[]> {
-    await this.ensureSchema();
     const result = await this.db
       .prepare(
         "SELECT * FROM agent_positions WHERE token_id = ? AND status = 'OPEN' ORDER BY opened_at ASC"
@@ -1435,7 +1208,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async listPositions(): Promise<AgentPosition[]> {
-    await this.ensureSchema();
     const result = await this.db
       .prepare(
         "SELECT * FROM agent_positions ORDER BY opened_at DESC LIMIT 500"
@@ -1445,7 +1217,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async getPortfolioPnl(): Promise<PortfolioPnl> {
-    await this.ensureSchema();
     const result = await this.db
       .prepare("SELECT * FROM agent_positions")
       .all<Record<string, unknown>>();
@@ -1453,7 +1224,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async upsertLiveOrder(input: LiveOrderUpsert): Promise<LiveOrderRecord> {
-    await this.ensureSchema();
     const existing = await this.db
       .prepare("SELECT * FROM agent_live_orders WHERE idempotency_key = ?")
       .bind(input.idempotencyKey)
@@ -1517,7 +1287,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   async getLiveOrderByIdempotencyKey(
     key: string
   ): Promise<LiveOrderRecord | null> {
-    await this.ensureSchema();
     const row = await this.db
       .prepare("SELECT * FROM agent_live_orders WHERE idempotency_key = ?")
       .bind(key)
@@ -1526,13 +1295,23 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async listLiveOrders(): Promise<LiveOrderRecord[]> {
-    await this.ensureSchema();
     const result = await this.db
       .prepare(
         "SELECT * FROM agent_live_orders ORDER BY created_at DESC LIMIT 200"
       )
       .all<Record<string, unknown>>();
     return result.results.map(rowToLiveOrder);
+  }
+
+  async hasUnresolvedLiveOrder(): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        `SELECT 1 AS unresolved FROM agent_live_orders
+         WHERE dry_run = 0 AND status IN ('POSTED', 'UNKNOWN')
+         LIMIT 1`
+      )
+      .first<{ unresolved: number }>();
+    return row !== null;
   }
 
   async updateLiveOrderStatus(
@@ -1544,7 +1323,6 @@ class D1AgentRepository extends MemoryAgentRepository {
       >
     >
   ): Promise<LiveOrderRecord | null> {
-    await this.ensureSchema();
     const existing = await this.getLiveOrderByIdempotencyKey(idempotencyKey);
     if (!existing) return null;
     const next: LiveOrderRecord = {
@@ -1580,7 +1358,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   async getClobCredential(
     key: string
   ): Promise<AgentClobCredentialRecord | null> {
-    await this.ensureSchema();
     const row = await this.db
       .prepare("SELECT * FROM agent_clob_credentials WHERE credential_key = ?")
       .bind(key)
@@ -1599,7 +1376,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   async upsertClobCredential(
     input: AgentClobCredentialUpsert
   ): Promise<AgentClobCredentialRecord> {
-    await this.ensureSchema();
     const existing = await this.db
       .prepare(
         "SELECT created_at, last_used_at FROM agent_clob_credentials WHERE credential_key = ?"
@@ -1638,7 +1414,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   async tryAcquireSchedulerLock(
     input: AcquireSchedulerLockInput
   ): Promise<AgentSchedulerLock | null> {
-    await this.ensureSchema();
     const expiresAt = addMs(input.now, input.leaseMs);
     const result = await this.db
       .prepare(
@@ -1671,8 +1446,24 @@ class D1AgentRepository extends MemoryAgentRepository {
     return rowToSchedulerLock(row);
   }
 
+  async renewSchedulerLock(
+    lockKey: string,
+    ownerId: string,
+    renewedAt: string,
+    leaseMs: number
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `UPDATE agent_scheduler_locks
+         SET expires_at = ?, updated_at = ?
+         WHERE lock_key = ? AND owner_id = ? AND expires_at > ?`
+      )
+      .bind(addMs(renewedAt, leaseMs), renewedAt, lockKey, ownerId, renewedAt)
+      .run();
+    return (d1ChangeCount(result) ?? 0) > 0;
+  }
+
   async releaseSchedulerLock(lockKey: string, ownerId: string): Promise<void> {
-    await this.ensureSchema();
     await this.db
       .prepare(
         "DELETE FROM agent_scheduler_locks WHERE lock_key = ? AND owner_id = ?"
@@ -1682,7 +1473,6 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async getCalibration(): Promise<CalibrationSummary> {
-    await this.ensureSchema();
     const rows = await this.db
       .prepare(
         `SELECT i.votes_json, r.outcome_yes
@@ -1726,6 +1516,7 @@ function rowToLiveOrder(row: Record<string, unknown>): LiveOrderRecord {
   const status: LiveOrderStatus =
     rawStatus === "DRY_RUN" ||
     rawStatus === "POSTED" ||
+    rawStatus === "UNKNOWN" ||
     rawStatus === "OPEN" ||
     rawStatus === "PARTIALLY_FILLED" ||
     rawStatus === "FILLED" ||

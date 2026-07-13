@@ -1,15 +1,22 @@
+import Decimal from "decimal.js";
 import type { Metadata } from "next";
+import { cleanMetaText } from "@/lib/meta-text";
+
+export { cleanMetaText } from "@/lib/meta-text";
 
 export const SITE_URL = "https://knoww.app";
 export const SITE_NAME = "Knoww";
 
 export const DEFAULT_SEO_DESCRIPTION =
-  "Discover live prediction markets, compare odds, and track market-moving opinions across politics, crypto, sports, business, and culture.";
+  "Track live Polymarket prediction markets, compare odds, and follow market-moving events across politics, crypto, sports, finance, and culture.";
 
 const DESCRIPTION_MAX_LENGTH = 155;
 const PREDICTION_MARKET_TITLE_PATTERN =
   /\b(prediction market|prediction markets|live odds)\b/i;
 const RESOLVED_MARKET_STATUS_PATTERN = /\b(proposed|resolved)\b/;
+const RESOLVED_MARKET_ONLY_PATTERN = /\bresolved\b/;
+const HISTORICAL_EVENT_MIN_DESCRIPTION_LENGTH = 80;
+const HISTORICAL_EVENT_MIN_VOLUME = new Decimal(10_000);
 
 type SeoMarketInput = {
   id?: string | number;
@@ -20,8 +27,11 @@ type SeoMarketInput = {
 };
 
 type SeoEventInput = {
+  parentEventId?: string | number | null;
   slug?: string | null;
   title?: string | null;
+  description?: string | null;
+  volume?: string | number | null;
   active?: boolean;
   closed?: boolean;
   archived?: boolean;
@@ -34,11 +44,12 @@ export function canonicalUrl(path = "/") {
   return `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export function cleanMetaText(value: string | undefined | null) {
-  return (value ?? "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+export function buildEventDetailPath(
+  requestedIdentifier: string,
+  eventSlug?: string | null
+) {
+  const canonicalIdentifier = cleanMetaText(eventSlug) || requestedIdentifier;
+  return `/events/detail/${encodeURIComponent(canonicalIdentifier)}`;
 }
 
 export function truncateMetaDescription(value: string | undefined | null) {
@@ -65,7 +76,24 @@ export function buildPredictionMarketTitle(title: string | undefined | null) {
     return cleaned;
   }
 
-  return `${cleaned} Prediction Market & Live Odds`;
+  return `${cleaned} Polymarket Odds`;
+}
+
+export function buildNoIndexMetadata({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}): Metadata {
+  return {
+    title,
+    description,
+    robots: {
+      index: false,
+      follow: true,
+    },
+  };
 }
 
 export function buildPredictionMarketDescription({
@@ -99,22 +127,26 @@ export function shouldIndexEventPage(event: SeoEventInput | null | undefined) {
     return false;
   }
 
-  if (
-    event.archived === true ||
-    event.closed === true ||
-    event.ended === true ||
-    event.active === false
-  ) {
+  if (event.archived === true) {
     return false;
   }
 
-  return hasIndexableOpenMarket(event);
+  const isCurrentEvent =
+    event.closed !== true &&
+    event.ended !== true &&
+    event.active !== false &&
+    hasIndexableOpenMarket(event);
+
+  return isCurrentEvent || hasIndexableResolvedEvent(event);
 }
 
 export function shouldListEventInSitemap(
   event: SeoEventInput | null | undefined
 ) {
-  if (!event?.slug) {
+  if (
+    !event?.slug ||
+    (event.parentEventId !== undefined && event.parentEventId !== null)
+  ) {
     return false;
   }
 
@@ -143,6 +175,54 @@ function hasIndexableOpenMarket(event: SeoEventInput) {
   return true;
 }
 
+function hasIndexableResolvedEvent(event: SeoEventInput) {
+  if (
+    !event.slug ||
+    cleanMetaText(event.description).length <
+      HISTORICAL_EVENT_MIN_DESCRIPTION_LENGTH ||
+    !hasMinimumHistoricalVolume(event.volume) ||
+    !Array.isArray(event.markets)
+  ) {
+    return false;
+  }
+
+  return event.markets.some(
+    (market) =>
+      market?.id !== undefined &&
+      market.closed === true &&
+      hasResolvedOnlyStatus(market)
+  );
+}
+
+function hasMinimumHistoricalVolume(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return false;
+  }
+
+  try {
+    const volume = new Decimal(value);
+    return (
+      volume.isFinite() &&
+      volume.greaterThanOrEqualTo(HISTORICAL_EVENT_MIN_VOLUME)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasResolvedOnlyStatus(market: SeoMarketInput) {
+  return (
+    hasStatusMatching(
+      market.umaResolutionStatus,
+      RESOLVED_MARKET_ONLY_PATTERN
+    ) ||
+    hasStatusMatching(
+      market.umaResolutionStatuses,
+      RESOLVED_MARKET_ONLY_PATTERN
+    )
+  );
+}
+
 function hasResolvedMarketStatus(market: SeoMarketInput) {
   return (
     hasResolutionStatus(market.umaResolutionStatus) ||
@@ -151,6 +231,10 @@ function hasResolvedMarketStatus(market: SeoMarketInput) {
 }
 
 function hasResolutionStatus(value?: string | null) {
+  return hasStatusMatching(value, RESOLVED_MARKET_STATUS_PATTERN);
+}
+
+function hasStatusMatching(value: string | null | undefined, pattern: RegExp) {
   if (!value) {
     return false;
   }
@@ -160,7 +244,7 @@ function hasResolutionStatus(value?: string | null) {
     return false;
   }
 
-  return RESOLVED_MARKET_STATUS_PATTERN.test(normalized);
+  return pattern.test(normalized);
 }
 
 export function buildPageMetadata({

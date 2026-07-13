@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { permanentRedirect } from "next/navigation";
 import { preload } from "react-dom";
+import { serializeJsonLd } from "@/lib/json-ld";
 import {
   buildOptimizedImageUrl,
   PRIORITY_EVENT_CARD_COUNT,
   PRIORITY_EVENT_CARD_IMAGE_WIDTH,
 } from "@/lib/lcp-images";
-import { buildPageMetadata } from "@/lib/seo";
+import { buildPageMetadata, canonicalUrl } from "@/lib/seo";
 import { getInitialEventsByTag, getTagDetails } from "@/lib/server-cache";
 import { isSportSubSlug } from "@/lib/sport-categories";
 import { normalizeTagSlug } from "@/lib/tag-slugs";
@@ -25,10 +26,10 @@ export async function generateMetadata({
   const label = tagDetails?.label || formatTagTitle(canonicalTagSlug);
 
   return buildPageMetadata({
-    title: `${label} Prediction Markets`,
+    title: `${label} Polymarket Prediction Markets`,
     description:
       tagDetails?.description ||
-      `Browse live ${label.toLowerCase()} prediction markets, compare odds, and track active outcomes on Knoww.`,
+      `Browse live ${label.toLowerCase()} Polymarket prediction markets, compare odds, and track active outcomes on Knoww.`,
     path: `/events/${canonicalTagSlug}`,
   });
 }
@@ -65,12 +66,38 @@ export default async function TagEventsPage({ params }: TagEventsPageProps) {
     }
   });
 
+  const tagLabel = initialTag?.label || formatTagTitle(canonicalTagSlug);
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Markets",
+        item: canonicalUrl("/markets"),
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: tagLabel,
+        item: canonicalUrl(`/events/${canonicalTagSlug}`),
+      },
+    ],
+  };
+
   return (
-    <TagEventsContent
-      tagSlug={canonicalTagSlug}
-      initialData={initialData}
-      initialTag={initialTag}
-    />
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
+      />
+      <TagEventsContent
+        tagSlug={canonicalTagSlug}
+        initialData={initialData}
+        initialTag={initialTag}
+      />
+    </>
   );
 }
 

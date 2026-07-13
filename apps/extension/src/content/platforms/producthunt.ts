@@ -1,5 +1,4 @@
-import type { InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { InjectionPoint, PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 
 function findProductHuntItems(): string {
@@ -220,6 +219,6 @@ const ProductHuntAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(ProductHuntAdapter, 100, 50);
+export const adapter: PlatformAdapter = ProductHuntAdapter;
 
 export { ProductHuntAdapter };

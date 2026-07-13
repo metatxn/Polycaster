@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildEvidencePack } from "./evidence.ts";
+import { buildEvidencePack, fetchAgentNewsUrl } from "./evidence.ts";
 
 const item = {
   id: "item_1",
@@ -23,6 +23,186 @@ const item = {
   createdAt: "2026-05-09T00:00:00.000Z",
   updatedAt: "2026-05-09T00:00:00.000Z",
 };
+
+async function withMockedFetch(mockFetch, callback) {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = mockFetch;
+  try {
+    return await callback();
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+}
+
+test("rejects forbidden news targets, schemes, and credential-bearing URLs before fetch", async () => {
+  let requestCount = 0;
+
+  await withMockedFetch(
+    async () => {
+      requestCount += 1;
+      return new Response("unreachable");
+    },
+    async () => {
+      for (const url of [
+        "http://www.reuters.com/world",
+        "https://example.com/story",
+        "https://127.0.0.1/admin",
+        "https://169.254.169.254/latest/meta-data",
+        "https://user:password@www.reuters.com/world",
+      ]) {
+        assert.equal(await fetchAgentNewsUrl(url), null);
+      }
+    }
+  );
+
+  assert.equal(requestCount, 0);
+});
+
+test("rejects a news redirect whose destination is not allowed", async () => {
+  const requestedUrls = [];
+
+  await withMockedFetch(
+    async (input, init) => {
+      requestedUrls.push(String(input));
+      assert.equal(init?.redirect, "manual");
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://127.0.0.1/internal" },
+      });
+    },
+    async () => {
+      assert.equal(
+        await fetchAgentNewsUrl("https://www.reuters.com/world/story"),
+        null
+      );
+    }
+  );
+
+  assert.deepEqual(requestedUrls, ["https://www.reuters.com/world/story"]);
+});
+
+test("stops following news redirects after the configured low hop cap", async () => {
+  let requestCount = 0;
+
+  await withMockedFetch(
+    async (_input, init) => {
+      requestCount += 1;
+      assert.equal(init?.redirect, "manual");
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `/redirect-${requestCount}` },
+      });
+    },
+    async () => {
+      assert.equal(
+        await fetchAgentNewsUrl("https://www.reuters.com/world/story"),
+        null
+      );
+    }
+  );
+
+  assert.equal(requestCount, 4);
+});
+
+test("rejects news responses whose declared length exceeds the byte cap", async () => {
+  let bodyCancelled = false;
+  const body = new ReadableStream({
+    pull() {},
+    cancel() {
+      bodyCancelled = true;
+    },
+  });
+
+  await withMockedFetch(
+    async () =>
+      new Response(body, {
+        headers: {
+          "Content-Length": "80001",
+          "Content-Type": "text/html; charset=utf-8",
+        },
+      }),
+    async () => {
+      assert.equal(
+        await fetchAgentNewsUrl("https://www.reuters.com/world/story"),
+        null
+      );
+    }
+  );
+
+  assert.equal(bodyCancelled, true);
+});
+
+test("cancels a chunked news response once its decoded body exceeds the byte cap", async () => {
+  const encoder = new TextEncoder();
+  let bodyCancelled = false;
+  let sentFirstChunk = false;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (!sentFirstChunk) {
+        sentFirstChunk = true;
+        controller.enqueue(encoder.encode("a".repeat(60_000)));
+        return;
+      }
+      controller.enqueue(encoder.encode("b".repeat(30_001)));
+    },
+    cancel() {
+      bodyCancelled = true;
+    },
+  });
+
+  await withMockedFetch(
+    async () =>
+      new Response(body, {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      }),
+    async () => {
+      assert.equal(
+        await fetchAgentNewsUrl("https://www.reuters.com/world/story"),
+        null
+      );
+    }
+  );
+
+  assert.equal(bodyCancelled, true);
+});
+
+test("rejects a non-text news response", async () => {
+  await withMockedFetch(
+    async () =>
+      new Response(new Uint8Array([0, 1, 2, 3]), {
+        headers: { "Content-Type": "application/octet-stream" },
+      }),
+    async () => {
+      assert.equal(
+        await fetchAgentNewsUrl("https://www.reuters.com/world/story"),
+        null
+      );
+    }
+  );
+});
+
+test("accepts a bounded textual response from an allowed news host", async () => {
+  await withMockedFetch(
+    async () =>
+      new Response(
+        "<html><title>Bounded report</title><body>Verified reporting.</body></html>",
+        {
+          headers: {
+            "Content-Length": "77",
+            "Content-Type": "text/html; charset=utf-8",
+          },
+        }
+      ),
+    async () => {
+      const news = await fetchAgentNewsUrl(
+        "https://www.reuters.com/world/story"
+      );
+      assert.equal(news?.url, "https://www.reuters.com/world/story");
+      assert.equal(news?.title, "Bounded report");
+      assert.equal(news?.excerpt, "Bounded report Verified reporting.");
+    }
+  );
+});
 
 test("builds market evidence from the order book without side-less price fetches", async () => {
   const previousFetch = globalThis.fetch;

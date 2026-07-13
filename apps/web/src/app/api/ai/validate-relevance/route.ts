@@ -306,7 +306,7 @@ export async function OPTIONS(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
-  const { response: authResponse, trust } = await verifyExtensionAccessPreAuth(
+  const { response: authResponse } = await verifyExtensionAccessPreAuth(
     request,
     "ai:validate"
   );
@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
     return authResponse;
   }
 
-  const rateLimitResponse = checkAiRateLimit(request, trust, 30);
+  const rateLimitResponse = checkAiRateLimit(request, 30);
   if (rateLimitResponse) {
     for (const [k, v] of Object.entries(cors))
       rateLimitResponse.headers.set(k, v);

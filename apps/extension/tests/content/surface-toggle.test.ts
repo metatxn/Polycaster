@@ -61,7 +61,7 @@ test("background opens the side panel before async view persistence", () => {
 });
 
 test("side panel offers a dedicated switch-to-floating control", () => {
-  const sidepanel = readSource("src/sidepanel.ts");
+  const sidepanel = readSource("src/sidepanel/markets.ts");
 
   // Dedicated button distinct from the existing close button, mirroring the
   // floating panel's "move to sidebar" affordance.
@@ -78,7 +78,10 @@ test("side panel offers a dedicated switch-to-floating control", () => {
   );
 
   // Handler persists floating, shows the page panel, and closes the side panel.
-  assert.equal(/function switchToFloatingPanel/.test(sidepanel), true);
+  assert.equal(
+    /target\?\.closest\("\.knoww-stack-popout"\)/.test(sidepanel),
+    true
+  );
   assert.equal(
     /KNOWW_SET_NOTIFICATION_PANEL_SURFACE[\s\S]*surface:\s*"floating"/.test(
       sidepanel
@@ -88,7 +91,7 @@ test("side panel offers a dedicated switch-to-floating control", () => {
   // Ordering invariant: show the page panel BEFORE closing the side panel, and
   // close via window.close() (reliable from the panel's own page).
   assert.equal(
-    /switchToFloatingPanel[\s\S]*setPagePanelVisibility\(true\)[\s\S]{0,200}window\.close\(\)/.test(
+    /KNOWW_SET_NOTIFICATION_PANEL_SURFACE[\s\S]*KNOWW_SET_NOTIFICATION_STACK_VISIBILITY[\s\S]{0,300}closeWindow\(\)/.test(
       sidepanel
     ),
     true
@@ -96,9 +99,7 @@ test("side panel offers a dedicated switch-to-floating control", () => {
 
   // The new control is wired to a click listener.
   assert.equal(
-    /querySelector<HTMLButtonElement>\("\.knoww-stack-popout"\)/.test(
-      sidepanel
-    ),
+    /target\?\.closest\("\.knoww-stack-popout"\)/.test(sidepanel),
     true
   );
 });

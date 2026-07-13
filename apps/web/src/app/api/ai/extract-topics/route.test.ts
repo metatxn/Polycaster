@@ -14,13 +14,18 @@ vi.mock("@/lib/ai-rate-limit", () => ({
   checkAiRateLimit: vi.fn(() => null),
 }));
 
-vi.mock("@/lib/extension-auth", () => ({
-  extensionCorsHeaders: vi.fn(() => ({})),
-  handleExtensionPreflight: vi.fn(() => new Response(null, { status: 204 })),
-  verifyExtensionAccessPreAuth: vi.fn(async () => ({
-    response: null,
-    trust: "session",
-  })),
+vi.mock("@/lib/auth/extension-session", () => ({
+  requireExtensionSession: vi.fn(async (request: NextRequest) =>
+    request.headers.get("authorization") === "Bearer valid-session"
+      ? { response: null, session: { sub: "0xabc" } }
+      : {
+          response: new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+          session: null,
+        }
+  ),
 }));
 
 vi.mock("@/lib/openrouter", () => ({
@@ -29,11 +34,12 @@ vi.mock("@/lib/openrouter", () => ({
   })),
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const originalOpenRouterLlmModel = process.env.OPENROUTER_LLM_MODEL;
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (originalOpenRouterLlmModel === undefined) {
     delete process.env.OPENROUTER_LLM_MODEL;
   } else {
@@ -57,9 +63,53 @@ describe("getTopicExtractionModelName", () => {
 });
 
 describe("POST /api/ai/extract-topics", () => {
+  it("rejects an allowed extension origin without a signed session before invoking the LLM", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    const req = new NextRequest("https://knoww.app/api/ai/extract-topics", {
+      method: "POST",
+      headers: {
+        origin: "chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc",
+      },
+      body: JSON.stringify({
+        text: "Bitcoin price momentum is accelerating into the weekend",
+      }),
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(401);
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid signed session and invokes the LLM", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    vi.mocked(generateText).mockResolvedValue({
+      output: {
+        category: "crypto",
+        entities: ["Bitcoin"],
+        tags: ["bitcoin"],
+        searchQuery: "bitcoin price momentum",
+        confidence: 0.9,
+      },
+    } as never);
+    const req = new NextRequest("https://knoww.app/api/ai/extract-topics", {
+      method: "POST",
+      headers: { authorization: "Bearer valid-session" },
+      body: JSON.stringify({
+        text: "Authenticated POST extraction for Bitcoin price momentum",
+      }),
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(generateText).toHaveBeenCalledOnce();
+  });
+
   it("rejects oversized request bodies before invoking the LLM", async () => {
     const req = new NextRequest("https://knoww.app/api/ai/extract-topics", {
       method: "POST",
+      headers: { authorization: "Bearer valid-session" },
       body: JSON.stringify({
         text: "Bitcoin ".repeat(3000),
       }),
@@ -76,6 +126,7 @@ describe("POST /api/ai/extract-topics", () => {
   it("rejects bodies outside the strict request schema", async () => {
     const req = new NextRequest("https://knoww.app/api/ai/extract-topics", {
       method: "POST",
+      headers: { authorization: "Bearer valid-session" },
       body: JSON.stringify({
         text: "Bitcoin is running again",
         ignored: "not allowed",
@@ -92,5 +143,46 @@ describe("POST /api/ai/extract-topics", () => {
     expect(body.error).toBe("Invalid request body");
     expect(body).not.toHaveProperty("details");
     expect(generateText).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/ai/extract-topics", () => {
+  it("rejects an allowed extension origin without a signed session before invoking the LLM", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    const req = new NextRequest(
+      "https://knoww.app/api/ai/extract-topics?text=Bitcoin+price+momentum+is+accelerating",
+      {
+        headers: {
+          origin: "chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc",
+        },
+      }
+    );
+
+    const res = await GET(req);
+
+    expect(res.status).toBe(401);
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid signed session and invokes the LLM", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    vi.mocked(generateText).mockResolvedValue({
+      output: {
+        category: "crypto",
+        entities: ["Bitcoin"],
+        tags: ["bitcoin"],
+        searchQuery: "bitcoin price momentum",
+        confidence: 0.9,
+      },
+    } as never);
+    const req = new NextRequest(
+      "https://knoww.app/api/ai/extract-topics?text=Authenticated+GET+extraction+for+Bitcoin+momentum",
+      { headers: { authorization: "Bearer valid-session" } }
+    );
+
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(generateText).toHaveBeenCalledOnce();
   });
 });

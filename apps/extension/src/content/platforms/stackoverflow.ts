@@ -1,5 +1,4 @@
-import type { InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { InjectionPoint, PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import { extractPostIdFromAttributes } from "./helpers";
 
@@ -92,6 +91,6 @@ const StackOverflowAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(StackOverflowAdapter, 100, 50);
+export const adapter: PlatformAdapter = StackOverflowAdapter;
 
 export { StackOverflowAdapter };

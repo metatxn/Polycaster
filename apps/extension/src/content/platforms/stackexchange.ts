@@ -1,5 +1,4 @@
 import type { InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
 import { createBasicAdapter } from "./basic-adapter";
 import { extractPostIdFromAttributes } from "./helpers";
 
@@ -98,7 +97,5 @@ const StackExchangeAdapter = createBasicAdapter({
     ]);
   },
 });
-
-registerAdapterWithRetry(StackExchangeAdapter, 100, 50);
 
 export { StackExchangeAdapter };

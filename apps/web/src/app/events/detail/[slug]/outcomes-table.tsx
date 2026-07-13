@@ -963,9 +963,9 @@ export function OutcomesTable({
           >
             §
           </span>
-          <h3 className="m-0 font-(family-name:--font-geist-mono) text-[11px] font-medium uppercase tracking-[0.18em] text-(--kwm-ink-2)">
+          <h2 className="m-0 font-(family-name:--font-geist-mono) text-[11px] font-medium uppercase tracking-[0.18em] text-(--kwm-ink-2)">
             All Outcomes
-          </h3>
+          </h2>
           <span aria-hidden="true" className="flex-1 h-px bg-(--kwm-hl)" />
           {isConnected && (
             <span
@@ -1037,7 +1037,7 @@ export function OutcomesTable({
                 PROB sits directly above the % values and the range label above the
                 change chip. Mirrors the row's inner grid + min-widths. */}
             {sortedMarketData.length > 0 && (
-              <div className="hidden lg:grid lg:grid-cols-[1fr_auto] items-center gap-4 pl-[11px] pr-4 py-1.5 border-b border-(--kwm-hl) bg-(--kwm-bg-2) font-(family-name:--font-geist-mono) text-[10px] font-bold uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+              <div className="hidden lg:grid lg:grid-cols-[1fr_auto] items-center gap-4 pl-[11px] pr-4 py-1.5 border-b border-(--kwm-hl) bg-(--kwm-bg-2) font-(family-name:--font-geist-mono) text-[10px] font-bold uppercase tracking-[0.14em] text-(--kwm-ink-2)">
                 <div className="grid grid-cols-[1fr_auto] items-center gap-4">
                   <span className="pl-[44px]">Market</span>
                   <div className="flex items-center justify-end gap-3 pr-4 border-r border-(--kwm-hl) h-6">
@@ -1120,9 +1120,6 @@ export function OutcomesTable({
                           }
                         }}
                         aria-expanded={isExpanded}
-                        aria-label={`${isExpanded ? "Collapse" : "Expand"} ${
-                          market.groupItemTitle
-                        }`}
                       >
                         {/* Mobile & Tablet Layout Section (<lg) */}
                         <div className="lg:hidden flex flex-col gap-4">

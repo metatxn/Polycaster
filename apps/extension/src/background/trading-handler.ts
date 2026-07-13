@@ -809,7 +809,7 @@ async function handleSplitPosition(
   const plan = await planCtfOperationTransactions({
     operation: "splitPosition",
     conditionId: msg.conditionId,
-    amount: String(msg.amount),
+    amount: msg.amount,
     negRisk: msg.negRisk,
     client: publicClient,
     collateralOwner: getAddress(proxyAddress) as Address,
@@ -865,7 +865,7 @@ async function handleMergePositions(
   const plan = await planCtfOperationTransactions({
     operation: "mergePositions",
     conditionId: msg.conditionId,
-    amount: String(msg.amount),
+    amount: msg.amount,
     negRisk: msg.negRisk,
     client: publicClient,
     collateralOwner: getAddress(proxyAddress) as Address,

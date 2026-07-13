@@ -10,6 +10,7 @@
     "build:ext:dev": "pnpm --filter @knoww/extension build:dev",
     "release:ext": "pnpm --filter @knoww/extension run release",
     "build": "pnpm -r build",
+    "test": "pnpm -r --if-present run test",
     "preview": "pnpm --filter @knoww/web preview",
     "deploy": "pnpm --filter @knoww/web run deploy",
     "lint": "biome check",

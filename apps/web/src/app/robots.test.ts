@@ -7,6 +7,8 @@ describe("robots", () => {
     const rules = Array.isArray(config.rules) ? config.rules[0] : config.rules;
 
     expect(rules?.disallow).toContain("/api/");
+    expect(rules?.disallow).not.toContain("/portfolio");
+    expect(rules?.disallow).not.toContain("/profile/");
     expect(rules?.allow).toEqual(
       expect.arrayContaining([
         "/",

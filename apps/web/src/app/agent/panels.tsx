@@ -67,6 +67,7 @@ export function LiveOrdersPanel({
       acc.total += 1;
       if (order.status === "DRY_RUN") acc.dryRun += 1;
       else if (order.status === "POSTED") acc.posted += 1;
+      else if (order.status === "UNKNOWN") acc.unknown += 1;
       else if (order.status === "OPEN") acc.open += 1;
       else if (order.status === "PARTIALLY_FILLED") acc.partial += 1;
       else if (order.status === "FILLED") acc.filled += 1;
@@ -78,6 +79,7 @@ export function LiveOrdersPanel({
       total: 0,
       dryRun: 0,
       posted: 0,
+      unknown: 0,
       open: 0,
       partial: 0,
       filled: 0,
@@ -138,10 +140,11 @@ export function LiveOrdersPanel({
           )}
         </div>
       </div>
-      <dl className="mt-3 grid grid-cols-3 sm:grid-cols-8 gap-3 text-xs">
+      <dl className="mt-3 grid grid-cols-3 sm:grid-cols-9 gap-3 text-xs">
         <CountTile label="Total" value={counts.total} />
         <CountTile label="Dry-run" value={counts.dryRun} />
         <CountTile label="Posted" value={counts.posted} />
+        <CountTile label="Unknown" value={counts.unknown} />
         <CountTile label="Open" value={counts.open} />
         <CountTile label="Partial" value={counts.partial} />
         <CountTile label="Filled" value={counts.filled} />

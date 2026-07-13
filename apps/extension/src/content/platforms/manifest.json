@@ -1,0 +1,684 @@
+[
+  {
+    "file": "twitter",
+    "name": "twitter",
+    "hostPatterns": [
+      {
+        "source": "^(www\\.)?twitter\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(www\\.)?x\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "linkedin",
+    "name": "linkedin",
+    "hostPatterns": [
+      {
+        "source": "^(www\\.)?linkedin\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "reddit",
+    "name": "reddit",
+    "hostPatterns": [
+      {
+        "source": "^(www\\.)?reddit\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(new\\.)?reddit\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^old\\.reddit\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "quora",
+    "name": "quora",
+    "hostPatterns": [
+      {
+        "source": "^(www\\.)?quora\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "hackernews",
+    "name": "hackernews",
+    "hostPatterns": [
+      {
+        "source": "^news\\.ycombinator\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "stackoverflow",
+    "name": "stackoverflow",
+    "hostPatterns": [
+      {
+        "source": "^(?:meta\\.)?stackoverflow\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "producthunt",
+    "name": "producthunt",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?producthunt\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "slashdot",
+    "name": "slashdot",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?slashdot\\.org$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "lemmy",
+    "name": "lemmy",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?lemmy\\.world$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?lemmy\\.ml$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?sh\\.itjust\\.works$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?programming\\.dev$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?beehaw\\.org$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?feddit\\.org$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?lemm\\.ee$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "threads",
+    "name": "threads",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?threads\\.(?:com|net)$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "bluesky",
+    "name": "bluesky",
+    "hostPatterns": [
+      {
+        "source": "^bsky\\.app$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "mastodon",
+    "name": "mastodon",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?mastodon\\.social$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?mstdn\\.social$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?fosstodon\\.org$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?hachyderm\\.io$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?mas\\.to$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?infosec\\.exchange$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "discord",
+    "name": "discord",
+    "hostPatterns": [
+      {
+        "source": "^discord\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^ptb\\.discord\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^canary\\.discord\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "farcaster",
+    "name": "farcaster",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?farcaster\\.xyz$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "twitch",
+    "name": "twitch",
+    "hostPatterns": [
+      {
+        "source": "(^|\\.)twitch\\.tv$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "coinmarketcap",
+    "name": "coinmarketcap",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?coinmarketcap\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "paragraph",
+    "name": "paragraph",
+    "hostPatterns": [
+      {
+        "source": "^(?:.+\\.)?paragraph\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "coindesk",
+    "name": "coindesk",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?coindesk\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "cointelegraph",
+    "name": "cointelegraph",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?cointelegraph\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "decrypt",
+    "name": "decrypt",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?decrypt\\.co$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "theblock",
+    "name": "theblock",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?theblock\\.co$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "blockworks",
+    "name": "blockworks",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?blockworks\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "bankless",
+    "name": "bankless",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?bankless\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "bitcoinmagazine",
+    "name": "bitcoinmagazine",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?bitcoinmagazine\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "beincrypto",
+    "name": "beincrypto",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?beincrypto\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "unchained",
+    "name": "unchained",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?unchainedcrypto\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "cryptopanic",
+    "name": "cryptopanic",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?cryptopanic\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "extended-editorial",
+    "name": "extended-editorial",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?wired\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?theverge\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?arstechnica\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?macrumors\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?reuters\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?bbc\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?aljazeera\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?axios\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?zerohedge\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?time\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?theatlantic\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?indianexpress\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?espn\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?espn\\.in$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?cbssports\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?pcworld\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?techcrunch\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?engadget\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?gizmodo\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?9to5(?:mac|google)\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?apnews\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?ft\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?theguardian\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?politico\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?usatoday\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:[\\w-]+\\.)*indiatimes\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?timesofindialive\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?bloomberg\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?marketwatch\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?investing\\.com$",
+        "flags": "i"
+      },
+      {
+        "source": "^(?:www\\.)?seekingalpha\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "extended-community",
+    "name": "extended-community",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?soylentnews\\.org$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "kalshi-website",
+    "name": "kalshi-platform",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?kalshi\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "manifold-markets",
+    "name": "manifold-markets",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?manifold\\.markets$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "extended-markets",
+    "name": "extended-markets",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?metaculus\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?tradingview\\.com$",
+        "flags": ""
+      },
+      {
+        "source": "^(?:www\\.)?defillama\\.com$",
+        "flags": ""
+      }
+    ]
+  },
+  {
+    "file": "cnn",
+    "name": "cnn",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.|edition\\.)?cnn\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "yahoo-finance",
+    "name": "yahoo-finance",
+    "hostPatterns": [
+      {
+        "source": "^(?:finance\\.)?yahoo\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "dlnews",
+    "name": "dlnews",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?dlnews\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "nytimes",
+    "name": "nytimes",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?nytimes\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "wsj",
+    "name": "wsj",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?wsj\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "washington-post",
+    "name": "washington-post",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?washingtonpost\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "thehindu",
+    "name": "thehindu",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?thehindu\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "hindustan-times",
+    "name": "hindustan-times",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?hindustantimes\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "cnbc",
+    "name": "cnbc",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?cnbc\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "forbes",
+    "name": "forbes",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?forbes\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "espncricinfo",
+    "name": "espncricinfo",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?espncricinfo\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "skysports",
+    "name": "skysports",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?skysports\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "sporting-news",
+    "name": "sporting-news",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?sportingnews\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "fox-sports",
+    "name": "fox-sports",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?foxsports\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "cnet",
+    "name": "cnet",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?cnet\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "zdnet",
+    "name": "zdnet",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?zdnet\\.com$",
+        "flags": "i"
+      }
+    ]
+  },
+  {
+    "file": "tomshardware",
+    "name": "tomshardware",
+    "hostPatterns": [
+      {
+        "source": "^(?:www\\.)?tomshardware\\.com$",
+        "flags": "i"
+      }
+    ]
+  }
+]

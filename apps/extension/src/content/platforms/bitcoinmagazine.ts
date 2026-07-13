@@ -1,5 +1,4 @@
-import type { InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { InjectionPoint, PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import {
   collectTextParts,
@@ -101,6 +100,6 @@ const BitcoinMagazineAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(BitcoinMagazineAdapter, 100, 50);
+export const adapter: PlatformAdapter = BitcoinMagazineAdapter;
 
 export { BitcoinMagazineAdapter };

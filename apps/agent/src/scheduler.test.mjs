@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAgentRepository } from "./repository.ts";
-import { runScheduledAgentTick } from "./scheduler.ts";
+import {
+  AGENT_EXECUTION_LOCK_KEY,
+  runScheduledAgentTick,
+} from "./scheduler.ts";
 
 function withCronEnv(env, fn) {
   const previous = {
@@ -66,15 +69,56 @@ test("scheduled agent tick runs paper mode under an acquired lock", async () => 
     assert.equal(result.status, "RAN");
     assert.equal(result.executionMode, "paper");
     assert.equal(result.runId, "run-1");
-    assert.deepEqual(calls, [{ executionMode: "paper" }]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].executionMode, "paper");
+    assert.equal(typeof calls[0].assertExecutionLock, "function");
   });
+});
+
+test("scheduler lock renewal extends only a current owner's lease", async () => {
+  const repository = createAgentRepository();
+  const acquired = await repository.tryAcquireSchedulerLock({
+    lockKey: AGENT_EXECUTION_LOCK_KEY,
+    ownerId: "worker-1",
+    now: "2026-05-14T12:00:00.000Z",
+    leaseMs: 60_000,
+  });
+  assert.notEqual(acquired, null);
+
+  assert.equal(
+    await repository.renewSchedulerLock(
+      AGENT_EXECUTION_LOCK_KEY,
+      "worker-2",
+      "2026-05-14T12:00:30.000Z",
+      60_000
+    ),
+    false
+  );
+  assert.equal(
+    await repository.renewSchedulerLock(
+      AGENT_EXECUTION_LOCK_KEY,
+      "worker-1",
+      "2026-05-14T12:00:30.000Z",
+      60_000
+    ),
+    true
+  );
+
+  const overlapping = await repository.tryAcquireSchedulerLock({
+    lockKey: AGENT_EXECUTION_LOCK_KEY,
+    ownerId: "worker-2",
+    now: "2026-05-14T12:01:15.000Z",
+    leaseMs: 60_000,
+  });
+  assert.equal(overlapping, null);
+  await repository.releaseSchedulerLock(AGENT_EXECUTION_LOCK_KEY, "worker-1");
 });
 
 test("scheduled agent tick skips when another worker holds the lock", async () => {
   await withCronEnv({ AGENT_CRON_ENABLED: "true" }, async () => {
     const repository = createAgentRepository();
     const acquired = await repository.tryAcquireSchedulerLock({
-      lockKey: "agent-cron",
+      lockKey: AGENT_EXECUTION_LOCK_KEY,
       ownerId: "other-worker",
       now: "2026-05-14T12:00:00.000Z",
       leaseMs: 60_000,

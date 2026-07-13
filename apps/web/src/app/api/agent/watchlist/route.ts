@@ -1,4 +1,7 @@
-import { resolvePolymarketEventWatchlistItem } from "@knoww/agent";
+import {
+  isAllowedAgentNewsUrl,
+  resolvePolymarketEventWatchlistItem,
+} from "@knoww/agent";
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -33,7 +36,16 @@ const WatchlistInputSchema = z
     eventStartTime: z.string().datetime().optional(),
     eventEndTime: z.string().datetime().optional(),
     resolutionSource: z.string().trim().url().max(500).optional(),
-    newsUrls: z.array(z.string().url().max(500)).max(5).default([]),
+    newsUrls: z
+      .array(
+        z
+          .string()
+          .url()
+          .max(500)
+          .refine(isAllowedAgentNewsUrl, "News URL host is not allowed")
+      )
+      .max(5)
+      .default([]),
     socialNotes: z
       .array(z.string().trim().min(1).max(1000))
       .max(10)
@@ -154,6 +166,7 @@ export async function GET(request: NextRequest) {
  *                 format: uri
  *               newsUrls:
  *                 type: array
+ *                 description: HTTPS URLs from supported public news hosts.
  *                 items:
  *                   type: string
  *                   format: uri

@@ -512,7 +512,7 @@ export async function OPTIONS(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
-  const { response: authResponse, trust } = await verifyExtensionAccessPreAuth(
+  const { response: authResponse } = await verifyExtensionAccessPreAuth(
     request,
     "ai:extract"
   );
@@ -521,7 +521,7 @@ export async function POST(request: NextRequest) {
     return authResponse;
   }
 
-  const rateLimitResponse = checkAiRateLimit(request, trust, 20);
+  const rateLimitResponse = checkAiRateLimit(request, 20);
   if (rateLimitResponse) {
     for (const [k, v] of Object.entries(cors))
       rateLimitResponse.headers.set(k, v);
@@ -598,7 +598,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const cors = extensionCorsHeaders(request);
 
-  const { response: authResponse, trust } = await verifyExtensionAccessPreAuth(
+  const { response: authResponse } = await verifyExtensionAccessPreAuth(
     request,
     "ai:extract"
   );
@@ -607,7 +607,7 @@ export async function GET(request: NextRequest) {
     return authResponse;
   }
 
-  const rateLimitResponse = checkAiRateLimit(request, trust, 20);
+  const rateLimitResponse = checkAiRateLimit(request, 20);
   if (rateLimitResponse) {
     for (const [k, v] of Object.entries(cors))
       rateLimitResponse.headers.set(k, v);

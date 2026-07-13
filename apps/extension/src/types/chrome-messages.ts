@@ -57,10 +57,12 @@ export interface ContextGateResult {
 // ── Order types (from shared package) ──
 
 import type { TradingWalletBalance } from "@knoww/shared-types/balances";
+import type { QuoteResponse } from "@knoww/shared-types/bridge";
 import type {
   ClobOrderType,
   TradingWalletMode,
 } from "@knoww/shared-types/polymarket";
+import type { PortfolioFundAction } from "./portfolio-fund-intent";
 
 export type { ClobOrderType, TradingWalletMode };
 
@@ -159,7 +161,7 @@ export interface TradingGetOrderPreflightResponse {
 export interface TradingSplitPositionMessage {
   type: "trading:split-position";
   conditionId: string;
-  amount: number;
+  amount: string;
   address: string;
   negRisk?: boolean;
   proxyAddress?: string;
@@ -173,7 +175,7 @@ export interface TradingSplitPositionMessage {
 export interface TradingMergePositionsMessage {
   type: "trading:merge-positions";
   conditionId: string;
-  amount: number;
+  amount: string;
   address: string;
   negRisk?: boolean;
   proxyAddress?: string;
@@ -234,6 +236,66 @@ export interface PortfolioSwitchWalletMessage {
   type: "KNOWW_SWITCH_PORTFOLIO_WALLET";
 }
 
+interface PortfolioFundMessageBase {
+  address: string;
+  walletMode?: TradingWalletMode;
+  amount: string;
+  idempotencyKey: string;
+  // Set once a background-owned funding attempt (see
+  // KNOWW_PORTFOLIO_FUND_BEGIN_ATTEMPT) exists for this intent, so the
+  // handler can record the resulting txHash against it on success.
+  attemptId?: string;
+}
+
+export interface PortfolioDepositMessage extends PortfolioFundMessageBase {
+  type: "KNOWW_PORTFOLIO_DEPOSIT";
+  chainId?: string;
+  tokenSymbol?: string;
+  tokenAddress?: string;
+  tokenDecimals?: number;
+}
+
+export interface PortfolioWithdrawMessage extends PortfolioFundMessageBase {
+  type: "KNOWW_PORTFOLIO_WITHDRAW";
+  destination: string;
+  chainKey?: string;
+  tokenId?: string;
+  quote?: QuoteResponse;
+}
+
+// ── Background-owned funding attempt authority ──
+//
+// The background service worker is the single authority both UI surfaces
+// (side panel, content trading panel) talk to for funding attempts: `begin`
+// resumes the same attempt (same idempotency key, recorded txHash) for a
+// given normalized intent until it reaches a terminal outcome, so a retry
+// after an ambiguous result (timeout after wallet submission, tab reload
+// before receipt) resumes instead of re-submitting money.
+export interface PortfolioFundBeginAttemptMessage {
+  type: "KNOWW_PORTFOLIO_FUND_BEGIN_ATTEMPT";
+  action: PortfolioFundAction;
+  address: string;
+  walletMode?: string;
+  amount: string;
+  destination?: string;
+  chainId?: string;
+  tokenSymbol?: string;
+  tokenAddress?: string;
+  tokenDecimals?: number;
+  chainKey?: string;
+  tokenId?: string;
+}
+
+export interface PortfolioFundCompleteAttemptMessage {
+  type: "KNOWW_PORTFOLIO_FUND_COMPLETE_ATTEMPT";
+  attemptId: string;
+  // Must match the key `begin` allocated for this attemptId — the background
+  // no-ops the completion otherwise, so a crossed-wires caller can never
+  // terminalize another attempt.
+  idempotencyKey: string;
+  outcome: "credited" | "reverted";
+}
+
 // ── Union types ──
 
 export type TradingMessage =
@@ -260,7 +322,11 @@ export type BackgroundMessage =
   | TradingMessage
   | SigningResponseMessage
   | AnalyticsTrackMessage
-  | PortfolioSwitchWalletMessage;
+  | PortfolioSwitchWalletMessage
+  | PortfolioDepositMessage
+  | PortfolioWithdrawMessage
+  | PortfolioFundBeginAttemptMessage
+  | PortfolioFundCompleteAttemptMessage;
 
 // ── Responses ──
 

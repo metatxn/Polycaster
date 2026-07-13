@@ -17,6 +17,80 @@ const log = createLogger("agent.evidence");
 
 const NEWS_TIMEOUT_MS = 5000;
 const MAX_NEWS_BYTES = 80_000;
+const MAX_NEWS_REDIRECTS = 3;
+const NEWS_TEXT_CONTENT_TYPES = new Set([
+  "application/xhtml+xml",
+  "text/html",
+  "text/plain",
+]);
+// Keep this deliberately narrower than a generic "public internet" policy.
+// These hosts are the established editorial/market sources already supported
+// by the product. Additions should be reviewed as outbound network access.
+const AGENT_NEWS_HOSTS = new Set([
+  "9to5google.com",
+  "9to5mac.com",
+  "aljazeera.com",
+  "apnews.com",
+  "arstechnica.com",
+  "axios.com",
+  "bankless.com",
+  "bbc.com",
+  "beincrypto.com",
+  "bitcoinmagazine.com",
+  "blockworks.com",
+  "bloomberg.com",
+  "cbssports.com",
+  "cnbc.com",
+  "cnet.com",
+  "cnn.com",
+  "coindesk.com",
+  "cointelegraph.com",
+  "cryptopanic.com",
+  "decrypt.co",
+  "defillama.com",
+  "dlnews.com",
+  "edition.cnn.com",
+  "engadget.com",
+  "espn.com",
+  "espn.in",
+  "espncricinfo.com",
+  "finance.yahoo.com",
+  "forbes.com",
+  "foxsports.com",
+  "ft.com",
+  "gizmodo.com",
+  "hindustantimes.com",
+  "indianexpress.com",
+  "investing.com",
+  "kalshi.com",
+  "macrumors.com",
+  "manifold.markets",
+  "marketwatch.com",
+  "metaculus.com",
+  "nytimes.com",
+  "politico.com",
+  "reuters.com",
+  "seekingalpha.com",
+  "skysports.com",
+  "sportingnews.com",
+  "techcrunch.com",
+  "theatlantic.com",
+  "theblock.co",
+  "theguardian.com",
+  "thehindu.com",
+  "theverge.com",
+  "time.com",
+  "timesofindialive.com",
+  "tomshardware.com",
+  "tradingview.com",
+  "unchainedcrypto.com",
+  "usatoday.com",
+  "washingtonpost.com",
+  "wired.com",
+  "wsj.com",
+  "zdnet.com",
+  "zerohedge.com",
+]);
 const GAMMA_EVENT_BY_SLUG_BASE = "https://gamma-api.polymarket.com/events/slug";
 const GAMMA_TIMEOUT_MS = 4000;
 const MAX_DESCRIPTION_CHARS = 2000;
@@ -269,30 +343,150 @@ function extractTitle(html: string): string {
   return stripHtml(match?.[1] ?? "").slice(0, 160);
 }
 
-async function fetchNewsUrl(
-  url: string
+function allowedAgentNewsUrl(value: string | URL): URL | null {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    if (url.port && url.port !== "443") return null;
+    const normalizedHost = hostname.startsWith("www.")
+      ? hostname.slice("www.".length)
+      : hostname;
+    return AGENT_NEWS_HOSTS.has(hostname) ||
+      AGENT_NEWS_HOSTS.has(normalizedHost)
+      ? url
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isAllowedAgentNewsUrl(value: string): boolean {
+  return allowedAgentNewsUrl(value) !== null;
+}
+
+function isRedirectResponse(response: Response): boolean {
+  return [301, 302, 303, 307, 308].includes(response.status);
+}
+
+async function cancelBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Cancellation is best-effort; the shared abort signal is the backstop.
+  }
+}
+
+function declaredBodyTooLarge(response: Response): boolean {
+  const rawLength = response.headers.get("content-length")?.trim();
+  if (!rawLength || !/^\d+$/.test(rawLength)) return false;
+  try {
+    return BigInt(rawLength) > BigInt(MAX_NEWS_BYTES);
+  } catch {
+    return true;
+  }
+}
+
+function hasAllowedTextContentType(response: Response): boolean {
+  const mediaType = response.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  return mediaType ? NEWS_TEXT_CONTENT_TYPES.has(mediaType) : false;
+}
+
+async function readBoundedNewsText(
+  response: Response,
+  controller: AbortController
+): Promise<string | null> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let byteCount = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteCount += value.byteLength;
+      if (byteCount > MAX_NEWS_BYTES) {
+        controller.abort();
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join("");
+  } catch (error) {
+    try {
+      await reader.cancel(error);
+    } catch {
+      // The stream may already have been cancelled by the abort signal.
+    }
+    throw error;
+  }
+}
+
+export async function fetchAgentNewsUrl(
+  rawUrl: string
 ): Promise<AgentEvidencePack["news"][number] | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), NEWS_TIMEOUT_MS);
   const fetchedAt = new Date().toISOString();
   try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        Accept: "text/html,text/plain;q=0.9,*/*;q=0.7",
-        "User-Agent": "KnowwPaperAgent/1.0",
-      },
-    });
-    if (!response.ok) return null;
-    const text = (await response.text()).slice(0, MAX_NEWS_BYTES);
-    return {
-      url,
-      title: extractTitle(text) || url,
-      excerpt: stripHtml(text).slice(0, 1000),
-      fetchedAt,
-    };
+    let currentUrl = allowedAgentNewsUrl(rawUrl);
+    if (!currentUrl) return null;
+
+    for (let redirectCount = 0; ; redirectCount += 1) {
+      const response = await fetch(currentUrl, {
+        signal: controller.signal,
+        redirect: "manual",
+        headers: {
+          Accept: "text/html,text/plain;q=0.9",
+          "User-Agent": "KnowwPaperAgent/1.0",
+        },
+      });
+
+      if (isRedirectResponse(response)) {
+        const location = response.headers.get("location");
+        await cancelBody(response);
+        if (!location || redirectCount >= MAX_NEWS_REDIRECTS) return null;
+        currentUrl = allowedAgentNewsUrl(new URL(location, currentUrl));
+        if (!currentUrl) return null;
+        continue;
+      }
+
+      if (!response.ok) {
+        await cancelBody(response);
+        return null;
+      }
+      if (
+        declaredBodyTooLarge(response) ||
+        !hasAllowedTextContentType(response)
+      ) {
+        controller.abort();
+        await cancelBody(response);
+        return null;
+      }
+
+      const text = await readBoundedNewsText(response, controller);
+      if (text === null) return null;
+      const finalUrl = currentUrl.toString();
+      return {
+        url: finalUrl,
+        title: extractTitle(text) || finalUrl,
+        excerpt: stripHtml(text).slice(0, 1000),
+        fetchedAt,
+      };
+    }
   } catch (error) {
-    log.error("news.fetch.failed", { url, error });
+    // Do not log the raw URL: rejected credential-bearing URLs must not leak
+    // userinfo into logs.
+    log.error("news.fetch.failed", { error });
     return null;
   } finally {
     clearTimeout(timeout);
@@ -489,7 +683,7 @@ export async function buildEvidencePack(
         return null;
       }),
       fetchPriceHistory(item.tokenId),
-      Promise.all(item.newsUrls.slice(0, 5).map(fetchNewsUrl)),
+      Promise.all(item.newsUrls.slice(0, 5).map(fetchAgentNewsUrl)),
       fetchGammaDescription(item.marketSlug, item),
       collectSearchEvidenceWithDiagnostics(item),
     ]);

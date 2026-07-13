@@ -22,7 +22,6 @@
 
 import { createLogger } from "@knoww/logger";
 import type { PlatformAdapter, StreamContext } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
 
 const log = createLogger("extension.twitch");
 
@@ -160,6 +159,6 @@ const TwitchAdapter: PlatformAdapter = {
   findInjectionPoint: () => null,
 };
 
-registerAdapterWithRetry(TwitchAdapter, 100, 50);
+export const adapter: PlatformAdapter = TwitchAdapter;
 
 export { TwitchAdapter };

@@ -13,13 +13,18 @@ vi.mock("@/lib/ai-rate-limit", () => ({
   checkAiRateLimit: vi.fn(() => null),
 }));
 
-vi.mock("@/lib/extension-auth", () => ({
-  extensionCorsHeaders: vi.fn(() => ({})),
-  handleExtensionPreflight: vi.fn(() => new Response(null, { status: 204 })),
-  verifyExtensionAccessPreAuth: vi.fn(async () => ({
-    response: null,
-    trust: "session",
-  })),
+vi.mock("@/lib/auth/extension-session", () => ({
+  requireExtensionSession: vi.fn(async (request: NextRequest) =>
+    request.headers.get("authorization") === "Bearer valid-session"
+      ? { response: null, session: { sub: "0xabc" } }
+      : {
+          response: new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+          session: null,
+        }
+  ),
 }));
 
 vi.mock("@/lib/openrouter", () => ({
@@ -32,12 +37,57 @@ import { POST } from "./route";
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/ai/validate-relevance", () => {
+  it("rejects an allowed extension origin without a signed session before invoking the LLM", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    const req = new NextRequest("https://knoww.app/api/ai/validate-relevance", {
+      method: "POST",
+      headers: {
+        origin: "chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc",
+      },
+      body: JSON.stringify({
+        postText: "Bitcoin is running again",
+        marketTitle: "Bitcoin above 100k?",
+      }),
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(401);
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid signed session and invokes the LLM", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    vi.mocked(generateText).mockResolvedValue({
+      output: {
+        relevant: true,
+        reason: "Post discusses Bitcoin price",
+        confidence: 0.9,
+      },
+    } as never);
+    const req = new NextRequest("https://knoww.app/api/ai/validate-relevance", {
+      method: "POST",
+      headers: { authorization: "Bearer valid-session" },
+      body: JSON.stringify({
+        postText: "Bitcoin is running again",
+        marketTitle: "Bitcoin above 100k?",
+      }),
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(generateText).toHaveBeenCalledOnce();
+  });
+
   it("rejects oversized request bodies before invoking the LLM", async () => {
     const req = new NextRequest("https://knoww.app/api/ai/validate-relevance", {
       method: "POST",
+      headers: { authorization: "Bearer valid-session" },
       body: JSON.stringify({
         postText: "x".repeat(20_000),
         marketTitle: "Bitcoin above 100k?",
@@ -55,6 +105,7 @@ describe("POST /api/ai/validate-relevance", () => {
   it("rejects bodies outside the strict request schema", async () => {
     const req = new NextRequest("https://knoww.app/api/ai/validate-relevance", {
       method: "POST",
+      headers: { authorization: "Bearer valid-session" },
       body: JSON.stringify({
         postText: "Bitcoin is running again",
         marketTitle: "Bitcoin above 100k?",

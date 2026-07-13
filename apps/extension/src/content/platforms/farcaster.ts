@@ -1,4 +1,4 @@
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { PlatformAdapter } from "../../types/platform";
 import { createEditorialPlatformAdapter } from "./editorial-adapter";
 
 const FarcasterAdapter = createEditorialPlatformAdapter({
@@ -20,6 +20,6 @@ const FarcasterAdapter = createEditorialPlatformAdapter({
   linkPattern: /\/[^/]+\/(0x[0-9a-f]+)/i,
 });
 
-registerAdapterWithRetry(FarcasterAdapter, 100, 50);
+export const adapter: PlatformAdapter = FarcasterAdapter;
 
 export { FarcasterAdapter };

@@ -8,6 +8,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -1432,20 +1433,13 @@ export default function EventDetailClient({
       <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 min-h-screen">
         {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <button
-            type="button"
-            onClick={() => {
-              if (typeof window !== "undefined" && window.history.length > 1) {
-                router.back();
-              } else {
-                router.push("/markets");
-              }
-            }}
+          <Link
+            href="/markets"
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />
-            <span>Back</span>
-          </button>
+            <span>Markets</span>
+          </Link>
           <span>/</span>
           <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">
             {event.title}

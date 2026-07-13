@@ -42,6 +42,10 @@ import {
   PositionsPanel,
   StatusPill,
 } from "./panels";
+import {
+  completeAgentRunIntent,
+  getOrCreateAgentRunIntentKeyWithLock,
+} from "./run-intent-idempotency";
 import type {
   AgentStatus,
   CalibrationSummary,
@@ -224,16 +228,31 @@ export function AgentDashboardClient() {
 
   const runAgent = useCallback(
     async (watchlistItemId?: string) => {
+      const intent = watchlistItemId ?? "all";
+      const idempotencyKey = await getOrCreateAgentRunIntentKeyWithLock(
+        window.localStorage,
+        intent,
+        navigator.locks,
+        undefined,
+        window.sessionStorage
+      );
       setRunning(true);
       setRunningItemId(watchlistItemId ?? null);
       setError(null);
       try {
         const body = await api<{ run: RunDetail }>("/api/agent/runs", {
           method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey },
           body: JSON.stringify(
             watchlistItemId ? { watchlistItemIds: [watchlistItemId] } : {}
           ),
         });
+        completeAgentRunIntent(
+          window.localStorage,
+          intent,
+          idempotencyKey,
+          window.sessionStorage
+        );
         setSelectedRun(body.run);
         await refresh();
       } catch (err) {

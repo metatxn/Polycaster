@@ -367,6 +367,7 @@ export async function executePortfolioDeposit(input: {
   tokenAddress?: string;
   tokenDecimals?: number;
   tabId: number;
+  onBeforeMoneyMovement?: () => void;
 }): Promise<{ txHash: string; bridgeAddress: string }> {
   const eoa = getAddress(input.eoaAddress) as Address;
   const proxy = deriveProxyAddress(eoa, normalizeWalletMode(input.walletMode));
@@ -406,6 +407,7 @@ export async function executePortfolioDeposit(input: {
   await wallet.switchChain(Number(chainId));
 
   const isNative = tokenAddress.toLowerCase() === NATIVE_TOKEN;
+  input.onBeforeMoneyMovement?.();
   const txHash = isNative
     ? await wallet.sendTransaction({ to: depositAddress, value: amountRaw })
     : await wallet.sendTransaction({
@@ -430,6 +432,7 @@ export async function executePortfolioWithdraw(input: {
   tokenId?: string;
   quote?: QuoteResponse;
   tabId: number;
+  onBeforeMoneyMovement?: () => void;
 }): Promise<{
   txHash: string;
   bridgeAddress?: string;
@@ -503,6 +506,7 @@ export async function executePortfolioWithdraw(input: {
         value: "0",
       },
     ];
+    input.onBeforeMoneyMovement?.();
     const result =
       mode === "deposit"
         ? await executeViaDepositWallet(wallet, eoa, transactions)
@@ -584,6 +588,7 @@ export async function executePortfolioWithdraw(input: {
     },
   ];
 
+  input.onBeforeMoneyMovement?.();
   const result =
     mode === "deposit"
       ? await executeViaDepositWallet(wallet, eoa, transactions)

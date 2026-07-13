@@ -188,8 +188,8 @@ async function proxy(
 
   // Layer 3a: path allow-list
   const head = pathSegments[0] ?? "";
-  if (!ALLOWED_PATHS.has(head)) {
-    return jsonError(`Path not allowed: /${head}`, 400);
+  if (pathSegments.length !== 1 || !ALLOWED_PATHS.has(head)) {
+    return jsonError("Path not allowed", 400);
   }
 
   // Layer 3b: oversize body fast-reject

@@ -3,8 +3,11 @@
 // Handles Quora-specific DOM interactions
 // ============================================
 
-import type { CardStyles, InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type {
+  CardStyles,
+  InjectionPoint,
+  PlatformAdapter,
+} from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import {
   buildGenericCardStyles,
@@ -191,8 +194,6 @@ const QuoraAdapter = createBasicAdapter({
   },
 });
 
-window.KNOWW_QUORA = QuoraAdapter;
-
-registerAdapterWithRetry(QuoraAdapter, 100, 50);
+export const adapter: PlatformAdapter = QuoraAdapter;
 
 export { QuoraAdapter };

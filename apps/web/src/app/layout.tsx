@@ -62,7 +62,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Knoww — Prediction markets for every opinion",
+    default: "Knoww — Polymarket Odds, Markets & Insights",
     template: "%s | Knoww",
   },
   description: DEFAULT_SEO_DESCRIPTION,
@@ -88,7 +88,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     siteName: SITE_NAME,
-    title: "Knoww — Prediction markets for every opinion",
+    title: "Knoww — Polymarket Odds, Markets & Insights",
     description: DEFAULT_SEO_DESCRIPTION,
     images: [
       {
@@ -101,7 +101,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Knoww — Prediction markets for every opinion",
+    title: "Knoww — Polymarket Odds, Markets & Insights",
     description: DEFAULT_SEO_DESCRIPTION,
     images: ["/logo-512x512.png"],
   },
@@ -121,14 +121,27 @@ export default async function RootLayout({
 
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "WebSite",
-    name: SITE_NAME,
-    url: SITE_URL,
-    potentialAction: {
-      "@type": "SearchAction",
-      target: `${SITE_URL}/search?q={search_term_string}`,
-      "query-input": "required name=search_term_string",
-    },
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${SITE_URL}/#organization`,
+        name: SITE_NAME,
+        url: SITE_URL,
+        logo: {
+          "@type": "ImageObject",
+          url: `${SITE_URL}/logo-512x512.png`,
+        },
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}/#website`,
+        name: SITE_NAME,
+        url: SITE_URL,
+        publisher: {
+          "@id": `${SITE_URL}/#organization`,
+        },
+      },
+    ],
   };
 
   return (

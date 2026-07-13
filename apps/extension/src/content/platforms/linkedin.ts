@@ -3,8 +3,11 @@
 // Handles LinkedIn-specific DOM interactions
 // ============================================
 
-import type { CardStyles, InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type {
+  CardStyles,
+  InjectionPoint,
+  PlatformAdapter,
+} from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import { buildGenericCardStyles } from "./helpers";
 
@@ -203,8 +206,6 @@ const LinkedInAdapter = createBasicAdapter({
   },
 });
 
-window.KNOWW_LINKEDIN = LinkedInAdapter;
-
-registerAdapterWithRetry(LinkedInAdapter, 100, 50);
+export const adapter: PlatformAdapter = LinkedInAdapter;
 
 export { LinkedInAdapter };

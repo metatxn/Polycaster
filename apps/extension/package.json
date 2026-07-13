@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm run build:prod",
     "build:dev": "webpack --config webpack.config.cjs --mode development",
-    "build:prod": "webpack --config webpack.config.cjs --mode production && node scripts/assert-production-bundle.mjs",
+    "build:prod": "webpack --config webpack.config.cjs --mode production && node scripts/assert-production-bundle.mjs && node scripts/smoke-esm-modules.mjs",
     "dev": "webpack --config webpack.config.cjs --mode development --watch",
     "clean": "rm -rf dist",
     "test": "pnpm run test:scoring",
@@ -16,7 +16,7 @@
     "lint": "biome check",
     "format": "biome format --write",
     "version:bump": "node scripts/bump-version.mjs",
-    "zip": "rm -f knoww-extension.zip && cd dist && zip -r ../knoww-extension.zip . -x '.*' '*.LICENSE.txt'",
+    "zip": "rm -f knoww-extension.zip && cd dist && zip -r ../knoww-extension.zip . -x '.*' '.stats/*' '*.LICENSE.txt'",
     "release": "node scripts/bump-version.mjs && pnpm run build && pnpm run zip"
   },
   "dependencies": {

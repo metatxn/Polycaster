@@ -1,4 +1,4 @@
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import { extractPostIdFromAttributes } from "./helpers";
 
@@ -29,6 +29,6 @@ const DiscordAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(DiscordAdapter, 100, 50);
+export const adapter: PlatformAdapter = DiscordAdapter;
 
 export { DiscordAdapter };

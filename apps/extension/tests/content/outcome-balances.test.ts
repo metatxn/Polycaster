@@ -6,7 +6,7 @@ import {
   formatBalance,
   hasDisplayPosition,
   positionValueUsd,
-} from "../../src/content/trading/outcome-balances";
+} from "../../src/content/ui/outcome-balances";
 
 test("balanceToNumber round-trips exact 6-decimal share strings", () => {
   assert.equal(balanceToNumber("10.123456"), 10.123456);

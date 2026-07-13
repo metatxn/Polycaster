@@ -114,6 +114,10 @@ Headers
 - `Content-Type: application/json`
 - Auth: agent admin token
 
+Request limits
+
+- JSON body size is capped at `16 KiB`.
+
 Request body
 
 | Field | Type | Required | Validation |
@@ -135,7 +139,7 @@ Request body
 | `eventStartTime` | `string` | No | ISO datetime. |
 | `eventEndTime` | `string` | No | ISO datetime. |
 | `resolutionSource` | `string` | No | URL, max 500 chars. |
-| `newsUrls` | `string[]` | No | URLs, up to 5 items. Defaults to `[]`. |
+| `newsUrls` | `string[]` | No | URLs, up to 5 items, and each host must pass the agent news allowlist. Defaults to `[]`. |
 | `socialNotes` | `string[]` | No | Up to 10 trimmed strings, each `1..1000` chars. Defaults to `[]`. |
 | `active` | `boolean` | No | Defaults to `true`. |
 
@@ -148,6 +152,7 @@ Success `200`
 Errors
 
 - `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid watchlist input" }`
+- `413`: `{ success: false, error: "Request body too large" }`
 - `401`: `{ success: false, error: "Unauthorized" }`
 - `403`: same-origin validation failure for mutating admin routes
 - `429`: shared rate-limit response
@@ -189,6 +194,7 @@ Headers
 
 - `Content-Type: application/json`
 - Auth: agent admin token
+- Optional: `Idempotency-Key: <uuid>` for paper runs; required for live runs
 
 Request body
 
@@ -204,11 +210,19 @@ Request body
 | `portfolio.realizedPnlUsd` | `string` | Yes, if `portfolio` is provided | Signed decimal string. |
 | `executionMode` | `"paper" \| "live"` | No | Optional override. |
 
+Request limits
+
+- JSON body size is capped at `16 KiB`.
+- Live runs require `Idempotency-Key` to be a UUID and reuse that value when retrying the same run intent.
+
 Success `200`
 
 - Schema:
   - `success: true`
   - `run: RunDetail`
+  - Optional `replayed: boolean` when `executionMode` resolves to `"live"`:
+    - `true` when the supplied `Idempotency-Key` matches an existing stored live run and the route returns that prior run without executing again
+    - `false` when a new live run executes successfully
   - `RunDetail` extends the run summary fields and adds `items`, where each item contains:
     - `watchlistItem: AgentWatchlistItem`
     - `evidence: object`
@@ -219,10 +233,19 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid run input" }`
+- `400`: `{ success: false, error: "Invalid JSON payload" }`, `{ success: false, error: "Invalid run input" }`, or `{ success: false, error: "A UUID Idempotency-Key header is required for live runs" }`
+- `409`: `{ success: false, error: "Another agent execution is already in progress" }`, `{ success: false, error: "Idempotency-Key was already used for a different live run" }`, or `{ success: false, error: "The idempotent live run is still in progress" }`
+- `413`: `{ success: false, error: "Request body too large" }`
 - `401`: `{ success: false, error: "Unauthorized" }`
 - `403`: same-origin validation failure for mutating admin routes
+- `429`: shared rate-limit response
 - `500`: `{ success: false, error: "Failed to run paper-trading agent" }`
+- `503`: `{ success: false, error: "Durable live-run storage is unavailable" }`
+
+Rate limiting
+
+- Paper runs: `60` requests/minute/IP
+- Live runs: `5` requests/minute/IP
 
 ### GET `/api/agent/runs/:id`
 
@@ -3804,13 +3827,28 @@ Success `200`
   - `activities: SuspiciousActivity[]`
   - `stats: { totalTradesScanned: number, uniqueTradersFound: number, newAccountsFound: number, suspiciousActivities: number, criticalCount: number, highCount: number, mediumCount: number, repeatOffenders: number }`
   - `lastUpdated: string`
-- `SuspiciousActivity` contains nested `account`, `trade`, `market`, and `analysis` with `suspicionScore`, `confidence`, `factors`, `repeatOffender`, and `marketsInvolved`.
+- `SuspiciousActivity` contains nested `account`, `trade`, `market`, and `analysis`.
+- `analysis` fields:
+  - `suspicionScore: number`
+  - `confidence: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"`
+  - `isContrarian: boolean`
+  - `marketSentiment: "BULLISH" | "BEARISH" | "NEUTRAL"`
+  - `reason: string`
+  - `factors: SuspicionFactor[]`
+  - `repeatOffender: boolean`
+  - `marketsInvolved: number`
+  - `firedArchetypes: ArchetypeId[]`
+  - `archetypes: ArchetypeScore[]`
+  - `sortPriority: number`
+  - `funding: WalletFunding | null`
+  - `owner: SafeOwners | null`
 
 Errors
 
 - `400`: Not used.
 - `401`: Not used.
 - `404`: Not used.
+- `429`: shared rate-limit response
 - `500`: `{ success: false, activities: [], stats: {...zeros}, lastUpdated: string, error: string }`
 
 Rate limiting

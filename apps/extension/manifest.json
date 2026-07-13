@@ -39,6 +39,8 @@
         "icons/icon-256.png",
         "knoww-inline.css",
         "page-bridge.js",
+        "platforms/*.js",
+        "content-trading.js",
         "fonts/*.woff2",
         "*.wasm",
         "*.mjs"

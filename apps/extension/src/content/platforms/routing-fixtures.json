@@ -1,0 +1,534 @@
+[
+  {
+    "host": "x.com",
+    "expect": "twitter"
+  },
+  {
+    "host": "twitter.com",
+    "expect": "twitter"
+  },
+  {
+    "host": "www.twitch.tv",
+    "expect": "twitch"
+  },
+  {
+    "host": "twitch.tv",
+    "expect": "twitch"
+  },
+  {
+    "host": "m.twitch.tv",
+    "expect": "twitch"
+  },
+  {
+    "host": "www.linkedin.com",
+    "expect": "linkedin"
+  },
+  {
+    "host": "www.reddit.com",
+    "expect": "reddit"
+  },
+  {
+    "host": "reddit.com",
+    "expect": "reddit"
+  },
+  {
+    "host": "old.reddit.com",
+    "expect": "reddit"
+  },
+  {
+    "host": "new.reddit.com",
+    "expect": "reddit"
+  },
+  {
+    "host": "www.quora.com",
+    "expect": "quora"
+  },
+  {
+    "host": "quora.com",
+    "expect": "quora"
+  },
+  {
+    "host": "news.ycombinator.com",
+    "expect": "hackernews"
+  },
+  {
+    "host": "stackoverflow.com",
+    "expect": "stackoverflow"
+  },
+  {
+    "host": "sub.stackoverflow.com",
+    "expect": "none"
+  },
+  {
+    "host": "www.producthunt.com",
+    "expect": "producthunt"
+  },
+  {
+    "host": "producthunt.com",
+    "expect": "producthunt"
+  },
+  {
+    "host": "slashdot.org",
+    "expect": "slashdot"
+  },
+  {
+    "host": "sub.slashdot.org",
+    "expect": "none"
+  },
+  {
+    "host": "lemmy.world",
+    "expect": "lemmy"
+  },
+  {
+    "host": "lemmy.ml",
+    "expect": "lemmy"
+  },
+  {
+    "host": "sh.itjust.works",
+    "expect": "lemmy"
+  },
+  {
+    "host": "programming.dev",
+    "expect": "lemmy"
+  },
+  {
+    "host": "beehaw.org",
+    "expect": "lemmy"
+  },
+  {
+    "host": "feddit.org",
+    "expect": "lemmy"
+  },
+  {
+    "host": "lemm.ee",
+    "expect": "lemmy"
+  },
+  {
+    "host": "threads.com",
+    "expect": "threads"
+  },
+  {
+    "host": "www.threads.com",
+    "expect": "threads"
+  },
+  {
+    "host": "threads.net",
+    "expect": "threads"
+  },
+  {
+    "host": "www.threads.net",
+    "expect": "threads"
+  },
+  {
+    "host": "bsky.app",
+    "expect": "bluesky"
+  },
+  {
+    "host": "mastodon.social",
+    "expect": "mastodon"
+  },
+  {
+    "host": "mstdn.social",
+    "expect": "mastodon"
+  },
+  {
+    "host": "fosstodon.org",
+    "expect": "mastodon"
+  },
+  {
+    "host": "hachyderm.io",
+    "expect": "mastodon"
+  },
+  {
+    "host": "mas.to",
+    "expect": "mastodon"
+  },
+  {
+    "host": "infosec.exchange",
+    "expect": "mastodon"
+  },
+  {
+    "host": "discord.com",
+    "expect": "discord"
+  },
+  {
+    "host": "ptb.discord.com",
+    "expect": "discord"
+  },
+  {
+    "host": "canary.discord.com",
+    "expect": "discord"
+  },
+  {
+    "host": "farcaster.xyz",
+    "expect": "farcaster"
+  },
+  {
+    "host": "www.farcaster.xyz",
+    "expect": "farcaster"
+  },
+  {
+    "host": "coinmarketcap.com",
+    "expect": "coinmarketcap"
+  },
+  {
+    "host": "www.coinmarketcap.com",
+    "expect": "coinmarketcap"
+  },
+  {
+    "host": "paragraph.com",
+    "expect": "paragraph"
+  },
+  {
+    "host": "sub.paragraph.com",
+    "expect": "paragraph"
+  },
+  {
+    "host": "coindesk.com",
+    "expect": "coindesk"
+  },
+  {
+    "host": "www.coindesk.com",
+    "expect": "coindesk"
+  },
+  {
+    "host": "cointelegraph.com",
+    "expect": "cointelegraph"
+  },
+  {
+    "host": "www.cointelegraph.com",
+    "expect": "cointelegraph"
+  },
+  {
+    "host": "decrypt.co",
+    "expect": "decrypt"
+  },
+  {
+    "host": "www.decrypt.co",
+    "expect": "decrypt"
+  },
+  {
+    "host": "theblock.co",
+    "expect": "theblock"
+  },
+  {
+    "host": "www.theblock.co",
+    "expect": "theblock"
+  },
+  {
+    "host": "blockworks.com",
+    "expect": "blockworks"
+  },
+  {
+    "host": "www.blockworks.com",
+    "expect": "blockworks"
+  },
+  {
+    "host": "bankless.com",
+    "expect": "bankless"
+  },
+  {
+    "host": "www.bankless.com",
+    "expect": "bankless"
+  },
+  {
+    "host": "bitcoinmagazine.com",
+    "expect": "bitcoinmagazine"
+  },
+  {
+    "host": "www.bitcoinmagazine.com",
+    "expect": "bitcoinmagazine"
+  },
+  {
+    "host": "beincrypto.com",
+    "expect": "beincrypto"
+  },
+  {
+    "host": "www.beincrypto.com",
+    "expect": "beincrypto"
+  },
+  {
+    "host": "unchainedcrypto.com",
+    "expect": "unchained"
+  },
+  {
+    "host": "www.unchainedcrypto.com",
+    "expect": "unchained"
+  },
+  {
+    "host": "cryptopanic.com",
+    "expect": "cryptopanic"
+  },
+  {
+    "host": "www.cryptopanic.com",
+    "expect": "cryptopanic"
+  },
+  {
+    "host": "soylentnews.org",
+    "expect": "extended-community"
+  },
+  {
+    "host": "techcrunch.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.wired.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.theverge.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "arstechnica.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.engadget.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "gizmodo.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "9to5mac.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "9to5google.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.macrumors.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.reuters.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "apnews.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "bbc.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.bbc.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.aljazeera.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.theguardian.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.politico.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.axios.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "ft.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.ft.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.bloomberg.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.marketwatch.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.investing.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "seekingalpha.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "finance.yahoo.com",
+    "expect": "yahoo-finance"
+  },
+  {
+    "host": "www.zerohedge.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "dlnews.com",
+    "expect": "dlnews"
+  },
+  {
+    "host": "www.dlnews.com",
+    "expect": "dlnews"
+  },
+  {
+    "host": "www.nytimes.com",
+    "expect": "nytimes"
+  },
+  {
+    "host": "www.wsj.com",
+    "expect": "wsj"
+  },
+  {
+    "host": "www.washingtonpost.com",
+    "expect": "washington-post"
+  },
+  {
+    "host": "www.cnn.com",
+    "expect": "cnn"
+  },
+  {
+    "host": "edition.cnn.com",
+    "expect": "cnn"
+  },
+  {
+    "host": "www.usatoday.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "time.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.theatlantic.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "sub.indiatimes.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "timesofindialive.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.timesofindialive.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "indianexpress.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "thehindu.com",
+    "expect": "thehindu"
+  },
+  {
+    "host": "www.thehindu.com",
+    "expect": "thehindu"
+  },
+  {
+    "host": "hindustantimes.com",
+    "expect": "hindustan-times"
+  },
+  {
+    "host": "www.hindustantimes.com",
+    "expect": "hindustan-times"
+  },
+  {
+    "host": "cnbc.com",
+    "expect": "cnbc"
+  },
+  {
+    "host": "www.cnbc.com",
+    "expect": "cnbc"
+  },
+  {
+    "host": "www.forbes.com",
+    "expect": "forbes"
+  },
+  {
+    "host": "www.espn.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.espn.in",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.espncricinfo.com",
+    "expect": "espncricinfo"
+  },
+  {
+    "host": "espncricinfo.com",
+    "expect": "espncricinfo"
+  },
+  {
+    "host": "www.skysports.com",
+    "expect": "skysports"
+  },
+  {
+    "host": "www.sportingnews.com",
+    "expect": "sporting-news"
+  },
+  {
+    "host": "www.cbssports.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "foxsports.com",
+    "expect": "fox-sports"
+  },
+  {
+    "host": "www.foxsports.com",
+    "expect": "fox-sports"
+  },
+  {
+    "host": "www.cnet.com",
+    "expect": "cnet"
+  },
+  {
+    "host": "www.zdnet.com",
+    "expect": "zdnet"
+  },
+  {
+    "host": "www.pcworld.com",
+    "expect": "extended-editorial"
+  },
+  {
+    "host": "www.tomshardware.com",
+    "expect": "tomshardware"
+  },
+  {
+    "host": "kalshi.com",
+    "expect": "kalshi-platform"
+  },
+  {
+    "host": "www.kalshi.com",
+    "expect": "kalshi-platform"
+  },
+  {
+    "host": "manifold.markets",
+    "expect": "manifold-markets"
+  },
+  {
+    "host": "www.metaculus.com",
+    "expect": "extended-markets"
+  },
+  {
+    "host": "www.tradingview.com",
+    "expect": "extended-markets"
+  },
+  {
+    "host": "defillama.com",
+    "expect": "extended-markets"
+  },
+  {
+    "host": "unsupported.example",
+    "expect": "none"
+  }
+]

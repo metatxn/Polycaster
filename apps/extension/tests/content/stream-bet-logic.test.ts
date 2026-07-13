@@ -13,7 +13,7 @@ import {
   type StreamHolding,
   sellButtonLabel,
   stepStake,
-} from "../../src/content/trading/stream-bet-logic";
+} from "../../src/content/ui/stream-bet-calc";
 import type { Market } from "../../src/types/market";
 
 test("STREAM_STAKE_STEP is $1", () => {

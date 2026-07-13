@@ -1621,6 +1621,17 @@ function injectMetamaskBridge(): void {
     const nonce = crypto.randomUUID();
     script.dataset.knowwNonce = nonce;
     window.__KNOWW_BRIDGE_NONCE__ = nonce;
+    script.addEventListener(
+      "load",
+      () => {
+        if (window.__KNOWW_BRIDGE_NONCE__ !== nonce) return;
+        window.postMessage(
+          { type: "KNOWW_LIST_WALLETS", _n: nonce },
+          window.location.origin
+        );
+      },
+      { once: true }
+    );
 
     try {
       script.src = chrome.runtime.getURL("page-bridge.js");

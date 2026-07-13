@@ -471,6 +471,8 @@ export interface LiveExecutionAdapterDeps {
     key: string
   ) => Promise<LiveOrderRecord | null>;
   listLiveOrders?: () => Promise<LiveOrderRecord[]>;
+  hasUnresolvedLiveOrder?: () => Promise<boolean>;
+  assertExecutionLock?: () => Promise<void>;
   getClobCredential?: (
     key: string
   ) => Promise<AgentClobCredentialRecord | null>;
@@ -721,10 +723,16 @@ function existingOrderToFill(
       shares: shares.gt(0)
         ? shares.toDecimalPlaces(6).toString()
         : notional.div(existing.price).toDecimalPlaces(6).toString(),
-      cashAfterUsd: new Decimal(request.portfolio.cashUsd)
-        .sub(notional)
-        .toDecimalPlaces(6)
-        .toString(),
+      cashAfterUsd:
+        existing.side === "SELL"
+          ? new Decimal(request.portfolio.cashUsd)
+              .add(notional)
+              .toDecimalPlaces(6)
+              .toString()
+          : new Decimal(request.portfolio.cashUsd)
+              .sub(notional)
+              .toDecimalPlaces(6)
+              .toString(),
       reason: `idempotent-replay:${existing.status}`,
       createdAt: existing.createdAt,
     };
@@ -803,6 +811,12 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
     const cappedSize = Decimal.min(requested, liveCap);
 
     let signerAddress: string;
+    let signedOrderHash: string | null = null;
+    let submittedAt: string | null = null;
+    let postedOrderId: string | null = null;
+    let submissionAttempted = false;
+    let submissionResponseReceived = false;
+    let submissionAccepted = false;
     const price = new Decimal(request.price);
     const shares =
       request.reduceOnly && request.action === TRADING_SIDES.SELL
@@ -972,7 +986,8 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
       );
 
       const signedOrderJson = JSON.stringify(signedOrder);
-      const signedOrderHash = await sha256Hex(signedOrderJson);
+      signedOrderHash = await sha256Hex(signedOrderJson);
+      submittedAt = config.dryRun ? null : new Date().toISOString();
       await this.deps.upsertLiveOrder({
         idempotencyKey,
         runId: request.runId,
@@ -984,7 +999,7 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         signedOrderHash,
         orderId: null,
         status: config.dryRun ? "DRY_RUN" : "POSTED",
-        submittedAt: config.dryRun ? null : new Date().toISOString(),
+        submittedAt,
         filledAt: null,
         filledNotionalUsd: "0",
         filledShares: "0",
@@ -1008,9 +1023,16 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         );
       }
 
+      await this.deps.assertExecutionLock?.();
+      submissionAttempted = true;
       const response = await client.postOrder(signedOrder, config.orderType);
+      submissionResponseReceived = true;
       assertClobPostOrderSuccess(response);
-      const orderId = parseOrderId(response);
+      submissionAccepted = true;
+      postedOrderId = parseOrderId(response);
+      if (!postedOrderId) {
+        throw new Error("CLOB response missing order id");
+      }
       const execution = parseClobExecution({
         response,
         requestedNotional: notional,
@@ -1032,7 +1054,7 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         requestedSizeUsd: notional.toDecimalPlaces(6).toString(),
         price: request.price,
         signedOrderHash,
-        orderId,
+        orderId: postedOrderId,
         status: execution.status,
         submittedAt: syncedAt,
         filledAt:
@@ -1058,7 +1080,7 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         return blockedFill(
           request,
           `live-${config.orderType.toLowerCase()}:order-${execution.status.toLowerCase()}${
-            orderId ? `:${orderId}` : ""
+            postedOrderId ? `:${postedOrderId}` : ""
           }`
         );
       }
@@ -1075,34 +1097,53 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         price: execution.averageFillPrice ?? request.price,
         reason: `live-${config.orderType.toLowerCase()}:${
           execution.status === "PARTIALLY_FILLED" ? "partial" : "submitted"
-        }${orderId ? `:${orderId}` : ""}`,
+        }${postedOrderId ? `:${postedOrderId}` : ""}`,
       });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "live execution failed";
-      log.error("live.submit.failed", { idempotencyKey, error });
-      await this.deps.upsertLiveOrder({
+      const outcomeUnknown =
+        submissionAttempted &&
+        (!submissionResponseReceived || submissionAccepted);
+      log.error(outcomeUnknown ? "live.submit.unknown" : "live.submit.failed", {
         idempotencyKey,
-        runId: request.runId,
-        watchlistItemId: request.watchlistItemId,
-        tokenId: request.tokenId,
-        side: request.action,
-        requestedSizeUsd: notional.toDecimalPlaces(6).toString(),
-        price: request.price,
-        signedOrderHash: null,
-        orderId: null,
-        status: "FAILED",
-        submittedAt: null,
-        filledAt: null,
-        filledNotionalUsd: "0",
-        filledShares: "0",
-        averageFillPrice: null,
-        lastSyncedAt: null,
-        balanceSnapshotJson: null,
-        dryRun: config.dryRun,
-        error: message,
+        error,
       });
-      return blockedFill(request, `live execution failed: ${message}`);
+      try {
+        await this.deps.upsertLiveOrder({
+          idempotencyKey,
+          runId: request.runId,
+          watchlistItemId: request.watchlistItemId,
+          tokenId: request.tokenId,
+          side: request.action,
+          requestedSizeUsd: notional.toDecimalPlaces(6).toString(),
+          price: request.price,
+          signedOrderHash,
+          orderId: postedOrderId,
+          status: outcomeUnknown ? "UNKNOWN" : "FAILED",
+          submittedAt: submissionAttempted ? submittedAt : null,
+          filledAt: null,
+          filledNotionalUsd: "0",
+          filledShares: "0",
+          averageFillPrice: null,
+          lastSyncedAt: null,
+          balanceSnapshotJson: null,
+          dryRun: config.dryRun,
+          error: message,
+        });
+      } catch (auditError) {
+        // If persistence is unavailable after submission, leave the earlier
+        // POSTED row intact instead of attempting a destructive replacement.
+        log.error("live.audit_update.failed", {
+          idempotencyKey,
+          auditError,
+          outcomeUnknown,
+        });
+      }
+      return blockedFill(
+        request,
+        `${outcomeUnknown ? "live execution outcome unknown" : "live execution failed"}: ${message}`
+      );
     }
   }
 
@@ -1233,13 +1274,25 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
 
     if (input.config.dryRun || !this.deps.listLiveOrders) return null;
 
+    const allLiveOrders = await this.deps.listLiveOrders();
+    const hasUnresolvedOrder = this.deps.hasUnresolvedLiveOrder
+      ? await this.deps.hasUnresolvedLiveOrder()
+      : allLiveOrders.some(
+          (order) =>
+            !order.dryRun &&
+            (order.status === "POSTED" || order.status === "UNKNOWN")
+        );
+    if (hasUnresolvedOrder) {
+      return "live execution blocked: an earlier order has an unknown outcome or is pending reconciliation";
+    }
+
     const [dailyOrderCap, dailyNotionalCap] = [
       configuredPositiveInteger("AGENT_LIVE_DAILY_MAX_ORDER_COUNT"),
       configuredPositiveDecimal("AGENT_LIVE_DAILY_MAX_NOTIONAL_USD"),
     ];
     if (!dailyOrderCap && !dailyNotionalCap) return null;
 
-    const orders = (await this.deps.listLiveOrders()).filter(
+    const orders = allLiveOrders.filter(
       (order) =>
         !order.dryRun &&
         isTodayIso(order.submittedAt ?? order.createdAt) &&

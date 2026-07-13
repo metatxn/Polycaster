@@ -22,7 +22,7 @@
     "agent:d1:migrate:remote": "wrangler d1 migrations apply knoww-agent-paper --remote --config wrangler.jsonc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && pnpm run test:node",
-    "test:node": "node --test $(find src -name '*.test.mjs')",
+    "test:node": "node --experimental-strip-types --test $(find src -name '*.test.mjs')",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test"

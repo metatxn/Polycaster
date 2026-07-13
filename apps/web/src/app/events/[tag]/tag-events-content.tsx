@@ -163,8 +163,6 @@ export function TagEventsContent({
       <ChromeHeader />
 
       <main className="relative z-10 px-3 sm:px-4 md:px-6 lg:px-8 pt-6 pb-8">
-        <h1 className="sr-only">{tagLabel} markets</h1>
-
         <ProductHero
           breadcrumbs={[
             { label: "Markets", href: "/markets" },
@@ -193,6 +191,18 @@ export function TagEventsContent({
             </>
           }
         />
+
+        <section className="mb-5 border-b border-border/40 pb-5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+            {tagLabel} Polymarket prediction markets
+          </h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            {initialTag?.description ||
+              `Follow active ${tagLabel.toLowerCase()} events and market outcomes.`}{" "}
+            Compare live Polymarket odds, volume, and outcome prices as trader
+            expectations change.
+          </p>
+        </section>
 
         <EventFilterBar showTags={false} />
 

@@ -3,8 +3,11 @@
 // Handles Reddit-specific DOM interactions
 // ============================================
 
-import type { CardStyles, InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type {
+  CardStyles,
+  InjectionPoint,
+  PlatformAdapter,
+} from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import { buildGenericCardStyles } from "./helpers";
 import { hasInjectedCardSibling } from "./story-adapter-helpers";
@@ -296,8 +299,6 @@ const RedditAdapter = createBasicAdapter({
   },
 });
 
-window.KNOWW_REDDIT = RedditAdapter;
-
-registerAdapterWithRetry(RedditAdapter, 100, 50);
+export const adapter: PlatformAdapter = RedditAdapter;
 
 export { RedditAdapter };

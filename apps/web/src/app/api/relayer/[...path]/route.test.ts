@@ -24,6 +24,39 @@ afterEach(() => {
 });
 
 describe("POST /api/relayer/[...path]", () => {
+  it("rejects extra path segments before attaching relayer credentials", async () => {
+    process.env.POLY_RELAYER_API_KEY = "relayer-key";
+    process.env.POLY_RELAYER_API_KEY_ADDRESS =
+      "0x0000000000000000000000000000000000000001";
+
+    const upstreamFetch = vi.fn(async () => {
+      return new Response(JSON.stringify({ transactionID: "tx-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", upstreamFetch);
+
+    const req = new NextRequest(
+      "https://knoww.app/api/relayer/submit/anything",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          type: "SAFE",
+          transactions: [],
+        }),
+      }
+    );
+
+    const res = await POST(req, {
+      params: Promise.resolve({ path: ["submit", "anything"] }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Path not allowed");
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
   it("forwards the configured builder code to Polymarket relayer submit requests", async () => {
     process.env.POLY_RELAYER_API_KEY = "relayer-key";
     process.env.POLY_RELAYER_API_KEY_ADDRESS =

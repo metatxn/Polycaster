@@ -240,7 +240,7 @@ function FieldTile({
         </span>
         <span
           className="font-mono text-[10px] tabular-nums shrink-0"
-          style={{ color: "var(--kwm-ink-dim)", letterSpacing: "0.10em" }}
+          style={{ color: "var(--kwm-ink-2)", letterSpacing: "0.10em" }}
         >
           #{rank}
         </span>
@@ -319,7 +319,7 @@ function FieldTile({
         }}
       >
         <span style={{ color: "var(--kwm-ink-2)" }}>{odds} payout</span>
-        <span style={{ color: "var(--kwm-ink-3)" }}>{vol}</span>
+        <span style={{ color: "var(--kwm-ink-2)" }}>{vol}</span>
       </div>
     </button>
   );
@@ -374,7 +374,7 @@ export function FieldTiles({
         >
           §
         </span>
-        <h3
+        <h2
           className="m-0 font-mono"
           style={{
             color: "var(--kwm-ink-2)",
@@ -385,7 +385,7 @@ export function FieldTiles({
           }}
         >
           The Field
-        </h3>
+        </h2>
         <span
           className="flex-1 h-px"
           style={{ background: "var(--kwm-hl)" }}

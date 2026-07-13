@@ -7,9 +7,9 @@ import type {
   CardStyles,
   InjectionPoint,
   MarketLinkHint,
+  PlatformAdapter,
   ThemeStyles,
 } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
 import { createBasicAdapter } from "./basic-adapter";
 
 const POLYMARKET_HOST_RE = /(^|\.)polymarket\.com$/i;
@@ -351,9 +351,7 @@ const TwitterAdapter = createBasicAdapter({
   findSidebarInjectionPoint: findTwitterSidebarInjectionPoint,
 });
 
-window.KNOWW_TWITTER = TwitterAdapter;
-
-registerAdapterWithRetry(TwitterAdapter, 100, 50);
+export const adapter: PlatformAdapter = TwitterAdapter;
 
 export {
   extractTwitterMarketLinkHints,

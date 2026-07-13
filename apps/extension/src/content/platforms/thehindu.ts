@@ -1,5 +1,4 @@
-import type { InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { InjectionPoint, PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import { combineTextParts, normalizeText } from "./helpers";
 import {
@@ -322,6 +321,6 @@ const TheHinduAdapter = createBasicAdapter({
   hasInjectedCard: hasTheHinduInjectedCard,
 });
 
-registerAdapterWithRetry(TheHinduAdapter, 100, 50);
+export const adapter: PlatformAdapter = TheHinduAdapter;
 
 export { TheHinduAdapter };

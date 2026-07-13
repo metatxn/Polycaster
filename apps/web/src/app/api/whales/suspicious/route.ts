@@ -1,5 +1,4 @@
 import { createLogger } from "@knoww/logger";
-import { fetchClobPrice } from "@knoww/shared-types/clob";
 import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -23,6 +22,10 @@ import {
 } from "@/lib/insider/archetypes/timing-cluster";
 import { categorize } from "@/lib/insider/category";
 import {
+  loadCurrentClobPrices,
+  resolveReferencePrice,
+} from "@/lib/insider/clob-price-batch-loader";
+import {
   type ArchetypeId,
   type ArchetypeScore,
   type SuspicionFactor,
@@ -34,6 +37,10 @@ import {
 } from "@/lib/insider/funding-source";
 import { getCachedKB } from "@/lib/insider/market-resolutions";
 import { getSafeOwnersBatch, type SafeOwners } from "@/lib/insider/safe-owner";
+import {
+  type PriceIndependentTradeContext,
+  planSuspiciousPriceCandidates,
+} from "@/lib/insider/suspicious-price-plan";
 import { getCachedWalletEdgesBatch } from "@/lib/insider/wallet-edge-cache";
 import { getTraderHistoriesBatch } from "@/lib/trader-history-cache";
 
@@ -144,10 +151,6 @@ interface TradeData {
   transactionHash: string;
 }
 
-interface PriceResponse {
-  price?: number;
-}
-
 function tradeUsdValueDecimal(
   trade: Pick<TradeData, "size" | "price">
 ): Decimal {
@@ -191,17 +194,28 @@ async function fetchRecentTrades(limit = 500): Promise<TradeData[]> {
   }
 }
 
-async function fetchCurrentPrice(tokenId: string): Promise<number | null> {
-  try {
-    const data = await fetchClobPrice<PriceResponse>(tokenId, {
-      requestInit: { next: { revalidate: 30 } },
-    });
-    return data?.price ?? null;
-  } catch {
-    return null;
-  }
-}
-
+/**
+ * @openapi
+ * /api/whales/suspicious:
+ *   get:
+ *     summary: Fetch /api/whales/suspicious.
+ *     tags: [Whales]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   const rateLimitResponse = checkRateLimit(request, {
     uniqueTokenPerInterval: 10,
@@ -287,25 +301,7 @@ export async function GET(request: NextRequest) {
       walletMarketMap.set(trade.proxyWallet, existing);
     }
 
-    // Step 6: Fetch current prices for unique tokens (drives the
-    // account-loader contrarian factor and is surfaced on the UI).
-    const tokenIds = [...new Set(largeTrades.map((t) => t.asset))];
-    const priceCache = new Map<string, number | null>();
-
-    const batchSize = 10;
-    for (let i = 0; i < tokenIds.length; i += batchSize) {
-      const batch = tokenIds.slice(i, i + batchSize);
-      const pricePromises = batch.map(async (tokenId) => {
-        const price = await fetchCurrentPrice(tokenId);
-        return { tokenId, price };
-      });
-      const results = await Promise.all(pricePromises);
-      for (const result of results) {
-        priceCache.set(result.tokenId, result.price);
-      }
-    }
-
-    // Step 7a: Build per-(wallet, market, side) accumulation contexts
+    // Step 6a: Build per-(wallet, market, side) accumulation contexts
     // from the largeTrades window. Every trade with ≥3 same-direction
     // companions from the same wallet on the same market gets a
     // non-null size-hider context.
@@ -343,7 +339,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Step 7b: Build per-(market, side) timing clusters. Each cluster
+    // Step 6b: Build per-(market, side) timing clusters. Each cluster
     // is attributed to every trade inside it.
     const marketSideKey = (condId: string, side: string): string =>
       `${condId}|${side}`;
@@ -385,7 +381,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Step 7c: Phase 3 specialist archetype — needs the resolution KB
+    // Step 6c: Phase 3 specialist archetype — needs the resolution KB
     // + each wallet's trade history. The KB is module-cached with a
     // background refresh, so the first cold-start request gets null
     // here and serves Phase 2 only. Subsequent requests (after the
@@ -396,58 +392,79 @@ export async function GET(request: NextRequest) {
       ? await getCachedWalletEdgesBatch(uniqueTraders, kb, 6)
       : new Map();
 
-    // Step 7d: Analyze trades. Run every trade (not just new-account
-    // trades) through the ensemble — size-hider and timing-cluster are
-    // age-blind so we must not pre-filter on account age.
-    const suspiciousActivities: SuspiciousActivity[] = [];
-
+    // Step 7: Build the complete price-independent scoring context first.
+    // This lets us prove which trades cannot meet the threshold even under
+    // the maximum possible contrarian contribution before fetching prices.
+    const tradeContexts = new Map<TradeData, PriceIndependentTradeContext>();
     for (const trade of largeTrades) {
       const history = traderHistories.get(trade.proxyWallet);
       if (!history) continue;
 
-      const currentPrice = priceCache.get(trade.asset);
-      const usdValue = tradeUsdValue(trade);
-      const referencePrice = currentPrice ?? trade.price;
-
       const walletMarkets = walletMarketMap.get(trade.proxyWallet);
       const marketsInvolved = walletMarkets?.size ?? 1;
       const isRepeatOffender = marketsInvolved >= 2;
-
       const sizeHiderCtx = accumulators.get(
         accumulatorKey(trade.proxyWallet, trade.conditionId, trade.side)
       );
       const clusterCtx = tradeCluster.get(trade);
-
-      // Phase 3 categorySpecialist input — built from the cached
-      // wallet-edge for this wallet + the current trade's category.
-      // Null when the KB wasn't warm this request (cold start) or
-      // this wallet has zero resolved historical trades.
       const edge = walletEdges.get(trade.proxyWallet.toLowerCase());
       const tradeCategory = categorize(trade.slug);
       const categorySpecialist =
         edge && edge.scoredTrades > 0 ? { edge, tradeCategory } : null;
 
-      const ensemble = scoreTrade({
+      tradeContexts.set(trade, {
         accountLoader: {
           accountAgeHours: history.accountAgeHours,
           totalTrades: history.totalTrades,
           tradeSide: trade.side,
-          tradeUsdValue: usdValue,
-          referencePrice,
+          tradeUsdValue: tradeUsdValue(trade),
           isRepeatOffender,
           marketsInvolved,
         },
         sizeHider: sizeHiderCtx ?? null,
         timingCluster: clusterCtx ?? null,
         categorySpecialist,
-        // Phase 4 funding-cluster is scored in a post-pass after we
-        // identify specialist-firing wallets — keeps Alchemy calls
-        // bounded to the tiny specialist subset instead of every
-        // unique trader.
         fundingCluster: null,
-        // Phase 5 owner-cluster is likewise scored in a post-pass
-        // (requires knowing the full flagged cohort).
         ownerCluster: null,
+      });
+    }
+
+    // Step 8: Batch-fetch only prices that can affect qualification. Missing,
+    // malformed, and one-sided books preserve the existing trade-price fallback.
+    const priceCandidateIds = planSuspiciousPriceCandidates(
+      [...tradeContexts].map(([trade, context]) => ({
+        assetId: trade.asset,
+        context,
+      })),
+      minSuspicionScore
+    );
+    const priceCache = await loadCurrentClobPrices(priceCandidateIds);
+
+    // Step 9: Analyze trades. Run every trade (not just new-account
+    // trades) through the ensemble — size-hider and timing-cluster are
+    // age-blind so we must not pre-filter on account age.
+    const suspiciousActivities: SuspiciousActivity[] = [];
+
+    for (const trade of largeTrades) {
+      const context = tradeContexts.get(trade);
+      if (!context) continue;
+      const history = traderHistories.get(trade.proxyWallet);
+      if (!history) continue;
+
+      const usdValue = tradeUsdValue(trade);
+      const referencePrice = resolveReferencePrice(
+        priceCache,
+        trade.asset,
+        trade.price
+      );
+      const { isRepeatOffender, marketsInvolved } = context.accountLoader;
+
+      const ensemble = scoreTrade({
+        ...context,
+        accountLoader: {
+          ...context.accountLoader,
+          referencePrice,
+        },
       });
 
       // Backward-compat filter: the legacy `minSuspicionScore` param

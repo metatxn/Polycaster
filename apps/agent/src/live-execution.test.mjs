@@ -41,6 +41,7 @@ function createDeps(runtimeOverrides = {}, options = {}) {
   }
   const credentialRecords = new Map();
   const calls = {
+    createOrder: 0,
     deriveApiCreds: 0,
     postOrder: 0,
     syncBalanceAllowance: 0,
@@ -52,9 +53,13 @@ function createDeps(runtimeOverrides = {}, options = {}) {
     updateBalanceAllowance: async () => {
       calls.syncBalanceAllowance += 1;
     },
-    createOrder: async (order) => ({ kind: "signed-order", order }),
+    createOrder: async (order) => {
+      calls.createOrder += 1;
+      return { kind: "signed-order", order };
+    },
     postOrder: async () => {
       calls.postOrder += 1;
+      if (options.postOrderError) throw options.postOrderError;
       return (
         options.postOrderResponse ?? {
           success: true,
@@ -164,6 +169,104 @@ test("posts a live order when real mode is explicitly enabled", async () => {
   assert.equal(calls.deriveApiCreds, 1);
   assert.equal(calls.syncBalanceAllowance > 0, true);
   assert.equal(calls.sendTransactions, 0);
+});
+
+test("adds SELL proceeds when replaying an idempotent filled order", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const createdAt = "2026-05-14T00:00:00.000Z";
+  const { deps, calls } = createDeps(
+    {},
+    {
+      liveOrders: [
+        {
+          idempotencyKey: "run-1:watch-1:SELL",
+          runId: "run-1",
+          watchlistItemId: "watch-1",
+          tokenId: "token-1",
+          side: "SELL",
+          requestedSizeUsd: "5",
+          price: "0.5",
+          signedOrderHash: "a".repeat(64),
+          orderId: "order-sell",
+          status: "FILLED",
+          submittedAt: createdAt,
+          filledAt: createdAt,
+          createdAt,
+          filledNotionalUsd: "5",
+          filledShares: "10",
+          averageFillPrice: "0.5",
+          lastSyncedAt: createdAt,
+          balanceSnapshotJson: null,
+          dryRun: false,
+          error: null,
+        },
+      ],
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(
+    baseRequest({ action: "SELL", portfolio: { ...baseRequest().portfolio } })
+  );
+
+  assert.equal(fill.status, "FILLED");
+  assert.equal(fill.cashAfterUsd, "1005");
+  assert.equal(calls.createOrder, 0);
+  assert.equal(calls.postOrder, 0);
+});
+
+test("continues subtracting BUY cost when replaying an idempotent filled order", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const createdAt = "2026-05-14T00:00:00.000Z";
+  const { deps, calls } = createDeps(
+    {},
+    {
+      liveOrders: [
+        {
+          idempotencyKey: "run-1:watch-1:BUY",
+          runId: "run-1",
+          watchlistItemId: "watch-1",
+          tokenId: "token-1",
+          side: "BUY",
+          requestedSizeUsd: "5",
+          price: "0.5",
+          signedOrderHash: "b".repeat(64),
+          orderId: "order-buy",
+          status: "FILLED",
+          submittedAt: createdAt,
+          filledAt: createdAt,
+          createdAt,
+          filledNotionalUsd: "5",
+          filledShares: "10",
+          averageFillPrice: "0.5",
+          lastSyncedAt: createdAt,
+          balanceSnapshotJson: null,
+          dryRun: false,
+          error: null,
+        },
+      ],
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+
+  assert.equal(fill.status, "FILLED");
+  assert.equal(fill.cashAfterUsd, "995");
+  assert.equal(calls.createOrder, 0);
+  assert.equal(calls.postOrder, 0);
 });
 
 test("blocks real live execution for unsupported external funders", async () => {
@@ -310,6 +413,152 @@ test("keeps unfilled CLOB orders open instead of treating post success as filled
   assert.equal(record.filledNotionalUsd, "0");
   assert.equal(record.filledShares, "0");
   assert.equal(calls.postOrder, 1);
+});
+
+test("preserves the signed audit identity for reconciliation when CLOB submission is ambiguous", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps, calls } = createDeps(
+    {},
+    {
+      // A timeout does not prove that the exchange rejected the order: the
+      // request may have crossed the network boundary before the response was
+      // lost. The persisted audit row must therefore remain reconcilable.
+      postOrderError: new Error("CLOB response timed out after submission"),
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const record = await deps.getLiveOrderByIdempotencyKey("run-1:watch-1:BUY");
+
+  assert.equal(fill.status, "BLOCKED");
+  assert.equal(calls.postOrder, 1);
+  assert.notEqual(record, null);
+  assert.match(record.signedOrderHash, /^[a-f0-9]{64}$/);
+  assert.notEqual(record.submittedAt, null);
+  assert.match(record.status, /^(UNKNOWN|PENDING_RECONCILIATION)$/);
+  assert.notEqual(record.status, "FAILED");
+  assert.match(record.error ?? "", /timed out/i);
+});
+
+test("treats a malformed CLOB success response as an unknown outcome", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps, calls } = createDeps({}, { postOrderResponse: {} });
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const record = await deps.getLiveOrderByIdempotencyKey("run-1:watch-1:BUY");
+
+  assert.equal(fill.status, "BLOCKED");
+  assert.equal(calls.postOrder, 1);
+  assert.equal(record.status, "UNKNOWN");
+  assert.match(record.error ?? "", /missing order id/i);
+});
+
+test("blocks new live submissions while an earlier order outcome is unknown", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const submittedAt = new Date().toISOString();
+  const { deps, calls } = createDeps(
+    {},
+    {
+      liveOrders: [
+        {
+          idempotencyKey: "previous:watch-1:BUY",
+          runId: "previous",
+          watchlistItemId: "watch-1",
+          tokenId: "token-1",
+          side: "BUY",
+          requestedSizeUsd: "5",
+          price: "0.50",
+          signedOrderHash: "a".repeat(64),
+          orderId: null,
+          status: "UNKNOWN",
+          submittedAt,
+          filledAt: null,
+          createdAt: submittedAt,
+          filledNotionalUsd: "0",
+          filledShares: "0",
+          averageFillPrice: null,
+          lastSyncedAt: null,
+          balanceSnapshotJson: null,
+          dryRun: false,
+          error: "response timed out",
+        },
+      ],
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest({ runId: "run-2" }));
+
+  assert.equal(fill.status, "BLOCKED");
+  assert.match(fill.reason ?? "", /unknown.*reconcil/i);
+  assert.equal(calls.postOrder, 0);
+});
+
+test("blocks new live submissions when a post-boundary audit row remains posted", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const submittedAt = new Date().toISOString();
+  const { deps, calls } = createDeps(
+    {},
+    {
+      liveOrders: [
+        {
+          idempotencyKey: "previous:watch-1:BUY",
+          runId: "previous",
+          watchlistItemId: "watch-1",
+          tokenId: "token-1",
+          side: "BUY",
+          requestedSizeUsd: "5",
+          price: "0.50",
+          signedOrderHash: "a".repeat(64),
+          orderId: null,
+          status: "POSTED",
+          submittedAt,
+          filledAt: null,
+          createdAt: submittedAt,
+          filledNotionalUsd: "0",
+          filledShares: "0",
+          averageFillPrice: null,
+          lastSyncedAt: null,
+          balanceSnapshotJson: null,
+          dryRun: false,
+          error: null,
+        },
+      ],
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest({ runId: "run-2" }));
+
+  assert.equal(fill.status, "BLOCKED");
+  assert.match(fill.reason ?? "", /pending.*reconcil/i);
+  assert.equal(calls.postOrder, 0);
 });
 
 test("decrypts cached CLOB credentials with a previous key and re-encrypts with the active version", async () => {

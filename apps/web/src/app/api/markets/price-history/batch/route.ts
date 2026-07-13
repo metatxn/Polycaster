@@ -3,6 +3,7 @@ import { fetchClobPriceHistory } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import { getCacheHeaders } from "@/lib/cache-headers";
 
 const log = createLogger("api.markets.price-history.batch");
@@ -25,6 +26,7 @@ const MAX_TOKENS_PER_BATCH = 40;
 const DEFAULT_FIDELITY = 60;
 const MAX_FIDELITY_MINUTES = 24 * 60;
 const MAX_START_TS = 4_102_444_800; // 2100-01-01T00:00:00Z
+const MAX_REQUEST_BODY_BYTES = 8 * 1024;
 
 const optionalInteger = (min: number, max: number) =>
   z.preprocess((value) => {
@@ -122,18 +124,21 @@ export async function POST(request: NextRequest) {
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
-    let json: unknown;
-    try {
-      json = await request.json();
-    } catch (error) {
-      log.warn("request.invalid_json", { error });
+    const jsonBody = await readJsonBodyWithLimit(
+      request,
+      MAX_REQUEST_BODY_BYTES
+    );
+    if (!jsonBody.ok) {
+      if (jsonBody.status === 400) {
+        log.warn("request.invalid_json");
+      }
       return NextResponse.json(
-        { success: false, error: "Invalid JSON body", histories: [] },
-        { status: 400 }
+        { success: false, error: jsonBody.error, histories: [] },
+        { status: jsonBody.status }
       );
     }
 
-    const parsed = batchRequestSchema.safeParse(json);
+    const parsed = batchRequestSchema.safeParse(jsonBody.body);
     if (!parsed.success) {
       return NextResponse.json(
         {

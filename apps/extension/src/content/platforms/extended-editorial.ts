@@ -1,4 +1,4 @@
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import {
   extractFinanceEditorialPostText,
@@ -180,6 +180,6 @@ const ExtendedEditorialAdapter = createBasicAdapter({
   hasInjectedCard: hasEditorialInjectedCard,
 });
 
-registerAdapterWithRetry(ExtendedEditorialAdapter, 100, 50);
+export const adapter: PlatformAdapter = ExtendedEditorialAdapter;
 
 export { ExtendedEditorialAdapter };

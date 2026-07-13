@@ -46,7 +46,7 @@ function readSource(path: string): string {
 }
 
 function streamBetSource(): string {
-  const src = readSource("src/content/ui.ts");
+  const src = readSource("src/content/ui/stream-bet-ui.ts");
   const start = src.indexOf("function buildStreamBetting");
   assert.ok(start !== -1, "expected buildStreamBetting to exist");
   const next = src.indexOf("\nfunction ", start + 1);
@@ -54,10 +54,10 @@ function streamBetSource(): string {
 }
 
 test("buildStreamBetting imports the pure stream-bet logic", () => {
-  const src = readSource("src/content/ui.ts");
+  const src = readSource("src/content/ui/stream-bet-ui.ts");
   assert.ok(
-    /from\s+"\.\/trading\/stream-bet-logic"/.test(src),
-    "expected ui.ts to import stream-bet-logic"
+    /from\s+"\.\/stream-bet-calc"/.test(src),
+    "expected stream-bet-ui.ts to import stream-bet-calc"
   );
 });
 
@@ -88,7 +88,7 @@ test("the old chips renderer is gone", () => {
 });
 
 test("stream rows render the collapsed pill with the market title", () => {
-  const src = readSource("src/content/ui.ts");
+  const src = readSource("src/content/ui/notifications.ts");
   assert.ok(src.includes("knoww-stream-pill-title"), "expected the pill title");
   assert.ok(
     /pillTitle\.textContent = streamShortTitle\(market\)/.test(src),
@@ -121,5 +121,18 @@ test("stream stake amount is directly editable", () => {
   assert.ok(
     fn.includes("knoww-stream-step-input"),
     "expected the input to use the stream step input class"
+  );
+});
+
+test("stream trade CTA does not interpolate outcome names into innerHTML", () => {
+  const fn = streamBetSource();
+  assert.equal(
+    /innerHTML\s*=\s*`[^`]*\$\{opt\.name\}/.test(fn),
+    false,
+    "expected external outcome names to be rendered as text, not HTML"
+  );
+  assert.ok(
+    /textContent\s*=\s*`\$\{opt\.name\} · \$\{pct\}¢`/.test(fn),
+    "expected stream outcome label to be assigned through textContent"
   );
 });

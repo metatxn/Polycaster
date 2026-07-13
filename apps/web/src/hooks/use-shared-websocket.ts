@@ -168,6 +168,9 @@ export function useOrderBookWebSocket(assetIds: string[]) {
   const handleLastTradePriceEvent = useOrderBookStore(
     (s) => s.handleLastTradePriceEvent
   );
+  const handleTickSizeChangeEvent = useOrderBookStore(
+    (s) => s.handleTickSizeChangeEvent
+  );
   const clearOrderBook = useOrderBookStore((s) => s.clearOrderBook);
   const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -176,6 +179,7 @@ export function useOrderBookWebSocket(assetIds: string[]) {
     onBook: handleBookEvent,
     onPriceChange: handlePriceChangeEvent,
     onLastTradePrice: handleLastTradePriceEvent,
+    onTickSizeChange: handleTickSizeChangeEvent,
   });
 
   // Stabilize the asset list for cleanup (same pattern as useSharedWebSocket)

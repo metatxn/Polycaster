@@ -2,10 +2,20 @@ import type { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/auth/extension-session", () => ({
-  requireExtensionSession: vi.fn(async () => ({
-    response: null,
-    session: { sub: "0xabc" },
-  })),
+  requireExtensionSession: vi.fn(async (request: NextRequest) =>
+    request.headers.get("authorization") === "Bearer valid-session"
+      ? {
+          response: null,
+          session: { sub: "0xabc" },
+        }
+      : {
+          response: new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+          session: null,
+        }
+  ),
 }));
 
 import { requireExtensionSession } from "@/lib/auth/extension-session";
@@ -20,25 +30,30 @@ describe("verifyExtensionAccessPreAuth", () => {
     expect(process.env.NODE_ENV).not.toBe("development");
   });
 
-  it("returns session trust for Bearer-authenticated requests", async () => {
+  it("accepts Bearer-authenticated requests with the required scope", async () => {
     const result = await verifyExtensionAccessPreAuth(
-      makeRequest({ authorization: "Bearer token123" }),
+      makeRequest({ authorization: "Bearer valid-session" }),
       "ai:extract"
     );
-    expect(result.trust).toBe("session");
     expect(result.response).toBeNull();
-    expect(requireExtensionSession).toHaveBeenCalled();
+    expect(requireExtensionSession).toHaveBeenCalledWith(
+      expect.anything(),
+      "ai:extract"
+    );
   });
 
-  it("returns low-trust for allowed-origin requests without a Bearer token", async () => {
+  it("rejects allowed-origin requests without a signed session", async () => {
     const result = await verifyExtensionAccessPreAuth(
       makeRequest({
         origin: "chrome-extension://ialnajflhafkmfnglapjaegjpbdifcmc",
       }),
       "ai:extract"
     );
-    expect(result.trust).toBe("low-trust");
-    expect(result.response).toBeNull();
+    expect(result.response?.status).toBe(401);
+    expect(requireExtensionSession).toHaveBeenCalledWith(
+      expect.anything(),
+      "ai:extract"
+    );
   });
 
   it("rejects requests with neither Bearer nor allowed origin", async () => {
@@ -46,6 +61,6 @@ describe("verifyExtensionAccessPreAuth", () => {
       makeRequest({}),
       "ai:extract"
     );
-    expect(result.response?.status).toBe(403);
+    expect(result.response?.status).toBe(401);
   });
 });

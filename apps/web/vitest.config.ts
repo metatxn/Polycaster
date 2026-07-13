@@ -17,12 +17,19 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
-      include: [
-        "src/hooks/use-clob-client.ts",
-        "src/hooks/use-clob-credentials.ts",
-        "src/hooks/use-notifications.ts",
+      include: ["src/**/*.{ts,tsx,mts,mtsx}"],
+      exclude: [
+        "src/**/*.d.ts",
+        "src/test/**",
+        "src/**/*.{test,spec}.{ts,tsx,mts,mtsx}",
+        "src/**/__tests__/**",
       ],
-      exclude: ["src/**/*.d.ts", "src/test/**"],
+      thresholds: {
+        statements: 19,
+        branches: 14,
+        functions: 19,
+        lines: 20,
+      },
     },
   },
 });

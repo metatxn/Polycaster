@@ -1,4 +1,4 @@
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import { extractPostIdFromAttributes, extractPostIdFromLink } from "./helpers";
 
@@ -40,6 +40,6 @@ const MastodonAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(MastodonAdapter, 100, 50);
+export const adapter: PlatformAdapter = MastodonAdapter;
 
 export { MastodonAdapter };

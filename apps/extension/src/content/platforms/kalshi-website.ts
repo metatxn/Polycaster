@@ -1,5 +1,4 @@
-import type { InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { InjectionPoint, PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import {
   collectTextParts,
@@ -374,6 +373,6 @@ const KalshiPlatformAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(KalshiPlatformAdapter, 100, 50);
+export const adapter: PlatformAdapter = KalshiPlatformAdapter;
 
 export { KalshiPlatformAdapter };

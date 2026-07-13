@@ -5,11 +5,13 @@ import { z } from "zod";
 import { POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import { issueExtensionChallengeToken } from "@/lib/auth/extension-session";
 import { createSiwxChallenge } from "@/lib/siwx/message";
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.extension.session.challenge");
+const MAX_REQUEST_BODY_BYTES = 8 * 1024;
 
 const challengeInputSchema = z.object({
   chainId: z
@@ -83,16 +85,21 @@ export async function POST(request: NextRequest) {
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
-    const body = await request.json();
-    const parsed = challengeInputSchema.safeParse(body);
+    const jsonBody = await readJsonBodyWithLimit(
+      request,
+      MAX_REQUEST_BODY_BYTES
+    );
+    if (!jsonBody.ok) {
+      return jsonError(jsonBody.error, jsonBody.status);
+    }
+
+    const parsed = challengeInputSchema.safeParse(jsonBody.body);
 
     if (!parsed.success) {
-      // Extra field `details` preserved; success: false added
       return NextResponse.json(
         {
           success: false,
           error: "Invalid request payload",
-          details: parsed.error.format(),
         },
         { status: 400 }
       );

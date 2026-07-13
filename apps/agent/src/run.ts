@@ -222,13 +222,19 @@ export function marketTimingGate(
 
 export type AgentExecutionMode = "paper" | "live";
 
-function configuredExecutionMode(): AgentExecutionMode {
-  return process.env.AGENT_EXECUTION_MODE === "live" ? "live" : "paper";
+export function resolveAgentExecutionMode(
+  requestedMode?: AgentExecutionMode
+): AgentExecutionMode {
+  return (
+    requestedMode ??
+    (process.env.AGENT_EXECUTION_MODE === "live" ? "live" : "paper")
+  );
 }
 
 function selectExecutionAdapter(
   repository: AgentRepository,
-  mode: AgentExecutionMode
+  mode: AgentExecutionMode,
+  assertExecutionLock?: () => Promise<void>
 ): ExecutionAdapter {
   if (mode === "live") {
     return new LiveExecutionAdapter({
@@ -236,6 +242,8 @@ function selectExecutionAdapter(
       getLiveOrderByIdempotencyKey: (key) =>
         repository.getLiveOrderByIdempotencyKey(key),
       listLiveOrders: () => repository.listLiveOrders(),
+      hasUnresolvedLiveOrder: () => repository.hasUnresolvedLiveOrder(),
+      assertExecutionLock,
       getClobCredential: (key) => repository.getClobCredential(key),
       upsertClobCredential: (record) => repository.upsertClobCredential(record),
     });
@@ -249,23 +257,33 @@ export async function runPaperAgent(
     watchlistItemIds?: string[];
     portfolio?: AgentPortfolio;
     executionMode?: AgentExecutionMode;
+    runId?: string;
+    requestFingerprint?: string;
+    assertExecutionLock?: () => Promise<void>;
   }
 ): Promise<AgentRunDetail> {
-  const run = await repository.createRun();
-  const executionMode = options?.executionMode ?? configuredExecutionMode();
-  const adapter = selectExecutionAdapter(repository, executionMode);
+  const run = await repository.createRun(
+    options?.runId,
+    options?.requestFingerprint
+  );
+  const executionMode = resolveAgentExecutionMode(options?.executionMode);
+  const adapter = selectExecutionAdapter(
+    repository,
+    executionMode,
+    options?.assertExecutionLock
+  );
   const portfolio = options?.portfolio ?? DEFAULT_PORTFOLIO;
   if (executionMode === "live") {
     log.warn("run.live_mode", { runId: run.id });
   }
-  const selectedIds = new Set(options?.watchlistItemIds ?? []);
-  const watchlist = (await repository.listWatchlist()).filter(
-    (item) =>
-      item.active && (selectedIds.size === 0 || selectedIds.has(item.id))
-  );
-
   try {
+    const selectedIds = new Set(options?.watchlistItemIds ?? []);
+    const watchlist = (await repository.listWatchlist()).filter(
+      (item) =>
+        item.active && (selectedIds.size === 0 || selectedIds.has(item.id))
+    );
     for (const item of watchlist) {
+      await options?.assertExecutionLock?.();
       const evidence = await buildEvidencePack(item);
       const exitPrice = evidence.market.midPrice ?? evidence.market.price;
 
@@ -278,6 +296,7 @@ export async function runPaperAgent(
       if (openPosition && shouldTimeExit(item)) {
         let exitFill: PaperFill;
         if (executionMode === "live") {
+          await options?.assertExecutionLock?.();
           exitFill = await adapter.execute({
             runId: run.id,
             watchlistItemId: item.id,
@@ -335,6 +354,7 @@ export async function runPaperAgent(
           if (decision.action === "SELL") {
             // Contradicts the open BUY position — close at current price.
             if (executionMode === "live") {
+              await options?.assertExecutionLock?.();
               fill = await adapter.execute({
                 runId: run.id,
                 watchlistItemId: item.id,
@@ -375,6 +395,7 @@ export async function runPaperAgent(
           // decision.action === "BUY" with an existing long position:
           // do nothing (we don't average up in v1).
         } else if (decision.action === "BUY") {
+          await options?.assertExecutionLock?.();
           const opened = await adapter.execute({
             runId: run.id,
             watchlistItemId: item.id,

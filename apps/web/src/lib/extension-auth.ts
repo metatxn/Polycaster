@@ -90,47 +90,26 @@ export async function verifyExtensionRequest(
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
-/** How a pre-auth extension request was authenticated. */
-export type ExtensionTrust = "session" | "low-trust";
-
 export interface ExtensionPreAuthResult {
   /** Non-null means the request must be rejected with this response. */
   response: NextResponse | null;
-  /**
-   * "session"   — Bearer token verified against a signed extension session.
-   * "low-trust" — only the spoofable Origin/Referer gate passed. Callers
-   *               invoking paid work (LLM routes) must apply stricter rate
-   *               limits to this tier (see checkAiRateLimit).
-   */
-  trust: ExtensionTrust;
 }
 
 /**
- * Verify extension access for pre-auth endpoints (AI discovery).
+ * Verify signed extension-session access for paid AI endpoints.
  *
- * These endpoints are called during the post-scanning phase before
- * the user has connected a wallet, so a session token may not exist.
- * Falls back to origin-based verification when no Bearer token is present,
- * and reports which trust tier passed so callers can rate-limit accordingly.
+ * Origin and Referer are CORS signals, not authentication: non-browser clients
+ * can forge both. Production callers must therefore present a valid Bearer
+ * session with the route's required scope before any paid generation occurs.
  */
 export async function verifyExtensionAccessPreAuth(
   request: NextRequest,
   requiredScope: ExtensionScope
 ): Promise<ExtensionPreAuthResult> {
   if (process.env.NODE_ENV === "development") {
-    // "session" trust so local dev calls are never capped by the
-    // low-trust daily limit in checkAiRateLimit.
-    return { response: null, trust: "session" };
+    return { response: null };
   }
 
-  const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    const { response } = await requireExtensionSession(request, requiredScope);
-    return { response, trust: "session" };
-  }
-
-  return {
-    response: await verifyExtensionRequest(request),
-    trust: "low-trust",
-  };
+  const { response } = await requireExtensionSession(request, requiredScope);
+  return { response };
 }

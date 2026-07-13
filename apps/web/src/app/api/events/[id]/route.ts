@@ -22,6 +22,28 @@ function isNumericId(str: string): boolean {
  * - Numeric ID (e.g., 35908): Uses https://gamma-api.polymarket.com/events/{id}
  * - Event slug: Uses https://gamma-api.polymarket.com/events/slug/{slug}
  */
+/**
+ * @openapi
+ * /api/events/{id}:
+ *   get:
+ *     summary: Fetch /api/events/{id}.
+ *     tags: [Events]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

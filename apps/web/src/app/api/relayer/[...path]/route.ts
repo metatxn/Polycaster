@@ -188,8 +188,8 @@ async function proxy(
 
   // Layer 3a: path allow-list
   const head = pathSegments[0] ?? "";
-  if (!ALLOWED_PATHS.has(head)) {
-    return jsonError(`Path not allowed: /${head}`, 400);
+  if (pathSegments.length !== 1 || !ALLOWED_PATHS.has(head)) {
+    return jsonError("Path not allowed", 400);
   }
 
   // Layer 3b: oversize body fast-reject
@@ -370,6 +370,28 @@ async function proxy(
   }
 }
 
+/**
+ * @openapi
+ * /api/relayer/{path}:
+ *   get:
+ *     summary: Fetch /api/relayer/{path}.
+ *     tags: [Relayer]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> }
@@ -378,6 +400,28 @@ export async function GET(
   return proxy(request, path, "GET");
 }
 
+/**
+ * @openapi
+ * /api/relayer/{path}:
+ *   post:
+ *     summary: Create or proxy /api/relayer/{path}.
+ *     tags: [Relayer]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> }

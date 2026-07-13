@@ -20,6 +20,7 @@ const base: TradingContext = {
   hasCredentials: true,
   error: null,
   orderBook: null,
+  orderBookTokenId: null,
   orderBookError: null,
   minOrderSize: 0,
   tickSize: 0,

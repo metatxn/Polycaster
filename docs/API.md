@@ -12,6 +12,7 @@ This document is generated from the route handlers under `apps/web/src/app/api`.
   - `/api/ai/validate-relevance`
   - `/api/analytics/batch`
   - `/api/extension/session/logout`
+  - `/api/search`
   - `/api/rpc/polygon`
 - Rate limiting: routes that call `checkRateLimit()` are limited per IP and per normalized route template.
 - Shared `429` response shape:
@@ -113,6 +114,10 @@ Headers
 - `Content-Type: application/json`
 - Auth: agent admin token
 
+Request limits
+
+- JSON body size is capped at `16 KiB`.
+
 Request body
 
 | Field | Type | Required | Validation |
@@ -134,7 +139,7 @@ Request body
 | `eventStartTime` | `string` | No | ISO datetime. |
 | `eventEndTime` | `string` | No | ISO datetime. |
 | `resolutionSource` | `string` | No | URL, max 500 chars. |
-| `newsUrls` | `string[]` | No | URLs, up to 5 items. Defaults to `[]`. |
+| `newsUrls` | `string[]` | No | URLs, up to 5 items, and each host must pass the agent news allowlist. Defaults to `[]`. |
 | `socialNotes` | `string[]` | No | Up to 10 trimmed strings, each `1..1000` chars. Defaults to `[]`. |
 | `active` | `boolean` | No | Defaults to `true`. |
 
@@ -146,7 +151,8 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid watchlist input", details: zodFlattenedError }`
+- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid watchlist input" }`
+- `413`: `{ success: false, error: "Request body too large" }`
 - `401`: `{ success: false, error: "Unauthorized" }`
 - `403`: same-origin validation failure for mutating admin routes
 - `429`: shared rate-limit response
@@ -188,6 +194,7 @@ Headers
 
 - `Content-Type: application/json`
 - Auth: agent admin token
+- Optional: `Idempotency-Key: <uuid>` for paper runs; required for live runs
 
 Request body
 
@@ -203,11 +210,19 @@ Request body
 | `portfolio.realizedPnlUsd` | `string` | Yes, if `portfolio` is provided | Signed decimal string. |
 | `executionMode` | `"paper" \| "live"` | No | Optional override. |
 
+Request limits
+
+- JSON body size is capped at `16 KiB`.
+- Live runs require `Idempotency-Key` to be a UUID and reuse that value when retrying the same run intent.
+
 Success `200`
 
 - Schema:
   - `success: true`
   - `run: RunDetail`
+  - Optional `replayed: boolean` when `executionMode` resolves to `"live"`:
+    - `true` when the supplied `Idempotency-Key` matches an existing stored live run and the route returns that prior run without executing again
+    - `false` when a new live run executes successfully
   - `RunDetail` extends the run summary fields and adds `items`, where each item contains:
     - `watchlistItem: AgentWatchlistItem`
     - `evidence: object`
@@ -218,10 +233,19 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid run input", details: zodFlattenedError }`
+- `400`: `{ success: false, error: "Invalid JSON payload" }`, `{ success: false, error: "Invalid run input" }`, or `{ success: false, error: "A UUID Idempotency-Key header is required for live runs" }`
+- `409`: `{ success: false, error: "Another agent execution is already in progress" }`, `{ success: false, error: "Idempotency-Key was already used for a different live run" }`, or `{ success: false, error: "The idempotent live run is still in progress" }`
+- `413`: `{ success: false, error: "Request body too large" }`
 - `401`: `{ success: false, error: "Unauthorized" }`
 - `403`: same-origin validation failure for mutating admin routes
+- `429`: shared rate-limit response
 - `500`: `{ success: false, error: "Failed to run paper-trading agent" }`
+- `503`: `{ success: false, error: "Durable live-run storage is unavailable" }`
+
+Rate limiting
+
+- Paper runs: `60` requests/minute/IP
+- Live runs: `5` requests/minute/IP
 
 ### GET `/api/agent/runs/:id`
 
@@ -454,9 +478,9 @@ Headers
 
 Request body
 
-| Field  | Type     | Required | Validation                                                                                                                                              |
-| ------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `text` | `string` | Yes      | Must exist and be a string. The extractor normalizes whitespace/URLs, truncates to 500 chars, and treats inputs under 20 meaningful chars as too short. |
+| Field  | Type     | Required | Validation                                                                                                                                                     |
+| ------ | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `text` | `string` | Yes      | Trimmed, non-empty string with max length `4000`. After validation, the extractor normalizes whitespace/URLs, truncates the processed input to `500` chars, and treats inputs under `20` meaningful chars as too short. |
 
 Success `200`
 
@@ -475,10 +499,11 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Missing or invalid 'text' field" }` or the structured fallback body `{ success: false, category: "other", entities: [], tags: [], topics: [], searchQuery: "", keywords: "", confidence: 0, inputLength: 0, truncated: false, fallbackReason: "provider-error", error: "Invalid request payload" }` when JSON parsing fails.
+- `400`: `{ success: false, error: "Invalid JSON payload" }`, `{ success: false, error: "Invalid request body" }`, or the structured fallback body `{ success: false, category: "other", entities: [], tags: [], topics: [], searchQuery: "", keywords: "", confidence: 0, inputLength: 0, truncated: false, fallbackReason: "provider-error", error: "Invalid request body" }` for unexpected request-parsing failures.
 - `401`: Returned only when bearer auth is supplied but invalid or expired.
 - `403`: `{ error: "Forbidden" }` when neither a valid bearer token nor an allowed extension `Origin` / app `Referer` is present.
 - `404`: Not used by this handler.
+- `413`: `{ success: false, error: "Request body too large" }`
 - `500`: Not emitted directly; provider failures fail open into a `200` body with `success: false`, `fallbackReason`, and `error`.
 
 Rate limiting
@@ -602,11 +627,11 @@ Headers
 
 Request body
 
-| Field         | Type                 | Required | Validation                                                                           |
-| ------------- | -------------------- | -------- | ------------------------------------------------------------------------------------ |
-| `postText`    | `string`             | Yes      | Must exist and be a string. Only the first 400 chars are used for caching/prompting. |
-| `marketTitle` | `string`             | Yes      | Must exist and be a string.                                                          |
-| `marketTags`  | `string[] \| string` | No       | Array is accepted directly. A comma-delimited string is split and trimmed.           |
+| Field         | Type                 | Required | Validation                                                                                                             |
+| ------------- | -------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `postText`    | `string`             | Yes      | Trimmed, non-empty string with max length `4000`. Only the first `400` chars are used for caching/prompting.         |
+| `marketTitle` | `string`             | Yes      | Trimmed, non-empty string with max length `300`.                                                                      |
+| `marketTags`  | `string[] \| string` | No       | Either a string up to `1000` chars or an array up to `20` trimmed tags, each `1..80` chars. Strings are split on commas, trimmed, filtered, and capped at `20` tags. |
 
 Success `200`
 
@@ -619,10 +644,11 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Missing 'postText' or 'marketTitle'" }` or fallback body `{ success: false, relevant: true, reason: "", confidence: 0, error: "Invalid request body" }`
+- `400`: `{ success: false, error: "Invalid JSON payload" }`, `{ success: false, error: "Invalid request body" }`, or fallback body `{ success: false, relevant: true, reason: "", confidence: 0, error: "Invalid request body" }`
 - `401`: Returned only when bearer auth is supplied but invalid or expired.
 - `403`: `{ error: "Forbidden" }` when neither a valid bearer token nor an allowed extension `Origin` / app `Referer` is present.
 - `404`: Not used.
+- `413`: `{ success: false, error: "Request body too large" }`
 - `500`: Unexpected handler failures return `{ success: false, relevant: true, reason: "", confidence: 0, error: "Internal server error" }`
 
 Rate limiting
@@ -715,7 +741,7 @@ Success `202`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid analytics payload", details: fieldErrors }`
+- `400`: `{ success: false, error: "Invalid JSON payload" }` or `{ success: false, error: "Invalid analytics payload" }`
 - `401`: Not used by this handler.
 - `404`: Not used.
 - `429`: Shared rate-limit body.
@@ -783,7 +809,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid request body", details: string }` or `{ success: false, error: string }`
+- `400`: `{ success: false, error: "Invalid request body" }` or `{ success: false, error: string }`
 - `401`: Not returned by this handler.
 - `404`: Not returned by this handler.
 - `500`: `{ success: false, error: "Failed to create or retrieve API credentials." }`
@@ -845,7 +871,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid request payload", details: formattedZodError }` or `{ success: false, error: "Invalid request payload" }`
+- `400`: `{ success: false, error: "Invalid request payload" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: Not used.
@@ -902,7 +928,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid request payload", details: formattedZodError }` or `{ success: false, error: "Invalid request payload" }`
+- `400`: `{ success: false, error: "Invalid request payload" }`
 - `401`: `{ success: false, error: "Invalid or expired challenge" }`, `{ success: false, error: "Invalid signature" }`, or `{ success: false, error: "Invalid signature or expired challenge" }`
 - `404`: Not used.
 - `500`: Not used.
@@ -1087,7 +1113,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used locally; upstream 404s are forwarded as the upstream status with `{ success: false, error: "Failed to fetch comments from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
@@ -1170,7 +1196,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid request body", details: fieldErrors }` or `{ success: false, error: "Failed to post comment to Polymarket", details: number }`
+- `400`: `{ success: false, error: "Invalid request body" }` or `{ success: false, error: "Failed to post comment to Polymarket", details: number }`
 - `401`: `{ success: false, error: "Authentication failed. Please sign in again." }`
 - `404`: Not used locally.
 - `500`: `{ success: false, error: string }`
@@ -1238,7 +1264,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -1448,7 +1474,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -1569,7 +1595,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -1834,7 +1860,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "tag_id is required" }`, `{ success: false, error: "offset is no longer supported; use after_cursor" }`, or `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "tag_id is required" }`, `{ success: false, error: "offset is no longer supported; use after_cursor" }`, or `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: "Failed to fetch markets" }`
@@ -2208,7 +2234,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Possible when the upstream CLOB helper throws a `ClobRequestError` with status `404`; body is `{ success: false, error: "Unable to load the price right now." }`
 - `500`: `{ success: false, error: "Unable to load the price right now." }`
@@ -2438,9 +2464,38 @@ GET /api/price/tokens HTTP/1.1
 
 ## Search
 
+### OPTIONS `/api/search`
+
+Description: CORS preflight handler for extension callers of the public search route.
+
+Headers
+
+- `Origin: <allowed extension origin>`
+
+Request body
+
+- None
+
+Success `204`
+
+- Empty body
+- Returns extension CORS headers from `handleExtensionPreflight()`
+
+Errors
+
+- `400`: Not used.
+- `401`: Not used.
+- `403`: Returned when the request origin is not allowed by the extension auth helpers.
+- `404`: Not used.
+- `500`: Not used.
+
+Rate limiting
+
+- No explicit rate limiter
+
 ### GET `/api/search`
 
-Description: Searches Polymarket public search and augments events with a derived `topOutcome`.
+Description: Searches Polymarket public search, optionally merges in tag-scoped event results, and augments events with a derived `topOutcome`.
 
 Headers
 
@@ -2448,24 +2503,33 @@ Headers
 
 Query parameters
 
-| Name    | Type     | Required | Validation                                                                                                                                                                         |
-| ------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`     | `string` | No       | Sanitized with `sanitizeSearchQuery()`: trimmed, max 200 chars, control chars removed, and common injection characters such as `<`, `>`, `"`, `'`, `` ` ``, `;`, and `\` stripped. |
-| `query` | `string` | No       | Used only when `q` is absent; the same sanitization is applied.                                                                                                                    |
-| `limit` | `string` | No       | Passed through upstream without numeric validation. Default `"10"`.                                                                                                                |
+| Name | Type | Required | Validation |
+| --- | --- | --- | --- |
+| `q` | `string` | No | Sanitized with `sanitizeSearchQuery()`: trimmed, max 200 chars, control chars removed, and common injection characters such as `<`, `>`, `"`, `'`, `` ` ``, `;`, and `\` stripped. |
+| `query` | `string` | No | Used only when `q` is absent; the same sanitization is applied. |
+| `limit` | `string` | No | Parsed as an integer and clamped to `1..20`. Invalid or missing values default to `10`. |
+| `tag_slugs` | `string` | No | Comma-separated tag slugs. Normalized to lowercase slug-safe values, deduplicated, and capped at `2`. |
+| `tags` | `string` | No | Alias for `tag_slugs`; only used when `tag_slugs` is absent. |
 
 Success `200`
 
-- When query is empty: `{ events: [], tags: [], profiles: [], pagination: { hasMore: false, totalResults: 0 } }`
-- Otherwise: raw upstream search payload with optional `events[].topOutcome = { name: string, price: number }`
+- When both the sanitized query and normalized tag list are empty: `{ events: [], tags: [], profiles: [], pagination: { hasMore: false, totalResults: 0 } }`
+- Otherwise:
+  - `events: SearchEvent[]`
+  - `tags: unknown[]`
+  - `profiles: unknown[]`
+  - `pagination: { hasMore: boolean, totalResults: number }`
+  - Optional `degraded: true` when upstream search failed and the handler served an empty or stale fallback
+  - Optional `events[].topOutcome = { name: string, price: number }`
 
 Errors
 
 - `400`: Not used.
 - `401`: Not used.
-- `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ error: "Failed to search" }`.
-- `500`: `{ error: "Internal server error" }`
-- Other upstream failures: the handler returns the upstream HTTP status with `{ error: "Failed to search" }`.
+- `403`: Not used on `GET`; extension-specific CORS handling applies only to preflight/header decoration.
+- `404`: Not used.
+- `500`: unexpected handler failure returns the normal search shape with `degraded: true`, empty results, and `X-Knoww-Search-Degraded: true`.
+- `502`: upstream search provider failed; response preserves the search shape with `degraded: true`, empty or stale results, and `X-Knoww-Search-Degraded: true`.
 
 Rate limiting
 
@@ -2765,7 +2829,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -2819,7 +2883,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "offset is no longer supported; use after_cursor" }` or `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: "Failed to fetch sports markets" }`
@@ -2982,7 +3046,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used; missing users return `200` with `details: null`.
 - `500`: `{ success: false, error: string }` for local exceptions only.
@@ -3040,7 +3104,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used; upstream 404 is normalized to `200` with `profile: null`.
 - `500`: `{ success: false, error: string }` for local exceptions only.
@@ -3097,7 +3161,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch portfolio value from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
@@ -3160,7 +3224,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch positions from Polymarket", details: number }`.
 - `500`: `{ success: false, error: "Unknown error" }`
@@ -3254,7 +3318,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch trades from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
@@ -3351,7 +3415,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used locally; upstream non-OK responses are forwarded with the upstream status and `{ success: false, error: "Failed to fetch P&L history from Polymarket", details: number }`.
 - `500`: `{ success: false, error: string }`
@@ -3423,7 +3487,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid query parameters", details: string }`
+- `400`: `{ success: false, error: "Invalid query parameters" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -3511,7 +3575,7 @@ Success `200`
 
 Errors
 
-- `400`: `{ success: false, error: "Invalid request body", details: string }`
+- `400`: `{ success: false, error: "Invalid request body" }`
 - `401`: Not used.
 - `404`: Not used.
 - `500`: `{ success: false, error: string }`
@@ -3763,13 +3827,28 @@ Success `200`
   - `activities: SuspiciousActivity[]`
   - `stats: { totalTradesScanned: number, uniqueTradersFound: number, newAccountsFound: number, suspiciousActivities: number, criticalCount: number, highCount: number, mediumCount: number, repeatOffenders: number }`
   - `lastUpdated: string`
-- `SuspiciousActivity` contains nested `account`, `trade`, `market`, and `analysis` with `suspicionScore`, `confidence`, `factors`, `repeatOffender`, and `marketsInvolved`.
+- `SuspiciousActivity` contains nested `account`, `trade`, `market`, and `analysis`.
+- `analysis` fields:
+  - `suspicionScore: number`
+  - `confidence: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"`
+  - `isContrarian: boolean`
+  - `marketSentiment: "BULLISH" | "BEARISH" | "NEUTRAL"`
+  - `reason: string`
+  - `factors: SuspicionFactor[]`
+  - `repeatOffender: boolean`
+  - `marketsInvolved: number`
+  - `firedArchetypes: ArchetypeId[]`
+  - `archetypes: ArchetypeScore[]`
+  - `sortPriority: number`
+  - `funding: WalletFunding | null`
+  - `owner: SafeOwners | null`
 
 Errors
 
 - `400`: Not used.
 - `401`: Not used.
 - `404`: Not used.
+- `429`: shared rate-limit response
 - `500`: `{ success: false, activities: [], stats: {...zeros}, lastUpdated: string, error: string }`
 
 Rate limiting

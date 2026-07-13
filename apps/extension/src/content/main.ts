@@ -8,6 +8,8 @@ import type {
   PolymarketTagsCache,
 } from "../types/market";
 import type { UserSettings } from "../types/settings";
+import { loadPlatformAdapter } from "./platform-loader";
+import { prefetchTradingRuntime } from "./trading-loader";
 import { startXTraderPnlBadges } from "./x-pnl-badges";
 
 const logger = createLogger("extension.main");
@@ -16,6 +18,49 @@ const logger = createLogger("extension.main");
 declare const NTH_INSERTER: typeof window.NTH_INSERTER | undefined;
 
 const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
+const FIRST_TRADING_CARD_SELECTOR =
+  '.knoww-market-card[data-nth-injector-card="true"]';
+
+export function observeFirstMountedTradingCard(
+  scheduleIdle: (callback: () => void, timeout: number) => void = window
+    .KNOWW_UTILS.scheduleIdle,
+  prefetch: () => void = prefetchTradingRuntime
+): () => void {
+  let stopped = false;
+  let matchedCard: HTMLElement | null = null;
+  const removePagehideListener = (): void => {
+    window.removeEventListener("pagehide", stop);
+  };
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    observer.disconnect();
+    removePagehideListener();
+  };
+  const observer = new MutationObserver(() => {
+    if (stopped || matchedCard) return;
+    const card = document.querySelector<HTMLElement>(
+      FIRST_TRADING_CARD_SELECTOR
+    );
+    if (!card?.isConnected) return;
+    matchedCard = card;
+    observer.disconnect();
+    scheduleIdle(() => {
+      if (stopped || document.hidden || !matchedCard?.isConnected) {
+        stop();
+        return;
+      }
+      prefetch();
+      stop();
+    }, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
+  });
+  window.addEventListener("pagehide", stop, { once: true });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+  return stop;
+}
 
 (async function main(): Promise<void> {
   const { log, safeSendMessage } = window.KNOWW_UTILS;
@@ -34,11 +79,25 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
 
   // Load user settings first (before doing anything else)
   await loadUserSettings();
+  const platformLoaded = await loadPlatformAdapter(
+    new URL(window.location.href)
+  );
+  if (!platformLoaded) {
+    logger.warn("platform.adapter_unavailable", {
+      host: window.location.hostname,
+    });
+    return;
+  }
 
   // Get platform name for checking if enabled
   const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
-  const platformName =
-    platform?.name || window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown";
+  if (!platform) {
+    logger.warn("platform.detection_unavailable", {
+      host: window.location.hostname,
+    });
+    return;
+  }
+  const platformName = platform.name;
 
   // Check if current platform is enabled by user
   if (!isPlatformEnabled(platformName)) {
@@ -214,6 +273,8 @@ const PRELOAD_WARMUP_IDLE_TIMEOUT_MS = 1000;
     POSTS_TO_ANALYZE: CONFIG.POSTS_TO_ANALYZE,
   });
   log("Selectors:", { itemSelector, containerSelector });
+
+  observeFirstMountedTradingCard(scheduleIdle);
 
   // Start watching the feed
   watchFeed(containerSelector, itemSelector);

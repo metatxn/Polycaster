@@ -1,5 +1,8 @@
-import type { CardStyles, InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type {
+  CardStyles,
+  InjectionPoint,
+  PlatformAdapter,
+} from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import {
   detectGenericTheme,
@@ -96,6 +99,6 @@ const ThreadsAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(ThreadsAdapter, 100, 50);
+export const adapter: PlatformAdapter = ThreadsAdapter;
 
 export { ThreadsAdapter };

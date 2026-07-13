@@ -1,4 +1,4 @@
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import { extractPostIdFromAttributes } from "./helpers";
 
@@ -34,6 +34,6 @@ const LemmyAdapter = createBasicAdapter({
   },
 });
 
-registerAdapterWithRetry(LemmyAdapter, 100, 50);
+export const adapter: PlatformAdapter = LemmyAdapter;
 
 export { LemmyAdapter };

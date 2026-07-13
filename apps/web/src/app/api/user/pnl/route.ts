@@ -1,4 +1,5 @@
 import { createLogger } from "@knoww/logger";
+import Decimal from "decimal.js";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
@@ -42,14 +43,39 @@ interface PositionData {
  * Trade data for P&L calculation
  */
 interface TradeData {
-  timestamp: string;
+  timestamp: string | number;
   side: "BUY" | "SELL";
-  size: string;
-  price: string;
-  usdcSize: string;
+  size: string | number;
+  price: string | number;
+  usdcSize: string | number;
   conditionId: string;
   outcome: string;
+  asset?: string;
+  id?: string;
+  transactionHash?: string;
+  type?: string;
 }
+
+interface NormalizedTradeData extends TradeData {
+  timestampMs: number | null;
+}
+
+interface ActivityResult {
+  trades: NormalizedTradeData[];
+  pagesFetched: number;
+  truncated: boolean;
+}
+
+interface PositionsResult {
+  positions: PositionData[];
+  pagesFetched: number;
+  truncated: boolean;
+}
+
+const ACTIVITY_PAGE_SIZE = 100;
+const MAX_ACTIVITY_PAGES = 10;
+const POSITIONS_PAGE_SIZE = 100;
+const MAX_POSITIONS_PAGES = 10;
 
 /**
  * Helper to convert null/empty to undefined for optional fields
@@ -79,6 +105,188 @@ const querySchema = z.object({
   includeHistory: optionalBoolean.pipe(z.boolean().optional().default(false)),
 });
 
+function toDecimal(value: string | number | null | undefined): Decimal {
+  try {
+    const decimal = new Decimal(value ?? 0);
+    return decimal.isFinite() ? decimal : new Decimal(0);
+  } catch {
+    return new Decimal(0);
+  }
+}
+
+function toNumber(value: Decimal): number {
+  return value.toNumber();
+}
+
+function isFiniteDecimalValue(value: unknown): value is string | number {
+  if (typeof value !== "string" && typeof value !== "number") return false;
+  try {
+    return new Decimal(value).isFinite();
+  } catch {
+    return false;
+  }
+}
+
+function isTradeData(value: unknown): value is TradeData {
+  if (!value || typeof value !== "object") return false;
+  const trade = value as Partial<TradeData>;
+  if (trade.type !== undefined && trade.type !== "TRADE") return false;
+  return (
+    (typeof trade.timestamp === "string" ||
+      typeof trade.timestamp === "number") &&
+    normalizeActivityTimestamp(trade.timestamp) !== null &&
+    (trade.side === "BUY" || trade.side === "SELL") &&
+    isFiniteDecimalValue(trade.size) &&
+    isFiniteDecimalValue(trade.price) &&
+    isFiniteDecimalValue(trade.usdcSize) &&
+    typeof trade.conditionId === "string" &&
+    trade.conditionId.trim().length > 0 &&
+    typeof trade.outcome === "string"
+  );
+}
+
+function normalizeActivityTimestamp(value: string | number): number | null {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : value.trim() === ""
+        ? Number.NaN
+        : Number(value);
+
+  if (Number.isFinite(numericValue)) {
+    const timestampMs =
+      Math.abs(numericValue) < 1_000_000_000_000
+        ? numericValue * 1000
+        : numericValue;
+    return Number.isFinite(timestampMs) ? timestampMs : null;
+  }
+
+  if (typeof value !== "string") return null;
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs) ? timestampMs : null;
+}
+
+function getActivityIdentity(
+  trade: TradeData,
+  timestampMs: number | null
+): string {
+  if (trade.id) return `id:${trade.id}`;
+
+  return JSON.stringify([
+    trade.transactionHash ?? "",
+    trade.type ?? "",
+    trade.asset ?? "",
+    timestampMs ?? String(trade.timestamp),
+    trade.conditionId,
+    trade.side,
+    trade.size,
+    trade.price,
+    trade.usdcSize,
+    trade.outcome,
+  ]);
+}
+
+function pageCrossesStartDate(
+  timestamps: number[],
+  startTimestampMs: number | null
+): boolean {
+  if (startTimestampMs === null || timestamps.length === 0) return false;
+
+  const isNewestFirst = timestamps.every(
+    (timestamp, index) => index === 0 || timestamps[index - 1] >= timestamp
+  );
+  return isNewestFirst && timestamps[timestamps.length - 1] < startTimestampMs;
+}
+
+async function fetchActivity(
+  user: string,
+  startDate: Date | null
+): Promise<ActivityResult> {
+  const startTimestampMs = startDate?.getTime() ?? null;
+  const trades: NormalizedTradeData[] = [];
+  const seen = new Set<string>();
+  let pagesFetched = 0;
+
+  for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
+    const offset = page * ACTIVITY_PAGE_SIZE;
+    const response = await fetch(
+      `${DATA_API_BASE}/activity?user=${user.toLowerCase()}&limit=${ACTIVITY_PAGE_SIZE}&offset=${offset}`,
+      {
+        headers: { Accept: "application/json" },
+        next: { revalidate: 60 },
+      }
+    );
+
+    if (!response.ok) throw new Error("Failed to fetch trades");
+
+    const pageData: unknown = await response.json();
+    if (!Array.isArray(pageData)) throw new Error("Failed to fetch trades");
+    pagesFetched++;
+
+    const pageTimestamps: number[] = [];
+    for (const rawTrade of pageData) {
+      if (!isTradeData(rawTrade)) continue;
+      const timestampMs = normalizeActivityTimestamp(rawTrade.timestamp);
+      if (timestampMs !== null) pageTimestamps.push(timestampMs);
+
+      if (
+        startTimestampMs !== null &&
+        (timestampMs === null || timestampMs < startTimestampMs)
+      ) {
+        continue;
+      }
+
+      const identity = getActivityIdentity(rawTrade, timestampMs);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      trades.push({ ...rawTrade, timestampMs });
+    }
+
+    if (
+      pageData.length < ACTIVITY_PAGE_SIZE ||
+      pageCrossesStartDate(pageTimestamps, startTimestampMs)
+    ) {
+      return { trades, pagesFetched, truncated: false };
+    }
+  }
+
+  return { trades, pagesFetched, truncated: true };
+}
+
+async function fetchPositions(user: string): Promise<PositionsResult> {
+  const positions: PositionData[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 0; page < MAX_POSITIONS_PAGES; page++) {
+    const response = await fetch(
+      `${DATA_API_BASE}/positions?user=${user.toLowerCase()}&sizeThreshold=.1&limit=${POSITIONS_PAGE_SIZE}&offset=${page * POSITIONS_PAGE_SIZE}`,
+      {
+        headers: { Accept: "application/json" },
+        next: { revalidate: 60 },
+      }
+    );
+    if (!response.ok) throw new Error("Failed to fetch positions");
+
+    const pageData: unknown = await response.json();
+    if (!Array.isArray(pageData)) throw new Error("Failed to fetch positions");
+    for (const position of pageData as PositionData[]) {
+      const identity = `${position.slug ?? ""}:${position.outcome ?? ""}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      positions.push(position);
+    }
+    if (pageData.length < POSITIONS_PAGE_SIZE) {
+      return { positions, pagesFetched: page + 1, truncated: false };
+    }
+  }
+
+  return {
+    positions,
+    pagesFetched: MAX_POSITIONS_PAGES,
+    truncated: true,
+  };
+}
+
 /**
  * GET /api/user/pnl
  *
@@ -95,6 +303,28 @@ const querySchema = z.object({
  * - totalPnl: Combined realized + unrealized P&L
  * - winRate: Percentage of winning trades
  * - history: Daily P&L breakdown (if includeHistory=true)
+ */
+/**
+ * @openapi
+ * /api/user/pnl:
+ *   get:
+ *     summary: Fetch /api/user/pnl.
+ *     tags: [User]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
  */
 export async function GET(request: NextRequest) {
   // Rate limit: 30 requests per minute (expensive endpoint)
@@ -119,7 +349,6 @@ export async function GET(request: NextRequest) {
         {
           success: false,
           error: "Invalid query parameters",
-          details: parsed.error.message,
         },
         { status: 400 }
       );
@@ -171,20 +400,8 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    // Fetch current positions (use same params as Polymarket)
-    const positionsResponse = await fetch(
-      `${DATA_API_BASE}/positions?user=${user.toLowerCase()}&sizeThreshold=.1&redeemable=true&limit=100&offset=0`,
-      {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 60 },
-      }
-    );
-
-    if (!positionsResponse.ok) {
-      throw new Error("Failed to fetch positions");
-    }
-
-    const allPositions: PositionData[] = await positionsResponse.json();
+    const positionsResult = await fetchPositions(user);
+    const allPositions = positionsResult.positions;
 
     // Filter to show only OPEN positions
     // - redeemable: false = market is still open/active
@@ -195,31 +412,12 @@ export async function GET(request: NextRequest) {
       return isOpenPosition || isWinningRedeemable;
     });
 
-    // Fetch trade history
-    const tradesResponse = await fetch(
-      `${DATA_API_BASE}/activity?user=${user.toLowerCase()}&limit=100`,
-      {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 60 },
-      }
-    );
-
-    if (!tradesResponse.ok) {
-      throw new Error("Failed to fetch trades");
-    }
-
-    let trades: TradeData[] = await tradesResponse.json();
-
-    // Filter trades by date range
-    if (startDate) {
-      trades = trades.filter(
-        (t) => new Date(t.timestamp).getTime() >= startDate.getTime()
-      );
-    }
+    const activity = await fetchActivity(user, startDate);
+    const trades = activity.trades;
 
     // Try to get P&L from dedicated API, fallback to position-based calculation
-    let unrealizedPnl = 0;
-    let realizedPnlFromPositions = 0;
+    let unrealizedPnl = new Decimal(0);
+    let realizedPnlFromPositions = new Decimal(0);
     let pnlApiData: { t: number; p: number }[] | null = null;
 
     if (pnlApiResponse.ok) {
@@ -228,7 +426,7 @@ export async function GET(request: NextRequest) {
         // The P&L API returns an array of { t: timestamp, p: pnl_value }
         // The last value is the current P&L
         if (Array.isArray(pnlApiData) && pnlApiData.length > 0) {
-          const latestPnl = pnlApiData[pnlApiData.length - 1]?.p || 0;
+          const latestPnl = toDecimal(pnlApiData[pnlApiData.length - 1]?.p);
           // For now, treat the entire P&L as unrealized since we don't have a breakdown
           unrealizedPnl = latestPnl;
         }
@@ -239,15 +437,15 @@ export async function GET(request: NextRequest) {
     }
 
     // If P&L API didn't work, calculate from positions
-    if (unrealizedPnl === 0 && realizedPnlFromPositions === 0) {
+    if (unrealizedPnl.isZero() && realizedPnlFromPositions.isZero()) {
       unrealizedPnl = positions.reduce(
-        (sum, p) => sum + Number.parseFloat(p.unrealizedPnl || "0"),
-        0
+        (sum, p) => sum.add(toDecimal(p.unrealizedPnl)),
+        new Decimal(0)
       );
 
       realizedPnlFromPositions = positions.reduce(
-        (sum, p) => sum + Number.parseFloat(p.realizedPnl || "0"),
-        0
+        (sum, p) => sum.add(toDecimal(p.realizedPnl)),
+        new Decimal(0)
       );
     }
 
@@ -256,32 +454,32 @@ export async function GET(request: NextRequest) {
     const sellTrades = trades.filter((t) => t.side === "SELL");
 
     const totalBuyValue = buyTrades.reduce(
-      (sum, t) => sum + Number.parseFloat(t.usdcSize || "0"),
-      0
+      (sum, t) => sum.add(toDecimal(t.usdcSize)),
+      new Decimal(0)
     );
 
     const totalSellValue = sellTrades.reduce(
-      (sum, t) => sum + Number.parseFloat(t.usdcSize || "0"),
-      0
+      (sum, t) => sum.add(toDecimal(t.usdcSize)),
+      new Decimal(0)
     );
 
     // Calculate current portfolio value
     const currentPortfolioValue = positions.reduce(
-      (sum, p) => sum + Number.parseFloat(p.curValue || "0"),
-      0
+      (sum, p) => sum.add(toDecimal(p.curValue)),
+      new Decimal(0)
     );
 
     const initialInvestment = positions.reduce(
-      (sum, p) => sum + Number.parseFloat(p.initialValue || "0"),
-      0
+      (sum, p) => sum.add(toDecimal(p.initialValue)),
+      new Decimal(0)
     );
 
     // Calculate win rate (positions with positive P&L)
     const positionsWithPnl = positions.filter(
-      (p) => Number.parseFloat(p.unrealizedPnl || "0") !== 0
+      (p) => !toDecimal(p.unrealizedPnl).isZero()
     );
-    const winningPositions = positionsWithPnl.filter(
-      (p) => Number.parseFloat(p.unrealizedPnl || "0") > 0
+    const winningPositions = positionsWithPnl.filter((p) =>
+      toDecimal(p.unrealizedPnl).gt(0)
     );
     const winRate =
       positionsWithPnl.length > 0
@@ -297,16 +495,19 @@ export async function GET(request: NextRequest) {
     if (includeHistory) {
       dailyHistory = trades.reduce(
         (acc, trade) => {
-          const date = new Date(trade.timestamp).toISOString().split("T")[0];
+          if (trade.timestampMs === null) return acc;
+          const date = new Date(trade.timestampMs).toISOString().split("T")[0];
           if (!acc[date]) {
             acc[date] = { realized: 0, trades: 0, volume: 0 };
           }
 
           // Approximate realized P&L from trades
           // This is simplified - actual P&L requires matching buys/sells
-          const tradeValue = Number.parseFloat(trade.usdcSize || "0");
+          const tradeValue = toDecimal(trade.usdcSize);
           acc[date].trades++;
-          acc[date].volume += tradeValue;
+          acc[date].volume = toNumber(
+            toDecimal(acc[date].volume).add(tradeValue)
+          );
 
           return acc;
         },
@@ -318,15 +519,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate ROI
-    const totalPnl = unrealizedPnl + realizedPnlFromPositions;
-    const roi =
-      initialInvestment > 0 ? (totalPnl / initialInvestment) * 100 : 0;
+    const totalPnl = unrealizedPnl.add(realizedPnlFromPositions);
+    const roi = initialInvestment.gt(0)
+      ? toNumber(totalPnl.div(initialInvestment).mul(100))
+      : 0;
 
     // Best and worst performing positions
-    const sortedByPnl = [...positions].sort(
-      (a, b) =>
-        Number.parseFloat(b.unrealizedPnl || "0") -
-        Number.parseFloat(a.unrealizedPnl || "0")
+    const sortedByPnl = [...positions].sort((a, b) =>
+      toDecimal(b.unrealizedPnl).cmp(toDecimal(a.unrealizedPnl))
     );
 
     const bestPerformer = sortedByPnl[0];
@@ -337,22 +537,28 @@ export async function GET(request: NextRequest) {
       user,
       period,
       pnl: {
-        realized: realizedPnlFromPositions,
-        unrealized: unrealizedPnl,
-        total: totalPnl,
+        realized: toNumber(realizedPnlFromPositions),
+        unrealized: toNumber(unrealizedPnl),
+        total: toNumber(totalPnl),
         roi,
       },
       portfolio: {
-        currentValue: currentPortfolioValue,
-        initialInvestment,
+        currentValue: toNumber(currentPortfolioValue),
+        initialInvestment: toNumber(initialInvestment),
         positionCount: positions.length,
+        positionsComplete: !positionsResult.truncated,
+        positionsPagesFetched: positionsResult.pagesFetched,
+        positionsTruncated: positionsResult.truncated,
       },
       trading: {
-        totalBuyValue,
-        totalSellValue,
-        netFlow: totalBuyValue - totalSellValue,
+        totalBuyValue: toNumber(totalBuyValue),
+        totalSellValue: toNumber(totalSellValue),
+        netFlow: toNumber(totalBuyValue.sub(totalSellValue)),
         tradeCount: trades.length,
         uniqueMarkets: new Set(trades.map((t) => t.conditionId)).size,
+        activityComplete: !activity.truncated,
+        activityPagesFetched: activity.pagesFetched,
+        activityTruncated: activity.truncated,
       },
       performance: {
         winRate,
@@ -363,13 +569,14 @@ export async function GET(request: NextRequest) {
               title: bestPerformer.title,
               slug: bestPerformer.slug,
               outcome: bestPerformer.outcome,
-              pnl: Number.parseFloat(bestPerformer.unrealizedPnl || "0"),
-              pnlPercent:
-                Number.parseFloat(bestPerformer.initialValue || "0") > 0
-                  ? (Number.parseFloat(bestPerformer.unrealizedPnl || "0") /
-                      Number.parseFloat(bestPerformer.initialValue || "0")) *
-                    100
-                  : 0,
+              pnl: toNumber(toDecimal(bestPerformer.unrealizedPnl)),
+              pnlPercent: toDecimal(bestPerformer.initialValue).gt(0)
+                ? toNumber(
+                    toDecimal(bestPerformer.unrealizedPnl)
+                      .div(toDecimal(bestPerformer.initialValue))
+                      .mul(100)
+                  )
+                : 0,
             }
           : null,
         worstPerformer: worstPerformer
@@ -377,13 +584,14 @@ export async function GET(request: NextRequest) {
               title: worstPerformer.title,
               slug: worstPerformer.slug,
               outcome: worstPerformer.outcome,
-              pnl: Number.parseFloat(worstPerformer.unrealizedPnl || "0"),
-              pnlPercent:
-                Number.parseFloat(worstPerformer.initialValue || "0") > 0
-                  ? (Number.parseFloat(worstPerformer.unrealizedPnl || "0") /
-                      Number.parseFloat(worstPerformer.initialValue || "0")) *
-                    100
-                  : 0,
+              pnl: toNumber(toDecimal(worstPerformer.unrealizedPnl)),
+              pnlPercent: toDecimal(worstPerformer.initialValue).gt(0)
+                ? toNumber(
+                    toDecimal(worstPerformer.unrealizedPnl)
+                      .div(toDecimal(worstPerformer.initialValue))
+                      .mul(100)
+                  )
+                : 0,
             }
           : null,
       },
@@ -396,8 +604,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error ? error.message : ERROR_MESSAGES.UNKNOWN_ERROR,
+        error: ERROR_MESSAGES.UNKNOWN_ERROR,
       },
       { status: 500 }
     );

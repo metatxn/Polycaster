@@ -2,6 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const webpack = require("webpack");
 const CopyPlugin = require("copy-webpack-plugin");
+const platformManifest = require("./src/content/platforms/manifest.json");
 
 require("dotenv").config();
 
@@ -142,11 +143,81 @@ const bundledFonts = [
   },
 ];
 
+class StatsWriterPlugin {
+  constructor(fileName) {
+    this.fileName = fileName;
+  }
+
+  apply(compiler) {
+    compiler.hooks.done.tap("StatsWriterPlugin", (stats) => {
+      const statsDir = path.resolve(__dirname, "dist/.stats");
+      fs.mkdirSync(statsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(statsDir, this.fileName),
+        JSON.stringify(
+          stats.toJson({
+            modules: true,
+            nestedModules: true,
+            reasons: true,
+            chunks: true,
+            entrypoints: true,
+            assets: true,
+          })
+        )
+      );
+    });
+  }
+}
+
+function createTypeScriptRule() {
+  return {
+    test: /\.tsx?$/,
+    use: {
+      loader: "ts-loader",
+      options: {
+        allowTsInNodeModules: false,
+        configFile: path.resolve(__dirname, "tsconfig.json"),
+        transpileOnly: true,
+      },
+    },
+    exclude: [/node_modules/, /__tests__/, /\.test\.ts$/, /\.spec\.ts$/],
+  };
+}
+
+function createResolveConfig() {
+  return {
+    extensions: [".tsx", ".ts", ".js"],
+    extensionAlias: {
+      ".js": [".ts", ".tsx", ".js"],
+    },
+    alias: {
+      "@knoww/shared-types": path.resolve(
+        __dirname,
+        "../../packages/shared-types/src"
+      ),
+      // ProvidePlugin injects `process`; resolve from this package so
+      // workspace sources (e.g. @knoww/logger) don't look under packages/*.
+      "process/browser": require.resolve("process/browser"),
+      crypto: cryptoShimPath,
+    },
+    fallback: {
+      stream: false,
+      http: false,
+      https: false,
+      zlib: false,
+      url: false,
+      assert: false,
+      crypto: cryptoShimPath,
+    },
+  };
+}
+
 module.exports = (_env, argv) => {
   const isProduction = argv.mode === "production";
   const devMode = isProduction ? false : process.env.DEV_MODE !== "false";
 
-  return {
+  const classicConfig = {
+    name: "classic",
     entry: {
       background: "./src/background.ts",
       offscreen: "./src/offscreen/offscreen.ts",
@@ -179,49 +250,14 @@ module.exports = (_env, argv) => {
             filename: "ort/[name][ext]",
           },
         },
-        {
-          test: /\.tsx?$/,
-          use: {
-            loader: "ts-loader",
-            options: {
-              allowTsInNodeModules: false,
-              configFile: path.resolve(__dirname, "tsconfig.json"),
-              transpileOnly: true,
-            },
-          },
-          exclude: [/node_modules/, /__tests__/, /\.test\.ts$/, /\.spec\.ts$/],
-        },
+        createTypeScriptRule(),
         {
           test: /\.m?js$/,
           resolve: { fullySpecified: false },
         },
       ],
     },
-    resolve: {
-      extensions: [".tsx", ".ts", ".js"],
-      extensionAlias: {
-        ".js": [".ts", ".tsx", ".js"],
-      },
-      alias: {
-        "@knoww/shared-types": path.resolve(
-          __dirname,
-          "../../packages/shared-types/src"
-        ),
-        // ProvidePlugin injects `process`; resolve from this package so
-        // workspace sources (e.g. @knoww/logger) don't look under packages/*.
-        "process/browser": require.resolve("process/browser"),
-        crypto: cryptoShimPath,
-      },
-      fallback: {
-        stream: false,
-        http: false,
-        https: false,
-        zlib: false,
-        url: false,
-        assert: false,
-        crypto: cryptoShimPath,
-      },
-    },
+    resolve: createResolveConfig(),
     plugins: [
       new webpack.NormalModuleReplacementPlugin(
         /^node:crypto$/,
@@ -318,6 +354,7 @@ module.exports = (_env, argv) => {
           ...bundledFonts,
         ],
       }),
+      new StatsWriterPlugin("classic.json"),
     ],
     ignoreWarnings: [
       {
@@ -344,4 +381,68 @@ module.exports = (_env, argv) => {
       assetFilter: (assetFilename) => /\.(css|js|mjs)$/.test(assetFilename),
     },
   };
+
+  const esmEntries = {
+    ...Object.fromEntries(
+      platformManifest.map((entry) => [
+        `platforms/${entry.name}`,
+        `./src/content/platforms/${entry.file}.ts`,
+      ])
+    ),
+    "content-trading": "./src/content/trading/trading-entry.ts",
+  };
+
+  const esmConfig = {
+    name: "esm",
+    dependencies: ["classic"],
+    entry: esmEntries,
+    output: {
+      path: path.resolve(__dirname, "dist"),
+      filename: "[name].js",
+      module: true,
+      library: { type: "module" },
+      clean: false,
+      publicPath: "",
+    },
+    devtool: isProduction ? false : "cheap-module-source-map",
+    module: {
+      rules: [createTypeScriptRule()],
+    },
+    resolve: createResolveConfig(),
+    plugins: [
+      new webpack.NormalModuleReplacementPlugin(
+        /^node:crypto$/,
+        cryptoShimPath
+      ),
+      new webpack.DefinePlugin({
+        __DEV_MODE__: JSON.stringify(devMode),
+        "process.env.NODE_DEBUG": JSON.stringify(""),
+        "process.env.NODE_ENV": JSON.stringify(
+          isProduction ? "production" : "development"
+        ),
+        "process.env.POLY_BUILDER_CODE": JSON.stringify(
+          process.env.POLY_BUILDER_CODE || ""
+        ),
+        "process.env.WALLETCONNECT_PROJECT_ID": JSON.stringify(
+          process.env.WALLETCONNECT_PROJECT_ID ||
+            process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
+            ""
+        ),
+      }),
+      new webpack.ProvidePlugin({
+        Buffer: ["buffer", "Buffer"],
+        process: "process/browser",
+      }),
+      new StatsWriterPlugin("esm.json"),
+    ],
+    experiments: {
+      outputModule: true,
+    },
+    optimization: {
+      splitChunks: false,
+      runtimeChunk: false,
+    },
+  };
+
+  return [classicConfig, esmConfig];
 };

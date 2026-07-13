@@ -9,12 +9,41 @@ function readSource(path: string): string {
   return readFileSync(join(process.cwd(), path), { encoding: "utf8" });
 }
 
+function readSidepanelSources(): string {
+  return [
+    "src/sidepanel.ts",
+    "src/sidepanel/setup.ts",
+    "src/sidepanel/portfolio.ts",
+    "src/sidepanel/funding-ui.ts",
+  ]
+    .map(readSource)
+    .join("\n");
+}
+
+function extractFunctionSource(source: string, functionName: string): string {
+  const start = source.indexOf(`function ${functionName}`);
+  assert.notEqual(start, -1);
+  let depth = 0;
+  let opened = false;
+  for (let index = start; index < source.length; index++) {
+    const character = source[index];
+    if (character === "{") {
+      opened = true;
+      depth++;
+    } else if (character === "}") {
+      depth--;
+      if (opened && depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error(`Unable to extract ${functionName}`);
+}
+
 function readInlineCss(): string {
   return readSource("src/content/knoww-inline.css");
 }
 
 test("insufficient balance primary action opens deposit flow", () => {
-  const source = readSource("src/content/trading/trading-panel.ts");
+  const source = readSource("src/content/trading/panel/order-view.ts");
 
   assert.equal(
     /const missingFunds = new Decimal\(cost\)\.sub\(availableCollateral\);/.test(
@@ -39,7 +68,7 @@ test("insufficient balance primary action opens deposit flow", () => {
 });
 
 test("deposit CTA replaces redundant insufficient-balance warning", () => {
-  const source = readSource("src/content/trading/trading-panel.ts");
+  const source = readSource("src/content/trading/panel/order-view.ts");
   const css = readInlineCss();
 
   assert.equal(
@@ -68,6 +97,23 @@ test("trading panel keeps the deployment-check spinner even after credentials ex
   );
 });
 
+test("returning wallet restoration renders a loading state instead of a blank panel", () => {
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const panelSource = readSource("src/content/trading/trading-panel.ts");
+
+  assert.equal(/\| "restoring-session"/.test(serviceSource), true);
+  assert.equal(
+    /update\(\{ state: "restoring-session" \}\);/.test(serviceSource),
+    true
+  );
+  assert.equal(
+    /state === "restoring-session"[\s\S]{0,160}addLoading\(panel, "Restoring trading session…"\);/.test(
+      panelSource
+    ),
+    true
+  );
+});
+
 test("trading panel keeps spacing around dynamic summary and CTA", () => {
   const css = readInlineCss();
 
@@ -82,7 +128,7 @@ test("trading panel keeps spacing around dynamic summary and CTA", () => {
 });
 
 test("order summary uses clearer decision labels", () => {
-  const source = readSource("src/content/trading/trading-panel.ts");
+  const source = readSource("src/content/trading/panel/order-view.ts");
 
   assert.equal(/"You pay"/.test(source), true);
   assert.equal(/"You receive"/.test(source), true);
@@ -94,16 +140,17 @@ test("order summary uses clearer decision labels", () => {
 });
 
 test("market buy uses amount input and derived filled shares", () => {
-  const source = readSource("src/content/trading/trading-panel.ts");
+  const source = readSource("src/content/trading/panel/order-view.ts");
 
   assert.equal(/calculateBuySlippageForAmount/.test(source), true);
   assert.equal(
-    /function isMarketBuyAmountOrder\(\): boolean \{[\s\S]*orderMode === "market" && activeSide === "buy"/.test(
+    /function isMarketBuyAmountOrder\(\): boolean \{[\s\S]*panelState\.orderMode === "market" && panelState\.activeSide === "buy"/.test(
       source
     ),
     true
   );
-  assert.equal(/let marketBuyAmount = 0;/.test(source), true);
+  const stateSource = readSource("src/content/trading/panel/panel-state.ts");
+  assert.equal(/marketBuyAmount: 0,/.test(stateSource), true);
   assert.equal(/function addMarketBuyAmountSection/.test(source), true);
   assert.equal(/"knoww-tp-amount-input"/.test(source), true);
   assert.equal(/"Order amount in dollars"/.test(source), true);
@@ -125,10 +172,16 @@ test("market buy amount controls are styled in the extension panel", () => {
 });
 
 test("deposit token list whitelists direct pUSD deposits", () => {
-  const source = readSource("src/content/trading/trading-panel.ts");
+  const source = readSource("src/content/trading/panel/deposit-view.ts");
 
+  // The funding machine (src/funding) now owns the deposit flow; the token
+  // step renderer is the sole guard that keeps unsupported non-pUSD tokens
+  // non-selectable while exempting direct pUSD deposits. Re-pointed from the
+  // deleted `depositSelectToken` guard to the renderer's per-token check —
+  // an equivalent guarantee (the direct-pUSD exemption is still computed and
+  // gates selectability).
   assert.equal(
-    /token\.depositSupported === false &&\s*!isPusdToken\(token\.symbol, token\.address\)/.test(
+    /const isDirectPusdDeposit = isPusdToken\(tok\.symbol, tok\.address\);/.test(
       source
     ),
     true
@@ -139,11 +192,19 @@ test("deposit token list whitelists direct pUSD deposits", () => {
     ),
     true
   );
+  // The disabled tokens carry no click handler → dispatch SELECT_TOKEN only
+  // for selectable (supported) tokens.
+  assert.equal(
+    /if \(isDisabled\) \{\s*row\.disabled = true;\s*\} else \{[\s\S]*controller\.dispatch\(\{ type: "SELECT_TOKEN", token: tok \}\)/.test(
+      source
+    ),
+    true
+  );
 });
 
 test("portfolio wallet token metadata preserves bridge support and blocks unknown-price minimum checks", () => {
   const fundsSource = readSource("src/background/portfolio-funds.ts");
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /depositSupported:\s*isPusd \|\| Boolean\(supported\)/.test(fundsSource),
@@ -153,8 +214,11 @@ test("portfolio wallet token metadata preserves bridge support and blocks unknow
     /getMinDepositForToken\(assets, symbol\) \|\| 2/.test(fundsSource),
     false
   );
+  // The funding machine (src/funding) now owns the deposit flow. The side
+  // panel renders the token list from FundingToken decimal strings (parsed for
+  // the display comparisons); unknown-price tokens are made non-selectable.
   assert.equal(
-    /const priceUnavailable = t\.minUsd > 0 && t\.usdValue <= 0;/.test(
+    /const priceUnavailable = minUsd > 0 && usdValue <= 0;/.test(
       sidepanelSource
     ),
     true
@@ -165,21 +229,26 @@ test("portfolio wallet token metadata preserves bridge support and blocks unknow
     ),
     true
   );
+  // The machine enforces the floor in TOKEN units (minAmount, derived from
+  // the USD floor via the price ratio at the gateway boundary); the error
+  // copy still leads with the USD figure.
+  const machineSource = readSource("src/funding/machine.ts");
   assert.equal(
-    /if \(token\.minUsd > 0 && token\.usdValue <= 0\)/.test(sidepanelSource),
-    true
-  );
-  assert.equal(
-    /Token price is unavailable\. Refresh and try again\./.test(
-      sidepanelSource
+    /minAmountDec\.gt\(0\) && amountDec\.lt\(minAmountDec\)/.test(
+      machineSource
     ),
     true
   );
   assert.equal(
-    /token\.usdValue > 0 && amountUsd\.lt\(token\.minUsd\)/.test(
-      sidepanelSource
-    ),
-    false
+    /Minimum deposit is \$\$\{token\.minUsd\}/.test(machineSource),
+    true
+  );
+  // The USD→token-unit conversion lives in the gateways' shared protocol
+  // module (both surfaces derive minAmount through it).
+  const sharedGatewaySource = readSource("src/funding/gateways/shared.ts");
+  assert.equal(
+    /export function deriveDepositMinAmount/.test(sharedGatewaySource),
+    true
   );
 });
 
@@ -196,12 +265,16 @@ test("portfolio withdrawal checks for a missing EVM bridge address before checks
 });
 
 test("portfolio withdrawal execution reuses the side panel quote", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const gatewaySource = readSource("src/funding/gateways/sidepanel-gateway.ts");
   const backgroundSource = readSource("src/background.ts");
   const fundsSource = readSource("src/background/portfolio-funds.ts");
 
+  // The sidepanel gateway re-quotes immediately before executing a withdraw and
+  // forwards that fresh quote to the background handler.
   assert.equal(
-    /quote:\s*withdrawQuotePayload\.quote/.test(sidepanelSource),
+    /type: "KNOWW_PORTFOLIO_WITHDRAW_QUOTE"[\s\S]*type: "KNOWW_PORTFOLIO_WITHDRAW"[\s\S]*\.\.\.\(quote \? \{ quote \} : \{\}\)/.test(
+      gatewaySource
+    ),
     true
   );
   assert.equal(
@@ -226,8 +299,8 @@ test("portfolio withdrawal execution reuses the side panel quote", () => {
 });
 
 test("portfolio wallet connect reports rejected wallet prompts", () => {
-  const uiSource = readSource("src/content/ui.ts");
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
+  const sidepanelSource = readSidepanelSources();
   const bridgeSource = readSource("src/content/trading/bridge.ts");
 
   assert.equal(/function formatWalletPromptError/.test(uiSource), true);
@@ -253,8 +326,10 @@ test("portfolio wallet connect reports rejected wallet prompts", () => {
     /function formatPortfolioTransactionError/.test(sidepanelSource),
     true
   );
+  // Funding errors surface through fundErrorCopy, whose default branch formats
+  // the raw error via formatPortfolioTransactionError.
   assert.equal(
-    /setPortfolioFundStatus\(\s*"error",\s*formatPortfolioTransactionError\(response\.error\)\s*\)/.test(
+    /return formatPortfolioTransactionError\(error\.message\)/.test(
       sidepanelSource
     ),
     true
@@ -267,7 +342,7 @@ test("portfolio wallet connect reports rejected wallet prompts", () => {
 });
 
 test("portfolio WalletConnect QR connect returns immediately so state polling can render the QR", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
 
   assert.equal(/WALLETCONNECT_WALLET_UUID/.test(uiSource), true);
   assert.equal(
@@ -285,7 +360,7 @@ test("portfolio WalletConnect QR connect returns immediately so state polling ca
 });
 
 test("portfolio disconnect clears the busy button state when logout send fails", () => {
-  const source = readSource("src/sidepanel.ts");
+  const source = readSidepanelSources();
 
   assert.equal(
     /finally \{[\s\S]*portfolioDisconnecting = false;[\s\S]*button\.classList\.remove\("is-busy"\);[\s\S]*button\.title = "Disconnect wallet";/.test(
@@ -295,43 +370,47 @@ test("portfolio disconnect clears the busy button state when logout send fails",
   );
 });
 
-test("deposit ERC20 transfers use viem encoding helpers", () => {
+test("deposit money path runs through the background, not the content panel", () => {
   const source = readSource("src/content/trading/trading-panel.ts");
+  const gatewaySource = readSource(
+    "src/funding/gateways/trading-panel-gateway.ts"
+  );
 
-  assert.equal(/parseUnits/.test(source), true);
-  assert.equal(/encodeFunctionData/.test(source), true);
-  assert.equal(/erc20Abi/.test(source), true);
-  assert.equal(/BigInt\(10 \*\* decimals\)/.test(source), false);
+  // Task 5 deletes the extension's last content-side money movement for
+  // funding: the panel no longer signs or sends deposit transactions. This is
+  // STRONGER than the old "uses viem encoding helpers" check — the encoding +
+  // signing moved entirely to the background viem path.
+  assert.equal(/WalletBridge\.sendTransaction/.test(source), false);
+  assert.equal(/encodeFunctionData/.test(source), false);
+  assert.equal(/erc20Abi/.test(source), false);
   assert.equal(/ERC20_TRANSFER_SELECTOR/.test(source), false);
+  assert.equal(/sendViemDeposit/.test(source), false);
+  // The deposit executes via the shared funding gateway's background message.
+  assert.equal(/type: "KNOWW_PORTFOLIO_DEPOSIT"/.test(gatewaySource), true);
 });
 
-test("deposit opener leaves loading state without waiting for bridge assets", () => {
-  const source = readSource("src/content/trading/trading-panel.ts");
+test("deposit opener bounds the wallet-balance load and starts the funding flow", () => {
+  const source = readSource("src/content/trading/panel/deposit-view.ts");
 
+  // The funding machine loads the wallet token list on demand
+  // (SELECT_METHOD → select-token). The load is still bounded by the same
+  // timeout so a hung wallet surfaces as a LOAD_FAILED (equivalent guarantee
+  // to the old "leaves loading state without waiting for bridge assets": the
+  // opener never blocks on a stalled balance/asset fetch).
   assert.equal(
     /const DEPOSIT_BALANCE_LOAD_TIMEOUT_MS = 8000;/.test(source),
     true
   );
   assert.equal(
-    /withDepositLoadTimeout\(\s*fetchEoaBalancesViaWallet\(eoaAddress\),\s*DEPOSIT_BALANCE_LOAD_TIMEOUT_MS/.test(
+    /withDepositLoadTimeout\(\s*fetchEoaBalancesViaWallet\(address\),\s*DEPOSIT_BALANCE_LOAD_TIMEOUT_MS/.test(
       source
     ),
     true
   );
+  // Opening the flow dispatches START into the shared controller instead of
+  // eagerly fetching balances + assets inline.
   assert.equal(
-    /Promise\.all\(\[loadBalances, loadAssets\]\)/.test(source),
-    false
-  );
-  assert.equal(
-    /void loadBalances\.finally\(\(\) => \{[\s\S]*depositState = "ready";[\s\S]*rerender\(\);[\s\S]*\}\);/.test(
-      source
-    ),
-    true
-  );
-  assert.equal(
-    /void fetchSupportedAssets\(\)[\s\S]*depositBridgeAssets = assets;[\s\S]*if \(depositState === "ready"\) rerender\(\);/.test(
-      source
-    ),
+    /controller\.dispatch\(\{\s*type: "START",\s*flow: "deposit",/.test(source),
     true
   );
 });
@@ -398,17 +477,13 @@ test("trading card does not let approval spinner override persisted setup comple
 
 test("trading panel computes card setup flow once and passes it into the setup view", () => {
   const source = readSource("src/content/trading/trading-panel.ts");
-  const addSetupStart = source.indexOf("function addSetupFlow");
-  assert.notEqual(addSetupStart, -1);
-  const addSetupEnd = source.indexOf("function renderOrderForm", addSetupStart);
-  assert.notEqual(addSetupEnd, -1);
-  const addSetupSource = source.slice(addSetupStart, addSetupEnd);
+  const setupSource = readSource("src/content/trading/panel/setup-view.ts");
   const renderStart = source.indexOf("function render(");
   assert.notEqual(renderStart, -1);
   const renderEnd = source.length;
   const renderSource = source.slice(renderStart, renderEnd);
 
-  assert.equal(/cardSetupFlow\(ctx\)/.test(addSetupSource), false);
+  assert.equal(/cardSetupFlow\(ctx\)/.test(setupSource), false);
   assert.equal(
     /const setupFlow = cardSetupFlow\(ctx\);/.test(renderSource),
     true
@@ -420,7 +495,7 @@ test("portfolio setup view imports the shared html escaper", () => {
   const source = readSource("src/content/trading/portfolio-setup-view.ts");
 
   assert.equal(
-    /import \{ escapeHtml \} from "\.\.\/utils";/.test(source),
+    /import \{ escapeHtml \} from "\.\.\/html-escape";/.test(source),
     true
   );
   assert.equal(/function escapeHtml/.test(source), false);
@@ -502,18 +577,20 @@ test("deposit token rows reset host page button and text metrics", () => {
 });
 
 test("deposit amount validation and max use exact raw token balances", () => {
-  const source = readSource("src/content/trading/trading-panel.ts");
+  const source = readSource("src/content/trading/panel/deposit-view.ts");
 
   assert.equal(/amountRaw\?: string;/.test(source), true);
   assert.equal(/function balanceHexToBigInt/.test(source), true);
   assert.equal(/amountRaw: amountRaw\.toString\(\)/.test(source), true);
   assert.equal(/amountRaw: polRaw\.toString\(\)/.test(source), true);
   assert.equal(/function parseDepositAmountRaw/.test(source), true);
-  assert.equal(/function isDepositAmountOverBalance/.test(source), true);
+  // The over-balance check now takes a FundingToken (machine boundary) and
+  // reads its exact raw balance; the max preset derives from the same raw
+  // FundingToken.balanceRaw — an equivalent guarantee to the old
+  // depositSelected.amountRaw path.
+  assert.equal(/function isFundingAmountOverBalance/.test(source), true);
   assert.equal(
-    /BigInt\(depositSelected\.amountRaw\) \* BigInt\(pct\)\) \/ 100n/.test(
-      source
-    ),
+    /BigInt\(token\.balanceRaw\) \* BigInt\(pct\)\) \/ 100n/.test(source),
     true
   );
   assert.equal(/sendViemDeposit/.test(source), false);
@@ -594,9 +671,9 @@ test("dismissing the WalletConnect QR cancels the in-flight pairing end to end",
     "src/content/trading/walletconnect-bridge.ts"
   );
   const bridgeSource = readSource("src/content/trading/bridge.ts");
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
   const backgroundSource = readSource("src/background.ts");
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /async cancel\(\): Promise<void>/.test(walletConnectSource),
@@ -644,13 +721,13 @@ test("external wallet account revocation clears the cached trading session", () 
   assert.equal(/onAccountsChanged/.test(bridgeSource), true);
   assert.equal(
     /message\?\.type === "KNOWW_GET_PORTFOLIO_CONNECTED_WALLET"[\s\S]*await TradingService\.getConnectedWalletAddress\(\)/.test(
-      readSource("src/content/ui.ts")
+      readSource("src/content/trading/trading-glue.ts")
     ),
     true
   );
   assert.equal(/handleExternalWalletAccountsChanged/.test(serviceSource), true);
   assert.equal(
-    /WalletBridge\.onAccountsChanged\(\(accounts\) => \{[\s\S]*TradingService\.handleExternalWalletAccountsChanged\(accounts\)/.test(
+    /const handleWalletAccountsChanged = \(accounts: string\[\]\): void => \{[\s\S]*TradingService\.handleExternalWalletAccountsChanged\(accounts\)[\s\S]*WalletBridge\.onAccountsChanged\([\s\S]*handleWalletAccountsChanged/.test(
       serviceSource
     ),
     true
@@ -746,7 +823,7 @@ test("intentional wallet switch ignores intermediate accountsChanged events", ()
     true
   );
   assert.equal(
-    /message\?\.type !== TRADING_SESSION_DISCONNECTED_MESSAGE[\s\S]*if \(walletSwitchInProgress\) \{[\s\S]*return false;[\s\S]*WalletBridge\.resetAfterDisconnect/.test(
+    /runtimeMessage\?\.type !== TRADING_SESSION_DISCONNECTED_MESSAGE[\s\S]*if \(walletSwitchInProgress\) \{[\s\S]*return false;[\s\S]*WalletBridge\.resetAfterDisconnect/.test(
       serviceSource
     ),
     true
@@ -925,11 +1002,81 @@ test("approveUsdc guards re-entry and refreshes the allowance before flipping to
   assert.equal(refreshIdx < readyIdx, true);
 });
 
+test("split and merge keep exact decimal strings through panel, service, and message contracts", () => {
+  const positionsSource = readSource(
+    "src/content/trading/panel/positions-view.ts"
+  );
+  const splitFormSource = extractFunctionSource(
+    positionsSource,
+    "renderSplitForm"
+  );
+  const mergeFormSource = extractFunctionSource(
+    positionsSource,
+    "renderMergeForm"
+  );
+  const serviceSource = readSource("src/content/trading/trading-service.ts");
+  const messageSource = readSource("src/types/chrome-messages.ts");
+
+  const stateSource = readSource("src/content/trading/panel/panel-state.ts");
+  assert.equal(/splitMergeAmount: "",/.test(stateSource), true);
+  for (const formSource of [splitFormSource, mergeFormSource]) {
+    assert.equal(
+      /Number\(input\.value\)|parseFloat\(input\.value\)/.test(formSource),
+      false
+    );
+    assert.equal(
+      /panelState\.splitMergeAmount = input\.value;/.test(formSource),
+      true
+    );
+    assert.equal(
+      /formatSplitMergeAmount\(canonicalAmount\)/.test(formSource),
+      true
+    );
+  }
+  assert.equal(
+    /isCtfPusdAmountOverBalance\(canonicalAmount, pusdBalance\)/.test(
+      splitFormSource
+    ),
+    true
+  );
+  assert.equal(
+    /isCtfPusdAmountOverBalance\(canonicalAmount, maxMerge\)/.test(
+      mergeFormSource
+    ),
+    true
+  );
+  assert.equal(
+    /async splitPosition\([\s\S]*?amount: string,[\s\S]*?type: "trading:split-position"[\s\S]*?amount,/.test(
+      serviceSource
+    ),
+    true
+  );
+  assert.equal(
+    /async mergePositions\([\s\S]*?amount: string,[\s\S]*?type: "trading:merge-positions"[\s\S]*?amount,/.test(
+      serviceSource
+    ),
+    true
+  );
+  assert.equal(
+    /interface TradingSplitPositionMessage[\s\S]*?amount: string;/.test(
+      messageSource
+    ),
+    true
+  );
+  assert.equal(
+    /interface TradingMergePositionsMessage[\s\S]*?amount: string;/.test(
+      messageSource
+    ),
+    true
+  );
+});
+
 test("dismissed-but-incomplete setup renders a resume banner instead of an empty card", () => {
   const panelSource = readSource("src/content/trading/trading-panel.ts");
+  const setupSource = readSource("src/content/trading/panel/setup-view.ts");
 
   assert.equal(
-    /setupSurfaceMode === "banner"[\s\S]{0,400}addSetupBanner\(panel, ctx\)/.test(
+    /setupSurfaceMode === "banner"[\s\S]{0,400}addSetupBanner\(panel, ctx, setupViewUi\)/.test(
       panelSource
     ),
     true
@@ -937,7 +1084,7 @@ test("dismissed-but-incomplete setup renders a resume banner instead of an empty
   // The banner's CTA clears the shared dismissal so the wizard can resume.
   assert.equal(
     /function addSetupBanner\([\s\S]*?writeSetupDismissed\(ctx\.address, false\)/.test(
-      panelSource
+      setupSource
     ),
     true
   );
@@ -972,4 +1119,76 @@ test("credential/order gates re-read a stale isDeployed=false before bouncing to
     /if \(!ctx\.proxyAddress \|\| ctx\.isDeployed !== true\)/g
   );
   assert.equal((gates || []).length >= 2, true);
+});
+
+test("deposit error copy maps raw execution codes and bridge failures to friendly copy", () => {
+  const source = readSource("src/content/trading/panel/format.ts");
+  const panelSource = readSource("src/content/trading/panel/deposit-view.ts");
+  const copyFn = extractFunctionSource(source, "depositErrorCopy");
+
+  // The gateway passes non-retryable execution codes through as the raw
+  // message ("PENDING_RECONCILIATION" etc.) — the renderer must map them.
+  assert.equal(/case "PENDING_RECONCILIATION":/.test(copyFn), true);
+  assert.equal(
+    copyFn.includes("This transaction may already be submitted."),
+    true
+  );
+  assert.equal(/case "IDEMPOTENCY_FINGERPRINT_MISMATCH":/.test(copyFn), true);
+  assert.equal(/case "NO_CONTENT_TAB":/.test(copyFn), true);
+
+  // Raw chrome.runtime bridge failures (SW restart / closed tab) must map
+  // to the sidepanel's "Couldn't reach your wallet" copy, not render raw.
+  assert.equal(
+    /isSigningBridgeUnreachable\(error\.message\)/.test(copyFn),
+    true
+  );
+  assert.equal(copyFn.includes("Couldn't reach your wallet."), true);
+  const unreachableFn = extractFunctionSource(
+    source,
+    "isSigningBridgeUnreachable"
+  );
+  for (const pattern of [
+    "Receiving end does not exist",
+    "Could not establish connection",
+    "Extension context invalidated",
+  ]) {
+    assert.equal(unreachableFn.includes(pattern), true);
+  }
+
+  // Every deposit error-render site routes through the copy mapper — no
+  // raw `state.error.message` display remains in the panel.
+  assert.equal(
+    (panelSource.match(/depositErrorCopy\(state\.error\)/g) || []).length >= 4,
+    true
+  );
+  assert.equal(
+    /el\("span", "", state\.error\.message\)/.test(panelSource),
+    false
+  );
+});
+
+test("account changes under an open funding flow reset the machine (never a stale command/address)", () => {
+  const source = readSource("src/content/trading/panel/deposit-view.ts");
+  const shellSource = readSource("src/content/trading/trading-panel.ts");
+
+  // The sync helper compares the machine's captured flow address against the
+  // live TradingService context and dispatches ACCOUNT_CHANGED on mismatch.
+  const syncFn = extractFunctionSource(source, "syncDepositControllerAccount");
+  assert.equal(/state\.corr\.address/.test(syncFn), true);
+  assert.equal(/dispatch\(\{ type: "ACCOUNT_CHANGED" \}\)/.test(syncFn), true);
+  // An open deposit view restarts for the new account (idle dead-ends: the
+  // method screen's SELECT_METHOD is a no-op until START seeds the address).
+  assert.equal(/type: "START",\s*flow: "deposit"/.test(syncFn), true);
+
+  // Both TradingService state listeners run the sync: the panel shell owns
+  // its listener and the inline deposit view owns its host-scoped listener.
+  assert.equal(
+    (source.match(/syncDepositControllerAccount\(ctx\);/g) || []).length >= 1,
+    true
+  );
+  assert.equal(
+    (shellSource.match(/syncDepositControllerAccount\(ctx\);/g) || []).length >=
+      1,
+    true
+  );
 });

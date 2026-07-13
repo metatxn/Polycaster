@@ -84,7 +84,7 @@ function buildSignedImageOptimizerUrl(
  * /api/image:
  *   get:
  *     summary: Sign and proxy image optimizer requests.
- *     description: Validates an allowlisted source image URL, signs it with the server-only image optimizer key, and streams the shared image processing service response. The route is used by the custom Next.js image loader so SSR and client hydration see the same same-origin URL while the upstream processor still receives an authenticated request.
+ *     description: Validates an allowlisted source image URL, signs it with the server-only image optimizer key, and streams the shared image processing service response. The route is used by the custom Next.js image loader so SSR and client hydration see the same-origin URL while the upstream processor still receives an authenticated request.
  *     tags:
  *       - Images
  *     parameters:

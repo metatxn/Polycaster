@@ -5,7 +5,7 @@ node_modules/
 .yarn/install-state.gz
 
 # testing
-/coverage
+coverage/
 
 # next.js
 .next/
@@ -75,3 +75,14 @@ apps/extension/.embedding-benchmark-cache/
 .design-preview/
 .design-review*/
 .fallow/
+.ds-sync/
+# design-sync: commit the durable inputs (config, notes, conventions, previews,
+# fonts, helper scripts); ignore only the regenerated caches / machine state.
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+apps/web/.design-sync-styles.css
+apps/web/.design-sync-entry.tsx
+ds-bundle/
+.design-sync/
+.design*

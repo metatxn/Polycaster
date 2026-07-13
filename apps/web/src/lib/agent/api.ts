@@ -1,8 +1,20 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import { checkOriginAndFetchSite } from "@/lib/origin-guard";
 
 const log = createLogger("agent.api");
+const MAX_AGENT_REQUEST_BODY_BYTES = 16 * 1024;
+
+export class JsonBodyError extends Error {
+  readonly status: 400 | 413;
+
+  constructor(message: string, status: 400 | 413) {
+    super(message);
+    this.name = "JsonBodyError";
+    this.status = status;
+  }
+}
 
 export function jsonError(
   message: string,
@@ -20,11 +32,14 @@ export function jsonError(
 }
 
 export async function readJson(request: NextRequest): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    throw new Error("Invalid JSON payload");
+  const result = await readJsonBodyWithLimit(
+    request,
+    MAX_AGENT_REQUEST_BODY_BYTES
+  );
+  if (!result.ok) {
+    throw new JsonBodyError(result.error, result.status);
   }
+  return result.body;
 }
 
 export function requireAgentAdmin(request: NextRequest): NextResponse | null {

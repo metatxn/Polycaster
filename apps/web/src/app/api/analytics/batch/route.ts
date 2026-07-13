@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import {
   extensionCorsHeaders,
   handleExtensionPreflight,
@@ -11,6 +12,8 @@ import {
   isPostHogServerConfigured,
   type ServerPostHogEvent,
 } from "@/lib/posthog-server";
+
+const MAX_REQUEST_BODY_BYTES = 32 * 1024;
 
 const primitiveSchema = z.union([
   z.string().max(200),
@@ -126,24 +129,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let json: unknown;
-  try {
-    json = await request.json();
-  } catch {
+  const jsonBody = await readJsonBodyWithLimit(request, MAX_REQUEST_BODY_BYTES);
+  if (!jsonBody.ok) {
     return NextResponse.json(
-      { success: false, error: "Invalid JSON payload" },
-      { status: 400, headers: cors }
+      { success: false, error: jsonBody.error },
+      { status: jsonBody.status, headers: cors }
     );
   }
 
-  const parsed = requestSchema.safeParse(json);
+  const parsed = requestSchema.safeParse(jsonBody.body);
 
   if (!parsed.success) {
     return NextResponse.json(
       {
         success: false,
         error: "Invalid analytics payload",
-        details: parsed.error.flatten().fieldErrors,
       },
       { status: 400, headers: cors }
     );

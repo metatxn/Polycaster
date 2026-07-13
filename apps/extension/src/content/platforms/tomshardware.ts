@@ -1,5 +1,4 @@
-import type { InjectionPoint } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
+import type { InjectionPoint, PlatformAdapter } from "../../types/platform";
 import { createBasicAdapter } from "./basic-adapter";
 import {
   combineTextParts,
@@ -310,6 +309,6 @@ const TomsHardwareAdapter = createBasicAdapter({
   hasInjectedCard: hasTomsHardwareInjectedCard,
 });
 
-registerAdapterWithRetry(TomsHardwareAdapter, 100, 50);
+export const adapter: PlatformAdapter = TomsHardwareAdapter;
 
 export { TomsHardwareAdapter };

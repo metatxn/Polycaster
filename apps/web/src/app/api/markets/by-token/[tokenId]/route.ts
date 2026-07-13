@@ -64,6 +64,28 @@ async function resolveEventSlug(
  * The token ID is the outcome token ID from the CLOB API.
  * We use the Gamma API with clob_token_ids parameter to look up the market.
  */
+/**
+ * @openapi
+ * /api/markets/by-token/{tokenId}:
+ *   get:
+ *     summary: Fetch /api/markets/by-token/{tokenId}.
+ *     tags: [Markets]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ tokenId: string }> }

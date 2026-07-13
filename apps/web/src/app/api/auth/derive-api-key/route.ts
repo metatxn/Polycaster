@@ -7,6 +7,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import {
   getPostHogClient,
   isPostHogServerConfigured,
@@ -14,6 +15,7 @@ import {
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.auth.derive-api-key");
+const MAX_REQUEST_BODY_BYTES = 8 * 1024;
 
 /**
  * Schema for L1 authentication headers
@@ -69,6 +71,28 @@ function trackApiKeyEvent(
  * 5. Backend returns the API credentials to frontend
  * 6. Frontend stores credentials for future order submissions
  */
+/**
+ * @openapi
+ * /api/auth/derive-api-key:
+ *   post:
+ *     summary: Create or proxy /api/auth/derive-api-key.
+ *     tags: [Auth]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function POST(request: NextRequest) {
   // Rate limit: 10 requests per minute (auth is sensitive)
   const rateLimitResponse = checkRateLimit(request, {
@@ -77,15 +101,27 @@ export async function POST(request: NextRequest) {
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
-    const body = await request.json();
-    const parsed = l1AuthSchema.safeParse(body);
+    const jsonBody = await readJsonBodyWithLimit(
+      request,
+      MAX_REQUEST_BODY_BYTES
+    );
+    if (!jsonBody.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: jsonBody.error,
+        },
+        { status: jsonBody.status }
+      );
+    }
+
+    const parsed = l1AuthSchema.safeParse(jsonBody.body);
 
     if (!parsed.success) {
       return NextResponse.json(
         {
           success: false,
           error: "Invalid request body",
-          details: parsed.error.message,
         },
         { status: 400 }
       );

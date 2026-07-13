@@ -106,6 +106,8 @@ pnpm dev:ext        # Run the extension build in watch mode
 pnpm build          # Build all workspace packages
 pnpm build:web      # Build the web app only
 pnpm build:ext      # Build the extension only
+pnpm build:ext:dev  # Build the extension once in development mode
+pnpm test           # Run workspace tests where defined
 pnpm preview        # Preview the Cloudflare web deployment locally
 pnpm lint           # Lint the monorepo
 pnpm lint:web       # Lint the web app only
@@ -117,12 +119,13 @@ pnpm typecheck:ext  # Type-check the extension only
 pnpm audit:security # Run a high-severity dependency audit
 pnpm brand:render   # Render the brand mark asset
 pnpm deploy         # Deploy the web app to Cloudflare
+pnpm prepare        # Install Husky hooks
 pnpm release:ext    # Bump, build, and zip the extension release
 ```
 
 Package-level scripts live in the workspace packages:
 
-- `apps/web/package.json`: `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:migrate:local`, `test`, `test:node`, `test:watch`, `test:coverage`, `test:e2e`
+- `apps/web/package.json`: `dev:turbo`, `start`, `soak`, `soak:assert`, `cf-typegen`, `agent:d1:list:local`, `agent:d1:adopt-runtime-schema:local`, `agent:d1:adopt-runtime-schema:remote`, `agent:d1:migrate:local`, `agent:d1:migrate:remote`, `test`, `test:node`, `test:watch`, `test:coverage`, `test:e2e`
 - `apps/extension/package.json`: `clean`, `test`, `test:scoring`, `benchmark:embeddings`, `format`, `version:bump`, `zip`, `release`
 - `apps/agent/package.json`: `build`, `typecheck`, `lint`, `format`, `test`
 

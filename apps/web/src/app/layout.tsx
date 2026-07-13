@@ -121,14 +121,27 @@ export default async function RootLayout({
 
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "WebSite",
-    name: SITE_NAME,
-    url: SITE_URL,
-    potentialAction: {
-      "@type": "SearchAction",
-      target: `${SITE_URL}/search?q={search_term_string}`,
-      "query-input": "required name=search_term_string",
-    },
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${SITE_URL}/#organization`,
+        name: SITE_NAME,
+        url: SITE_URL,
+        logo: {
+          "@type": "ImageObject",
+          url: `${SITE_URL}/logo-512x512.png`,
+        },
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}/#website`,
+        name: SITE_NAME,
+        url: SITE_URL,
+        publisher: {
+          "@id": `${SITE_URL}/#organization`,
+        },
+      },
+    ],
   };
 
   return (

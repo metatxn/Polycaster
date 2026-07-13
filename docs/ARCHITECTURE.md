@@ -87,7 +87,7 @@ flowchart LR
 | Web wallet and session auth | `apps/web/src/config/index.tsx`, `apps/web/src/lib/auth/*`, `apps/web/src/lib/extension-auth.ts`, `apps/web/src/lib/siwx/*` | Configures Reown/Wagmi wallet bootstrapping, SIWX challenge generation, extension CORS/session helpers, and extension-session token issuance/verification used by relayer-proxy and `/api/extension/session/*` flows | Wallet providers, API routes, browser sessions |
 | Web data hooks | `apps/web/src/hooks/*` | Wraps fetches to `/api/*`, React Query state, websocket subscriptions, trading helpers | App Router API routes, websocket managers |
 | Web realtime and account UX | `apps/web/src/app/live/page.tsx`, `apps/web/src/app/events/sports/live/page.tsx`, `apps/web/src/app/sports/live/page.tsx`, `apps/web/src/components/notifications/*`, `apps/web/src/hooks/use-price-alerts.ts`, `apps/web/src/app/whales/_components/*`, `apps/web/src/app/whales/_lib/*` | Powers live sports markets across the current live-route aliases, CLOB notification surfaces, hook-driven browser price-alert detection, and whale-specific dashboards/aggregations | Web data hooks, websocket managers, Polymarket CLOB |
-| Agent operator dashboard | `apps/web/src/app/agent/page.tsx`, `apps/web/src/app/agent/agent-dashboard-client.tsx` | Internal UI for managing watchlist items, triggering runs, reviewing evidence/votes, inspecting paper positions, live-order audits, and model calibration | Agent admin APIs, `apps/agent`, D1 |
+| Agent operator dashboard | `apps/web/src/app/agent/page.tsx`, `apps/web/src/app/agent/agent-dashboard-client.tsx`, `apps/web/src/app/agent/run-intent-idempotency.ts` | Internal UI for managing watchlist items, triggering paper/live runs, persisting live-run idempotency intent keys in the browser, reviewing evidence/votes, inspecting paper positions, live-order audits, and model calibration | Agent admin APIs, `apps/agent`, D1 |
 | API/BFF layer | `apps/web/src/app/api/**/*/route.ts` | Validates input, rate-limits requests, calls upstream services, reshapes responses for the UI, and also exposes same-origin infrastructure endpoints such as the signed image optimizer proxy at `/api/image` | Polymarket APIs, OpenRouter, relayer proxy, Polygon RPC, shared image optimizer |
 | Agent admin API helpers | `apps/web/src/lib/agent/api.ts`, `apps/web/src/lib/agent/repository.ts`, `apps/web/src/app/api/agent/**/*/route.ts` | Enforces admin auth/origin checks, binds Cloudflare D1 when available, and exposes the paper-trading control plane over `/api/agent/*` | Agent dashboard, `apps/agent`, D1, origin guard |
 | Agent engine package | `apps/agent/src/*` | Owns watchlist import, evidence gathering, model voting, quorum, paper/live execution adapters, resolution refresh, and the repository schema used by `/api/agent/*` | Web admin APIs, Polymarket APIs, OpenRouter/search providers, D1 |
@@ -96,14 +96,14 @@ flowchart LR
 | Insider detection and backtesting | `apps/web/src/lib/insider/*`, `apps/web/src/app/api/whales/backtest/route.ts` | Scores suspicious trading with archetype-based detectors, replays the same logic against resolved markets, and exposes the heavyweight backtest API used by the whales backtest UI | Polymarket Gamma/Data/CLOB APIs, trader-history cache, whales pages |
 | Web constants and types | `apps/web/src/constants/*`, `apps/web/src/types/*` | Shared Polymarket constants, API enums, cache durations, and typed response shapes used across routes, hooks, and components | Web app shell, API routes, hooks |
 | Web platform guards | `apps/web/src/middleware.ts`, `apps/web/instrumentation-client.ts` | Applies security headers/CSP and bootstraps browser-side telemetry | Browser, Next.js runtime, PostHog |
-| Extension content runtime | `apps/extension/src/content/index.ts`, `apps/extension/src/content/*`, `apps/extension/src/content/streaming/stream-markets.ts` | Bundles the content-script pipeline, detects supported sites, extracts post/article text, ranks relevant markets, and also powers stream-surface companion cards such as Twitch's Live Markets module | Background service worker, page bridge, Knoww APIs, Polymarket APIs |
-| Extension in-page trading bridge | `apps/extension/src/content/trading/*`, `apps/extension/src/page-bridge.ts` | Manages content-script trading UI, extension-session bootstrapping, proxy-wallet bridging, and page-world wallet RPC handoff for inline trading flows | Content runtime, background worker, page bridge, `/api/extension/session/*`, `/api/relayer/*` |
+| Extension content runtime | `apps/extension/src/content/index.ts`, `apps/extension/src/content/main.ts`, `apps/extension/src/content/platform-loader.ts`, `apps/extension/src/content/platform-manifest.ts`, `apps/extension/src/content/streaming/stream-markets.ts`, `apps/extension/src/content/ui/*` | Boots the content-script pipeline, lazily loads host adapters from the generated platform manifest, extracts post/article text, ranks relevant markets, renders shared injected UI, and powers stream-surface companion cards such as Twitch's Live Markets module | Background service worker, page bridge, Knoww APIs, Polymarket APIs |
+| Extension in-page trading bridge | `apps/extension/src/content/trading-loader.ts`, `apps/extension/src/content/trading/*`, `apps/extension/src/page-bridge.ts` | Manages lazy trading-runtime loading, content-script trading UI, extension-session bootstrapping, proxy-wallet bridging, and page-world wallet RPC handoff for inline trading flows | Content runtime, background worker, page bridge, `/api/extension/session/*`, `/api/relayer/*` |
 | Extension background worker | `apps/extension/src/background.ts`, `apps/extension/src/background/*` | Central message router, auth token storage, batched analytics queue, CORS-safe fetch proxy, local NLP/embedding services | Content scripts, offscreen document, Knoww API, analytics ingest proxy, Polymarket APIs |
 | Extension page bridge | `apps/extension/src/page-bridge.ts` | Runs in the page's main world to discover injected wallets via EIP-6963 and bridge EIP-1193 RPC requests between page wallets and the isolated content script | Content runtime, injected wallet providers |
-| Extension platform and host config | `apps/extension/src/supported-hosts.ts`, `apps/extension/src/content/platform-registry.ts`, `apps/extension/src/content/platforms/*` | Defines match patterns, platform adapters, and site-specific extraction/injection behavior for supported social, editorial, prediction-native, and streaming surfaces | Content runtime, background worker |
+| Extension platform and host config | `apps/extension/src/supported-hosts.ts`, `apps/extension/src/content/platform-registry.ts`, `apps/extension/src/content/platform-manifest.ts`, `apps/extension/src/content/platforms/*` | Defines match patterns, manifest-driven adapter discovery, registered platform adapters, and site-specific extraction/injection behavior for supported social, editorial, prediction-native, and streaming surfaces | Content runtime, background worker |
 | Extension offscreen runtimes | `apps/extension/src/offscreen/offscreen.ts`, `apps/extension/src/offscreen/scoring-runtime.ts`, `apps/extension/src/offscreen/trading-runtime.ts`, `apps/extension/src/background/trading-handler.ts` | Splits heavy scoring and trading work out of the MV3 service worker, loading runtime-specific modules only when needed | Background worker, relayer, CLOB, Polygon RPC, local scoring pipeline |
 | Extension options and preferences | `apps/extension/src/options.tsx`, `apps/extension/src/content/preferences.ts`, `apps/extension/src/types/settings.ts` | Manages per-user platform/source toggles, analytics preferences, theme overrides, and debug settings | Chrome storage, content runtime, background worker |
-| Extension sidepanel | `apps/extension/src/sidepanel.ts` | Renders the extension-owned sidepanel UI for snapshot markets, search, portfolio, and wallet-session controls outside the in-page injection flow | Background worker, Knoww API, Chrome extension runtime |
+| Extension sidepanel | `apps/extension/src/sidepanel.ts`, `apps/extension/src/sidepanel/*` | Renders the extension-owned sidepanel UI plus its supporting portfolio, market, funding, setup, and messaging modules outside the in-page injection flow | Background worker, Knoww API, Chrome extension runtime |
 | Shared logger package | `packages/logger/src/index.ts` | Provides the structured logger used across the web app, extension, and agent package instead of ad hoc console logging | Web app routes/libs, extension background/content runtimes, `apps/agent` |
 | Shared market/contracts package | `packages/shared-types/src/*` | Single source of truth for Polymarket endpoints, contract addresses, auth constants, slippage helpers, crypto helpers, trading helpers, ABIs, and shared types | Web app, extension, and agent package |
 | Deployment config | `apps/web/custom-worker.ts`, `apps/web/wrangler.jsonc`, `apps/web/open-next.config.ts`, `apps/web/next.config.ts` | Packages the Next.js app for Cloudflare Workers, wires the custom Worker entrypoint, and configures the R2-backed incremental cache plus cron schedule | Cloudflare Workers, R2 |
@@ -181,9 +181,9 @@ Relevant files:
 ### 3.2 Typical extension request: social post to inline market card
 
 1. The extension content bundle starts from `apps/extension/src/content/index.ts`, which wires together the content runtime modules before handing off to `apps/extension/src/content/main.ts`.
-2. Platform detection comes from `apps/extension/src/content/platform-registry.ts` and platform adapters under `apps/extension/src/content/platforms/*`.
+2. Platform detection starts with the generated host manifest in `apps/extension/src/content/platform-manifest.ts`, then `apps/extension/src/content/platform-loader.ts` lazily imports matching adapters and registers them through `apps/extension/src/content/platform-registry.ts`.
 3. When a page needs wallet access, `apps/extension/src/page-bridge.ts` runs in the page's main world so the extension can discover injected providers and bridge EIP-1193 requests safely into the isolated content script.
-4. The content script extracts post text and asks the background worker for local NLP ranking or remote AI extraction.
+4. The content script extracts post text, asks the background worker for local NLP ranking or remote AI extraction, and separately lazy-loads the trading runtime through `apps/extension/src/content/trading-loader.ts` only when inline trading UI is needed.
 5. The background worker either:
    - runs local NLP / embeddings from `apps/extension/src/background/nlp.ts` and `apps/extension/src/background/embeddings.ts`, or
    - calls Knoww’s AI routes at `/api/ai/extract-topics` and `/api/ai/validate-relevance`.
@@ -220,7 +220,10 @@ Relevant files:
 - `apps/extension/src/content/index.ts`
 - `apps/extension/src/content/main.ts`
 - `apps/extension/src/content/api.ts`
+- `apps/extension/src/content/platform-loader.ts`
+- `apps/extension/src/content/platform-manifest.ts`
 - `apps/extension/src/content/platform-registry.ts`
+- `apps/extension/src/content/trading-loader.ts`
 - `apps/extension/src/page-bridge.ts`
 - `apps/extension/src/background.ts`
 - `apps/extension/src/background/nlp.ts`
@@ -289,16 +292,18 @@ Persistence inside this repo currently falls into four buckets:
 
 ### 4.1 Agent-owned D1 schema
 
-The application-owned schema lives inside `apps/agent/src/repository.ts`, its versioned SQL migrations live in `apps/agent/migrations/*.sql`, and the repository is bound in `apps/web/src/lib/agent/repository.ts` through the `AGENT_DB` Cloudflare D1 binding.
+The versioned SQL migrations in `apps/agent/migrations/*.sql` are the sole authority for the application-owned schema. `apps/agent/src/repository.ts` contains queries and row mappings only, and the repository is bound in `apps/web/src/lib/agent/repository.ts` through the `AGENT_DB` Cloudflare D1 binding. Remote adoption and migration are exposed as explicit workspace scripts rather than inferred from the runtime code path.
+
+Before applying migrations, deployment runs the guarded adoption script at `apps/agent/adoption/adopt-runtime-schema.sql`. It records migrations as already applied only when every table, upgraded column, and index created by the retired runtime-schema path is present. Fresh databases remain unmarked and run all migrations normally; partial legacy schemas remain unmarked so deployment fails closed for manual reconciliation instead of skipping unknown changes.
 
 | Table | Defined in | Purpose | Keys / indexes | Relationships |
 | --- | --- | --- | --- | --- |
-| `agent_watchlist` | `apps/agent/src/repository.ts` | Stores operator-curated watchlist items and imported market metadata | Primary key `id`; active/created indexes | Referenced by runs, positions, and live orders |
-| `agent_runs` | `apps/agent/src/repository.ts` | Stores top-level paper-trading run lifecycle rows | Primary key `id`; `started_at` index | Parent for `agent_run_items` |
-| `agent_run_items` | `apps/agent/src/repository.ts` | Persists per-watchlist evidence, votes, decisions, and fill snapshots for a run | Primary key `id`; `run_id` and `watchlist_item_id` indexes | Foreign keys to `agent_runs.id` and `agent_watchlist.id` |
-| `agent_resolutions` | `apps/agent/src/repository.ts` | Stores fetched market outcomes used for settlement/calibration | Primary key `token_id`; `resolved_at` index | Joined back to watchlist/run items by token |
-| `agent_positions` | `apps/agent/src/repository.ts` | Tracks paper positions, closes, and realized P&L | Primary key `id`; token/status/watchlist indexes | Foreign key to `agent_watchlist.id` |
-| `agent_live_orders` | `apps/agent/src/repository.ts` | Audit log for live-mode order submission attempts and status changes | Primary key `idempotency_key`; created/status indexes | Linked logically to runs/watchlist items |
+| `agent_watchlist` | `apps/agent/migrations/*.sql` | Stores operator-curated watchlist items and imported market metadata | Primary key `id`; active/created indexes | Referenced by runs, positions, and live orders |
+| `agent_runs` | `apps/agent/migrations/*.sql` | Stores top-level paper-trading run lifecycle rows | Primary key `id`; `started_at` index | Parent for `agent_run_items` |
+| `agent_run_items` | `apps/agent/migrations/*.sql` | Persists per-watchlist evidence, votes, decisions, and fill snapshots for a run | Primary key `id`; `run_id` and `watchlist_item_id` indexes | Foreign keys to `agent_runs.id` and `agent_watchlist.id` |
+| `agent_resolutions` | `apps/agent/migrations/*.sql` | Stores fetched market outcomes used for settlement/calibration | Primary key `token_id`; `resolved_at` index | Joined back to watchlist/run items by token |
+| `agent_positions` | `apps/agent/migrations/*.sql` | Tracks paper positions, closes, and realized P&L | Primary key `id`; token/status/watchlist indexes | Foreign key to `agent_watchlist.id` |
+| `agent_live_orders` | `apps/agent/migrations/*.sql` | Audit log for live-mode order submission attempts and status changes | Primary key `idempotency_key`; created/status indexes | Linked logically to runs/watchlist items |
 
 Notes:
 

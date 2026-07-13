@@ -4,8 +4,60 @@ import { type AgentExecutionMode, runPaperAgent } from "./run.ts";
 
 const log = createLogger("agent.scheduler");
 
-const DEFAULT_LOCK_LEASE_MS = 10 * 60_000;
-const DEFAULT_LOCK_KEY = "agent-cron";
+export const AGENT_EXECUTION_LOCK_LEASE_MS = 10 * 60_000;
+export const AGENT_EXECUTION_LOCK_KEY = "agent-execution";
+
+export interface AgentExecutionLockHeartbeat {
+  assertHeld(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export function startAgentExecutionLockHeartbeat(
+  repository: AgentRepository,
+  input: { lockKey: string; ownerId: string; leaseMs: number }
+): AgentExecutionLockHeartbeat {
+  let lockError: Error | null = null;
+  let pendingRenewal = Promise.resolve();
+  const renew = () => {
+    pendingRenewal = pendingRenewal.then(async () => {
+      if (lockError) return;
+      try {
+        const renewed = await repository.renewSchedulerLock(
+          input.lockKey,
+          input.ownerId,
+          new Date().toISOString(),
+          input.leaseMs
+        );
+        if (!renewed) {
+          lockError = new Error("Agent execution lock was lost");
+        }
+      } catch (error) {
+        lockError =
+          error instanceof Error
+            ? error
+            : new Error("Agent execution lock renewal failed");
+      }
+    });
+    return pendingRenewal;
+  };
+  const interval = setInterval(
+    () => {
+      void renew();
+    },
+    Math.max(1_000, Math.floor(input.leaseMs / 3))
+  );
+
+  return {
+    async assertHeld() {
+      await renew();
+      if (lockError) throw lockError;
+    },
+    async stop() {
+      clearInterval(interval);
+      await pendingRenewal;
+    },
+  };
+}
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -41,7 +93,10 @@ export interface ScheduledAgentTickOptions {
   now?: () => Date;
   runAgent?: (
     repository: AgentRepository,
-    options: { executionMode: AgentExecutionMode }
+    options: {
+      executionMode: AgentExecutionMode;
+      assertExecutionLock?: () => Promise<void>;
+    }
   ) => Promise<AgentRunDetail>;
 }
 
@@ -58,7 +113,7 @@ export function getScheduledAgentConfig(
     executionMode: env.AGENT_CRON_EXECUTION_MODE === "live" ? "live" : "paper",
     lockLeaseMs: positiveInteger(
       env.AGENT_CRON_LOCK_LEASE_MS,
-      DEFAULT_LOCK_LEASE_MS
+      AGENT_EXECUTION_LOCK_LEASE_MS
     ),
   };
 }
@@ -78,7 +133,7 @@ export async function runScheduledAgentTick(
 
   const now = (options.now ?? (() => new Date()))().toISOString();
   const ownerId = crypto.randomUUID();
-  const lockKey = options.lockKey ?? DEFAULT_LOCK_KEY;
+  const lockKey = options.lockKey ?? AGENT_EXECUTION_LOCK_KEY;
   const lock = await repository.tryAcquireSchedulerLock({
     lockKey,
     ownerId,
@@ -93,9 +148,16 @@ export async function runScheduledAgentTick(
     };
   }
 
+  const heartbeat = startAgentExecutionLockHeartbeat(repository, {
+    lockKey,
+    ownerId,
+    leaseMs: config.lockLeaseMs,
+  });
+
   try {
     const run = await (options.runAgent ?? runPaperAgent)(repository, {
       executionMode: config.executionMode,
+      assertExecutionLock: () => heartbeat.assertHeld(),
     });
     log.info("tick.completed", {
       runId: run.id,
@@ -122,6 +184,7 @@ export async function runScheduledAgentTick(
       error: message,
     };
   } finally {
+    await heartbeat.stop();
     await repository.releaseSchedulerLock(lockKey, ownerId);
   }
 }

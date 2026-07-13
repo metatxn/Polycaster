@@ -1,15 +1,19 @@
 /**
  * Render a WalletConnect pairing URI into a static QR-code SVG string.
  *
- * The side panel (a separate, non-React extension surface) can't run
- * react-qr-code itself, so the content script — where React and react-qr-code
- * already live — renders the QR to markup and ships the SVG string across.
+ * React's module factories are required only when QR markup is explicitly
+ * requested. Keeping these literal requires inside the renderer preserves the
+ * synchronous response contract without evaluating React DOM at bundle import.
  */
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import QRCode from "react-qr-code";
+
+declare const require: (request: string) => unknown;
 
 export function renderWalletConnectQrSvg(uri: string): string {
+  const React = require("react") as typeof import("react");
+  const { renderToStaticMarkup } =
+    require("react-dom/server") as typeof import("react-dom/server");
+  const { default: QRCode } =
+    require("react-qr-code") as typeof import("react-qr-code");
   return renderToStaticMarkup(
     React.createElement(QRCode, {
       value: uri,

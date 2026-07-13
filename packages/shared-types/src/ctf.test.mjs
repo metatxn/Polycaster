@@ -5,7 +5,10 @@ import {
   CTF_ADDRESS,
   NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
 } from "./contracts.ts";
-import { planCtfOperationTransactions } from "./ctf.ts";
+import {
+  isCtfPusdAmountOverBalance,
+  planCtfOperationTransactions,
+} from "./ctf.ts";
 
 const owner = "0x0000000000000000000000000000000000000001";
 const conditionId =
@@ -127,4 +130,34 @@ test("erc1155 preflight still fails closed without fallbackToApproval", async ()
     }),
     /rpc unavailable/
   );
+});
+
+test("split and merge preserve an exact six-decimal amount", async () => {
+  for (const operation of ["splitPosition", "mergePositions"]) {
+    const plan = await planCtfOperationTransactions({
+      operation,
+      conditionId,
+      amount: "0.100001",
+    });
+
+    assert.equal(plan.amountRaw, 100001n);
+  }
+});
+
+test("split and merge compare six-decimal amounts to balances without rounding", () => {
+  assert.equal(isCtfPusdAmountOverBalance("0.100001", "0.100000"), true);
+  assert.equal(isCtfPusdAmountOverBalance("0.100000", "0.100000"), false);
+});
+
+test("split and merge reject non-canonical or non-positive amounts without rounding", async () => {
+  for (const amount of ["0.100000000000000001", "1e-3", "NaN", "0", "-1"]) {
+    await assert.rejects(
+      planCtfOperationTransactions({
+        operation: "splitPosition",
+        conditionId,
+        amount,
+      }),
+      /plain decimal|positive|six decimal/i
+    );
+  }
 });

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { POLYMARKET_CHAIN_ID } from "@/constants/polymarket";
 import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import {
   issueExtensionSessionToken,
   verifyExtensionChallengeToken,
@@ -12,6 +13,7 @@ import {
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.extension.session.verify");
+const MAX_REQUEST_BODY_BYTES = 8 * 1024;
 
 const verifyInputSchema = z.object({
   challengeToken: z.string().min(1, "challengeToken is required"),
@@ -101,16 +103,21 @@ export async function POST(request: NextRequest) {
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
-    const body = await request.json();
-    const parsed = verifyInputSchema.safeParse(body);
+    const jsonBody = await readJsonBodyWithLimit(
+      request,
+      MAX_REQUEST_BODY_BYTES
+    );
+    if (!jsonBody.ok) {
+      return jsonError(jsonBody.error, jsonBody.status);
+    }
+
+    const parsed = verifyInputSchema.safeParse(jsonBody.body);
 
     if (!parsed.success) {
-      // Extra field `details` preserved; success: false added
       return NextResponse.json(
         {
           success: false,
           error: "Invalid request payload",
-          details: parsed.error.format(),
         },
         { status: 400 }
       );

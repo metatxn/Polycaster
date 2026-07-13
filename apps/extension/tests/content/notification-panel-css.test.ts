@@ -49,7 +49,7 @@ test("notification panel title and price typography inherit platform fonts", () 
 });
 
 test("notification monetary display calculations use Decimal.js", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const volumeFormatter = extractFunctionSource(uiSource, "formatMarketVolume");
   const priceRenderer = extractFunctionSource(uiSource, "renderEditorialPrice");
 
@@ -124,7 +124,7 @@ test("notification panel defines theme palettes for light and dim modes", () => 
 });
 
 test("notification panel theme refresh runs when settings change", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const mainSource = readSource("src/content/main.ts");
   const globalsSource = readSource("src/types/globals.d.ts");
 
@@ -140,7 +140,7 @@ test("notification panel theme refresh runs when settings change", () => {
 });
 
 test("notification stack close persists until explicitly reopened", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(
     /const STACK_DISMISSED_STORAGE_KEY = "knoww-stack-dismissed";/.test(
@@ -165,7 +165,7 @@ test("notification stack close persists until explicitly reopened", () => {
 });
 
 test("notification stack exposes settings and action-open controls", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const backgroundSource = readSource("src/background.ts");
 
   assert.equal(/KNOWW_OPEN_EXTENSION/.test(uiSource), true);
@@ -201,7 +201,7 @@ test("notification stack exposes settings and action-open controls", () => {
 });
 
 test("notification stack icon reopen restores preferred top-right position", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const resetSource = extractFunctionSource(
     uiSource,
     "resetNotificationStackToPreferredPosition"
@@ -223,7 +223,7 @@ test("notification stack icon reopen restores preferred top-right position", () 
 });
 
 test("notification stack snapshot includes trending and supports sidepanel focus", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const snapshotSource = extractFunctionSource(
     uiSource,
     "getNotificationStackSnapshot"
@@ -263,7 +263,7 @@ test("notification stack snapshot includes trending and supports sidepanel focus
 });
 
 test("notification stack supports sidepanel search requests", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const searchSource = extractFunctionSource(
     uiSource,
     "searchNotificationStackMarkets"
@@ -282,7 +282,7 @@ test("notification stack supports sidepanel search requests", () => {
 });
 
 test("notification stack dedupe prefers visible duplicate market cards", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(/function isCardInViewport/.test(uiSource), true);
   assert.equal(/function classifyInjectedMarketEntry/.test(uiSource), true);
@@ -310,7 +310,7 @@ test("notification stack dedupe prefers visible duplicate market cards", () => {
 
 test("notification click scrolls to cards without any highlight pulse", () => {
   const css = readInlineCss();
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(/\.knoww-market-card\.knoww-highlight/.test(css), false);
   assert.equal(/knoww-highlight-pulse/.test(css), false);
@@ -320,7 +320,7 @@ test("notification click scrolls to cards without any highlight pulse", () => {
 
 test("notification panel does not expose the footer see all control", () => {
   const css = readInlineCss();
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(
     /#knoww-notification-stack\.knoww-stack-expanded:not\(\.knoww-stack-minimized\)\s*\{[^}]*width:\s*min\(520px,\s*calc\(100vw - 32px\)\)/.test(
@@ -359,7 +359,7 @@ test("notification panel does not expose the footer see all control", () => {
 });
 
 test("notification panel shows trending between active and seen earlier", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const updateSource = extractFunctionSource(
     uiSource,
     "updateNotificationStack"
@@ -376,7 +376,7 @@ test("notification panel shows trending between active and seen earlier", () => 
 });
 
 test("notification panel uses user-facing seen earlier copy without count-aware footer", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(/"Seen earlier"/.test(uiSource), true);
   assert.equal(/"Recently scrolled out"/.test(uiSource), false);
@@ -400,7 +400,7 @@ test("notification panel uses user-facing seen earlier copy without count-aware 
 
 test("expanded notification panel has in-panel tabs", () => {
   const css = readInlineCss();
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(
     /type StackFilter = "all" \| "active" \| "seen" \| "trending";/.test(
@@ -457,7 +457,7 @@ test("expanded notification panel tabs are readable and selected state is obviou
 });
 
 test("expanded trending tab can show more trending markets", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(/const MAX_TRENDING_DISPLAY = 2;/.test(uiSource), true);
   assert.equal(
@@ -489,7 +489,7 @@ test("expanded trending tab can show more trending markets", () => {
 });
 
 test("expanded notification panel is clamped back into the viewport", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(
     /function clampNotificationStackToViewport\(\s*container:\s*HTMLElement\s*\)/.test(
@@ -524,7 +524,7 @@ test("expanded notification panel is clamped back into the viewport", () => {
 });
 
 test("notification panel supports session expansion and keyboard controls", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
 
   assert.equal(
     /STACK_EXPANDED_SESSION_KEY\s*=\s*"knoww-stack-expanded"/.test(uiSource),
@@ -556,7 +556,7 @@ test("notification panel supports session expansion and keyboard controls", () =
 });
 
 test("notification empty and seen-earlier states expose clearer actions", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const css = readInlineCss();
 
   assert.equal(/No markets found on this page yet/.test(uiSource), true);

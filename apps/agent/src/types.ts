@@ -150,6 +150,7 @@ export type PositionCloseReason =
 export type LiveOrderStatus =
   | "DRY_RUN"
   | "POSTED"
+  | "UNKNOWN"
   | "OPEN"
   | "PARTIALLY_FILLED"
   | "FILLED"

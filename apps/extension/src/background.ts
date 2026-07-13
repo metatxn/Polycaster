@@ -45,6 +45,8 @@ import {
   isKnowwApiUrl,
   setExtensionAccessToken,
 } from "./background/extension-session";
+import { createPortfolioFundAttemptStore } from "./background/portfolio-fund-attempts";
+import { createPortfolioFundIdempotencyCoordinator } from "./background/portfolio-fund-idempotency";
 import {
   executePortfolioDeposit,
   executePortfolioWithdraw,
@@ -59,6 +61,7 @@ import {
   extractDerivedCredentials,
   tradingOpNeedsCredentials,
 } from "./background/trading-credential-mediation";
+import { TRADING_WARM_ELIGIBLE_STORAGE_KEY } from "./content/trading-warm-flag";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import type {
   BackgroundResponse,
@@ -70,9 +73,14 @@ import type {
   ScoringPrewarmMessage,
 } from "./types/chrome-messages";
 import {
+  EXTENSION_AUTH_REQUIRED_ERROR,
   TRADING_CREDENTIALS_UPDATED_MESSAGE,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
 } from "./types/chrome-messages";
+import {
+  fingerprintPortfolioFundIntent,
+  isPortfolioFundIdempotencyKey,
+} from "./types/portfolio-fund-intent";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
 // ── Programmatic content script registration ──
@@ -84,6 +92,12 @@ const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
 const SETTINGS_STORAGE_KEY = "knowwSettings";
 const CONTENT_SCRIPT_REINJECT_SETTLE_MS = 500;
 const SIDEPANEL_REQUESTED_VIEW_KEY = "knoww_sidepanel_requested_view";
+const portfolioFundIdempotency = createPortfolioFundIdempotencyCoordinator(
+  chrome.storage.local
+);
+const portfolioFundAttempts = createPortfolioFundAttemptStore(
+  chrome.storage.local
+);
 
 type SidePanelView = "markets" | "portfolio";
 
@@ -873,6 +887,9 @@ function forwardToOffscreen(
         const extracted = extractDerivedCredentials(result);
         if (extracted) {
           await storeClobCredentials(msg.address, extracted.credentials);
+          await chrome.storage.local
+            .set({ [TRADING_WARM_ELIGIBLE_STORAGE_KEY]: true })
+            .catch(() => {});
           broadcastTradingCredentialsUpdated(msg.address);
           sendResponse(extracted.response);
           return;
@@ -981,8 +998,12 @@ chrome.runtime.onMessage.addListener(
       chainKey?: string;
       bridgeAddress?: string;
       quote?: unknown;
+      idempotencyKey?: string;
       surface?: "sidebar" | "floating";
       view?: SidePanelView;
+      action?: string;
+      attemptId?: string;
+      outcome?: string;
     };
 
     // Relay signing responses from content script → offscreen document.
@@ -1505,15 +1526,99 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (msg?.type === "KNOWW_PORTFOLIO_FUND_BEGIN_ATTEMPT") {
+      if (
+        (msg.action !== "deposit" && msg.action !== "withdraw") ||
+        typeof msg.address !== "string" ||
+        typeof msg.amount !== "string" ||
+        (msg.walletMode !== undefined && typeof msg.walletMode !== "string") ||
+        (msg.destination !== undefined &&
+          typeof msg.destination !== "string") ||
+        (msg.chainId !== undefined && typeof msg.chainId !== "string") ||
+        (msg.tokenSymbol !== undefined &&
+          typeof msg.tokenSymbol !== "string") ||
+        (msg.tokenAddress !== undefined &&
+          typeof msg.tokenAddress !== "string") ||
+        (msg.tokenDecimals !== undefined &&
+          typeof msg.tokenDecimals !== "number") ||
+        (msg.chainKey !== undefined && typeof msg.chainKey !== "string") ||
+        (msg.tokenId !== undefined && typeof msg.tokenId !== "string")
+      ) {
+        sendResponse({
+          ok: false,
+          error: "Invalid portfolio fund attempt request.",
+        } as BackgroundResponse);
+        return true;
+      }
+      void portfolioFundAttempts
+        .begin({
+          action: msg.action,
+          address: msg.address,
+          walletMode: msg.walletMode,
+          amount: msg.amount,
+          destination: msg.destination,
+          chainId: msg.chainId,
+          tokenSymbol: msg.tokenSymbol,
+          tokenAddress: msg.tokenAddress,
+          tokenDecimals: msg.tokenDecimals,
+          chainKey: msg.chainKey,
+          tokenId: msg.tokenId,
+        })
+        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_PORTFOLIO_FUND_COMPLETE_ATTEMPT") {
+      if (
+        typeof msg.attemptId !== "string" ||
+        !isPortfolioFundIdempotencyKey(msg.idempotencyKey) ||
+        (msg.outcome !== "credited" && msg.outcome !== "reverted")
+      ) {
+        sendResponse({
+          ok: false,
+          error: "Invalid portfolio fund attempt completion request.",
+        } as BackgroundResponse);
+        return true;
+      }
+      void portfolioFundAttempts
+        .complete(msg.attemptId, msg.outcome, msg.idempotencyKey)
+        .then(() =>
+          sendResponse({ ok: true, data: null } as BackgroundResponse)
+        )
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
     if (
-      (msg?.type === "KNOWW_PORTFOLIO_DEPOSIT" ||
-        msg?.type === "KNOWW_PORTFOLIO_WITHDRAW") &&
-      typeof msg.address === "string" &&
-      typeof msg.amount === "string"
+      msg?.type === "KNOWW_PORTFOLIO_DEPOSIT" ||
+      msg?.type === "KNOWW_PORTFOLIO_WITHDRAW"
     ) {
+      if (
+        typeof msg.address !== "string" ||
+        typeof msg.amount !== "string" ||
+        !isPortfolioFundIdempotencyKey(msg.idempotencyKey)
+      ) {
+        sendResponse({
+          ok: false,
+          error: "Invalid portfolio transaction request.",
+        } as BackgroundResponse);
+        return true;
+      }
       const isWithdraw = msg.type === "KNOWW_PORTFOLIO_WITHDRAW";
       const eoaAddress = msg.address;
       const amount = msg.amount;
+      const idempotencyKey = msg.idempotencyKey;
       const walletMode = msg.walletMode;
       const destination = msg.destination;
       const chainId = msg.chainId;
@@ -1522,10 +1627,33 @@ chrome.runtime.onMessage.addListener(
       const tokenDecimals = msg.tokenDecimals;
       const chainKey = msg.chainKey;
       const tokenId = msg.tokenId;
+      const attemptId = msg.attemptId;
       const withdrawQuote =
         isWithdraw && isPortfolioWithdrawQuoteResponse(msg.quote)
           ? msg.quote
           : undefined;
+      let fingerprint: string;
+      try {
+        fingerprint = fingerprintPortfolioFundIntent({
+          action: isWithdraw ? "withdraw" : "deposit",
+          address: eoaAddress,
+          walletMode,
+          amount,
+          destination,
+          chainId,
+          tokenSymbol,
+          tokenAddress,
+          tokenDecimals,
+          chainKey,
+          tokenId,
+        });
+      } catch {
+        sendResponse({
+          ok: false,
+          error: "Invalid portfolio transaction request.",
+        } as BackgroundResponse);
+        return true;
+      }
       if (isWithdraw) {
         logInfo("portfolio.withdraw.message.execute", {
           ownerAddress: eoaAddress,
@@ -1546,18 +1674,27 @@ chrome.runtime.onMessage.addListener(
           } as BackgroundResponse);
           return;
         }
-        const run = isWithdraw
-          ? executePortfolioWithdraw({
-              eoaAddress,
-              walletMode,
-              amount,
-              destination: destination ?? "",
-              chainKey,
-              tokenId,
-              quote: withdrawQuote,
-              tabId,
-            })
-          : executePortfolioDeposit({
+        const run = portfolioFundIdempotency.run({
+          idempotencyKey,
+          fingerprint,
+          isSafeToRetryError: (error) =>
+            error instanceof Error &&
+            error.message === EXTENSION_AUTH_REQUIRED_ERROR,
+          execute: async ({ markMoneyMovementStarted }) => {
+            if (isWithdraw) {
+              return executePortfolioWithdraw({
+                eoaAddress,
+                walletMode,
+                amount,
+                destination: destination ?? "",
+                chainKey,
+                tokenId,
+                quote: withdrawQuote,
+                tabId,
+                onBeforeMoneyMovement: markMoneyMovementStarted,
+              });
+            }
+            return executePortfolioDeposit({
               eoaAddress,
               walletMode,
               amount,
@@ -1566,11 +1703,45 @@ chrome.runtime.onMessage.addListener(
               tokenAddress,
               tokenDecimals,
               tabId,
+              onBeforeMoneyMovement: markMoneyMovementStarted,
             });
+          },
+        });
         run
-          .then((data) =>
-            sendResponse({ ok: true, data } as BackgroundResponse)
-          )
+          .then(async (data) => {
+            if (typeof attemptId === "string") {
+              try {
+                // attempt.txHash stores the status-polling handle: on-chain
+                // hash for deposits, bridge address (or the sidepanel
+                // gateway's "direct" sentinel for a direct-route withdraw
+                // with no bridge address) for withdraws. Deposits keep the
+                // real on-chain hash since waitForTxReceipt needs it; a
+                // withdraw resumed from this record must poll with the same
+                // handle `executeWithdraw` returned in-session, or
+                // KNOWW_PORTFOLIO_WITHDRAW_STATUS never matches and RETRY
+                // spins forever.
+                const recordedTxHash = isWithdraw
+                  ? ((data as { bridgeAddress?: string }).bridgeAddress ??
+                    "direct")
+                  : data.txHash;
+                await portfolioFundAttempts.recordExecution(
+                  attemptId,
+                  recordedTxHash,
+                  idempotencyKey
+                );
+              } catch (error) {
+                // A recording failure must not turn a successful on-chain
+                // execution into an error response — the money already
+                // moved. Log and proceed; the attempt simply won't resume
+                // from this txHash if the caller retries.
+                logWarn("portfolio.fund.attempt.record_execution_failed", {
+                  error,
+                  attemptId,
+                });
+              }
+            }
+            sendResponse({ ok: true, data } as BackgroundResponse);
+          })
           .catch((error) => {
             if (isWithdraw) {
               logWarn("portfolio.withdraw.message.execute_failed", {
@@ -1801,6 +1972,9 @@ chrome.runtime.onMessage.addListener(
         } finally {
           await clearCachedTradingCredentials();
           await clearExtensionAccessToken();
+          await chrome.storage.local
+            .remove(TRADING_WARM_ELIGIBLE_STORAGE_KEY)
+            .catch(() => {});
           await broadcastTradingSessionDisconnected();
           sendResponse({ ok: true, data: null } as BackgroundResponse);
         }

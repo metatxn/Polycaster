@@ -8,6 +8,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -233,7 +234,11 @@ export default function EventDetailClient({
         // Still skip seeding if both endpoints returned empty — preserves
         // any WS-delivered data already in the store.
         if (data.bids.length === 0 && data.asks.length === 0) return;
-        setOrderBookFromRest(tokenId, data.bids, data.asks);
+        setOrderBookFromRest(tokenId, data.bids, data.asks, {
+          market: data.market,
+          tickSize: data.tick_size,
+          minOrderSize: data.min_order_size,
+        });
       } catch (err) {
         log.error("orderbook.preload_failed", { error: err });
       }
@@ -954,7 +959,11 @@ export default function EventDetailClient({
           const asks = book.asks || [];
           if (bids.length === 0 && asks.length === 0) continue;
           seededTokenIds.add(tokenId);
-          setOrderBookFromRest(tokenId, bids, asks);
+          setOrderBookFromRest(tokenId, bids, asks, {
+            market: book.market,
+            tickSize: book.tick_size,
+            minOrderSize: book.min_order_size,
+          });
         }
 
         for (const tokenId of restQuoteTokenIds) {
@@ -1064,7 +1073,10 @@ export default function EventDetailClient({
     const bids = orderBookData.bids || [];
     const asks = orderBookData.asks || [];
     if (bids.length === 0 && asks.length === 0) return;
-    setOrderBookFromRest(currentTokenId, bids, asks);
+    setOrderBookFromRest(currentTokenId, bids, asks, {
+      tickSize: orderBookData.tick_size,
+      minOrderSize: orderBookData.min_order_size,
+    });
   }, [orderBookData, currentTokenId, setOrderBookFromRest]);
 
   // STEP 3: Connect to shared WebSocket for real-time incremental updates
@@ -1083,11 +1095,17 @@ export default function EventDetailClient({
 
       // Use store data (seeded by REST, updated by WebSocket)
       if (storeOrderBook) {
+        const storeTickSize = storeOrderBook.tickSize ?? 0.01;
+        const storeMinOrderSize = Math.max(
+          marketMinOrderSize,
+          storeOrderBook.minOrderSize ?? 1
+        );
+
         return {
           bestBid: storeOrderBook.bestBid ?? undefined,
           bestAsk: storeOrderBook.bestAsk ?? undefined,
-          tickSize: 0.01, // Default tick size
-          minOrderSize: marketMinOrderSize,
+          tickSize: storeTickSize,
+          minOrderSize: storeMinOrderSize,
           orderBook: {
             bids: storeOrderBook.bids,
             asks: storeOrderBook.asks,
@@ -1415,20 +1433,13 @@ export default function EventDetailClient({
       <main className="relative z-10 px-4 md:px-6 lg:px-8 py-6 min-h-screen">
         {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <button
-            type="button"
-            onClick={() => {
-              if (typeof window !== "undefined" && window.history.length > 1) {
-                router.back();
-              } else {
-                router.push("/markets");
-              }
-            }}
+          <Link
+            href="/markets"
             className="flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />
-            <span>Back</span>
-          </button>
+            <span>Markets</span>
+          </Link>
           <span>/</span>
           <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">
             {event.title}

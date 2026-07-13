@@ -297,7 +297,11 @@ export function OrderBook({
       setOrderBookFromRest(
         tokenId,
         restOrderBook.bids || [],
-        restOrderBook.asks || []
+        restOrderBook.asks || [],
+        {
+          tickSize: restOrderBook.tick_size,
+          minOrderSize: restOrderBook.min_order_size,
+        }
       );
     }
   }, [restOrderBook, tokenId, isTokenValidForRest, setOrderBookFromRest]);

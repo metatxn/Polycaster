@@ -10,259 +10,65 @@
  * Split/Merge accessible via "..." dropdown menu.
  */
 
-import {
-  PUSD_ADDRESS,
-  PUSD_DECIMALS,
-  USDC_E_ADDRESS,
-} from "@knoww/shared-types/contracts";
-import {
-  type ExpirationPreset,
-  getGtdExpirationTimestamp,
-  ORDER_EXPIRATION_PRESETS,
-} from "@knoww/shared-types/orders";
-import {
-  POLYGON_CHAIN_ID_HEX,
-  SHOW_EOA_OPTION,
-} from "@knoww/shared-types/polymarket";
-import {
-  calculateBuySlippageForAmount,
-  calculateSlippage,
-  roundToTick,
-} from "@knoww/shared-types/slippage";
-import {
-  estimateFallbackFeeRaw,
-  parsePusdUnits,
-} from "@knoww/shared-types/trading";
-import { Decimal } from "decimal.js";
-import React from "react";
-import { createRoot, type Root } from "react-dom/client";
-import QRCode from "react-qr-code";
-import { encodeFunctionData, erc20Abi, parseUnits } from "viem";
-import type { ClobOrderType } from "../../types/chrome-messages";
-import type { Market } from "../../types/market";
-import { escapeHtml } from "../utils";
+import { escapeHtml } from "../html-escape";
 import { getNonce, WALLETCONNECT_WALLET_UUID, WalletBridge } from "./bridge";
-import {
-  CHAIN_METADATA,
-  createDepositAddresses,
-  type DepositAddress,
-  type DepositTransaction,
-  fetchDepositStatus,
-  fetchQuote,
-  fetchSupportedAssets,
-  findSupportedBridgeAsset,
-  formatCheckoutTime,
-  getDefaultMinDeposit,
-  getDepositStatusDisplay,
-  getMinDepositForToken,
-  isPusdToken,
-  POLYGON_BRIDGE_CHAIN_ID,
-  type QuoteResponse,
-  resolveWalletDepositRoute,
-  type SupportedAsset,
-  type WalletDepositRoute,
-} from "./bridge-api";
 import { CredentialManager } from "./credentials";
-import { formatTradingErrorLine, mapTradingError } from "./error-mapping";
+import { mapTradingError } from "./error-mapping";
 import {
-  balanceChanged,
-  balanceToNumber,
-  formatBalance,
-  hasDisplayPosition,
-  type OutcomeBalances,
-  positionValueUsd,
-} from "./outcome-balances";
+  closeInlineDeposit,
+  configureDepositView,
+  disposeDepositController,
+  mountInlineDeposit,
+  renderDepositForm,
+  renderInlineDeposit,
+  startDepositFlow,
+  syncDepositControllerAccount,
+} from "./panel/deposit-view";
+import {
+  formatCollateralBreakdown,
+  formatTokenAmount,
+  normalizeUsdChipAmount,
+  truncAddr,
+} from "./panel/format";
+import {
+  configureOrderView,
+  getAvailableTradingCollateral,
+  getDisplayPriceFromOrderBook,
+  normalizePrice,
+  renderOrderForm,
+} from "./panel/order-view";
+import {
+  capturePanelOrderBookRequest,
+  isPanelOrderBookRequestCurrent,
+  type PanelOptions,
+  panelState,
+} from "./panel/panel-state";
+import {
+  addPortfolioBar,
+  type PositionsViewUiPort,
+  refreshSplitMergeState,
+  renderMergeForm,
+  renderSplitForm,
+} from "./panel/positions-view";
+import {
+  addSetupBanner,
+  addSetupFlow,
+  type SetupViewUiPort,
+} from "./panel/setup-view";
 import {
   cardSetupFlow,
   isSetupApprovalReadKnown,
   resolveSetupSurfaceMode,
-  SETUP_APPROVAL_DEFAULT,
-  type SetupFlow,
 } from "./setup-flow";
-import {
-  readSetupComplete,
-  readSetupDismissed,
-  writeSetupDismissed,
-} from "./setup-flow-storage";
+import { readSetupComplete, readSetupDismissed } from "./setup-flow-storage";
 import { type TradingContext, TradingService } from "./trading-service";
 
-const DEPOSIT_TOKENS: Array<{
-  symbol: string;
-  address: string;
-  decimals: number;
-}> = [
-  { symbol: "pUSD", address: PUSD_ADDRESS, decimals: 6 },
-  { symbol: "USDC.e", address: USDC_E_ADDRESS, decimals: 6 },
-  {
-    symbol: "USDC",
-    address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-    decimals: 6,
-  },
-  {
-    symbol: "USDT",
-    address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-    decimals: 6,
-  },
-  {
-    symbol: "DAI",
-    address: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
-    decimals: 18,
-  },
-  {
-    symbol: "WETH",
-    address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
-    decimals: 18,
-  },
-];
-// ── Types ──
+declare const require: (request: string) => unknown;
 
-interface PanelOptions {
-  market: Market;
-  outcomeName: string;
-  outcomeIndex: number;
-  price: number;
-  side: "BUY" | "SELL";
-  tokenId: string;
-  negRisk?: boolean;
-  isMultiOutcome?: boolean;
-  anchorElement: HTMLElement;
-  conditionId?: string;
-  yesTokenId?: string;
-  noTokenId?: string;
-  /** Pre-fill the order with this USD stake (converted to shares). */
-  initialAmountUsd?: number;
-  /**
-   * One-click: auto-place the order as soon as the panel reaches a fully-ready
-   * state (connected + credentialed + approved + funded). If any precondition
-   * is missing, the panel just stays open for the user — it never force-submits.
-   */
-  autoSubmit?: boolean;
-  /** Open the panel directly in a specific view (e.g. straight to deposit). */
-  initialView?: "order" | "deposit";
-  /**
-   * Opened from a stream card's "Deposit to trade $X". Drives the contextual
-   * shortfall banner in the deposit view (target = `initialAmountUsd`). Stream-
-   * only — feed/panel deposit behaviour is unaffected when this is unset.
-   */
-  streamDeposit?: boolean;
-}
-
-type OrderMode = "market" | "limit";
-type TradeSide = "buy" | "sell";
-type ActiveView = "order" | "split" | "merge" | "deposit";
-
-interface DepositToken {
-  symbol: string;
-  amount: number;
-  amountRaw?: string;
-  usdValue: number;
-  address: string;
-  decimals: number;
-  depositSupported?: boolean;
-  depositDisabledReason?: string;
-}
-
-type DepositStep = "method" | "token" | "bridge-select" | "amount" | "confirm";
-type DepositMethod = "wallet" | "bridge";
-
-type DepositState =
-  | "idle"
-  | "loading-balances"
-  | "loading-bridge"
-  | "ready"
-  | "pending"
-  | "confirming"
-  | "success"
-  | "error";
-
-// ── Module State ──
-
-let activePanel: HTMLElement | null = null;
-let panelOpts: PanelOptions | null = null;
-// Inline deposit (stream surface): the deposit flow renders into a host element
-// inside a stream card instead of the floating panel, reusing the same deposit
-// state machine + `.knoww-tp-*` components so it resonates with the panel UI.
-// When set, `rerender()` re-renders the deposit form into this host.
-let inlineDepositHost: HTMLElement | null = null;
-let inlineDepositUnsub: (() => void) | null = null;
-let inlineDepositOnClose: (() => void) | null = null;
-
-/** The DOM root the deposit flow currently lives in (inline host or panel). */
-function depositDomRoot(): HTMLElement | null {
-  return inlineDepositHost ?? activePanel;
-}
-let activeUnsubscribe: (() => void) | null = null;
-let mobileQrRoot: Root | null = null;
-
-let activeSide: TradeSide = "buy";
-let activeView: ActiveView = "order";
-let orderMode: OrderMode = "market";
-let selectedShares = 10;
-let marketBuyAmount = 0;
-let limitPrice = 0;
-let expirationPreset: ExpirationPreset = "GTC";
-let splitMergeAmount = 0;
-let outcomeBalances: OutcomeBalances | null = null;
-let outcomeBalancesLoaded = false;
-let outcomeBalancesFetching = false;
-let moreMenuOpen = false;
-
-let orderSettling = false;
-let settleTimer: ReturnType<typeof setTimeout> | null = null;
-let orderApprovalPreview: {
-  key: string;
-  requiredCollateral: number;
-  requiredCollateralRaw: string;
-} | null = null;
-let orderApprovalPreviewInFlightKey: string | null = null;
-let orderApprovalPreviewTimer: ReturnType<typeof setTimeout> | null = null;
-let cardSetupStorageAddress: string | null = null;
-let cardSetupDismissed = false;
-let cardSetupComplete = false;
-let cardSetupStorageToken = 0;
 // Debounce window for the preflight call. The user typing in the shares input
 // would otherwise fire one round-trip per keystroke; the preview state stays
 // "Checking allowance..." during the debounce so the gate is never wrong.
-const ORDER_APPROVAL_PREVIEW_DEBOUNCE_MS = 200;
-
-let depositState: DepositState = "idle";
-let depositStep: DepositStep = "method";
-let depositMethod: DepositMethod | null = null;
-let depositTokens: DepositToken[] = [];
-let depositSelected: DepositToken | null = null;
-let depositAmount = "";
-let depositError: string | null = null;
-let depositBridgeAddress = "";
-let depositRoute: WalletDepositRoute | null = null;
-let depositBridgeAssets: SupportedAsset[] = [];
-let depositSelectedBridgeAsset: SupportedAsset | null = null;
-let depositBridgeSearchQuery = "";
-let depositQuote: QuoteResponse | null = null;
-let depositIsLoadingQuote = false;
-let depositTransactions: DepositTransaction[] = [];
-let depositAddressesCache: DepositAddress[] = [];
-let depositIsPending = false;
-let depositIsConfirming = false;
-let depositIsConfirmed = false;
-let depositTxConfirmed = false;
-let depositStatusPollTimer: ReturnType<typeof setTimeout> | null = null;
-
-let selectedOutcome: "yes" | "no" = "yes";
-let yesPrice = 0;
-let noPriceValue = 0;
-
-let sessionRestoreAttempted = false;
-let lastRenderedErrorToast: string | null = null;
-let dismissedErrorToast: string | null = null;
-
-const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const LIVE_PANEL_REFRESH_INTERVAL = 10000;
-const DEPOSIT_POLL_INTERVAL = 2000;
-const DEPOSIT_BALANCE_SYNC_TIMEOUT = 8000;
-const DEPOSIT_BALANCE_SYNC_INTERVAL = 1500;
-const DEPOSIT_BALANCE_LOAD_TIMEOUT_MS = 8000;
-let livePanelRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-let livePanelRefreshEnabled = false;
 
 function trackPanelAnalytics(
   event: string,
@@ -274,61 +80,30 @@ function trackPanelAnalytics(
   });
 }
 
-function getTrackedOutcomeName(opts: PanelOptions): string {
-  if (opts.yesTokenId && opts.noTokenId) {
-    return selectedOutcome === "yes" ? "Yes" : "No";
-  }
-  return opts.outcomeName;
-}
-
-function getDepositEventProperties(): Record<
-  string,
-  string | number | boolean | null | undefined
-> {
-  return {
-    depositMethod,
-    tokenSymbol:
-      depositSelected?.symbol ?? depositSelectedBridgeAsset?.token.symbol,
-    amount:
-      depositAmount && !Number.isNaN(Number.parseFloat(depositAmount))
-        ? Number.parseFloat(depositAmount)
-        : undefined,
-    chainName: depositSelectedBridgeAsset?.chainName,
-  };
-}
-
-function getTickSize(): number {
-  return TradingService.getContext().tickSize || 0.01;
-}
-
 function clearLivePanelRefreshTimer(): void {
-  if (livePanelRefreshTimer) {
-    clearTimeout(livePanelRefreshTimer);
-    livePanelRefreshTimer = null;
+  if (panelState.livePanelRefreshTimer) {
+    clearTimeout(panelState.livePanelRefreshTimer);
+    panelState.livePanelRefreshTimer = null;
   }
 }
 
 function pauseLivePanelRefresh(): void {
-  livePanelRefreshEnabled = false;
+  panelState.livePanelRefreshEnabled = false;
   clearLivePanelRefreshTimer();
 }
 
 function resumeLivePanelRefresh(): void {
-  if (!activePanel?.isConnected || !panelOpts) return;
-  livePanelRefreshEnabled = true;
+  if (!panelState.activePanel?.isConnected || !panelState.panelOpts) return;
+  panelState.livePanelRefreshEnabled = true;
   scheduleLivePanelRefresh();
 }
 
 function canRefreshLivePanel(): boolean {
   return Boolean(
-    livePanelRefreshEnabled && activePanel?.isConnected && panelOpts
+    panelState.livePanelRefreshEnabled &&
+      panelState.activePanel?.isConnected &&
+      panelState.panelOpts
   );
-}
-
-function normalizePrice(price: number, tick?: number): number {
-  const t = tick ?? getTickSize();
-  const rounded = roundToTick(price, t);
-  return Math.max(t, Math.min(1 - t, Number(rounded.toFixed(4))));
 }
 
 // ── SVG Icons ──
@@ -353,10 +128,6 @@ const I = {
 };
 
 // ── DOM Helpers ──
-
-function truncAddr(a: string): string {
-  return `${a.slice(0, 6)}...${a.slice(-4)}`;
-}
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -451,86 +222,76 @@ function setButtonLoading(btn: HTMLElement, text: string): void {
 
 function rerender(): void {
   // Inline (stream) deposit re-renders only the deposit form into its host.
-  if (inlineDepositHost) {
+  if (panelState.inlineDepositHost) {
     renderInlineDeposit();
     return;
   }
-  if (activePanel && panelOpts)
-    render(activePanel, panelOpts, TradingService.getContext());
+  if (panelState.activePanel && panelState.panelOpts)
+    render(
+      panelState.activePanel,
+      panelState.panelOpts,
+      TradingService.getContext()
+    );
 }
+
+const positionsViewUi: PositionsViewUiPort = {
+  el,
+  elHtml,
+  rerender,
+  trackAnalytics: trackPanelAnalytics,
+  showToast,
+  icons: { back: I.back, alert: I.alert },
+};
 
 function syncCardSetupStorage(address: string | null): void {
   if (!address) {
-    cardSetupStorageAddress = null;
-    cardSetupDismissed = false;
-    cardSetupComplete = false;
-    cardSetupStorageToken++;
+    panelState.cardSetupStorageAddress = null;
+    panelState.cardSetupDismissed = false;
+    panelState.cardSetupComplete = false;
+    panelState.cardSetupStorageToken++;
     return;
   }
 
-  if (cardSetupStorageAddress === address) return;
+  if (panelState.cardSetupStorageAddress === address) return;
 
-  cardSetupStorageAddress = address;
-  cardSetupDismissed = false;
-  cardSetupComplete = false;
-  const token = ++cardSetupStorageToken;
+  panelState.cardSetupStorageAddress = address;
+  panelState.cardSetupDismissed = false;
+  panelState.cardSetupComplete = false;
+  const token = ++panelState.cardSetupStorageToken;
 
   // The token is the whole staleness guard: it bumps on every mutation of
-  // cardSetupStorageAddress (including A→null→A resyncs, which an address
+  // panelState.cardSetupStorageAddress (including A→null→A resyncs, which an address
   // comparison alone would wrongly pass).
   void Promise.all([readSetupDismissed(address), readSetupComplete(address)])
     .then(([dismissed, complete]) => {
-      if (token !== cardSetupStorageToken) return;
-      cardSetupDismissed = dismissed;
-      cardSetupComplete = complete;
+      if (token !== panelState.cardSetupStorageToken) return;
+      panelState.cardSetupDismissed = dismissed;
+      panelState.cardSetupComplete = complete;
       rerender();
     })
     .catch(() => {
-      if (token !== cardSetupStorageToken) return;
-      cardSetupDismissed = false;
-      cardSetupComplete = false;
+      if (token !== panelState.cardSetupStorageToken) return;
+      panelState.cardSetupDismissed = false;
+      panelState.cardSetupComplete = false;
     });
 }
 
-/** Re-render the deposit form into the inline host (stream card). */
-function renderInlineDeposit(): void {
-  const host = inlineDepositHost;
-  if (!host?.isConnected) {
-    closeInlineDeposit();
-    return;
-  }
-  host.innerHTML = "";
-  renderDepositForm(host, TradingService.getContext());
-}
-
-/** Tear down the inline deposit and hand control back to the card. */
-function closeInlineDeposit(): void {
-  if (inlineDepositUnsub) {
-    inlineDepositUnsub();
-    inlineDepositUnsub = null;
-  }
-  resetDepositState();
-  const host = inlineDepositHost;
-  const onClose = inlineDepositOnClose;
-  inlineDepositHost = null;
-  inlineDepositOnClose = null;
-  panelOpts = null;
-  activeView = "order";
-  if (host) host.innerHTML = "";
-  onClose?.();
-}
-
 function unmountMobileQrRoot(): void {
-  if (mobileQrRoot) {
-    mobileQrRoot.unmount();
-    mobileQrRoot = null;
+  if (panelState.mobileQrRoot) {
+    panelState.mobileQrRoot.unmount();
+    panelState.mobileQrRoot = null;
   }
 }
 
 function mountMobileQrCode(container: HTMLElement, uri: string): void {
   unmountMobileQrRoot();
-  mobileQrRoot = createRoot(container);
-  mobileQrRoot.render(
+  const React = require("react") as typeof import("react");
+  const { createRoot } =
+    require("react-dom/client") as typeof import("react-dom/client");
+  const { default: QRCode } =
+    require("react-qr-code") as typeof import("react-qr-code");
+  panelState.mobileQrRoot = createRoot(container);
+  panelState.mobileQrRoot.render(
     React.createElement(QRCode, {
       value: uri,
       size: 196,
@@ -542,70 +303,32 @@ function mountMobileQrCode(container: HTMLElement, uri: string): void {
   );
 }
 
-function getBestBidAskFromOrderBook(
-  orderBook:
-    | { bids?: Array<{ price: string }>; asks?: Array<{ price: string }> }
-    | null
-    | undefined
-): {
-  bestBid: number | undefined;
-  bestAsk: number | undefined;
-} {
-  if (!orderBook) return { bestBid: undefined, bestAsk: undefined };
-
-  let bestBid: number | undefined;
-  if (orderBook.bids?.length) {
-    const parsed = orderBook.bids
-      .map((l) => parseFloat(l.price))
-      .filter((p) => Number.isFinite(p) && p > 0);
-    if (parsed.length > 0) bestBid = Math.max(...parsed);
-  }
-
-  let bestAsk: number | undefined;
-  if (orderBook.asks?.length) {
-    const parsed = orderBook.asks
-      .map((l) => parseFloat(l.price))
-      .filter((p) => Number.isFinite(p) && p > 0);
-    if (parsed.length > 0) bestAsk = Math.min(...parsed);
-  }
-
-  return { bestBid, bestAsk };
-}
-
-function getDisplayPriceFromOrderBook(
-  orderBook:
-    | { bids?: Array<{ price: string }>; asks?: Array<{ price: string }> }
-    | null
-    | undefined,
-  fallback: number
-): number {
-  const { bestBid, bestAsk } = getBestBidAskFromOrderBook(orderBook);
-  if (bestBid !== undefined && bestAsk !== undefined) {
-    return new Decimal(bestBid).add(bestAsk).div(2).toNumber();
-  }
-  return bestAsk ?? bestBid ?? fallback;
-}
-
 function syncSelectedOutcomePrice(): void {
-  if (!panelOpts) return;
-  if (panelOpts.yesTokenId && panelOpts.noTokenId) {
-    panelOpts.price = selectedOutcome === "yes" ? yesPrice : noPriceValue;
+  if (!panelState.panelOpts) return;
+  if (panelState.panelOpts.yesTokenId && panelState.panelOpts.noTokenId) {
+    panelState.panelOpts.price =
+      panelState.selectedOutcome === "yes"
+        ? panelState.yesPrice
+        : panelState.noPriceValue;
     return;
   }
-  panelOpts.price = yesPrice;
+  panelState.panelOpts.price = panelState.yesPrice;
 }
 
 async function refreshLivePanelData(): Promise<void> {
-  if (!canRefreshLivePanel() || !panelOpts) return;
+  if (!canRefreshLivePanel() || !panelState.panelOpts) return;
 
-  const currentTokenId = panelOpts.tokenId;
-  if (!currentTokenId) return;
+  const request = capturePanelOrderBookRequest();
+  if (!request) return;
+  const currentTokenId = request.tokenId;
 
-  const isBinary = Boolean(panelOpts.yesTokenId && panelOpts.noTokenId);
+  const isBinary = Boolean(
+    panelState.panelOpts.yesTokenId && panelState.panelOpts.noTokenId
+  );
   const siblingTokenId = isBinary
-    ? selectedOutcome === "yes"
-      ? panelOpts.noTokenId
-      : panelOpts.yesTokenId
+    ? panelState.selectedOutcome === "yes"
+      ? panelState.panelOpts.noTokenId
+      : panelState.panelOpts.yesTokenId
     : undefined;
 
   const [currentBook, siblingBook] = await Promise.all([
@@ -616,27 +339,34 @@ async function refreshLivePanelData(): Promise<void> {
       : Promise.resolve(null),
   ]).then(([, current, sibling]) => [current, sibling] as const);
 
-  // Re-check after async operation - panel may have been hidden
-  if (!panelOpts || !activePanel) return;
+  // A hidden/replaced panel or an outcome switch invalidates every result
+  // captured above. Never project an earlier token's book into the new form.
+  if (!isPanelOrderBookRequestCurrent(request)) return;
 
   if (isBinary) {
-    if (selectedOutcome === "yes") {
-      yesPrice = getDisplayPriceFromOrderBook(currentBook, yesPrice);
-      noPriceValue = getDisplayPriceFromOrderBook(
+    if (panelState.selectedOutcome === "yes") {
+      panelState.yesPrice = getDisplayPriceFromOrderBook(
+        currentBook,
+        panelState.yesPrice
+      );
+      panelState.noPriceValue = getDisplayPriceFromOrderBook(
         siblingBook,
-        noPriceValue || 1 - yesPrice
+        panelState.noPriceValue || 1 - panelState.yesPrice
       );
     } else {
-      noPriceValue = getDisplayPriceFromOrderBook(currentBook, noPriceValue);
-      yesPrice = getDisplayPriceFromOrderBook(
+      panelState.noPriceValue = getDisplayPriceFromOrderBook(
+        currentBook,
+        panelState.noPriceValue
+      );
+      panelState.yesPrice = getDisplayPriceFromOrderBook(
         siblingBook,
-        yesPrice || 1 - noPriceValue
+        panelState.yesPrice || 1 - panelState.noPriceValue
       );
     }
   } else if (currentBook) {
-    yesPrice = getDisplayPriceFromOrderBook(
+    panelState.yesPrice = getDisplayPriceFromOrderBook(
       currentBook,
-      yesPrice || panelOpts.price
+      panelState.yesPrice || panelState.panelOpts.price
     );
   }
 
@@ -659,345 +389,19 @@ function scheduleLivePanelRefresh(): void {
       /* ignore live refresh errors */
     } finally {
       if (canRefreshLivePanel()) {
-        livePanelRefreshTimer = setTimeout(run, LIVE_PANEL_REFRESH_INTERVAL);
+        panelState.livePanelRefreshTimer = setTimeout(
+          run,
+          LIVE_PANEL_REFRESH_INTERVAL
+        );
       }
     }
   };
 
-  livePanelRefreshTimer = setTimeout(run, LIVE_PANEL_REFRESH_INTERVAL);
-}
-
-function getEffectivePrice(opts: PanelOptions): number {
-  return orderMode === "limit" ? limitPrice || opts.price : opts.price;
-}
-
-function isMarketBuyAmountOrder(): boolean {
-  return orderMode === "market" && activeSide === "buy";
-}
-
-function formatShareQuantity(quantity: number): string {
-  try {
-    const value = new Decimal(quantity);
-    if (!value.isFinite()) return "0";
-    const rounded = value.toDecimalPlaces(4);
-    return rounded.isInteger()
-      ? rounded.toFixed(0)
-      : rounded.toFixed().replace(/\.?0+$/, "");
-  } catch {
-    return "0";
-  }
-}
-
-function formatMarketBuyAmountInput(amount: number): string {
-  return amount > 0 ? String(amount) : "0";
-}
-
-function normalizeUsdInputAmount(amount: number | string): number {
-  try {
-    const value = new Decimal(amount || 0);
-    if (!value.isFinite() || value.lt(0)) return 0;
-    return value.toNumber();
-  } catch {
-    return 0;
-  }
-}
-
-function normalizeUsdChipAmount(amount: number | string): number {
-  try {
-    const value = new Decimal(amount || 0);
-    if (!value.isFinite() || value.lt(0)) return 0;
-    return value.toDecimalPlaces(2).toNumber();
-  } catch {
-    return 0;
-  }
-}
-
-function getMarketSlippage(ctx: TradingContext) {
-  if (orderMode !== "market" || !ctx.orderBook) return null;
-
-  const slip = isMarketBuyAmountOrder()
-    ? calculateBuySlippageForAmount(ctx.orderBook, marketBuyAmount)
-    : selectedShares > 0
-      ? calculateSlippage(
-          ctx.orderBook,
-          activeSide === "sell" ? "SELL" : "BUY",
-          selectedShares
-        )
-      : null;
-
-  if (!slip || slip.fills.length === 0) return null;
-  return slip;
-}
-
-function getOrderShareSize(_opts: PanelOptions, ctx: TradingContext): number {
-  if (!isMarketBuyAmountOrder()) return selectedShares;
-
-  const slip = getMarketSlippage(ctx);
-  return slip?.filledSize ?? 0;
-}
-
-function getMarketNotional(ctx: TradingContext): number | null {
-  const slip = getMarketSlippage(ctx);
-  if (!slip) return null;
-
-  return new Decimal(slip.totalNotional).toNumber();
-}
-
-function getCost(opts: PanelOptions, ctx?: TradingContext): number {
-  if (isMarketBuyAmountOrder()) {
-    const marketNotional = ctx ? getMarketNotional(ctx) : null;
-    return marketNotional !== null ? marketNotional : marketBuyAmount;
-  }
-
-  const marketNotional = ctx ? getMarketNotional(ctx) : null;
-  if (marketNotional !== null) {
-    return marketNotional;
-  }
-
-  const price = new Decimal(getEffectivePrice(opts));
-  return price.mul(selectedShares).toNumber();
-}
-
-function rawPusdToNumber(raw: string): number {
-  return new Decimal(raw || "0")
-    .div(new Decimal(10).pow(PUSD_DECIMALS))
-    .toNumber();
-}
-
-function getFallbackRequiredCollateral(cost: number): number {
-  const requiredRaw = parsePusdUnits(new Decimal(cost));
-  const feeRaw = estimateFallbackFeeRaw(requiredRaw);
-  return rawPusdToNumber((requiredRaw + feeRaw).toString());
-}
-
-function getPanelOrderType(): ClobOrderType {
-  if (orderMode === "market") return "FAK";
-  return expirationPreset === "GTC" ? "GTC" : "GTD";
-}
-
-function getOrderApprovalPreviewKey(
-  opts: PanelOptions,
-  cost: number,
-  orderSize: number,
-  isMarketableBuy: boolean | undefined
-): string | null {
-  if (
-    activeSide !== "buy" ||
-    !Number.isFinite(cost) ||
-    cost <= 0 ||
-    !Number.isFinite(orderSize) ||
-    orderSize <= 0
-  ) {
-    return null;
-  }
-  const price =
-    orderMode === "market" ? 0 : normalizePrice(limitPrice || opts.price);
-  return [
-    opts.tokenId,
-    opts.conditionId ?? "",
-    activeSide,
-    getPanelOrderType(),
-    orderSize,
-    price,
-    new Decimal(cost).toDecimalPlaces(PUSD_DECIMALS).toFixed(),
-    // Marketability flips the required collateral (taker vs maker builder
-    // fee), so it must invalidate the cached preview. The "?" state covers
-    // the case where bestAsk is unavailable for a limit order — the
-    // background falls back to taker (the conservative upper bound), and we
-    // need to invalidate the preview when bestAsk later loads and we can
-    // assert maker confidently.
-    isMarketableBuy === undefined ? "?" : isMarketableBuy ? "T" : "M",
-  ].join(":");
-}
-
-function ensureOrderApprovalPreview(
-  opts: PanelOptions,
-  cost: number,
-  orderSize: number,
-  isMarketableBuy: boolean | undefined
-): string | null {
-  const key = getOrderApprovalPreviewKey(
-    opts,
-    cost,
-    orderSize,
-    isMarketableBuy
+  panelState.livePanelRefreshTimer = setTimeout(
+    run,
+    LIVE_PANEL_REFRESH_INTERVAL
   );
-  if (!key) return null;
-  if (
-    orderApprovalPreview?.key === key ||
-    orderApprovalPreviewInFlightKey === key
-  ) {
-    return key;
-  }
-
-  if (orderApprovalPreviewTimer) {
-    clearTimeout(orderApprovalPreviewTimer);
-    orderApprovalPreviewTimer = null;
-  }
-  orderApprovalPreviewInFlightKey = key;
-
-  orderApprovalPreviewTimer = setTimeout(() => {
-    orderApprovalPreviewTimer = null;
-    if (orderApprovalPreviewInFlightKey !== key) return;
-
-    const orderType = getPanelOrderType();
-    const price =
-      orderMode === "market" ? 0 : normalizePrice(limitPrice || opts.price);
-    TradingService.getOrderPreflight({
-      side: "BUY",
-      price,
-      size: orderSize,
-      amount: cost,
-      orderType,
-      conditionId: opts.conditionId,
-      isMarketableBuy,
-    })
-      .then((preflight) => {
-        // Drop the result if a newer key is now in flight, otherwise a slow
-        // earlier request would clobber the fresher preview.
-        if (orderApprovalPreviewInFlightKey !== key) return;
-        orderApprovalPreviewInFlightKey = null;
-        orderApprovalPreview = {
-          key,
-          requiredCollateral: rawPusdToNumber(preflight.requiredCollateralRaw),
-          requiredCollateralRaw: preflight.requiredCollateralRaw,
-        };
-        rerender();
-      })
-      .catch(() => {
-        if (orderApprovalPreviewInFlightKey !== key) return;
-        orderApprovalPreviewInFlightKey = null;
-        orderApprovalPreview = {
-          key,
-          requiredCollateral: getFallbackRequiredCollateral(cost),
-          requiredCollateralRaw: "",
-        };
-        rerender();
-      });
-  }, ORDER_APPROVAL_PREVIEW_DEBOUNCE_MS);
-
-  return key;
 }
-
-function refreshDynamicUI(): void {
-  if (!activePanel || !panelOpts) return;
-  const ctx = TradingService.getContext();
-  const opts = panelOpts;
-  const cost = getCost(opts, ctx);
-
-  const form = activePanel.querySelector(".knoww-tp-form");
-  if (!form) return;
-
-  const costDisp = form.querySelector(".knoww-tp-cost-display");
-  if (costDisp) costDisp.textContent = `$${new Decimal(cost).toFixed(2)}`;
-
-  const sharesInput = form.querySelector(
-    ".knoww-tp-shares-input"
-  ) as HTMLInputElement | null;
-  if (sharesInput && document.activeElement !== sharesInput) {
-    sharesInput.value = String(selectedShares);
-  }
-
-  const amountInput = form.querySelector(
-    ".knoww-tp-amount-input"
-  ) as HTMLInputElement | null;
-  if (amountInput && document.activeElement !== amountInput) {
-    amountInput.value = formatMarketBuyAmountInput(marketBuyAmount);
-  }
-
-  const amountSub = form.querySelector(".knoww-tp-amount-sub");
-  if (amountSub) {
-    const shares = getOrderShareSize(opts, ctx);
-    amountSub.textContent =
-      marketBuyAmount > 0 && shares > 0
-        ? `≈ ${formatShareQuantity(shares)} shares`
-        : "";
-  }
-
-  const limitInput = form.querySelector(
-    ".knoww-tp-price-field"
-  ) as HTMLInputElement | null;
-  if (limitInput && document.activeElement !== limitInput) {
-    limitInput.value = String(Math.round((limitPrice || opts.price) * 100));
-  }
-
-  // Update order position indicator
-  const posIndicator = form.querySelector(".knoww-tp-order-position");
-  if (posIndicator) {
-    const { bestBid, bestAsk } = getBestBidAsk(ctx);
-    if (bestBid !== undefined || bestAsk !== undefined) {
-      const currentPrice = limitPrice || opts.price;
-      const info = getOrderPositionInfo(currentPrice, bestBid, bestAsk);
-      posIndicator.textContent = info.label;
-      posIndicator.className = `knoww-tp-order-position ${info.cls}`;
-    } else if (!ctx.orderBook) {
-      posIndicator.textContent = "Loading order book...";
-      posIndicator.className = "knoww-tp-order-position muted";
-    } else if (ctx.orderBookError) {
-      posIndicator.textContent = "Order book unavailable";
-      posIndicator.className = "knoww-tp-order-position muted";
-    } else {
-      posIndicator.textContent = "Order book is empty";
-      posIndicator.className = "knoww-tp-order-position muted";
-    }
-  }
-
-  const oldDynamic = form.querySelector(".knoww-tp-dynamic");
-  const dynamic = el("div", "knoww-tp-dynamic");
-  addOrderSummary(dynamic, opts, ctx);
-  addBalanceWarning(dynamic, opts, ctx);
-  addSubmitButton(dynamic, opts, ctx);
-  if (oldDynamic) {
-    oldDynamic.replaceWith(dynamic);
-  }
-}
-
-function refreshSplitMergeState(
-  opts: PanelOptions,
-  {
-    refreshWallet = true,
-    refreshOutcomeBalances = false,
-    resetOutcomeBalances = false,
-  }: {
-    refreshWallet?: boolean;
-    refreshOutcomeBalances?: boolean;
-    resetOutcomeBalances?: boolean;
-  } = {}
-): void {
-  if (refreshWallet) {
-    TradingService.refreshBalance().catch(() => {});
-  }
-
-  if (!refreshOutcomeBalances || !opts.yesTokenId || !opts.noTokenId) {
-    return;
-  }
-
-  if (resetOutcomeBalances) {
-    outcomeBalances = null;
-    outcomeBalancesLoaded = false;
-    rerender();
-  }
-
-  if (outcomeBalancesFetching) {
-    return;
-  }
-
-  outcomeBalancesFetching = true;
-  TradingService.getOutcomeBalances(opts.yesTokenId, opts.noTokenId)
-    .then((balances) => {
-      outcomeBalances = balances;
-      outcomeBalancesLoaded = true;
-    })
-    .catch(() => {
-      outcomeBalancesLoaded = true;
-    })
-    .finally(() => {
-      outcomeBalancesFetching = false;
-      rerender();
-    });
-}
-
-// ── Panel Lifecycle ──
 
 function createPanel(opts: PanelOptions): HTMLElement {
   const panel = document.createElement("div");
@@ -1005,52 +409,47 @@ function createPanel(opts: PanelOptions): HTMLElement {
   panel.setAttribute("data-knoww-trading", "true");
   panel.addEventListener("click", (e) => e.stopPropagation());
 
-  panelOpts = opts;
-  activeSide = opts.side === "SELL" ? "sell" : "buy";
-  activeView = "order";
-  orderMode = "market";
+  panelState.panelOpts = opts;
+  panelState.activeSide = opts.side === "SELL" ? "sell" : "buy";
+  panelState.activeView = "order";
+  panelState.orderMode = "market";
   // Keep limit orders share-based, but prefill market buys with the USD stake
   // when provided (one-click stream trades).
-  marketBuyAmount =
+  panelState.marketBuyAmount =
     opts.initialAmountUsd && opts.initialAmountUsd > 0
       ? normalizeUsdChipAmount(opts.initialAmountUsd)
       : 0;
-  selectedShares =
+  panelState.selectedShares =
     opts.initialAmountUsd && opts.price > 0
       ? Math.max(1, Math.round(opts.initialAmountUsd / opts.price))
       : 10;
-  limitPrice = normalizePrice(opts.price);
-  expirationPreset = "GTC";
-  splitMergeAmount = 0;
-  outcomeBalances = null;
-  outcomeBalancesLoaded = false;
-  outcomeBalancesFetching = false;
-  moreMenuOpen = false;
-  orderApprovalPreview = null;
-  orderApprovalPreviewInFlightKey = null;
-  if (orderApprovalPreviewTimer) {
-    clearTimeout(orderApprovalPreviewTimer);
-    orderApprovalPreviewTimer = null;
+  panelState.limitPrice = normalizePrice(opts.price);
+  panelState.expirationPreset = "GTC";
+  panelState.splitMergeAmount = "";
+  panelState.outcomeBalances = null;
+  panelState.outcomeBalancesLoaded = false;
+  panelState.outcomeBalancesFetching = false;
+  panelState.moreMenuOpen = false;
+  panelState.orderApprovalPreview = null;
+  panelState.orderApprovalPreviewInFlightKey = null;
+  if (panelState.orderApprovalPreviewTimer) {
+    clearTimeout(panelState.orderApprovalPreviewTimer);
+    panelState.orderApprovalPreviewTimer = null;
   }
-  depositState = "idle";
-  depositTokens = [];
-  depositSelected = null;
-  depositAmount = "";
-  depositError = null;
-  depositRoute = null;
 
   if (opts.isMultiOutcome) {
-    selectedOutcome = "yes";
-    yesPrice = opts.price;
-    noPriceValue = 1 - opts.price;
+    panelState.selectedOutcome = "yes";
+    panelState.yesPrice = opts.price;
+    panelState.noPriceValue = 1 - opts.price;
     opts.outcomeIndex = 0;
   } else {
-    selectedOutcome = opts.outcomeIndex === 1 ? "no" : "yes";
-    yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
-    noPriceValue = opts.outcomeIndex === 1 ? opts.price : 1 - opts.price;
+    panelState.selectedOutcome = opts.outcomeIndex === 1 ? "no" : "yes";
+    panelState.yesPrice = opts.outcomeIndex === 0 ? opts.price : 1 - opts.price;
+    panelState.noPriceValue =
+      opts.outcomeIndex === 1 ? opts.price : 1 - opts.price;
   }
 
-  lastRenderedErrorToast = null;
+  panelState.lastRenderedErrorToast = null;
 
   const currentCtx = TradingService.getContext();
   if (
@@ -1069,18 +468,19 @@ function createPanel(opts: PanelOptions): HTMLElement {
       opts.yesTokenId &&
       opts.noTokenId &&
       ctx.proxyAddress &&
-      !outcomeBalancesLoaded &&
-      !outcomeBalancesFetching
+      !panelState.outcomeBalancesLoaded &&
+      !panelState.outcomeBalancesFetching
     ) {
-      refreshSplitMergeState(opts, {
+      refreshSplitMergeState(opts, positionsViewUi, {
         refreshWallet: false,
         refreshOutcomeBalances: true,
       });
     }
+    syncDepositControllerAccount(ctx);
     render(panel, opts, ctx);
   });
   const mobileUnsub = WalletBridge.onMobileConnectionChange(() => rerender());
-  activeUnsubscribe = () => {
+  panelState.activeUnsubscribe = () => {
     stateUnsub();
     mobileUnsub();
     unmountMobileQrRoot();
@@ -1093,8 +493,11 @@ function createPanel(opts: PanelOptions): HTMLElement {
     .sendMessage({ type: "trading:prewarm-offscreen" })
     .catch(() => {});
 
-  if (!TradingService.getContext().address && !sessionRestoreAttempted) {
-    sessionRestoreAttempted = true;
+  if (
+    !TradingService.getContext().address &&
+    !panelState.sessionRestoreAttempted
+  ) {
+    panelState.sessionRestoreAttempted = true;
     TradingService.hasActiveSession()
       .then((hasSession) => {
         if (!hasSession) {
@@ -1119,23 +522,23 @@ function createPanel(opts: PanelOptions): HTMLElement {
     opts.noTokenId &&
     TradingService.getContext().proxyAddress
   ) {
-    refreshSplitMergeState(opts, {
+    refreshSplitMergeState(opts, positionsViewUi, {
       refreshWallet: false,
       refreshOutcomeBalances: true,
     });
   } else if (!opts.yesTokenId || !opts.noTokenId) {
-    outcomeBalancesLoaded = true;
+    panelState.outcomeBalancesLoaded = true;
   }
 
   const closeMenu = () => {
-    if (moreMenuOpen) {
-      moreMenuOpen = false;
+    if (panelState.moreMenuOpen) {
+      panelState.moreMenuOpen = false;
       rerender();
     }
   };
   document.addEventListener("click", closeMenu);
-  const origUnsub = activeUnsubscribe;
-  activeUnsubscribe = () => {
+  const origUnsub = panelState.activeUnsubscribe;
+  panelState.activeUnsubscribe = () => {
     origUnsub();
     document.removeEventListener("click", closeMenu);
   };
@@ -1181,9 +584,9 @@ function addHeader(
     depositBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("trading_panel_deposit_clicked", {
-        marketId: panelOpts?.market.id,
+        marketId: panelState.panelOpts?.market.id,
       });
-      activeView = "deposit";
+      panelState.activeView = "deposit";
       startDepositFlow(address);
     };
     right.appendChild(depositBtn);
@@ -1193,18 +596,21 @@ function addHeader(
     refreshBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("trading_panel_balance_refreshed", {
-        marketId: panelOpts?.market.id,
+        marketId: panelState.panelOpts?.market.id,
       });
       refreshBtn.classList.add("spinning");
       TradingService.refreshBalance()
         .then(() => {
-          if (panelOpts?.yesTokenId && panelOpts?.noTokenId) {
+          if (
+            panelState.panelOpts?.yesTokenId &&
+            panelState.panelOpts?.noTokenId
+          ) {
             return TradingService.getOutcomeBalances(
-              panelOpts.yesTokenId,
-              panelOpts.noTokenId
+              panelState.panelOpts.yesTokenId,
+              panelState.panelOpts.noTokenId
             ).then((b) => {
-              outcomeBalances = b;
-              outcomeBalancesLoaded = true;
+              panelState.outcomeBalances = b;
+              panelState.outcomeBalancesLoaded = true;
             });
           }
         })
@@ -1261,7 +667,7 @@ function addHeader(
   closeBtn.onclick = (e) => {
     e.stopPropagation();
     trackPanelAnalytics("trading_panel_closed", {
-      marketId: panelOpts?.market.id,
+      marketId: panelState.panelOpts?.market.id,
     });
     TradingPanel.hide();
   };
@@ -1270,148 +676,6 @@ function addHeader(
   h.appendChild(right);
   p.appendChild(h);
 }
-
-function switchOutcome(side: "yes" | "no"): void {
-  if (!panelOpts || side === selectedOutcome) return;
-  if (!panelOpts.yesTokenId || !panelOpts.noTokenId) return;
-
-  selectedOutcome = side;
-  if (side === "yes") {
-    panelOpts.tokenId = panelOpts.yesTokenId;
-    panelOpts.price = yesPrice;
-    panelOpts.outcomeIndex = 0;
-  } else {
-    panelOpts.tokenId = panelOpts.noTokenId;
-    panelOpts.price = noPriceValue;
-    panelOpts.outcomeIndex = 1;
-  }
-
-  limitPrice = normalizePrice(panelOpts.price);
-  TradingService.fetchOrderBook(panelOpts.tokenId);
-  scheduleLivePanelRefresh();
-  rerender();
-}
-
-function addOutcomeToggle(p: HTMLElement, opts: PanelOptions): void {
-  if (!opts.yesTokenId || !opts.noTokenId) return;
-
-  const yesCtx = Math.round(yesPrice * 100);
-  const noCtx = Math.round(noPriceValue * 100);
-
-  const row = el("div", "knoww-tp-outcome-toggle");
-
-  const yesBtn = el(
-    "button",
-    `knoww-tp-outcome-btn yes${selectedOutcome === "yes" ? " active" : ""}`
-  );
-  yesBtn.innerHTML = `<span class="knoww-tp-outcome-label">Yes</span><span class="knoww-tp-outcome-price">${yesCtx}¢</span>`;
-  yesBtn.onclick = (e) => {
-    e.stopPropagation();
-    trackPanelAnalytics("trading_panel_outcome_toggled", {
-      outcome: "yes",
-      marketId: opts.market.id,
-    });
-    switchOutcome("yes");
-  };
-
-  const noBtn = el(
-    "button",
-    `knoww-tp-outcome-btn no${selectedOutcome === "no" ? " active" : ""}`
-  );
-  noBtn.innerHTML = `<span class="knoww-tp-outcome-label">No</span><span class="knoww-tp-outcome-price">${noCtx}¢</span>`;
-  noBtn.onclick = (e) => {
-    e.stopPropagation();
-    trackPanelAnalytics("trading_panel_outcome_toggled", {
-      outcome: "no",
-      marketId: opts.market.id,
-    });
-    switchOutcome("no");
-  };
-
-  row.appendChild(yesBtn);
-  row.appendChild(noBtn);
-  p.appendChild(row);
-}
-
-function formatTokenAmount(amount: number): string {
-  if (amount <= 0) return "0.00";
-  if (amount < 0.01) return "<0.01";
-  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M`;
-  if (amount >= 1_000) return `${(amount / 1_000).toFixed(2)}K`;
-  return amount.toFixed(2);
-}
-
-function getTokenBalance(ctx: TradingContext, symbol: string): number {
-  const normalized = symbol.toLowerCase();
-  return (
-    ctx.tokenBalances.find((token) => token.symbol.toLowerCase() === normalized)
-      ?.amount ?? 0
-  );
-}
-
-function getPusdBalance(ctx: TradingContext): number {
-  return ctx.pusdBalance ?? getTokenBalance(ctx, "pUSD");
-}
-
-function getAvailableTradingCollateral(ctx: TradingContext): number {
-  return ctx.balance;
-}
-
-function formatCollateralBreakdown(ctx: TradingContext): string {
-  return `pUSD ${formatTokenAmount(getPusdBalance(ctx))} + USDC.e ${formatTokenAmount(ctx.usdcEBalance ?? getTokenBalance(ctx, "USDC.e"))}`;
-}
-
-function addPortfolioBar(
-  p: HTMLElement,
-  _ctx: TradingContext,
-  opts: PanelOptions
-): void {
-  const yesPos = outcomeBalances?.yesBalance ?? "0";
-  const noPos = outcomeBalances?.noBalance ?? "0";
-  const showYes = hasDisplayPosition(yesPos);
-  const showNo = hasDisplayPosition(noPos);
-
-  if (!showYes && !showNo) return;
-
-  const currentYesPrice =
-    opts.yesTokenId && opts.noTokenId ? yesPrice : opts.price;
-  const currentNoPrice =
-    opts.yesTokenId && opts.noTokenId ? noPriceValue : 1 - currentYesPrice;
-
-  const yesLabel = opts.outcomeIndex === 0 ? opts.outcomeName : "Yes";
-  const noLabel = opts.outcomeIndex === 0 ? "No" : opts.outcomeName;
-
-  const portfolio = el("div", "knoww-tp-portfolio-bar");
-
-  if (showYes) {
-    const yRow = el("div", "knoww-tp-portfolio-row");
-    yRow.appendChild(el("span", "knoww-tp-portfolio-label", `${yesLabel}`));
-    yRow.appendChild(
-      el(
-        "span",
-        "knoww-tp-portfolio-value positive",
-        `${formatBalance(yesPos, 1)} @ $${currentYesPrice.toFixed(2)} · $${positionValueUsd(yesPos, currentYesPrice)}`
-      )
-    );
-    portfolio.appendChild(yRow);
-  }
-  if (showNo) {
-    const nRow = el("div", "knoww-tp-portfolio-row");
-    nRow.appendChild(el("span", "knoww-tp-portfolio-label", `${noLabel}`));
-    nRow.appendChild(
-      el(
-        "span",
-        "knoww-tp-portfolio-value positive",
-        `${formatBalance(noPos, 1)} @ $${currentNoPrice.toFixed(2)} · $${positionValueUsd(noPos, currentNoPrice)}`
-      )
-    );
-    portfolio.appendChild(nRow);
-  }
-
-  p.appendChild(portfolio);
-}
-
-let disconnectedUnsub: (() => void) | null = null;
 
 function connectMobileWallet(btn?: HTMLElement): void {
   if (btn) setButtonLoading(btn, "Preparing QR…");
@@ -1473,9 +737,9 @@ function addMobileWalletButton(p: HTMLElement): void {
 }
 
 function addDisconnected(p: HTMLElement): void {
-  if (disconnectedUnsub) {
-    disconnectedUnsub();
-    disconnectedUnsub = null;
+  if (panelState.disconnectedUnsub) {
+    panelState.disconnectedUnsub();
+    panelState.disconnectedUnsub = null;
   }
 
   const existing = p.querySelector(".knoww-tp-connect-section");
@@ -1566,7 +830,7 @@ function addDisconnected(p: HTMLElement): void {
     s.appendChild(buildInlineErrorParts("Couldn't connect", mobileState.error));
   }
 
-  disconnectedUnsub = WalletBridge.onWalletsChanged((newWallets) => {
+  panelState.disconnectedUnsub = WalletBridge.onWalletsChanged((newWallets) => {
     if (newWallets.length > 0 && s.isConnected) {
       addDisconnected(p);
     }
@@ -1586,14 +850,11 @@ function addLoading(p: HTMLElement, text: string): void {
 // under a sustained RPC outage the resolve never settles, and without a
 // deadline a returning credentialed user is stuck on the spinner forever.
 const WALLET_RESOLVE_SPINNER_TIMEOUT_MS = 15_000;
-let walletResolveLoadingSince: number | null = null;
-let walletResolveTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
-
 function resetWalletResolveSpinnerTimeout(): void {
-  walletResolveLoadingSince = null;
-  if (walletResolveTimeoutTimer !== null) {
-    clearTimeout(walletResolveTimeoutTimer);
-    walletResolveTimeoutTimer = null;
+  panelState.walletResolveLoadingSince = null;
+  if (panelState.walletResolveTimeoutTimer !== null) {
+    clearTimeout(panelState.walletResolveTimeoutTimer);
+    panelState.walletResolveTimeoutTimer = null;
   }
 }
 
@@ -1614,12 +875,6 @@ function addWalletResolveTimeoutError(p: HTMLElement): void {
   };
   s.appendChild(btn);
   p.appendChild(s);
-}
-
-function formatTradingPanelErrorMessage(
-  message: string | null | undefined
-): string {
-  return formatTradingErrorLine(message);
 }
 
 // Structured inline error card: alert icon + bold title + muted body. Keeping
@@ -1647,3706 +902,54 @@ function buildInlineError(rawMessage: string | null | undefined): HTMLElement {
   return buildInlineErrorParts(mapped.title, mapped.body);
 }
 
-function addWalletModeSelector(p: HTMLElement, ctx: TradingContext): void {
-  const showLegacySafe = ctx.legacySafeAvailable || ctx.walletMode === "safe";
-  const modes: Array<{
-    mode: TradingContext["walletMode"];
-    label: string;
-    desc: string;
-  }> = [];
-
-  if (showLegacySafe) {
-    modes.push({
-      mode: "safe",
-      label: "Safe",
-      desc: "Legacy Polymarket Safe wallet.",
-    });
-  } else {
-    modes.push({
-      mode: "deposit",
-      label: "Deposit Wallet",
-      desc: "New Polymarket wallet for gasless setup and trading.",
-    });
-  }
-
-  if (SHOW_EOA_OPTION) {
-    modes.push({
-      mode: "eoa",
-      label: "EOA",
-      desc: "Trade directly from this wallet. Requires POL for gas.",
-    });
-  }
-
-  if (modes.length === 1) {
-    const onlyMode = modes[0];
-    const statusLabel =
-      onlyMode.mode === "safe" ? "Safe Wallet" : "Deposit Wallet";
-    const status = el(
-      "div",
-      "knoww-tp-wallet-mode-status",
-      `Using ${statusLabel}`
-    );
-    p.appendChild(status);
-    return;
-  }
-
-  const wrap = el("div", "knoww-tp-wallet-mode");
-  const title = el("div", "knoww-tp-wallet-mode-title", "Trading wallet");
-  wrap.appendChild(title);
-
-  const options = el("div", "knoww-tp-wallet-mode-options");
-  if (!showLegacySafe) options.classList.add("no-safe");
-
-  for (const item of modes) {
-    const btn = el(
-      "button",
-      `knoww-tp-wallet-mode-option${
-        ctx.walletMode === item.mode ? " active" : ""
-      }`
-    );
-    btn.innerHTML = `<span>${item.label}</span><small>${item.desc}</small>`;
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      if (ctx.walletMode === item.mode) return;
-      btn.classList.add("loading");
-      void TradingService.setWalletMode(item.mode).catch(() => {});
-    };
-    options.appendChild(btn);
-  }
-
-  wrap.appendChild(options);
-  p.appendChild(wrap);
-}
-
-/**
- * Guided setup flow — rendered after wallet connect, until trading is ready.
- *
- * Renders a compact version of the shared setup model (connect → vault →
- * approve → credentials): a progress rail plus the current step's action. The
- * same model drives the side panel portfolio, so both surfaces gate
- * identically. Deploy-before-credentials falls out of the step order (orders
- * use the relayer wallet as funderAddress, so the vault must exist before
- * credentials are useful). The order-time "Approve pUSD" top-up and deposit
- * prompts are separate ongoing paths.
- */
-function addSetupFlow(
-  p: HTMLElement,
-  ctx: TradingContext,
-  options: { errorMessage: string | null; flow: SetupFlow }
-): void {
-  const flow = options.flow;
-  const rawError = options.errorMessage;
-
-  const s = el("div", "knoww-tp-setup");
-
-  // Returning users already have a trading vault — skip the multi-step rail and
-  // just show the single action that's left (usually generating CLOB API keys).
-  const isReturning =
-    flow.steps.find((step) => step.id === "vault")?.status === "done";
-
-  if (!isReturning) {
-    // Compact progress rail: one node per step, marked done / now / pending.
-    const rail = el("div", "knoww-tp-setup-rail");
-    for (const step of flow.steps) {
-      rail.appendChild(
-        el(
-          "span",
-          `knoww-tp-setup-node is-${step.status}`,
-          step.status === "done" ? "✓" : String(step.index)
-        )
-      );
-    }
-    s.appendChild(rail);
-    s.appendChild(
-      el(
-        "div",
-        "knoww-tp-setup-kicker",
-        `Set up trading · step ${flow.currentIndex} of ${flow.totalSteps}`
-      )
-    );
-  }
-
-  const current = flow.steps.find((step) => step.id === flow.currentStepId);
-  if (current) {
-    s.appendChild(el("div", "knoww-tp-setup-title", current.label));
-    s.appendChild(el("div", "knoww-tp-setup-helper", current.helper));
-  }
-  if (rawError) {
-    s.appendChild(buildInlineError(rawError));
-  }
-
-  switch (flow.currentStepId) {
-    case "vault": {
-      addWalletModeSelector(s, ctx);
-      const btn = el("button", "knoww-tp-btn-enable", "Create vault");
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        setButtonLoading(btn, "Waiting for signature…");
-        TradingService.deployWallet().catch(() => {
-          // Error flows through ctx.error; the next render surfaces it here.
-        });
-      };
-      s.appendChild(btn);
-      break;
-    }
-    case "approve": {
-      const row = el("div", "knoww-tp-setup-approve");
-      const field = el("div", "knoww-tp-setup-approve-field");
-      const input = document.createElement("input");
-      input.type = "number";
-      input.min = "1";
-      input.step = "1";
-      input.value = SETUP_APPROVAL_DEFAULT;
-      input.className = "knoww-tp-setup-approve-input";
-      field.appendChild(input);
-      field.appendChild(el("span", "knoww-tp-setup-approve-unit", "USDC"));
-      row.appendChild(field);
-      const btn = el("button", "knoww-tp-btn-enable", "Approve");
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const amount = Number((input.value || "").trim());
-        setButtonLoading(btn, "Waiting for signature…");
-        TradingService.approveUsdc(
-          false,
-          Number.isFinite(amount) && amount > 0
-            ? amount
-            : Number(SETUP_APPROVAL_DEFAULT)
-        ).catch(() => {
-          // Error flows through ctx.error; the next render surfaces it here.
-        });
-      };
-      row.appendChild(btn);
-      s.appendChild(row);
-      break;
-    }
-    case "credentials": {
-      const btn = el("button", "knoww-tp-btn-enable", "Generate API keys");
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        setButtonLoading(btn, "Waiting for signature…");
-        TradingService.deriveCredentials();
-      };
-      s.appendChild(btn);
-      break;
-    }
-    default:
-      break;
-  }
-
-  p.appendChild(s);
-}
-
-/**
- * Compact resume-setup banner for setupSurfaceMode "banner": setup was
- * dismissed ("Skip for now") but is incomplete, so the order form can't
- * render — without this the card body would be empty with no CTA.
- */
-function addSetupBanner(p: HTMLElement, ctx: TradingContext): void {
-  const s = el("div", "knoww-tp-setup");
-  s.appendChild(el("div", "knoww-tp-setup-title", "Finish setting up trading"));
-  s.appendChild(
-    el(
-      "div",
-      "knoww-tp-setup-helper",
-      "A couple of quick signatures and you can trade right from this card."
-    )
-  );
-  const btn = el("button", "knoww-tp-btn-enable", "Resume setup");
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    cardSetupDismissed = false;
-    if (ctx.address) void writeSetupDismissed(ctx.address, false);
-    rerender();
-  };
-  s.appendChild(btn);
-  p.appendChild(s);
-}
-
-// ── Order Type Toggle + More Menu ──
-
-function addOrderTypeRow(form: HTMLElement, opts: PanelOptions): void {
-  const row = el("div", "knoww-tp-ordertype-row");
-
-  const toggle = el("div", "knoww-tp-ordertype-toggle");
-  const mBtn = elHtml(
-    "button",
-    `knoww-tp-ordertype-btn${orderMode === "market" ? " active" : ""}`,
-    `${I.zap} Market`
-  );
-  mBtn.onclick = (e) => {
-    e.stopPropagation();
-    trackPanelAnalytics("trading_panel_order_mode_selected", {
-      mode: "market",
-      marketId: opts.market.id,
-    });
-    orderMode = "market";
-    moreMenuOpen = false;
-    rerender();
-  };
-  const lBtn = el(
-    "button",
-    `knoww-tp-ordertype-btn${orderMode === "limit" ? " active" : ""}`,
-    "Limit"
-  );
-  lBtn.onclick = (e) => {
-    e.stopPropagation();
-    trackPanelAnalytics("trading_panel_order_mode_selected", {
-      mode: "limit",
-      marketId: opts.market.id,
-    });
-    orderMode = "limit";
-    moreMenuOpen = false;
-    rerender();
-  };
-  toggle.appendChild(mBtn);
-  toggle.appendChild(lBtn);
-  row.appendChild(toggle);
-
-  const hasSplitMerge = !!(
-    opts.conditionId &&
-    opts.yesTokenId &&
-    opts.noTokenId
-  );
-  if (hasSplitMerge) {
-    const wrap = el("div", "knoww-tp-more-wrap");
-    const moreBtn = elHtml(
-      "button",
-      `knoww-tp-more-btn${moreMenuOpen ? " active" : ""}`,
-      I.more
-    );
-    moreBtn.title = "More options";
-    moreBtn.onclick = (e) => {
-      e.stopPropagation();
-      moreMenuOpen = !moreMenuOpen;
-      rerender();
-    };
-    wrap.appendChild(moreBtn);
-
-    if (moreMenuOpen) {
-      const menu = el("div", "knoww-tp-more-menu");
-      const splitBtn = elHtml(
-        "button",
-        "knoww-tp-more-item",
-        `${I.split} Split <span class="knoww-tp-tooltip-icon" title="Convert 1 pUSD into 1 Yes and 1 No share">(?)</span>`
-      );
-      splitBtn.onclick = (e) => {
-        e.stopPropagation();
-        trackPanelAnalytics("trading_panel_split_opened", {
-          marketId: opts.market.id,
-        });
-        moreMenuOpen = false;
-        activeView = "split";
-        splitMergeAmount = 0;
-        refreshSplitMergeState(opts, { refreshWallet: true });
-        rerender();
-      };
-      menu.appendChild(splitBtn);
-      menu.appendChild(el("div", "knoww-tp-more-divider"));
-      const mergeBtn = elHtml(
-        "button",
-        "knoww-tp-more-item",
-        `${I.merge} Merge <span class="knoww-tp-tooltip-icon" title="Combine 1 Yes and 1 No share to get 1 USDC back">(?)</span>`
-      );
-      mergeBtn.onclick = (e) => {
-        e.stopPropagation();
-        trackPanelAnalytics("trading_panel_merge_opened", {
-          marketId: opts.market.id,
-        });
-        moreMenuOpen = false;
-        activeView = "merge";
-        splitMergeAmount = 0;
-        refreshSplitMergeState(opts, {
-          refreshWallet: true,
-          refreshOutcomeBalances: true,
-          resetOutcomeBalances: true,
-        });
-        rerender();
-      };
-      menu.appendChild(mergeBtn);
-      wrap.appendChild(menu);
-    }
-    row.appendChild(wrap);
-  }
-
-  form.appendChild(row);
-}
-
-// ── Buy/Sell Toggle ──
-
-function addBuySellToggle(form: HTMLElement): void {
-  const toggle = el("div", "knoww-tp-buysell-toggle");
-  const buyBtn = elHtml(
-    "button",
-    `knoww-tp-buysell-btn buy${activeSide === "buy" ? " active" : ""}`,
-    `${I.up} Buy`
-  );
-  buyBtn.onclick = (e) => {
-    e.stopPropagation();
-    trackPanelAnalytics("trading_panel_side_selected", {
-      side: "buy",
-      marketId: panelOpts?.market.id,
-    });
-    activeSide = "buy";
-    rerender();
-  };
-  const sellBtn = elHtml(
-    "button",
-    `knoww-tp-buysell-btn sell${activeSide === "sell" ? " active" : ""}`,
-    `${I.down} Sell`
-  );
-  sellBtn.onclick = (e) => {
-    e.stopPropagation();
-    trackPanelAnalytics("trading_panel_side_selected", {
-      side: "sell",
-      marketId: panelOpts?.market.id,
-    });
-    activeSide = "sell";
-    if (panelOpts) {
-      const pos = getPositionSize(panelOpts);
-      if (pos > 0) selectedShares = pos;
-    }
-    rerender();
-  };
-  toggle.appendChild(buyBtn);
-  toggle.appendChild(sellBtn);
-  form.appendChild(toggle);
-}
-
-// ── Limit Price Input with +/- Steppers ──
-
-function getBestBidAsk(ctx: TradingContext): {
-  bestBid: number | undefined;
-  bestAsk: number | undefined;
-} {
-  return getBestBidAskFromOrderBook(ctx.orderBook);
-}
-
-function getOrderPositionInfo(
-  price: number,
-  bestBid: number | undefined,
-  bestAsk: number | undefined
-): { label: string; cls: string } {
-  if (activeSide === "buy") {
-    if (bestAsk !== undefined && price >= bestAsk) {
-      return {
-        label: "Crosses spread - will execute immediately",
-        cls: "green",
-      };
-    }
-    if (bestBid !== undefined && price > bestBid) {
-      return { label: "Above best bid - near top of book", cls: "blue" };
-    }
-    if (bestBid !== undefined && price === bestBid) {
-      return { label: "At best bid - joins queue", cls: "muted" };
-    }
-    return { label: "Below best bid - deeper in book", cls: "amber" };
-  }
-  if (bestBid !== undefined && price <= bestBid) {
-    return { label: "Crosses spread - will execute immediately", cls: "green" };
-  }
-  if (bestAsk !== undefined && price < bestAsk) {
-    return { label: "Below best ask - near top of book", cls: "blue" };
-  }
-  if (bestAsk !== undefined && price === bestAsk) {
-    return { label: "At best ask - joins queue", cls: "muted" };
-  }
-  return { label: "Above best ask - deeper in book", cls: "amber" };
-}
-
-function addLimitPrice(
-  form: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  if (orderMode !== "limit") return;
-
-  const { bestBid, bestAsk } = getBestBidAsk(ctx);
-  const tickSize = ctx.tickSize || 0.01;
-
-  const section = el("div", "knoww-tp-price-section");
-
-  const header = el("div", "knoww-tp-section-header");
-  header.appendChild(el("span", "knoww-tp-section-label", "Limit Price"));
-
-  // Bid/Ask quick-set buttons (always show, even while loading)
-  const bidAskWrap = el("div", "knoww-tp-bidask-wrap");
-  if (bestBid !== undefined) {
-    const bidBtn = el(
-      "button",
-      "knoww-tp-bidask-btn bid",
-      `Bid: ${(bestBid * 100).toFixed(1)}¢`
-    );
-    bidBtn.onclick = (e) => {
-      e.stopPropagation();
-      limitPrice = normalizePrice(bestBid, tickSize);
-      trackPanelAnalytics("trading_form_limit_price_set", {
-        marketId: opts.market.id,
-        method: "bid",
-        price: limitPrice,
-      });
-      rerender();
-    };
-    bidAskWrap.appendChild(bidBtn);
-  }
-  if (bestAsk !== undefined) {
-    const askBtn = el(
-      "button",
-      "knoww-tp-bidask-btn ask",
-      `Ask: ${(bestAsk * 100).toFixed(1)}¢`
-    );
-    askBtn.onclick = (e) => {
-      e.stopPropagation();
-      limitPrice = normalizePrice(bestAsk, tickSize);
-      trackPanelAnalytics("trading_form_limit_price_set", {
-        marketId: opts.market.id,
-        method: "ask",
-        price: limitPrice,
-      });
-      rerender();
-    };
-    bidAskWrap.appendChild(askBtn);
-  }
-  header.appendChild(bidAskWrap);
-  section.appendChild(header);
-
-  const controls = el("div", "knoww-tp-price-controls");
-  const minus = el("button", "knoww-tp-price-btn", "−");
-  minus.onclick = (e) => {
-    e.stopPropagation();
-    limitPrice = normalizePrice(
-      (limitPrice || opts.price) - tickSize,
-      tickSize
-    );
-    trackPanelAnalytics("trading_form_limit_price_set", {
-      marketId: opts.market.id,
-      method: "stepper_down",
-      price: limitPrice,
-    });
-    rerender();
-  };
-
-  const wrap = el("div", "knoww-tp-price-input-wrap");
-  const input = document.createElement("input");
-  input.className = "knoww-tp-price-field";
-  input.type = "number";
-  const tickCents = tickSize * 100;
-  input.min = String(tickCents);
-  input.max = String(100 - tickCents);
-  input.step = String(tickCents);
-  const displayPrice = normalizePrice(limitPrice || opts.price, tickSize);
-  input.value =
-    tickSize < 0.01
-      ? (displayPrice * 100).toFixed(2)
-      : (displayPrice * 100).toFixed(1);
-  input.oninput = () => {
-    const v = parseFloat(input.value);
-    if (v >= 1 && v <= 99) {
-      limitPrice = v / 100;
-      refreshDynamicUI();
-    }
-  };
-  input.onblur = () => {
-    limitPrice = normalizePrice(limitPrice, tickSize);
-    const centsDisplay =
-      tickSize < 0.01
-        ? (limitPrice * 100).toFixed(2)
-        : (limitPrice * 100).toFixed(1);
-    input.value = centsDisplay;
-    trackPanelAnalytics("trading_form_limit_price_set", {
-      marketId: opts.market.id,
-      method: "manual",
-      price: limitPrice,
-    });
-    refreshDynamicUI();
-  };
-  wrap.appendChild(input);
-  wrap.appendChild(el("span", "knoww-tp-price-cent", "¢"));
-
-  const plus = el("button", "knoww-tp-price-btn", "+");
-  plus.onclick = (e) => {
-    e.stopPropagation();
-    limitPrice = normalizePrice(
-      (limitPrice || opts.price) + tickSize,
-      tickSize
-    );
-    trackPanelAnalytics("trading_form_limit_price_set", {
-      marketId: opts.market.id,
-      method: "stepper_up",
-      price: limitPrice,
-    });
-    rerender();
-  };
-
-  controls.appendChild(minus);
-  controls.appendChild(wrap);
-  controls.appendChild(plus);
-  section.appendChild(controls);
-
-  // Order position indicator (updated live by refreshDynamicUI)
-  if (bestBid !== undefined || bestAsk !== undefined) {
-    const currentPrice = limitPrice || opts.price;
-    const info = getOrderPositionInfo(currentPrice, bestBid, bestAsk);
-    section.appendChild(
-      el("div", `knoww-tp-order-position ${info.cls}`, info.label)
-    );
-  } else if (ctx.orderBookError) {
-    section.appendChild(
-      el("div", "knoww-tp-order-position muted", "Order book unavailable")
-    );
-  } else {
-    section.appendChild(
-      el("div", "knoww-tp-order-position muted", "Loading order book...")
-    );
-  }
-
-  // Tick size info
-  section.appendChild(
-    el(
-      "div",
-      "knoww-tp-tick-info",
-      `Tick size: ${(tickSize * 100).toFixed(1)}¢`
-    )
-  );
-
-  // Expiration
-  const expBlock = el("div", "knoww-tp-expiration");
-  const expHeader = el("div", "knoww-tp-section-header");
-  expHeader.appendChild(el("span", "knoww-tp-section-label", "Expiration"));
-  expBlock.appendChild(expHeader);
-
-  const expRow = el("div", "knoww-tp-exp-row");
-  for (const p of ORDER_EXPIRATION_PRESETS) {
-    const btn = el(
-      "button",
-      `knoww-tp-exp-btn${expirationPreset === p ? " active" : ""}`,
-      p
-    );
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      expirationPreset = p;
-      trackPanelAnalytics("trading_form_expiration_changed", {
-        marketId: opts.market.id,
-        expiration: p,
-      });
-      rerender();
-    };
-    expRow.appendChild(btn);
-  }
-  expBlock.appendChild(expRow);
-  expBlock.appendChild(
-    el(
-      "div",
-      "knoww-tp-exp-info",
-      expirationPreset === "GTC"
-        ? "Order remains active until filled or cancelled"
-        : `Expires in ${expirationPreset} if not filled`
-    )
-  );
-  section.appendChild(expBlock);
-  form.appendChild(section);
-}
-
-// ── Slippage Info (Market mode) ──
-
-function addSlippageInfo(
-  form: HTMLElement,
-  _opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  const slip = getMarketSlippage(ctx);
-  if (!slip) return;
-
-  const row = el("div", "knoww-tp-execution-info");
-
-  const avgG = el("span", "knoww-tp-exec-group");
-  avgG.appendChild(el("span", "knoww-tp-exec-label", "Avg. Price"));
-  avgG.appendChild(
-    el(
-      "span",
-      "knoww-tp-exec-value",
-      `${(slip.avgFillPrice * 100).toFixed(1)}¢`
-    )
-  );
-  row.appendChild(avgG);
-
-  const slipG = el("span", "knoww-tp-exec-group");
-  slipG.appendChild(el("span", "knoww-tp-exec-label", "Slippage"));
-  slipG.appendChild(
-    el(
-      "span",
-      `knoww-tp-exec-value${slip.slippagePercent > 2 ? " warn" : ""}`,
-      `${slip.slippagePercent.toFixed(2)}%`
-    )
-  );
-  row.appendChild(slipG);
-
-  form.appendChild(row);
-}
-
-// ── Amount Section ──
-
-function addMarketBuyAmountSection(
-  form: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  const section = el("div", "knoww-tp-amount-section market-buy");
-  const availableCollateral = getAvailableTradingCollateral(ctx);
-  const shares = getOrderShareSize(opts, ctx);
-
-  const header = el("div", "knoww-tp-section-header");
-  header.appendChild(el("span", "knoww-tp-section-label", "Amount"));
-  header.appendChild(
-    el(
-      "span",
-      "knoww-tp-cash-display",
-      `$${new Decimal(availableCollateral).toFixed(2)} cash`
-    )
-  );
-  section.appendChild(header);
-
-  const inputWrap = el("div", "knoww-tp-amount-input-wrap");
-  inputWrap.appendChild(el("span", "knoww-tp-amount-currency", "$"));
-
-  const amountInput = document.createElement("input");
-  amountInput.className = "knoww-tp-amount-input";
-  amountInput.type = "text";
-  amountInput.inputMode = "decimal";
-  amountInput.name = "amount";
-  amountInput.value = formatMarketBuyAmountInput(marketBuyAmount);
-  amountInput.setAttribute("aria-label", "Order amount in dollars");
-  amountInput.onfocus = () => {
-    amountInput.select();
-  };
-  amountInput.oninput = () => {
-    const cleaned = amountInput.value
-      .replace(/[^0-9.]/g, "")
-      .replace(/(\..*)\./g, "$1");
-    if (cleaned !== amountInput.value) amountInput.value = cleaned;
-    marketBuyAmount = normalizeUsdInputAmount(cleaned);
-    trackPanelAnalytics("trading_form_amount_input", {
-      marketId: opts.market.id,
-      amount: marketBuyAmount,
-      method: "manual",
-      side: activeSide,
-    });
-    refreshDynamicUI();
-  };
-  amountInput.onblur = () => {
-    amountInput.value = formatMarketBuyAmountInput(marketBuyAmount);
-    refreshDynamicUI();
-  };
-  inputWrap.appendChild(amountInput);
-  section.appendChild(inputWrap);
-
-  const presets = el("div", "knoww-tp-amount-presets");
-  for (const delta of [1, 5, 10, 100]) {
-    const chip = el("button", "knoww-tp-amount-chip", `+$${delta}`);
-    chip.onclick = (e) => {
-      e.stopPropagation();
-      marketBuyAmount = normalizeUsdChipAmount(
-        new Decimal(marketBuyAmount).add(delta).toString()
-      );
-      trackPanelAnalytics("trading_form_amount_adjusted", {
-        marketId: opts.market.id,
-        amount: marketBuyAmount,
-        delta,
-        method: "chip",
-        side: activeSide,
-      });
-      rerender();
-    };
-    presets.appendChild(chip);
-  }
-
-  const maxBtn = el("button", "knoww-tp-amount-chip max", "Max");
-  maxBtn.onclick = (e) => {
-    e.stopPropagation();
-    marketBuyAmount = normalizeUsdChipAmount(
-      new Decimal(availableCollateral)
-        .toDecimalPlaces(2, Decimal.ROUND_FLOOR)
-        .toString()
-    );
-    trackPanelAnalytics("trading_form_amount_max_clicked", {
-      marketId: opts.market.id,
-      amount: marketBuyAmount,
-      side: activeSide,
-    });
-    rerender();
-  };
-  if (availableCollateral <= 0) maxBtn.disabled = true;
-  presets.appendChild(maxBtn);
-  section.appendChild(presets);
-
-  section.appendChild(
-    el(
-      "div",
-      "knoww-tp-amount-sub",
-      marketBuyAmount > 0 && shares > 0
-        ? `≈ ${formatShareQuantity(shares)} shares`
-        : ""
-    )
-  );
-
-  form.appendChild(section);
-}
-
-function addAmountSection(
-  form: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  if (isMarketBuyAmountOrder()) {
-    addMarketBuyAmountSection(form, opts, ctx);
-    return;
-  }
-
-  const section = el("div", "knoww-tp-amount-section");
-  const effectivePrice = getEffectivePrice(opts);
-  const isSell = activeSide === "sell";
-  const positionSize = getPositionSize(opts);
-  const cost = getCost(opts, ctx);
-  const minShares = isSell ? 1 : Math.max(1, Math.ceil(ctx.minOrderSize));
-  const availableCollateral = getAvailableTradingCollateral(ctx);
-
-  // Shares header: "Shares" label on left, cost on right
-  const sharesHeader = el("div", "knoww-tp-section-header");
-  sharesHeader.appendChild(el("span", "knoww-tp-section-label", "Shares"));
-  const costLabel = el("span", "knoww-tp-cost-display", `$${cost.toFixed(2)}`);
-  sharesHeader.appendChild(costLabel);
-  section.appendChild(sharesHeader);
-
-  // Shares row: [-10] [-1] [input] [+1] [+10] [Max]
-  const sharesRow = el("div", "knoww-tp-shares-row");
-
-  const m10 = el("button", "knoww-tp-shares-btn", "-10");
-  m10.onclick = (e) => {
-    e.stopPropagation();
-    adjustShares(-10, minShares);
-  };
-  if (selectedShares - 10 < minShares) m10.disabled = true;
-  sharesRow.appendChild(m10);
-
-  const m1 = el("button", "knoww-tp-shares-btn", "-1");
-  m1.onclick = (e) => {
-    e.stopPropagation();
-    adjustShares(-1, minShares);
-  };
-  if (selectedShares - 1 < minShares) m1.disabled = true;
-  sharesRow.appendChild(m1);
-
-  const sharesInput = document.createElement("input");
-  sharesInput.className = "knoww-tp-shares-input";
-  sharesInput.type = "number";
-  sharesInput.min = String(minShares);
-  sharesInput.step = isSell ? "0.01" : "1";
-  sharesInput.value = String(selectedShares);
-  sharesInput.oninput = () => {
-    const v = Number(sharesInput.value);
-    if (!Number.isNaN(v) && v > 0) {
-      let capped = Math.max(isSell ? 0.01 : minShares, v);
-      if (isSell && positionSize > 0) capped = Math.min(capped, positionSize);
-      selectedShares = capped;
-      trackPanelAnalytics("trading_form_shares_input", {
-        marketId: opts.market.id,
-        shares: capped,
-        method: "manual",
-        side: activeSide,
-      });
-      refreshDynamicUI();
-    }
-  };
-  sharesRow.appendChild(sharesInput);
-
-  const p1 = el("button", "knoww-tp-shares-btn", "+1");
-  p1.onclick = (e) => {
-    e.stopPropagation();
-    adjustShares(1, minShares);
-  };
-  sharesRow.appendChild(p1);
-
-  const p10 = el("button", "knoww-tp-shares-btn", "+10");
-  p10.onclick = (e) => {
-    e.stopPropagation();
-    adjustShares(10, minShares);
-  };
-  sharesRow.appendChild(p10);
-
-  const maxBtn = el("button", "knoww-tp-max-btn", "Max");
-  maxBtn.onclick = (e) => {
-    e.stopPropagation();
-    if (isSell && positionSize > 0) {
-      selectedShares = positionSize;
-    } else if (!isSell && availableCollateral > 0 && effectivePrice > 0) {
-      selectedShares = Math.max(
-        minShares,
-        Math.floor(availableCollateral / effectivePrice)
-      );
-    }
-    trackPanelAnalytics("trading_form_max_clicked", {
-      marketId: opts.market.id,
-      shares: selectedShares,
-      side: activeSide,
-    });
-    rerender();
-  };
-  if ((isSell && positionSize <= 0) || (!isSell && availableCollateral <= 0)) {
-    maxBtn.disabled = true;
-  }
-  sharesRow.appendChild(maxBtn);
-
-  section.appendChild(sharesRow);
-
-  form.appendChild(section);
-}
-
-function getPositionSize(opts: PanelOptions): number {
-  if (!outcomeBalances) return 0;
-  return balanceToNumber(
-    opts.outcomeIndex === 0
-      ? outcomeBalances.yesBalance
-      : outcomeBalances.noBalance
-  );
-}
-
-function adjustShares(delta: number, minShares: number): void {
-  let next = Math.max(minShares, selectedShares + delta);
-  if (activeSide === "sell" && panelOpts) {
-    const pos = getPositionSize(panelOpts);
-    if (pos > 0) next = Math.min(next, pos);
-  }
-  selectedShares = next;
-  trackPanelAnalytics("trading_form_shares_adjusted", {
-    marketId: panelOpts?.market.id || "",
-    shares: next,
-    delta,
-    method: "button",
-    side: activeSide,
-  });
-  rerender();
-}
-
-// ── Order Summary ──
-
-function addOrderSummary(
-  form: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  const isBuy = activeSide === "buy";
-  const isMarketBuyAmount = isMarketBuyAmountOrder();
-  const effectivePrice = getEffectivePrice(opts);
-  const shares = getOrderShareSize(opts, ctx);
-  const cost = getCost(opts, ctx);
-  const minShares = Math.max(1, Math.ceil(ctx.minOrderSize));
-  const positionSize = getPositionSize(opts);
-
-  const summary = el("div", "knoww-tp-summary");
-
-  // Portfolio position
-  if (outcomeBalances) {
-    const posRow = el("div", "knoww-tp-summary-row");
-    posRow.appendChild(
-      el("span", "knoww-tp-summary-label", `Your ${opts.outcomeName} position`)
-    );
-    const posVal =
-      positionSize > 0
-        ? `${new Decimal(positionSize).toFixed(2)} shares ($${new Decimal(positionSize).mul(effectivePrice).toFixed(2)})`
-        : "None";
-    posRow.appendChild(
-      el(
-        "span",
-        `knoww-tp-summary-value${positionSize > 0 ? " positive" : ""}`,
-        posVal
-      )
-    );
-    summary.appendChild(posRow);
-  }
-
-  // Primary cash movement for the order.
-  const r1 = el("div", "knoww-tp-summary-row");
-  r1.appendChild(
-    el("span", "knoww-tp-summary-label", isBuy ? "You pay" : "You receive")
-  );
-  const costDec = new Decimal(cost);
-  r1.appendChild(
-    el(
-      "span",
-      `knoww-tp-summary-value lg${!isBuy ? " positive" : ""}`,
-      `$${costDec.toFixed(2)}`
-    )
-  );
-  summary.appendChild(r1);
-
-  if (isBuy && !isMarketBuyAmount && shares > 0 && shares < minShares) {
-    const minRow = el("div", "knoww-tp-summary-row knoww-tp-warn-row");
-    minRow.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-label knoww-tp-warn-text",
-        "Min shares required"
-      )
-    );
-    minRow.appendChild(
-      el("span", "knoww-tp-summary-value knoww-tp-warn-text", String(minShares))
-    );
-    summary.appendChild(minRow);
-  }
-
-  if (isBuy) {
-    const potentialReturn = new Decimal(shares);
-    const r3 = el("div", "knoww-tp-summary-row");
-    r3.appendChild(
-      el("span", "knoww-tp-summary-label", `Payout if ${opts.outcomeName}`)
-    );
-    r3.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value positive lg",
-        `$${potentialReturn.toFixed(2)}`
-      )
-    );
-    summary.appendChild(r3);
-
-    const profit = potentialReturn.sub(costDec);
-    const pct = costDec.gt(0) ? profit.div(costDec).mul(100) : new Decimal(0);
-    const r4 = el("div", "knoww-tp-summary-row");
-    r4.appendChild(el("span", "knoww-tp-summary-label", "Estimated Profit"));
-    r4.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value positive sm",
-        `+$${profit.toFixed(2)} (${pct.toFixed(1)}%)`
-      )
-    );
-    summary.appendChild(r4);
-  }
-
-  if (!isBuy) {
-    if (positionSize <= 0) {
-      const noPos = el("div", "knoww-tp-summary-row knoww-tp-warn-row");
-      noPos.appendChild(
-        el(
-          "span",
-          "knoww-tp-summary-label knoww-tp-warn-text",
-          "No position to sell"
-        )
-      );
-      noPos.appendChild(
-        el("span", "knoww-tp-summary-value knoww-tp-warn-text", "0 shares")
-      );
-      summary.appendChild(noPos);
-    } else if (shares - positionSize > positionSize * 0.01) {
-      const overPos = el("div", "knoww-tp-summary-row knoww-tp-warn-row");
-      overPos.appendChild(
-        el(
-          "span",
-          "knoww-tp-summary-label knoww-tp-warn-text",
-          "Exceeds position"
-        )
-      );
-      overPos.appendChild(
-        el(
-          "span",
-          "knoww-tp-summary-value knoww-tp-warn-text",
-          `Max ${positionSize.toFixed(1)} shares`
-        )
-      );
-      summary.appendChild(overPos);
-    }
-  }
-
-  form.appendChild(summary);
-}
-
-// ── Balance Warning ──
-
-function addBalanceWarning(
-  form: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  if (activeSide === "sell") return;
-  const { address } = ctx;
-  const cost = getCost(opts, ctx);
-  const balanceDecimal = new Decimal(getAvailableTradingCollateral(ctx));
-  const costDecimal = new Decimal(cost);
-  if (costDecimal.lte(balanceDecimal) || balanceDecimal.lt(0)) return;
-  if (address && costDecimal.gt(balanceDecimal)) return;
-
-  const w = el("div", "knoww-tp-balance-warn");
-
-  const top = el("div", "knoww-tp-warn-top");
-  const left = el("div", "knoww-tp-warn-left");
-  left.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
-  left.appendChild(
-    el(
-      "span",
-      "knoww-tp-warn-text",
-      `Need $${costDecimal.sub(balanceDecimal).toFixed(2)} more`
-    )
-  );
-  top.appendChild(left);
-  w.appendChild(top);
-
-  const progress = Decimal.min(100, balanceDecimal.div(costDecimal).mul(100));
-  const barBg = el("div", "knoww-tp-warn-bar-bg");
-  const barFill = el("div", "knoww-tp-warn-bar-fill");
-  barFill.style.width = `${progress.toNumber()}%`;
-  barBg.appendChild(barFill);
-  w.appendChild(barBg);
-
-  w.appendChild(
-    el(
-      "div",
-      "knoww-tp-warn-detail",
-      `$${balanceDecimal.toFixed(2)} / $${costDecimal.toFixed(2)} available (${formatCollateralBreakdown(ctx)})`
-    )
-  );
-  form.appendChild(w);
-}
-
-// ── Submit Button ──
-
-function addSubmitButton(
-  form: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  const side = activeSide === "sell" ? "SELL" : "BUY";
-  const { state, minOrderSize, usdcAllowance, usdcAllowanceNegRisk } = ctx;
-  const isSubmitting = state === "placing-order" || state === "approving";
-  const isMarketBuyAmount = isMarketBuyAmountOrder();
-  const marketSlippage = orderMode === "market" ? getMarketSlippage(ctx) : null;
-  const cost = getCost(opts, ctx);
-  const availableCollateral = getAvailableTradingCollateral(ctx);
-  const noFunds = activeSide === "buy" && cost > availableCollateral;
-  const missingFunds = new Decimal(cost).sub(availableCollateral);
-  const shares = getOrderShareSize(opts, ctx);
-  const noAmount = isMarketBuyAmount && marketBuyAmount <= 0;
-  const noShares = !isMarketBuyAmount && shares <= 0;
-  const minShares = Math.max(1, Math.ceil(minOrderSize));
-  const belowMinShares =
-    activeSide === "buy" && !isMarketBuyAmount && shares < minShares;
-  const hasInsufficientLiquidity =
-    orderMode === "market" && !noAmount && marketSlippage?.canFill !== true;
-  const relevantAllowance = opts.negRisk ? usdcAllowanceNegRisk : usdcAllowance;
-  // Compute marketability before the preflight call — it gates which builder
-  // fee rate (taker vs maker) the gate sizes against, so it must be part of
-  // the preview cache key. Use `undefined` (not `false`) when bestAsk is
-  // unavailable for a limit order, so the background falls back to the
-  // conservative taker rate instead of mistakenly sizing as a maker.
-  const { bestAsk } = getBestBidAsk(ctx);
-  const isMarketableBuy: boolean | undefined =
-    activeSide !== "buy"
-      ? undefined
-      : orderMode === "market"
-        ? true
-        : bestAsk !== undefined
-          ? limitPrice >= bestAsk
-          : undefined;
-  const approvalPreviewKey = hasInsufficientLiquidity
-    ? null
-    : ensureOrderApprovalPreview(opts, cost, shares, isMarketableBuy);
-  const approvalRequirement =
-    approvalPreviewKey && orderApprovalPreview?.key === approvalPreviewKey
-      ? orderApprovalPreview.requiredCollateral
-      : cost;
-  const isCheckingApprovalRequirement =
-    activeSide === "buy" &&
-    cost > 0 &&
-    Boolean(approvalPreviewKey) &&
-    orderApprovalPreview?.key !== approvalPreviewKey;
-  const needsApproval =
-    activeSide === "buy" &&
-    cost > 0 &&
-    !isCheckingApprovalRequirement &&
-    relevantAllowance < approvalRequirement;
-  const marketableBuyNotional = isMarketBuyAmount ? marketBuyAmount : cost;
-  const belowMinNotional =
-    isMarketableBuy && marketableBuyNotional < MIN_MARKETABLE_BUY_NOTIONAL_USD;
-  const positionSize = getPositionSize(opts);
-  const sellBalancesLoading = activeSide === "sell" && !outcomeBalancesLoaded;
-  const noPosition =
-    activeSide === "sell" && outcomeBalancesLoaded && positionSize <= 0;
-  const overPosition =
-    activeSide === "sell" &&
-    outcomeBalances &&
-    positionSize > 0 &&
-    shares > positionSize;
-
-  const btn = el("button", `knoww-tp-submit ${activeSide}`);
-  btn.setAttribute("type", "button");
-
-  if (orderSettling) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Settling...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (isSubmitting) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> ${state === "approving" ? "Approving..." : "Placing Order..."}`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (sellBalancesLoading) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Loading position...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (isCheckingApprovalRequirement) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Checking allowance...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (noAmount) {
-    btn.textContent = "Enter Amount";
-    btn.disabled = true;
-  } else if (noShares) {
-    btn.textContent = "Enter Shares";
-    btn.disabled = true;
-  } else if (noPosition) {
-    btn.textContent = "No position to sell";
-    btn.disabled = true;
-  } else if (overPosition) {
-    btn.textContent = `Max ${positionSize.toFixed(1)} shares`;
-    btn.disabled = true;
-  } else if (hasInsufficientLiquidity) {
-    btn.textContent = "Insufficient liquidity";
-    btn.disabled = true;
-  } else if (belowMinNotional) {
-    btn.textContent = `Minimum order: $${MIN_MARKETABLE_BUY_NOTIONAL_USD}`;
-    btn.disabled = true;
-  } else if (belowMinShares) {
-    btn.textContent = `Minimum shares: ${minShares}`;
-    btn.disabled = true;
-  } else if (noFunds) {
-    if (ctx.address) {
-      btn.textContent = `Deposit $${missingFunds.toFixed(2)} more`;
-      btn.classList.add("deposit");
-      btn.classList.add("deposit-needed");
-    } else {
-      btn.textContent = "Insufficient Balance";
-      btn.disabled = true;
-    }
-  } else if (needsApproval) {
-    btn.innerHTML = `${I.shield} Approve pUSD`;
-    btn.classList.add("approve");
-  } else {
-    const icon = activeSide === "buy" ? I.up : I.down;
-    if (isMarketBuyAmount) {
-      btn.innerHTML = `${icon} BUY ${formatShareQuantity(shares)} for $${new Decimal(cost).toFixed(2)}`;
-    } else {
-      const modeLabel =
-        orderMode === "limit"
-          ? `${((limitPrice || opts.price) * 100).toFixed(1)}¢`
-          : "Market";
-      btn.innerHTML = `${icon} ${side} ${formatShareQuantity(shares)} @ ${modeLabel}`;
-    }
-  }
-
-  btn.onclick = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    if (btn.disabled) {
-      let reason = "unknown";
-      if (orderSettling) reason = "settling";
-      else if (isSubmitting) reason = "submitting";
-      else if (sellBalancesLoading) reason = "loading_position";
-      else if (isCheckingApprovalRequirement) reason = "checking_allowance";
-      else if (noAmount) reason = "no_amount";
-      else if (noShares) reason = "no_shares";
-      else if (noPosition) reason = "no_position";
-      else if (overPosition) reason = "over_position";
-      else if (hasInsufficientLiquidity) reason = "insufficient_liquidity";
-      else if (belowMinNotional) reason = "below_min_notional";
-      else if (belowMinShares) reason = "below_min_shares";
-      else if (noFunds) reason = "insufficient_balance";
-      trackPanelAnalytics("trading_form_submit_blocked", {
-        marketId: opts.market.id,
-        reason,
-        side: activeSide,
-        shares,
-      });
-      return;
-    }
-    const panel =
-      activePanel ??
-      (btn.closest('[data-knoww-trading="true"]') as HTMLElement | null);
-    if (!panel) return;
-
-    if (noFunds && ctx.address) {
-      activeView = "deposit";
-      trackPanelAnalytics("trading_insufficient_balance_deposit_clicked", {
-        marketId: opts.market.id,
-        missingFunds: missingFunds.toNumber(),
-      });
-      startDepositFlow(ctx.address);
-      return;
-    }
-
-    if (needsApproval) {
-      pauseLivePanelRefresh();
-      trackPanelAnalytics("trading_usdc_approve_started", {
-        marketId: opts.market.id,
-      });
-      try {
-        await TradingService.approveUsdc(!!opts.negRisk, approvalRequirement);
-        trackPanelAnalytics("trading_usdc_approve_succeeded", {
-          marketId: opts.market.id,
-        });
-        showToast(panel, "Approval updated!", "success");
-        TradingService.refreshBalance().catch(() => {});
-      } catch (err) {
-        trackPanelAnalytics("trading_usdc_approve_failed", {
-          marketId: opts.market.id,
-          error: err instanceof Error ? err.message : "Approval failed",
-        });
-        showToast(
-          panel,
-          err instanceof Error ? err.message : "Approval failed",
-          "error"
-        );
-      } finally {
-        resumeLivePanelRefresh();
-      }
-      return;
-    }
-
-    let clobOrderType: ClobOrderType;
-    let price: number | undefined;
-    let expiration: number | undefined;
-
-    if (orderMode === "market") {
-      clobOrderType = "FAK";
-      price = undefined;
-    } else {
-      price = normalizePrice(limitPrice || opts.price);
-      if (expirationPreset === "GTC") {
-        clobOrderType = "GTC";
-      } else {
-        clobOrderType = "GTD";
-        expiration = getGtdExpirationTimestamp(expirationPreset);
-      }
-    }
-
-    // Immediately show loading state on the button before the async call
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Placing Order...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-    pauseLivePanelRefresh();
-
-    try {
-      let effectiveSize = shares;
-      if (side === "SELL" && positionSize > 0) {
-        const diff = Math.abs(shares - positionSize);
-        if (diff < positionSize * 0.01 || shares >= positionSize) {
-          effectiveSize = positionSize;
-        }
-      }
-      trackPanelAnalytics("market_order_submitted", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        outcomeName: getTrackedOutcomeName(opts),
-        side,
-        orderType: clobOrderType,
-        shares: effectiveSize,
-        totalCost: cost,
-      });
-      await TradingService.placeOrder({
-        tokenId: opts.tokenId,
-        conditionId: opts.conditionId,
-        outcomeIndex: opts.outcomeIndex,
-        side,
-        price: price ?? 0,
-        size: effectiveSize,
-        amount: cost,
-        orderType: clobOrderType,
-        expiration,
-        negRisk: opts.negRisk,
-        // Forward the same marketability flag the panel preview gated against,
-        // so the background's collateral check uses the same builder fee rate
-        // (and therefore the same required-collateral) as the preview.
-        isMarketableBuy: side === "BUY" ? isMarketableBuy : undefined,
-      });
-
-      const isLimitOrder = clobOrderType === "GTC" || clobOrderType === "GTD";
-
-      if (isLimitOrder) {
-        trackPanelAnalytics("market_order_succeeded", {
-          marketId: opts.market.id,
-          marketTitle: opts.market.title || "Untitled Market",
-          outcomeName: getTrackedOutcomeName(opts),
-          side,
-          orderType: clobOrderType,
-          shares: effectiveSize,
-          totalCost: cost,
-        });
-        await TradingService.refreshBalance().catch(() => {});
-        if (opts.yesTokenId && opts.noTokenId) {
-          await TradingService.getOutcomeBalances(
-            opts.yesTokenId,
-            opts.noTokenId
-          )
-            .then((b) => {
-              outcomeBalances = b;
-              rerender();
-            })
-            .catch(() => {});
-        }
-        rerender();
-        showToast(panel, "Limit order placed!", "success");
-        resumeLivePanelRefresh();
-      } else {
-        orderSettling = true;
-        rerender();
-
-        const prevBalance = getAvailableTradingCollateral(ctx);
-        const prevYes = outcomeBalances?.yesBalance ?? "0";
-        const prevNo = outcomeBalances?.noBalance ?? "0";
-        const POLL_INTERVAL = 3000;
-        const TIMEOUT = 30000;
-        const PER_POLL_TIMEOUT = 8000;
-        const startTime = Date.now();
-
-        const finishSettling = (message: string, type: "success" | "error") => {
-          orderSettling = false;
-          if (settleTimer) {
-            clearTimeout(settleTimer);
-            settleTimer = null;
-          }
-          if (type === "success") {
-            trackPanelAnalytics("market_order_succeeded", {
-              marketId: opts.market.id,
-              marketTitle: opts.market.title || "Untitled Market",
-              outcomeName: getTrackedOutcomeName(opts),
-              side,
-              orderType: clobOrderType,
-              shares: effectiveSize,
-              totalCost: cost,
-            });
-          }
-          showToast(panel, message, type);
-          rerender();
-          resumeLivePanelRefresh();
-        };
-
-        const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
-          Promise.race([
-            p,
-            new Promise<null>((r) => setTimeout(() => r(null), ms)),
-          ]);
-
-        const poll = async () => {
-          if (!orderSettling) return;
-
-          if (Date.now() - startTime >= TIMEOUT) {
-            finishSettling("Order submitted", "success");
-            return;
-          }
-
-          try {
-            await withTimeout(
-              TradingService.refreshBalance(),
-              PER_POLL_TIMEOUT
-            );
-            if (opts.yesTokenId && opts.noTokenId) {
-              const newBal = await withTimeout(
-                TradingService.getOutcomeBalances(
-                  opts.yesTokenId,
-                  opts.noTokenId
-                ),
-                PER_POLL_TIMEOUT
-              );
-              if (newBal) outcomeBalances = newBal;
-            }
-          } catch {
-            /* ignore poll errors */
-          }
-
-          const newCtx = TradingService.getContext();
-          const newYes = outcomeBalances?.yesBalance ?? "0";
-          const newNo = outcomeBalances?.noBalance ?? "0";
-          const collateralChanged =
-            Math.abs(getAvailableTradingCollateral(newCtx) - prevBalance) >
-            0.001;
-          const positionChanged =
-            balanceChanged(prevYes, newYes) || balanceChanged(prevNo, newNo);
-
-          if (collateralChanged || positionChanged) {
-            finishSettling("Order filled!", "success");
-
-            // Show a success overlay
-            const overlay = el("div", "knoww-tp-success-overlay");
-            overlay.innerHTML = `
-              <div class="knoww-tp-success-icon">${I.check}</div>
-              <div class="knoww-tp-success-text">Order Placed Successfully</div>
-            `;
-            panel.appendChild(overlay);
-
-            // Fade out and remove after 1.5s
-            setTimeout(() => {
-              overlay.style.opacity = "0";
-              setTimeout(() => overlay.remove(), 300);
-            }, 1500);
-
-            return;
-          }
-
-          settleTimer = setTimeout(poll, POLL_INTERVAL);
-        };
-
-        settleTimer = setTimeout(poll, POLL_INTERVAL);
-      }
-    } catch (err) {
-      orderSettling = false;
-      if (settleTimer) {
-        clearTimeout(settleTimer);
-        settleTimer = null;
-      }
-      trackPanelAnalytics("market_order_failed", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        outcomeName: getTrackedOutcomeName(opts),
-        side,
-        orderType: clobOrderType,
-        shares,
-        totalCost: cost,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
-      showToast(
-        panel,
-        err instanceof Error ? err.message : "Order failed",
-        "error"
-      );
-      rerender();
-      resumeLivePanelRefresh();
-    }
-  };
-
-  form.appendChild(btn);
-}
-
-// ── Order Form (Buy / Sell) ──
-
-function renderOrderForm(
-  p: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  const form = el("div", "knoww-tp-form");
-
-  addOrderTypeRow(form, opts);
-  addBuySellToggle(form);
-  addOutcomeToggle(form, opts);
-  addLimitPrice(form, opts, ctx);
-  addSlippageInfo(form, opts, ctx);
-  addAmountSection(form, opts, ctx);
-
-  const dynamic = el("div", "knoww-tp-dynamic");
-  addOrderSummary(dynamic, opts, ctx);
-  addBalanceWarning(dynamic, opts, ctx);
-  addSubmitButton(dynamic, opts, ctx);
-  form.appendChild(dynamic);
-
-  form.appendChild(
-    el(
-      "div",
-      "knoww-tp-terms",
-      "By placing an order, you agree to the terms of service."
-    )
-  );
-
-  p.appendChild(form);
-}
-
-// ── Split Form ──
-
-function renderSplitForm(
-  p: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  if (!opts.conditionId) {
-    p.appendChild(
-      el("div", "knoww-tp-info-msg", "Split is not available for this market.")
-    );
-    return;
-  }
-
-  const { state } = ctx;
-  const pusdBalance = getPusdBalance(ctx);
-  const isSplitting = state === "splitting";
-  const form = el("div", "knoww-tp-form");
-
-  const back = elHtml(
-    "button",
-    "knoww-tp-back-btn",
-    `${I.back} Back to trading`
-  );
-  back.onclick = (e) => {
-    e.stopPropagation();
-    activeView = "order";
-    rerender();
-  };
-  form.appendChild(back);
-
-  const info = el("div", "knoww-tp-info-box");
-  info.innerHTML = `<strong>Split:</strong> Convert pUSD into equal YES + NO shares.<br>1 pUSD → 1 YES + 1 NO`;
-  form.appendChild(info);
-
-  const header = el("div", "knoww-tp-section-header");
-  header.appendChild(el("span", "knoww-tp-section-label", "Amount (pUSD)"));
-  form.appendChild(header);
-
-  const inputRow = el("div", "knoww-tp-input-row");
-  const input = document.createElement("input");
-  input.className = "knoww-tp-input-field";
-  input.type = "number";
-  input.min = "0.01";
-  input.step = "0.01";
-  input.placeholder = "0.00";
-  if (splitMergeAmount > 0) input.value = String(splitMergeAmount);
-  input.oninput = () => {
-    splitMergeAmount = Math.max(0, Number(input.value));
-    rerender();
-  };
-  const maxBtn = el("button", "knoww-tp-max-btn", "Max");
-  maxBtn.onclick = (e) => {
-    e.stopPropagation();
-    splitMergeAmount = pusdBalance;
-    input.value = String(pusdBalance);
-    rerender();
-  };
-  inputRow.appendChild(input);
-  inputRow.appendChild(maxBtn);
-  form.appendChild(inputRow);
-
-  if (splitMergeAmount > 0) {
-    const summary = el("div", "knoww-tp-summary");
-    const r1 = el("div", "knoww-tp-summary-row");
-    r1.appendChild(el("span", "knoww-tp-summary-label", "You spend"));
-    r1.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value",
-        `${splitMergeAmount.toFixed(2)} pUSD`
-      )
-    );
-    summary.appendChild(r1);
-    const r2 = el("div", "knoww-tp-summary-row");
-    r2.appendChild(el("span", "knoww-tp-summary-label", "You receive"));
-    r2.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value positive",
-        `${splitMergeAmount.toFixed(2)} YES + ${splitMergeAmount.toFixed(2)} NO`
-      )
-    );
-    summary.appendChild(r2);
-    form.appendChild(summary);
-  }
-
-  if (splitMergeAmount > pusdBalance) {
-    const w = el("div", "knoww-tp-balance-warn");
-    const top = el("div", "knoww-tp-warn-top");
-    const left = el("div", "knoww-tp-warn-left");
-    left.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
-    left.appendChild(
-      el("span", "knoww-tp-warn-text", "Insufficient pUSD balance")
-    );
-    top.appendChild(left);
-    w.appendChild(top);
-    form.appendChild(w);
-  }
-
-  const btn = el("button", "knoww-tp-submit split");
-  if (isSplitting) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Splitting...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (splitMergeAmount <= 0) {
-    btn.textContent = "Enter Amount";
-    btn.disabled = true;
-  } else if (splitMergeAmount > pusdBalance) {
-    btn.textContent = "Insufficient Balance";
-    btn.disabled = true;
-  } else {
-    btn.textContent = `Split ${splitMergeAmount.toFixed(2)} pUSD`;
-  }
-  btn.onclick = async (e) => {
-    e.stopPropagation();
-    if (btn.disabled || !opts.conditionId || !activePanel) return;
-    const panel = activePanel;
-    try {
-      trackPanelAnalytics("position_split_submitted", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        amount: splitMergeAmount,
-      });
-      await TradingService.splitPosition(
-        opts.conditionId,
-        splitMergeAmount,
-        opts.yesTokenId,
-        opts.noTokenId,
-        !!opts.negRisk
-      );
-      trackPanelAnalytics("position_split_succeeded", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        amount: splitMergeAmount,
-      });
-      showToast(panel, "Split completed!", "success");
-      refreshSplitMergeState(opts, {
-        refreshWallet: true,
-        refreshOutcomeBalances: true,
-      });
-    } catch (err) {
-      trackPanelAnalytics("position_split_failed", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        amount: splitMergeAmount,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
-      showToast(
-        panel,
-        err instanceof Error ? err.message : "Split failed",
-        "error"
-      );
-    }
-  };
-  form.appendChild(btn);
-  p.appendChild(form);
-}
-
-// ── Merge Form ──
-
-function renderMergeForm(
-  p: HTMLElement,
-  opts: PanelOptions,
-  ctx: TradingContext
-): void {
-  if (!opts.conditionId || !opts.yesTokenId || !opts.noTokenId) {
-    p.appendChild(
-      el("div", "knoww-tp-info-msg", "Merge is not available for this market.")
-    );
-    return;
-  }
-
-  const { state } = ctx;
-  const isMerging = state === "merging";
-  const maxMerge = outcomeBalances
-    ? balanceToNumber(outcomeBalances.minBalance)
-    : 0;
-  const form = el("div", "knoww-tp-form");
-
-  const back = elHtml(
-    "button",
-    "knoww-tp-back-btn",
-    `${I.back} Back to trading`
-  );
-  back.onclick = (e) => {
-    e.stopPropagation();
-    activeView = "order";
-    rerender();
-  };
-  form.appendChild(back);
-
-  const info = el("div", "knoww-tp-info-box");
-  info.innerHTML = `<strong>Merge:</strong> Convert equal YES + NO shares back into pUSD.<br>1 YES + 1 NO → 1 pUSD`;
-  form.appendChild(info);
-
-  if (outcomeBalances) {
-    const summary = el("div", "knoww-tp-summary");
-    const yRow = el("div", "knoww-tp-summary-row");
-    yRow.appendChild(el("span", "knoww-tp-summary-label", "YES balance"));
-    yRow.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value",
-        formatBalance(outcomeBalances.yesBalance, 2)
-      )
-    );
-    summary.appendChild(yRow);
-    const nRow = el("div", "knoww-tp-summary-row");
-    nRow.appendChild(el("span", "knoww-tp-summary-label", "NO balance"));
-    nRow.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value",
-        formatBalance(outcomeBalances.noBalance, 2)
-      )
-    );
-    summary.appendChild(nRow);
-    const mRow = el("div", "knoww-tp-summary-row");
-    mRow.appendChild(el("span", "knoww-tp-summary-label", "Max merge"));
-    mRow.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value positive",
-        formatBalance(outcomeBalances.minBalance, 2)
-      )
-    );
-    summary.appendChild(mRow);
-    form.appendChild(summary);
-  } else {
-    form.appendChild(
-      el(
-        "div",
-        "knoww-tp-info-msg",
-        outcomeBalancesLoaded ? "Balances unavailable." : "Loading balances..."
-      )
-    );
-  }
-
-  const header = el("div", "knoww-tp-section-header");
-  header.appendChild(el("span", "knoww-tp-section-label", "Amount to merge"));
-  form.appendChild(header);
-
-  const inputRow = el("div", "knoww-tp-input-row");
-  const input = document.createElement("input");
-  input.className = "knoww-tp-input-field";
-  input.type = "number";
-  input.min = "0.01";
-  input.step = "0.01";
-  input.placeholder = "0.00";
-  if (splitMergeAmount > 0) input.value = String(splitMergeAmount);
-  input.oninput = () => {
-    splitMergeAmount = Math.max(0, Number(input.value));
-    rerender();
-  };
-  const maxBtn = el("button", "knoww-tp-max-btn", "Max");
-  maxBtn.onclick = (e) => {
-    e.stopPropagation();
-    splitMergeAmount = maxMerge;
-    input.value = String(maxMerge);
-    rerender();
-  };
-  inputRow.appendChild(input);
-  inputRow.appendChild(maxBtn);
-  form.appendChild(inputRow);
-
-  if (splitMergeAmount > 0) {
-    const preview = el("div", "knoww-tp-summary");
-    const r1 = el("div", "knoww-tp-summary-row");
-    r1.appendChild(el("span", "knoww-tp-summary-label", "You spend"));
-    r1.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value",
-        `${splitMergeAmount.toFixed(2)} YES + ${splitMergeAmount.toFixed(2)} NO`
-      )
-    );
-    preview.appendChild(r1);
-    const r2 = el("div", "knoww-tp-summary-row");
-    r2.appendChild(el("span", "knoww-tp-summary-label", "You receive"));
-    r2.appendChild(
-      el(
-        "span",
-        "knoww-tp-summary-value positive",
-        `${splitMergeAmount.toFixed(2)} pUSD`
-      )
-    );
-    preview.appendChild(r2);
-    form.appendChild(preview);
-  }
-
-  if (splitMergeAmount > maxMerge && outcomeBalances) {
-    const w = el("div", "knoww-tp-balance-warn");
-    const top = el("div", "knoww-tp-warn-top");
-    const left = el("div", "knoww-tp-warn-left");
-    left.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
-    left.appendChild(
-      el("span", "knoww-tp-warn-text", "Amount exceeds available balance")
-    );
-    top.appendChild(left);
-    w.appendChild(top);
-    form.appendChild(w);
-  }
-
-  const btn = el("button", "knoww-tp-submit merge");
-  if (isMerging) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Merging...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (splitMergeAmount <= 0) {
-    btn.textContent = "Enter Amount";
-    btn.disabled = true;
-  } else if (splitMergeAmount > maxMerge && outcomeBalances) {
-    btn.textContent = "Insufficient Shares";
-    btn.disabled = true;
-  } else {
-    btn.textContent = `Merge ${splitMergeAmount.toFixed(2)} shares`;
-  }
-  btn.onclick = async (e) => {
-    e.stopPropagation();
-    if (btn.disabled || !opts.conditionId || !activePanel) return;
-    const panel = activePanel;
-    try {
-      trackPanelAnalytics("position_merge_submitted", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        amount: splitMergeAmount,
-      });
-      await TradingService.mergePositions(
-        opts.conditionId,
-        splitMergeAmount,
-        opts.yesTokenId,
-        opts.noTokenId,
-        !!opts.negRisk
-      );
-      trackPanelAnalytics("position_merge_succeeded", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        amount: splitMergeAmount,
-      });
-      showToast(panel, "Merge completed!", "success");
-      refreshSplitMergeState(opts, {
-        refreshWallet: true,
-        refreshOutcomeBalances: true,
-      });
-    } catch (err) {
-      trackPanelAnalytics("position_merge_failed", {
-        marketId: opts.market.id,
-        marketTitle: opts.market.title || "Untitled Market",
-        amount: splitMergeAmount,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
-      showToast(
-        panel,
-        err instanceof Error ? err.message : "Merge failed",
-        "error"
-      );
-    }
-  };
-  form.appendChild(btn);
-  p.appendChild(form);
-}
-
-// ── Deposit Flow ──
-
-function resetDepositState(): void {
-  depositState = "idle";
-  depositStep = "method";
-  depositMethod = null;
-  depositTokens = [];
-  depositSelected = null;
-  depositAmount = "";
-  depositError = null;
-  depositBridgeAddress = "";
-  depositRoute = null;
-  depositBridgeAssets = [];
-  depositSelectedBridgeAsset = null;
-  depositBridgeSearchQuery = "";
-  depositQuote = null;
-  depositIsLoadingQuote = false;
-  depositTransactions = [];
-  depositAddressesCache = [];
-  depositIsPending = false;
-  depositIsConfirming = false;
-  depositIsConfirmed = false;
-  depositTxConfirmed = false;
-  if (depositStatusPollTimer) {
-    clearTimeout(depositStatusPollTimer);
-    depositStatusPollTimer = null;
-  }
-  if (depositPollTimer) {
-    clearTimeout(depositPollTimer);
-    depositPollTimer = null;
-  }
-}
-
-const BALANCE_OF_SIG = "0x70a08231";
-
-function encodeBalanceOfCall(owner: string): string {
-  return (
-    BALANCE_OF_SIG + owner.toLowerCase().replace("0x", "").padStart(64, "0")
-  );
-}
-
-function balanceHexToBigInt(hex: string): bigint {
-  if (!hex || hex === "0x" || hex === "0x0") return 0n;
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (!clean || clean === "0") return 0n;
-  return BigInt(`0x${clean}`);
-}
-
-function parseBalanceHex(hex: string, decimals: number): number {
-  const raw = balanceHexToBigInt(hex);
-  if (raw <= 0n) return 0;
-  const scale = 10n ** BigInt(decimals);
-  const integerPart = raw / scale;
-  const remainder = raw % scale;
-  const fracStr = remainder.toString().padStart(decimals, "0");
-  return Number(`${integerPart}.${fracStr}`);
-}
-
-async function waitForTxReceipt(
-  txHash: string,
-  pollingInterval = 5000,
-  timeout = 180_000
-): Promise<{ status: "success" | "reverted" }> {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const receipt = await WalletBridge.getTransactionReceipt(txHash);
-      if (receipt?.status) {
-        return { status: receipt.status === "0x1" ? "success" : "reverted" };
-      }
-    } catch {
-      // RPC error — retry
-    }
-    await new Promise((r) => setTimeout(r, pollingInterval));
-  }
-  throw new Error(
-    "Transaction confirmation timed out. Check your wallet or Polygonscan."
-  );
-}
-
-const STABLECOINS = new Set([
-  "USDC",
-  "USDC.e",
-  "USDC.E",
-  "pUSD",
-  "USDT",
-  "DAI",
-]);
-
-let cachedPrices: Record<string, number> | null = null;
-let pricesFetchedAt = 0;
-const PRICE_CACHE_TTL = 5 * 60 * 1000;
-
-async function fetchTokenPrices(): Promise<Record<string, number>> {
-  if (cachedPrices && Date.now() - pricesFetchedAt < PRICE_CACHE_TTL) {
-    return cachedPrices;
-  }
-  const baseUrl = window.KNOWW_CONFIG?.KNOWW_APP_URL || "https://knoww.app";
-  const data = await new Promise<{ prices?: Record<string, number> }>(
-    (resolve, reject) => {
-      chrome.runtime.sendMessage(
-        {
-          type: "fetch-json",
-          url: `${baseUrl}/api/price/tokens`,
-          method: "GET",
-        },
-        (response: { ok: boolean; data?: unknown; error?: string }) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          if (!response?.ok) {
-            reject(new Error(response?.error || "Price fetch failed"));
-            return;
-          }
-          resolve(response.data as { prices?: Record<string, number> });
-        }
-      );
-    }
-  );
-  if (data?.prices) {
-    cachedPrices = data.prices;
-    pricesFetchedAt = Date.now();
-    return data.prices;
-  }
-  throw new Error("No prices in response");
-}
-
-function getTokenPrice(symbol: string, prices: Record<string, number>): number {
-  if (prices[symbol] !== undefined) return prices[symbol];
-  if (STABLECOINS.has(symbol)) return 1;
-  return 0;
-}
-
-async function ensurePolygonChain(): Promise<void> {
-  try {
-    const chainId = await WalletBridge.getChainId();
-    if (chainId !== POLYGON_CHAIN_ID_HEX) {
-      await WalletBridge.switchChain(POLYGON_CHAIN_ID_HEX);
-    }
-  } catch {
-    throw new Error("Please switch your wallet to Polygon network.");
-  }
-}
-
-async function fetchEoaBalancesViaWallet(
-  eoaAddress: string
-): Promise<DepositToken[]> {
-  await ensurePolygonChain();
-
-  let prices: Record<string, number> = {};
-  try {
-    prices = await fetchTokenPrices();
-  } catch {
-    // Price API unavailable — stablecoins still get $1 via getTokenPrice
-  }
-
-  const callData = encodeBalanceOfCall(eoaAddress);
-  const tokens: DepositToken[] = [];
-
-  const erc20Results = await Promise.allSettled(
-    DEPOSIT_TOKENS.map((tok) => WalletBridge.ethCall(tok.address, callData))
-  );
-
-  for (let i = 0; i < DEPOSIT_TOKENS.length; i++) {
-    const res = erc20Results[i];
-    if (res.status !== "fulfilled") continue;
-    const amountRaw = balanceHexToBigInt(res.value);
-    const amount = parseBalanceHex(res.value, DEPOSIT_TOKENS[i].decimals);
-    if (amount > 0) {
-      const price = getTokenPrice(DEPOSIT_TOKENS[i].symbol, prices);
-      tokens.push({
-        symbol: DEPOSIT_TOKENS[i].symbol,
-        amount,
-        amountRaw: amountRaw.toString(),
-        usdValue: amount * price,
-        address: DEPOSIT_TOKENS[i].address,
-        decimals: DEPOSIT_TOKENS[i].decimals,
-        depositSupported: true,
-      });
-    }
-  }
-
-  try {
-    const polHex = await WalletBridge.getBalance(eoaAddress);
-    const polRaw = balanceHexToBigInt(polHex);
-    const polAmount = parseBalanceHex(polHex, 18);
-    if (polAmount > 0) {
-      const polPrice = getTokenPrice("POL", prices);
-      tokens.push({
-        symbol: "POL",
-        amount: polAmount,
-        amountRaw: polRaw.toString(),
-        usdValue: polAmount * polPrice,
-        address: "native",
-        decimals: 18,
-      });
-    }
-  } catch {
-    // POL balance fetch failed, skip
-  }
-
-  tokens.sort((a, b) => b.usdValue - a.usdValue);
-  return tokens;
-}
-
-function withDepositLoadTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  message: string
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(new Error(message));
-    }, timeoutMs);
-
-    promise.then(
-      (value) => {
-        clearTimeout(timeoutId);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timeoutId);
-        reject(error);
-      }
-    );
-  });
-}
-
-function startDepositFlow(eoaAddress: string): void {
-  resetDepositState();
-  depositState = "loading-balances";
-  depositStep = "method";
-  trackPanelAnalytics("deposit_opened");
-  rerender();
-
-  const loadBalances = withDepositLoadTimeout(
-    fetchEoaBalancesViaWallet(eoaAddress),
-    DEPOSIT_BALANCE_LOAD_TIMEOUT_MS,
-    "Wallet balance request timed out. Try again, or use Transfer Crypto."
-  )
-    .then((tokens) => {
-      depositTokens = tokens;
-    })
-    .catch((err) => {
-      depositError =
-        err instanceof Error ? err.message : "Failed to load balances";
-    });
-
-  void loadBalances.finally(() => {
-    if (depositState === "loading-balances") {
-      depositState = "ready";
-      rerender();
-    }
-  });
-
-  void fetchSupportedAssets()
-    .then((assets) => {
-      depositBridgeAssets = assets;
-      if (depositState === "ready") rerender();
-    })
-    .catch(() => {
-      // Non-critical: bridge selection will just show empty list
-    });
-}
-
-function toHex(n: bigint): string {
-  return `0x${n.toString(16)}`;
-}
-
-let depositPollTimer: ReturnType<typeof setTimeout> | null = null;
-
-function hasBalanceIncreased(current: number, previous: number): boolean {
-  return new Decimal(current).gt(new Decimal(previous).plus(0.001));
-}
-
-function formatDepositRawAmount(raw: bigint, decimals: number): string {
-  const amount = new Decimal(raw.toString()).div(new Decimal(10).pow(decimals));
-  const fixed = amount.toFixed();
-  return fixed.includes(".")
-    ? fixed.replace(/0+$/, "").replace(/\.$/, "")
-    : fixed;
-}
-
-function parseDepositAmountRaw(
-  amount: string,
-  decimals: number
-): bigint | null {
-  try {
-    return parseUnits(amount, decimals);
-  } catch {
-    return null;
-  }
-}
-
-function isDepositAmountOverBalance(
-  amountRaw: bigint,
-  token: DepositToken
-): boolean {
-  if (token.amountRaw) return amountRaw > BigInt(token.amountRaw);
-  return new Decimal(formatDepositRawAmount(amountRaw, token.decimals)).gt(
-    token.amount
-  );
-}
-
-async function refreshDepositBalanceUntilSynced(
-  previousBalance: number
-): Promise<boolean> {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < DEPOSIT_BALANCE_SYNC_TIMEOUT) {
-    try {
-      await TradingService.refreshBalance();
-      if (
-        hasBalanceIncreased(
-          TradingService.getContext().balance,
-          previousBalance
-        )
-      ) {
-        rerender();
-        return true;
-      }
-    } catch {
-      /* retry until timeout */
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, DEPOSIT_BALANCE_SYNC_INTERVAL)
-    );
-  }
-
-  try {
-    await TradingService.refreshBalance();
-  } catch {
-    /* ignore final sync failure */
-  }
-  rerender();
-  return hasBalanceIncreased(
-    TradingService.getContext().balance,
-    previousBalance
-  );
-}
-
-function depositHandleBack(): void {
-  if (depositStep === "token" || depositStep === "bridge-select") {
-    depositStep = "method";
-    depositMethod = null;
-    depositBridgeSearchQuery = "";
-  } else if (depositStep === "amount") {
-    depositStep = "token";
-    depositSelected = null;
-    depositAmount = "";
-    depositQuote = null;
-  } else if (depositStep === "confirm") {
-    if (depositMethod === "bridge") {
-      depositStep = "bridge-select";
-      depositSelectedBridgeAsset = null;
-      depositBridgeAddress = "";
-    } else {
-      depositStep = "amount";
-      depositQuote = null;
-    }
-  }
-  depositError = null;
-  rerender();
-}
-
-async function depositSelectMethod(method: DepositMethod): Promise<void> {
-  depositMethod = method;
-  trackPanelAnalytics("deposit_method_selected", {
-    depositMethod: method,
-  });
-  if (method === "wallet") {
-    depositStep = "token";
-  } else if (method === "bridge") {
-    depositStep = "bridge-select";
-    if (depositBridgeAssets.length === 0) {
-      depositState = "loading-bridge";
-      rerender();
-      try {
-        depositBridgeAssets = await fetchSupportedAssets();
-      } catch {
-        // will show empty list
-      }
-      depositState = "ready";
-    }
-  }
-  rerender();
-}
-
-async function depositSelectToken(
-  token: DepositToken,
-  proxyAddress: string
-): Promise<void> {
-  if (
-    token.depositSupported === false &&
-    !isPusdToken(token.symbol, token.address)
-  ) {
-    depositError = `${token.symbol} is not supported for Polygon deposits.`;
-    rerender();
-    return;
-  }
-
-  trackPanelAnalytics("deposit_asset_selected", {
-    depositMethod: "wallet",
-    tokenSymbol: token.symbol,
-  });
-  depositSelected = token;
-  depositError = null;
-  depositBridgeAddress = "";
-  depositRoute = null;
-  depositState = "loading-bridge";
-  rerender();
-
-  try {
-    const isDirectPusdDeposit = isPusdToken(token.symbol, token.address);
-    if (!isDirectPusdDeposit && depositBridgeAssets.length === 0) {
-      depositBridgeAssets = await fetchSupportedAssets();
-    }
-    if (!isDirectPusdDeposit) {
-      const supported = findSupportedBridgeAsset(
-        depositBridgeAssets,
-        POLYGON_BRIDGE_CHAIN_ID,
-        token.symbol,
-        token.address
-      );
-      if (supported && depositAddressesCache.length === 0) {
-        depositAddressesCache = await createDepositAddresses(proxyAddress);
-      }
-    }
-    const route = resolveWalletDepositRoute({
-      chainId: POLYGON_BRIDGE_CHAIN_ID,
-      tokenSymbol: token.symbol,
-      tokenAddress: token.address,
-      recipientAddress: proxyAddress,
-      supportedAssets: isDirectPusdDeposit ? [] : depositBridgeAssets,
-      depositAddresses: isDirectPusdDeposit ? [] : depositAddressesCache,
-    });
-    if (route) {
-      depositRoute = route;
-      depositBridgeAddress = route.depositAddress;
-    } else {
-      depositError = `${token.symbol} is not supported for Polygon deposits.`;
-    }
-  } catch (err) {
-    depositError =
-      err instanceof Error ? err.message : "Failed to get deposit address.";
-  }
-
-  depositState = "ready";
-  if (!depositError) depositStep = "amount";
-  rerender();
-}
-
-async function depositSelectBridgeAsset(
-  asset: SupportedAsset,
-  proxyAddress: string
-): Promise<void> {
-  if (isPusdToken(asset.token.symbol, asset.token.address)) {
-    depositError =
-      "Use Wallet deposit to send pUSD directly from your Polygon wallet.";
-    rerender();
-    return;
-  }
-
-  trackPanelAnalytics("deposit_asset_selected", {
-    depositMethod: "bridge",
-    tokenSymbol: asset.token.symbol,
-    chainName: asset.chainName,
-  });
-  depositSelectedBridgeAsset = asset;
-  depositRoute = null;
-  depositState = "loading-bridge";
-  rerender();
-
-  try {
-    if (depositAddressesCache.length === 0) {
-      depositAddressesCache = await createDepositAddresses(proxyAddress);
-    }
-    const addrs = depositAddressesCache;
-    if (addrs.length > 0) {
-      const matching =
-        addrs.find(
-          (a) =>
-            a.chainId === asset.chainId && a.tokenSymbol === asset.token.symbol
-        ) || addrs.find((a) => a.chainId === asset.chainId);
-      if (matching) {
-        depositBridgeAddress = matching.depositAddress;
-        depositRoute = {
-          kind: "bridge",
-          depositAddress: matching.depositAddress,
-          minUsd: asset.minCheckoutUsd,
-        };
-      }
-    }
-  } catch (err) {
-    depositError =
-      err instanceof Error ? err.message : "Failed to get bridge address.";
-  }
-
-  depositState = "ready";
-  depositStep = "confirm";
-  rerender();
-}
-
-function depositFetchQuote(): void {
-  if (
-    !depositSelected ||
-    !depositBridgeAddress ||
-    !depositAmount ||
-    depositRoute?.kind === "direct" ||
-    depositIsLoadingQuote
-  )
-    return;
-  const numAmount = parseFloat(depositAmount);
-  if (!numAmount || numAmount <= 0) return;
-
-  const amountBaseUnit = parseUnits(
-    depositAmount,
-    depositSelected.decimals
-  ).toString();
-
-  depositIsLoadingQuote = true;
-  rerender();
-
-  fetchQuote({
-    fromAmountBaseUnit: amountBaseUnit,
-    fromChainId: "137",
-    fromTokenAddress: depositSelected.address,
-    recipientAddress: depositBridgeAddress,
-    toChainId: "137",
-    toTokenAddress: PUSD_ADDRESS,
-  })
-    .then((q) => {
-      depositQuote = q;
-      depositIsLoadingQuote = false;
-      rerender();
-    })
-    .catch(() => {
-      depositQuote = null;
-      depositIsLoadingQuote = false;
-      rerender();
-    });
-}
-
-async function executeDeposit(ctx: TradingContext): Promise<void> {
-  if (!depositSelected || !ctx.address || !depositBridgeAddress) return;
-  const amountBig = parseDepositAmountRaw(
-    depositAmount,
-    depositSelected.decimals
-  );
-  if (!amountBig || amountBig <= 0n) return;
-  if (isDepositAmountOverBalance(amountBig, depositSelected)) {
-    depositError = "Insufficient balance";
-    rerender();
-    return;
-  }
-
-  depositIsPending = true;
-  depositError = null;
-  rerender();
-
-  try {
-    const prevBalance = ctx.balance;
-
-    let txHash: string;
-    if (depositSelected.address === "native") {
-      txHash = await WalletBridge.sendTransaction({
-        from: ctx.address,
-        to: depositBridgeAddress,
-        value: toHex(amountBig),
-      });
-    } else {
-      const data = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: "transfer",
-        args: [depositBridgeAddress as `0x${string}`, amountBig],
-      });
-      txHash = await WalletBridge.sendTransaction({
-        from: ctx.address,
-        to: depositSelected.address,
-        data,
-        value: "0x0",
-      });
-    }
-
-    depositIsPending = false;
-    depositIsConfirming = true;
-    depositTxConfirmed = false;
-    rerender();
-
-    // Phase 1: Wait for on-chain transaction confirmation
-    const receipt = await waitForTxReceipt(txHash);
-    if (receipt.status === "reverted") {
-      depositIsConfirming = false;
-      depositError = "Transaction reverted on-chain";
-      trackPanelAnalytics("deposit_failed", {
-        ...getDepositEventProperties(),
-        stage: "on_chain",
-        errorMessage: depositError,
-      });
-      rerender();
-      return;
-    }
-
-    // Phase 2: On-chain confirmed — now poll for bridge credit
-    depositTxConfirmed = true;
-    trackPanelAnalytics("deposit_initiated", {
-      ...getDepositEventProperties(),
-      txHash,
-    });
-    rerender();
-
-    if (depositRoute?.kind === "direct") {
-      await refreshDepositBalanceUntilSynced(prevBalance);
-      depositIsConfirming = false;
-      depositIsConfirmed = true;
-      trackPanelAnalytics("deposit_completed", {
-        ...getDepositEventProperties(),
-        statusSource: "direct_transfer",
-      });
-      rerender();
-      setTimeout(() => {
-        if (inlineDepositHost) {
-          closeInlineDeposit();
-        } else {
-          activeView = "order";
-          resetDepositState();
-          rerender();
-        }
-      }, 3000);
-      return;
-    }
-
-    const BRIDGE_TIMEOUT = 180_000;
-    const bridgeStart = Date.now();
-
-    const pollBridgeCredit = async () => {
-      try {
-        await TradingService.refreshBalance();
-      } catch {
-        /* ignore */
-      }
-
-      let bridgeCompleted = false;
-      let bridgeFailed = false;
-      if (depositBridgeAddress) {
-        try {
-          depositTransactions = await fetchDepositStatus(depositBridgeAddress);
-          bridgeCompleted = depositTransactions.some(
-            (tx) => tx.status === "COMPLETED"
-          );
-          bridgeFailed = depositTransactions.some(
-            (tx) => tx.status === "FAILED"
-          );
-          rerender();
-        } catch {
-          /* ignore */
-        }
-      }
-
-      const newCtx = TradingService.getContext();
-      const balanceChanged = hasBalanceIncreased(newCtx.balance, prevBalance);
-      const timedOut = Date.now() - bridgeStart >= BRIDGE_TIMEOUT;
-
-      if (bridgeFailed) {
-        if (depositPollTimer) {
-          clearTimeout(depositPollTimer);
-          depositPollTimer = null;
-        }
-        depositIsConfirming = false;
-        depositError =
-          "Transaction confirmed on-chain, but bridge processing failed.";
-        trackPanelAnalytics("deposit_failed", {
-          ...getDepositEventProperties(),
-          stage: "bridge",
-          errorMessage: depositError,
-        });
-        rerender();
-        return;
-      }
-
-      if (bridgeCompleted || balanceChanged) {
-        if (depositPollTimer) {
-          clearTimeout(depositPollTimer);
-          depositPollTimer = null;
-        }
-        const balanceSynced =
-          balanceChanged ||
-          (await refreshDepositBalanceUntilSynced(prevBalance));
-        depositIsConfirming = false;
-        depositIsConfirmed = true;
-        trackPanelAnalytics("deposit_completed", {
-          ...getDepositEventProperties(),
-          statusSource: balanceSynced
-            ? "balance_change"
-            : bridgeCompleted
-              ? "bridge_status"
-              : "balance_pending",
-        });
-        rerender();
-        setTimeout(() => {
-          // Stream: return to the trade (bet buttons now show a placeable
-          // Trade since the balance is funded). Panel: back to the order view.
-          if (inlineDepositHost) {
-            closeInlineDeposit();
-          } else {
-            activeView = "order";
-            resetDepositState();
-            rerender();
-          }
-        }, 3000);
-        return;
-      }
-
-      if (timedOut) {
-        if (depositPollTimer) {
-          clearTimeout(depositPollTimer);
-          depositPollTimer = null;
-        }
-        depositIsConfirming = false;
-        depositError =
-          "Transaction confirmed on-chain, but bridge credit is taking longer than expected. Please check again shortly.";
-        trackPanelAnalytics("deposit_failed", {
-          ...getDepositEventProperties(),
-          stage: "bridge_timeout",
-          errorMessage: depositError,
-        });
-        rerender();
-        return;
-      }
-
-      depositPollTimer = setTimeout(pollBridgeCredit, DEPOSIT_POLL_INTERVAL);
-    };
-
-    void pollBridgeCredit();
-  } catch (err) {
-    depositIsPending = false;
-    depositIsConfirming = false;
-    depositTxConfirmed = false;
-    const msg = err instanceof Error ? err.message : "Transaction failed";
-    if (msg.includes("User rejected") || msg.includes("user rejected")) {
-      depositError = "Transaction rejected";
-    } else {
-      depositError = msg;
-    }
-    trackPanelAnalytics("deposit_failed", {
-      ...getDepositEventProperties(),
-      stage: "submission",
-      errorMessage: depositError,
-    });
-    rerender();
-  }
-}
-
-function computeReceiveAmount(): string {
-  if (!depositAmount || !depositSelected) return "0";
-  const numAmount = parseFloat(depositAmount);
-  if (Number.isNaN(numAmount)) return "0";
-  if (
-    ["USDC", "USDC.e", "USDC.E", "pUSD", "DAI", "USDT"].includes(
-      depositSelected.symbol
-    )
-  )
-    return numAmount.toFixed(2);
-  return (
-    (depositSelected.usdValue / depositSelected.amount) *
-    numAmount
-  ).toFixed(2);
-}
-
-function computeEnteredAmountUsd(): number {
-  if (!depositAmount || !depositSelected) return 0;
-  const numAmount = parseFloat(depositAmount);
-  if (Number.isNaN(numAmount)) return 0;
-  if (
-    ["USDC", "USDC.e", "USDC.E", "pUSD", "DAI", "USDT"].includes(
-      depositSelected.symbol
-    )
-  )
-    return numAmount;
-  return (depositSelected.usdValue / depositSelected.amount) * numAmount;
-}
-
-// ── Deposit Form Renderers ──
-
-function renderDepositMethodStep(form: HTMLElement, ctx: TradingContext): void {
-  // Wallet option
-  const walletBtn = el("button", "knoww-tp-deposit-method-btn");
-  const walletLeft = el("div", "knoww-tp-deposit-method-left");
-  const walletIcon = el("div", "knoww-tp-deposit-method-icon wallet");
-  walletIcon.textContent = "🦊";
-  walletLeft.appendChild(walletIcon);
-  const walletInfo = el("div", "knoww-tp-deposit-method-info");
-  const walletName = el("div", "knoww-tp-deposit-method-name");
-  walletName.textContent = ctx.address
-    ? `Wallet (${truncAddr(ctx.address)})`
-    : "Wallet (Not connected)";
-  walletInfo.appendChild(walletName);
-  const totalUsd = depositTokens.reduce((s, t) => s + t.usdValue, 0);
-  let walletSubText: string;
-  if (depositTokens.length > 0) {
-    walletSubText = `$${totalUsd.toFixed(2)} • Instant`;
-  } else if (ctx.address) {
-    walletSubText = "No tokens found";
-  } else {
-    walletSubText = "Connect wallet";
-  }
-  const walletSub = el("div", "knoww-tp-deposit-method-sub", walletSubText);
-  walletInfo.appendChild(walletSub);
-  walletLeft.appendChild(walletInfo);
-  walletBtn.appendChild(walletLeft);
-  walletBtn.appendChild(
-    elHtml(
-      "span",
-      "knoww-tp-deposit-method-chevron",
-      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`
-    )
-  );
-  walletBtn.onclick = (e) => {
-    e.stopPropagation();
-    depositSelectMethod("wallet");
-  };
-  form.appendChild(walletBtn);
-
-  // Divider
-  const divider = el("div", "knoww-tp-deposit-divider");
-  divider.appendChild(el("span", "knoww-tp-deposit-divider-line"));
-  divider.appendChild(el("span", "knoww-tp-deposit-divider-text", "more"));
-  divider.appendChild(el("span", "knoww-tp-deposit-divider-line"));
-  form.appendChild(divider);
-
-  // Bridge option
-  const bridgeBtn = el("button", "knoww-tp-deposit-method-btn");
-  const bridgeLeft = el("div", "knoww-tp-deposit-method-left");
-  const bridgeIcon = el("div", "knoww-tp-deposit-method-icon bridge");
-  bridgeIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>`;
-  bridgeLeft.appendChild(bridgeIcon);
-  const bridgeInfo = el("div", "knoww-tp-deposit-method-info");
-  bridgeInfo.appendChild(
-    el("div", "knoww-tp-deposit-method-name", "Transfer Crypto")
-  );
-  bridgeInfo.appendChild(
-    el("div", "knoww-tp-deposit-method-sub", "No limit • Instant")
-  );
-  bridgeLeft.appendChild(bridgeInfo);
-  bridgeBtn.appendChild(bridgeLeft);
-  const chainIcons = el("div", "knoww-tp-deposit-chain-icons");
-  for (const icon of ["⟠", "⬡", "🔷", "🔵"]) {
-    chainIcons.appendChild(el("span", "knoww-tp-deposit-chain-dot", icon));
-  }
-  bridgeBtn.appendChild(chainIcons);
-  bridgeBtn.appendChild(
-    elHtml(
-      "span",
-      "knoww-tp-deposit-method-chevron",
-      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`
-    )
-  );
-  bridgeBtn.onclick = (e) => {
-    e.stopPropagation();
-    depositSelectMethod("bridge");
-  };
-  form.appendChild(bridgeBtn);
-
-  // Card - Coming Soon
-  const cardBtn = el("button", "knoww-tp-deposit-method-btn disabled");
-  cardBtn.disabled = true;
-  const cardLeft = el("div", "knoww-tp-deposit-method-left");
-  const cardIcon = el("div", "knoww-tp-deposit-method-icon card");
-  cardIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>`;
-  cardLeft.appendChild(cardIcon);
-  const cardInfo = el("div", "knoww-tp-deposit-method-info");
-  cardInfo.appendChild(
-    el("div", "knoww-tp-deposit-method-name", "Deposit with Card")
-  );
-  cardInfo.appendChild(
-    el("div", "knoww-tp-deposit-method-sub", "$50,000 • 5 min")
-  );
-  cardLeft.appendChild(cardInfo);
-  cardBtn.appendChild(cardLeft);
-  cardBtn.appendChild(
-    el("span", "knoww-tp-deposit-coming-soon", "Coming Soon")
-  );
-  form.appendChild(cardBtn);
-
-  // Exchange - Coming Soon
-  const exchBtn = el("button", "knoww-tp-deposit-method-btn disabled");
-  exchBtn.disabled = true;
-  const exchLeft = el("div", "knoww-tp-deposit-method-left");
-  const exchIcon = el("div", "knoww-tp-deposit-method-icon exchange");
-  exchIcon.innerHTML = I.refresh;
-  exchLeft.appendChild(exchIcon);
-  const exchInfo = el("div", "knoww-tp-deposit-method-info");
-  exchInfo.appendChild(
-    el("div", "knoww-tp-deposit-method-name", "Connect Exchange")
-  );
-  exchInfo.appendChild(
-    el("div", "knoww-tp-deposit-method-sub", "No limit • 2 min")
-  );
-  exchLeft.appendChild(exchInfo);
-  exchBtn.appendChild(exchLeft);
-  exchBtn.appendChild(
-    el("span", "knoww-tp-deposit-coming-soon", "Coming Soon")
-  );
-  form.appendChild(exchBtn);
-}
-
-function renderDepositTokenStep(form: HTMLElement, ctx: TradingContext): void {
-  if (depositState === "loading-balances") {
-    const loader = el("div", "knoww-tp-loading-section");
-    loader.appendChild(el("div", "knoww-tp-spinner"));
-    loader.appendChild(
-      el("div", "knoww-tp-loading-text", "Loading wallet balances...")
-    );
-    form.appendChild(loader);
-    return;
-  }
-
-  if (depositError) {
-    const errRow = el("div", "knoww-tp-deposit-error");
-    errRow.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
-    errRow.appendChild(el("span", "", depositError));
-    form.appendChild(errRow);
-  }
-
-  const MIN_BALANCE_USD = 2;
-
-  if (depositTokens.length === 0) {
-    const empty = el("div", "knoww-tp-deposit-empty");
-    empty.appendChild(elHtml("span", "knoww-tp-deposit-empty-icon", I.wallet));
-    empty.appendChild(
-      el("div", "knoww-tp-deposit-empty-text", "No tokens found in your wallet")
-    );
-    empty.appendChild(
-      el(
-        "div",
-        "knoww-tp-deposit-empty-sub",
-        depositError
-          ? "There was an issue fetching your balances. Please try again."
-          : "Make sure you have tokens on Polygon network."
-      )
-    );
-    form.appendChild(empty);
-    return;
-  }
-
-  // Min deposit info banner
-  const minDeposit = getDefaultMinDeposit(depositBridgeAssets);
-  const infoBanner = el("div", "knoww-tp-deposit-info-banner warn");
-  infoBanner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
-  infoBanner.appendChild(
-    el(
-      "span",
-      "",
-      `Minimum deposit varies by token (typically $${minDeposit}+)`
-    )
-  );
-  form.appendChild(infoBanner);
-
-  const tokenList = el("div", "knoww-tp-deposit-token-list");
-  for (const tok of depositTokens) {
-    const isDirectPusdDeposit = isPusdToken(tok.symbol, tok.address);
-    const minDep = getMinDepositForToken(depositBridgeAssets, tok.symbol);
-    const isUnsupported =
-      tok.depositSupported === false && !isDirectPusdDeposit;
-    const isBelowMinDeposit = tok.usdValue < minDep;
-    const isBelowMinBalance = tok.usdValue < MIN_BALANCE_USD;
-    const isDisabled =
-      isUnsupported ||
-      isBelowMinDeposit ||
-      (!isDirectPusdDeposit && isBelowMinBalance);
-    const row = el(
-      "button",
-      `knoww-tp-deposit-token-row${isDisabled ? " below-min" : ""}`
-    );
-    const dot = el("span", "knoww-tp-deposit-token-dot");
-    const colorMap: Record<string, string> = {
-      "usdc.e": "#2687d1",
-      usdc: "#2687d1",
-      usdt: "#26a17b",
-      dai: "#f3ba2f",
-      weth: "#627eea",
-      pol: "#8247e5",
-    };
-    dot.style.backgroundColor = colorMap[tok.symbol.toLowerCase()] ?? "#a0a0a0";
-    row.appendChild(dot);
-    const symCol = el("div", "knoww-tp-deposit-token-info");
-    symCol.appendChild(el("span", "knoww-tp-deposit-token-sym", tok.symbol));
-    symCol.appendChild(
-      el(
-        "span",
-        "knoww-tp-deposit-token-amt",
-        `${tok.amount.toFixed(5)} ${tok.symbol}`
-      )
-    );
-    row.appendChild(symCol);
-    const rightCol = el("div", "knoww-tp-deposit-token-right");
-    if (isUnsupported) {
-      rightCol.appendChild(
-        el(
-          "span",
-          "knoww-tp-deposit-min-badge",
-          tok.depositDisabledReason || "Unsupported"
-        )
-      );
-    } else if (isDisabled) {
-      const badgeAmount =
-        !isDirectPusdDeposit && isBelowMinBalance ? MIN_BALANCE_USD : minDep;
-      rightCol.appendChild(
-        el("span", "knoww-tp-deposit-min-badge", `Min $${badgeAmount}`)
-      );
-    }
-    rightCol.appendChild(
-      el("span", "knoww-tp-deposit-token-usd", `$${tok.usdValue.toFixed(2)}`)
-    );
-    row.appendChild(rightCol);
-    if (isDisabled) {
-      row.disabled = true;
-    } else {
-      row.onclick = (e) => {
-        e.stopPropagation();
-        if (ctx.proxyAddress) {
-          depositSelectToken(tok, ctx.proxyAddress);
-        }
-      };
-    }
-    tokenList.appendChild(row);
-  }
-  form.appendChild(tokenList);
-}
-
-function renderDepositBridgeSelectStep(
-  form: HTMLElement,
-  ctx: TradingContext
-): void {
-  if (depositState === "loading-bridge") {
-    const loader = el("div", "knoww-tp-loading-section");
-    loader.appendChild(el("div", "knoww-tp-spinner"));
-    loader.appendChild(el("div", "knoww-tp-loading-text", "Loading assets..."));
-    form.appendChild(loader);
-    return;
-  }
-
-  // Search input
-  const searchWrap = el("div", "knoww-tp-deposit-search-wrap");
-  const searchInput = document.createElement("input");
-  searchInput.className = "knoww-tp-deposit-search";
-  searchInput.type = "text";
-  searchInput.placeholder = "Search chain or token...";
-  searchInput.value = depositBridgeSearchQuery;
-  searchInput.setAttribute("data-bridge-search", "true");
-  searchInput.oninput = (e) => {
-    depositBridgeSearchQuery = (e.target as HTMLInputElement).value;
-    rerender();
-    const restored = depositDomRoot()?.querySelector<HTMLInputElement>(
-      "[data-bridge-search]"
-    );
-    if (restored) restored.focus();
-  };
-  searchWrap.appendChild(searchInput);
-  form.appendChild(searchWrap);
-
-  // Info banner
-  const infoBanner = el("div", "knoww-tp-deposit-info-banner info");
-  infoBanner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:var(--knoww-accent, #1d9bf0)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
-  infoBanner.appendChild(
-    elHtml(
-      "span",
-      "",
-      `All deposits are automatically converted to <strong style="color:var(--knoww-accent, #1d9bf0)">pUSD on Polygon</strong> (Polymarket's V2 trading token) at the best available rate.`
-    )
-  );
-  form.appendChild(infoBanner);
-
-  // Filter assets
-  const query = depositBridgeSearchQuery.toLowerCase().trim();
-  const depositAssets = depositBridgeAssets.filter(
-    (a) => !isPusdToken(a.token.symbol, a.token.address)
-  );
-  const filtered = query
-    ? depositAssets.filter(
-        (a) =>
-          a.token.symbol.toLowerCase().includes(query) ||
-          a.token.name.toLowerCase().includes(query) ||
-          a.chainName.toLowerCase().includes(query)
-      )
-    : depositAssets;
-
-  const list = el("div", "knoww-tp-deposit-bridge-list");
-  for (const asset of filtered) {
-    const meta = CHAIN_METADATA[asset.chainId] || {
-      name: `Chain ${asset.chainId}`,
-      icon: "🔗",
-      color: "#888",
-    };
-    const row = el("button", "knoww-tp-deposit-bridge-row");
-    const chainIcon = el("div", "knoww-tp-deposit-bridge-icon");
-    chainIcon.style.background = meta.color;
-    chainIcon.textContent = meta.icon;
-    row.appendChild(chainIcon);
-    const info = el("div", "knoww-tp-deposit-bridge-info");
-    info.appendChild(
-      el("div", "knoww-tp-deposit-bridge-sym", asset.token.symbol)
-    );
-    info.appendChild(
-      el("div", "knoww-tp-deposit-bridge-chain", asset.chainName)
-    );
-    row.appendChild(info);
-    const right = el("div", "knoww-tp-deposit-bridge-right");
-    right.appendChild(el("span", "knoww-tp-deposit-bridge-min-label", "MIN"));
-    right.appendChild(
-      el("span", "knoww-tp-deposit-bridge-min-val", `$${asset.minCheckoutUsd}`)
-    );
-    row.appendChild(right);
-    row.appendChild(
-      elHtml(
-        "span",
-        "knoww-tp-deposit-method-chevron",
-        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`
-      )
-    );
-    row.onclick = (e) => {
-      e.stopPropagation();
-      if (ctx.proxyAddress) {
-        depositSelectBridgeAsset(asset, ctx.proxyAddress);
-      }
-    };
-    list.appendChild(row);
-  }
-  form.appendChild(list);
-}
-
-function renderDepositAmountStep(form: HTMLElement): void {
-  if (!depositSelected) return;
-
-  // Large amount input centered
-  const amtCenter = el("div", "knoww-tp-deposit-amt-center");
-  const amtInput = document.createElement("input");
-  amtInput.className = "knoww-tp-deposit-amt-input";
-  amtInput.type = "text";
-  amtInput.placeholder = "0.00";
-  amtInput.value = depositAmount;
-  amtInput.setAttribute("data-deposit-amt", "true");
-  amtInput.oninput = (e) => {
-    depositAmount = (e.target as HTMLInputElement).value.replace(
-      /[^0-9.]/g,
-      ""
-    );
-    depositError = null;
-    rerender();
-    const restored =
-      depositDomRoot()?.querySelector<HTMLInputElement>("[data-deposit-amt]");
-    if (restored) restored.focus();
-  };
-  amtCenter.appendChild(amtInput);
-  form.appendChild(amtCenter);
-
-  // Percentage presets
-  const presets = el("div", "knoww-tp-deposit-presets");
-  for (const pct of [25, 50, 75, 100]) {
-    const label = pct === 100 ? "Max" : `${pct}%`;
-    const btn = el("button", "knoww-tp-deposit-preset-btn", label);
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      if (!depositSelected) return;
-      if (depositSelected?.amountRaw) {
-        const raw = (BigInt(depositSelected.amountRaw) * BigInt(pct)) / 100n;
-        depositAmount = formatDepositRawAmount(raw, depositSelected.decimals);
-      } else {
-        const val = new Decimal(depositSelected.amount)
-          .mul(pct)
-          .div(100)
-          .toDecimalPlaces(
-            depositSelected.decimals > 6 ? 6 : depositSelected.decimals,
-            Decimal.ROUND_DOWN
-          );
-        depositAmount = val.toFixed();
-      }
-      rerender();
-    };
-    presets.appendChild(btn);
-  }
-  form.appendChild(presets);
-
-  // Send → Receive summary
-  const sendRecv = el("div", "knoww-tp-deposit-send-recv");
-  const sendSide = el("span", "", `You send: ${depositSelected.symbol}`);
-  const arrow = elHtml(
-    "span",
-    "",
-    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`
-  );
-  const recvSide = el("span", "", "You receive: pUSD");
-  sendRecv.appendChild(sendSide);
-  sendRecv.appendChild(arrow);
-  sendRecv.appendChild(recvSide);
-  form.appendChild(sendRecv);
-
-  // Minimum deposit/balance warnings
-  const enteredUsd = computeEnteredAmountUsd();
-  const minDep =
-    depositRoute?.minUsd ??
-    getMinDepositForToken(depositBridgeAssets, depositSelected.symbol);
-  const MIN_AMOUNT_USD = depositRoute?.kind === "direct" ? 0 : 2;
-  const isBelowMinBalance = enteredUsd > 0 && enteredUsd < MIN_AMOUNT_USD;
-  const isBelowMinDeposit = enteredUsd > 0 && enteredUsd < minDep;
-
-  if (depositAmount && isBelowMinBalance) {
-    const warn = el("div", "knoww-tp-deposit-info-banner warn");
-    warn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
-    warn.appendChild(
-      el(
-        "span",
-        "",
-        `Minimum amount is $${MIN_AMOUNT_USD}. You entered $${enteredUsd.toFixed(2)}.`
-      )
-    );
-    form.appendChild(warn);
-  } else if (depositAmount && isBelowMinDeposit) {
-    const warn = el("div", "knoww-tp-deposit-info-banner warn");
-    warn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
-    warn.appendChild(
-      el(
-        "span",
-        "",
-        `Minimum deposit is $${minDep}. You entered $${enteredUsd.toFixed(2)}.`
-      )
-    );
-    form.appendChild(warn);
-  }
-
-  // Continue button
-  const amountRaw = depositAmount
-    ? parseDepositAmountRaw(depositAmount, depositSelected.decimals)
-    : null;
-  const numAmt = amountRaw
-    ? Number(formatDepositRawAmount(amountRaw, depositSelected.decimals))
-    : 0;
-  const overBalance = amountRaw
-    ? isDepositAmountOverBalance(amountRaw, depositSelected)
-    : false;
-  const isValid =
-    numAmt > 0 && !overBalance && !isBelowMinBalance && !isBelowMinDeposit;
-
-  const btn = el("button", "knoww-tp-submit deposit");
-  if (isBelowMinBalance) {
-    btn.textContent = `Min. $${MIN_AMOUNT_USD} required`;
-    btn.disabled = true;
-  } else if (isBelowMinDeposit) {
-    btn.textContent = `Min. $${minDep} required`;
-    btn.disabled = true;
-  } else if (overBalance) {
-    btn.textContent = "Insufficient balance";
-    btn.disabled = true;
-  } else if (numAmt <= 0) {
-    btn.textContent = "Enter amount";
-    btn.disabled = true;
-  } else {
-    btn.textContent = "Continue";
-  }
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    if (!isValid) return;
-    depositStep = "confirm";
-    depositFetchQuote();
-    rerender();
-  };
-  form.appendChild(btn);
-}
-
-function renderDepositConfirmStep(
-  form: HTMLElement,
-  ctx: TradingContext
-): void {
-  if (depositMethod === "bridge" && depositSelectedBridgeAsset) {
-    // Bridge confirmation: show deposit address
-    form.appendChild(
-      el(
-        "div",
-        "knoww-tp-deposit-confirm-title",
-        `Deposit ${depositSelectedBridgeAsset.token.symbol}`
-      )
-    );
-    form.appendChild(
-      el(
-        "div",
-        "knoww-tp-deposit-confirm-sub",
-        `on ${depositSelectedBridgeAsset.chainName}`
-      )
-    );
-
-    if (depositState === "loading-bridge") {
-      const loader = el("div", "knoww-tp-loading-section");
-      loader.appendChild(el("div", "knoww-tp-spinner"));
-      form.appendChild(loader);
-      return;
-    }
-
-    if (depositBridgeAddress) {
-      // Deposit address box
-      const addrBox = el("div", "knoww-tp-deposit-addr-box");
-      addrBox.appendChild(
-        el(
-          "div",
-          "knoww-tp-deposit-addr-label",
-          `Send ${depositSelectedBridgeAsset.token.symbol} to this address`
-        )
-      );
-      const addrRow = el("div", "knoww-tp-deposit-addr-row");
-      const code = el(
-        "code",
-        "knoww-tp-deposit-addr-code",
-        depositBridgeAddress
-      );
-      addrRow.appendChild(code);
-      const copyBtn = el("button", "knoww-tp-deposit-copy-btn");
-      copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-      copyBtn.onclick = (e) => {
-        e.stopPropagation();
-        trackPanelAnalytics("deposit_address_copied", { method: "icon" });
-        navigator.clipboard.writeText(depositBridgeAddress);
-        copyBtn.innerHTML = I.check;
-        setTimeout(() => {
-          copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-        }, 2000);
-      };
-      addrRow.appendChild(copyBtn);
-      addrBox.appendChild(addrRow);
-      form.appendChild(addrBox);
-
-      // Copy full address button
-      const copyFullBtn = el("button", "knoww-tp-submit deposit");
-      copyFullBtn.textContent = "Copy Deposit Address";
-      copyFullBtn.onclick = (e) => {
-        e.stopPropagation();
-        trackPanelAnalytics("deposit_address_copied", { method: "button" });
-        navigator.clipboard.writeText(depositBridgeAddress);
-        copyFullBtn.textContent = "Address Copied!";
-        setTimeout(() => {
-          copyFullBtn.textContent = "Copy Deposit Address";
-        }, 2000);
-      };
-      form.appendChild(copyFullBtn);
-
-      // Min info
-      const minInfo = el("div", "knoww-tp-deposit-info-banner warn");
-      minInfo.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
-      const minText = el("div", "");
-      minText.appendChild(
-        el("div", "", `Minimum: $${depositSelectedBridgeAsset.minCheckoutUsd}`)
-      );
-      minText.appendChild(
-        el(
-          "div",
-          "",
-          "Assets will be converted to pUSD (Polymarket's V2 trading token) on Polygon."
-        )
-      );
-      minText.style.fontSize = "11px";
-      minInfo.appendChild(minText);
-      form.appendChild(minInfo);
-    } else {
-      form.appendChild(
-        el(
-          "div",
-          "knoww-tp-deposit-status-sub",
-          "Failed to get deposit address. Please try again."
-        )
-      );
-    }
-    return;
-  }
-
-  // Wallet confirmation with quote
-  if (!depositSelected) return;
-
-  const displayReceiveAmt = depositQuote
-    ? (Number(depositQuote.estToTokenBaseUnit) / 1e6).toFixed(2)
-    : computeReceiveAmount();
-  const estimatedTime = depositQuote
-    ? formatCheckoutTime(depositQuote.estCheckoutTimeMs)
-    : depositRoute?.kind === "direct"
-      ? "On-chain"
-      : "< 2 min";
-
-  // Amount display
-  form.appendChild(
-    el(
-      "div",
-      "knoww-tp-deposit-confirm-amount",
-      `$${parseFloat(depositAmount || "0").toFixed(2)}`
-    )
-  );
-
-  // Auto-conversion banner (hidden in the stream inline flow — keep it compact)
-  if (depositSelected.symbol !== "pUSD" && !inlineDepositHost) {
-    const banner = el("div", "knoww-tp-deposit-info-banner info");
-    banner.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:var(--knoww-accent, #1d9bf0)"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>`;
-    const text = el("div", "");
-    text.appendChild(el("div", "", "Auto-conversion to pUSD"));
-    text.appendChild(
-      el(
-        "div",
-        "",
-        `Your ${depositSelected.symbol} will be automatically converted to pUSD (Polymarket's V2 trading token) on Polygon via Polymarket Bridge.`
-      )
-    );
-    text.style.fontSize = "11px";
-    banner.appendChild(text);
-    form.appendChild(banner);
-  }
-
-  // Details card (Source / Via / Destination) — omitted in the stream inline
-  // flow to keep the card short; Est. time still surfaces in the breakdown.
-  if (!inlineDepositHost) {
-    const details = el("div", "knoww-tp-deposit-details-card");
-    const rows: Array<[string, string]> = [
-      ["Source", `🦊 Wallet (${ctx.address ? truncAddr(ctx.address) : ""})`],
-      [
-        "Via",
-        depositRoute?.kind === "direct"
-          ? "Direct transfer"
-          : "🌉 Polymarket Bridge",
-      ],
-      ["Destination", "📊 Polymarket Wallet"],
-      ["Est. time", estimatedTime],
-    ];
-    for (const [label, value] of rows) {
-      const row = el("div", "knoww-tp-deposit-detail-row");
-      row.appendChild(el("span", "knoww-tp-deposit-detail-label", label));
-      row.appendChild(el("span", "knoww-tp-deposit-detail-value", value));
-      details.appendChild(row);
-    }
-    form.appendChild(details);
-  }
-
-  // Transaction breakdown
-  const breakdown = el("div", "knoww-tp-deposit-details-card");
-  const sendRow = el("div", "knoww-tp-deposit-detail-row");
-  sendRow.appendChild(el("span", "knoww-tp-deposit-detail-label", "You send"));
-  sendRow.appendChild(
-    el(
-      "span",
-      "knoww-tp-deposit-detail-value",
-      `${depositAmount} ${depositSelected.symbol}`
-    )
-  );
-  breakdown.appendChild(sendRow);
-
-  const recvRow = el("div", "knoww-tp-deposit-detail-row");
-  const recvLabel = el(
-    "span",
-    "knoww-tp-deposit-detail-label",
-    `You receive ${depositQuote ? "" : "(approx)"}`
-  );
-  recvRow.appendChild(recvLabel);
-  const recvVal = el("span", "knoww-tp-deposit-detail-value");
-  if (depositIsLoadingQuote) {
-    recvVal.appendChild(el("span", "knoww-tp-deposit-inline-spinner"));
-  }
-  recvVal.appendChild(
-    document.createTextNode(
-      `${depositQuote ? "" : "~"}${displayReceiveAmt} pUSD`
-    )
-  );
-  recvRow.appendChild(recvVal);
-  breakdown.appendChild(recvRow);
-
-  // Fee breakdown — collected into feeBox so the stream flow can tuck it behind
-  // an (i) tooltip instead of showing gas/swap/min-received inline.
-  const feeBox = document.createElement("div");
-
-  if (depositRoute?.kind === "direct") {
-    const r = el("div", "knoww-tp-deposit-fee-row");
-    r.appendChild(el("span", "knoww-tp-deposit-fee-label", "Network cost"));
-    r.appendChild(el("span", "knoww-tp-deposit-fee-value", "Polygon gas"));
-    feeBox.appendChild(r);
-  } else if (depositQuote?.estFeeBreakdown) {
-    const fb = depositQuote.estFeeBreakdown;
-    const feeRows: Array<[string, string]> = [
-      ["Gas fee", `$${fb.gasUsd.toFixed(4)}`],
-    ];
-    if (fb.swapImpactUsd > 0) {
-      feeRows.push(["Swap impact", `$${fb.swapImpactUsd.toFixed(4)}`]);
-    }
-    if (fb.appFeeUsd > 0) {
-      feeRows.push([
-        fb.appFeeLabel || "App fee",
-        `$${fb.appFeeUsd.toFixed(4)}`,
-      ]);
-    }
-    if (fb.maxSlippage > 0) {
-      feeRows.push(["Max slippage", `${(fb.maxSlippage * 100).toFixed(2)}%`]);
-    }
-    for (const [lbl, val] of feeRows) {
-      const r = el("div", "knoww-tp-deposit-fee-row");
-      r.appendChild(el("span", "knoww-tp-deposit-fee-label", lbl));
-      r.appendChild(el("span", "knoww-tp-deposit-fee-value", val));
-      feeBox.appendChild(r);
-    }
-    const minRecvRow = el("div", "knoww-tp-deposit-fee-row highlight");
-    minRecvRow.appendChild(
-      el("span", "knoww-tp-deposit-fee-label", "Min. received")
-    );
-    minRecvRow.appendChild(
-      el(
-        "span",
-        "knoww-tp-deposit-fee-value",
-        `${fb.minReceived.toFixed(2)} pUSD`
-      )
-    );
-    feeBox.appendChild(minRecvRow);
-  } else {
-    const defaultFees: Array<[string, string]> = [
-      ["Network cost", "~$0.01"],
-      ["Bridge fee", "~0.1%"],
-    ];
-    for (const [lbl, val] of defaultFees) {
-      const r = el("div", "knoww-tp-deposit-fee-row");
-      r.appendChild(el("span", "knoww-tp-deposit-fee-label", lbl));
-      r.appendChild(el("span", "knoww-tp-deposit-fee-value", val));
-      feeBox.appendChild(r);
-    }
-  }
-
-  if (inlineDepositHost) {
-    // Stream: keep only You send / You receive; tuck the fee breakdown behind
-    // a hover (i) on the "You receive" label.
-    const info = el("span", "knoww-tp-deposit-fee-info");
-    info.setAttribute("tabindex", "0");
-    info.setAttribute("aria-label", "Fee details");
-    info.appendChild(el("span", "knoww-tp-deposit-fee-info-icon", "ⓘ"));
-    feeBox.classList.add("knoww-tp-deposit-fee-tooltip");
-    info.appendChild(feeBox);
-    recvLabel.appendChild(info);
-  } else {
-    const feeDivider = el("div", "knoww-tp-deposit-fee-divider");
-    breakdown.appendChild(feeDivider);
-    breakdown.appendChild(feeBox);
-  }
-  form.appendChild(breakdown);
-
-  // Error display
-  if (depositError) {
-    const errRow = el("div", "knoww-tp-deposit-error");
-    errRow.appendChild(elHtml("span", "knoww-tp-warn-icon", I.alert));
-    const errText =
-      depositError.length > 150
-        ? `${depositError.slice(0, 150)}...`
-        : depositError;
-    errRow.appendChild(el("span", "", errText));
-    form.appendChild(errRow);
-  }
-
-  // No bridge address warning
-  if (!depositBridgeAddress && depositState !== "loading-bridge") {
-    const warn = el("div", "knoww-tp-deposit-info-banner warn");
-    warn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;color:#f59e0b"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
-    warn.appendChild(
-      el(
-        "span",
-        "",
-        "Failed to get bridge address. Please go back and try again."
-      )
-    );
-    form.appendChild(warn);
-  }
-
-  // On-chain confirmed, now waiting for bridge credit
-  if (depositIsConfirming && depositTxConfirmed) {
-    const infoBanner = el("div", "knoww-tp-deposit-info-banner success");
-    infoBanner.innerHTML = I.check;
-    const infoText = el("div", "");
-    infoText.appendChild(el("div", "", "Transaction confirmed on-chain!"));
-    infoText.appendChild(
-      el(
-        "div",
-        "",
-        depositRoute?.kind === "direct"
-          ? "Finalizing direct pUSD transfer..."
-          : "Waiting for bridge to credit pUSD to your wallet..."
-      )
-    );
-    infoText.style.fontSize = "11px";
-    infoBanner.appendChild(infoText);
-    form.appendChild(infoBanner);
-  }
-
-  // Deposit complete
-  if (depositIsConfirmed) {
-    const successBanner = el("div", "knoww-tp-deposit-info-banner success");
-    successBanner.innerHTML = I.check;
-    const successText = el("div", "");
-    successText.appendChild(el("div", "", "Deposit complete!"));
-    successText.appendChild(
-      el("div", "", "pUSD has been credited to your Polymarket wallet.")
-    );
-    successText.style.fontSize = "11px";
-    successBanner.appendChild(successText);
-    form.appendChild(successBanner);
-  }
-
-  // Deposit status tracking
-  if (
-    (depositIsConfirmed || (depositIsConfirming && depositTxConfirmed)) &&
-    depositTransactions.length > 0
-  ) {
-    const statusCard = el("div", "knoww-tp-deposit-details-card");
-    statusCard.appendChild(
-      el("div", "knoww-tp-deposit-detail-label", "Bridge Status")
-    );
-    for (const tx of depositTransactions.slice(0, 3)) {
-      const display = getDepositStatusDisplay(tx.status);
-      const statusRow = el("div", "knoww-tp-deposit-status-row");
-      const statusDot = el("span", "knoww-tp-deposit-status-dot");
-      statusDot.style.backgroundColor = display.color;
-      statusRow.appendChild(statusDot);
-      statusRow.appendChild(el("span", "", display.text));
-      statusRow.appendChild(
-        el(
-          "span",
-          "knoww-tp-deposit-status-amt",
-          `${(Number(tx.fromAmountBaseUnit) / 1e6).toFixed(2)} USDC`
-        )
-      );
-      statusCard.appendChild(statusRow);
-    }
-    form.appendChild(statusCard);
-  }
-
-  // Terms
-  form.appendChild(
-    el(
-      "div",
-      "knoww-tp-deposit-terms",
-      "By clicking Confirm Order, you agree to our terms."
-    )
-  );
-
-  // Confirm button
-  const btn = el("button", "knoww-tp-submit deposit");
-  const isDisabled =
-    !depositBridgeAddress ||
-    depositIsPending ||
-    depositIsConfirming ||
-    depositIsConfirmed;
-
-  if (depositIsPending) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirm in Wallet...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (depositIsConfirming && !depositTxConfirmed) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirming on-chain...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (depositIsConfirming && depositTxConfirmed) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Waiting for bridge...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
-  } else if (depositIsConfirmed) {
-    btn.innerHTML = `${I.check} Deposit Complete!`;
-    btn.disabled = true;
-  } else if (!depositBridgeAddress) {
-    btn.textContent = "Loading Bridge...";
-    btn.disabled = true;
-  } else {
-    btn.textContent = "Confirm Order";
-  }
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    if (isDisabled) return;
-    trackPanelAnalytics("deposit_confirm_clicked", {
-      asset:
-        depositSelected?.symbol ?? depositSelectedBridgeAsset?.token.symbol,
-      amount: depositAmount || null,
-    });
-    executeDeposit(ctx);
-  };
-  form.appendChild(btn);
-
-  // Inline (stream): after a completed deposit there's no panel close button to
-  // exit, so give an explicit way back to the bet buttons (balance is now
-  // synced, so the card will re-render to a placeable "Trade").
-  if (depositIsConfirmed && inlineDepositHost) {
-    const backToTrade = el("button", "knoww-tp-submit", "Back to trade");
-    backToTrade.onclick = (e) => {
-      e.stopPropagation();
-      closeInlineDeposit();
-    };
-    form.appendChild(backToTrade);
-  }
-}
-
-function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
-  const form = el("div", "knoww-tp-form");
-
-  // Header with back button
-  const headerRow = el("div", "knoww-tp-deposit-header-row");
-  const backBtn = elHtml("button", "knoww-tp-back-btn", I.back);
-  if (depositStep === "method") {
-    backBtn.onclick = (e) => {
-      e.stopPropagation();
-      // Inline (stream): back exits the deposit and restores the card's
-      // bet buttons; floating panel: back returns to the order view.
-      if (inlineDepositHost) {
-        closeInlineDeposit();
-        return;
-      }
-      activeView = "order";
-      resetDepositState();
-      rerender();
-    };
-  } else {
-    backBtn.onclick = (e) => {
-      e.stopPropagation();
-      depositHandleBack();
-    };
-  }
-  headerRow.appendChild(backBtn);
-
-  const title = el("div", "knoww-tp-deposit-title", "Deposit");
-  headerRow.appendChild(title);
-
-  const balance = el(
-    "div",
-    "knoww-tp-deposit-header-bal",
-    `Balance: $${formatTokenAmount(ctx.balance)}`
-  );
-  headerRow.appendChild(balance);
-  form.appendChild(headerRow);
-
-  // Stream-only: contextual shortfall banner. When the user tapped "Deposit to
-  // trade $X" on a stream card, tell them how much more they need and for which
-  // trade. Gated on `streamDeposit` so the feed/panel deposit view is unchanged.
-  if (panelOpts?.streamDeposit && depositStep === "method") {
-    const targetUsd = panelOpts.initialAmountUsd ?? 0;
-    const shortfall = targetUsd - ctx.balance;
-    if (targetUsd > 0 && shortfall > 0) {
-      const banner = el("div", "knoww-tp-deposit-info-banner stream");
-      banner.appendChild(
-        el(
-          "span",
-          "",
-          `Add $${shortfall.toFixed(2)} to place your $${targetUsd} ${panelOpts.outcomeName} trade`
-        )
-      );
-      form.appendChild(banner);
-    }
-  }
-
-  // Loading state
-  if (depositState === "loading-balances" && depositStep === "method") {
-    const loader = el("div", "knoww-tp-loading-section");
-    loader.appendChild(el("div", "knoww-tp-spinner"));
-    loader.appendChild(
-      el("div", "knoww-tp-loading-text", "Loading wallet balances...")
-    );
-    form.appendChild(loader);
-    p.appendChild(form);
-    return;
-  }
-
-  // Enable trading notice (blocks all steps)
-  const needsTrading = !ctx.hasCredentials;
-  if (needsTrading) {
-    const enableTradingError =
-      ctx.state === "error" && ctx.error
-        ? formatTradingPanelErrorMessage(ctx.error)
-        : null;
-    const notice = el("div", "knoww-tp-deposit-notice");
-    notice.appendChild(
-      elHtml("span", "knoww-tp-deposit-notice-icon", I.shield)
-    );
-    const noticeText = el("div", "knoww-tp-deposit-notice-body");
-    noticeText.appendChild(
-      el("div", "knoww-tp-deposit-notice-title", "Enable trading first")
-    );
-    noticeText.appendChild(
-      el(
-        "div",
-        "knoww-tp-deposit-notice-desc",
-        enableTradingError
-          ? "Trading could not be enabled. Retry to start a new signing request before depositing funds."
-          : "You need to sign a message to enable trading before you can deposit funds."
-      )
-    );
-    if (enableTradingError) {
-      noticeText.appendChild(buildInlineError(ctx.error));
-    }
-    notice.appendChild(noticeText);
-    form.appendChild(notice);
-    addWalletModeSelector(form, ctx);
-
-    const enableBtn = el("button", "knoww-tp-submit deposit");
-    enableBtn.textContent = enableTradingError ? "Retry" : "Enable Trading";
-    enableBtn.onclick = (e) => {
-      e.stopPropagation();
-      setButtonLoading(enableBtn, "Waiting for signature…");
-      activeView = "order";
-      TradingService.deriveCredentials();
-    };
-    form.appendChild(enableBtn);
-    p.appendChild(form);
-    return;
-  }
-
-  // Render the current step
-  switch (depositStep) {
-    case "method":
-      renderDepositMethodStep(form, ctx);
-      break;
-    case "token":
-      renderDepositTokenStep(form, ctx);
-      break;
-    case "bridge-select":
-      renderDepositBridgeSelectStep(form, ctx);
-      break;
-    case "amount":
-      renderDepositAmountStep(form);
-      break;
-    case "confirm":
-      renderDepositConfirmStep(form, ctx);
-      break;
-  }
-
-  p.appendChild(form);
-}
+const setupViewUi: SetupViewUiPort = {
+  el,
+  buildInlineError,
+  setButtonLoading,
+  rerender,
+};
+
+configureDepositView({
+  el,
+  elHtml,
+  rerender,
+  trackAnalytics: trackPanelAnalytics,
+  buildInlineError,
+  setButtonLoading,
+  setupViewUi,
+  icons: {
+    refresh: I.refresh,
+    alert: I.alert,
+    wallet: I.wallet,
+    check: I.check,
+    back: I.back,
+    shield: I.shield,
+  },
+});
+
+configureOrderView({
+  el,
+  elHtml,
+  rerender,
+  trackAnalytics: trackPanelAnalytics,
+  showToast,
+  pauseLivePanelRefresh,
+  resumeLivePanelRefresh,
+  scheduleLivePanelRefresh,
+  startDepositFlow,
+  positionsViewUi,
+  icons: {
+    zap: I.zap,
+    more: I.more,
+    split: I.split,
+    merge: I.merge,
+    up: I.up,
+    down: I.down,
+    alert: I.alert,
+    shield: I.shield,
+    check: I.check,
+  },
+});
 
 // ── Main Render ──
 
@@ -5383,14 +986,18 @@ function render(
     addLoading(panel, "Switching to Polygon...");
     return;
   }
+  if (state === "restoring-session") {
+    addLoading(panel, "Restoring trading session…");
+    return;
+  }
 
-  addPortfolioBar(panel, ctx, opts);
+  addPortfolioBar(panel, ctx, opts, positionsViewUi);
   syncCardSetupStorage(address);
   const setupFlow = cardSetupFlow(ctx);
   const setupSurfaceMode = resolveSetupSurfaceMode({
     flow: setupFlow,
-    persistedComplete: cardSetupComplete,
-    dismissed: cardSetupDismissed,
+    persistedComplete: panelState.cardSetupComplete,
+    dismissed: panelState.cardSetupDismissed,
     liveCompleteKnown: isSetupApprovalReadKnown(ctx.approvalReadStatus),
   });
 
@@ -5407,19 +1014,19 @@ function render(
     // Initial on-chain deployment check still in flight (first balance fetch).
     // Show a neutral spinner instead of flashing the Deploy gate for ~500ms —
     // but not forever: past the deadline this flips to a retryable error.
-    if (walletResolveLoadingSince === null) {
-      walletResolveLoadingSince = Date.now();
+    if (panelState.walletResolveLoadingSince === null) {
+      panelState.walletResolveLoadingSince = Date.now();
     }
-    const waitedMs = Date.now() - walletResolveLoadingSince;
+    const waitedMs = Date.now() - panelState.walletResolveLoadingSince;
     if (waitedMs >= WALLET_RESOLVE_SPINNER_TIMEOUT_MS) {
       addWalletResolveTimeoutError(panel);
       return;
     }
-    if (walletResolveTimeoutTimer === null) {
+    if (panelState.walletResolveTimeoutTimer === null) {
       // Deadline re-render: recovery must not depend on an unrelated ctx
       // update arriving while the RPC is down.
-      walletResolveTimeoutTimer = setTimeout(() => {
-        walletResolveTimeoutTimer = null;
+      panelState.walletResolveTimeoutTimer = setTimeout(() => {
+        panelState.walletResolveTimeoutTimer = null;
         rerender();
       }, WALLET_RESOLVE_SPINNER_TIMEOUT_MS - waitedMs);
     }
@@ -5445,19 +1052,27 @@ function render(
     // Fully-onboarded users fall through to the order form instead.
     addLoading(panel, "Confirm approval in your wallet...");
     return;
-  } else if (setupSurfaceMode === "wizard" && activeView !== "deposit") {
+  } else if (
+    setupSurfaceMode === "wizard" &&
+    panelState.activeView !== "deposit"
+  ) {
     // Guided setup (connect → vault → approve → credentials),
     // driven by the shared setup-flow model so the card and the side panel
     // portfolio gate identically. Deploy-before-credentials falls out of the
     // step order. Deposit remains a separate view and contextual BUY prompt.
-    addSetupFlow(panel, ctx, {
-      errorMessage: state === "error" ? error : null,
-      flow: setupFlow,
-    });
+    addSetupFlow(
+      panel,
+      ctx,
+      {
+        errorMessage: state === "error" ? error : null,
+        flow: setupFlow,
+      },
+      setupViewUi
+    );
     if (state !== "error") {
       return;
     }
-  } else if (activeView === "deposit") {
+  } else if (panelState.activeView === "deposit") {
     renderDepositForm(panel, ctx);
   } else if (
     state === "ready" ||
@@ -5470,30 +1085,33 @@ function render(
     // let the error toast below surface the failure.
     (state === "error" && setupSurfaceMode === "complete")
   ) {
-    if (activeView === "order") {
+    if (panelState.activeView === "order") {
       renderOrderForm(panel, opts, ctx);
-    } else if (activeView === "split") {
-      renderSplitForm(panel, opts, ctx);
-    } else if (activeView === "merge") {
-      renderMergeForm(panel, opts, ctx);
+    } else if (panelState.activeView === "split") {
+      renderSplitForm(panel, opts, ctx, positionsViewUi);
+    } else if (panelState.activeView === "merge") {
+      renderMergeForm(panel, opts, ctx, positionsViewUi);
     }
   } else if (setupSurfaceMode === "banner") {
     // Setup was dismissed ("Skip for now" in the side panel) but is still
     // incomplete and no other surface matched (e.g. state "connected" with no
     // credentials) — render a resume-setup banner instead of an empty body.
-    addSetupBanner(panel, ctx);
+    addSetupBanner(panel, ctx, setupViewUi);
   }
 
   if (error) {
     // Key on the raw error string so we don't re-render the rich toast on
     // each state tick when the underlying error hasn't changed.
-    if (lastRenderedErrorToast !== error && dismissedErrorToast !== error) {
+    if (
+      panelState.lastRenderedErrorToast !== error &&
+      panelState.dismissedErrorToast !== error
+    ) {
       showRichErrorToast(panel, error);
-      lastRenderedErrorToast = error;
+      panelState.lastRenderedErrorToast = error;
     }
   } else {
-    lastRenderedErrorToast = null;
-    dismissedErrorToast = null;
+    panelState.lastRenderedErrorToast = null;
+    panelState.dismissedErrorToast = null;
   }
 }
 
@@ -5547,10 +1165,10 @@ function showRichErrorToast(panel: HTMLElement, rawError: string): void {
   `;
 
   const dismiss = () => {
-    dismissedErrorToast = rawError;
+    panelState.dismissedErrorToast = rawError;
     toast?.remove();
-    if (lastRenderedErrorToast === rawError) {
-      lastRenderedErrorToast = null;
+    if (panelState.lastRenderedErrorToast === rawError) {
+      panelState.lastRenderedErrorToast = null;
     }
   };
 
@@ -5584,15 +1202,13 @@ function showRichErrorToast(panel: HTMLElement, rawError: string): void {
 
 // ── Public API ──
 
-let overflowOverrides: Array<{ el: HTMLElement; prev: string }> = [];
-
 function clearOverflowOverrides(): void {
-  for (const { el: elem, prev } of overflowOverrides) {
+  for (const { el: elem, prev } of panelState.overflowOverrides) {
     if (elem.isConnected) {
       elem.style.overflow = prev;
     }
   }
-  overflowOverrides = [];
+  panelState.overflowOverrides = [];
 }
 
 function applyOverflowOverrides(startEl: HTMLElement): void {
@@ -5601,7 +1217,10 @@ function applyOverflowOverrides(startEl: HTMLElement): void {
   while (current) {
     const style = getComputedStyle(current);
     if (style.overflow === "hidden" || style.overflowY === "hidden") {
-      overflowOverrides.push({ el: current, prev: current.style.overflow });
+      panelState.overflowOverrides.push({
+        el: current,
+        prev: current.style.overflow,
+      });
       current.style.overflow = "visible";
     }
     current = current.parentElement;
@@ -5620,7 +1239,7 @@ function scheduleAutoSubmit(panel: HTMLElement): void {
   let attempts = 0;
   let done = false;
   const tick = (): void => {
-    if (done || activePanel !== panel || !panel.isConnected) return;
+    if (done || panelState.activePanel !== panel || !panel.isConnected) return;
     attempts += 1;
     const btn = panel.querySelector<HTMLButtonElement>(
       ".knoww-tp-submit.buy, .knoww-tp-submit.sell"
@@ -5653,12 +1272,12 @@ export const TradingPanel = {
     } else {
       anchor.parentNode?.insertBefore(panel, anchor.nextSibling);
     }
-    activePanel = panel;
-    livePanelRefreshEnabled = true;
+    panelState.activePanel = panel;
+    panelState.livePanelRefreshEnabled = true;
     applyOverflowOverrides(panel);
     scheduleLivePanelRefresh();
     requestAnimationFrame(() => {
-      if (activePanel === panel && panel.isConnected) {
+      if (panelState.activePanel === panel && panel.isConnected) {
         panel.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
     });
@@ -5666,37 +1285,37 @@ export const TradingPanel = {
     if (opts.initialView === "deposit") {
       const addr = TradingService.getContext().address;
       if (addr) {
-        activeView = "deposit";
+        panelState.activeView = "deposit";
         startDepositFlow(addr);
       }
     }
   },
 
   hide(): void {
-    livePanelRefreshEnabled = false;
+    panelState.livePanelRefreshEnabled = false;
     clearLivePanelRefreshTimer();
-    lastRenderedErrorToast = null;
-    dismissedErrorToast = null;
-    if (settleTimer) {
-      clearTimeout(settleTimer);
-      settleTimer = null;
+    panelState.lastRenderedErrorToast = null;
+    panelState.dismissedErrorToast = null;
+    if (panelState.settleTimer) {
+      clearTimeout(panelState.settleTimer);
+      panelState.settleTimer = null;
     }
-    resetDepositState();
-    orderSettling = false;
-    if (activeUnsubscribe) {
-      activeUnsubscribe();
-      activeUnsubscribe = null;
+    disposeDepositController();
+    panelState.orderSettling = false;
+    if (panelState.activeUnsubscribe) {
+      panelState.activeUnsubscribe();
+      panelState.activeUnsubscribe = null;
     }
     clearOverflowOverrides();
-    if (activePanel) {
-      activePanel.remove();
-      activePanel = null;
+    if (panelState.activePanel) {
+      panelState.activePanel.remove();
+      panelState.activePanel = null;
     }
-    panelOpts = null;
+    panelState.panelOpts = null;
   },
 
   isVisible(): boolean {
-    return activePanel !== null;
+    return panelState.activePanel !== null;
   },
 
   /**
@@ -5709,31 +1328,14 @@ export const TradingPanel = {
     opts: PanelOptions;
     onClose?: () => void;
   }): void {
-    // Close any floating panel so the two surfaces never fight over deposit state.
-    this.hide();
-    inlineDepositHost = args.host;
-    inlineDepositOnClose = args.onClose ?? null;
-    panelOpts = args.opts;
-    activeView = "deposit";
-    resetDepositState();
-    // Re-render the inline form on wallet/balance/tx-status changes.
-    inlineDepositUnsub = TradingService.onStateChange(() => {
-      if (!inlineDepositHost?.isConnected) {
-        closeInlineDeposit();
-        return;
-      }
-      renderInlineDeposit();
+    mountInlineDeposit({
+      ...args,
+      hidePanel: () => this.hide(),
     });
-    const addr = TradingService.getContext().address;
-    if (addr) {
-      startDepositFlow(addr);
-    } else {
-      renderInlineDeposit();
-    }
   },
 
   /** Tear down an inline deposit (e.g. when the card collapses). */
-  closeInlineDeposit(): void {
-    if (inlineDepositHost) closeInlineDeposit();
+  closeInlineDeposit(host?: HTMLElement): void {
+    closeInlineDeposit(host);
   },
 };

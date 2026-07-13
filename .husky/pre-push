@@ -69,6 +69,22 @@ if [ $? -ne 0 ]; then
 fi
 echo "Lint check passed!"
 
+echo "Running all tests..."
+pnpm test
+if [ $? -ne 0 ]; then
+  echo "Test suite failed. Please fix failing tests before pushing."
+  exit 1
+fi
+echo "All tests passed!"
+
+echo "Checking web coverage thresholds..."
+pnpm --filter @knoww/web test:coverage
+if [ $? -ne 0 ]; then
+  echo "Coverage check failed. Add tests or update code before pushing."
+  exit 1
+fi
+echo "Coverage thresholds passed!"
+
 echo "Building web app..."
 pnpm build:web
 if [ $? -ne 0 ]; then

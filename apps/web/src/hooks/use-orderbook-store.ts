@@ -8,6 +8,7 @@ import type {
   BookEvent,
   LastTradePriceEvent,
   PriceChangeEvent,
+  TickSizeChangeEvent,
 } from "@/types/websocket";
 
 /**
@@ -55,6 +56,10 @@ export interface ProcessedOrderBook {
   source: "websocket" | "rest";
   /** When the data was received locally (for staleness detection) */
   receivedAt: number;
+  /** Market tick size in 0..1 units, when supplied by the CLOB API. */
+  tickSize?: number;
+  /** Minimum order size, when supplied by the CLOB API. */
+  minOrderSize?: number;
 }
 
 /**
@@ -74,6 +79,12 @@ export interface LastTrade {
 interface PendingChange {
   event: PriceChangeEvent;
   receivedAt: number;
+}
+
+interface OrderBookMetadata {
+  market?: string;
+  tickSize?: string | number | null;
+  minOrderSize?: string | number | null;
 }
 
 /**
@@ -131,13 +142,16 @@ interface OrderBookStoreState {
   handleBookEvent: (event: BookEvent) => void;
   /** Process incremental price changes */
   handlePriceChangeEvent: (event: PriceChangeEvent) => void;
+  /** Process tick size updates */
+  handleTickSizeChangeEvent: (event: TickSizeChangeEvent) => void;
   /** Process last trade price event */
   handleLastTradePriceEvent: (event: LastTradePriceEvent) => void;
   /** Set order book from REST API fallback */
   setOrderBookFromRest: (
     assetId: string,
     bids: OrderBookLevel[],
-    asks: OrderBookLevel[]
+    asks: OrderBookLevel[],
+    metadata?: OrderBookMetadata
   ) => void;
   /** Clear order book for an asset */
   clearOrderBook: (assetId: string) => void;
@@ -210,6 +224,15 @@ function insertLevelSorted(
   return result;
 }
 
+function parsePositiveFiniteNumber(
+  value: string | number | null | undefined
+): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const parsed =
+    typeof value === "number" ? value : Number.parseFloat(String(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 /**
  * Process raw order book levels into sorted arrays with computed values
  */
@@ -220,7 +243,8 @@ function processOrderBook(
   rawAsks: OrderBookLevel[],
   timestamp: string,
   hash: string,
-  source: "websocket" | "rest"
+  source: "websocket" | "rest",
+  metadata: OrderBookMetadata = {}
 ): ProcessedOrderBook {
   // Sort bids descending by price
   const bids = [...rawBids].sort(
@@ -267,6 +291,8 @@ function processOrderBook(
     hash,
     source,
     receivedAt: Date.now(),
+    tickSize: parsePositiveFiniteNumber(metadata.tickSize),
+    minOrderSize: parsePositiveFiniteNumber(metadata.minOrderSize),
   };
 }
 
@@ -517,6 +543,7 @@ export const useOrderBookStore = create<OrderBookStoreState>()(
 
     handleBookEvent: (event: BookEvent) => {
       set((state) => {
+        const existing = state.orderBooks.get(event.asset_id);
         let processed = processOrderBook(
           event.asset_id,
           event.market,
@@ -524,7 +551,11 @@ export const useOrderBookStore = create<OrderBookStoreState>()(
           event.asks,
           event.timestamp,
           event.hash,
-          "websocket"
+          "websocket",
+          {
+            tickSize: existing?.tickSize,
+            minOrderSize: existing?.minOrderSize,
+          }
         );
 
         // Apply any pending changes that arrived before this snapshot
@@ -665,6 +696,28 @@ export const useOrderBookStore = create<OrderBookStoreState>()(
       });
     },
 
+    handleTickSizeChangeEvent: (event: TickSizeChangeEvent) => {
+      const tickSize = parsePositiveFiniteNumber(event.new_tick_size);
+      if (tickSize === undefined) return;
+
+      set((state) => {
+        const existing = state.orderBooks.get(event.asset_id);
+        if (!existing) return {};
+
+        const newOrderBooks = new Map(state.orderBooks);
+        newOrderBooks.set(event.asset_id, {
+          ...existing,
+          market: event.market || existing.market,
+          timestamp: event.timestamp,
+          tickSize,
+          source: "websocket",
+          receivedAt: Date.now(),
+        });
+
+        return { orderBooks: newOrderBooks };
+      });
+    },
+
     handleLastTradePriceEvent: (event: LastTradePriceEvent) => {
       const lastTrade: LastTrade = {
         assetId: event.asset_id,
@@ -684,17 +737,23 @@ export const useOrderBookStore = create<OrderBookStoreState>()(
     setOrderBookFromRest: (
       assetId: string,
       bids: OrderBookLevel[],
-      asks: OrderBookLevel[]
+      asks: OrderBookLevel[],
+      metadata: OrderBookMetadata = {}
     ) => {
       set((state) => {
+        const existing = state.orderBooks.get(assetId);
         let processed = processOrderBook(
           assetId,
-          "",
+          metadata.market ?? existing?.market ?? "",
           bids,
           asks,
           Date.now().toString(),
           "",
-          "rest"
+          "rest",
+          {
+            tickSize: metadata.tickSize ?? existing?.tickSize,
+            minOrderSize: metadata.minOrderSize ?? existing?.minOrderSize,
+          }
         );
 
         // Apply any pending changes that arrived before this REST data

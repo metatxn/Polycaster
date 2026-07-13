@@ -28,6 +28,16 @@ export default {
   ) {
     ctx.waitUntil(
       (async () => {
+        if (
+          env.AGENT_CRON_ENABLED === "true" &&
+          env.AGENT_CRON_EXECUTION_MODE === "live" &&
+          !env.AGENT_DB
+        ) {
+          log.error("tick.live_storage_unavailable", {
+            cron: controller.cron,
+          });
+          return;
+        }
         const repository = createAgentRepository(
           env.AGENT_DB as AgentD1Database | undefined
         );

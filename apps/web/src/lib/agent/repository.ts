@@ -14,7 +14,16 @@ interface AgentDbEnv {
 
 let warnedMemoryFallback = false;
 
-export async function getAgentRepository(): Promise<AgentRepository> {
+export class DurableAgentRepositoryUnavailableError extends Error {
+  constructor() {
+    super("Durable agent repository unavailable");
+    this.name = "DurableAgentRepositoryUnavailableError";
+  }
+}
+
+export async function getAgentRepository(options?: {
+  requireDurable?: boolean;
+}): Promise<AgentRepository> {
   try {
     const { env } = await getCloudflareContext({ async: true });
     const db = (env as AgentDbEnv).AGENT_DB;
@@ -24,6 +33,9 @@ export async function getAgentRepository(): Promise<AgentRepository> {
       log.error("d1.context.unavailable", { error });
       warnedMemoryFallback = true;
     }
+  }
+  if (options?.requireDurable) {
+    throw new DurableAgentRepositoryUnavailableError();
   }
   return createAgentRepository();
 }

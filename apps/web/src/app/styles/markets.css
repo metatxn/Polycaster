@@ -51,16 +51,16 @@
 
   /* Signal colors — light-family values are deepened so the SAME token can
      carry both fills (3:1 graphical bar) and small text and still clear
-     WCAG AA (4.5:1) on the off-white/white surfaces. Measured on white:
-     up #15803d ≈ 5.0:1, down #c81e1e ≈ 5.7:1, warn #b45309 ≈ 5.0:1.
-     Dark-family themes override these with brighter values below. */
-  --kwm-up: #15803d;
+     WCAG AA (4.5:1) on both off-white surfaces and the tinted signal
+     backgrounds used by market tiles and the trade ticket. Dark-family
+     themes override these with brighter values below. */
+  --kwm-up: #14532d;
   --kwm-up-soft: color-mix(in oklch, var(--kwm-up) 10%, transparent);
   --kwm-up-border: color-mix(in oklch, var(--kwm-up) 30%, transparent);
-  --kwm-down: #c81e1e;
+  --kwm-down: #991b1b;
   --kwm-down-soft: color-mix(in oklch, var(--kwm-down) 10%, transparent);
-  --kwm-accent: #2563eb;
-  --kwm-warn: #b45309;
+  --kwm-accent: #1d4ed8;
+  --kwm-warn: #92400e;
   --kwm-warn-soft: color-mix(in oklch, var(--kwm-warn) 10%, transparent);
   --kwm-warn-border: color-mix(in oklch, var(--kwm-warn) 30%, transparent);
   --kwm-down-border: color-mix(in oklch, var(--kwm-down) 30%, transparent);
@@ -99,11 +99,11 @@
    the previously-faint depth bars. */
 html:not(.dark):not(.midnight):not(.ocean):not(.slate):not(.softpop) .kw-app {
   --color-emerald-500: #047857;
-  --color-green-500: #15803d;
-  --color-red-500: #c81e1e;
+  --color-green-500: #14532d;
+  --color-red-500: #991b1b;
   --color-rose-500: #be123c;
-  --color-amber-500: #b45309;
-  --color-orange-500: #b45309;
+  --color-amber-500: #92400e;
+  --color-orange-500: #92400e;
 }
 
 /* ============================================================

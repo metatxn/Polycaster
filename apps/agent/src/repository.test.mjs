@@ -130,10 +130,9 @@ test("D1 repository persists encrypted CLOB credentials without plaintext column
   assert.equal(fetched?.encryptionKeyVersion, "v1");
   assert.equal(fetched?.lastUsedAt !== null, true);
   assert.equal(
-    db.queries.some((query) =>
-      /CREATE TABLE IF NOT EXISTS agent_clob_credentials/i.test(query)
-    ),
-    true
+    db.queries.some((query) => /\b(?:CREATE|ALTER|PRAGMA)\b/i.test(query)),
+    false,
+    "repository methods must rely on versioned migrations instead of runtime schema changes"
   );
   assert.equal(
     db.queries.some((query) =>

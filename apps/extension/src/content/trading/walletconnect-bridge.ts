@@ -92,6 +92,14 @@ type WalletConnectBridgeSharedState = {
   connectedAccounts: string[];
   listeners: WalletConnectStateListener[];
   attachedProviders: WeakSet<UniversalProvider>;
+  staleSessionCleanup: StaleSessionCleanupDescriptor | null;
+};
+
+type StaleSessionCleanupDescriptor = {
+  provider: UniversalProvider;
+  session: unknown;
+  topic: string | null;
+  inflight: Promise<void> | null;
 };
 
 interface JsonRpcResponse<T> {
@@ -121,12 +129,11 @@ function getSharedState(): WalletConnectBridgeSharedState {
       connectedAccounts: [],
       listeners: [],
       attachedProviders: new WeakSet<UniversalProvider>(),
+      staleSessionCleanup: null,
     };
   }
   return globalState.__KNOWW_WALLETCONNECT_BRIDGE_STATE__;
 }
-
-const shared = getSharedState();
 
 function getProjectId(): string {
   return process.env.WALLETCONNECT_PROJECT_ID || "";
@@ -145,6 +152,7 @@ function getWalletConnectMetadataUrl(): string {
 }
 
 function emit(next: Partial<WalletConnectState>): void {
+  const shared = getSharedState();
   shared.state = { ...shared.state, ...next };
   for (const listener of shared.listeners) {
     try {
@@ -179,6 +187,7 @@ function buildNamespace(methods: string[]) {
 }
 
 function syncAccountsFromSession(provider: UniversalProvider): string[] {
+  const shared = getSharedState();
   const namespace = provider.session?.namespaces.eip155;
   const accounts = normalizeAccounts(namespace?.accounts ?? []);
   shared.connectedAccounts = accounts;
@@ -191,6 +200,7 @@ function syncAccountsFromSession(provider: UniversalProvider): string[] {
 }
 
 async function getProvider(): Promise<UniversalProvider> {
+  const shared = getSharedState();
   if (shared.providerPromise) return shared.providerPromise;
 
   const projectId = getProjectId();
@@ -245,10 +255,22 @@ async function getProvider(): Promise<UniversalProvider> {
   return shared.providerPromise;
 }
 
-async function getSessionAccounts(): Promise<string[]> {
+async function getSessionAccounts(publish = true): Promise<string[]> {
   const provider = await getProvider();
   if (!provider.session) return [];
-  return syncAccountsFromSession(provider);
+  const accounts = normalizeAccounts(
+    provider.session.namespaces.eip155?.accounts ?? []
+  );
+  if (publish) {
+    const shared = getSharedState();
+    shared.connectedAccounts = accounts;
+    emit({
+      status: accounts.length > 0 ? "connected" : "idle",
+      qrUri: null,
+      error: null,
+    });
+  }
+  return accounts;
 }
 
 async function request<T = unknown>(
@@ -314,7 +336,7 @@ async function disconnectExistingSession(provider: UniversalProvider) {
   } catch (error) {
     log.warn("disconnect_existing.failed", { error });
   }
-  shared.connectedAccounts = [];
+  getSharedState().connectedAccounts = [];
   emit({ status: "idle", qrUri: null, error: null });
 }
 
@@ -324,20 +346,134 @@ async function disconnectExistingSession(provider: UniversalProvider) {
 // WalletConnect pairing so the relay subscription/URI is released promptly
 // instead of lingering until the ~3-min pairing TTL.
 async function abortPendingConnect(): Promise<void> {
+  const shared = getSharedState();
+  const pendingConnect = shared.connectPromise;
   shared.connectGeneration++;
-  shared.connectPromise = null;
-  if (!shared.providerPromise) return;
+  let cleanupFailure: unknown;
   try {
-    const provider = await getProvider();
-    provider.abortPairingAttempt();
-    await provider.cleanupPendingPairings();
+    await retryRetainedStaleSessionCleanup();
   } catch (error) {
-    log.warn("connect.abort_failed", { error });
+    cleanupFailure = error;
   }
+  if (shared.providerPromise) {
+    try {
+      const provider = await getProvider();
+      await provider.abortPairingAttempt();
+      await provider.cleanupPendingPairings();
+    } catch (error) {
+      cleanupFailure = error;
+      log.warn("connect.abort_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // UniversalProvider 2.23.10 does not actually cancel a pending approval:
+  // abortPairingAttempt is a no-op and cleanupPendingPairings only removes
+  // relay subscriptions. Quarantine reconnects behind the captured attempt so
+  // a late approval cannot race a newer provider.connect and publish last.
+  if (pendingConnect) {
+    try {
+      await pendingConnect;
+    } catch (error) {
+      if (
+        error instanceof StaleSessionCleanupError &&
+        shared.staleSessionCleanup
+      ) {
+        cleanupFailure ??= error;
+      }
+    }
+  }
+
+  if (cleanupFailure) throw cleanupFailure;
+  if (shared.connectPromise === pendingConnect) {
+    shared.connectPromise = null;
+  }
+}
+
+function assertCurrentConnectGeneration(
+  shared: WalletConnectBridgeSharedState,
+  generation: number
+): void {
+  if (shared.connectGeneration !== generation) {
+    throw new Error("WalletConnect connection attempt was superseded.");
+  }
+}
+
+class StaleSessionCleanupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StaleSessionCleanupError";
+  }
+}
+
+async function retryRetainedStaleSessionCleanup(): Promise<void> {
+  const shared = getSharedState();
+  const descriptor = shared.staleSessionCleanup;
+  if (!descriptor) return;
+  if (descriptor.inflight) return descriptor.inflight;
+
+  if (!descriptor.topic) {
+    log.warn("connect.stale_session_topic_missing", {});
+    throw new StaleSessionCleanupError(
+      "Superseded WalletConnect session has no cleanup topic."
+    );
+  }
+
+  const cleanup = descriptor.provider.client
+    .disconnect({
+      topic: descriptor.topic,
+      reason: { code: 6000, message: "User disconnected" },
+    })
+    .then(() => {
+      if (shared.staleSessionCleanup === descriptor) {
+        shared.staleSessionCleanup = null;
+      }
+    })
+    .catch((error: unknown) => {
+      log.warn("connect.stale_session_cleanup_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new StaleSessionCleanupError(
+        "Superseded WalletConnect session cleanup failed."
+      );
+    })
+    .finally(() => {
+      if (shared.staleSessionCleanup === descriptor) {
+        descriptor.inflight = null;
+      }
+    });
+  descriptor.inflight = cleanup;
+  return cleanup;
+}
+
+async function cleanupSupersededSession(
+  provider: UniversalProvider,
+  session: unknown,
+  generation: number
+): Promise<void> {
+  const shared = getSharedState();
+  if (shared.connectGeneration === generation || provider.session !== session) {
+    return;
+  }
+  const topic =
+    session &&
+    typeof session === "object" &&
+    typeof (session as { topic?: unknown }).topic === "string"
+      ? (session as { topic: string }).topic
+      : null;
+  shared.staleSessionCleanup = {
+    provider,
+    session,
+    topic,
+    inflight: null,
+  };
+  await retryRetainedStaleSessionCleanup();
 }
 
 export const WalletConnectBridge = {
   onStateChange(listener: WalletConnectStateListener): () => void {
+    const shared = getSharedState();
     shared.listeners.push(listener);
     return () => {
       const index = shared.listeners.indexOf(listener);
@@ -346,10 +482,11 @@ export const WalletConnectBridge = {
   },
 
   getState(): WalletConnectState {
-    return shared.state;
+    return getSharedState().state;
   },
 
   async connect(options: { forceNew?: boolean } = {}): Promise<string[]> {
+    const shared = getSharedState();
     const forceNew = options.forceNew === true;
 
     if (shared.connectPromise) {
@@ -367,13 +504,20 @@ export const WalletConnectBridge = {
       try {
         if (forceNew) {
           await disconnectExistingSession(await getProvider());
+          assertCurrentConnectGeneration(shared, generation);
         }
 
-        const existing = await getSessionAccounts();
-        if (existing.length > 0) return existing;
+        const existing = await getSessionAccounts(false);
+        assertCurrentConnectGeneration(shared, generation);
+        if (existing.length > 0) {
+          shared.connectedAccounts = existing;
+          emit({ status: "connected", qrUri: null, error: null });
+          return existing;
+        }
 
         emit({ status: "pairing", qrUri: null, error: null });
         const provider = await getProvider();
+        assertCurrentConnectGeneration(shared, generation);
         const session = await provider.connect({
           namespaces: {
             eip155: buildNamespace(WALLETCONNECT_REQUIRED_METHODS),
@@ -382,6 +526,10 @@ export const WalletConnectBridge = {
             eip155: buildNamespace(WALLETCONNECT_OPTIONAL_METHODS),
           },
         });
+        if (shared.connectGeneration !== generation) {
+          await cleanupSupersededSession(provider, session, generation);
+          assertCurrentConnectGeneration(shared, generation);
+        }
         const accounts = normalizeAccounts(
           session?.namespaces.eip155?.accounts ?? []
         );
@@ -421,6 +569,7 @@ export const WalletConnectBridge = {
   },
 
   async getAccounts(): Promise<string[]> {
+    const shared = getSharedState();
     if (shared.connectedAccounts.length > 0) return shared.connectedAccounts;
     try {
       return await getSessionAccounts();
@@ -468,6 +617,7 @@ export const WalletConnectBridge = {
   },
 
   async disconnect(): Promise<void> {
+    const shared = getSharedState();
     const provider = await getProvider();
     if (provider.session) {
       await provider.disconnect();

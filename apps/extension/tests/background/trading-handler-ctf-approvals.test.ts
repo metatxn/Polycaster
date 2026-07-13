@@ -26,6 +26,7 @@ function extractFunctionSource(source: string, functionName: string): string {
 }
 
 const handlerSource = readSource("src/background/trading-handler.ts");
+const splitSource = extractFunctionSource(handlerSource, "handleSplitPosition");
 const mergeSource = extractFunctionSource(
   handlerSource,
   "handleMergePositions"
@@ -66,4 +67,11 @@ test("the sync single-transaction CTF planner is no longer used by the handler",
   // "planCtfOperationTransactions(" — does not match.
   assert.equal(/planCtfOperationTransaction\(/.test(handlerSource), false);
   assert.equal(/\bplanCtfOperationTransaction,/.test(handlerSource), false);
+});
+
+test("split and merge forward exact message amounts directly to the CTF planner", () => {
+  for (const source of [splitSource, mergeSource]) {
+    assert.equal(/amount: msg\.amount,/.test(source), true);
+    assert.equal(/String\(msg\.amount\)/.test(source), false);
+  }
 });

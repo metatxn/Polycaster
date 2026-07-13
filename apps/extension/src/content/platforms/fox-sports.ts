@@ -5,7 +5,6 @@ import type {
   SportsMatchCandidate,
   StreamContext,
 } from "../../types/platform";
-import { registerAdapterWithRetry } from "../platform-registry";
 import { resolveDirectSportsMarket } from "../sports-live-market-source";
 import { createBasicAdapter } from "./basic-adapter";
 import {
@@ -786,6 +785,6 @@ const FoxSportsAdapter: PlatformAdapter = {
   cleanupStaleInjections: cleanupFoxSportsStaleInjections,
 };
 
-registerAdapterWithRetry(FoxSportsAdapter, 100, 50);
+export const adapter: PlatformAdapter = FoxSportsAdapter;
 
 export { FoxSportsAdapter };

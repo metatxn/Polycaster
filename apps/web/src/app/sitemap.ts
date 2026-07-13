@@ -1,40 +1,58 @@
 import type { MetadataRoute } from "next";
+import { unstable_cache } from "next/cache";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
-import { SITE_URL, shouldListEventInSitemap } from "@/lib/seo";
+import {
+  buildEventDetailPath,
+  canonicalUrl,
+  shouldListEventInSitemap,
+} from "@/lib/seo";
 import { SPORT_GROUPS } from "@/lib/sport-categories";
+import { buildFallbackTags } from "@/lib/tag-slugs";
 
 const SITEMAP_REVALIDATE_SECONDS = 3600;
-const SITEMAP_PAGE_LIMIT = "10";
+const SITEMAP_PAGE_LIMIT = "100";
 // Keep the sitemap focused on canonical, high-value URLs. The app can browse
 // the full catalog, but SEO should not ask crawlers to revisit thousands of
 // low-volume or duplicate market detail URLs every hour.
-const SITEMAP_MAX_EVENTS = 300;
-const CORE_EVENT_CATEGORY_SLUGS = [
-  "politics",
-  "crypto",
-  "sports",
-  "business",
-  "economics",
-  "technology",
-  "culture",
-  "elections",
-  "world",
-  "finance",
-] as const;
+const SITEMAP_MAX_EVENTS = 1000;
+const SITEMAP_MAX_RESOLVED_EVENTS = 250;
 
-async function fetchAllKeysetItems<T>(
+type SitemapEvent = {
+  slug?: string;
+  title?: string;
+  description?: string;
+  volume?: string | number;
+  active?: boolean;
+  closed?: boolean;
+  archived?: boolean;
+  ended?: boolean;
+  parentEventId?: string | number | null;
+  marketCount?: number;
+  markets?: Array<{
+    id?: string | number;
+    active?: boolean;
+    closed?: boolean;
+    umaResolutionStatus?: string | null;
+    umaResolutionStatuses?: string | null;
+  }>;
+  updatedAt?: string;
+};
+
+async function fetchAllKeysetItems<T, R>(
   endpoint: string,
   params: URLSearchParams,
   preferredKeys: Array<"data" | "events" | "markets">,
-  maxItems: number
-): Promise<T[]> {
-  const items: T[] = [];
+  maxItems: number,
+  mapPage: (items: T[]) => R[]
+): Promise<R[]> {
+  const items: R[] = [];
+  let sourceItemCount = 0;
   let nextCursor: string | undefined;
   const seenCursors = new Set<string>();
 
-  while (items.length < maxItems) {
+  while (sourceItemCount < maxItems) {
     const pageParams = new URLSearchParams(params);
     if (nextCursor) {
       pageParams.set("after_cursor", nextCursor);
@@ -44,7 +62,7 @@ async function fetchAllKeysetItems<T>(
       {
         endpoint,
         params: pageParams,
-        revalidate: SITEMAP_REVALIDATE_SECONDS,
+        cache: "no-store",
       },
       preferredKeys
     );
@@ -53,7 +71,10 @@ async function fetchAllKeysetItems<T>(
       break;
     }
 
-    items.push(...page.items);
+    const remainingItems = maxItems - sourceItemCount;
+    const sourceItems = page.items.slice(0, remainingItems);
+    items.push(...mapPage(sourceItems));
+    sourceItemCount += sourceItems.length;
 
     if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
       break;
@@ -63,88 +84,67 @@ async function fetchAllKeysetItems<T>(
     nextCursor = page.nextCursor;
   }
 
-  return items.length > maxItems ? items.slice(0, maxItems) : items;
+  return items;
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const generatedAt = new Date();
+  const staticRoutes = buildStaticSitemapRoutes();
+  const eventRoutes = await getCachedSitemapEventRoutes();
 
-  // Static routes
-  const staticRoutes: MetadataRoute.Sitemap = [
-    {
-      url: SITE_URL,
-      lastModified: generatedAt,
-      changeFrequency: "weekly",
-      priority: 1,
-    },
-    {
-      url: `${SITE_URL}/markets`,
-      lastModified: generatedAt,
-      changeFrequency: "daily",
-      priority: 0.9,
-    },
-    {
-      url: `${SITE_URL}/leaderboard`,
-      lastModified: generatedAt,
-      changeFrequency: "daily",
-      priority: 0.7,
-    },
-    {
-      url: `${SITE_URL}/events/sports`,
-      lastModified: generatedAt,
-      changeFrequency: "daily",
-      priority: 0.8,
-    },
-    {
-      url: `${SITE_URL}/events/sports/live`,
-      lastModified: generatedAt,
-      changeFrequency: "hourly",
-      priority: 0.8,
-    },
-    ...CORE_EVENT_CATEGORY_SLUGS.map((slug) => ({
-      url: `${SITE_URL}/events/${slug}`,
-      lastModified: generatedAt,
-      changeFrequency: "daily" as const,
-      priority: 0.75,
-    })),
-    ...SPORT_GROUPS.flatMap((group) => [
-      {
-        url: `${SITE_URL}/events/sports/${group.slug}`,
-        lastModified: generatedAt,
-        changeFrequency: "daily" as const,
-        priority: 0.72,
-      },
-      ...group.leagues.map((league) => ({
-        url: `${SITE_URL}/events/sports/${league.slug}`,
-        lastModified: generatedAt,
-        changeFrequency: "daily" as const,
-        priority: 0.68,
-      })),
-    ]),
-  ];
+  return dedupeSitemapRoutes([...staticRoutes, ...eventRoutes]);
+}
 
-  // Fetch active events for dynamic routes
-  let eventRoutes: MetadataRoute.Sitemap = [];
-  try {
-    const events = await fetchAllKeysetItems<{
-      slug?: string;
-      title?: string;
-      active?: boolean;
-      closed?: boolean;
-      archived?: boolean;
-      ended?: boolean;
-      marketCount?: number;
-      markets?: Array<{
-        id?: string | number;
-        active?: boolean;
-        closed?: boolean;
-      }>;
-      updatedAt?: string;
-      startDate?: string;
-      endDate?: string;
-    }>(
-      POLYMARKET_API.GAMMA.EVENTS_KEYSET,
-      new URLSearchParams({
+const getCachedSitemapEventRoutes = unstable_cache(
+  fetchSitemapEventRoutes,
+  ["knoww-sitemap-event-routes-v3"],
+  { revalidate: SITEMAP_REVALIDATE_SECONDS }
+);
+
+async function fetchSitemapEventRoutes() {
+  const queryResults = await Promise.allSettled(
+    buildSitemapEventQueries().map((query) =>
+      fetchAllKeysetItems<SitemapEvent, MetadataRoute.Sitemap[number]>(
+        POLYMARKET_API.GAMMA.EVENTS_KEYSET,
+        query.params,
+        ["events", "data"],
+        query.maxItems,
+        buildEventSitemapRoutes
+      )
+    )
+  );
+  const eventRoutes: MetadataRoute.Sitemap = [];
+
+  for (const result of queryResults) {
+    if (result.status === "fulfilled") {
+      eventRoutes.push(...result.value);
+      continue;
+    }
+
+    logger.error("sitemap.events.fetch_failed", {
+      error:
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason),
+    });
+  }
+
+  return eventRoutes;
+}
+
+export function buildEventSitemapRoutes(
+  events: SitemapEvent[]
+): MetadataRoute.Sitemap {
+  return events
+    .filter((event) => shouldListEventInSitemap(event))
+    .flatMap((event) =>
+      event.slug ? [buildEventSitemapRoute({ ...event, slug: event.slug })] : []
+    );
+}
+
+export function buildSitemapEventQueries() {
+  return [
+    {
+      params: new URLSearchParams({
         active: "true",
         closed: "false",
         archived: "false",
@@ -152,29 +152,60 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         ascending: "false",
         limit: SITEMAP_PAGE_LIMIT,
       }),
-      ["events", "data"],
-      SITEMAP_MAX_EVENTS
-    );
+      maxItems: SITEMAP_MAX_EVENTS,
+    },
+    {
+      params: new URLSearchParams({
+        closed: "true",
+        archived: "false",
+        order: "volume",
+        ascending: "false",
+        limit: SITEMAP_PAGE_LIMIT,
+      }),
+      maxItems: SITEMAP_MAX_RESOLVED_EVENTS,
+    },
+  ];
+}
 
-    eventRoutes = events
-      .filter((e) => shouldListEventInSitemap(e))
-      .map((e) => ({
-        url: `${SITE_URL}/events/detail/${e.slug}`,
-        lastModified:
-          parseSitemapDate(e.updatedAt) ??
-          parseSitemapDate(e.endDate) ??
-          parseSitemapDate(e.startDate) ??
-          generatedAt,
-        changeFrequency: "daily" as const,
-        priority: 0.8,
-      }));
-  } catch (e) {
-    logger.error("sitemap.events.fetch_failed", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-  }
+export function buildStaticSitemapRoutes(): MetadataRoute.Sitemap {
+  const categoryRoutes = buildFallbackTags()
+    .filter((tag) => tag.slug !== "sports")
+    .map((tag) => ({ url: canonicalUrl(`/events/${tag.slug}`) }));
 
-  return dedupeSitemapRoutes([...staticRoutes, ...eventRoutes]);
+  const sportRoutes = SPORT_GROUPS.flatMap((group) => [
+    { url: canonicalUrl(`/events/sports/${group.slug}`) },
+    ...group.leagues.map((league) => ({
+      url: canonicalUrl(`/events/sports/${league.slug}`),
+    })),
+  ]);
+
+  return dedupeSitemapRoutes([
+    { url: canonicalUrl() },
+    { url: canonicalUrl("/markets") },
+    { url: canonicalUrl("/leaderboard") },
+    { url: canonicalUrl("/whales") },
+    { url: canonicalUrl("/events/sports/live") },
+    ...categoryRoutes,
+    ...sportRoutes,
+  ]);
+}
+
+type EventSitemapInput = {
+  slug: string;
+  updatedAt?: string;
+  endDate?: string;
+  startDate?: string;
+};
+
+export function buildEventSitemapRoute(
+  event: EventSitemapInput
+): MetadataRoute.Sitemap[number] {
+  const lastModified = parseSitemapDate(event.updatedAt);
+
+  return {
+    url: canonicalUrl(buildEventDetailPath(event.slug, event.slug)),
+    ...(lastModified ? { lastModified } : {}),
+  };
 }
 
 function parseSitemapDate(value: string | undefined) {

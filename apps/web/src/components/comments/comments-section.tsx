@@ -109,9 +109,9 @@ export function CommentsSection({
         >
           §
         </span>
-        <h3 className="m-0 font-(family-name:--font-geist-mono) text-[11px] font-medium uppercase tracking-[0.18em] text-(--kwm-ink-2)">
+        <h2 className="m-0 font-(family-name:--font-geist-mono) text-[11px] font-medium uppercase tracking-[0.18em] text-(--kwm-ink-2)">
           Comments
-        </h3>
+        </h2>
         <span aria-hidden="true" className="flex-1 h-px bg-(--kwm-hl)" />
 
         {/* Sort dropdown — mono-caps outline pill matching the chart's
@@ -162,6 +162,7 @@ export function CommentsSection({
             <span className="hidden sm:inline">Holders</span>
           </label>
           <Switch
+            aria-label="Holders only"
             id="holders-filter"
             checked={holdersOnly}
             onCheckedChange={setHoldersOnly}

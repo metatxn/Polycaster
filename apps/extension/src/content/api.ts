@@ -13,6 +13,7 @@ import type {
 } from "../types/market";
 import type { MarketLinkHint } from "../types/platform";
 import { KNOWW_CONFIG } from "./config";
+import { findMatchingLiveMarket } from "./market-token-resolution";
 import {
   buildMarketGateText,
   CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
@@ -1095,6 +1096,7 @@ interface RawPolymarketEvent {
     active?: boolean;
     closed?: boolean;
     archived?: boolean;
+    acceptingOrders?: boolean;
     volume?: string | number;
   }>;
   image?: string;
@@ -2504,26 +2506,38 @@ async function fetchClobTokenIds(
     if (!fullEvent.markets || fullEvent.markets.length === 0) return null;
 
     if (market.markets) {
-      for (
-        let i = 0;
-        i < fullEvent.markets.length && i < market.markets.length;
-        i++
-      ) {
-        const src = fullEvent.markets[i];
-        if (src?.clobTokenIds && market.markets[i]) {
-          (market.markets[i] as Record<string, unknown>).clobTokenIds =
-            src.clobTokenIds;
+      for (let i = 0; i < market.markets.length; i++) {
+        const localMarket = market.markets[i];
+        const liveMarket = findMatchingLiveMarket(
+          localMarket,
+          fullEvent.markets,
+          i
+        );
+        if (liveMarket?.clobTokenIds) {
+          (localMarket as Record<string, unknown>).clobTokenIds =
+            liveMarket.clobTokenIds;
         }
-        if (src?.conditionId && market.markets[i]) {
-          (market.markets[i] as Record<string, unknown>).conditionId =
-            src.conditionId;
+        if (liveMarket?.conditionId) {
+          (localMarket as Record<string, unknown>).conditionId =
+            liveMarket.conditionId;
         }
       }
     }
 
-    const idx = isMultiOutcome ? (marketIndex ?? 0) : 0;
-    const nestedMarket = fullEvent.markets[idx];
+    const idx = marketIndex ?? 0;
+    const nestedMarket = findMatchingLiveMarket(
+      market.markets?.[idx],
+      fullEvent.markets,
+      idx
+    );
     if (!nestedMarket?.clobTokenIds) return null;
+    if (
+      nestedMarket.active === false ||
+      nestedMarket.closed === true ||
+      nestedMarket.acceptingOrders === false
+    ) {
+      return null;
+    }
 
     const tokenIds = parseGammaStringArray(nestedMarket.clobTokenIds);
 

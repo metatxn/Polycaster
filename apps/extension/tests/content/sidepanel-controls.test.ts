@@ -9,6 +9,17 @@ function readSource(path: string): string {
   return readFileSync(join(process.cwd(), path), { encoding: "utf8" });
 }
 
+function readSidepanelSources(): string {
+  return [
+    "src/sidepanel.ts",
+    "src/sidepanel/setup.ts",
+    "src/sidepanel/portfolio.ts",
+    "src/sidepanel/funding-ui.ts",
+  ]
+    .map(readSource)
+    .join("\n");
+}
+
 function extractFunctionSource(source: string, functionName: string): string {
   const start = source.indexOf(`function ${functionName}`);
   assert.notEqual(start, -1);
@@ -101,9 +112,9 @@ test("production settings hide the Kalshi source toggle", () => {
 });
 
 test("notification stack can move itself into the browser side panel", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/ui/notifications.ts");
   const backgroundSource = readSource("src/background.ts");
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /sidebarBtn\.className = "knoww-stack-sidebar";/.test(uiSource),
@@ -214,72 +225,93 @@ test("notification stack can move itself into the browser side panel", () => {
     true
   );
   assert.equal(
-    /KNOWW_SET_NOTIFICATION_STACK_VISIBILITY/.test(sidepanelSource),
+    /KNOWW_SET_NOTIFICATION_STACK_VISIBILITY/.test(
+      readSource("src/sidepanel/markets.ts")
+    ),
     true
   );
   assert.equal(
-    /KNOWW_GET_NOTIFICATION_STACK_SNAPSHOT/.test(sidepanelSource),
+    /KNOWW_GET_NOTIFICATION_STACK_SNAPSHOT/.test(
+      readSource("src/sidepanel/markets.ts")
+    ),
     true
   );
-  assert.equal(/KNOWW_FOCUS_NOTIFICATION_MARKET/.test(sidepanelSource), true);
+  assert.equal(
+    /KNOWW_FOCUS_NOTIFICATION_MARKET/.test(
+      readSource("src/sidepanel/markets.ts")
+    ),
+    true
+  );
   assert.equal(/KNOWW_FOCUS_NOTIFICATION_MARKET/.test(backgroundSource), true);
-  assert.equal(/KNOWW_SEARCH_NOTIFICATION_MARKETS/.test(sidepanelSource), true);
+  assert.equal(
+    /KNOWW_SEARCH_NOTIFICATION_MARKETS/.test(
+      readSource("src/sidepanel/markets.ts")
+    ),
+    true
+  );
   assert.equal(
     /KNOWW_SEARCH_NOTIFICATION_MARKETS/.test(backgroundSource),
     true
   );
-  assert.equal(/renderMarketRows/.test(sidepanelSource), true);
+  const marketsSource = readSource("src/sidepanel/markets.ts");
+  assert.equal(/renderMarketRows/.test(marketsSource), true);
   assert.equal(/id="knoww-notification-stack"/.test(sidepanelSource), true);
-  assert.equal(/knoww-notification-item/.test(sidepanelSource), true);
-  assert.equal(/knoww-stack-section-header/.test(sidepanelSource), true);
-  assert.equal(/Trending now/.test(sidepanelSource), true);
-  assert.equal(/snapshot\.trending/.test(sidepanelSource), true);
-  assert.equal(/trendingLimit:\s*5/.test(sidepanelSource), true);
+  assert.equal(/knoww-notification-item/.test(marketsSource), true);
+  assert.equal(/knoww-stack-section-header/.test(marketsSource), true);
+  assert.equal(/Trending now/.test(marketsSource), true);
+  assert.equal(/snapshot\.trending/.test(marketsSource), true);
+  assert.equal(/trendingLimit:\s*5/.test(marketsSource), true);
   assert.equal(/data-show-page-panel/.test(sidepanelSource), false);
   assert.equal(/knoww-stack-footer-see-all/.test(sidepanelSource), false);
-  assert.equal(/focusMarket\(marketId\)/.test(sidepanelSource), true);
   assert.equal(
-    /classList\.toggle\("knoww-search-open"\)/.test(sidepanelSource),
-    true
-  );
-  assert.equal(
-    /classList\.toggle\("knoww-search-active"\)/.test(sidepanelSource),
-    true
-  );
-  assert.equal(
-    /classList\.remove\("knoww-search-open"\)/.test(sidepanelSource),
-    true
-  );
-  assert.equal(
-    /classList\.remove\("knoww-search-active"\)/.test(sidepanelSource),
-    true
-  );
-  assert.equal(/input\.value\.trim\(\) === ""/.test(sidepanelSource), true);
-  assert.equal(/searchMarkets\(query\)/.test(sidepanelSource), true);
-  assert.equal(
-    /SNAPSHOT_REFRESH_INTERVAL_MS\s*=\s*5_000/.test(sidepanelSource),
-    true
-  );
-  assert.equal(
-    /setInterval\(\(\) => void refreshSnapshot\(\)/.test(sidepanelSource),
-    true
-  );
-  assert.equal(/knoww-search-container/.test(sidepanelSource), true);
-  assert.equal(/knoww-stack-minimize/.test(sidepanelSource), true);
-  assert.equal(
-    /grid-template-columns:\s*40px minmax\(0,\s*1fr\) 96px/.test(
-      sidepanelSource
+    /KNOWW_FOCUS_NOTIFICATION_MARKET[\s\S]*marketId:\s*item\.dataset\.marketId/.test(
+      marketsSource
     ),
     true
   );
-  assert.equal(/text-align:\s*left !important/.test(sidepanelSource), true);
   assert.equal(
-    /align-items:\s*flex-start !important/.test(sidepanelSource),
+    /classList\.toggle\("knoww-search-open"\)/.test(marketsSource),
+    true
+  );
+  assert.equal(
+    /classList\.toggle\("knoww-search-active"\)/.test(marketsSource),
+    true
+  );
+  assert.equal(
+    /classList\.remove\("knoww-search-open"\)/.test(marketsSource),
+    true
+  );
+  assert.equal(
+    /classList\.remove\("knoww-search-active"\)/.test(marketsSource),
+    true
+  );
+  assert.equal(
+    /searchInput\?\.value\.trim\(\) === ""/.test(marketsSource),
+    true
+  );
+  assert.equal(/KNOWW_SEARCH_NOTIFICATION_MARKETS/.test(marketsSource), true);
+  assert.equal(
+    /SNAPSHOT_REFRESH_INTERVAL_MS\s*=\s*5_000/.test(marketsSource),
+    true
+  );
+  assert.equal(
+    /setInterval\([\s\S]{0,80}\(\) => void refresh\(\)/.test(marketsSource),
+    true
+  );
+  assert.equal(/knoww-search-container/.test(marketsSource), true);
+  assert.equal(/knoww-stack-minimize/.test(marketsSource), true);
+  assert.equal(
+    /grid-template-columns:\s*40px minmax\(0,\s*1fr\) 96px/.test(marketsSource),
+    true
+  );
+  assert.equal(/text-align:\s*left !important/.test(marketsSource), true);
+  assert.equal(
+    /align-items:\s*flex-start !important/.test(marketsSource),
     true
   );
   assert.equal(/Sidebar mode/.test(sidepanelSource), false);
   assert.equal(/Refresh markets/.test(sidepanelSource), false);
-  assert.equal(/KNOWW_CLOSE_EXTENSION_SIDEPANEL/.test(sidepanelSource), true);
+  assert.equal(/KNOWW_CLOSE_EXTENSION_SIDEPANEL/.test(marketsSource), true);
 });
 
 test("portfolio sidebar can resolve an already-connected content wallet", () => {
@@ -287,9 +319,9 @@ test("portfolio sidebar can resolve an already-connected content wallet", () => 
   const tradingServiceSource = readSource(
     "src/content/trading/trading-service.ts"
   );
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
   const backgroundSource = readSource("src/background.ts");
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(/TRADING_WALLET_CONNECTED_MESSAGE/.test(messagesSource), true);
   assert.equal(
@@ -315,13 +347,18 @@ test("portfolio sidebar can resolve an already-connected content wallet", () => 
     ),
     true
   );
-  assert.equal(/TRADING_WALLET_CONNECTED_MESSAGE/.test(sidepanelSource), true);
+  assert.equal(
+    /TRADING_WALLET_CONNECTED_MESSAGE/.test(
+      readSource("src/sidepanel/messaging.ts")
+    ),
+    true
+  );
 });
 
 test("trading setup opens the side panel portfolio onboarding", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
   const backgroundSource = readSource("src/background.ts");
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSource("src/sidepanel/messaging.ts");
 
   assert.equal(/openTradingSetupSidePanel/.test(uiSource), true);
   assert.equal(/view:\s*"portfolio"/.test(uiSource), true);
@@ -333,7 +370,7 @@ test("trading setup opens the side panel portfolio onboarding", () => {
 });
 
 test("side panel portfolio onboarding deploys the trading wallet before credentials", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
   const serviceSource = readSource("src/content/trading/trading-service.ts");
   const setupViewSource = readSource(
     "src/content/trading/portfolio-setup-view.ts"
@@ -376,10 +413,10 @@ test("background trading handler uses extension wallet mode gates", () => {
 });
 
 test("side panel shows trending markets before seen earlier", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSource("src/sidepanel/markets.ts");
   const refreshSource = extractFunctionSource(
     sidepanelSource,
-    "refreshSnapshot"
+    "renderSnapshotSections"
   );
   const activeIndex = refreshSource.indexOf('"Active now"');
   const trendingIndex = refreshSource.indexOf('"Trending now"');
@@ -393,9 +430,9 @@ test("side panel shows trending markets before seen earlier", () => {
 });
 
 test("side panel exposes a compact portfolio view without charts", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
   const backgroundSource = readSource("src/background.ts");
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
 
   assert.equal(/data-sidepanel-view="portfolio"/.test(sidepanelSource), true);
   // Session info is fetched as derived facts ({ loggedIn, address }); the raw
@@ -471,7 +508,7 @@ test("side panel exposes a compact portfolio view without charts", () => {
 });
 
 test("portfolio approval forwarding reports async approval failures", () => {
-  const uiSource = readSource("src/content/ui.ts");
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
 
   assert.equal(
     /KNOWW_APPROVE_PORTFOLIO_TRADING[\s\S]*await TradingService\.approveUsdc[\s\S]*sendResponse\(\{[\s\S]*success: true,[\s\S]*status: "approved"[\s\S]*\}\);[\s\S]*catch\(\(err\)[\s\S]*sendResponse\(\{[\s\S]*success: false/.test(
@@ -482,7 +519,7 @@ test("portfolio approval forwarding reports async approval failures", () => {
 });
 
 test("portfolio approval polling uses the shared setup approval check with backoff", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
   const hasApprovalSource = extractFunctionSource(
     sidepanelSource,
     "hasPortfolioApproval"
@@ -513,7 +550,7 @@ test("portfolio approval polling uses the shared setup approval check with backo
 });
 
 test("post-create deployment wait requires on-chain bytecode, not the relayer record", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
   const deploySource = extractFunctionSource(
     sidepanelSource,
     "deployPortfolioTradingWallet"
@@ -530,7 +567,7 @@ test("post-create deployment wait requires on-chain bytecode, not the relayer re
 });
 
 test("switch-wallet failure surfaces in the loaded portfolio view", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
   const switchSource = extractFunctionSource(
     sidepanelSource,
     "switchPortfolioWallet"
@@ -540,7 +577,7 @@ test("switch-wallet failure surfaces in the loaded portfolio view", () => {
   // own error channel (the signed-out channel renders nothing here and the
   // stored message would leak into a later signed-out render).
   assert.equal(
-    /portfolioTradingError = message;[\s\S]{0,120}loadPortfolio\(true\)/.test(
+    /portfolioTradingError = message;[\s\S]{0,160}dependencies\.reloadPortfolio\(\)/.test(
       switchSource
     ),
     true
@@ -554,7 +591,7 @@ test("switch-wallet failure surfaces in the loaded portfolio view", () => {
 });
 
 test("approval wait maps an unresolvable poll address to unverified, not rejected", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /\? await waitForPortfolioApproval\(proxyAddress\)\s*:\s*"unverified"/.test(
@@ -593,13 +630,13 @@ test("connected-wallet lookup prefers the remembered wallet-session tab", () => 
 });
 
 test("live view-switch consumes the persisted requested view", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSource("src/sidepanel/messaging.ts");
 
   // The background persists the view for a boot-time consume AND notifies an
   // already-open panel; the live path must also clear the key or the leftover
   // value hijacks the next toolbar open.
   assert.equal(
-    /KNOWW_SHOW_EXTENSION_SIDEPANEL_VIEW[\s\S]{0,400}session\.remove\(\s*SIDEPANEL_REQUESTED_VIEW_KEY/.test(
+    /KNOWW_SHOW_EXTENSION_SIDEPANEL_VIEW[\s\S]{0,400}sessionStorage\.remove\(\s*SIDEPANEL_REQUESTED_VIEW_KEY/.test(
       sidepanelSource
     ),
     true
@@ -607,7 +644,7 @@ test("live view-switch consumes the persisted requested view", () => {
 });
 
 test("portfolio setup completion is not cleared when approval status is unknown", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
   const renderSource = extractFunctionSource(
     sidepanelSource,
     "renderPortfolioSetupSurface"
@@ -649,7 +686,7 @@ test("get-all-allowances reports degraded partial reads instead of hiding them",
 });
 
 test("side panel removes unused setup rail css", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(/knoww-pf-setup-rail/.test(sidepanelSource), false);
   assert.equal(/knoww-pf-setup-node/.test(sidepanelSource), false);
@@ -657,7 +694,7 @@ test("side panel removes unused setup rail css", () => {
 });
 
 test("side panel portfolio fetches a full active positions page but displays compact rows", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /const PORTFOLIO_POSITIONS_FETCH_LIMIT = 50;/.test(sidepanelSource),
@@ -680,7 +717,7 @@ test("side panel portfolio fetches a full active positions page but displays com
 });
 
 test("side panel portfolio refreshes while visible instead of keeping stale positions", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /const PORTFOLIO_REFRESH_INTERVAL_MS = 30_000;/.test(sidepanelSource),
@@ -688,19 +725,19 @@ test("side panel portfolio refreshes while visible instead of keeping stale posi
   );
   assert.equal(/function refreshVisiblePortfolio/.test(sidepanelSource), true);
   assert.equal(
-    /if \(view === "portfolio"\) void loadPortfolio\(true\);/.test(
+    /applySidepanelView\(root, view, \(\) => void loadPortfolio\(true\)\);/.test(
       sidepanelSource
     ),
     true
   );
   assert.equal(
-    /setInterval\(\(\) => refreshVisiblePortfolio\(\), PORTFOLIO_REFRESH_INTERVAL_MS\)/.test(
+    /setInterval\([\s\S]{0,80}\(\) => refreshVisiblePortfolio\(\),[\s\S]{0,40}PORTFOLIO_REFRESH_INTERVAL_MS/.test(
       sidepanelSource
     ),
     true
   );
   assert.equal(
-    /document\.addEventListener\("visibilitychange", \(\) => \{[\s\S]*refreshVisiblePortfolio\(\);/.test(
+    /const onPortfolioVisibilityChange[\s\S]{0,180}refreshVisiblePortfolio\(\);[\s\S]*document\.addEventListener\("visibilitychange", onPortfolioVisibilityChange\)/.test(
       sidepanelSource
     ),
     true
@@ -708,7 +745,7 @@ test("side panel portfolio refreshes while visible instead of keeping stale posi
 });
 
 test("side panel portfolio refresh ignores stale in-flight responses", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(/let portfolioLoadGeneration = 0;/.test(sidepanelSource), true);
   assert.equal(
@@ -727,7 +764,7 @@ test("side panel portfolio refresh ignores stale in-flight responses", () => {
 });
 
 test("side panel resolves wallet mode from deployed legacy Safe before portfolio actions", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /resolvePreferredPortfolioWalletMode/.test(sidepanelSource),
@@ -743,7 +780,7 @@ test("side panel resolves wallet mode from deployed legacy Safe before portfolio
 });
 
 test("side panel treats a failed legacy-Safe probe as unknown, not missing", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   // hasPortfolioLegacySafe must return null (unknown) on probe failure...
   assert.equal(
@@ -764,13 +801,13 @@ test("side panel treats a failed legacy-Safe probe as unknown, not missing", () 
 });
 
 test("side panel never clears persisted setup completion from degraded approval reads", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
   const clearIndex = sidepanelSource.indexOf(
     "await writeSetupComplete(data.ownerAddress, false);"
   );
   assert.notEqual(clearIndex, -1);
   const clearWindow = sidepanelSource.slice(
-    Math.max(0, clearIndex - 220),
+    Math.max(0, clearIndex - 700),
     clearIndex + 80
   );
 
@@ -793,7 +830,7 @@ test("side panel never clears persisted setup completion from degraded approval 
     true
   );
   assert.equal(
-    /preserveDegradedApproval: isWithinDegradedSetupTrustWindow\([\s\S]{0,200}portfolioSetupConsecutiveDegradedReads \+ 1/.test(
+    /function shouldPreserveDegradedApproval\(\)[\s\S]{0,200}isWithinDegradedSetupTrustWindow\([\s\S]{0,100}portfolioSetupConsecutiveDegradedReads \+ 1/.test(
       sidepanelSource
     ),
     true
@@ -807,16 +844,16 @@ test("side panel never clears persisted setup completion from degraded approval 
 });
 
 test("side panel setup renderer returns mode metadata instead of searching html", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
-    /type PortfolioSetupSurfaceRender = \{[\s\S]*html: string;[\s\S]*mode: SetupSurfaceMode;[\s\S]*\};/.test(
+    /interface PortfolioSetupSurfaceRender \{[\s\S]*html: string;[\s\S]*mode: SetupSurfaceMode;[\s\S]*\}/.test(
       sidepanelSource
     ),
     true
   );
   assert.equal(
-    /function renderPortfolioSetupSurface\([\s\S]*data: PortfolioData[\s\S]*\): PortfolioSetupSurfaceRender/.test(
+    /function renderPortfolioSetupSurface\([\s\S]*data: SetupPortfolioData[\s\S]*\): PortfolioSetupSurfaceRender/.test(
       sidepanelSource
     ),
     true
@@ -834,7 +871,7 @@ test("side panel setup renderer returns mode metadata instead of searching html"
 });
 
 test("side panel position rows expose exact inline action labels", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(/portfolioExpandedPositionId/.test(sidepanelSource), true);
   assert.equal(/portfolioConfirmingSellPositionId/.test(sidepanelSource), true);
@@ -864,7 +901,7 @@ test("side panel position rows expose exact inline action labels", () => {
 });
 
 test("side panel confirms and sells the full selected position through a portfolio sell message", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /function requestPortfolioPositionSell/.test(sidepanelSource),
@@ -915,24 +952,19 @@ test("background mediates side panel portfolio sells through the existing order 
 });
 
 test("side panel clears portfolio state when trading disconnects", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
+  const messagingSource = readSource("src/sidepanel/messaging.ts");
   const backgroundSource = readSource("src/background.ts");
 
   assert.equal(
-    /TRADING_SESSION_DISCONNECTED_MESSAGE/.test(sidepanelSource),
+    /TRADING_SESSION_DISCONNECTED_MESSAGE/.test(messagingSource),
     true
   );
-  assert.equal(
-    /chrome\.runtime\.onMessage\.addListener/.test(sidepanelSource),
-    true
-  );
+  assert.equal(/runtime\.onMessage\.addListener/.test(messagingSource), true);
   assert.equal(/portfolioLoaded\s*=\s*false/.test(sidepanelSource), true);
   assert.equal(/portfolioConnectError\s*=\s*null/.test(sidepanelSource), true);
   assert.equal(/portfolioWallets\s*=\s*null/.test(sidepanelSource), true);
-  assert.equal(
-    /refreshPortfolioWalletChoicesAfterDisconnect/.test(sidepanelSource),
-    true
-  );
+  assert.equal(/prepareSignedOut/.test(sidepanelSource), true);
   assert.equal(
     /portfolioWallets\s*=\s*await getPortfolioWallets\(\)/.test(
       sidepanelSource
@@ -948,7 +980,7 @@ test("side panel clears portfolio state when trading disconnects", () => {
 });
 
 test("side panel does not fall back to an auth session after wallet revocation", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /type PortfolioConnectedWalletState/.test(sidepanelSource),
@@ -968,8 +1000,8 @@ test("side panel does not fall back to an auth session after wallet revocation",
 });
 
 test("portfolio side panel exposes wallet switch and forwards it to content", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
-  const uiSource = readSource("src/content/ui.ts");
+  const sidepanelSource = readSidepanelSources();
+  const uiSource = readSource("src/content/trading/trading-glue.ts");
   const typesSource = readSource("src/types/chrome-messages.ts");
 
   assert.equal(/data-portfolio-switch-wallet/.test(sidepanelSource), true);
@@ -994,7 +1026,7 @@ test("trading preflight market info uses direct CLOB fetch fallback", () => {
 });
 
 test("side panel clamps portfolio fund amount inputs to six decimals", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   assert.equal(
     /const PORTFOLIO_AMOUNT_DECIMALS = 6;/.test(sidepanelSource),
@@ -1013,7 +1045,7 @@ test("side panel clamps portfolio fund amount inputs to six decimals", () => {
     true
   );
   assert.equal(
-    /amountInput\.value = formatPortfolioAmountInputValue\(value\);/.test(
+    /amount\.value = formatPortfolioAmountInputValue\(value\);/.test(
       sidepanelSource
     ),
     true
@@ -1023,7 +1055,7 @@ test("side panel clamps portfolio fund amount inputs to six decimals", () => {
 test("limit order book loading exits on fetch failure", () => {
   const backgroundSource = readSource("src/background.ts");
   const serviceSource = readSource("src/content/trading/trading-service.ts");
-  const panelSource = readSource("src/content/trading/trading-panel.ts");
+  const panelSource = readSource("src/content/trading/panel/order-view.ts");
 
   assert.equal(/POLYMARKET_API/.test(backgroundSource), true);
   assert.equal(
@@ -1060,7 +1092,8 @@ test("limit order book loading exits on fetch failure", () => {
 
 test("side panel refreshes portfolio trading gate when credentials update", () => {
   const backgroundSource = readSource("src/background.ts");
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
+  const messagingSource = readSource("src/sidepanel/messaging.ts");
 
   // The service worker persists derived CLOB credentials and broadcasts a
   // credentials-updated message (the raw creds never leave the worker).
@@ -1071,7 +1104,7 @@ test("side panel refreshes portfolio trading gate when credentials update", () =
   assert.equal(/storeClobCredentials/.test(backgroundSource), true);
   // The sidepanel listens for that broadcast and refreshes the portfolio gate.
   assert.equal(
-    /TRADING_CREDENTIALS_UPDATED_MESSAGE/.test(sidepanelSource),
+    /TRADING_CREDENTIALS_UPDATED_MESSAGE/.test(messagingSource),
     true
   );
   assert.equal(/loadPortfolio\(true\)/.test(sidepanelSource), true);
@@ -1094,7 +1127,7 @@ test("offscreen trading handler never accesses session storage directly", () => 
 });
 
 test("approval wait distinguishes unverified reads from a confirmed non-approval", () => {
-  const sidepanelSource = readSource("src/sidepanel.ts");
+  const sidepanelSource = readSidepanelSources();
 
   // A window of only degraded/null reads must not claim the approval "didn't
   // complete" (it may have landed) — that message prompts a redundant

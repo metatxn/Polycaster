@@ -1,4 +1,4 @@
-import { escapeHtml } from "../utils";
+import { escapeHtml } from "../html-escape";
 import { SETUP_APPROVAL_DEFAULT, type SetupFlow } from "./setup-flow";
 
 function actionControl(

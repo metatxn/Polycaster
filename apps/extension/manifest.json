@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Knoww — Every opinion is a position",
-  "version": "2.5.48",
+  "version": "2.5.49",
   "description": "A prediction market layer for the open internet.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -39,6 +39,8 @@
         "icons/icon-256.png",
         "knoww-inline.css",
         "page-bridge.js",
+        "platforms/*.js",
+        "content-trading.js",
         "fonts/*.woff2",
         "*.wasm",
         "*.mjs"

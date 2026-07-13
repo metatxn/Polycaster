@@ -11,6 +11,28 @@ import type { GammaEvent } from "@/types/gamma-api";
  * GET /api/events/trending
  * Get trending events sorted by total volume (highest first).
  */
+/**
+ * @openapi
+ * /api/events/trending:
+ *   get:
+ *     summary: Fetch /api/events/trending.
+ *     tags: [Events]
+ *     responses:
+ *       200:
+ *         description: Successful response.
+ *       400:
+ *         description: Invalid request.
+ *       401:
+ *         description: Authentication required.
+ *       403:
+ *         description: Request forbidden.
+ *       404:
+ *         description: Resource not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Request failed.
+ */
 export async function GET(request: NextRequest) {
   const rateLimitResponse = checkRateLimit(request, {
     interval: 60 * 1000,

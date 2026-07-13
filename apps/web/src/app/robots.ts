@@ -14,7 +14,7 @@ export default function robots(): MetadataRoute.Robots {
         "/api/markets/price-history/",
         "/api/markets/price-history/batch",
       ],
-      disallow: ["/api/", "/portfolio", "/profile/"],
+      disallow: ["/api/"],
     },
     sitemap: "https://knoww.app/sitemap.xml",
   };

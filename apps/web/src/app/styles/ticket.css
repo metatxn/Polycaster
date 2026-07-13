@@ -94,7 +94,7 @@
   @apply border-(--kwm-down-border) bg-(--kwm-down-soft);
 }
 .kw-app .kw-ticket .tk-price .lbl {
-  @apply font-(family-name:--font-geist-mono) text-[12px] tracking-[0.16em] uppercase text-(--kwm-ink-3) col-start-1 row-start-1;
+  @apply font-(family-name:--font-geist-mono) text-[12px] tracking-[0.16em] uppercase text-(--kwm-ink-2) col-start-1 row-start-1;
 }
 .kw-app .kw-ticket .tk-price.on.yes .lbl {
   @apply text-(--kwm-up);

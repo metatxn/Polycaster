@@ -26,10 +26,10 @@ import {
   type TradingGetOrderPreflightResponse,
   type TradingWalletMode,
 } from "../../types/chrome-messages";
+import type { OutcomeBalances } from "../ui/outcome-balances";
 import { WalletBridge } from "./bridge";
 import { CredentialManager } from "./credentials";
 import { ExtensionSession } from "./extension-session";
-import type { OutcomeBalances } from "./outcome-balances";
 import { ProxyWallet } from "./proxy-wallet";
 import {
   fetchTradingSetupApprovalStatus,
@@ -47,6 +47,7 @@ export type TradingState =
   | "disconnected"
   | "connecting"
   | "switching-chain"
+  | "restoring-session"
   | "connected"
   | "deriving-credentials"
   | "ready"
@@ -80,6 +81,7 @@ export interface TradingContext {
    */
   isDeployed: boolean | null;
   pusdBalance: number;
+  pusdBalanceRaw: string;
   usdcEBalance: number;
   balance: number;
   polBalance: number;
@@ -92,6 +94,8 @@ export interface TradingContext {
   hasCredentials: boolean;
   error: string | null;
   orderBook: OrderBook | null;
+  /** Token whose levels are currently stored in `orderBook`. */
+  orderBookTokenId: string | null;
   orderBookError: string | null;
   minOrderSize: number;
   tickSize: number;
@@ -114,6 +118,7 @@ function createDisconnectedContext(): TradingContext {
     legacySafeAvailable: false,
     isDeployed: null,
     pusdBalance: 0,
+    pusdBalanceRaw: "0",
     usdcEBalance: 0,
     balance: 0,
     polBalance: 0,
@@ -121,6 +126,7 @@ function createDisconnectedContext(): TradingContext {
     hasCredentials: false,
     error: null,
     orderBook: null,
+    orderBookTokenId: null,
     orderBookError: null,
     minOrderSize: 1,
     tickSize: 0.01,
@@ -132,6 +138,8 @@ function createDisconnectedContext(): TradingContext {
 }
 
 let ctx: TradingContext = createDisconnectedContext();
+let orderBookRequestSequence = 0;
+let latestContextOrderBookRequest = 0;
 let walletSwitchInProgress = false;
 // Last accountsChanged swallowed while a deliberate switch is in flight —
 // replayed once the switch settles so a failed switch can't strand ctx on an
@@ -219,6 +227,7 @@ type ResolvedTradingWallet = {
   proxyAddress: string;
   balance: number;
   pusdBalance: number;
+  pusdBalanceRaw: string;
   usdcEBalance: number;
   polBalance: number;
   tokenBalances: TokenBalanceEntry[];
@@ -247,6 +256,7 @@ async function resolveTradingWallet(
       proxyAddress: address,
       balance: balData.balance,
       pusdBalance: balData.pusdBalance,
+      pusdBalanceRaw: balData.pusdBalanceRaw,
       usdcEBalance: balData.usdcEBalance,
       polBalance: balData.polBalance ?? 0,
       tokenBalances: balData.tokenBalances ?? [],
@@ -265,6 +275,7 @@ async function resolveTradingWallet(
     proxyAddress: derived.proxyAddress,
     balance: balData.balance,
     pusdBalance: balData.pusdBalance,
+    pusdBalanceRaw: balData.pusdBalanceRaw,
     usdcEBalance: balData.usdcEBalance,
     polBalance: balData.polBalance ?? 0,
     tokenBalances: balData.tokenBalances ?? [],
@@ -287,6 +298,7 @@ async function resolveExistingSafeWallet(
       proxyAddress: derived.proxyAddress,
       balance: safeBalance.balance,
       pusdBalance: safeBalance.pusdBalance,
+      pusdBalanceRaw: safeBalance.pusdBalanceRaw,
       usdcEBalance: safeBalance.usdcEBalance,
       polBalance: safeBalance.polBalance ?? 0,
       tokenBalances: safeBalance.tokenBalances ?? [],
@@ -478,7 +490,10 @@ async function applyConnectedWalletAccounts(
     log.warn("chain.switch_failed", { error: err });
   }
 
-  update({ state: "connected" });
+  // The wallet is connected, but the trading-wallet and credential checks
+  // below can take several seconds for a returning session. Keep that gap as
+  // an explicit loading state so the panel never renders an empty body.
+  update({ state: "restoring-session" });
 
   try {
     const existingSafe = await resolveExistingSafeWallet(address);
@@ -519,6 +534,7 @@ async function applyConnectedWalletAccounts(
         : {}),
       balance: 0,
       pusdBalance: 0,
+      pusdBalanceRaw: "0",
       usdcEBalance: 0,
       polBalance: 0,
       tokenBalances: [],
@@ -809,6 +825,7 @@ export const TradingService = {
       isDeployed: normalizedMode === "eoa" ? true : null,
       balance: 0,
       pusdBalance: 0,
+      pusdBalanceRaw: "0",
       usdcEBalance: 0,
       polBalance: 0,
       tokenBalances: [],
@@ -864,6 +881,7 @@ export const TradingService = {
       update({
         balance: nextBalance.balance,
         pusdBalance: nextBalance.pusdBalance,
+        pusdBalanceRaw: nextBalance.pusdBalanceRaw,
         usdcEBalance: nextBalance.usdcEBalance,
         polBalance: nextBalance.polBalance ?? 0,
         tokenBalances: nextBalance.tokenBalances ?? [],
@@ -942,6 +960,19 @@ export const TradingService = {
     tokenId: string,
     options?: { syncContext?: boolean }
   ): Promise<OrderBook | null> {
+    const syncContext = options?.syncContext !== false;
+    const requestId = syncContext ? ++orderBookRequestSequence : 0;
+    if (syncContext) {
+      latestContextOrderBookRequest = requestId;
+      const tokenChanged = ctx.orderBookTokenId !== tokenId;
+      update({
+        orderBook: tokenChanged ? null : ctx.orderBook,
+        orderBookTokenId: tokenId,
+        orderBookError: null,
+        ...(tokenChanged ? { minOrderSize: 1, tickSize: 0.01 } : {}),
+      });
+    }
+
     try {
       const data = await sendMsg<
         OrderBook & { min_order_size?: string; tick_size?: string }
@@ -949,7 +980,11 @@ export const TradingService = {
         { type: "trading:get-orderbook", tokenId },
         "Failed to fetch order book"
       );
-      if (options?.syncContext !== false) {
+      if (
+        syncContext &&
+        requestId === latestContextOrderBookRequest &&
+        ctx.orderBookTokenId === tokenId
+      ) {
         const rawMin = parseFloat(data.min_order_size ?? "1");
         const minOrderSize = Math.max(
           1,
@@ -967,7 +1002,11 @@ export const TradingService = {
       }
       return data;
     } catch (err) {
-      if (options?.syncContext !== false) {
+      if (
+        syncContext &&
+        requestId === latestContextOrderBookRequest &&
+        ctx.orderBookTokenId === tokenId
+      ) {
         update({
           orderBook: { bids: [], asks: [] },
           orderBookError:
@@ -1158,7 +1197,7 @@ export const TradingService = {
 
   async splitPosition(
     conditionId: string,
-    amount: number,
+    amount: string,
     yesTokenId?: string,
     noTokenId?: string,
     negRisk = false
@@ -1200,7 +1239,7 @@ export const TradingService = {
 
   async mergePositions(
     conditionId: string,
-    amount: number,
+    amount: string,
     yesTokenId?: string,
     noTokenId?: string,
     negRisk = false
@@ -1265,6 +1304,7 @@ export const TradingService = {
   },
 
   reset(): void {
+    latestContextOrderBookRequest = ++orderBookRequestSequence;
     ctx = createDisconnectedContext();
     consecutiveDegradedApprovalReads = 0;
     notify();
@@ -1279,22 +1319,48 @@ export const TradingService = {
   },
 };
 
-if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
-  WalletBridge.onAccountsChanged((accounts) => {
-    void TradingService.handleExternalWalletAccountsChanged(accounts);
-  });
+let tradingServiceListenersInstalled = false;
+let removeAccountsChangedListener: (() => void) | null = null;
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type !== TRADING_SESSION_DISCONNECTED_MESSAGE) {
-      return false;
-    }
+const handleWalletAccountsChanged = (accounts: string[]): void => {
+  void TradingService.handleExternalWalletAccountsChanged(accounts);
+};
 
-    if (walletSwitchInProgress) {
-      return false;
-    }
-
-    WalletBridge.resetAfterDisconnect();
-    TradingService.reset();
+const handleTradingServiceMessage = (message: unknown): boolean => {
+  const runtimeMessage = message as { type?: string } | undefined;
+  if (runtimeMessage?.type !== TRADING_SESSION_DISCONNECTED_MESSAGE) {
     return false;
-  });
+  }
+
+  if (walletSwitchInProgress) {
+    return false;
+  }
+
+  WalletBridge.resetAfterDisconnect();
+  TradingService.reset();
+  return false;
+};
+
+function disposeTradingServiceListeners(): void {
+  if (!tradingServiceListenersInstalled) return;
+  tradingServiceListenersInstalled = false;
+  removeAccountsChangedListener?.();
+  removeAccountsChangedListener = null;
+  chrome.runtime.onMessage.removeListener(handleTradingServiceMessage);
+}
+
+export function installTradingServiceListeners(): () => void {
+  if (tradingServiceListenersInstalled) {
+    return disposeTradingServiceListeners;
+  }
+  if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) {
+    return () => {};
+  }
+
+  tradingServiceListenersInstalled = true;
+  removeAccountsChangedListener = WalletBridge.onAccountsChanged(
+    handleWalletAccountsChanged
+  );
+  chrome.runtime.onMessage.addListener(handleTradingServiceMessage);
+  return disposeTradingServiceListeners;
 }

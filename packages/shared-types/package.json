@@ -25,6 +25,7 @@
     "./ctf": "./src/ctf.ts"
   },
   "scripts": {
+    "test": "node --experimental-strip-types --test src/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "format": "biome format --write"

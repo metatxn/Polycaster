@@ -393,12 +393,6 @@ declare global {
       resetPreferences: () => Promise<void>;
     };
 
-    // Platform adapters
-    KNOWW_TWITTER: PlatformAdapter;
-    KNOWW_LINKEDIN: PlatformAdapter;
-    KNOWW_REDDIT: PlatformAdapter;
-    KNOWW_QUORA: PlatformAdapter;
-
     // Settings listeners
     KNOWW_SETTINGS_LISTENERS: Array<(settings: UserSettings) => void>;
 

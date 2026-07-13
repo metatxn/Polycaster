@@ -9,17 +9,7 @@ const contentLog = createLogger("extension.content");
 
 import type { Market } from "../types/market";
 
-const HTML_ESCAPE_MAP: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-export function escapeHtml(str: string): string {
-  return str.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch] ?? ch);
-}
+export { escapeHtml } from "./html-escape";
 
 export function escapeSelectorValue(value: string): string {
   if (typeof globalThis.CSS?.escape === "function") {

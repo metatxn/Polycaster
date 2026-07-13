@@ -180,6 +180,7 @@ export interface LiveOrderRecordSummary {
   status:
     | "DRY_RUN"
     | "POSTED"
+    | "UNKNOWN"
     | "OPEN"
     | "PARTIALLY_FILLED"
     | "FILLED"

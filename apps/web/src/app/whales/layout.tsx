@@ -1,4 +1,5 @@
 import { buildPageMetadata } from "@/lib/seo";
+import "@/app/styles/product.css";
 
 export const metadata = buildPageMetadata({
   title: "Polymarket Whale Tracker",

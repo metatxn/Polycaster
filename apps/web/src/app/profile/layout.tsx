@@ -1,4 +1,5 @@
 import { buildNoIndexMetadata } from "@/lib/seo";
+import "@/app/styles/product.css";
 
 export const metadata = buildNoIndexMetadata({
   title: "Trader Profile",

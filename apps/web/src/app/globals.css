@@ -5,11 +5,4 @@
 
 @import "./styles/themes.css";
 @import "./styles/base.css";
-
-@import "./styles/marketing.css";
 @import "./styles/app-tokens.css";
-@import "./styles/landing.css";
-@import "./styles/tweet-overlay.css";
-@import "./styles/markets.css";
-@import "./styles/onboarding.css";
-@import "./styles/ticket.css";

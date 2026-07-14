@@ -18,6 +18,7 @@ import { LandingShell } from "@/components/landing/landing-shell";
 import { LandingThemeDropdown } from "@/components/landing/landing-theme-dropdown";
 import { TweetOverlayHero } from "@/components/tweet-overlay-hero";
 import { buildPageMetadata, DEFAULT_SEO_DESCRIPTION } from "@/lib/seo";
+import "./styles/landing-route.css";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "Knoww — Prediction markets for every opinion",

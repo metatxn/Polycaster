@@ -1,0 +1,5 @@
+@import "./markets.css";
+@import "./onboarding.css";
+@import "./ticket.css";
+
+@reference "../globals.css";

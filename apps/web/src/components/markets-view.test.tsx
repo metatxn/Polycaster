@@ -85,7 +85,95 @@ const worldCupConcedeEvent: MarketViewEvent = {
   ],
 };
 
+function makeMultiOutcomeEvent(
+  id: string,
+  title: string,
+  volume24hr: number
+): MarketViewEvent {
+  return {
+    ...worldCupConcedeEvent,
+    id,
+    slug: id,
+    title,
+    volume24hr,
+    markets: worldCupConcedeEvent.markets?.map((market, i) => ({
+      ...market,
+      id: `${id}-${i}`,
+      clobTokenIds: JSON.stringify([`${id}-${i}-yes`, `${id}-${i}-no`]),
+    })),
+  };
+}
+
+function makeBinaryEvent(
+  id: string,
+  title: string,
+  volume24hr: number
+): MarketViewEvent {
+  return {
+    id,
+    slug: id,
+    title,
+    image: "/logo-256x256.png",
+    volume24hr,
+    liquidityClob: 5_000,
+    markets: [
+      {
+        id: `${id}-market`,
+        question: title,
+        outcomes: JSON.stringify(["Yes", "No"]),
+        outcomePrices: JSON.stringify(["0.99", "0.01"]),
+        clobTokenIds: JSON.stringify([`${id}-yes`, `${id}-no`]),
+      },
+    ],
+  };
+}
+
+function getFeaturedTitles(): string[] {
+  return Array.from(document.querySelectorAll(".kwm-tob-card")).map(
+    (card) => card.textContent ?? ""
+  );
+}
+
 describe("MarketsView", () => {
+  it("keeps binary markets out of Top of Book when multi-outcome events fill it", () => {
+    const binary = makeBinaryEvent("binary-1", "Binary Question Event", 9_999);
+    const events = [
+      binary,
+      makeMultiOutcomeEvent("multi-1", "Multi Event One", 500),
+      makeMultiOutcomeEvent("multi-2", "Multi Event Two", 400),
+      makeMultiOutcomeEvent("multi-3", "Multi Event Three", 300),
+    ];
+
+    render(
+      <MarketsView events={events} viewMode="new" onViewChange={() => {}} />
+    );
+
+    const featuredTitles = getFeaturedTitles();
+    expect(featuredTitles).toHaveLength(3);
+    expect(featuredTitles.join(" ")).not.toContain("Binary Question Event");
+    // The deferred binary still surfaces in The Book table below.
+    expect(screen.getAllByText("Binary Question Event").length).toBeGreaterThan(
+      0
+    );
+  });
+
+  it("backfills Top of Book with binary events when multi-outcome events run short", () => {
+    const events = [
+      makeBinaryEvent("binary-1", "Binary Question Event", 9_999),
+      makeMultiOutcomeEvent("multi-1", "Multi Event One", 500),
+    ];
+
+    render(
+      <MarketsView events={events} viewMode="new" onViewChange={() => {}} />
+    );
+
+    const featuredTitles = getFeaturedTitles();
+    expect(featuredTitles).toHaveLength(2);
+    // Multi-outcome leads the strip; the binary fills the empty slot.
+    expect(featuredTitles[0]).toContain("Multi Event One");
+    expect(featuredTitles[1]).toContain("Binary Question Event");
+  });
+
   it("omits generic placeholder candidates from market summaries", () => {
     render(
       <MarketsView

@@ -26,7 +26,6 @@ const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Whales", href: "/whales" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Portfolio", href: "/portfolio" },
-  { label: "FIFA", href: "/events/sports/fifa-world-cup" },
   { label: "Search", href: "/search" },
 ];
 

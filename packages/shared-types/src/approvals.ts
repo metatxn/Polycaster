@@ -11,7 +11,6 @@ import {
   CTF_ADDRESS,
   CTF_COLLATERAL_ADAPTER_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
-  NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
@@ -48,7 +47,6 @@ export interface TradingApprovalStatus {
   pusdCtfExchange: boolean;
   pusdNegRiskExchange: boolean;
   /** pUSD approvals for adapter-specific CTF/conversion operations. */
-  pusdNegRiskAdapter: boolean;
   pusdCtfCollateralAdapter: boolean;
   pusdNegRiskCtfCollateralAdapter: boolean;
   /**
@@ -61,7 +59,6 @@ export interface TradingApprovalStatus {
   /** ERC1155 outcome token operator approvals for CLOB/adapter operations. */
   ctfExchangeApproval: boolean;
   ctfNegRiskExchangeApproval: boolean;
-  ctfNegRiskAdapterApproval: boolean;
   ctfCollateralAdapterApproval: boolean;
   ctfNegRiskCollateralAdapterApproval: boolean;
   /** True when the default app trading setup is complete. */
@@ -133,9 +130,12 @@ export function isClobOrderApproved(
 ): boolean {
   if (requirement.side === "SELL") {
     // Neg-risk settlement moves outcome tokens through the adapter as well as
-    // the exchange — same operator pair clobTradingApproved requires.
+    // the exchange — same operator pair clobTradingApproved requires. The
+    // adapter is the NegRiskCtfCollateralAdapter (the v1 NegRiskAdapter was
+    // retired 2026-07-17).
     return requirement.negRisk
-      ? status.ctfNegRiskExchangeApproval && status.ctfNegRiskAdapterApproval
+      ? status.ctfNegRiskExchangeApproval &&
+          status.ctfNegRiskCollateralAdapterApproval
       : status.ctfExchangeApproval;
   }
 
@@ -144,7 +144,7 @@ export function isClobOrderApproved(
   // consumes it whole, zeroing any standing allowance — gating orders on it
   // would re-fail after every wrap-funded BUY.
   return requirement.negRisk
-    ? status.pusdNegRiskExchange && status.pusdNegRiskAdapter
+    ? status.pusdNegRiskExchange && status.pusdNegRiskCtfCollateralAdapter
     : status.pusdCtfExchange;
 }
 
@@ -162,8 +162,8 @@ export function buildClobOrderApprovalTransactions(
             NEG_RISK_CTF_EXCHANGE_ADDRESS as Address,
           ],
           [
-            status.ctfNegRiskAdapterApproval,
-            NEG_RISK_ADAPTER_ADDRESS as Address,
+            status.ctfNegRiskCollateralAdapterApproval,
+            NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address,
           ],
         ]
       : [[status.ctfExchangeApproval, CTF_EXCHANGE_ADDRESS as Address]];
@@ -183,8 +183,8 @@ export function buildClobOrderApprovalTransactions(
           maxUint256,
         ],
         [
-          status.pusdNegRiskAdapter,
-          NEG_RISK_ADAPTER_ADDRESS as Address,
+          status.pusdNegRiskCtfCollateralAdapter,
+          NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address,
           maxUint256,
         ],
       ]
@@ -236,11 +236,11 @@ export function readPusdExchangeAllowance(
 
 /**
  * Effective pUSD allowance available to a CLOB order: the exchange allowance,
- * and for neg-risk markets the minimum of the exchange and NegRiskAdapter
- * allowances (CLOB V2 pulls collateral through both). This is the single
- * owner of the "which spenders must cover a neg-risk order" rule for on-chain
- * reads; the same rule over an allowance map lives in the extension's
- * setup-flow `getTradingOrderAllowance`.
+ * and for neg-risk markets the minimum of the exchange and
+ * NegRiskCtfCollateralAdapter allowances (CLOB V2 pulls collateral through
+ * both). This is the single owner of the "which spenders must cover a
+ * neg-risk order" rule for on-chain reads; the same rule over an allowance
+ * map lives in the extension's setup-flow `getTradingOrderAllowance`.
  */
 export async function readClobOrderPusdAllowance(
   client: PublicClient,
@@ -254,7 +254,7 @@ export async function readClobOrderPusdAllowance(
       ? readErc20Allowance(
           client,
           owner,
-          NEG_RISK_ADAPTER_ADDRESS as Address,
+          NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address,
           options
         )
       : Promise.resolve(null),
@@ -321,12 +321,6 @@ export async function readTradingApprovalStatus(
         address: PUSD_ADDRESS,
         abi: erc20Abi,
         functionName: "allowance",
-        args: [owner, NEG_RISK_ADAPTER_ADDRESS],
-      },
-      {
-        address: PUSD_ADDRESS,
-        abi: erc20Abi,
-        functionName: "allowance",
         args: [owner, CTF_COLLATERAL_ADAPTER_ADDRESS],
       },
       {
@@ -357,12 +351,6 @@ export async function readTradingApprovalStatus(
         address: CTF_ADDRESS,
         abi: ERC1155_APPROVAL_ABI,
         functionName: "isApprovedForAll",
-        args: [owner, NEG_RISK_ADAPTER_ADDRESS],
-      },
-      {
-        address: CTF_ADDRESS,
-        abi: ERC1155_APPROVAL_ABI,
-        functionName: "isApprovedForAll",
         args: [owner, CTF_COLLATERAL_ADAPTER_ADDRESS],
       },
       {
@@ -377,30 +365,28 @@ export async function readTradingApprovalStatus(
   const pusdCtf = allowanceResultOk(results[0], approvalAmountRaw);
   const pusdCtfExchange = allowanceResultOk(results[1], approvalAmountRaw);
   const pusdNegRiskExchange = allowanceResultOk(results[2], approvalAmountRaw);
-  const pusdNegRiskAdapter = allowanceResultOk(results[3], approvalAmountRaw);
   const pusdCtfCollateralAdapter = allowanceResultOk(
-    results[4],
+    results[3],
     approvalAmountRaw
   );
   const pusdNegRiskCtfCollateralAdapter = allowanceResultOk(
-    results[5],
+    results[4],
     approvalAmountRaw
   );
-  const usdcOnramp = allowanceResultOk(results[6], approvalAmountRaw);
-  const ctfExchangeApproval = approvalResultOk(results[7]);
-  const ctfNegRiskExchangeApproval = approvalResultOk(results[8]);
-  const ctfNegRiskAdapterApproval = approvalResultOk(results[9]);
-  const ctfCollateralAdapterApproval = approvalResultOk(results[10]);
-  const ctfNegRiskCollateralAdapterApproval = approvalResultOk(results[11]);
+  const usdcOnramp = allowanceResultOk(results[5], approvalAmountRaw);
+  const ctfExchangeApproval = approvalResultOk(results[6]);
+  const ctfNegRiskExchangeApproval = approvalResultOk(results[7]);
+  const ctfCollateralAdapterApproval = approvalResultOk(results[8]);
+  const ctfNegRiskCollateralAdapterApproval = approvalResultOk(results[9]);
 
   const clobTradingApproved =
     pusdCtf &&
     pusdCtfExchange &&
     pusdNegRiskExchange &&
-    pusdNegRiskAdapter &&
+    pusdNegRiskCtfCollateralAdapter &&
     ctfExchangeApproval &&
     ctfNegRiskExchangeApproval &&
-    ctfNegRiskAdapterApproval;
+    ctfNegRiskCollateralAdapterApproval;
   const autoWrapApproved = usdcOnramp;
   const ctfOperationsApproved =
     pusdCtf &&
@@ -409,9 +395,7 @@ export async function readTradingApprovalStatus(
     ctfCollateralAdapterApproval &&
     ctfNegRiskCollateralAdapterApproval;
   const negRiskConversionApproved =
-    pusdNegRiskAdapter &&
-    ctfNegRiskAdapterApproval &&
-    ctfNegRiskCollateralAdapterApproval;
+    pusdNegRiskCtfCollateralAdapter && ctfNegRiskCollateralAdapterApproval;
   // autoWrapApproved is deliberately excluded: every auto-wrap zeroes the
   // standing onramp allowance (exact self-approve, fully consumed), so
   // including it would flip "all approved" back to false after the first
@@ -422,13 +406,11 @@ export async function readTradingApprovalStatus(
     pusdCtf,
     pusdCtfExchange,
     pusdNegRiskExchange,
-    pusdNegRiskAdapter,
     pusdCtfCollateralAdapter,
     pusdNegRiskCtfCollateralAdapter,
     usdcOnramp,
     ctfExchangeApproval,
     ctfNegRiskExchangeApproval,
-    ctfNegRiskAdapterApproval,
     ctfCollateralAdapterApproval,
     ctfNegRiskCollateralAdapterApproval,
     allApproved,
@@ -511,10 +493,11 @@ export function buildTradingApprovalTransactions(
       NEG_RISK_CTF_EXCHANGE_ADDRESS as Address,
       maxUint256,
     ],
-    // CLOB V2 pulls pUSD via the neg-risk adapter for neg-risk market orders.
+    // CLOB V2 pulls pUSD via the NegRiskCtfCollateralAdapter for neg-risk
+    // market orders (the v1 NegRiskAdapter was retired 2026-07-17).
     [
-      status.pusdNegRiskAdapter,
-      NEG_RISK_ADAPTER_ADDRESS as Address,
+      status.pusdNegRiskCtfCollateralAdapter,
+      NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address,
       maxUint256,
     ],
   ];
@@ -536,7 +519,10 @@ export function buildTradingApprovalTransactions(
       status.ctfNegRiskExchangeApproval,
       NEG_RISK_CTF_EXCHANGE_ADDRESS as Address,
     ],
-    [status.ctfNegRiskAdapterApproval, NEG_RISK_ADAPTER_ADDRESS as Address],
+    [
+      status.ctfNegRiskCollateralAdapterApproval,
+      NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address,
+    ],
   ];
   for (const [approved, operator] of ctfTargets) {
     if (!approved) {
@@ -601,27 +587,22 @@ export function buildNegRiskConversionApprovalTransactions(
 ): ApprovalTransaction[] {
   const txns: ApprovalTransaction[] = [];
 
-  if (!status.pusdNegRiskAdapter) {
+  if (!status.pusdNegRiskCtfCollateralAdapter) {
     txns.push(
       buildErc20ApprovalTransaction(
         PUSD_ADDRESS as Address,
-        NEG_RISK_ADAPTER_ADDRESS as Address,
+        NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address,
         approvalAmountRaw
       )
     );
   }
 
-  const ctfTargets: Array<[boolean, Address]> = [
-    [status.ctfNegRiskAdapterApproval, NEG_RISK_ADAPTER_ADDRESS as Address],
-    [
-      status.ctfNegRiskCollateralAdapterApproval,
-      NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address,
-    ],
-  ];
-  for (const [approved, operator] of ctfTargets) {
-    if (!approved) {
-      txns.push(buildErc1155ApprovalTransaction(operator));
-    }
+  if (!status.ctfNegRiskCollateralAdapterApproval) {
+    txns.push(
+      buildErc1155ApprovalTransaction(
+        NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS as Address
+      )
+    );
   }
 
   return txns;
@@ -653,13 +634,11 @@ export function buildFullTradingApprovalTransactions(
       pusdCtf: false,
       pusdCtfExchange: false,
       pusdNegRiskExchange: false,
-      pusdNegRiskAdapter: false,
       pusdCtfCollateralAdapter: false,
       pusdNegRiskCtfCollateralAdapter: false,
       usdcOnramp: false,
       ctfExchangeApproval: false,
       ctfNegRiskExchangeApproval: false,
-      ctfNegRiskAdapterApproval: false,
       ctfCollateralAdapterApproval: false,
       ctfNegRiskCollateralAdapterApproval: false,
       allApproved: false,

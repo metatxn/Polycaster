@@ -47,9 +47,7 @@ vi.mock("@/components/sportsbook-view", () => ({
 
 describe("SportsContent", () => {
   it("does not create overflow scroll containers above the sticky trading panel", () => {
-    const { container } = render(
-      <SportsContent selectedSport="fifa-world-cup" />
-    );
+    const { container } = render(<SportsContent selectedSport="mls" />);
 
     const root = container.firstElementChild;
     const sportsbookWrapper =
@@ -61,23 +59,17 @@ describe("SportsContent", () => {
     expect(sportsbookWrapper).not.toHaveClass("overflow-hidden");
   });
 
-  it("hides the desktop sports sidebar on the FIFA page", () => {
-    render(<SportsContent selectedSport="fifa-world-cup" />);
+  it("shows the desktop sports sidebar alongside the mobile league rail", () => {
+    render(<SportsContent selectedSport="mls" />);
 
     const sportsbookWrapper =
       screen.getByTestId("sportsbook-view").parentElement;
     const contentGrid = sportsbookWrapper?.parentElement;
 
-    expect(screen.queryByTestId("desktop-league-rail")).not.toBeInTheDocument();
+    expect(screen.getByTestId("desktop-league-rail")).toBeInTheDocument();
     expect(screen.getByTestId("mobile-league-rail")).toBeInTheDocument();
-    expect(contentGrid?.className).not.toContain(
+    expect(contentGrid?.className).toContain(
       "xl:grid-cols-[240px_minmax(0,1fr)]"
     );
-  });
-
-  it("keeps the desktop sports sidebar on non-FIFA sports pages", () => {
-    render(<SportsContent selectedSport="mls" />);
-
-    expect(screen.getByTestId("desktop-league-rail")).toBeInTheDocument();
   });
 });

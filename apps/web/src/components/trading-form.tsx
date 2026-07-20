@@ -109,9 +109,11 @@ function LimitQueueStatusInline({
     }
   }
 
+  // parseFloat trims trailing zeros so 0.001 → "0.1¢" while quarter-cent
+  // ticks (e.g. 0.0025 on World Cup markets) still render as "0.25¢".
   const tickLabel =
     tickSize && Number.isFinite(tickSize)
-      ? `${(tickSize * 100).toFixed(tickSize >= 0.01 ? 0 : 1)}¢`
+      ? `${parseFloat((tickSize * 100).toFixed(2))}¢`
       : "0.1¢";
 
   return (

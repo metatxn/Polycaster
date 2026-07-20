@@ -1,6 +1,6 @@
 import {
   CTF_EXCHANGE_ADDRESS,
-  NEG_RISK_ADAPTER_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
 } from "@knoww/shared-types/contracts";
 import { DEFAULT_APPROVAL_AMOUNT } from "@knoww/shared-types/trading";
@@ -81,10 +81,10 @@ export interface TradingSetupAllowancesResponse {
 const REQUIRED_TRADING_SETUP_APPROVAL_KEYS = [
   `pusd:${CTF_EXCHANGE_ADDRESS}`,
   `pusd:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`,
-  `pusd:${NEG_RISK_ADAPTER_ADDRESS}`,
+  `pusd:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`,
   `erc1155:${CTF_EXCHANGE_ADDRESS}`,
   `erc1155:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`,
-  `erc1155:${NEG_RISK_ADAPTER_ADDRESS}`,
+  `erc1155:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`,
 ] as const;
 const REQUIRED_TRADING_SETUP_APPROVAL_KEY_SET = new Set<string>(
   REQUIRED_TRADING_SETUP_APPROVAL_KEYS
@@ -149,7 +149,7 @@ export function getTradingOrderAllowance(
   if (!negRisk) return exchangeAllowance;
 
   const adapterAllowance = Number(
-    allowances[`pusd:${NEG_RISK_ADAPTER_ADDRESS}`] ?? 0
+    allowances[`pusd:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`] ?? 0
   );
   return Math.min(exchangeAllowance, adapterAllowance);
 }

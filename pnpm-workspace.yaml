@@ -22,7 +22,7 @@ minimumReleaseAgeExclude:
 
 catalog:
   "@biomejs/biome": "2.5.2"
-  "@polymarket/client": "0.1.0-beta.14"
+  "@polymarket/client": "0.1.0-beta.18"
   "@types/react": "19.2.17"
   "@types/react-dom": "19.2.3"
   "decimal.js": "^10.6.0"
@@ -30,7 +30,7 @@ catalog:
   "react-dom": "19.2.7"
   "react-qr-code": "2.2.0"
   "typescript": "6.0.3"
-  "viem": "2.54.6"
+  "viem": "2.55.1"
 
 packageExtensions:
   "@metamask/connect-multichain@0.12.1":
@@ -43,7 +43,7 @@ peerDependencyRules:
 
 overrides:
   "typescript": "6.0.3"
-  "viem": "2.54.6"
+  "viem": "2.55.1"
   "axios": "1.18.0"
   "@isaacs/brace-expansion": "5.0.6"
   "brace-expansion": "5.0.6"

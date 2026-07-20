@@ -151,12 +151,6 @@ export const SPORT_GROUPS: readonly SportGroup[] = [
       },
       { slug: "mls", label: "MLS", tagSlug: "mls-2025", seriesId: 10189 },
       {
-        slug: "fifa-world-cup",
-        label: "FIFA World Cup",
-        tagSlug: "fifa-world-cup",
-        seriesId: 11433,
-      },
-      {
         slug: "copa-libertadores",
         label: "Copa Libertadores",
         tagSlug: "lib-2025",

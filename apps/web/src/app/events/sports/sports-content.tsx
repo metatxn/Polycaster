@@ -37,7 +37,6 @@ export function SportsContent({ selectedSport = "" }: SportsContentProps) {
     selectedSport ? { label: "Sports", href: "/events/sports" } : null,
     { label: selectedSport ? sport.label : "Sports" },
   ].filter(Boolean) as { label: string; href?: string }[];
-  const showDesktopLeagueRail = selectedSport !== "fifa-world-cup";
 
   return (
     <div className="kw-app min-h-screen relative overflow-x-clip">
@@ -53,20 +52,12 @@ export function SportsContent({ selectedSport = "" }: SportsContentProps) {
           <LeagueRailMobile activeSlug={selectedSport || undefined} />
         </div>
 
-        <div
-          className={
-            showDesktopLeagueRail
-              ? "grid gap-6 xl:gap-8 xl:grid-cols-[240px_minmax(0,1fr)]"
-              : "grid gap-6 xl:gap-8"
-          }
-        >
-          {showDesktopLeagueRail && (
-            <div className="hidden xl:block">
-              <div className="sticky top-4 self-start">
-                <LeagueRail activeSlug={selectedSport || undefined} />
-              </div>
+        <div className="grid gap-6 xl:gap-8 xl:grid-cols-[240px_minmax(0,1fr)]">
+          <div className="hidden xl:block">
+            <div className="sticky top-4 self-start">
+              <LeagueRail activeSlug={selectedSport || undefined} />
             </div>
-          )}
+          </div>
 
           {/* Right: hero + sportsbook + trade panel */}
           <div className="min-w-0 overflow-x-clip">

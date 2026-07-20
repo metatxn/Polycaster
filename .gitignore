@@ -25,6 +25,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .cursor/
+.codex/
+.superpowers/
 
 # local env files
 .env

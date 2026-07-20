@@ -88,3 +88,6 @@ apps/web/.design-sync-entry.tsx
 ds-bundle/
 .design-sync/
 .design*
+
+# local video production spec (not for the repo)
+docs/onboarding-video-spec.md

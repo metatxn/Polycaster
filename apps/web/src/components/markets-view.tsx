@@ -1096,8 +1096,17 @@ export function MarketsView({
 
   if (events.length === 0 && !isTransitioning) return null;
 
-  const featured = sorted.slice(0, 3);
-  const tableRows = sorted.slice(3);
+  // Top of Book prefers multi-outcome events: a binary card renders a
+  // single sparse row next to neighbors with four, breaking the strip's
+  // visual rhythm. Binaries only backfill when the current view has
+  // fewer than three multi-outcome events, so the hero never collapses.
+  const featured = sorted.filter((e) => (e.markets?.length || 0) > 1);
+  featured.splice(3);
+  for (const event of sorted) {
+    if (featured.length >= 3) break;
+    if (!featured.includes(event)) featured.push(event);
+  }
+  const tableRows = sorted.filter((e) => !featured.includes(e));
   const activeCount = totalResults ?? sorted.length;
 
   return (
@@ -1124,7 +1133,7 @@ export function MarketsView({
       <section>
         <SectionHeader
           title="Top of Book"
-          rightMeta={`3 / ${activeCount} MARKETS`}
+          rightMeta={`${featured.length} / ${activeCount} MARKETS`}
         />
         <div className="grid grid-cols-3 gap-4 px-7">
           {isTransitioning

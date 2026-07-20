@@ -3,7 +3,7 @@ import {
   COLLATERAL_ONRAMP_ADDRESS,
   CTF_COLLATERAL_ADAPTER_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
-  NEG_RISK_ADAPTER_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_CTF_APPROVAL_TARGET,
 } from "@knoww/shared-types/contracts";
@@ -102,11 +102,11 @@ test("shared approval status derives setup completion and order allowances", () 
     [`pusd:${PUSD_CTF_APPROVAL_TARGET}`]: 100,
     [`pusd:${CTF_EXCHANGE_ADDRESS}`]: 80,
     [`pusd:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 90,
-    [`pusd:${NEG_RISK_ADAPTER_ADDRESS}`]: 45,
+    [`pusd:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 45,
     [`usdce:${COLLATERAL_ONRAMP_ADDRESS}`]: 100,
     [`erc1155:${CTF_EXCHANGE_ADDRESS}`]: 1,
     [`erc1155:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 1,
-    [`erc1155:${NEG_RISK_ADAPTER_ADDRESS}`]: 1,
+    [`erc1155:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 1,
   });
 
   assert.deepEqual(status, {
@@ -127,11 +127,11 @@ test("consumed onramp/CTF allowances do not flip setup completion", () => {
     [`pusd:${PUSD_CTF_APPROVAL_TARGET}`]: 0,
     [`pusd:${CTF_EXCHANGE_ADDRESS}`]: 80,
     [`pusd:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 90,
-    [`pusd:${NEG_RISK_ADAPTER_ADDRESS}`]: 45,
+    [`pusd:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 45,
     [`usdce:${COLLATERAL_ONRAMP_ADDRESS}`]: 0,
     [`erc1155:${CTF_EXCHANGE_ADDRESS}`]: 1,
     [`erc1155:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 1,
-    [`erc1155:${NEG_RISK_ADAPTER_ADDRESS}`]: 1,
+    [`erc1155:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 1,
   });
 
   assert.equal(status.hasTradingApproval, true);
@@ -142,7 +142,7 @@ test("shared approval status fails closed when required setup approvals are miss
   const status = deriveTradingSetupApprovalStatus({
     [`pusd:${CTF_EXCHANGE_ADDRESS}`]: 80,
     [`pusd:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 90,
-    [`pusd:${NEG_RISK_ADAPTER_ADDRESS}`]: 45,
+    [`pusd:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 45,
   });
 
   assert.deepEqual(status, {
@@ -158,7 +158,7 @@ test("shared approval status can mark a partial allowance read as degraded", () 
     {
       [`pusd:${CTF_EXCHANGE_ADDRESS}`]: 80,
       [`pusd:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 90,
-      [`pusd:${NEG_RISK_ADAPTER_ADDRESS}`]: 45,
+      [`pusd:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 45,
     },
     { degraded: true }
   );
@@ -184,11 +184,11 @@ test("shared approval status stays complete when only unrelated approval reads d
       [`pusd:${PUSD_CTF_APPROVAL_TARGET}`]: 100,
       [`pusd:${CTF_EXCHANGE_ADDRESS}`]: 80,
       [`pusd:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 90,
-      [`pusd:${NEG_RISK_ADAPTER_ADDRESS}`]: 45,
+      [`pusd:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 45,
       [`usdce:${COLLATERAL_ONRAMP_ADDRESS}`]: 100,
       [`erc1155:${CTF_EXCHANGE_ADDRESS}`]: 1,
       [`erc1155:${NEG_RISK_CTF_EXCHANGE_ADDRESS}`]: 1,
-      [`erc1155:${NEG_RISK_ADAPTER_ADDRESS}`]: 1,
+      [`erc1155:${NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS}`]: 1,
     },
     options
   );

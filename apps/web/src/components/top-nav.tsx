@@ -34,7 +34,6 @@ const PRIMARY_LINKS: Array<{ label: string; href: string }> = [
   { label: "Whales", href: "/whales" },
   { label: "Leaderboard", href: "/leaderboard" },
   { label: "Portfolio", href: "/portfolio" },
-  { label: "FIFA", href: "/events/sports/fifa-world-cup" },
 ];
 
 /** Category taxonomy — each item maps to the `/events/{slug}` browse
@@ -93,7 +92,6 @@ export function TopNav() {
               const isActive =
                 pathname === link.href ||
                 (link.href !== "/" && pathname?.startsWith(link.href));
-              const isFifa = link.href === "/events/sports/fifa-world-cup";
               return (
                 <Link
                   key={link.href}
@@ -102,7 +100,7 @@ export function TopNav() {
                     isActive
                       ? "text-(--kwm-ink) border-(--kwm-ink)"
                       : "text-(--kwm-ink-2) border-transparent hover:text-(--kwm-ink) hover:border-(--kwm-ink-3)/40"
-                  } ${isFifa ? "kw-fifa-nav-link" : ""}`}
+                  }`}
                 >
                   {link.label}
                 </Link>

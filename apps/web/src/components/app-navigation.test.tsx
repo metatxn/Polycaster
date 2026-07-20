@@ -91,28 +91,24 @@ describe("app navigation", () => {
     navigationState.push.mockReset();
   });
 
-  it("surfaces FIFA World Cup as a direct desktop primary destination", () => {
+  it("lists the desktop primary destinations in order", () => {
     render(<TopNav />);
 
     const primaryNav = screen.getByRole("navigation", { name: "Primary" });
-    const fifaLink = within(primaryNav).getByRole("link", { name: "FIFA" });
     const primaryLabels = within(primaryNav)
       .getAllByRole("link")
       .map((link) => link.textContent);
 
-    expect(fifaLink).toHaveAttribute("href", "/events/sports/fifa-world-cup");
     expect(primaryLabels).toEqual([
       "Markets",
       "Live",
       "Whales",
       "Leaderboard",
       "Portfolio",
-      "FIFA",
     ]);
-    expect(fifaLink).toHaveClass("kw-fifa-nav-link");
   });
 
-  it("surfaces FIFA World Cup in the mobile drawer primary destinations", () => {
+  it("lists the mobile drawer primary destinations in order", () => {
     render(<SidebarMobile />);
 
     const primaryButtons = screen
@@ -125,12 +121,11 @@ describe("app navigation", () => {
           "Whales",
           "Leaderboard",
           "Portfolio",
-          "FIFA",
           "Search",
         ].includes(label ?? "")
       );
-    const fifaButton = screen.getByRole("button", { name: "FIFA" });
-    fireEvent.click(fifaButton);
+    const whalesButton = screen.getByRole("button", { name: "Whales" });
+    fireEvent.click(whalesButton);
 
     expect(primaryButtons).toEqual([
       "Markets",
@@ -138,11 +133,8 @@ describe("app navigation", () => {
       "Whales",
       "Leaderboard",
       "Portfolio",
-      "FIFA",
       "Search",
     ]);
-    expect(navigationState.push).toHaveBeenCalledWith(
-      "/events/sports/fifa-world-cup"
-    );
+    expect(navigationState.push).toHaveBeenCalledWith("/whales");
   });
 });

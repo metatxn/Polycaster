@@ -11,13 +11,11 @@ const fullyApprovedStatus = () => ({
   pusdCtf: true,
   pusdCtfExchange: true,
   pusdNegRiskExchange: true,
-  pusdNegRiskAdapter: true,
   pusdCtfCollateralAdapter: true,
   pusdNegRiskCtfCollateralAdapter: true,
   usdcOnramp: true,
   ctfExchangeApproval: true,
   ctfNegRiskExchangeApproval: true,
-  ctfNegRiskAdapterApproval: true,
   ctfCollateralAdapterApproval: true,
   ctfNegRiskCollateralAdapterApproval: true,
   allApproved: true,
@@ -383,7 +381,7 @@ describe("useClobClient", () => {
     // posted order with its generic balance/allowance error.
     appApprovalsMock.checkAllApprovals.mockResolvedValue({
       ...fullyApprovedStatus(),
-      ctfNegRiskAdapterApproval: false,
+      ctfNegRiskCollateralAdapterApproval: false,
       clobTradingApproved: false,
       allApproved: false,
       negRiskConversionApproved: false,

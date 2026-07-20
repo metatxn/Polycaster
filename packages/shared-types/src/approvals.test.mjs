@@ -10,7 +10,7 @@ import {
   COLLATERAL_ONRAMP_ADDRESS,
   CTF_ADDRESS,
   CTF_EXCHANGE_ADDRESS,
-  NEG_RISK_ADAPTER_ADDRESS,
+  NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
   USDC_E_ADDRESS,
@@ -41,13 +41,11 @@ function missingApprovalStatus() {
     pusdCtf: false,
     pusdCtfExchange: false,
     pusdNegRiskExchange: false,
-    pusdNegRiskAdapter: false,
     pusdCtfCollateralAdapter: false,
     pusdNegRiskCtfCollateralAdapter: false,
     usdcOnramp: false,
     ctfExchangeApproval: false,
     ctfNegRiskExchangeApproval: false,
-    ctfNegRiskAdapterApproval: false,
     ctfCollateralAdapterApproval: false,
     ctfNegRiskCollateralAdapterApproval: false,
     allApproved: false,
@@ -69,7 +67,7 @@ test("neg-risk BUY approval readiness ignores unrelated global setup approvals",
   const status = {
     ...missingApprovalStatus(),
     pusdNegRiskExchange: true,
-    pusdNegRiskAdapter: true,
+    pusdNegRiskCtfCollateralAdapter: true,
     // The standing onramp allowance is zeroed by every auto-wrap (the wrap
     // batch self-approves the exact amount), so BUY readiness must not
     // require it — otherwise the approval gate re-fails after every
@@ -91,7 +89,7 @@ test("neg-risk BUY scoped approvals never grant the self-approving onramp allowa
   const status = {
     ...missingApprovalStatus(),
     pusdNegRiskExchange: true,
-    pusdNegRiskAdapter: true,
+    pusdNegRiskCtfCollateralAdapter: true,
     usdcOnramp: false,
   };
 
@@ -106,9 +104,9 @@ test("neg-risk BUY scoped approvals never grant the self-approving onramp allowa
 });
 
 test("neg-risk SELL readiness requires both exchange and adapter operator approvals", () => {
-  // clobTradingApproved requires ctfNegRiskAdapterApproval; the per-order
-  // path must apply the same rule or a neg-risk SELL (e.g. transferred-in
-  // tokens) passes the gate and fails at settlement.
+  // clobTradingApproved requires ctfNegRiskCollateralAdapterApproval; the
+  // per-order path must apply the same rule or a neg-risk SELL (e.g.
+  // transferred-in tokens) passes the gate and fails at settlement.
   const exchangeOnly = {
     ...missingApprovalStatus(),
     ctfNegRiskExchangeApproval: true,
@@ -120,7 +118,7 @@ test("neg-risk SELL readiness requires both exchange and adapter operator approv
 
   const both = {
     ...exchangeOnly,
-    ctfNegRiskAdapterApproval: true,
+    ctfNegRiskCollateralAdapterApproval: true,
   };
   assert.equal(
     isClobOrderApproved(both, { side: "SELL", negRisk: true }),
@@ -138,7 +136,7 @@ test("neg-risk SELL readiness requires both exchange and adapter operator approv
   );
 });
 
-test("neg-risk SELL scoped approvals grant the missing NegRiskAdapter operator approval", () => {
+test("neg-risk SELL scoped approvals grant the missing NegRiskCtfCollateralAdapter operator approval", () => {
   const exchangeOnly = {
     ...missingApprovalStatus(),
     ctfNegRiskExchangeApproval: true,
@@ -150,7 +148,7 @@ test("neg-risk SELL scoped approvals grant the missing NegRiskAdapter operator a
   assert.equal(adapterOnlyTxns.length, 1);
   assert.equal(adapterOnlyTxns[0].to, CTF_ADDRESS);
   const adapterDecoded = decodeErc1155Approval(adapterOnlyTxns[0]);
-  assert.equal(adapterDecoded.args[0], NEG_RISK_ADAPTER_ADDRESS);
+  assert.equal(adapterDecoded.args[0], NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS);
   assert.equal(adapterDecoded.args[1], true);
 
   const bothMissingTxns = buildClobOrderApprovalTransactions(
@@ -162,7 +160,10 @@ test("neg-risk SELL scoped approvals grant the missing NegRiskAdapter operator a
   );
   assert.deepEqual(
     [...operators].sort(),
-    [NEG_RISK_ADAPTER_ADDRESS, NEG_RISK_CTF_EXCHANGE_ADDRESS].sort()
+    [
+      NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS,
+      NEG_RISK_CTF_EXCHANGE_ADDRESS,
+    ].sort()
   );
 });
 
@@ -191,7 +192,8 @@ test("trading approval batch uses MaxUint256 for pUSD exchange approvals", () =>
   );
   const negRiskAdapterApproval = erc20Approvals.find(
     ({ token, decoded }) =>
-      token === PUSD_ADDRESS && decoded.args[0] === NEG_RISK_ADAPTER_ADDRESS
+      token === PUSD_ADDRESS &&
+      decoded.args[0] === NEG_RISK_CTF_COLLATERAL_ADAPTER_ADDRESS
   );
   const usdcOnrampApproval = erc20Approvals.find(
     ({ token, decoded }) =>

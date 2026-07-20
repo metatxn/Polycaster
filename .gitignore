@@ -25,6 +25,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .cursor/
+.codex/
+.superpowers/
 
 # local env files
 .env
@@ -86,3 +88,6 @@ apps/web/.design-sync-entry.tsx
 ds-bundle/
 .design-sync/
 .design*
+
+# local video production spec (not for the repo)
+docs/onboarding-video-spec.md

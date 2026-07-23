@@ -1,0 +1,35 @@
+{
+  "name": "@knoww/video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts KnowwOnboarding out/knoww-onboarding.mp4",
+    "render:vertical": "remotion render src/index.ts KnowwOnboardingVertical out/knoww-onboarding-9x16.mp4",
+    "render:square": "remotion render src/index.ts KnowwOnboardingSquare out/knoww-onboarding-1x1.mp4",
+    "still": "remotion still src/index.ts",
+    "upgrade": "remotion upgrade",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/fraunces": "^5.2.5",
+    "@fontsource/jetbrains-mono": "^5.2.5",
+    "@fontsource/plus-jakarta-sans": "^5.2.5",
+    "@remotion/cli": "4.0.489",
+    "@remotion/fonts": "4.0.489",
+    "@remotion/shapes": "4.0.489",
+    "@remotion/tailwind-v4": "4.0.489",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "remotion": "4.0.489",
+    "tailwindcss": "4.3.2"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "typescript": "catalog:"
+  }
+}

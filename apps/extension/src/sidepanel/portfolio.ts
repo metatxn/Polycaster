@@ -1783,7 +1783,13 @@ export function createPortfolioSidepanel(
                 ? `<button type="button" class="knoww-portfolio-position-action" data-portfolio-position-sell-cancel data-position-id="${escapeHtml(position.id)}">Cancel</button>`
                 : `<button type="button" class="knoww-portfolio-position-action" data-portfolio-position-view data-position-id="${escapeHtml(position.id)}" ${url ? "" : "disabled"}>View</button>`
             }
-            <button type="button" class="knoww-portfolio-position-action danger ${confirming ? "is-confirming" : ""}" ${confirming ? "data-portfolio-position-sell-confirm" : "data-portfolio-position-sell"} data-position-id="${escapeHtml(position.id)}" ${selling ? "disabled" : ""}>Sell Position</button>
+            ${
+              // Selling routes through the store-gated trading pipeline; the
+              // read-only store portfolio must not offer the affordance.
+              __STORE_BUILD__
+                ? ""
+                : `<button type="button" class="knoww-portfolio-position-action danger ${confirming ? "is-confirming" : ""}" ${confirming ? "data-portfolio-position-sell-confirm" : "data-portfolio-position-sell"} data-position-id="${escapeHtml(position.id)}" ${selling ? "disabled" : ""}>Sell Position</button>`
+            }
             <button type="button" class="knoww-portfolio-position-action icon" data-portfolio-position-close data-position-id="${escapeHtml(position.id)}">X</button>
           </div>
           ${
@@ -1947,7 +1953,11 @@ export function createPortfolioSidepanel(
               )}</span>
             </div>
           ${linkClose}
-          <button
+          ${
+            // Order cancellation is a trading action the store build strips.
+            __STORE_BUILD__
+              ? ""
+              : `<button
             type="button"
             class="knoww-portfolio-cancel"
             data-cancel-order
@@ -1956,7 +1966,8 @@ export function createPortfolioSidepanel(
             aria-label="Cancel order"
           >
             <span data-cancel-label>Cancel</span>
-          </button>
+          </button>`
+          }
         </div>
       `;
       })
@@ -2050,6 +2061,18 @@ export function createPortfolioSidepanel(
     data: PortfolioData,
     options: { stale?: boolean } = {}
   ): string {
+    if (__STORE_BUILD__) {
+      // Store-compliant build: a connected wallet shows read-only balance,
+      // positions, and trading history only. No deposit/withdraw actions and
+      // no trading-enablement setup surface (approvals / CLOB key derivation /
+      // vault deployment) — those are stripped to match the background build.
+      // See docs/chrome-prediction-market-ban-assessment.md.
+      return `
+    ${options.stale ? renderPortfolioStaleNotice() : ""}
+    ${renderPortfolioSummary(data)}
+    ${renderPortfolioTable(data)}
+  `;
+    }
     const setupSurface = setupUi.renderSurface(data);
     const wizardExpanded = setupSurface.mode === "wizard";
     return `
@@ -2096,6 +2119,11 @@ export function createPortfolioSidepanel(
 
   async function loadPortfolio(force = false): Promise<void> {
     if (portfolioLoaded && !force) return;
+    // A funding flow owns the portfolio container while it's open: every caller
+    // (view switches, credential updates, refresh timers) funnels through this
+    // render, and replacing the container's HTML here would wipe the flow's
+    // screen. The flow's own teardown reloads with fresh data on close.
+    if (fundingUi.isOpen()) return;
     const container = root?.querySelector<HTMLElement>(
       "[data-sidepanel-portfolio]"
     );

@@ -36,14 +36,29 @@ function readHostsFile() {
   );
 }
 
-function buildHostPermissions(hostsSource, devMode) {
+// Endpoints that only exist to place orders or move funds. The store-
+// compliant build drops these from host_permissions so the manifest cannot
+// reach any real-money trading surface — read-only market/portfolio data
+// (gamma-api, data-api, user-pnl-api, polygon RPC) and wallet-connect are
+// kept. Keep in sync with the background write-route strip.
+const TRADING_ONLY_HOST_PERMISSIONS = new Set([
+  "https://clob.polymarket.com/*",
+  "https://relayer-v2.polymarket.com/*",
+  "https://bridge.polymarket.com/*",
+]);
+
+function buildHostPermissions(hostsSource, devMode, storeBuild) {
   const sitePatterns = extractStringArray(
     hostsSource,
     "SUPPORTED_MATCH_PATTERNS"
   );
   const apiPatterns = extractStringArray(hostsSource, "API_HOST_PERMISSIONS");
   const extra = devMode ? ["http://localhost/*"] : [];
-  const unique = [...new Set([...sitePatterns, ...apiPatterns, ...extra])];
+  const merged = [...sitePatterns, ...apiPatterns, ...extra];
+  const filtered = storeBuild
+    ? merged.filter((pattern) => !TRADING_ONLY_HOST_PERMISSIONS.has(pattern))
+    : merged;
+  const unique = [...new Set(filtered)];
   unique.sort();
   return unique;
 }
@@ -215,6 +230,12 @@ function createResolveConfig() {
 module.exports = (_env, argv) => {
   const isProduction = argv.mode === "production";
   const devMode = isProduction ? false : process.env.DEV_MODE !== "false";
+  // Chrome Web Store–compliant build: strips all real-money trading and
+  // on-chain money-movement capability so the shipped ZIP only surfaces
+  // markets and shows read-only portfolio data. Enforced by
+  // scripts/assert-production-bundle.mjs in store mode.
+  // See docs/chrome-prediction-market-ban-assessment.md.
+  const storeBuild = process.env.STORE_BUILD === "true";
 
   const classicConfig = {
     name: "classic",
@@ -295,6 +316,7 @@ module.exports = (_env, argv) => {
       },
       new webpack.DefinePlugin({
         __DEV_MODE__: JSON.stringify(devMode),
+        __STORE_BUILD__: JSON.stringify(storeBuild),
         "process.env.NODE_DEBUG": JSON.stringify(""),
         "process.env.NODE_ENV": JSON.stringify(
           isProduction ? "production" : "development"
@@ -328,11 +350,30 @@ module.exports = (_env, argv) => {
                 const hostsSource = readHostsFile();
                 manifest.host_permissions = buildHostPermissions(
                   hostsSource,
-                  devMode
+                  devMode,
+                  storeBuild
                 );
                 if (manifest.web_accessible_resources?.[0]?.matches) {
                   manifest.web_accessible_resources[0].matches =
                     buildWarMatches(hostsSource);
+                }
+                if (storeBuild) {
+                  // Drop the "prediction market" framing that flags CWS
+                  // review; the store build surfaces relevant markets and
+                  // shows read-only portfolio data, it does not trade.
+                  manifest.name = "Knoww — Markets for what you're reading";
+                  manifest.description =
+                    "Surface relevant prediction markets for the posts and articles you browse.";
+                  // The store build ships no in-page trading panel, so the
+                  // lazy trading chunk is never emitted or referenced; the
+                  // wallet-only chunk replaces it so the portfolio sidepanel
+                  // can still discover, pair, and authenticate wallets.
+                  if (manifest.web_accessible_resources?.[0]?.resources) {
+                    manifest.web_accessible_resources[0].resources =
+                      manifest.web_accessible_resources[0].resources
+                        .filter((resource) => resource !== "content-trading.js")
+                        .concat("content-wallet.js");
+                  }
                 }
                 return `${JSON.stringify(manifest, null, 2)}\n`;
               },
@@ -389,7 +430,16 @@ module.exports = (_env, argv) => {
         `./src/content/platforms/${entry.file}.ts`,
       ])
     ),
-    "content-trading": "./src/content/trading/trading-entry.ts",
+    // The store-compliant build ships no in-page trading panel, so the
+    // content-trading chunk (order entry, deposit, split/merge) is not
+    // emitted at all. It ships a wallet-only chunk instead (discovery,
+    // WalletConnect pairing, session auth) so the portfolio sidepanel still
+    // works; the loader picks the asset via __STORE_BUILD__. The full build
+    // keeps everything in content-trading, so the wallet chunk is not
+    // emitted there (avoids double-shipping the WalletConnect payload).
+    ...(storeBuild
+      ? { "content-wallet": "./src/content/trading/wallet-entry.ts" }
+      : { "content-trading": "./src/content/trading/trading-entry.ts" }),
   };
 
   const esmConfig = {
@@ -416,6 +466,7 @@ module.exports = (_env, argv) => {
       ),
       new webpack.DefinePlugin({
         __DEV_MODE__: JSON.stringify(devMode),
+        __STORE_BUILD__: JSON.stringify(storeBuild),
         "process.env.NODE_DEBUG": JSON.stringify(""),
         "process.env.NODE_ENV": JSON.stringify(
           isProduction ? "production" : "development"

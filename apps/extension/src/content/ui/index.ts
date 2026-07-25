@@ -26,12 +26,18 @@ import {
 } from "./notifications";
 import { createPortfolioMessageDispatcher } from "./portfolio-message-dispatcher";
 
-configureCardTradingRuntimePort({
-  load: loadTradingRuntime,
-  getLoaded: getLoadedRuntime,
-  showError: showScrollToast,
-});
-configureStreamTradingRuntimePort({ load: loadTradingRuntime });
+// The store-compliant build ships no in-page trading panel: leaving the
+// runtime ports unconfigured means the content script never imports the lazy
+// `content-trading.js` chunk (which is not emitted in that build). Outcome
+// clicks deep-link to knoww.app instead (see cards.ts openTradingPanel).
+if (!__STORE_BUILD__) {
+  configureCardTradingRuntimePort({
+    load: loadTradingRuntime,
+    getLoaded: getLoadedRuntime,
+    showError: showScrollToast,
+  });
+  configureStreamTradingRuntimePort({ load: loadTradingRuntime });
+}
 const portfolioMessageDispatcher = createPortfolioMessageDispatcher();
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {

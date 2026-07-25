@@ -11,6 +11,7 @@ import { escapeSelectorValue } from "../utils";
 import {
   applyPlatformStyleVariables,
   buildKalshiUrl,
+  buildKnowwUrl,
   buildMarketUrl,
   getMarketEmoji,
   getSafeRuntimeUrl,
@@ -1524,10 +1525,18 @@ export function createNotificationItem(
     pill.appendChild(chev);
     content.appendChild(pill);
 
-    item.appendChild(createStreamBetHost(market));
+    if (!__STORE_BUILD__) {
+      // The store build ships no trading runtime, so the bet host would sit
+      // on "Loading trading…" forever — skip it and deep-link instead.
+      item.appendChild(createStreamBetHost(market));
+    }
 
     item.setAttribute("aria-label", `Markets for ${market.title || "market"}`);
     item.onclick = (e) => {
+      if (__STORE_BUILD__) {
+        window.open(buildKnowwUrl(market), "_blank", "noopener,noreferrer");
+        return;
+      }
       // Don't toggle when interacting with the betting controls themselves.
       if ((e.target as Element).closest(".knoww-stream-bet")) return;
       const willExpand = !item.classList.contains("expanded");

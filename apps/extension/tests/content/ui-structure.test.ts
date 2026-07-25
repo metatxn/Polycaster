@@ -46,7 +46,7 @@ interface StaticImport {
 
 interface StaticDependency {
   kind: "dynamic-import" | "import" | "re-export" | "require";
-  runtimeUrlContract?: "content-trading" | "platform" | null;
+  runtimeUrlContract?: "runtime-chunk" | "platform" | null;
   specifier: string;
   webpackIgnoreExact?: boolean;
   typeOnly: boolean;
@@ -60,7 +60,7 @@ const FORBIDDEN_CORE_PACKAGES = [
   "viem",
 ] as const;
 const APPROVED_RUNTIME_URL_IMPORTS = new Map([
-  [join(CONTENT_ROOT, "trading-loader.ts"), "content-trading"],
+  [join(CONTENT_ROOT, "trading-loader.ts"), "runtime-chunk"],
   [join(CONTENT_ROOT, "platform-loader.ts"), "platform"],
 ]);
 
@@ -127,6 +127,49 @@ function staticDependencies(
 
   const dependencies: StaticDependency[] = [];
   const exactPlatformTemplate = ["`platforms/$", "{name}.js`"].join("");
+  const isExactChunkLiteral = (
+    expression: ts.Expression,
+    chunk: string
+  ): boolean => {
+    if (!ts.isStringLiteralLike(expression) || expression.text !== chunk) {
+      return false;
+    }
+    const raw = expression.getText(sourceFile);
+    return raw === `"${chunk}"` || raw === `'${chunk}'`;
+  };
+  const runtimeAssetDeclarations: ts.VariableDeclaration[] = [];
+  const collectRuntimeAssetDeclarations = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === "RUNTIME_ASSET"
+    ) {
+      runtimeAssetDeclarations.push(node);
+    }
+    ts.forEachChild(node, collectRuntimeAssetDeclarations);
+  };
+  collectRuntimeAssetDeclarations(sourceFile);
+  // The loader must declare RUNTIME_ASSET exactly once as the const
+  // __STORE_BUILD__ ternary between the two approved runtime chunks; any
+  // other shape (shadowing, extra declarations, different literals) keeps
+  // the dynamic import unapproved.
+  const runtimeAssetContractDeclared =
+    runtimeAssetDeclarations.length === 1 &&
+    (() => {
+      const [declaration] = runtimeAssetDeclarations;
+      const list = declaration.parent;
+      const initializer = declaration.initializer;
+      return (
+        ts.isVariableDeclarationList(list) &&
+        (list.flags & ts.NodeFlags.Const) !== 0 &&
+        initializer !== undefined &&
+        ts.isConditionalExpression(initializer) &&
+        ts.isIdentifier(initializer.condition) &&
+        initializer.condition.text === "__STORE_BUILD__" &&
+        isExactChunkLiteral(initializer.whenTrue, "content-wallet.js") &&
+        isExactChunkLiteral(initializer.whenFalse, "content-trading.js")
+      );
+    })();
   const runtimeUrlContract = (
     argument: ts.Expression | undefined
   ): StaticDependency["runtimeUrlContract"] => {
@@ -144,12 +187,12 @@ function staticDependencies(
       return null;
     }
     const asset = argument.arguments[0];
-    if (ts.isStringLiteralLike(asset)) {
-      const raw = asset.getText(sourceFile);
-      return asset.text === "content-trading.js" &&
-        (raw === '"content-trading.js"' || raw === "'content-trading.js'")
-        ? "content-trading"
-        : null;
+    if (
+      ts.isIdentifier(asset) &&
+      asset.text === "RUNTIME_ASSET" &&
+      runtimeAssetContractDeclared
+    ) {
+      return "runtime-chunk";
     }
     if (
       ts.isTemplateExpression(asset) &&

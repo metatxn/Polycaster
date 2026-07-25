@@ -5,8 +5,15 @@ export type ImportTradingEntry = () => Promise<{
   createTradingRuntime(): TradingRuntime;
 }>;
 
+// The store build ships the wallet-only chunk (discovery + WalletConnect +
+// session auth) in place of the full trading runtime; both export the same
+// createTradingRuntime contract.
+const RUNTIME_ASSET = __STORE_BUILD__
+  ? "content-wallet.js"
+  : "content-trading.js";
+
 const defaultImport: ImportTradingEntry = () =>
-  import(/* webpackIgnore: true */ chrome.runtime.getURL("content-trading.js"));
+  import(/* webpackIgnore: true */ chrome.runtime.getURL(RUNTIME_ASSET));
 
 let inflight: Promise<TradingRuntime> | null = null;
 let loaded: TradingRuntime | null = null;

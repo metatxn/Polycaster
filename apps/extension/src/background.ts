@@ -6,7 +6,11 @@
 
 import { logInfo, logWarn } from "@knoww/logger";
 import type { QuoteResponse } from "@knoww/shared-types/bridge";
-import { fetchClobOrderBook } from "@knoww/shared-types/clob";
+// NOTE: `@knoww/shared-types/clob` is NOT imported statically. Its functions
+// dynamically import the unified Polymarket CLOB SDK (order placement, split /
+// merge), so a static import would pull that SDK chunk into the store build.
+// The order-book route below dynamic-imports it inside an `!__STORE_BUILD__`
+// branch. See docs/chrome-prediction-market-ban-assessment.md.
 import {
   POLYMARKET_API,
   RELAYER_API_HOST,
@@ -26,11 +30,13 @@ import {
   loadClobCredentials,
   storeClobCredentials,
 } from "./background/clob-credentials-store";
-import {
-  cancelClobOrder,
-  fetchPortfolioOpenOrders,
-  type PortfolioClobOpenOrder,
-} from "./background/clob-open-orders";
+// `./background/clob-open-orders` signs CLOB requests (order cancels), so it
+// must not ship in the store build. Routes below import it eagerly inside
+// `!__STORE_BUILD__` branches: DefinePlugin drops the module from the store
+// bundle, while `webpackMode: "eager"` inlines it into background.js for the
+// full build (classic MV3 service workers cannot load webpack script-tag
+// chunks at runtime).
+import type { PortfolioClobOpenOrder } from "./background/clob-open-orders";
 import {
   checkAuthorizedSender,
   checkCredsKey,
@@ -47,16 +53,17 @@ import {
 } from "./background/extension-session";
 import { createPortfolioFundAttemptStore } from "./background/portfolio-fund-attempts";
 import { createPortfolioFundIdempotencyCoordinator } from "./background/portfolio-fund-idempotency";
-import {
-  executePortfolioDeposit,
-  executePortfolioWithdraw,
-  getPortfolioBridgeAssets,
-  getPortfolioDepositMax,
-  getPortfolioWalletTokens,
-  getPortfolioWithdrawQuote,
-  getPortfolioWithdrawStatus,
-} from "./background/portfolio-funds";
+// `./background/portfolio-funds` is the only on-chain money-movement module
+// (it pulls in bridge-signer + relayer-client + viem wallet clients). It is
+// NOT imported statically: the store-compliant build must not ship it. Every
+// deposit/withdraw route dynamic-imports it inside an `if (!__STORE_BUILD__)`
+// branch so webpack's DefinePlugin drops the module from the store build.
+// Those imports use `webpackMode: "eager"` — the classic MV3 service worker
+// cannot load webpack's script-tag async chunks at runtime, so the module is
+// inlined into background.js for the full build instead of split out.
+// See docs/chrome-prediction-market-ban-assessment.md.
 import { initBridgeWallet } from "./background/signing-state";
+import { handleStorePortfolioRead } from "./background/store-portfolio-reads";
 import {
   extractDerivedCredentials,
   tradingOpNeedsCredentials,
@@ -549,6 +556,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // ── Build mode (injected by webpack DefinePlugin, typed in env.d.ts) ──
+
+// Response returned by trading / money-movement message routes in the
+// store-compliant build, where that capability is stripped from the bundle.
+const STORE_TRADING_DISABLED_MESSAGE = "Trading is unavailable in this build.";
+const STORE_TRADING_DISABLED_RESPONSE: BackgroundResponse = {
+  ok: false,
+  error: STORE_TRADING_DISABLED_MESSAGE,
+};
 
 // ── Session storage stays TRUSTED_CONTEXTS only (default).
 // Content scripts access credentials via message passing below. ──
@@ -1297,6 +1312,10 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_ENABLE_PORTFOLIO_TRADING" &&
       typeof msg.address === "string"
     ) {
+      if (__STORE_BUILD__) {
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       forwardToPortfolioSigningTab(msg, sender, sendResponse, {
         type: "KNOWW_ENABLE_PORTFOLIO_TRADING",
         address: msg.address,
@@ -1308,6 +1327,10 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_APPROVE_PORTFOLIO_TRADING" &&
       typeof msg.address === "string"
     ) {
+      if (__STORE_BUILD__) {
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       const approvalAmount = (msg as { approvalAmount?: unknown })
         .approvalAmount;
       forwardToPortfolioSigningTab(msg, sender, sendResponse, {
@@ -1323,6 +1346,16 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_GET_PORTFOLIO_OPEN_ORDERS" &&
       typeof msg.address === "string"
     ) {
+      if (__STORE_BUILD__) {
+        // Open orders are fetched with signed CLOB requests the store build
+        // cannot make (module and host permission are both stripped); an empty
+        // list keeps the read-only portfolio rendering cleanly.
+        sendResponse({
+          ok: true,
+          data: { orders: [], count: 0 },
+        } as BackgroundResponse);
+        return true;
+      }
       const address = msg.address;
       void (async () => {
         const credentials = await loadClobCredentials(address);
@@ -1334,6 +1367,9 @@ chrome.runtime.onMessage.addListener(
           return;
         }
 
+        const { fetchPortfolioOpenOrders } = await import(
+          /* webpackMode: "eager" */ "./background/clob-open-orders"
+        );
         const orders: PortfolioClobOpenOrder[] = await fetchPortfolioOpenOrders(
           {
             address,
@@ -1355,6 +1391,10 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_SELL_PORTFOLIO_POSITION") {
+      if (__STORE_BUILD__) {
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       if (
         typeof msg.address !== "string" ||
         typeof msg.proxyAddress !== "string" ||
@@ -1409,6 +1449,10 @@ chrome.runtime.onMessage.addListener(
       typeof msg.address === "string" &&
       typeof msg.orderId === "string"
     ) {
+      if (__STORE_BUILD__) {
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       const address = msg.address;
       const orderId = msg.orderId;
       void (async () => {
@@ -1421,6 +1465,9 @@ chrome.runtime.onMessage.addListener(
           return;
         }
 
+        const { cancelClobOrder } = await import(
+          /* webpackMode: "eager" */ "./background/clob-open-orders"
+        );
         await cancelClobOrder({ address, credentials, orderId });
         sendResponse({ ok: true, data: { orderId } } as BackgroundResponse);
       })().catch((error) => {
@@ -1433,16 +1480,21 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_PORTFOLIO_BRIDGE_ASSETS") {
-      void getPortfolioBridgeAssets()
-        .then((assets) =>
-          sendResponse({ ok: true, data: { assets } } as BackgroundResponse)
-        )
-        .catch((error) => {
-          sendResponse({
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          } as BackgroundResponse);
-        });
+      if (!__STORE_BUILD__) {
+        void import(/* webpackMode: "eager" */ "./background/portfolio-funds")
+          .then(({ getPortfolioBridgeAssets }) => getPortfolioBridgeAssets())
+          .then((assets) =>
+            sendResponse({ ok: true, data: { assets } } as BackgroundResponse)
+          )
+          .catch((error) => {
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            } as BackgroundResponse);
+          });
+        return true;
+      }
+      sendResponse(STORE_TRADING_DISABLED_RESPONSE);
       return true;
     }
 
@@ -1450,14 +1502,24 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_PORTFOLIO_WALLET_TOKENS" &&
       typeof msg.address === "string"
     ) {
-      void getPortfolioWalletTokens(msg.address)
-        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
-        .catch((error) => {
-          sendResponse({
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          } as BackgroundResponse);
-        });
+      if (!__STORE_BUILD__) {
+        const walletAddress = msg.address;
+        void import(/* webpackMode: "eager" */ "./background/portfolio-funds")
+          .then(({ getPortfolioWalletTokens }) =>
+            getPortfolioWalletTokens(walletAddress)
+          )
+          .then((data) =>
+            sendResponse({ ok: true, data } as BackgroundResponse)
+          )
+          .catch((error) => {
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            } as BackgroundResponse);
+          });
+        return true;
+      }
+      sendResponse(STORE_TRADING_DISABLED_RESPONSE);
       return true;
     }
 
@@ -1466,14 +1528,23 @@ chrome.runtime.onMessage.addListener(
       typeof msg.address === "string"
     ) {
       const eoaAddress = msg.address;
-      void getPortfolioDepositMax(eoaAddress)
-        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
-        .catch((error) => {
-          sendResponse({
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          } as BackgroundResponse);
-        });
+      if (!__STORE_BUILD__) {
+        void import(/* webpackMode: "eager" */ "./background/portfolio-funds")
+          .then(({ getPortfolioDepositMax }) =>
+            getPortfolioDepositMax(eoaAddress)
+          )
+          .then((data) =>
+            sendResponse({ ok: true, data } as BackgroundResponse)
+          )
+          .catch((error) => {
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            } as BackgroundResponse);
+          });
+        return true;
+      }
+      sendResponse(STORE_TRADING_DISABLED_RESPONSE);
       return true;
     }
 
@@ -1482,32 +1553,42 @@ chrome.runtime.onMessage.addListener(
       typeof msg.amount === "string" &&
       typeof msg.destination === "string"
     ) {
-      logInfo("portfolio.withdraw.message.quote", {
-        amount: msg.amount,
-        recipientAddress: msg.destination,
-        chainKey: msg.chainKey,
-        tokenId: msg.tokenId,
-      });
-      void getPortfolioWithdrawQuote({
-        amount: msg.amount,
-        destination: msg.destination,
-        chainKey: msg.chainKey,
-        tokenId: msg.tokenId,
-      })
-        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
-        .catch((error) => {
-          logWarn("portfolio.withdraw.message.quote_failed", {
-            error,
-            amount: msg.amount,
-            recipientAddress: msg.destination,
-            chainKey: msg.chainKey,
-            tokenId: msg.tokenId,
-          });
-          sendResponse({
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          } as BackgroundResponse);
+      if (!__STORE_BUILD__) {
+        logInfo("portfolio.withdraw.message.quote", {
+          amount: msg.amount,
+          recipientAddress: msg.destination,
+          chainKey: msg.chainKey,
+          tokenId: msg.tokenId,
         });
+        const quoteRequest = {
+          amount: msg.amount,
+          destination: msg.destination,
+          chainKey: msg.chainKey,
+          tokenId: msg.tokenId,
+        };
+        void import(/* webpackMode: "eager" */ "./background/portfolio-funds")
+          .then(({ getPortfolioWithdrawQuote }) =>
+            getPortfolioWithdrawQuote(quoteRequest)
+          )
+          .then((data) =>
+            sendResponse({ ok: true, data } as BackgroundResponse)
+          )
+          .catch((error) => {
+            logWarn("portfolio.withdraw.message.quote_failed", {
+              error,
+              amount: quoteRequest.amount,
+              recipientAddress: quoteRequest.destination,
+              chainKey: quoteRequest.chainKey,
+              tokenId: quoteRequest.tokenId,
+            });
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            } as BackgroundResponse);
+          });
+        return true;
+      }
+      sendResponse(STORE_TRADING_DISABLED_RESPONSE);
       return true;
     }
 
@@ -1515,18 +1596,32 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_PORTFOLIO_WITHDRAW_STATUS" &&
       typeof msg.bridgeAddress === "string"
     ) {
-      void getPortfolioWithdrawStatus(msg.bridgeAddress)
-        .then((data) => sendResponse({ ok: true, data } as BackgroundResponse))
-        .catch((error) => {
-          sendResponse({
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          } as BackgroundResponse);
-        });
+      if (!__STORE_BUILD__) {
+        const bridgeAddress = msg.bridgeAddress;
+        void import(/* webpackMode: "eager" */ "./background/portfolio-funds")
+          .then(({ getPortfolioWithdrawStatus }) =>
+            getPortfolioWithdrawStatus(bridgeAddress)
+          )
+          .then((data) =>
+            sendResponse({ ok: true, data } as BackgroundResponse)
+          )
+          .catch((error) => {
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            } as BackgroundResponse);
+          });
+        return true;
+      }
+      sendResponse(STORE_TRADING_DISABLED_RESPONSE);
       return true;
     }
 
     if (msg?.type === "KNOWW_PORTFOLIO_FUND_BEGIN_ATTEMPT") {
+      if (__STORE_BUILD__) {
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       if (
         (msg.action !== "deposit" && msg.action !== "withdraw") ||
         typeof msg.address !== "string" ||
@@ -1575,6 +1670,10 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg?.type === "KNOWW_PORTFOLIO_FUND_COMPLETE_ATTEMPT") {
+      if (__STORE_BUILD__) {
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       if (
         typeof msg.attemptId !== "string" ||
         !isPortfolioFundIdempotencyKey(msg.idempotencyKey) ||
@@ -1604,6 +1703,10 @@ chrome.runtime.onMessage.addListener(
       msg?.type === "KNOWW_PORTFOLIO_DEPOSIT" ||
       msg?.type === "KNOWW_PORTFOLIO_WITHDRAW"
     ) {
+      if (__STORE_BUILD__) {
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       if (
         typeof msg.address !== "string" ||
         typeof msg.amount !== "string" ||
@@ -1681,30 +1784,40 @@ chrome.runtime.onMessage.addListener(
             error instanceof Error &&
             error.message === EXTENSION_AUTH_REQUIRED_ERROR,
           execute: async ({ markMoneyMovementStarted }) => {
-            if (isWithdraw) {
-              return executePortfolioWithdraw({
+            // The dynamic import stays inside this `!__STORE_BUILD__` branch so
+            // webpack drops portfolio-funds (and its bridge-signer /
+            // relayer-client / viem chain) from the store-compliant build.
+            if (!__STORE_BUILD__) {
+              const { executePortfolioDeposit, executePortfolioWithdraw } =
+                await import(
+                  /* webpackMode: "eager" */ "./background/portfolio-funds"
+                );
+              if (isWithdraw) {
+                return executePortfolioWithdraw({
+                  eoaAddress,
+                  walletMode,
+                  amount,
+                  destination: destination ?? "",
+                  chainKey,
+                  tokenId,
+                  quote: withdrawQuote,
+                  tabId,
+                  onBeforeMoneyMovement: markMoneyMovementStarted,
+                });
+              }
+              return executePortfolioDeposit({
                 eoaAddress,
                 walletMode,
                 amount,
-                destination: destination ?? "",
-                chainKey,
-                tokenId,
-                quote: withdrawQuote,
+                chainId,
+                tokenSymbol,
+                tokenAddress,
+                tokenDecimals,
                 tabId,
                 onBeforeMoneyMovement: markMoneyMovementStarted,
               });
             }
-            return executePortfolioDeposit({
-              eoaAddress,
-              walletMode,
-              amount,
-              chainId,
-              tokenSymbol,
-              tokenAddress,
-              tokenDecimals,
-              tabId,
-              onBeforeMoneyMovement: markMoneyMovementStarted,
-            });
+            throw new Error(STORE_TRADING_DISABLED_MESSAGE);
           },
         });
         run
@@ -2013,27 +2126,44 @@ chrome.runtime.onMessage.addListener(
       typeof msg.tokenId === "string"
     ) {
       const { tokenId } = msg;
-      (async () => {
-        try {
-          const data = await fetchClobOrderBook(tokenId, {
-            host: POLYMARKET_API.CLOB.BASE,
-            // TODO: Move this back to the SDK path once unified SDK public reads
-            // support extension order-book fetching reliably.
-            useUnifiedSdk: false,
-          });
-          sendResponse({ ok: true, data } as BackgroundResponse);
-        } catch (e) {
-          sendResponse({
-            ok: false,
-            error: e instanceof Error ? e.message : String(e),
-          } as BackgroundResponse);
-        }
-      })();
+      // The order book is only used by the in-page trading panel, which the
+      // store build does not ship. Keeping the `@knoww/shared-types/clob`
+      // import inside this dead-in-store branch prevents the unified CLOB SDK
+      // chunk from being emitted into the store bundle.
+      if (!__STORE_BUILD__) {
+        (async () => {
+          try {
+            const { fetchClobOrderBook } = await import(
+              /* webpackMode: "eager" */ "@knoww/shared-types/clob"
+            );
+            const data = await fetchClobOrderBook(tokenId, {
+              host: POLYMARKET_API.CLOB.BASE,
+              // TODO: Move this back to the SDK path once unified SDK public
+              // reads support extension order-book fetching reliably.
+              useUnifiedSdk: false,
+            });
+            sendResponse({ ok: true, data } as BackgroundResponse);
+          } catch (e) {
+            sendResponse({
+              ok: false,
+              error: e instanceof Error ? e.message : String(e),
+            } as BackgroundResponse);
+          }
+        })();
+        return true;
+      }
+      sendResponse(STORE_TRADING_DISABLED_RESPONSE);
       return true;
     }
 
     // Pre-warm offscreen document so it's ready when the user places a trade
     if (msg?.type === "trading:prewarm-offscreen") {
+      if (__STORE_BUILD__) {
+        // Nothing to warm: the store build ships no offscreen trading runtime.
+        // Prewarm is fire-and-forget, so answer ok like the full build does.
+        sendResponse({ ok: true, data: null } as BackgroundResponse);
+        return true;
+      }
       void ensureOffscreen()
         .then(() =>
           sendOffscreenMessage(
@@ -2083,6 +2213,19 @@ chrome.runtime.onMessage.addListener(
 
     // Trading messages — forward to offscreen document
     if (isTradingMessage(message)) {
+      if (__STORE_BUILD__) {
+        // The store offscreen document has no trading handler; forwarding
+        // would hang the sender's response callback. The two read-only
+        // messages the portfolio sidepanel needs (proxy-address derivation
+        // and the cash-balance read) are answered inline in the SW; every
+        // other trading message fails fast, and its caller treats the error
+        // response as an empty value.
+        if (handleStorePortfolioRead(message, sendResponse)) {
+          return true;
+        }
+        sendResponse(STORE_TRADING_DISABLED_RESPONSE);
+        return true;
+      }
       forwardToOffscreen(message, sender, sendResponse);
       return true;
     }

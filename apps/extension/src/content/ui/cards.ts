@@ -50,6 +50,27 @@ async function openTradingPanel(
   const card = trigger.closest<HTMLElement>(".knoww-market-card");
   if (!card || !trigger.isConnected || !card.isConnected) return;
 
+  if (__STORE_BUILD__) {
+    // The Chrome Web Store–compliant build ships no in-page trading panel.
+    // Hand the user off to the knoww.app market page instead of loading the
+    // (absent) trading runtime. See docs/chrome-prediction-market-ban-assessment.md.
+    // Multi-outcome options are their own nested binary markets: link the
+    // option's conditionId with outcome "yes", not markets[0] with yes/no.
+    const url = isMultiOutcome
+      ? buildKnowwUrlForOutcome(market, {
+          name: outcomeName,
+          price,
+          marketIndex: marketIndex ?? 0,
+          conditionId:
+            typeof marketIndex === "number"
+              ? market.markets?.[marketIndex]?.conditionId
+              : undefined,
+        } satisfies MultiOutcomeItem)
+      : buildKnowwUrl(market, outcomeIndex, "BUY");
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+
   activatingTradingTriggers.add(trigger);
   const port = tradingRuntimePort();
   const previousStyle = trigger.getAttribute("style");
@@ -95,7 +116,9 @@ async function openTradingPanel(
 }
 
 export function hideLoadedTradingPanel(): void {
-  tradingRuntimePort().getLoaded()?.hideTradingPanel();
+  // No-op when the port is unconfigured (store build, or a dismiss/minimize
+  // that races ahead of configuration) — there is no loaded panel to hide.
+  cardTradingRuntimePort?.getLoaded()?.hideTradingPanel();
 }
 
 export async function activateCardTradingIntentForTest(

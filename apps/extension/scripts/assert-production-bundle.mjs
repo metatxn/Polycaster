@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractStaticEsmExportNames } from "./lib/esm-contract.mjs";
@@ -21,6 +21,85 @@ const routingFixturesPath = path.join(
 const supportedHostsPath = path.join(extensionDir, "src/supported-hosts.ts");
 const classicStatsPath = path.join(distDir, ".stats/classic.json");
 const esmStatsPath = path.join(distDir, ".stats/esm.json");
+
+// Chrome Web Store–compliant build. Must ship no real-money trading or
+// on-chain money-movement code. Keep in sync with webpack STORE_BUILD gating.
+// See docs/chrome-prediction-market-ban-assessment.md.
+const STORE_BUILD = process.env.STORE_BUILD === "true";
+
+// Source-module path fragments that constitute genuine trading capability:
+// order placement, on-chain money movement, and wallet signing. In a store
+// build NONE of these may appear anywhere in the emitted module graph (any
+// entry chunk or lazily-split async chunk).
+const STORE_FORBIDDEN_MODULE_MARKERS = [
+  "src/background/portfolio-funds",
+  "src/background/bridge-signer",
+  "src/background/relayer-client",
+  "src/background/unified-clob-client",
+  "src/background/trading-handler",
+  "src/background/clob-open-orders",
+  "src/offscreen/trading-runtime",
+  // The unified Polymarket CLOB SDK (order placement / split / merge). Reached
+  // via the dynamic imports in packages/shared-types/src/clob.ts.
+  "packages/shared-types/src/polymarket-unified",
+];
+
+// Everything under src/content/trading/ is forbidden in the store graph by
+// default; only these capability-free state/util helpers, which the read-only
+// sidepanel legitimately shares, are allowed through. A new file in that
+// directory therefore fails the store build until it is explicitly reviewed
+// and listed here (deny-by-default, not allow-by-omission).
+const STORE_ALLOWED_TRADING_UTIL_FILES = new Set([
+  "src/content/trading/backoff.ts",
+  "src/content/trading/setup-gates.ts",
+  "src/content/trading/portfolio-approval.ts",
+  "src/content/trading/portfolio-setup-view.ts",
+  "src/content/trading/setup-flow.ts",
+  "src/content/trading/setup-flow-storage.ts",
+  // The wallet-only rail shipped as content-wallet.js: EIP-6963 discovery,
+  // WalletConnect pairing, and knoww.app session auth (personal_sign only).
+  // Reviewed capability-free — no order construction, credential derivation,
+  // approvals, or on-chain money movement.
+  "src/content/trading/wallet-entry.ts",
+  "src/content/trading/bridge.ts",
+  "src/content/trading/walletconnect-bridge.ts",
+  "src/content/trading/walletconnect-qr.ts",
+  "src/content/trading/extension-session.ts",
+]);
+
+function storeForbiddenTradingDirModule(normalizedIdentifier) {
+  const match = normalizedIdentifier.match(/src\/content\/trading\/.*$/);
+  if (!match) return null;
+  // Strip webpack loader/query suffixes ("path.ts?abcd", "loader!path.ts").
+  const sourcePath = match[0].split("?")[0].split("!").pop();
+  return STORE_ALLOWED_TRADING_UTIL_FILES.has(sourcePath) ? null : sourcePath;
+}
+
+// Endpoints dropped from host_permissions in the store build (order placement
+// + on-chain money movement). Keep in sync with webpack.config.cjs.
+const STORE_FORBIDDEN_HOST_PERMISSIONS = [
+  "https://clob.polymarket.com/*",
+  "https://relayer-v2.polymarket.com/*",
+  "https://bridge.polymarket.com/*",
+];
+
+function collectAllModuleIdentifiers(statsJson, identifiers = new Set()) {
+  const visit = (module) => {
+    if (!module || typeof module !== "object") return;
+    for (const field of ["nameForCondition", "identifier", "name"]) {
+      if (typeof module[field] === "string" && module[field].length > 0) {
+        identifiers.add(module[field]);
+        break;
+      }
+    }
+    for (const nested of module.modules ?? []) visit(nested);
+  };
+  for (const module of statsJson?.modules ?? []) visit(module);
+  for (const chunk of statsJson?.chunks ?? []) {
+    for (const module of chunk?.modules ?? []) visit(module);
+  }
+  return identifiers;
+}
 
 // Task 10 production baseline measured 2026-07-11: 281,034 bytes.
 // Keep 10% headroom (ceil(281,034 * 1.10)) while preventing core regressions.
@@ -220,18 +299,36 @@ async function main() {
 
   const relativeFiles = files.map(relativeDistPath);
   const contentJavaScriptPath = path.join(distDir, "content.js");
-  const contentTradingPath = path.join(distDir, "content-trading.js");
+  // Each build emits exactly one runtime chunk: the full trading panel in the
+  // regular build, the wallet-only runtime (discovery + WalletConnect +
+  // session auth) in the store build. Both export the same
+  // createTradingRuntime contract; the other build's chunk must be absent.
+  const runtimeChunkEntry = STORE_BUILD ? "content-wallet" : "content-trading";
+  const runtimeChunkAsset = `${runtimeChunkEntry}.js`;
+  const absentRuntimeChunkAsset = STORE_BUILD
+    ? "content-trading.js"
+    : "content-wallet.js";
+  if (relativeFiles.includes(absentRuntimeChunkAsset)) {
+    failures.push(
+      STORE_BUILD
+        ? "store build must not emit content-trading.js (in-page trading panel)"
+        : "full build must not emit content-wallet.js (store-only wallet runtime)"
+    );
+  }
   try {
-    const contentTradingSource = await readFile(contentTradingPath, "utf8");
-    const exportNames = extractStaticEsmExportNames(contentTradingSource);
+    const runtimeChunkSource = await readFile(
+      path.join(distDir, runtimeChunkAsset),
+      "utf8"
+    );
+    const exportNames = extractStaticEsmExportNames(runtimeChunkSource);
     if (exportNames.length !== 1 || exportNames[0] !== "createTradingRuntime") {
       failures.push(
-        `content-trading.js static exports must be exactly ["createTradingRuntime"] (got ${JSON.stringify(exportNames)})`
+        `${runtimeChunkAsset} static exports must be exactly ["createTradingRuntime"] (got ${JSON.stringify(exportNames)})`
       );
     }
   } catch (error) {
     failures.push(
-      `content-trading.js static exports could not be parsed: ${
+      `${runtimeChunkAsset} static exports could not be parsed: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
@@ -256,8 +353,8 @@ async function main() {
   const expectedPlatformAssets = expectedPlatformEntries.map(
     (entryName) => `${entryName}.js`
   );
-  const expectedEsmEntries = [...expectedPlatformEntries, "content-trading"];
-  const expectedEsmAssets = [...expectedPlatformAssets, "content-trading.js"];
+  const expectedEsmEntries = [...expectedPlatformEntries, runtimeChunkEntry];
+  const expectedEsmAssets = [...expectedPlatformAssets, runtimeChunkAsset];
   const emittedPlatformAssets = relativeFiles.filter((relativePath) =>
     /^platforms\/[^/]+\.js$/.test(relativePath)
   );
@@ -273,9 +370,13 @@ async function main() {
     supportedHostsSource,
     "SUPPORTED_MATCH_PATTERNS"
   );
+  // The lazy-WAR contract asserts this build's runtime chunk (trading in the
+  // full build, wallet-only in the store build) is exposed exactly once by the
+  // same canonical owner as platforms/*.js.
   for (const failure of validateLazyWarContract(
     builtManifest.web_accessible_resources,
-    supportedMatchPatterns
+    supportedMatchPatterns,
+    runtimeChunkAsset
   )) {
     failures.push(`lazy WAR contract: ${failure}`);
   }
@@ -430,51 +531,157 @@ async function main() {
     );
   }
 
-  try {
-    const tradingModules = collectEntryModules(esmStats, "content-trading");
-    const requiredTradingPanelModules = [
-      "src/content/trading/panel/deposit-view.ts",
-      "src/content/trading/panel/format.ts",
-      "src/content/trading/panel/order-view.ts",
-      "src/content/trading/panel/panel-state.ts",
-      "src/content/trading/panel/positions-view.ts",
-      "src/content/trading/panel/setup-view.ts",
-    ];
-    const forbiddenTradingGraphMarkers = [
-      "/src/content/ui/index.ts",
-      "/src/content/trading-loader.ts",
-      "/src/content/platform-loader.ts",
-    ];
-    const normalizedTradingModules = [...tradingModules].map(
-      normalizeModulePath
-    );
-    for (const normalized of normalizedTradingModules) {
-      const marker = forbiddenTradingGraphMarkers.find((candidate) =>
-        normalized.includes(candidate)
+  if (STORE_BUILD) {
+    // Authoritative capability check: no trading / money-movement / signing
+    // source module may appear anywhere in the emitted graph — not in an entry
+    // chunk, not in a lazily-split async chunk. This is what makes the store
+    // ZIP genuinely compliant rather than merely UI-hidden.
+    const allModules = [
+      ...collectAllModuleIdentifiers(classicStats),
+      ...collectAllModuleIdentifiers(esmStats),
+    ].map(normalizeModulePath);
+    // Guard against a vacuous pass: if the stats walker returns almost
+    // nothing, the marker scan below would "pass" without inspecting the
+    // real module graph (stats format drift, empty stats file, etc.).
+    if (allModules.length < 50) {
+      failures.push(
+        `store module-graph scan collected only ${allModules.length} module identifiers — stats look wrong, refusing to certify the build`
       );
-      if (marker) {
+    }
+    for (const marker of STORE_FORBIDDEN_MODULE_MARKERS) {
+      const leaked = allModules.find((identifier) =>
+        identifier.includes(marker)
+      );
+      if (leaked) {
         failures.push(
-          `content-trading graph contains forbidden core module ${marker}: ${normalized}`
+          `store build leaks forbidden trading module "${marker}": ${leaked}`
         );
       }
     }
-    for (const requiredModule of requiredTradingPanelModules) {
-      if (
-        !normalizedTradingModules.some((identifier) =>
-          identifier.includes(requiredModule)
-        )
-      ) {
+    const leakedTradingDirModules = new Set();
+    for (const identifier of allModules) {
+      const forbidden = storeForbiddenTradingDirModule(identifier);
+      if (forbidden) leakedTradingDirModules.add(forbidden);
+    }
+    for (const forbidden of leakedTradingDirModules) {
+      failures.push(
+        `store build leaks src/content/trading module "${forbidden}" (not in the reviewed capability-free allowlist)`
+      );
+    }
+    const hostPermissions = Array.isArray(builtManifest.host_permissions)
+      ? builtManifest.host_permissions
+      : [];
+    for (const forbidden of STORE_FORBIDDEN_HOST_PERMISSIONS) {
+      if (hostPermissions.includes(forbidden)) {
         failures.push(
-          `content-trading graph is missing required panel module ${requiredModule}`
+          `store build manifest must not request trading host permission "${forbidden}"`
         );
       }
     }
-  } catch (error) {
-    failures.push(
-      `content-trading graph could not be collected: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
+    const warResources =
+      builtManifest.web_accessible_resources?.[0]?.resources ?? [];
+    if (warResources.includes("content-trading.js")) {
+      failures.push(
+        "store build manifest must not expose content-trading.js as a web-accessible resource"
+      );
+    }
+  }
+
+  if (STORE_BUILD) {
+    try {
+      const walletModules = [
+        ...collectEntryModules(esmStats, "content-wallet"),
+      ].map(normalizeModulePath);
+      // The wallet chunk must actually contain the wallet rail (a build that
+      // silently dropped it would strand the sidepanel with no wallets) and
+      // none of the core modules the loader/UI own.
+      const requiredWalletModules = [
+        "src/content/trading/wallet-entry.ts",
+        "src/content/trading/bridge.ts",
+        "src/content/trading/walletconnect-bridge.ts",
+        "src/content/trading/walletconnect-qr.ts",
+        "src/content/trading/extension-session.ts",
+      ];
+      const forbiddenWalletGraphMarkers = [
+        "/src/content/ui/index.ts",
+        "/src/content/trading-loader.ts",
+        "/src/content/platform-loader.ts",
+      ];
+      for (const normalized of walletModules) {
+        const marker = forbiddenWalletGraphMarkers.find((candidate) =>
+          normalized.includes(candidate)
+        );
+        if (marker) {
+          failures.push(
+            `content-wallet graph contains forbidden core module ${marker}: ${normalized}`
+          );
+        }
+      }
+      for (const requiredModule of requiredWalletModules) {
+        if (
+          !walletModules.some((identifier) =>
+            identifier.includes(requiredModule)
+          )
+        ) {
+          failures.push(
+            `content-wallet graph is missing required wallet module ${requiredModule}`
+          );
+        }
+      }
+    } catch (error) {
+      failures.push(
+        `content-wallet graph could not be collected: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  } else {
+    try {
+      const tradingModules = collectEntryModules(esmStats, "content-trading");
+      const requiredTradingPanelModules = [
+        "src/content/trading/panel/deposit-view.ts",
+        "src/content/trading/panel/format.ts",
+        "src/content/trading/panel/order-view.ts",
+        "src/content/trading/panel/panel-state.ts",
+        "src/content/trading/panel/positions-view.ts",
+        "src/content/trading/panel/setup-view.ts",
+      ];
+      const forbiddenTradingGraphMarkers = [
+        "/src/content/ui/index.ts",
+        "/src/content/trading-loader.ts",
+        "/src/content/platform-loader.ts",
+      ];
+      const normalizedTradingModules = [...tradingModules].map(
+        normalizeModulePath
+      );
+      for (const normalized of normalizedTradingModules) {
+        const marker = forbiddenTradingGraphMarkers.find((candidate) =>
+          normalized.includes(candidate)
+        );
+        if (marker) {
+          failures.push(
+            `content-trading graph contains forbidden core module ${marker}: ${normalized}`
+          );
+        }
+      }
+      for (const requiredModule of requiredTradingPanelModules) {
+        if (
+          !normalizedTradingModules.some((identifier) =>
+            identifier.includes(requiredModule)
+          )
+        ) {
+          failures.push(
+            `content-trading graph is missing required panel module ${requiredModule}`
+          );
+        }
+      }
+    } catch (error) {
+      failures.push(
+        `content-trading graph could not be collected: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   for (const requiredAsset of [
@@ -547,6 +754,17 @@ async function main() {
     );
     process.exitCode = 1;
     return;
+  }
+
+  // Variant marker consumed by the zip scripts so `zip:store` can only ever
+  // package a verified store build (and `zip` only a full build). Webpack's
+  // `clean: true` wipes it on every rebuild; it is (re)written only after all
+  // checks above pass, and the zip excludes dotfiles so it never ships.
+  const storeMarkerPath = path.join(distDir, ".store-build");
+  if (STORE_BUILD) {
+    await writeFile(storeMarkerPath, "");
+  } else {
+    await rm(storeMarkerPath, { force: true });
   }
 
   process.stdout.write(

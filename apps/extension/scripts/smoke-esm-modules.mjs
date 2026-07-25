@@ -405,23 +405,30 @@ function assertNoObservations(observations, label) {
   );
 }
 
+function filterRuntimeInstallObservations(observations) {
+  return {
+    windowAdds: observations.filter(
+      (entry) =>
+        entry.kind === "listener" &&
+        entry.target === "window" &&
+        entry.operation === "add" &&
+        entry.type === "message"
+    ),
+    chromeAdds: observations.filter(
+      (entry) => entry.kind === "chrome-listener" && entry.operation === "add"
+    ),
+    walletPosts: observations.filter(
+      (entry) =>
+        entry.kind === "post-message" &&
+        entry.message?.type === "KNOWW_LIST_WALLETS" &&
+        entry.targetOrigin === "https://smoke.invalid"
+    ),
+  };
+}
+
 function assertTradingFactoryInstall(observations, listenerSets) {
-  const windowAdds = observations.filter(
-    (entry) =>
-      entry.kind === "listener" &&
-      entry.target === "window" &&
-      entry.operation === "add" &&
-      entry.type === "message"
-  );
-  const chromeAdds = observations.filter(
-    (entry) => entry.kind === "chrome-listener" && entry.operation === "add"
-  );
-  const walletPosts = observations.filter(
-    (entry) =>
-      entry.kind === "post-message" &&
-      entry.message?.type === "KNOWW_LIST_WALLETS" &&
-      entry.targetOrigin === "https://smoke.invalid"
-  );
+  const { windowAdds, chromeAdds, walletPosts } =
+    filterRuntimeInstallObservations(observations);
   if (
     observations.length !== 3 ||
     windowAdds.length !== 1 ||
@@ -605,8 +612,51 @@ function assertTradingFactoryDispose(observations, listenerSets, installed) {
   }
 }
 
+// The store build's wallet-only runtime installs the page-bridge rail and
+// nothing else: one window "message" listener plus one wallet-discovery post.
+// A chrome listener or an account-subscription push would mean trading-service
+// wiring leaked into the wallet chunk.
+function assertWalletFactoryInstall(observations, listenerSets) {
+  const { windowAdds, chromeAdds, walletPosts } =
+    filterRuntimeInstallObservations(observations);
+  if (
+    observations.length !== 2 ||
+    windowAdds.length !== 1 ||
+    chromeAdds.length !== 0 ||
+    walletPosts.length !== 1 ||
+    listenerSets.window.get("message")?.size !== 1 ||
+    listenerSets.chrome.size !== 0
+  ) {
+    throw new Error(
+      `Wallet runtime factory lifecycle mismatch (expected one bridge window listener and one wallet discovery post; no chrome listener or other work):\n${describeObservations(observations)}`
+    );
+  }
+  return { windowCallback: windowAdds[0].callback };
+}
+
+function assertWalletFactoryDispose(observations, listenerSets, installed) {
+  const windowRemoves = observations.filter(
+    (entry) =>
+      entry.kind === "listener" &&
+      entry.target === "window" &&
+      entry.operation === "remove" &&
+      entry.type === "message"
+  );
+  if (
+    observations.length !== 1 ||
+    windowRemoves.length !== 1 ||
+    windowRemoves[0].callback !== installed.windowCallback ||
+    (listenerSets.window.get("message")?.size ?? 0) !== 0 ||
+    listenerSets.chrome.size !== 0
+  ) {
+    throw new Error(
+      `Wallet runtime disposal lifecycle mismatch (expected the exact installed bridge listener removed once and no listeners remaining):\n${describeObservations(observations)}`
+    );
+  }
+}
+
 async function runChild(mode, modulePath, expectedName) {
-  if (mode !== "adapter" && mode !== "trading") {
+  if (mode !== "adapter" && mode !== "trading" && mode !== "wallet") {
     throw new Error(`Unknown child smoke mode: ${String(mode)}`);
   }
   if (!modulePath || !path.isAbsolute(modulePath)) {
@@ -663,33 +713,58 @@ async function runChild(mode, modulePath, expectedName) {
       throw new Error("Trading runtime factory returned no disposable runtime");
     }
     await instrumentation.drainMicrotasks();
-    const installed = assertTradingFactoryInstall(
-      instrumentation.observations,
-      instrumentation.listenerSets
-    );
-    const accountSubscription =
-      assertTradingAccountSubscriptionInstall(functionArrayTracker);
-    await assertInstalledListenerRoles(
-      installed,
-      accountSubscription,
-      instrumentation
-    );
 
-    instrumentation.clear();
-    functionArrayTracker.beginDispose();
-    first.dispose();
-    first.dispose();
-    functionArrayTracker.idle();
-    await instrumentation.drainMicrotasks();
-    assertTradingFactoryDispose(
-      instrumentation.observations,
-      instrumentation.listenerSets,
-      installed
-    );
-    assertTradingAccountSubscriptionDispose(
-      functionArrayTracker,
-      accountSubscription
-    );
+    if (mode === "wallet") {
+      const installed = assertWalletFactoryInstall(
+        instrumentation.observations,
+        instrumentation.listenerSets
+      );
+      if (functionArrayTracker.additions.length !== 0) {
+        throw new Error(
+          `Wallet runtime must not install account subscriptions (got ${functionArrayTracker.additions.length})`
+        );
+      }
+
+      instrumentation.clear();
+      functionArrayTracker.beginDispose();
+      first.dispose();
+      first.dispose();
+      functionArrayTracker.idle();
+      await instrumentation.drainMicrotasks();
+      assertWalletFactoryDispose(
+        instrumentation.observations,
+        instrumentation.listenerSets,
+        installed
+      );
+    } else {
+      const installed = assertTradingFactoryInstall(
+        instrumentation.observations,
+        instrumentation.listenerSets
+      );
+      const accountSubscription =
+        assertTradingAccountSubscriptionInstall(functionArrayTracker);
+      await assertInstalledListenerRoles(
+        installed,
+        accountSubscription,
+        instrumentation
+      );
+
+      instrumentation.clear();
+      functionArrayTracker.beginDispose();
+      first.dispose();
+      first.dispose();
+      functionArrayTracker.idle();
+      await instrumentation.drainMicrotasks();
+      assertTradingFactoryDispose(
+        instrumentation.observations,
+        instrumentation.listenerSets,
+        installed
+      );
+      assertTradingAccountSubscriptionDispose(
+        functionArrayTracker,
+        accountSubscription
+      );
+    }
   } finally {
     functionArrayTracker.restore();
   }
@@ -863,6 +938,40 @@ async function runNegativeControls() {
       "Trading account subscription disposal mismatch"
     );
 
+    const walletChromeListenerPath = path.join(
+      directory,
+      "wallet-chrome-listener.mjs"
+    );
+    await writeFile(
+      walletChromeListenerPath,
+      `let active;\nexport function createTradingRuntime() {\n  if (active) return active;\n  const bridge = () => {}; const service = () => false;\n  window.addEventListener("message", bridge); chrome.runtime.onMessage.addListener(service);\n  window.postMessage({ type: "KNOWW_LIST_WALLETS" }, window.location.origin);\n  active = { dispose() { window.removeEventListener("message", bridge); chrome.runtime.onMessage.removeListener(service); } };\n  return active;\n}\n`,
+      "utf8"
+    );
+    assertRejectedControl(
+      "Wallet chrome listener",
+      await runIsolatedImport("wallet", walletChromeListenerPath, "", {
+        timeoutMs: controlTimeoutMs,
+      }),
+      "Wallet runtime factory lifecycle mismatch"
+    );
+
+    const walletMissingRemovalPath = path.join(
+      directory,
+      "wallet-missing-removal.mjs"
+    );
+    await writeFile(
+      walletMissingRemovalPath,
+      `let active;\nexport function createTradingRuntime() {\n  if (active) return active;\n  const bridge = () => {};\n  window.addEventListener("message", bridge);\n  window.postMessage({ type: "KNOWW_LIST_WALLETS" }, window.location.origin);\n  active = { dispose() {} };\n  return active;\n}\n`,
+      "utf8"
+    );
+    assertRejectedControl(
+      "Wallet missing removal",
+      await runIsolatedImport("wallet", walletMissingRemovalPath, "", {
+        timeoutMs: controlTimeoutMs,
+      }),
+      "Wallet runtime disposal lifecycle mismatch"
+    );
+
     const malformedNamespacePath = path.join(
       directory,
       "malformed-namespace.mjs"
@@ -909,11 +1018,17 @@ async function runParent() {
       failures.push(`${entry.name}: ${protocolError}`);
   }
 
-  const tradingPath = path.resolve(extensionRoot, "dist/content-trading.js");
-  const tradingResult = await runIsolatedImport("trading", tradingPath);
-  const tradingProtocolError = childProtocolError(tradingResult);
-  if (tradingProtocolError !== null) {
-    failures.push(`content-trading: ${tradingProtocolError}`);
+  // The store-compliant build replaces the trading panel with the wallet-only
+  // runtime (see docs/chrome-prediction-market-ban-assessment.md); smoke the
+  // runtime chunk this build actually emits under its matching lifecycle.
+  const storeBuild = process.env.STORE_BUILD === "true";
+  const runtimeChunk = storeBuild ? "content-wallet" : "content-trading";
+  const runtimeMode = storeBuild ? "wallet" : "trading";
+  const runtimePath = path.resolve(extensionRoot, `dist/${runtimeChunk}.js`);
+  const runtimeResult = await runIsolatedImport(runtimeMode, runtimePath);
+  const runtimeProtocolError = childProtocolError(runtimeResult);
+  if (runtimeProtocolError !== null) {
+    failures.push(`${runtimeChunk}: ${runtimeProtocolError}`);
   }
 
   if (failures.length > 0) {
@@ -922,7 +1037,7 @@ async function runParent() {
     );
   }
   process.stdout.write(
-    `ESM smoke passed: ${manifest.length} isolated platform modules + content-trading two-phase lifecycle; 9 controls rejected (4 protocol, 2 external lifecycle, 2 account-subscription lifecycle, 1 namespace).\n`
+    `ESM smoke passed: ${manifest.length} isolated platform modules + ${runtimeChunk} two-phase lifecycle; 11 controls rejected (4 protocol, 2 external lifecycle, 2 account-subscription lifecycle, 2 wallet lifecycle, 1 namespace).\n`
   );
 }
 

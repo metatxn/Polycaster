@@ -627,6 +627,10 @@ export function createPortfolioSetup(
     ownerAddress: string
   ): Promise<TradingWalletMode> {
     const storedMode = await readStoredWalletMode(ownerAddress);
+    // A stored "safe" is only ever written after a successful on-chain
+    // detection, and a deployed Safe is permanent — re-probing can never
+    // change the answer, so skip the per-open bytecode round trip.
+    if (storedMode === "safe") return storedMode;
     const legacySafeDeployed = await hasPortfolioLegacySafe(ownerAddress);
     if (legacySafeDeployed === null) {
       // Transient probe failure: honor the stored mode (a stored "safe" is only

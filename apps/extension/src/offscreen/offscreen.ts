@@ -1,15 +1,17 @@
 /**
  * Offscreen Document — lightweight dispatcher. Scoring stays lazy-loaded
- * because it is large; trading is bundled directly to avoid stale/missing
- * chunk failures while the extension is rebuilt in development.
+ * because it is large.
+ *
+ * Trading is also lazy-loaded, but gated behind `__STORE_BUILD__`: the
+ * dynamic `import("./trading-runtime")` lives inside an `if (!__STORE_BUILD__)`
+ * branch so webpack's DefinePlugin removes the import — and its
+ * trading-handler / bridge-signer / relayer-client / CLOB chunk — entirely
+ * from the Chrome Web Store–compliant build. See
+ * docs/chrome-prediction-market-ban-assessment.md.
  */
 
 import { logWarn } from "@knoww/logger";
 import type { ScoreMarketsMessage } from "../types/chrome-messages";
-import {
-  handleTradingOffscreenMessage,
-  prewarmTrading,
-} from "./trading-runtime";
 
 type ScoringRuntimeModule = typeof import("./scoring-runtime");
 
@@ -64,41 +66,57 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
 
-    if (msg.type === "offscreen:trading") {
-      handleTradingOffscreenMessage(
-        payload as { type: string; [key: string]: unknown },
-        tabId
-      )
-        .then((result) => {
-          sendResponse(result);
-        })
-        .catch((err) => {
-          logWarn("offscreen.trading-failed", {
-            message: err instanceof Error ? err.message : String(err),
-          });
-          sendResponse({
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-      return true;
-    }
+    if (!__STORE_BUILD__) {
+      // Trading runtime (order placement, split/merge, CLOB signing). The
+      // `import()` is inside this dead-in-store-build branch so webpack drops
+      // the whole trading-handler chunk from the compliant build.
+      const loadTradingRuntime = (): Promise<
+        typeof import("./trading-runtime")
+      > =>
+        import(
+          /* webpackChunkName: "offscreen-trading-runtime" */ "./trading-runtime"
+        );
 
-    if (msg.type === "offscreen:trading-prewarm") {
-      prewarmTrading()
-        .then(() => {
-          sendResponse({ ok: true, data: null });
-        })
-        .catch((err) => {
-          logWarn("offscreen.trading-prewarm-failed", {
-            message: err instanceof Error ? err.message : String(err),
+      if (msg.type === "offscreen:trading") {
+        loadTradingRuntime()
+          .then((runtime) =>
+            runtime.handleTradingOffscreenMessage(
+              payload as { type: string; [key: string]: unknown },
+              tabId
+            )
+          )
+          .then((result) => {
+            sendResponse(result);
+          })
+          .catch((err) => {
+            logWarn("offscreen.trading-failed", {
+              message: err instanceof Error ? err.message : String(err),
+            });
+            sendResponse({
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
-          sendResponse({
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
+        return true;
+      }
+
+      if (msg.type === "offscreen:trading-prewarm") {
+        loadTradingRuntime()
+          .then((runtime) => runtime.prewarmTrading())
+          .then(() => {
+            sendResponse({ ok: true, data: null });
+          })
+          .catch((err) => {
+            logWarn("offscreen.trading-prewarm-failed", {
+              message: err instanceof Error ? err.message : String(err),
+            });
+            sendResponse({
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
-        });
-      return true;
+        return true;
+      }
     }
 
     if (msg.type === "offscreen:scoring-prewarm") {

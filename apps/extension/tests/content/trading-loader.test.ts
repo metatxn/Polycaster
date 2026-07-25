@@ -147,7 +147,11 @@ test("the default loader keeps webpack from bundling the runtime import", () => 
   );
   assert.match(
     source,
-    /import\(\/\* webpackIgnore: true \*\/ chrome\.runtime\.getURL\("content-trading\.js"\)\)/
+    /import\(\/\* webpackIgnore: true \*\/ chrome\.runtime\.getURL\(RUNTIME_ASSET\)\)/
+  );
+  assert.match(
+    source,
+    /const RUNTIME_ASSET = __STORE_BUILD__\s*\?\s*"content-wallet\.js"\s*:\s*"content-trading\.js";/
   );
   assert.doesNotMatch(source, /loadTradingRuntime\(\);/);
 });

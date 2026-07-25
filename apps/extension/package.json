@@ -7,6 +7,7 @@
     "build": "pnpm run build:prod",
     "build:dev": "webpack --config webpack.config.cjs --mode development",
     "build:prod": "webpack --config webpack.config.cjs --mode production && node scripts/assert-production-bundle.mjs && node scripts/smoke-esm-modules.mjs",
+    "build:store": "STORE_BUILD=true pnpm run build:prod",
     "dev": "webpack --config webpack.config.cjs --mode development --watch",
     "clean": "rm -rf dist",
     "test": "pnpm run test:scoring",
@@ -16,8 +17,10 @@
     "lint": "biome check",
     "format": "biome format --write",
     "version:bump": "node scripts/bump-version.mjs",
-    "zip": "rm -f knoww-extension.zip && cd dist && zip -r ../knoww-extension.zip . -x '.*' '.stats/*' '*.LICENSE.txt'",
-    "release": "node scripts/bump-version.mjs && pnpm run build && pnpm run zip"
+    "zip": "if [ -f dist/.store-build ]; then echo 'dist/ holds a store build — run `pnpm run build` before `pnpm run zip`' >&2; exit 1; fi && rm -f knoww-extension.zip && cd dist && zip -r ../knoww-extension.zip . -x '.*' '.stats/*' '*.LICENSE.txt'",
+    "zip:store": "if [ ! -f dist/.store-build ]; then echo 'dist/ is not a verified store build — run `pnpm run build:store` before `pnpm run zip:store`' >&2; exit 1; fi && rm -f knoww-extension-store.zip && cd dist && zip -r ../knoww-extension-store.zip . -x '.*' '.stats/*' '*.LICENSE.txt'",
+    "release": "node scripts/bump-version.mjs && pnpm run build && pnpm run zip",
+    "release:store": "pnpm run build:store && pnpm run zip:store"
   },
   "dependencies": {
     "@huggingface/transformers": "4.2.0",

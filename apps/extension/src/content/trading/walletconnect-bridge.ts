@@ -340,6 +340,20 @@ async function disconnectExistingSession(provider: UniversalProvider) {
   emit({ status: "idle", qrUri: null, error: null });
 }
 
+async function purgeWalletConnectStorage(): Promise<void> {
+  try {
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all).filter((key) =>
+      key.startsWith(STORAGE_PREFIX)
+    );
+    if (keys.length > 0) {
+      await chrome.storage.local.remove(keys);
+    }
+  } catch (error) {
+    log.warn("storage.purge_failed", { error });
+  }
+}
+
 // Tear down an in-flight pairing attempt (one waiting on the QR scan). Bumping
 // the generation first invalidates the pending attempt so its rejection can't
 // emit an error or null out a newer attempt's connectPromise; then we abort the
@@ -503,11 +517,26 @@ export const WalletConnectBridge = {
     const attempt = (async () => {
       try {
         if (forceNew) {
-          await disconnectExistingSession(await getProvider());
+          const provider = await getProvider();
+          await disconnectExistingSession(provider);
           assertCurrentConnectGeneration(shared, generation);
+          if (provider.session) {
+            // provider.disconnect() failed and left the session attached —
+            // typical after logout, when the persisted session's mobile peer
+            // is gone and the relay rejects the teardown. Reusing that dead
+            // session would short-circuit pairing below and no QR would ever
+            // appear, so drop the provider and its persisted state entirely
+            // and let a fresh, sessionless provider initialize.
+            shared.providerPromise = null;
+            shared.connectedAccounts = [];
+            await purgeWalletConnectStorage();
+            assertCurrentConnectGeneration(shared, generation);
+          }
         }
 
-        const existing = await getSessionAccounts(false);
+        // A forced connect must always run a fresh pairing so the QR is
+        // guaranteed; only silent reconnects may reuse an existing session.
+        const existing = forceNew ? [] : await getSessionAccounts(false);
         assertCurrentConnectGeneration(shared, generation);
         if (existing.length > 0) {
           shared.connectedAccounts = existing;

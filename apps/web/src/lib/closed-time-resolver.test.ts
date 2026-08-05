@@ -18,11 +18,25 @@ function requestParams(input: RequestInfo | URL): {
   return { ids, slugs };
 }
 
-/** Waits for all queued microtasks (fetch promise chains) to settle. */
-async function flushMicrotasks() {
-  for (let i = 0; i < 10; i += 1) {
+/**
+ * Drains queued microtasks until `predicate` holds, or the budget runs out.
+ *
+ * The resolver's `fetch` → `res.json()` → `Promise.all` chain is several promise
+ * hops deep, and the exact depth is an implementation detail of undici's
+ * Response body reader — 8 hops on Node 24, 12 on Node 23. Poll for the
+ * condition rather than draining a fixed number of ticks, so these tests do not
+ * silently break on a Node upgrade.
+ */
+async function flushUntil(predicate: () => boolean, maxTicks = 100) {
+  for (let i = 0; i < maxTicks; i += 1) {
+    if (predicate()) return;
     await Promise.resolve();
   }
+}
+
+/** Drains every queued microtask — for asserting that nothing further happens. */
+async function flushMicrotasks() {
+  await flushUntil(() => false);
 }
 
 beforeEach(() => {
@@ -45,7 +59,7 @@ describe("resolveClosedTimes", () => {
     resolveClosedTimes(ids, slugs, () => {}, {
       fetchImpl: fetchMock as unknown as FetchImpl,
     });
-    await flushMicrotasks();
+    await flushUntil(() => fetchMock.mock.calls.length === 3);
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const sizes = fetchMock.mock.calls.map(
@@ -75,7 +89,7 @@ describe("resolveClosedTimes", () => {
       chunkSize: 2,
       fetchImpl: fetchMock as unknown as FetchImpl,
     });
-    await flushMicrotasks();
+    await flushUntil(() => onResolved.mock.calls.length > 0);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(onResolved).toHaveBeenCalledTimes(1);
@@ -99,7 +113,7 @@ describe("resolveClosedTimes", () => {
       retryBaseDelayMs: 15_000,
       fetchImpl: fetchMock as unknown as FetchImpl,
     });
-    await flushMicrotasks();
+    await flushUntil(() => vi.getTimerCount() > 0);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(onResolved).not.toHaveBeenCalled();
@@ -108,7 +122,7 @@ describe("resolveClosedTimes", () => {
     await vi.advanceTimersByTimeAsync(14_999);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
-    await flushMicrotasks();
+    await flushUntil(() => onResolved.mock.calls.length > 0);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(onResolved).toHaveBeenCalledWith({ "0xa": "t" });
@@ -126,9 +140,9 @@ describe("resolveClosedTimes", () => {
     resolveClosedTimes(["0xa"], new Map(), onResolved, {
       fetchImpl: fetchMock as unknown as FetchImpl,
     });
-    await flushMicrotasks();
+    await flushUntil(() => vi.getTimerCount() > 0);
     await vi.advanceTimersByTimeAsync(15_000);
-    await flushMicrotasks();
+    await flushUntil(() => onResolved.mock.calls.length > 0);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(onResolved).toHaveBeenCalledWith({ "0xa": "t" });
@@ -152,13 +166,13 @@ describe("resolveClosedTimes", () => {
     resolveClosedTimes(["0xa", "0xb"], new Map(), onResolved, {
       fetchImpl: fetchMock as unknown as FetchImpl,
     });
-    await flushMicrotasks();
+    await flushUntil(() => onResolved.mock.calls.length > 0);
 
     // First pass delivered what it could.
     expect(onResolved).toHaveBeenNthCalledWith(1, { "0xa": "a-time" });
 
     await vi.advanceTimersByTimeAsync(15_000);
-    await flushMicrotasks();
+    await flushUntil(() => onResolved.mock.calls.length > 1);
 
     // Retry asked only for the unresolved id.
     const retryIds = requestParams(
@@ -208,16 +222,16 @@ describe("resolveClosedTimes", () => {
       maxAttempts: 3,
       fetchImpl: fetchMock as unknown as FetchImpl,
     });
-    await flushMicrotasks();
+    await flushUntil(() => vi.getTimerCount() > 0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Attempt 2 at 15s × 1, attempt 3 at a further 15s × 2.
     await vi.advanceTimersByTimeAsync(15_000);
-    await flushMicrotasks();
+    await flushUntil(() => vi.getTimerCount() > 0);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await vi.advanceTimersByTimeAsync(30_000);
-    await flushMicrotasks();
+    await flushUntil(() => fetchMock.mock.calls.length === 3);
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
     // No fourth attempt, ever.
@@ -259,7 +273,9 @@ describe("resolveClosedTimes", () => {
     const cancel = resolveClosedTimes(["0xa"], new Map(), () => {}, {
       fetchImpl: fetchMock as unknown as FetchImpl,
     });
-    await flushMicrotasks();
+    // Cancel only once the retry timer actually exists — that is what this
+    // test claims to exercise.
+    await flushUntil(() => vi.getTimerCount() > 0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     cancel();

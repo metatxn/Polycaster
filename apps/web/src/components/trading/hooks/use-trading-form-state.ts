@@ -3,6 +3,7 @@
 import { isClobOrderApproved } from "@knoww/shared-types/approvals";
 import {
   estimateFallbackFeeRaw,
+  MIN_MARKETABLE_BUY_TICKET_USD,
   parsePusdUnits,
 } from "@knoww/shared-types/trading";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import { clearBalanceCache } from "@/lib/rpc";
 import {
   calculateBuySlippageForAmount,
   calculateSellSlippage,
+  normalizeLimitPrice,
   roundDownToTick,
   roundUpToTick,
 } from "@/lib/slippage";
@@ -31,11 +33,10 @@ import type { OrderTypeSelection, TradingSide } from "@/types/market";
 import type { TradingFormProps } from "../types";
 
 const DEFAULT_MAX_SLIPPAGE_PERCENT = 2;
-const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 // Default USD budget for a MARKET BUY. Market buys are denominated in dollars
 // (Polymarket's `createMarketOrder` takes a notional `amount`, not a share
 // count). Opens at $0 — an empty state the user fills via the input or a quick
-// preset; the summary stays hidden until the amount clears the $1 minimum.
+// preset; the summary stays hidden until the amount clears the minimum.
 const DEFAULT_MARKET_BUY_AMOUNT_USD = 0;
 const APPROVAL_CHECK_BUCKET_RAW = BigInt(10) ** BigInt(PUSD_DECIMALS);
 
@@ -70,6 +71,7 @@ export function useTradingFormState({
     canTrade,
     updateAllowance,
     getUsdcAllowance,
+    estimateBuyFee,
   } = useClobClient();
 
   const {
@@ -139,12 +141,14 @@ export function useTradingFormState({
     return Math.max(1, Math.ceil(raw));
   }, [minOrderSize]);
 
-  // Set initial limit price when outcome changes, but allow user to override
+  // Set initial limit price when outcome changes, but allow user to override.
+  // Snapped to the market's tick rather than to a cent: on a 0.001-tick market
+  // `toFixed(2)` moved a 9.7¢ outcome to 10¢ before the user touched anything.
   useEffect(() => {
     if (selectedOutcome && orderType === "LIMIT" && !hasUserEditedPrice) {
-      setLimitPrice(Number(selectedOutcome.price.toFixed(2)));
+      setLimitPrice(normalizeLimitPrice(selectedOutcome.price, tickSize));
     }
-  }, [selectedOutcome, orderType, hasUserEditedPrice]);
+  }, [selectedOutcome, orderType, hasUserEditedPrice, tickSize]);
 
   // Reset user edit flag when switching outcomes - using ref to track previous tokenId
   const previousTokenIdRef = useRef(selectedOutcome?.tokenId);
@@ -197,10 +201,19 @@ export function useTradingFormState({
     }
   }, [side, maxSellShares, shares]);
 
-  const handleLimitPriceChange = useCallback((price: number) => {
-    setHasUserEditedPrice(true);
-    setLimitPrice(price);
-  }, []);
+  // Every limit-price write in the ticket lands here, so this is where the
+  // price is put back on the tick grid. The ± stepper does its arithmetic in
+  // cents (`price * 100 ± tickCents`, then `/ 100`), and those float
+  // round-trips drift off-grid — 10.0¢ stepped down to "9.5¢" arrives as
+  // 0.09500000000000001, which the SDK rejects as having more decimal places
+  // than the tick allows.
+  const handleLimitPriceChange = useCallback(
+    (price: number) => {
+      setHasUserEditedPrice(true);
+      setLimitPrice(normalizeLimitPrice(price, tickSize));
+    },
+    [tickSize]
+  );
 
   const slippageResult = useMemo(() => {
     if (!orderBook || orderType !== "MARKET") return null;
@@ -219,26 +232,63 @@ export function useTradingFormState({
     }
   }, [orderBook, orderType, side, shares, marketBuyAmount]);
 
+  // `slippageResult` is null in three very different situations: the user has
+  // not entered a size yet, the book has not loaded, or the walk threw. Only
+  // the case where the book was actually walked and came up short is genuinely
+  // "insufficient liquidity" — the others get their own labels so the form
+  // never blames a deep market for an empty amount field.
+  const hasMarketOrderSize =
+    orderType === "MARKET" &&
+    (side === "BUY" ? marketBuyAmount > 0 : shares > 0);
+  const isMarketOrderSizeEmpty = orderType === "MARKET" && !hasMarketOrderSize;
+  const isOrderBookUnavailable =
+    orderType === "MARKET" && hasMarketOrderSize && !orderBook;
+
+  // The book came up short, but the user allowed a partial fill (FAK) and the
+  // walk did touch real depth. FAK's contract is "fill whatever is available
+  // within the price bound, cancel the rest", so this is a placeable order —
+  // we just size the ticket down to the fillable portion and say so.
+  const isPartialFillAvailable =
+    orderType === "MARKET" &&
+    allowPartialFill &&
+    slippageResult !== null &&
+    !slippageResult.canFill &&
+    slippageResult.filledSize > 0 &&
+    slippageResult.worstPrice > 0;
+
+  // Genuinely un-fillable: either the user demanded all-or-nothing (FOK) or
+  // the book has no depth at all to walk into.
+  const hasInsufficientLiquidity =
+    orderType === "MARKET" &&
+    slippageResult !== null &&
+    !slippageResult.canFill &&
+    !isPartialFillAvailable;
+
   const marketOrderPrice = useMemo(() => {
-    if (slippageResult?.canFill) {
+    // A partial FAK walk still produces a real worst price — the price of the
+    // deepest level the fillable portion reaches — so it gets the same bound
+    // as a full fill. This matters: `optionalPriceBound` in the SDK shim drops
+    // any non-positive price, so falling through to `0` here would sign the
+    // order with NO `maxPrice`/`minPrice` at all (unbounded slippage).
+    if (slippageResult && (slippageResult.canFill || isPartialFillAvailable)) {
       const worst = new Decimal(slippageResult.worstPrice);
       if (side === "BUY") {
         const buffered = worst.mul("1.005").toNumber();
-        return Math.min(0.99, roundUpToTick(buffered, tickSize));
+        return Math.min(1 - tickSize, roundUpToTick(buffered, tickSize));
       }
       const buffered = worst.mul("0.995").toNumber();
-      return Math.max(0.01, roundDownToTick(buffered, tickSize));
+      return Math.max(tickSize, roundDownToTick(buffered, tickSize));
     }
 
-    // MARKET order but the current book can't fully fill the requested size.
-    // Do NOT synthesize a "reasonable" price from the Gamma/outcome price
-    // here — Polymarket V2 FOK/FAK orders are rejected server-side when depth
-    // is insufficient (per /developers/CLOB/orders/create-order and the error
-    // codes doc), so painting a plausible estimate would mislead the user
-    // into thinking an un-fillable order will settle at that price.
+    // MARKET order the book cannot fill, and the user did not allow a partial
+    // fill (FOK) — or there is no depth to price against at all. Do NOT
+    // synthesize a "reasonable" price from the Gamma/outcome price here: an
+    // FOK order that cannot fill in full is killed, so painting a plausible
+    // estimate would mislead the user into thinking it will settle there.
     // Returning 0 surfaces an honest "0.0¢ / $0.00" in the summary, and the
-    // submit button is already disabled via `canFullyFill` → "Insufficient
-    // liquidity" in the parent form.
+    // submit button is already disabled via `canPlaceMarketOrder` in the
+    // parent form (labelled by `hasInsufficientLiquidity` /
+    // `isOrderBookUnavailable`).
     if (orderType === "MARKET") {
       return 0;
     }
@@ -249,13 +299,14 @@ export function useTradingFormState({
     if (side === "BUY") {
       const base = new Decimal(bestAsk ?? selectedOutcome?.price ?? 0.5);
       const withSlippage = base.mul(new Decimal(1).add(maxFrac)).toNumber();
-      return Math.min(0.99, roundUpToTick(withSlippage, tickSize));
+      return Math.min(1 - tickSize, roundUpToTick(withSlippage, tickSize));
     }
     const base = new Decimal(bestBid ?? selectedOutcome?.price ?? 0.5);
     const withSlippage = base.mul(new Decimal(1).sub(maxFrac)).toNumber();
-    return Math.max(0.01, roundDownToTick(withSlippage, tickSize));
+    return Math.max(tickSize, roundDownToTick(withSlippage, tickSize));
   }, [
     slippageResult,
+    isPartialFillAvailable,
     orderType,
     side,
     tickSize,
@@ -265,14 +316,31 @@ export function useTradingFormState({
     selectedOutcome?.price,
   ]);
 
+  // What the ticket has to say out loud when FAK sizes the order down: the
+  // user asked for one number and only part of it is reachable on the book.
+  const partialFill = useMemo(() => {
+    if (!isPartialFillAvailable || !slippageResult) return null;
+    return {
+      filledShares: slippageResult.filledSize,
+      filledUsd: slippageResult.totalNotional,
+      requestedUsd: side === "BUY" ? marketBuyAmount : null,
+      requestedShares: side === "BUY" ? null : shares,
+    };
+  }, [isPartialFillAvailable, slippageResult, side, marketBuyAmount, shares]);
+
   const calculations = useMemo(() => {
     const price = orderType === "MARKET" ? marketOrderPrice : limitPrice;
     const orderSide = side === "BUY" ? OrderSide.BUY : OrderSide.SELL;
     // For a MARKET BUY the user controls the dollar budget, so the share count
-    // is whatever that budget fills on the book. Everywhere else the share
-    // count is the canonical input.
+    // is whatever that budget fills on the book. A MARKET SELL is entered in
+    // shares, but on a partial (FAK) fill only `filledSize` of them clear —
+    // and that is the number we sign, so it is the number we show. Everywhere
+    // else the share count is the canonical input.
     const isMarketBuy = orderType === "MARKET" && side === "BUY";
-    const size = isMarketBuy ? (slippageResult?.filledSize ?? 0) : shares;
+    const size =
+      orderType === "MARKET"
+        ? (slippageResult?.filledSize ?? (isMarketBuy ? 0 : shares))
+        : shares;
     const pnl = calculatePotentialPnL(price, size, orderSide);
     const total =
       orderType === "MARKET" && slippageResult
@@ -404,8 +472,77 @@ export function useTradingFormState({
 
   const isBelowMarketableBuyMinNotional = useMemo(() => {
     if (!isMarketableBuy) return false;
-    return calculations.total < MIN_MARKETABLE_BUY_NOTIONAL_USD;
+    // `calculations.total` is the pre-fee ticket amount. Signed without
+    // `maxSpend`, so `makerAmount` equals it and the server's $1 floor applies
+    // to it directly — no fee headroom needed. See MIN_MARKETABLE_BUY_TICKET_USD.
+    return calculations.total < MIN_MARKETABLE_BUY_TICKET_USD;
   }, [isMarketableBuy, calculations.total]);
+
+  // Round the fee inputs before they reach the query key. The fee is a smooth
+  // function of size and price, so a cent of movement never changes the
+  // displayed number — but an unrounded key would refetch on every keystroke.
+  const feeEstimateInputs = useMemo(() => {
+    if (side !== "BUY" || !conditionId) return null;
+    if (calculations.size <= 0 || calculations.total <= 0) return null;
+    // A market order the book cannot fill prices at 0 (see `marketOrderPrice`),
+    // and the protocol fee curve is 0 at that endpoint — quoting it would print
+    // a confident "$0.00" for a fee we have no basis to estimate.
+    if (calculations.price <= 0) return null;
+    return {
+      size: calculations.size.toFixed(2),
+      price: calculations.price.toFixed(4),
+      notional: calculations.total.toFixed(2),
+    };
+  }, [
+    side,
+    conditionId,
+    calculations.size,
+    calculations.price,
+    calculations.total,
+  ]);
+
+  const { data: estimatedFeeRaw, isFetching: isFeeEstimateFetching } = useQuery(
+    {
+      queryKey: qk.orders.buyFeeEstimate(
+        conditionId,
+        feeEstimateInputs?.size ?? "",
+        feeEstimateInputs?.price ?? "",
+        feeEstimateInputs?.notional ?? ""
+      ),
+      queryFn: () =>
+        estimateBuyFee({
+          conditionId,
+          size: Number(feeEstimateInputs?.size),
+          price: Number(feeEstimateInputs?.price),
+          notional: Number(feeEstimateInputs?.notional),
+          isMarketableBuy,
+        }),
+      enabled: !!feeEstimateInputs && hasCredentials && !!proxyAddress,
+      // Market fee parameters are effectively static; the ticket inputs are
+      // already in the key, so anything cached for this exact ticket is fresh.
+      staleTime: 5 * 60 * 1000,
+      retry: false,
+      // Hold the last known fee while the next one loads. Without this the row
+      // would blink out of the ticket on every amount change, which reads as
+      // "the fee went away" rather than "the fee is being recomputed".
+      placeholderData: (previous: bigint | null | undefined) => previous,
+    }
+  );
+
+  /**
+   * Estimated fee in USD, or `null` when it could not be determined.
+   *
+   * `null` is deliberately not `0` — the market fee lookup can fail, and
+   * rendering "$0.00" for an unknown fee would be a worse lie than rendering
+   * nothing. Orders sign without `maxSpend`, so this fee is charged *on top of*
+   * the ticket total rather than taken out of it.
+   */
+  const estimatedFeeUsd = useMemo(() => {
+    if (estimatedFeeRaw === null || estimatedFeeRaw === undefined) return null;
+    return new Decimal(estimatedFeeRaw.toString())
+      .div(new Decimal(10).pow(PUSD_DECIMALS))
+      .toNumber();
+  }, [estimatedFeeRaw]);
 
   const handleSetAllowance = useCallback(async () => {
     setIsUpdatingAllowance(true);
@@ -473,7 +610,18 @@ export function useTradingFormState({
   );
 
   const handleSubmit = useCallback(async (): Promise<boolean> => {
-    if (!canTrade || !selectedOutcome || !hasValidTokenId) return false;
+    // The submit button disables itself on all three of these, so reaching
+    // here means the UI and this guard have drifted apart. Report it rather
+    // than returning a bare `false`: a click that does nothing at all, with
+    // no toast and no banner, reads to the user as a broken button.
+    if (!canTrade || !selectedOutcome || !hasValidTokenId) {
+      onOrderError?.(
+        new Error(
+          "Trading is not ready yet. Reconnect your wallet and try again."
+        )
+      );
+      return false;
+    }
 
     try {
       let clobOrderType: ClobOrderType;
@@ -500,17 +648,29 @@ export function useTradingFormState({
         }
       }
 
-      const orderPrice = orderType === "MARKET" ? marketOrderPrice : limitPrice;
+      // Re-snapped at the boundary as well as on entry: `limitPrice` survives a
+      // tick change (the book can load, or the outcome switch, after the price
+      // was set), and an off-grid price is rejected by the SDK before the order
+      // is ever signed.
+      const orderPrice =
+        orderType === "MARKET"
+          ? marketOrderPrice
+          : normalizeLimitPrice(limitPrice, tickSize);
 
       // MARKET BUY submits a notional `amount` (USD); the on-chain
       // `createMarketOrder` derives the size from it, so `size` here is the
-      // informational filled-share estimate. SELL/LIMIT submit the share count.
+      // informational filled-share estimate. LIMIT submits the share count.
+      // A MARKET order signs the *walked* size/notional, so on an FAK partial
+      // the order we sign is exactly the order the ticket quoted — the
+      // remainder is never sent rather than sent-and-canceled, which keeps the
+      // marketable-BUY minimum (`isBelowMarketableBuyMinNotional`) checking
+      // the same number the exchange sees.
       const isMarketBuy = orderType === "MARKET" && side === "BUY";
       const result = await createOrder({
         tokenId: selectedOutcome.tokenId,
         conditionId,
         price: orderPrice,
-        size: isMarketBuy ? calculations.size : shares,
+        size: orderType === "MARKET" ? calculations.size : shares,
         amount: isMarketBuy ? calculations.total : undefined,
         side: side === "BUY" ? Side.BUY : Side.SELL,
         orderType: clobOrderType,
@@ -640,6 +800,7 @@ export function useTradingFormState({
     expirationTime,
     marketOrderPrice,
     limitPrice,
+    tickSize,
     shares,
     side,
     negRisk,
@@ -668,7 +829,9 @@ export function useTradingFormState({
     setShares,
     marketBuyAmount,
     setMarketBuyAmount,
-    minBuyAmount: MIN_MARKETABLE_BUY_NOTIONAL_USD,
+    minBuyAmount: MIN_MARKETABLE_BUY_TICKET_USD,
+    estimatedFeeUsd,
+    isFeeEstimateFetching,
     allowPartialFill,
     setAllowPartialFill,
     expirationType,
@@ -699,6 +862,16 @@ export function useTradingFormState({
     handleSharesChange,
     handleSubmit,
     hasValidTokenId,
-    canFullyFill: orderType !== "MARKET" || Boolean(slippageResult?.canFill),
+    // Not "the book can fill the whole ticket" — that would block every FAK
+    // partial. This is "we have something real to sign": a full walk, or a
+    // partial one the user opted into. Non-MARKET tickets are gated elsewhere.
+    canPlaceMarketOrder:
+      orderType !== "MARKET" ||
+      Boolean(slippageResult?.canFill) ||
+      isPartialFillAvailable,
+    partialFill,
+    hasInsufficientLiquidity,
+    isOrderBookUnavailable,
+    isMarketOrderSizeEmpty,
   };
 }

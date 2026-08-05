@@ -142,6 +142,57 @@ test("D1 repository persists encrypted CLOB credentials without plaintext column
   );
 });
 
+test("applySettledFeeToRunFill corrects the persisted fill cash exactly once", async () => {
+  const repo = createAgentRepository();
+  const item = await repo.upsertWatchlistItem(watchlistInput());
+  const run = await repo.createRun("run-heal");
+  await repo.saveRunItem({
+    runId: run.id,
+    watchlistItemId: item.id,
+    watchlistItem: item,
+    evidence: { newsSummaries: [], socialSummaries: [] },
+    votes: [],
+    decision: { action: "BUY", confidence: 0.9, rationale: "test" },
+    fill: {
+      id: "fill-heal",
+      runId: run.id,
+      watchlistItemId: item.id,
+      tokenId: item.tokenId,
+      status: "FILLED",
+      side: "BUY",
+      price: "0.5",
+      notionalUsd: "5",
+      shares: "10",
+      // $1000 − $5 notional − $0.15 preflight fee estimate: the number the
+      // run persisted after an inline settlement timeout.
+      cashAfterUsd: "994.85",
+      reason: "test",
+      createdAt: "2026-05-14T00:00:00.000Z",
+    },
+  });
+
+  const heal = {
+    runId: run.id,
+    watchlistItemId: item.id,
+    side: "BUY",
+    feeEstimateUsd: "0.15",
+    settledFeeUsd: "0.25",
+  };
+  await repo.applySettledFeeToRunFill(heal);
+
+  const corrected = (await repo.getRun(run.id))?.items[0]?.fill;
+  // The estimate is backed out and the actual settled fee applied.
+  assert.equal(corrected?.cashAfterUsd, "994.75");
+  assert.equal(corrected?.settledFeeUsd, "0.25");
+
+  // Replaying the correction is a no-op: the stamped settledFeeUsd marker
+  // keeps the arithmetic from being applied twice.
+  await repo.applySettledFeeToRunFill(heal);
+  const replayed = (await repo.getRun(run.id))?.items[0]?.fill;
+  assert.equal(replayed?.cashAfterUsd, "994.75");
+  assert.equal(replayed?.settledFeeUsd, "0.25");
+});
+
 test("repository preserves live order lifecycle reconciliation fields", async () => {
   const repo = createAgentRepository();
   const idempotencyKey = `live-reconcile-${crypto.randomUUID()}:watch:BUY`;

@@ -2,9 +2,15 @@
   * {
     @apply border-border outline-ring/50;
   }
-  html {
-    overflow-x: clip;
-  }
+  /* Horizontal clipping lives on <body> only. Overflow set on <body>
+     propagates to the viewport as long as <html> keeps `overflow: visible`,
+     so the page still can't scroll sideways — but crucially, Radix modals
+     (react-remove-scroll) rely on the same propagation: they set
+     `body { overflow: hidden !important }` while a dialog is open. With
+     `overflow-x: clip` on <html>, propagation is disabled and that `hidden`
+     applies to the <body> box itself, turning it into a scroll container —
+     which un-anchors every viewport-sticky element (event header, trading
+     panel) for as long as the dialog is open. */
   body {
     @apply bg-background text-foreground;
     overflow-x: clip;

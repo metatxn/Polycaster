@@ -83,6 +83,35 @@ export function roundToTick(price: number, tickSize: number): number {
   return p.div(t).round().mul(t).toNumber();
 }
 
+/**
+ * Snap a user-entered limit price onto the market's tick grid.
+ *
+ * The ticket edits a limit price in cents — `price * 100`, `± tickCents`,
+ * `/ 100` — and every one of those float round-trips leaves IEEE-754 residue.
+ * Stepping down from 10.0¢ on a 0.001-tick market reaches
+ * `0.09500000000000001`, which the UI happily renders as "9.5¢" via
+ * `.toFixed(1)`. The SDK counts decimals on the raw number
+ * (`decimalPlaces(price) > roundConfig.price`) and rejects the order with
+ * "Price must conform to tick size 0.001 with at most 3 decimal places."
+ *
+ * Every step here runs through decimal.js, so the result is an exact multiple
+ * of the tick, clamped to `[tick, 1 - tick]` — the same band `resolvePrice`
+ * enforces, which moves with the tick and so cannot be a fixed 1¢..99¢.
+ */
+export function normalizeLimitPrice(price: number, tickSize: number): number {
+  // The book may not have loaded yet. A cent is a whole multiple of every tick
+  // Polymarket uses except 0.1, so it is the safest stand-in.
+  const tick = Number.isFinite(tickSize) && tickSize > 0 ? tickSize : 0.01;
+  const t = new Decimal(tick);
+  if (!Number.isFinite(price)) return t.toNumber();
+
+  const snapped = new Decimal(price).div(t).round().mul(t);
+  return Decimal.min(
+    Decimal.max(snapped, t),
+    new Decimal(1).minus(t)
+  ).toNumber();
+}
+
 function createEmptyResult(size: number): SlippageResult {
   return {
     canFill: false,

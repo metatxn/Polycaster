@@ -10,7 +10,9 @@ import {
 
 const log = createLogger("api.trader.x_profile");
 
-const INDEX_TTL_MS = 5 * 60 * 1000;
+// Owner-approved 30-minute cache (2026-07): leaderboard x-profile mappings
+// change slowly, and the extension keeps its own badge caches on top.
+const INDEX_TTL_MS = 30 * 60 * 1000;
 const LEADERBOARD_LIMIT = 50;
 const LEADERBOARD_MAX_OFFSET = 1000;
 const LEADERBOARD_ORDERS = ["PNL", "VOL"] as const;
@@ -77,7 +79,7 @@ export async function GET(request: NextRequest) {
       { success: true, profile },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
+          "Cache-Control": "public, s-maxage=1800, stale-while-revalidate=3600",
         },
       }
     );
@@ -154,7 +156,7 @@ async function fetchLeaderboardPage(
         Accept: "application/json",
       },
       next: {
-        revalidate: 300,
+        revalidate: 1800,
       },
     }
   );

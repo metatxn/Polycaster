@@ -28,13 +28,20 @@ export interface PriceHistoryPoint {
 
 interface BatchEntry {
   tokenId: string;
+  status?: "ok" | "not_found" | "timeout" | "upstream_error";
   history: PriceHistoryPoint[];
 }
 
 interface BatchResponse {
   success: boolean;
+  partial?: boolean;
   histories: BatchEntry[];
   error?: string;
+}
+
+interface BatchQueryData {
+  histories: Map<string, PriceHistoryPoint[]>;
+  partial: boolean;
 }
 
 /** Number of days of history to fetch. Matches the "30D" column label. */
@@ -45,6 +52,9 @@ const DEFAULT_FIDELITY_MINUTES = 60;
 /** Refetch the whole batch every 5 minutes so sparklines stay fresh
  *  without hammering the upstream CLOB API. */
 const STALE_TIME_MS = 5 * 60 * 1000;
+/** A partial batch (some tokens timed out / errored upstream) goes stale
+ *  quickly so the missing sparklines recover without a page reload. */
+const PARTIAL_STALE_TIME_MS = 30 * 1000;
 
 export function useBatchPriceHistory(
   tokenIds: string[],
@@ -64,8 +74,13 @@ export function useBatchPriceHistory(
   return useQuery({
     queryKey: qk.market.priceHistoryBatch(normalized, lookbackDays, fidelity),
     enabled: enabled && normalized.length > 0,
-    staleTime: STALE_TIME_MS,
-    queryFn: async () => {
+    // Partial batches go stale fast (and re-poll) so failed tokens recover;
+    // complete batches keep the normal 5-minute cadence.
+    staleTime: (query) =>
+      query.state.data?.partial ? PARTIAL_STALE_TIME_MS : STALE_TIME_MS,
+    refetchInterval: (query) =>
+      query.state.data?.partial ? PARTIAL_STALE_TIME_MS : false,
+    queryFn: async (): Promise<BatchQueryData> => {
       const res = await fetch("/api/markets/price-history/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -81,11 +96,20 @@ export function useBatchPriceHistory(
       const data = (await res.json()) as BatchResponse;
       const map = new Map<string, PriceHistoryPoint[]>();
       for (const entry of data.histories ?? []) {
-        if (entry.tokenId) {
-          map.set(entry.tokenId, entry.history);
+        if (!entry.tokenId) continue;
+        // Skip transient failures instead of caching them as empty arrays —
+        // consumers then render their "no data" placeholder and the next
+        // (fast) refetch can fill the gap. `not_found` stays: it is a real,
+        // stable "this token has no history" answer.
+        if (entry.status === "timeout" || entry.status === "upstream_error") {
+          continue;
         }
+        map.set(entry.tokenId, entry.history);
       }
-      return map;
+      return { histories: map, partial: data.partial === true };
     },
+    // Consumers only ever read the map; `partial` exists for the
+    // staleTime/refetchInterval callbacks above.
+    select: (data) => data.histories,
   });
 }

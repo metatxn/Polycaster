@@ -951,6 +951,32 @@ test("background mediates side panel portfolio sells through the existing order 
   assert.equal(/price:\s*0/.test(backgroundSource), true);
 });
 
+test("extension order posts retry transient CLOB order-manager rejections", () => {
+  const handlerSource = readSource("src/background/trading-handler.ts");
+
+  assert.equal(/postClobOrderWithRetry/.test(handlerSource), true);
+  assert.equal(/function postExtensionClobOrder/.test(handlerSource), true);
+  assert.equal(
+    handlerSource.match(
+      /await postExtensionClobOrder\(client, order, orderType\)/g
+    )?.length,
+    2
+  );
+  assert.equal(/trading\.place-order\.retry/.test(handlerSource), true);
+});
+
+test("side panel replaces exhausted order-manager errors with retry guidance", () => {
+  const sidepanelSource = readSidepanelSources();
+
+  assert.equal(/\\bnot ready\\b/i.test(sidepanelSource), true);
+  assert.equal(
+    sidepanelSource.includes(
+      "Polymarket's order engine is busy. Try again in a few seconds."
+    ),
+    true
+  );
+});
+
 test("side panel clears portfolio state when trading disconnects", () => {
   const sidepanelSource = readSidepanelSources();
   const messagingSource = readSource("src/sidepanel/messaging.ts");
@@ -1012,17 +1038,20 @@ test("portfolio side panel exposes wallet switch and forwards it to content", ()
   assert.equal(/KNOWW_SWITCH_PORTFOLIO_WALLET/.test(typesSource), true);
 });
 
-test("trading preflight market info uses direct CLOB fetch fallback", () => {
+test("trading preflight market info reads the fee-bearing /clob-markets endpoint", () => {
+  // `/markets/{conditionId}` carries no `fd` protocol-fee block, so pointing the
+  // pre-flight at it silently estimated a zero protocol fee. Only
+  // `/clob-markets/{conditionId}` — what `fetchClobMarketInfo` reads — has it.
   const source = readSource("src/background/trading-handler.ts");
 
-  assert.equal(/fetchClobMarket/.test(source), true);
   assert.equal(
-    /getClobMarketInfo\(conditionId: string\) {\s*return fetchClobMarket\(\s*conditionId,[\s\S]*useUnifiedSdk:\s*false/s.test(
+    /getClobMarketInfo\(conditionId: string\) {\s*return fetchClobMarketInfo\(conditionId, { host: CLOB_HOST }\);/s.test(
       source
     ),
     true
   );
-  assert.equal(/fetchUnifiedClobMarket/.test(source), false);
+  assert.equal(/fetchClobMarket\(/.test(source), false);
+  assert.equal(/useUnifiedSdk:\s*false/.test(source), false);
 });
 
 test("side panel clamps portfolio fund amount inputs to six decimals", () => {
@@ -1059,13 +1088,13 @@ test("limit order book loading exits on fetch failure", () => {
 
   assert.equal(/POLYMARKET_API/.test(backgroundSource), true);
   assert.equal(
-    /fetchClobOrderBook\(tokenId,[\s\S]*host:\s*POLYMARKET_API\.CLOB\.BASE,[\s\S]*useUnifiedSdk:\s*false/.test(
+    /fetchClobOrderBook\(tokenId, {\s*host: POLYMARKET_API\.CLOB\.BASE,\s*}\)/.test(
       backgroundSource
     ),
     true
   );
   assert.equal(
-    /fetchClobBuilderFeeRates\(builderCode,[\s\S]*useUnifiedSdk:\s*false/.test(
+    /fetchClobBuilderFeeRates\(builderCode, {\s*host: CLOB_HOST,\s*}\)/.test(
       readSource("src/background/trading-handler.ts")
     ),
     true

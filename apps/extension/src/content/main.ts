@@ -274,7 +274,11 @@ export function observeFirstMountedTradingCard(
   });
   log("Selectors:", { itemSelector, containerSelector });
 
-  observeFirstMountedTradingCard(scheduleIdle);
+  // No in-page trading panel ships in the store-compliant build, so there is
+  // nothing to prefetch/warm.
+  if (!__STORE_BUILD__) {
+    observeFirstMountedTradingCard(scheduleIdle);
+  }
 
   // Start watching the feed
   watchFeed(containerSelector, itemSelector);

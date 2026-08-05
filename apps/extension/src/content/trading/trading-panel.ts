@@ -424,6 +424,7 @@ function createPanel(opts: PanelOptions): HTMLElement {
       ? Math.max(1, Math.round(opts.initialAmountUsd / opts.price))
       : 10;
   panelState.limitPrice = normalizePrice(opts.price);
+  panelState.allowPartialFill = true;
   panelState.expirationPreset = "GTC";
   panelState.splitMergeAmount = "";
   panelState.outcomeBalances = null;

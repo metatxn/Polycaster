@@ -153,6 +153,12 @@ export function createFundingController(
 
   function dispatch(event: FundingEvent): void {
     if (disposed) return;
+    if (event.type === "START" && state.step !== "idle") {
+      // The machine drops START from any non-idle step (by design), and the
+      // callers' screens render nothing new for a dropped one — a silent drop
+      // here has surfaced as a stuck loading screen before. Make it visible.
+      log.warn("START dropped: machine not idle", { step: state.step });
+    }
     if (event.type === "RESET" || event.type === "ACCOUNT_CHANGED") {
       // The machine drops everything and bumps its epoch; kill any pending
       // debounced quote or scheduled re-poll so no zombie gateway call

@@ -693,6 +693,8 @@ const KNOWW_APP_URL = __DEV_MODE__
 const PORTFOLIO_AMOUNT_DECIMALS = 6;
 const WITHDRAW_QUOTE_DEBOUNCE_MS = 350;
 const WITHDRAW_STATUS_POLL_MS = 4500;
+// Ceiling for the pre-START wallet-mode probe (service worker → offscreen → RPC).
+const FUND_WALLET_MODE_TIMEOUT_MS = 15000;
 
 export function createFundingUi(
   dependencies: FundingUiDependencies
@@ -723,6 +725,19 @@ export function createFundingUi(
   let fundFlow: PortfolioFundAction | null = null;
   let fundDepositSource: "wallet" | "cross-chain" = "wallet";
   let lastFundScreenKey: string | null = null;
+  // Bumped by every open and by every teardown (close / reset / account change /
+  // post-submit refresh). The async wallet-mode probe in openPortfolioFunds
+  // compares against it so a stale probe can never dispatch into a view the user
+  // has since left, and — the other direction — so a teardown that lands mid
+  // probe can't silently abandon a view that is still on screen.
+  let fundOpenToken = 0;
+  // The one in-flight wallet-mode round trip, shared per address so a Retry
+  // issued while a slow probe is still pending latches onto it instead of
+  // stacking another RPC call. Cleared when the round trip settles.
+  let pendingWalletModeProbe: {
+    address: string;
+    probe: Promise<TradingWalletMode | null>;
+  } | null = null;
 
   function getPortfolioContainer(): HTMLElement | null {
     return (
@@ -1111,10 +1126,30 @@ export function createFundingUi(
   // The side panel maps its transport onto the controller via a gateway,
   // subscribes for re-renders, and dispatches events from the DOM handlers.
 
-  /** True while a funding flow is on screen (any non-idle machine step). */
+  /** True while a funding flow owns the portfolio container. `fundFlow` is the
+   * single source of truth: it is set for the whole open window (including the
+   * pre-START wallet-mode probe, when the machine is still idle), and every
+   * teardown that nulls it synchronously recycles the machine — so the machine
+   * can never be non-idle while `fundFlow` is null. */
   function isFundViewOpen(): boolean {
-    const step = fundController?.getState().step;
-    return step !== undefined && step !== "idle";
+    return fundFlow !== null;
+  }
+
+  /** Invalidates any in-flight open (see `fundOpenToken`). Every teardown path
+   * that nulls `fundFlow` must call this. */
+  function cancelFundOpen(): void {
+    fundOpenToken += 1;
+  }
+
+  /** Shared teardown for every path that releases the funding view. Callers
+   * follow with the machine event that fits the site (RESET vs ACCOUNT_CHANGED,
+   * or nothing when the machine is provably idle) — keeping the
+   * `isFundViewOpen` invariant above intact. */
+  function resetFundOpenState(): void {
+    cancelFundOpen();
+    fundFlow = null;
+    fundDepositSource = "wallet";
+    lastFundScreenKey = null;
   }
 
   /** True while the withdraw form is on screen — its amount step AND its
@@ -1621,6 +1656,92 @@ export function createFundingUi(
     controller.dispatch({ type: "REQUEST_QUOTE" });
   }
 
+  /** The screen shown while the signing wallet mode resolves, and the retryable
+   * error screen when that probe fails or times out. Both carry a Back button:
+   * this step is a background round trip, so it must never be able to strand the
+   * panel on a placeholder with no way out. Retry re-enters through the same
+   * `[data-portfolio-fund]` affordance the portfolio uses. */
+  function renderFundProbe(
+    action: PortfolioFundAction,
+    error?: string
+  ): string {
+    const label = action === "deposit" ? "Deposit" : "Withdraw";
+    const body = error
+      ? `<div class="knoww-pf-fund-status is-error">${escapeHtml(error)}</div>
+      <button type="button" class="knoww-pf-fund-submit primary" data-portfolio-fund="${action}">
+        <span class="knoww-pf-submit-label">Retry</span>
+      </button>`
+      : `<div class="knoww-portfolio-loading">Loading…</div>`;
+    return `
+    <div class="knoww-pf-fund" data-fund-probe>
+      <div class="knoww-pf-fund-head">
+        <button type="button" class="knoww-pf-fund-back" data-fund-back aria-label="Back to portfolio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+        </button>
+        <div class="knoww-pf-fund-heading">
+          <span class="knoww-pf-fund-kicker">${label}</span>
+        </div>
+      </div>
+      ${body}
+    </div>`;
+  }
+
+  /** Bounds the wallet-mode probe. It hops side panel → service worker →
+   * offscreen → Polygon RPC; any of those can go quiet (worker evicted mid
+   * flight, offscreen wedged, RPC hanging), and an unanswered probe must surface
+   * as a retryable error rather than as a spinner that never resolves. The
+   * underlying round trip is shared per address (see `pendingWalletModeProbe`),
+   * so each open/retry gets its own fresh timeout window over the same probe. */
+  function resolveFundWalletMode(
+    address: string
+  ): Promise<TradingWalletMode | null> {
+    let entry = pendingWalletModeProbe;
+    if (!entry || entry.address !== address) {
+      const probe = dependencies.resolvePreferredWalletMode(address).then(
+        (mode) => mode,
+        () => null
+      );
+      entry = { address, probe };
+      pendingWalletModeProbe = entry;
+      const settled = entry;
+      void probe.then(() => {
+        if (pendingWalletModeProbe === settled) pendingWalletModeProbe = null;
+      });
+    }
+    const { probe } = entry;
+    return new Promise<TradingWalletMode | null>((resolve) => {
+      const timer = setTimeout(
+        () => resolve(null),
+        FUND_WALLET_MODE_TIMEOUT_MS
+      );
+      void probe.then((mode) => {
+        clearTimeout(timer);
+        resolve(mode);
+      });
+    });
+  }
+
+  /** Screen for reopening the funds view onto a flow whose money is still in
+   * flight: a live status panel over that transaction (regardless of which
+   * action was clicked). Reuses the fund frame's status/submit hooks so the
+   * shared progress sync keeps driving it through done/error. */
+  function renderFundInFlight(flow: PortfolioFundAction): string {
+    const label = flow === "deposit" ? "Deposit" : "Withdraw";
+    return `
+    <div class="knoww-pf-fund">
+      <div class="knoww-pf-fund-head">
+        <button type="button" class="knoww-pf-fund-back" data-fund-back aria-label="Back to portfolio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+        </button>
+        <div class="knoww-pf-fund-heading">
+          <span class="knoww-pf-fund-kicker">${label}</span>
+        </div>
+      </div>
+      <div class="knoww-pf-fund-status" data-fund-status hidden></div>
+      ${renderFundSubmitButton(label, true)}
+    </div>`;
+  }
+
   function openPortfolioFunds(action: PortfolioFundAction): void {
     const container = getPortfolioContainer();
     const data = dependencies.getPortfolioData();
@@ -1630,6 +1751,27 @@ export function createFundingUi(
       return;
     }
     const controller = ensureFundController();
+    const current = controller.getState();
+    // A flow with money in flight must never be recycled: RESET would tear down
+    // the controller's confirmation polling and its outcome would never reach
+    // the screen. Re-attach instead — the status panel keeps tracking it, and
+    // its "done" refresh closes the view as usual.
+    if (current.step === "submitting" || current.step === "confirming") {
+      cancelFundOpen();
+      fundFlow = current.command.flow;
+      fundDepositSource = "wallet";
+      lastFundScreenKey = "in-flight";
+      container.innerHTML = renderFundInFlight(current.command.flow);
+      syncFundProgress(current);
+      return;
+    }
+    // START is only honoured from the machine's idle step; every other step drops
+    // it. A flow left mid-air (errored, or abandoned by switching to the Markets
+    // tab — neither dispatches RESET) would therefore swallow the START below,
+    // and those steps render nothing new, leaving the loading placeholder on
+    // screen forever. Recycle so the open always starts from idle.
+    if (current.step !== "idle") controller.dispatch({ type: "RESET" });
+    const token = ++fundOpenToken;
     fundFlow = action;
     fundDepositSource = "wallet";
     lastFundScreenKey = null;
@@ -1637,18 +1779,33 @@ export function createFundingUi(
     // The signing wallet mode must be known before START (the machine threads it
     // into the command fingerprint). Resolving it is async, so show a brief
     // loading state instead of a blank flash.
-    container.innerHTML = `<div class="knoww-portfolio-loading">Loading…</div>`;
+    container.innerHTML = renderFundProbe(action);
     void (async () => {
-      const walletMode = await dependencies.resolvePreferredWalletMode(address);
-      if (fundFlow !== action) return; // navigated away during the probe
+      const walletMode = await resolveFundWalletMode(address);
+      if (token !== fundOpenToken) return; // closed or reopened during the probe
+      const target = getPortfolioContainer();
+      // If some external render replaced the probe screen anyway, releasing the
+      // view beats painting a funding screen over foreign content. The machine
+      // is provably idle here (START hasn't been dispatched), so no RESET.
+      if (!target?.querySelector("[data-fund-probe]")) {
+        resetFundOpenState();
+        return;
+      }
+      if (!walletMode) {
+        // Never guess the signing wallet — a wrong mode signs from the wrong
+        // address. Surface it instead and let the user retry.
+        target.innerHTML = renderFundProbe(
+          action,
+          "Couldn't reach your wallet. Check your connection and try again."
+        );
+        return;
+      }
       controller.dispatch({ type: "START", flow: action, address, walletMode });
     })();
   }
 
   function closePortfolioFunds(): void {
-    fundFlow = null;
-    fundDepositSource = "wallet";
-    lastFundScreenKey = null;
+    resetFundOpenState();
     fundController?.dispatch({ type: "RESET" });
     if (dependencies.getPortfolioData()) dependencies.renderPortfolio();
     else void dependencies.reloadPortfolio();
@@ -1669,11 +1826,13 @@ export function createFundingUi(
         setTimeout(() => {
           if (run !== portfolioFundRefreshRun) return;
           // The first refresh closes the funds view (this action's result is on
-          // screen); later ones only reload if the user hasn't reopened it.
+          // screen); later ones only reload if the user hasn't reopened it. The
+          // "done" gate tells the completed flow these timers belong to apart
+          // from a same-action flow the user has since reopened — which must
+          // not be torn down mid-form.
           if (fundFlow === action) {
-            fundFlow = null;
-            fundDepositSource = "wallet";
-            lastFundScreenKey = null;
+            if (fundController?.getState().step !== "done") return;
+            resetFundOpenState();
             fundController?.dispatch({ type: "RESET" });
           } else if (isFundViewOpen()) {
             return;
@@ -1825,6 +1984,9 @@ export function createFundingUi(
   }
 
   function renderPortfolioFundActions(): string {
+    // Deposit/withdraw move real funds on-chain; the store-compliant build
+    // ships neither the buttons nor the background money-movement routes.
+    if (__STORE_BUILD__) return "";
     return `
     <div class="knoww-pf-fund-actions">
       <button type="button" class="knoww-pf-fund-btn primary" data-portfolio-fund="deposit">
@@ -1888,6 +2050,9 @@ export function createFundingUi(
     const target = event.target as Element | null;
     const portfolioFund = target?.closest<HTMLElement>("[data-portfolio-fund]");
     if (portfolioFund) {
+      // Money-movement is stripped from the store-compliant build; ignore any
+      // stray deposit/withdraw affordance defensively.
+      if (__STORE_BUILD__) return true;
       const action = portfolioFund.dataset.portfolioFund;
       if (action === "deposit" || action === "withdraw")
         openPortfolioFunds(action);
@@ -1968,15 +2133,14 @@ export function createFundingUi(
     close: closePortfolioFunds,
     renderActions: renderPortfolioFundActions,
     resetAccount() {
-      fundFlow = null;
-      fundDepositSource = "wallet";
-      lastFundScreenKey = null;
+      resetFundOpenState();
       fundController?.dispatch({ type: "ACCOUNT_CHANGED" });
     },
     handleChange,
     handleInput,
     handleClick,
     dispose() {
+      resetFundOpenState();
       clearPortfolioFundRefreshTimers();
       fundController?.dispose();
       fundController = null;

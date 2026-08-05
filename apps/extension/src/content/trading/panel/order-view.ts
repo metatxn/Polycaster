@@ -6,10 +6,15 @@ import {
 import {
   calculateBuySlippageForAmount,
   calculateSlippage,
+  roundDownToTick,
   roundToTick,
+  roundUpToTick,
+  type SlippageResult,
 } from "@knoww/shared-types/slippage";
 import {
   estimateFallbackFeeRaw,
+  formatFeeUsd,
+  MIN_MARKETABLE_BUY_TICKET_USD,
   parsePusdUnits,
 } from "@knoww/shared-types/trading";
 import { Decimal } from "decimal.js";
@@ -163,7 +168,6 @@ const I = {
 
 const ORDER_APPROVAL_PREVIEW_DEBOUNCE_MS = 200;
 
-const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 function getTrackedOutcomeName(opts: PanelOptions): string {
   if (opts.yesTokenId && opts.noTokenId) {
     return panelState.selectedOutcome === "yes" ? "Yes" : "No";
@@ -279,11 +283,60 @@ function getMarketSlippage(ctx: TradingContext, opts: PanelOptions) {
   return slip;
 }
 
+/**
+ * The book came up short, but the user allowed a partial fill (FAK) and the
+ * walk did touch real depth. FAK's contract is "fill whatever is available
+ * within the price bound, cancel the rest", so this is a placeable order — we
+ * just size the ticket down to the fillable portion and say so.
+ */
+function isPartialFill(slip: SlippageResult | null): boolean {
+  return Boolean(
+    panelState.orderMode === "market" &&
+      panelState.allowPartialFill &&
+      slip &&
+      !slip.canFill &&
+      slip.filledSize > 0 &&
+      slip.worstPrice > 0
+  );
+}
+
+/**
+ * Price bound to sign a market order with — the walk's worst price plus a small
+ * buffer, snapped to the tick.
+ *
+ * A partial (FAK) walk still produces a real worst price, so it gets the same
+ * bound as a full fill. This matters: `optionalPriceBound` in the SDK shim
+ * drops any non-positive price, and the background only forwards a bound when
+ * `price > 0`, so returning `undefined`/`0` here would sign the order with no
+ * `maxPrice`/`minPrice` at all (unbounded slippage).
+ */
+function getMarketPriceBound(slip: SlippageResult | null): number | undefined {
+  if (!slip || slip.worstPrice <= 0) return undefined;
+  if (!slip.canFill && !isPartialFill(slip)) return undefined;
+
+  const tickSize = getTickSize();
+  const worst = new Decimal(slip.worstPrice);
+  if (panelState.activeSide === "sell") {
+    return Math.max(
+      tickSize,
+      roundDownToTick(worst.mul("0.995").toNumber(), tickSize)
+    );
+  }
+  return Math.min(
+    1 - tickSize,
+    roundUpToTick(worst.mul("1.005").toNumber(), tickSize)
+  );
+}
+
 function getOrderShareSize(opts: PanelOptions, ctx: TradingContext): number {
-  if (!isMarketBuyAmountOrder()) return panelState.selectedShares;
+  if (panelState.orderMode !== "market") return panelState.selectedShares;
 
   const slip = getMarketSlippage(ctx, opts);
-  return slip?.filledSize ?? 0;
+  if (isMarketBuyAmountOrder()) return slip?.filledSize ?? 0;
+  // A MARKET SELL is entered in shares, but on a partial (FAK) fill only
+  // `filledSize` of them clear — and that is the size we sign, so it is the
+  // size we show. With no walk to go on, fall back to what the user typed.
+  return slip?.filledSize ?? panelState.selectedShares;
 }
 
 function getMarketNotional(
@@ -320,8 +373,77 @@ function getFallbackRequiredCollateral(cost: number): number {
 }
 
 function getPanelOrderType(): ClobOrderType {
-  if (panelState.orderMode === "market") return "FAK";
+  // "Allow partial fill" is the whole difference between the two immediate
+  // order types: FAK takes whatever depth is there and cancels the rest, FOK
+  // is all-or-nothing.
+  if (panelState.orderMode === "market") {
+    return panelState.allowPartialFill ? "FAK" : "FOK";
+  }
   return panelState.expirationPreset === "GTC" ? "GTC" : "GTD";
+}
+
+/**
+ * Whether the current BUY ticket would cross the book, or `undefined` when we
+ * cannot yet assert it (a limit order whose bestAsk has not loaded).
+ *
+ * `undefined` is not `false`: it makes the background fall back to the
+ * conservative taker rate rather than mistakenly sizing the order as a maker.
+ */
+function getIsMarketableBuy(
+  ctx: TradingContext,
+  opts: PanelOptions
+): boolean | undefined {
+  if (panelState.activeSide !== "buy") return undefined;
+  if (panelState.orderMode === "market") return true;
+  const { bestAsk } = getBestBidAsk(ctx, opts);
+  return bestAsk === undefined ? undefined : panelState.limitPrice >= bestAsk;
+}
+
+/**
+ * Taker fee for the ticket as it stands, in USD, or `null` when unknown.
+ *
+ * Reads the preflight preview the submit button already fetches — the key check
+ * makes sure a stale preview from a previous amount never gets shown against
+ * the current one. Returns `null` rather than `0` for an unread fee.
+ */
+function getPreviewedFeeUsd(
+  opts: PanelOptions,
+  ctx: TradingContext,
+  cost: number,
+  shares: number
+): number | null {
+  if (panelState.activeSide !== "buy") return null;
+  const key = getOrderApprovalPreviewKey(
+    opts,
+    cost,
+    shares,
+    getIsMarketableBuy(ctx, opts)
+  );
+  if (!key || panelState.orderApprovalPreview?.key !== key) return null;
+  return panelState.orderApprovalPreview.estimatedFee;
+}
+
+/**
+ * Price to quote the preflight at.
+ *
+ * A market order has no single quoted price, so use the average fill price the
+ * ticket implies. Sending `0` — which the collateral math tolerates, since a
+ * market BUY is sized by amount, not by price — would collapse the fee estimate
+ * to zero: the protocol fee is a curve in `price · (1 − price)`, which is 0 at
+ * the endpoints.
+ */
+function getPreflightPrice(
+  opts: PanelOptions,
+  cost: number,
+  orderSize: number
+): number {
+  if (panelState.orderMode !== "market") {
+    return normalizePrice(panelState.limitPrice || opts.price);
+  }
+  if (orderSize > 0 && cost > 0) {
+    return new Decimal(cost).div(orderSize).toNumber();
+  }
+  return getEffectivePrice(opts);
 }
 
 function getOrderApprovalPreviewKey(
@@ -339,10 +461,7 @@ function getOrderApprovalPreviewKey(
   ) {
     return null;
   }
-  const price =
-    panelState.orderMode === "market"
-      ? 0
-      : normalizePrice(panelState.limitPrice || opts.price);
+  const price = getPreflightPrice(opts, cost, orderSize);
   return [
     opts.tokenId,
     opts.conditionId ?? "",
@@ -392,10 +511,7 @@ function ensureOrderApprovalPreview(
     if (panelState.orderApprovalPreviewInFlightKey !== key) return;
 
     const orderType = getPanelOrderType();
-    const price =
-      panelState.orderMode === "market"
-        ? 0
-        : normalizePrice(panelState.limitPrice || opts.price);
+    const price = getPreflightPrice(opts, cost, orderSize);
     TradingService.getOrderPreflight({
       side: "BUY",
       price,
@@ -414,6 +530,10 @@ function ensureOrderApprovalPreview(
           key,
           requiredCollateral: rawPusdToNumber(preflight.requiredCollateralRaw),
           requiredCollateralRaw: preflight.requiredCollateralRaw,
+          estimatedFee:
+            preflight.estimatedFeeRaw === null
+              ? null
+              : rawPusdToNumber(preflight.estimatedFeeRaw),
         };
         rerender();
       })
@@ -424,6 +544,9 @@ function ensureOrderApprovalPreview(
           key,
           requiredCollateral: getFallbackRequiredCollateral(cost),
           requiredCollateralRaw: "",
+          // The preflight is what knows the fee; if it failed we do not have a
+          // number worth showing.
+          estimatedFee: null,
         };
         rerender();
       });
@@ -1006,6 +1129,46 @@ function addSlippageInfo(
   form.appendChild(row);
 }
 
+// ── Partial Fill Toggle (Market mode) ──
+
+function addPartialFillToggle(form: HTMLElement, opts: PanelOptions): void {
+  if (panelState.orderMode !== "market") return;
+
+  const block = el("div", "knoww-tp-partial-fill");
+  const row = el("div", "knoww-tp-pf-row");
+  row.appendChild(el("span", "knoww-tp-pf-label", "Allow partial fill"));
+
+  const on = panelState.allowPartialFill;
+  const sw = el("button", `knoww-tp-pf-switch${on ? " on" : ""}`);
+  sw.setAttribute("type", "button");
+  sw.setAttribute("role", "switch");
+  sw.setAttribute("aria-checked", on ? "true" : "false");
+  sw.setAttribute("aria-label", "Allow partial fill");
+  sw.appendChild(el("span", "knoww-tp-pf-knob"));
+  sw.onclick = (e) => {
+    e.stopPropagation();
+    panelState.allowPartialFill = !panelState.allowPartialFill;
+    trackPanelAnalytics("trading_form_partial_fill_toggled", {
+      marketId: opts.market.id,
+      allowPartialFill: panelState.allowPartialFill,
+    });
+    rerender();
+  };
+  row.appendChild(sw);
+  block.appendChild(row);
+
+  block.appendChild(
+    el(
+      "div",
+      "knoww-tp-pf-info",
+      on
+        ? "Fills whatever the book has right now and cancels the rest (FAK)"
+        : "Fills the full amount or nothing at all (FOK)"
+    )
+  );
+  form.appendChild(block);
+}
+
 // ── Amount Section ──
 
 function addMarketBuyAmountSection(
@@ -1296,6 +1459,32 @@ function addOrderSummary(
   );
   summary.appendChild(r1);
 
+  // Taker fee. Orders are signed without `maxSpend`, so the fee is charged *on
+  // top* of what you pay rather than taken out of it — the row plus the total
+  // below it are what make the real debit visible instead of a surprise.
+  // Omitted when the market's fee details could not be read; "$0.00" would be a
+  // worse lie, and a total built on a missing fee would be worse still.
+  const estimatedFeeUsd = getPreviewedFeeUsd(opts, ctx, cost, shares);
+  if (isBuy && estimatedFeeUsd !== null) {
+    const feeRow = el("div", "knoww-tp-summary-row");
+    feeRow.appendChild(el("span", "knoww-tp-summary-label", "Est. fee"));
+    feeRow.appendChild(
+      el("span", "knoww-tp-summary-value sm", formatFeeUsd(estimatedFeeUsd))
+    );
+    summary.appendChild(feeRow);
+
+    const totalRow = el("div", "knoww-tp-summary-row");
+    totalRow.appendChild(el("span", "knoww-tp-summary-label", "Est. total"));
+    totalRow.appendChild(
+      el(
+        "span",
+        "knoww-tp-summary-value sm",
+        `$${costDec.plus(estimatedFeeUsd).toFixed(2)}`
+      )
+    );
+    summary.appendChild(totalRow);
+  }
+
   if (orderBookStatus !== "ready") {
     const statusRow = el("div", "knoww-tp-summary-row");
     statusRow.appendChild(
@@ -1317,6 +1506,27 @@ function addOrderSummary(
     summary.appendChild(statusRow);
     form.appendChild(summary);
     return;
+  }
+
+  // FAK sized the ticket down to the depth that is actually there. Say so in
+  // the user's own units — they typed dollars on a market BUY and shares on a
+  // SELL — before they sign for less than they asked for.
+  const marketSlippage = getMarketSlippage(ctx, opts);
+  if (marketSlippage && isPartialFill(marketSlippage)) {
+    const pfRow = el("div", "knoww-tp-summary-row knoww-tp-warn-row");
+    pfRow.appendChild(
+      el("span", "knoww-tp-summary-label knoww-tp-warn-text", "Partial fill")
+    );
+    pfRow.appendChild(
+      el(
+        "span",
+        "knoww-tp-summary-value knoww-tp-warn-text",
+        isMarketBuyAmount
+          ? `$${new Decimal(marketSlippage.totalNotional).toFixed(2)} of $${new Decimal(panelState.marketBuyAmount).toFixed(2)}`
+          : `${formatShareQuantity(marketSlippage.filledSize)} of ${formatShareQuantity(panelState.selectedShares)} shares`
+      )
+    );
+    summary.appendChild(pfRow);
   }
 
   if (isBuy && !isMarketBuyAmount && shares > 0 && shares < minShares) {
@@ -1474,26 +1684,19 @@ function addSubmitButton(
   const minShares = Math.max(1, Math.ceil(minOrderSize));
   const belowMinShares =
     panelState.activeSide === "buy" && !isMarketBuyAmount && shares < minShares;
+  // Genuinely un-fillable: either the user demanded all-or-nothing (FOK) or
+  // the book has no depth at all to walk into. A short book the user opted
+  // into filling partially is a placeable order, not a blocked one.
   const hasInsufficientLiquidity =
     panelState.orderMode === "market" &&
     orderBookStatus === "ready" &&
     !noAmount &&
-    marketSlippage?.canFill !== true;
+    marketSlippage?.canFill !== true &&
+    !isPartialFill(marketSlippage);
   const relevantAllowance = opts.negRisk ? usdcAllowanceNegRisk : usdcAllowance;
-  // Compute marketability before the preflight call — it gates which builder
-  // fee rate (taker vs maker) the gate sizes against, so it must be part of
-  // the preview cache key. Use `undefined` (not `false`) when bestAsk is
-  // unavailable for a limit order, so the background falls back to the
-  // conservative taker rate instead of mistakenly sizing as a maker.
-  const { bestAsk } = getBestBidAsk(ctx, opts);
-  const isMarketableBuy: boolean | undefined =
-    panelState.activeSide !== "buy"
-      ? undefined
-      : panelState.orderMode === "market"
-        ? true
-        : bestAsk !== undefined
-          ? panelState.limitPrice >= bestAsk
-          : undefined;
+  // Marketability gates which builder fee rate (taker vs maker) the gate sizes
+  // against, so it is part of the preview cache key.
+  const isMarketableBuy = getIsMarketableBuy(ctx, opts);
   const approvalPreviewKey =
     orderBookStatus !== "ready" || hasInsufficientLiquidity
       ? null
@@ -1513,11 +1716,13 @@ function addSubmitButton(
     cost > 0 &&
     !isCheckingApprovalRequirement &&
     relevantAllowance < approvalRequirement;
-  const marketableBuyNotional = isMarketBuyAmount
-    ? panelState.marketBuyAmount
-    : cost;
+  // Signed without `maxSpend`, so `makerAmount` equals the amount we submit —
+  // which is `cost`, the walked book notional on a partial (FAK) fill, not the
+  // typed amount. The CLOB's $1 floor applies to that signed amount directly,
+  // so the guard must size against it too (a $10 ticket over $0.60 of depth
+  // signs a $0.60 order).
   const belowMinNotional =
-    isMarketableBuy && marketableBuyNotional < MIN_MARKETABLE_BUY_NOTIONAL_USD;
+    isMarketableBuy && cost < MIN_MARKETABLE_BUY_TICKET_USD;
   const positionSize = getPositionSize(opts);
   const sellBalancesLoading =
     panelState.activeSide === "sell" && !panelState.outcomeBalancesLoaded;
@@ -1573,7 +1778,7 @@ function addSubmitButton(
     btn.textContent = "Insufficient liquidity";
     btn.disabled = true;
   } else if (belowMinNotional) {
-    btn.textContent = `Minimum order: $${MIN_MARKETABLE_BUY_NOTIONAL_USD}`;
+    btn.textContent = `Minimum order: $${MIN_MARKETABLE_BUY_TICKET_USD.toFixed(2)}`;
     btn.disabled = true;
   } else if (belowMinShares) {
     btn.textContent = `Minimum shares: ${minShares}`;
@@ -1680,8 +1885,11 @@ function addSubmitButton(
     let expiration: number | undefined;
 
     if (panelState.orderMode === "market") {
-      clobOrderType = "FAK";
-      price = undefined;
+      clobOrderType = getPanelOrderType();
+      // Sign the walk's buffered worst price. Sending nothing here reaches the
+      // background as `price: 0`, which forwards no bound at all — a market
+      // order with unbounded slippage.
+      price = getMarketPriceBound(marketSlippage);
     } else {
       price = normalizePrice(panelState.limitPrice || opts.price);
       if (panelState.expirationPreset === "GTC") {
@@ -1700,7 +1908,13 @@ function addSubmitButton(
 
     try {
       let effectiveSize = shares;
-      if (side === "SELL" && positionSize > 0) {
+      // On a partial fill the walked size *is* the order — snapping it up to
+      // the full position would sign more than the ticket quoted.
+      if (
+        side === "SELL" &&
+        positionSize > 0 &&
+        !isPartialFill(marketSlippage)
+      ) {
         const diff = Math.abs(shares - positionSize);
         if (diff < positionSize * 0.01 || shares >= positionSize) {
           effectiveSize = positionSize;
@@ -1904,6 +2118,7 @@ export function renderOrderForm(
   addLimitPrice(form, opts, ctx);
   addSlippageInfo(form, opts, ctx);
   addAmountSection(form, opts, ctx);
+  addPartialFillToggle(form, opts);
 
   const dynamic = el("div", "knoww-tp-dynamic");
   addOrderSummary(dynamic, opts, ctx);

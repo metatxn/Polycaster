@@ -148,6 +148,31 @@ describe("deposit wallet path", () => {
     expect(effects).toEqual([]);
   });
 
+  it("START is dropped outside idle, so callers must RESET a stale flow first", () => {
+    // done/error render nothing new, so a swallowed START leaves whatever the
+    // caller put on screen (the side panel's loading placeholder) up forever.
+    // openPortfolioFunds relies on this by recycling before it dispatches START.
+    const stale: FundingState = {
+      step: "done",
+      txHash: null,
+      corr: initialFundingState.corr,
+    };
+    const [ignored] = reduceFunding(stale, {
+      type: "START",
+      flow: "deposit",
+      address: ADDRESS,
+    });
+    expect(ignored).toBe(stale);
+    const [recycled] = reduceFunding(stale, { type: "RESET" });
+    expect(recycled.step).toBe("idle");
+    const [started] = reduceFunding(recycled, {
+      type: "START",
+      flow: "deposit",
+      address: ADDRESS,
+    });
+    expect(started.step).toBe("method");
+  });
+
   it("SELECT_METHOD wallet emits loadTokens with fresh effectId", () => {
     let state = initialFundingState;
     [state] = reduceFunding(state, { type: "START", flow: "deposit" });

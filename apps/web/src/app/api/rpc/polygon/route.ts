@@ -22,6 +22,20 @@ const PER_ENDPOINT_TIMEOUT_MS = 5000;
 // Maximum request body size (100KB — well above any legitimate JSON-RPC payload)
 const MAX_BODY_SIZE = 100 * 1024;
 
+// Maximum JSON-RPC requests per batch. viem/wagmi batching stays well under
+// this; larger batches amplify upstream fanout through a shared proxy.
+const MAX_BATCH_ITEMS = 10;
+
+// Maximum upstream response size we will buffer. Responses are read through
+// a byte-counting stream so a misbehaving upstream (or an eth_getLogs-style
+// query with a huge result) cannot exhaust isolate memory.
+const MAX_UPSTREAM_RESPONSE_BYTES = 1024 * 1024;
+
+// eth_feeHistory returns one entry per block and percentile. Bounding both
+// axes prevents a small request from asking the upstream for a large matrix.
+const MAX_FEE_HISTORY_BLOCKS = 128;
+const MAX_FEE_HISTORY_PERCENTILES = 20;
+
 // How long an endpoint stays in the "unhealthy" set after a failure before
 // we re-probe it. Short enough that a transient blip doesn't sideline the
 // fastest endpoint for long.
@@ -52,43 +66,216 @@ const PUBLIC_RPC_ENDPOINTS: RpcEndpoint[] = [
 const unhealthyEndpoints = new Map<string, number>();
 
 /**
- * Blocked JSON-RPC methods (denylist approach).
+ * Allowed JSON-RPC methods (allowlist approach).
  *
- * We block write/signing methods that should never go through a shared proxy.
- * Everything else (reads, gas estimation, fee queries, etc.) is allowed,
- * which avoids breaking when viem/wagmi/wallet SDKs add new read methods.
+ * The proxy exists solely so the browser can read Polygon state through our
+ * origin (wagmi public client, viem multicall, wallet-token balances). Only
+ * the standard read/fee methods those clients issue are forwarded; anything
+ * else — signing, tx submission, admin/debug namespaces, and any method a
+ * future upstream might add — is rejected by default. Filter methods
+ * (eth_newFilter etc.) are deliberately absent: filter ids are per-node
+ * state, which a round-robin multi-endpoint proxy cannot honor.
+ * `eth_getLogs` is also excluded — no browser flow uses it, and an
+ * unbounded block range can force the Worker and provider to produce
+ * multi-megabyte responses; re-add it only behind a bounded
+ * range/address/topic policy.
+ *
+ * The set is intentionally minimal: it contains exactly the methods a
+ * repository grep shows the app's clients issuing. Every extra method is
+ * free Worker/provider quota for anyone who finds this public proxy, so
+ * add one only when an actual application flow needs it — never
+ * speculatively.
  */
-const BLOCKED_RPC_METHODS = new Set([
-  // Transaction submission — users should sign and submit via their own wallet
-  "eth_sendTransaction",
-  "eth_sendRawTransaction",
-  // Signing — must happen client-side via the user's wallet
-  "eth_sign",
-  "eth_signTransaction",
-  "personal_sign",
-  "eth_signTypedData",
-  "eth_signTypedData_v3",
-  "eth_signTypedData_v4",
-  // Account management — these are wallet-level operations
-  "eth_accounts",
-  "eth_requestAccounts",
-  "eth_coinbase",
-  // Mining/admin — not applicable
-  "eth_mining",
-  "eth_submitWork",
-  "eth_submitHashrate",
-  "admin_addPeer",
-  "admin_removePeer",
-  "admin_nodeInfo",
-  "debug_traceTransaction",
-  "debug_traceBlockByNumber",
-  "debug_traceBlockByHash",
-  "miner_start",
-  "miner_stop",
-  "personal_newAccount",
-  "personal_unlockAccount",
-  "personal_importRawKey",
+const ALLOWED_RPC_METHODS = new Set([
+  // Chain identity
+  "eth_chainId",
+  // Blocks — number polling + lookup for viem receipt waiting
+  "eth_blockNumber",
+  "eth_getBlockByNumber",
+  // State reads — wagmi public client, viem multicall, token balances
+  "eth_call",
+  "eth_getBalance",
+  "eth_getCode",
+  "eth_getTransactionCount",
+  // Transactions (read-only lookups)
+  "eth_getTransactionByHash",
+  "eth_getTransactionReceipt",
+  // Gas / fees
+  "eth_estimateGas",
+  "eth_gasPrice",
+  "eth_feeHistory",
+  "eth_maxPriorityFeePerGas",
 ]);
+
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+const HASH_RE = /^0x[a-fA-F0-9]{64}$/;
+const HEX_DATA_RE = /^0x(?:[a-fA-F0-9]{2})*$/;
+const HEX_QUANTITY_RE = /^0x(?:0|[1-9a-fA-F][a-fA-F0-9]*)$/;
+const BLOCK_TAGS = new Set([
+  "earliest",
+  "finalized",
+  "latest",
+  "pending",
+  "safe",
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function isHexQuantity(value: unknown): value is string {
+  return typeof value === "string" && HEX_QUANTITY_RE.test(value);
+}
+
+function isBlockIdentifier(value: unknown): boolean {
+  if (typeof value === "string") {
+    return BLOCK_TAGS.has(value) || isHexQuantity(value);
+  }
+  if (!isPlainObject(value)) return false;
+
+  const hasHash = "blockHash" in value;
+  const hasNumber = "blockNumber" in value;
+  if (hasHash === hasNumber) return false;
+  if (hasHash && !HASH_RE.test(String(value.blockHash))) return false;
+  if (hasNumber && !isHexQuantity(value.blockNumber)) return false;
+  return (
+    !("requireCanonical" in value) ||
+    typeof value.requireCanonical === "boolean"
+  );
+}
+
+function isCallObject(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+
+  for (const key of ["from", "to"] as const) {
+    if (key in value && !ADDRESS_RE.test(String(value[key]))) return false;
+  }
+  for (const key of [
+    "chainId",
+    "gas",
+    "gasPrice",
+    "maxFeePerGas",
+    "maxPriorityFeePerGas",
+    "nonce",
+    "type",
+    "value",
+  ] as const) {
+    if (key in value && !isHexQuantity(value[key])) return false;
+  }
+  for (const key of ["data", "input"] as const) {
+    if (key in value && !HEX_DATA_RE.test(String(value[key]))) return false;
+  }
+  return true;
+}
+
+function areSortedPercentiles(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > MAX_FEE_HISTORY_PERCENTILES) {
+    return false;
+  }
+
+  let previous = -1;
+  for (const percentile of value) {
+    if (
+      typeof percentile !== "number" ||
+      !Number.isFinite(percentile) ||
+      percentile < 0 ||
+      percentile > 100 ||
+      percentile < previous
+    ) {
+      return false;
+    }
+    previous = percentile;
+  }
+  return true;
+}
+
+function hasParams(
+  params: unknown[],
+  count: number,
+  validators: Array<(value: unknown) => boolean>
+): boolean {
+  return (
+    params.length === count &&
+    validators.every((validator, index) => validator(params[index]))
+  );
+}
+
+function hasValidRpcParams(method: string, paramsValue: unknown): boolean {
+  const params = paramsValue === undefined ? [] : paramsValue;
+  if (!Array.isArray(params)) return false;
+
+  switch (method) {
+    case "eth_chainId":
+    case "eth_blockNumber":
+    case "eth_gasPrice":
+    case "eth_maxPriorityFeePerGas":
+      return params.length === 0;
+
+    case "eth_getBlockByNumber":
+      // Returning full transaction objects can multiply the response size.
+      return hasParams(params, 2, [
+        (value) => typeof value === "string" && isBlockIdentifier(value),
+        (value) => value === false,
+      ]);
+
+    case "eth_getBalance":
+    case "eth_getCode":
+    case "eth_getTransactionCount":
+      return hasParams(params, 2, [
+        (value) => typeof value === "string" && ADDRESS_RE.test(value),
+        isBlockIdentifier,
+      ]);
+
+    case "eth_getTransactionByHash":
+    case "eth_getTransactionReceipt":
+      return hasParams(params, 1, [
+        (value) => typeof value === "string" && HASH_RE.test(value),
+      ]);
+
+    case "eth_feeHistory": {
+      if (
+        !hasParams(params, 3, [
+          isHexQuantity,
+          isBlockIdentifier,
+          areSortedPercentiles,
+        ])
+      ) {
+        return false;
+      }
+      const blockCount = Number.parseInt(params[0] as string, 16);
+      return (
+        Number.isSafeInteger(blockCount) &&
+        blockCount > 0 &&
+        blockCount <= MAX_FEE_HISTORY_BLOCKS
+      );
+    }
+
+    case "eth_call":
+      return (
+        params.length >= 1 &&
+        params.length <= 3 &&
+        isCallObject(params[0]) &&
+        (params.length < 2 || isBlockIdentifier(params[1])) &&
+        (params.length < 3 || isPlainObject(params[2]))
+      );
+
+    case "eth_estimateGas":
+      return (
+        params.length >= 1 &&
+        params.length <= 2 &&
+        isCallObject(params[0]) &&
+        (params.length < 2 || isBlockIdentifier(params[1]))
+      );
+
+    default:
+      return false;
+  }
+}
 
 /**
  * Generates CORS headers for the validated origin.
@@ -217,10 +404,67 @@ function isRetryableRpcResponse(data: unknown): boolean {
   );
 }
 
+/**
+ * Reads a response body with a hard byte cap, then parses JSON. Uses a
+ * streaming reader so oversized bodies are cancelled mid-flight instead of
+ * fully buffered before the size check.
+ */
+async function readBoundedJson(
+  response: Response,
+  maxBytes: number
+): Promise<
+  | { ok: true; data: unknown }
+  | { ok: false; reason: "too_large" | "invalid_json" }
+> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && Number.parseInt(contentLength, 10) > maxBytes) {
+    await response.body?.cancel();
+    return { ok: false, reason: "too_large" };
+  }
+
+  if (!response.body) {
+    return { ok: false, reason: "invalid_json" };
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel();
+      return { ok: false, reason: "too_large" };
+    }
+    chunks.push(value);
+  }
+
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    return { ok: true, data: JSON.parse(new TextDecoder().decode(combined)) };
+  } catch {
+    return { ok: false, reason: "invalid_json" };
+  }
+}
+
+type EndpointFetchResult =
+  | { kind: "success"; data: unknown; status: number }
+  // Terminal: a too-large response is driven by the request, so retrying the
+  // next endpoint would just re-download the same oversized payload.
+  | { kind: "too_large" }
+  | { kind: "failed" };
+
 async function fetchFromEndpoint(
   endpoint: RpcEndpoint,
   body: unknown
-): Promise<{ data: unknown; status: number } | null> {
+): Promise<EndpointFetchResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(
     () => controller.abort(),
@@ -245,21 +489,29 @@ async function fetchFromEndpoint(
         statusText: response.statusText,
       });
       markEndpointUnhealthy(endpoint, `http_${response.status}`);
-      return null;
+      return { kind: "failed" };
     }
 
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch (error) {
+    const parsed = await readBoundedJson(response, MAX_UPSTREAM_RESPONSE_BYTES);
+    if (!parsed.ok) {
+      if (parsed.reason === "too_large") {
+        // Not an endpoint-health problem — the request produced an oversized
+        // result, so don't sideline the endpoint for other callers.
+        log.warn("upstream.response_too_large", {
+          provider: endpoint.provider,
+          endpoint: endpoint.name,
+          maxBytes: MAX_UPSTREAM_RESPONSE_BYTES,
+        });
+        return { kind: "too_large" };
+      }
       log.warn("upstream.invalid_json", {
         provider: endpoint.provider,
         endpoint: endpoint.name,
-        error,
       });
       markEndpointUnhealthy(endpoint, "invalid_json");
-      return null;
+      return { kind: "failed" };
     }
+    const data = parsed.data;
 
     if (isRetryableRpcResponse(data)) {
       log.warn("upstream.retryable_rpc_error", {
@@ -267,14 +519,14 @@ async function fetchFromEndpoint(
         endpoint: endpoint.name,
       });
       markEndpointUnhealthy(endpoint, "retryable_rpc_error");
-      return null;
+      return { kind: "failed" };
     }
 
     log.debug("upstream.success", {
       provider: endpoint.provider,
       endpoint: endpoint.name,
     });
-    return { data, status: response.status };
+    return { kind: "success", data, status: response.status };
   } catch (error) {
     const isAbortError = error instanceof Error && error.name === "AbortError";
     log.warn(isAbortError ? "upstream.timeout" : "upstream.fetch_failed", {
@@ -284,7 +536,7 @@ async function fetchFromEndpoint(
       error,
     });
     markEndpointUnhealthy(endpoint, isAbortError ? "timeout" : "fetch_failed");
-    return null;
+    return { kind: "failed" };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -294,13 +546,13 @@ async function fetchFromEndpoint(
  * @openapi
  * /api/rpc/polygon:
  *   post:
- *     summary: Create or proxy /api/rpc/polygon.
+ *     summary: Proxy bounded read-only Polygon JSON-RPC requests.
  *     tags: [Rpc]
  *     responses:
  *       200:
  *         description: Successful response.
  *       400:
- *         description: Invalid request.
+ *         description: Invalid JSON-RPC request or method parameters.
  *       401:
  *         description: Authentication required.
  *       403:
@@ -311,6 +563,8 @@ async function fetchFromEndpoint(
  *         description: Rate limit exceeded.
  *       500:
  *         description: Request failed.
+ *       502:
+ *         description: Upstream unavailable or response exceeded the byte cap.
  */
 export async function POST(request: NextRequest) {
   const requestOrigin = request.headers.get("origin");
@@ -354,8 +608,19 @@ export async function POST(request: NextRequest) {
       return jsonError("Invalid JSON-RPC request", 400, corsHeaders);
     }
 
-    // Validate JSON-RPC methods against denylist
-    const requests = Array.isArray(body) ? body : [body];
+    // Validate JSON-RPC methods against the read-method allowlist
+    const isBatch = Array.isArray(body);
+    const requests: unknown[] = Array.isArray(body) ? body : [body];
+    if (isBatch && requests.length === 0) {
+      return jsonError("Empty JSON-RPC batch", 400, corsHeaders);
+    }
+    if (requests.length > MAX_BATCH_ITEMS) {
+      return jsonError(
+        `Too many requests in batch (max ${MAX_BATCH_ITEMS})`,
+        400,
+        corsHeaders
+      );
+    }
     for (const rpcRequest of requests) {
       const method =
         typeof rpcRequest === "object" &&
@@ -372,10 +637,24 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (BLOCKED_RPC_METHODS.has(method)) {
+      if (!ALLOWED_RPC_METHODS.has(method)) {
+        log.warn("method.rejected", { method });
         return jsonError(
           `RPC method not allowed through proxy: ${method}`,
           403,
+          corsHeaders
+        );
+      }
+
+      const rpcObject = rpcRequest as Record<string, unknown>;
+      if (
+        rpcObject.jsonrpc !== "2.0" ||
+        !hasValidRpcParams(method, rpcObject.params)
+      ) {
+        log.warn("params.rejected", { method });
+        return jsonError(
+          `Invalid params for RPC method: ${method}`,
+          400,
           corsHeaders
         );
       }
@@ -391,11 +670,14 @@ export async function POST(request: NextRequest) {
 
     for (const endpoint of endpoints) {
       const result = await fetchFromEndpoint(endpoint, body);
-      if (result) {
+      if (result.kind === "success") {
         return NextResponse.json(result.data, {
           status: result.status,
           headers: corsHeaders,
         });
+      }
+      if (result.kind === "too_large") {
+        return jsonError("RPC upstream response too large", 502, corsHeaders);
       }
     }
 

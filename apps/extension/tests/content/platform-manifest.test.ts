@@ -127,33 +127,35 @@ beforeAll(() => {
 });
 
 describe("canonical adapter exports", () => {
-  test.each(
-    manifestAdapterFiles
-  )("%s exports its adapter through the canonical export", async (fileName) => {
-    const module = await importPlatformModule(fileName);
-    assert.ok(
-      Object.hasOwn(module, "adapter"),
-      `expected src/content/platforms/${fileName}.ts to export adapter`
-    );
-    assert.equal(typeof module.adapter?.name, "string");
-    assert.ok(Array.isArray(module.adapter?.hostPatterns));
-  });
+  test.each(manifestAdapterFiles)(
+    "%s exports its adapter through the canonical export",
+    async (fileName) => {
+      const module = await importPlatformModule(fileName);
+      assert.ok(
+        Object.hasOwn(module, "adapter"),
+        `expected src/content/platforms/${fileName}.ts to export adapter`
+      );
+      assert.equal(typeof module.adapter?.name, "string");
+      assert.ok(Array.isArray(module.adapter?.hostPatterns));
+    }
+  );
 
-  test.each(
-    HELPER_MODULES
-  )("%s remains a helper rather than an adapter entry", async (fileName) => {
-    const module = await importPlatformModule(fileName);
-    assert.equal(
-      Object.hasOwn(module, "adapter"),
-      false,
-      `expected ${fileName}.ts not to export adapter`
-    );
-    assert.equal(
-      readManifest().some((entry) => entry.file === fileName),
-      false,
-      `expected ${fileName} not to appear in the platform manifest`
-    );
-  });
+  test.each(HELPER_MODULES)(
+    "%s remains a helper rather than an adapter entry",
+    async (fileName) => {
+      const module = await importPlatformModule(fileName);
+      assert.equal(
+        Object.hasOwn(module, "adapter"),
+        false,
+        `expected ${fileName}.ts not to export adapter`
+      );
+      assert.equal(
+        readManifest().some((entry) => entry.file === fileName),
+        false,
+        `expected ${fileName} not to appear in the platform manifest`
+      );
+    }
+  );
 });
 
 test("manifest entries exactly mirror adapter names and regexes", async () => {

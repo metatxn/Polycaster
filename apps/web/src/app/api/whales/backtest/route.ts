@@ -46,7 +46,7 @@ function clampFloat(
  *         schema:
  *           type: integer
  *           minimum: 2
- *           maximum: 60
+ *           maximum: 30
  *       - in: query
  *         name: minDaysAgo
  *         schema:
@@ -70,7 +70,7 @@ function clampFloat(
  *         schema:
  *           type: integer
  *           minimum: 1
- *           maximum: 40
+ *           maximum: 30
  *       - in: query
  *         name: minScore
  *         schema:
@@ -103,8 +103,12 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
 
+    // Interim workload clamps until the backtest moves to an async Workflow:
+    // the market sample and discovery window are the main cost drivers, so
+    // their maxima are held at the UI's default workload (30 markets, ≤30-day
+    // window) rather than the previous 40/60.
     const options = {
-      maxDaysAgo: clampInt(searchParams.get("maxDaysAgo"), 21, 2, 60),
+      maxDaysAgo: clampInt(searchParams.get("maxDaysAgo"), 21, 2, 30),
       minDaysAgo: clampInt(searchParams.get("minDaysAgo"), 2, 0, 30),
       minDurationHours: clampInt(
         searchParams.get("minDurationHours"),
@@ -118,7 +122,7 @@ export async function GET(request: NextRequest) {
         0,
         10_000_000
       ),
-      maxMarkets: clampInt(searchParams.get("maxMarkets"), 20, 1, 40),
+      maxMarkets: clampInt(searchParams.get("maxMarkets"), 20, 1, 30),
       minSuspicionScore: clampInt(searchParams.get("minScore"), 30, 1, 100),
       minTradeUsd: clampFloat(
         searchParams.get("minTradeUsd"),

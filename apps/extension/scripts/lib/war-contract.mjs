@@ -15,7 +15,8 @@ function ownersOf(entries, resource) {
 
 export function validateLazyWarContract(
   webAccessibleResources,
-  supportedMatchPatterns
+  supportedMatchPatterns,
+  runtimeChunk = "content-trading.js"
 ) {
   const failures = [];
   if (!Array.isArray(webAccessibleResources)) {
@@ -26,31 +27,31 @@ export function validateLazyWarContract(
   }
 
   const platformOwners = ownersOf(webAccessibleResources, "platforms/*.js");
-  const tradingOwners = ownersOf(webAccessibleResources, "content-trading.js");
+  const runtimeOwners = ownersOf(webAccessibleResources, runtimeChunk);
   if (platformOwners.length !== 1) {
     failures.push(
       `expected exactly one platforms/*.js WAR owner, got ${platformOwners.length}`
     );
   }
-  if (tradingOwners.length !== 1) {
+  if (runtimeOwners.length !== 1) {
     failures.push(
-      `expected exactly one content-trading.js WAR owner, got ${tradingOwners.length}`
+      `expected exactly one ${runtimeChunk} WAR owner, got ${runtimeOwners.length}`
     );
   }
   if (
     platformOwners.length === 1 &&
-    tradingOwners.length === 1 &&
-    platformOwners[0].index !== tradingOwners[0].index
+    runtimeOwners.length === 1 &&
+    platformOwners[0].index !== runtimeOwners[0].index
   ) {
     failures.push(
-      "content-trading.js must use the same canonical WAR owner as platforms/*.js"
+      `${runtimeChunk} must use the same canonical WAR owner as platforms/*.js`
     );
   }
 
   const canonical =
     platformOwners.length === 1 ? platformOwners[0].entry : null;
   if (!canonical) return failures;
-  for (const resource of ["platforms/*.js", "content-trading.js"]) {
+  for (const resource of ["platforms/*.js", runtimeChunk]) {
     const count = canonical.resources.filter(
       (value) => value === resource
     ).length;

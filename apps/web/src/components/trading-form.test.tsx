@@ -68,6 +68,8 @@ function makeTradingFormState(overrides = {}) {
     marketBuyAmount: 5,
     setMarketBuyAmount: vi.fn(),
     minBuyAmount: 1,
+    estimatedFeeUsd: null,
+    isFeeEstimateFetching: false,
     allowPartialFill: true,
     setAllowPartialFill: vi.fn(),
     expirationType: "GTC",
@@ -98,12 +100,41 @@ function makeTradingFormState(overrides = {}) {
     maxSellShares: 0,
     hasCredentials: false,
     isConnected: false,
+    canTrade: true,
     handleSetAllowance: vi.fn(),
     handleSubmit: vi.fn(),
     hasValidTokenId: true,
-    canFullyFill: true,
+    canPlaceMarketOrder: true,
+    partialFill: null,
+    hasInsufficientLiquidity: false,
+    isOrderBookUnavailable: false,
+    isMarketOrderSizeEmpty: false,
     ...overrides,
   };
+}
+
+/** A plain two-outcome market, for tests that only care about the mocked state. */
+function renderDefaultForm() {
+  return render(
+    <TradingForm
+      marketTitle="France"
+      tokenId="france-token"
+      outcomes={[
+        { name: "YES", tokenId: "france-token", price: 0.6, probability: 60 },
+        {
+          name: "NO",
+          tokenId: "not-france-token",
+          price: 0.4,
+          probability: 40,
+        },
+      ]}
+      selectedOutcomeIndex={0}
+      onOutcomeChange={() => {}}
+      bestBid={0.59}
+      bestAsk={0.6}
+      disableSticky
+    />
+  );
 }
 
 describe("TradingForm", () => {
@@ -199,6 +230,45 @@ describe("TradingForm", () => {
     expect(
       screen.getByRole("button", { name: /buy 6 shares for \$1\.06/i })
     ).toBeInTheDocument();
+    // No fee estimate in this state, so no fee row — see the pair of fee tests.
+    expect(screen.queryByText(/est\. fee/i)).not.toBeInTheDocument();
+  });
+
+  // Orders sign without `maxSpend`, so the fee is charged on top of what you
+  // typed. The fee row plus the total are what make the real debit visible.
+  it("shows the estimated fee and the resulting total for a BUY", () => {
+    useTradingFormStateMock.mockReturnValue(
+      makeTradingFormState({
+        hasCredentials: true,
+        isConnected: true,
+        estimatedFeeUsd: 0.0125,
+      })
+    );
+
+    renderDefaultForm();
+
+    expect(screen.getByText("Est. fee").parentElement).toHaveTextContent(
+      "$0.01"
+    );
+    // `calculations.total` is 6, so the debit is 6 + 0.0125.
+    expect(screen.getByText("Est. total").parentElement).toHaveTextContent(
+      "$6.01"
+    );
+  });
+
+  // A fee we could not read is not a zero fee.
+  it("omits the fee row when the estimate is unavailable", () => {
+    useTradingFormStateMock.mockReturnValue(
+      makeTradingFormState({
+        hasCredentials: true,
+        isConnected: true,
+        estimatedFeeUsd: null,
+      })
+    );
+
+    renderDefaultForm();
+
+    expect(screen.queryByText(/est\. fee/i)).not.toBeInTheDocument();
   });
 
   it("uses a USD amount input for MARKET BUY (no shares stepper)", () => {
@@ -512,5 +582,228 @@ describe("TradingForm", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  describe("MARKET order submit label", () => {
+    const outcomes = [
+      { name: "GUY", tokenId: "guy-token", price: 0.63, probability: 63 },
+      { name: "LAH", tokenId: "lah-token", price: 0.39, probability: 39 },
+    ];
+
+    function renderForm() {
+      render(
+        <TradingForm
+          marketTitle="Guyana vs Lahore"
+          tokenId="lah-token"
+          outcomes={outcomes}
+          selectedOutcomeIndex={1}
+          onOutcomeChange={() => {}}
+          bestBid={0.38}
+          bestAsk={0.39}
+          disableSticky
+        />
+      );
+    }
+
+    it("does not blame liquidity when no amount has been entered", () => {
+      useTradingFormStateMock.mockReturnValue(
+        makeTradingFormState({
+          isConnected: true,
+          hasCredentials: true,
+          marketBuyAmount: 0,
+          calculations: {
+            price: 0,
+            total: 0,
+            size: 0,
+            potentialWin: 0,
+            potentialLoss: 0,
+            returnPercent: "0.0",
+          },
+          slippageResult: null,
+          isBelowMarketableBuyMinNotional: true,
+          canPlaceMarketOrder: false,
+          hasInsufficientLiquidity: false,
+          isOrderBookUnavailable: false,
+          isMarketOrderSizeEmpty: true,
+        })
+      );
+
+      renderForm();
+
+      expect(screen.queryByText(/insufficient liquidity/i)).toBeNull();
+      expect(
+        screen.getByRole("button", { name: /enter amount/i })
+      ).toBeDisabled();
+    });
+
+    it("says the book is unavailable when it has not loaded", () => {
+      useTradingFormStateMock.mockReturnValue(
+        makeTradingFormState({
+          isConnected: true,
+          hasCredentials: true,
+          marketBuyAmount: 5,
+          slippageResult: null,
+          canPlaceMarketOrder: false,
+          hasInsufficientLiquidity: false,
+          isOrderBookUnavailable: true,
+        })
+      );
+
+      renderForm();
+
+      expect(screen.queryByText(/insufficient liquidity/i)).toBeNull();
+      expect(
+        screen.getByRole("button", { name: /order book unavailable/i })
+      ).toBeDisabled();
+    });
+
+    it("reports insufficient liquidity only when the book was walked short", () => {
+      useTradingFormStateMock.mockReturnValue(
+        makeTradingFormState({
+          isConnected: true,
+          hasCredentials: true,
+          marketBuyAmount: 5000,
+          slippageResult: {
+            canFill: false,
+            avgFillPrice: 0.42,
+            bestPrice: 0.39,
+            worstPrice: 0.5,
+            slippage: 0.11,
+            slippagePercent: 28.2,
+            totalNotional: 100,
+            fills: [],
+            unfilledSize: 4800,
+            filledSize: 200,
+          },
+          canPlaceMarketOrder: false,
+          hasInsufficientLiquidity: true,
+          isOrderBookUnavailable: false,
+        })
+      );
+
+      renderForm();
+
+      expect(
+        screen.getByRole("button", { name: /insufficient liquidity/i })
+      ).toBeDisabled();
+    });
+
+    it("offers the partial fill instead of blocking when FAK is allowed", () => {
+      useTradingFormStateMock.mockReturnValue(
+        makeTradingFormState({
+          isConnected: true,
+          hasCredentials: true,
+          marketBuyAmount: 5000,
+          calculations: {
+            price: 0.87,
+            total: 86,
+            size: 100,
+            potentialWin: 14,
+            potentialLoss: 86,
+            returnPercent: "16.3",
+          },
+          partialFill: {
+            filledShares: 100,
+            filledUsd: 86,
+            requestedUsd: 5000,
+            requestedShares: null,
+          },
+          canPlaceMarketOrder: true,
+          hasInsufficientLiquidity: false,
+          isOrderBookUnavailable: false,
+        })
+      );
+
+      renderForm();
+
+      expect(screen.queryByText(/insufficient liquidity/i)).toBeNull();
+      expect(
+        screen.getByText(/Fills \$86\.00 of \$5000\.00/)
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /buy 100 shares/i })
+      ).toBeEnabled();
+    });
+  });
+
+  describe("submit readiness gate", () => {
+    const outcomes = [
+      { name: "GUY", tokenId: "guy-token", price: 0.63, probability: 63 },
+      { name: "LAH", tokenId: "lah-token", price: 0.39, probability: 39 },
+    ];
+
+    function renderForm() {
+      render(
+        <TradingForm
+          marketTitle="Guyana vs Lahore"
+          tokenId="lah-token"
+          outcomes={outcomes}
+          selectedOutcomeIndex={1}
+          onOutcomeChange={() => {}}
+          bestBid={0.38}
+          bestAsk={0.39}
+          disableSticky
+        />
+      );
+    }
+
+    // `handleSubmit` bails out on `!canTrade` before it touches the CLOB, so a
+    // button that looks ready while `canTrade` is false is a dead click: no
+    // toast, no error banner, nothing. The disabled set has to cover every
+    // precondition `handleSubmit` enforces.
+    it("does not offer a live Buy action while the wallet is still preparing", () => {
+      useTradingFormStateMock.mockReturnValue(
+        makeTradingFormState({
+          isConnected: true,
+          hasCredentials: true,
+          canTrade: false,
+        })
+      );
+
+      renderForm();
+
+      expect(
+        screen.queryByRole("button", { name: /buy .* shares/i })
+      ).toBeNull();
+      expect(
+        screen.getByRole("button", { name: /preparing wallet/i })
+      ).toBeDisabled();
+    });
+
+    it("does not run a dead submit when the wallet is not ready", () => {
+      const handleSubmit = vi.fn();
+      useTradingFormStateMock.mockReturnValue(
+        makeTradingFormState({
+          isConnected: true,
+          hasCredentials: true,
+          canTrade: false,
+          handleSubmit,
+        })
+      );
+
+      renderForm();
+      fireEvent.click(
+        screen.getByRole("button", { name: /preparing wallet/i })
+      );
+
+      expect(handleSubmit).not.toHaveBeenCalled();
+    });
+
+    it("offers the live Buy action once the wallet is ready", () => {
+      useTradingFormStateMock.mockReturnValue(
+        makeTradingFormState({
+          isConnected: true,
+          hasCredentials: true,
+          canTrade: true,
+        })
+      );
+
+      renderForm();
+
+      expect(screen.queryByText(/preparing wallet/i)).toBeNull();
+      expect(
+        screen.getByRole("button", { name: /buy .* shares/i })
+      ).toBeEnabled();
+    });
   });
 });

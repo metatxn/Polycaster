@@ -52,7 +52,13 @@ export function useChartRangeHistory(
         chartRangeHistoryRequest.fidelity
       ),
     enabled: restQuoteTokenIds.length > 0,
-    staleTime: 60_000,
+    // Partial batches (server timed out on some tokens) go immediately
+    // stale AND actively re-poll — stale alone never triggers a refetch
+    // while the component stays mounted, so without the interval the
+    // missing sparklines would stay empty until a remount. The interval
+    // switches off as soon as a complete response lands.
+    staleTime: (query) => (query.state.data?.partial ? 0 : 60_000),
+    refetchInterval: (query) => (query.state.data?.partial ? 30_000 : false),
     refetchOnWindowFocus: false,
   });
 
@@ -61,6 +67,8 @@ export function useChartRangeHistory(
 
     if (!chartRangePriceHistories) return map;
 
+    const entries = chartRangePriceHistories.histories;
+
     const currentPriceByTokenId = new Map(
       sortedMarketData.map((market) => [
         market.yesTokenId,
@@ -68,7 +76,7 @@ export function useChartRangeHistory(
       ])
     );
 
-    for (const entry of chartRangePriceHistories) {
+    for (const entry of entries) {
       const history = entry.history || [];
       const reference = history.find((point) => Number.isFinite(point.p));
       const current = currentPriceByTokenId.get(entry.tokenId);

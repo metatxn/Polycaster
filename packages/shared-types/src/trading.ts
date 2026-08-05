@@ -128,26 +128,64 @@ function decimalFromUnknown(value: unknown): Decimal | null {
   return decimal.isFinite() ? decimal : null;
 }
 
-function parseProtocolFeeDetails(info: unknown): ProtocolFeeDetails {
+/**
+ * Read the protocol fee curve out of a CLOB market-info payload.
+ *
+ * Three spellings, all of the same `GET /clob-markets/{conditionId}` response:
+ * the wire form (`fd.r` / `fd.e`), an older expanded form (`fee_details`), and
+ * the unified SDK's parsed form, which renames the block to
+ * `feeInfo: {rate, exponent}`. Note that `GET /markets/{conditionId}` — what
+ * `fetchClobMarket` returns — carries none of these.
+ *
+ * Returns `null` unless a spelling carries a usable curve: a finite,
+ * non-negative rate paired with a finite, non-negative exponent. An absent or
+ * malformed value is not a zero fee — a negative rate would make the fee
+ * negative and `Decimal.max(0, ...)` downstream would launder it into a
+ * confident free-trade quote, so anything short of a valid curve flows through
+ * as "unknown" and callers apply the conservative fallback. An explicit `"0"`
+ * rate is preserved: at zero the exponent cannot change the answer, so it is
+ * the one case that needs no `e`.
+ */
+function parseProtocolFeeDetails(info: unknown): ProtocolFeeDetails | null {
   const rate =
     decimalFromUnknown(getNestedValue(info, ["fd", "r"])) ??
-    decimalFromUnknown(getNestedValue(info, ["fee_details", "r"]));
+    decimalFromUnknown(getNestedValue(info, ["fee_details", "r"])) ??
+    decimalFromUnknown(getNestedValue(info, ["feeInfo", "rate"]));
+  if (!rate || rate.isNegative()) return null;
+  if (rate.isZero()) return { rate, exponent: new Decimal(1) };
   const exponent =
     decimalFromUnknown(getNestedValue(info, ["fd", "e"])) ??
-    decimalFromUnknown(getNestedValue(info, ["fee_details", "e"]));
+    decimalFromUnknown(getNestedValue(info, ["fee_details", "e"])) ??
+    decimalFromUnknown(getNestedValue(info, ["feeInfo", "exponent"]));
+  if (!exponent || exponent.isNegative()) return null;
 
-  return {
-    rate: rate ?? new Decimal(0),
-    exponent: exponent?.isFinite() ? exponent : new Decimal(1),
-  };
+  return { rate, exponent };
 }
 
-function parseBuilderTakerFeeRate(info: unknown): Decimal {
-  const rawBps =
-    decimalFromUnknown(getNestedValue(info, ["tbf"])) ??
-    decimalFromUnknown(getNestedValue(info, ["builderTakerFeeBps"])) ??
-    decimalFromUnknown(getNestedValue(info, ["builder_taker_fee_bps"]));
-  if (!rawBps) return new Decimal(0);
+/**
+ * Last-resort builder rate, read off the market payload's `tbf` bps.
+ *
+ * The unified SDK's parsed market info drops `tbf` entirely, so on the SDK path
+ * this always reads as absent — callers that care about builder fees must pass
+ * `builderCode` + `getBuilderFeeRates` and source them from
+ * `fetchClobBuilderFeeRates` instead.
+ *
+ * Absent is not the same as malformed: no spelling on the payload means no
+ * builder attribution (a real zero), while a value that is present but
+ * non-finite or negative means the payload can't be trusted — that flows
+ * through as `null` ("unknown") so the caller falls back to the conservative
+ * reserve instead of quoting the fee without its builder component.
+ */
+function parseBuilderTakerFeeRate(info: unknown): Decimal | null {
+  const raw =
+    getNestedValue(info, ["tbf"]) ??
+    getNestedValue(info, ["builderTakerFeeBps"]) ??
+    getNestedValue(info, ["builder_taker_fee_bps"]);
+  if (raw === undefined || raw === null) return new Decimal(0);
+  const rawBps = decimalFromUnknown(raw);
+  // Same laundering hazard as the protocol rate: a negative bps value would
+  // offset the protocol fee inside `Decimal.max(0, ...)` downstream.
+  if (!rawBps || rawBps.isNegative()) return null;
   return rawBps.div(10_000);
 }
 
@@ -242,8 +280,52 @@ export function getClobSellSizeRaw(size: Decimal.Value): bigint {
   return parsePusdUnits(roundedSize, Decimal.ROUND_DOWN);
 }
 
+/**
+ * Conservative fee rate used wherever the real fee is not available
+ * synchronously. The protocol fee follows a per-market price curve and the
+ * builder fee is a per-market taker rate, so neither is a constant we can read
+ * without a fetch — reserve above both instead of under-reserving.
+ */
+export const FALLBACK_FEE_BPS = 300;
+
 export function estimateFallbackFeeRaw(amount: bigint): bigint {
-  return (amount * BigInt(300)) / BigInt(10_000);
+  return (amount * BigInt(FALLBACK_FEE_BPS)) / BigInt(10_000);
+}
+
+/**
+ * The CLOB rejects a marketable BUY whose signed `makerAmount` is below this,
+ * with `invalid amount for a marketable BUY order ($x), min size: 1`.
+ */
+export const CLOB_MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+
+/**
+ * Smallest amount a ticket may accept for a marketable BUY.
+ *
+ * Market buys are signed without `maxSpend`, which is the SDK's documented
+ * default: the signed `makerAmount` equals the amount entered and fees are
+ * charged on top. The server's floor therefore applies to the entered amount
+ * directly, and the ticket minimum is simply that floor.
+ *
+ * This used to carry a fee headroom markup, because signing with
+ * `maxSpend === amount` made the SDK shrink `makerAmount` below the entered
+ * amount. No static markup can be correct there: the protocol fee is charged
+ * per share, so as a fraction of the amount it scales as `rate / price` and
+ * grows without bound on cheap outcomes (~3% at $0.50, ~5% at $0.10, ~9% at
+ * $0.02). Dropping `maxSpend` removes the shrink and the markup with it.
+ */
+export const MIN_MARKETABLE_BUY_TICKET_USD =
+  CLOB_MIN_MARKETABLE_BUY_NOTIONAL_USD;
+
+/**
+ * Render an estimated fee for a ticket.
+ *
+ * Fees on small tickets are genuinely sub-cent, and `$0.00` reads as "free"
+ * rather than "too small to show" — so anything that would round to zero but is
+ * not zero renders as `<$0.01` instead.
+ */
+export function formatFeeUsd(feeUsd: number): string {
+  if (feeUsd > 0 && feeUsd < 0.005) return "<$0.01";
+  return `$${feeUsd.toFixed(2)}`;
 }
 
 function normalizeOpenOrders(
@@ -434,8 +516,13 @@ export async function estimateBuyTakerFeeRaw(
       return BigInt(0);
     }
 
-    const { rate: protocolRate, exponent: protocolExponent } =
-      parseProtocolFeeDetails(info);
+    const feeDetails = parseProtocolFeeDetails(info);
+    if (!feeDetails) {
+      // No fee metadata on the payload: the fee is unknown, not zero. Callers
+      // fall back to the conservative FALLBACK_FEE_BPS reserve on null.
+      return null;
+    }
+    const { rate: protocolRate, exponent: protocolExponent } = feeDetails;
     const priceCurve = effectivePrice
       .mul(new Decimal(1).sub(effectivePrice))
       .pow(protocolExponent);
@@ -447,13 +534,20 @@ export async function estimateBuyTakerFeeRaw(
     // whichever rate the order will actually incur — taker for marketable
     // BUYs, maker for resting limits. Default to taker when marketability
     // is unknown (it's typically the higher rate, so the safer over-reserve).
-    let builderFeeRate: Decimal;
+    let builderFeeRate: Decimal | null;
     if (options?.builderCode && options.getBuilderFeeRates) {
       const rates = await options.getBuilderFeeRates(options.builderCode);
       const useMaker = options.isMarketableBuy === false;
-      builderFeeRate = new Decimal(useMaker ? rates.maker : rates.taker);
+      builderFeeRate = decimalFromUnknown(useMaker ? rates.maker : rates.taker);
     } else {
       builderFeeRate = parseBuilderTakerFeeRate(info);
+    }
+    if (!builderFeeRate || builderFeeRate.isNegative()) {
+      // A configured builder whose rate reads as non-finite or negative is
+      // malformed data, not a free ride: a negative rate would offset the
+      // protocol fee inside `Decimal.max(0, ...)` below and launder the
+      // whole quote into a confident 0n. Unknown, so callers fall back.
+      return null;
     }
     const builderFee = notionalDecimal.mul(builderFeeRate);
     return parsePusdUnits(Decimal.max(0, protocolFee.plus(builderFee)));

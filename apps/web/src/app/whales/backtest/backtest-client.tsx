@@ -128,7 +128,7 @@ export function BacktestClient() {
             value={options.maxMarkets}
             hint="sampled per run"
             min={5}
-            max={60}
+            max={30}
             step={5}
             disabled={isRunning}
             onChange={(v) => updateOption("maxMarkets", v)}

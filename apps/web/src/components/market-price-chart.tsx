@@ -148,6 +148,7 @@ const DEFAULT_COLORS = [
 
 interface BatchPriceHistoryResponse {
   success: boolean;
+  partial?: boolean;
   histories?: Array<{ tokenId: string; history: PriceHistoryPoint[] }>;
   error?: string;
 }
@@ -156,15 +157,18 @@ interface BatchPriceHistoryResponse {
  * Fetch price history for many tokens in a single round trip.
  * The server fans out to Polymarket in parallel and each upstream call is
  * individually cached (60s), so repeated batches reuse the cache.
+ * `partial` is true when the server could not fetch every token (or the
+ * request itself failed) — callers should treat that data as refetchable
+ * rather than caching it for the full interval.
  */
 async function fetchPriceHistoryBatch(
   tokenIds: string[],
   startTs: number,
   fidelity: number
-): Promise<Map<string, PriceHistoryPoint[]>> {
+): Promise<{ byToken: Map<string, PriceHistoryPoint[]>; partial: boolean }> {
   const valid = tokenIds.filter((id) => id && id.length > 10);
-  const result = new Map<string, PriceHistoryPoint[]>();
-  if (valid.length === 0) return result;
+  const byToken = new Map<string, PriceHistoryPoint[]>();
+  if (valid.length === 0) return { byToken, partial: false };
 
   try {
     const response = await fetch("/api/markets/price-history/batch", {
@@ -174,17 +178,17 @@ async function fetchPriceHistoryBatch(
     });
     if (!response.ok) {
       log.warn("batch_price_history.fetch_failed", { status: response.status });
-      return result;
+      return { byToken, partial: true };
     }
     const data = (await response.json()) as BatchPriceHistoryResponse;
-    if (!data.success || !data.histories) return result;
+    if (!data.success || !data.histories) return { byToken, partial: true };
     for (const entry of data.histories) {
-      result.set(entry.tokenId, entry.history);
+      byToken.set(entry.tokenId, entry.history);
     }
-    return result;
+    return { byToken, partial: data.partial === true };
   } catch (error) {
     log.error("batch_price_history.fetch_error", { error });
-    return result;
+    return { byToken, partial: true };
   }
 }
 
@@ -408,21 +412,30 @@ export function MarketPriceChart({
       fidelity
     ),
     queryFn: async () => {
-      const byToken = await fetchPriceHistoryBatch(
+      const { byToken, partial } = await fetchPriceHistoryBatch(
         allFetchTokens.map((t) => t.tokenId),
         startTs,
         fidelity
       );
-      return allFetchTokens.map((token) => ({
-        tokenId: token.tokenId,
-        name: token.name,
-        color: token.color,
-        history: byToken.get(token.tokenId) ?? [],
-      }));
+      return {
+        partial,
+        tokens: allFetchTokens.map((token) => ({
+          tokenId: token.tokenId,
+          name: token.name,
+          color: token.color,
+          history: byToken.get(token.tokenId) ?? [],
+        })),
+      };
     },
+    select: (data) => data.tokens,
     enabled: hasValidTokens,
-    staleTime: 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
+    // The server marks a batch `partial` when some tokens failed or timed
+    // out (it also sends Cache-Control: no-store, which React Query
+    // ignores). Treat partial data as immediately stale and retry on a
+    // short interval so the missing series fill in without a page reload.
+    staleTime: (query) => (query.state.data?.partial ? 0 : 60 * 1000),
+    refetchInterval: (query) =>
+      query.state.data?.partial ? 15 * 1000 : 5 * 60 * 1000,
   });
 
   // Resolved series config (real history when available, mock otherwise).
@@ -579,10 +592,12 @@ export function MarketPriceChart({
     const LABEL_RESERVE = 200;
     const flipped = x + LABEL_RESERVE > plotRight;
     const bottomBound = plotBottom - HALF - 4;
-    // When labels flip left near the right edge, they share horizontal space
-    // with the timestamp badge. Keep the timestamp in the top slot and push
-    // high-price market pills below it.
-    const topBound = flipped ? 64 : HALF + 4;
+    // The timestamp badge is centered on the crosshair X in the chart's top
+    // headroom, so pills share its horizontal space in BOTH orientations
+    // (they sit just 10px to either side of that same X, well inside the
+    // badge's ~136px width). Always keep the timestamp in the top slot and
+    // push high-price market pills below it.
+    const topBound = 64;
     if (items.length > 0) {
       if (items[0].y < topBound) {
         const shift = topBound - items[0].y;

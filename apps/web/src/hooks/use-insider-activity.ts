@@ -80,6 +80,10 @@ export interface SuspiciousActivity {
 export interface SuspiciousActivityStats {
   totalTradesScanned: number;
   uniqueTradersFound: number;
+  /** Traders actually analyzed; capped server-side, may be < uniqueTradersFound. */
+  tradersAnalyzed?: number;
+  /** True when more unique traders were found than could be analyzed. */
+  truncated?: boolean;
   newAccountsFound: number;
   suspiciousActivities: number;
   criticalCount: number;

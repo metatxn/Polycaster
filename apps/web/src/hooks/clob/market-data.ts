@@ -14,8 +14,7 @@ export async function checkOrderScoring(
   client: LegacyClobCompatibleClient,
   orderId: string
 ): Promise<boolean> {
-  // SDK uses snake_case: order_id
-  const response = await client.isOrderScoring({ order_id: orderId });
+  const response = await client.isOrderScoring({ orderId });
   return !!response.scoring;
 }
 

@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import { isUnresolvedLiveOrder } from "./live-accounting.ts";
 import type { AgentResolution } from "./resolutions.ts";
 import { brierScore } from "./resolutions.ts";
 import type {
@@ -117,6 +118,15 @@ export interface ReducePositionInput {
   closedRunId: string | null;
 }
 
+export interface ApplySettledFeeToRunFillInput {
+  runId: string;
+  watchlistItemId: string;
+  side: AgentAction;
+  /** Preflight estimate the stored fill deducted from `cashAfterUsd`. */
+  feeEstimateUsd: string;
+  settledFeeUsd: string;
+}
+
 export interface AgentRepository {
   listWatchlist(): Promise<AgentWatchlistItem[]>;
   upsertWatchlistItem(
@@ -135,6 +145,15 @@ export interface AgentRepository {
     decision: QuorumDecision;
     fill: PaperFill | null;
   }): Promise<void>;
+  /**
+   * Overlay the ACTUAL settled BUY fee onto the persisted run-item fill once
+   * late settlement reconciliation derives it. The fill was stored with the
+   * preflight estimate baked into `cashAfterUsd`; this rewrites it to
+   * `cashAfterUsd + feeEstimateUsd − settledFeeUsd` and stamps
+   * `settledFeeUsd` on the fill, which doubles as the idempotency marker —
+   * an already-corrected fill is left untouched.
+   */
+  applySettledFeeToRunFill(input: ApplySettledFeeToRunFillInput): Promise<void>;
   listRuns(): Promise<AgentRunSummary[]>;
   getRun(id: string): Promise<AgentRunDetail | null>;
   getMetrics(): Promise<AgentMetrics>;
@@ -274,6 +293,31 @@ function sumNotionalUsd(fills: PaperFill[]): string {
     .toString();
 }
 
+/**
+ * Pure correction step shared by both repositories: swap the preflight fee
+ * estimate baked into a stored fill's `cashAfterUsd` for the actual settled
+ * fee. Returns null when the fill is not the executed order the fee belongs
+ * to, or when it was already corrected (idempotency via the `settledFeeUsd`
+ * marker).
+ */
+function settledFeeCorrectedFill(
+  fill: PaperFill,
+  input: ApplySettledFeeToRunFillInput
+): PaperFill | null {
+  if (fill.side !== input.side) return null;
+  if (!isExecutedFillStatus(fill.status)) return null;
+  if (fill.settledFeeUsd != null) return null;
+  return {
+    ...fill,
+    settledFeeUsd: input.settledFeeUsd,
+    cashAfterUsd: decimal(fill.cashAfterUsd)
+      .plus(decimal(input.feeEstimateUsd))
+      .minus(decimal(input.settledFeeUsd))
+      .toDecimalPlaces(6)
+      .toString(),
+  };
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -389,6 +433,20 @@ class MemoryAgentRepository implements AgentRepository {
       fill: input.fill,
       resolution: null,
     });
+  }
+
+  async applySettledFeeToRunFill(
+    input: ApplySettledFeeToRunFillInput
+  ): Promise<void> {
+    const run = memory.runs.get(input.runId);
+    if (!run) return;
+    for (const item of run.items) {
+      if (item.watchlistItem.id !== input.watchlistItemId || !item.fill) {
+        continue;
+      }
+      const corrected = settledFeeCorrectedFill(item.fill, input);
+      if (corrected) item.fill = corrected;
+    }
   }
 
   async listRuns(): Promise<AgentRunSummary[]> {
@@ -608,6 +666,11 @@ class MemoryAgentRepository implements AgentRepository {
       filledNotionalUsd:
         input.filledNotionalUsd ?? existing?.filledNotionalUsd ?? "0",
       filledShares: input.filledShares ?? existing?.filledShares ?? "0",
+      feeEstimateUsd: input.feeEstimateUsd ?? existing?.feeEstimateUsd ?? "0",
+      settledFeeUsd:
+        input.settledFeeUsd !== undefined
+          ? input.settledFeeUsd
+          : (existing?.settledFeeUsd ?? null),
       averageFillPrice:
         input.averageFillPrice !== undefined
           ? input.averageFillPrice
@@ -638,11 +701,7 @@ class MemoryAgentRepository implements AgentRepository {
   }
 
   async hasUnresolvedLiveOrder(): Promise<boolean> {
-    return [...memory.liveOrders.values()].some(
-      (order) =>
-        !order.dryRun &&
-        (order.status === "POSTED" || order.status === "UNKNOWN")
-    );
+    return [...memory.liveOrders.values()].some(isUnresolvedLiveOrder);
   }
 
   async updateLiveOrderStatus(
@@ -872,6 +931,28 @@ class D1AgentRepository extends MemoryAgentRepository {
         input.fill ? JSON.stringify(input.fill) : null,
         now()
       )
+      .run();
+  }
+
+  async applySettledFeeToRunFill(
+    input: ApplySettledFeeToRunFillInput
+  ): Promise<void> {
+    const row = await this.db
+      .prepare(
+        `SELECT id, fill_json FROM agent_run_items
+        WHERE run_id = ? AND watchlist_item_id = ? AND fill_json IS NOT NULL`
+      )
+      .bind(input.runId, input.watchlistItemId)
+      .first<{ id: string; fill_json: string }>();
+    if (!row?.fill_json) return;
+    const corrected = settledFeeCorrectedFill(
+      JSON.parse(String(row.fill_json)) as PaperFill,
+      input
+    );
+    if (!corrected) return;
+    await this.db
+      .prepare("UPDATE agent_run_items SET fill_json = ? WHERE id = ?")
+      .bind(JSON.stringify(corrected), row.id)
       .run();
   }
 
@@ -1235,6 +1316,12 @@ class D1AgentRepository extends MemoryAgentRepository {
       filledNotionalUsd:
         input.filledNotionalUsd ?? existingOrder?.filledNotionalUsd ?? "0",
       filledShares: input.filledShares ?? existingOrder?.filledShares ?? "0",
+      feeEstimateUsd:
+        input.feeEstimateUsd ?? existingOrder?.feeEstimateUsd ?? "0",
+      settledFeeUsd:
+        input.settledFeeUsd !== undefined
+          ? input.settledFeeUsd
+          : (existingOrder?.settledFeeUsd ?? null),
       averageFillPrice:
         input.averageFillPrice !== undefined
           ? input.averageFillPrice
@@ -1254,9 +1341,10 @@ class D1AgentRepository extends MemoryAgentRepository {
           (idempotency_key, run_id, watchlist_item_id, token_id, side,
            requested_size_usd, price, signed_order_hash, order_id, status,
            submitted_at, filled_at, created_at, filled_notional_usd,
-           filled_shares, average_fill_price, last_synced_at,
-           balance_snapshot_json, dry_run, error)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           filled_shares, fee_estimate_usd, settled_fee_usd,
+           average_fill_price, last_synced_at, balance_snapshot_json,
+           dry_run, error)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         record.idempotencyKey,
@@ -1274,6 +1362,8 @@ class D1AgentRepository extends MemoryAgentRepository {
         record.createdAt,
         record.filledNotionalUsd,
         record.filledShares,
+        record.feeEstimateUsd,
+        record.settledFeeUsd,
         record.averageFillPrice,
         record.lastSyncedAt,
         record.balanceSnapshotJson,
@@ -1304,10 +1394,24 @@ class D1AgentRepository extends MemoryAgentRepository {
   }
 
   async hasUnresolvedLiveOrder(): Promise<boolean> {
+    // SQL mirror of isUnresolvedLiveOrder in live-accounting.ts: keep the
+    // two predicates in sync. The json_extract clause is the "carries a
+    // pre-submission anchor" guard — it stops legacy rows written before
+    // balance anchors existed from blocking live trading forever.
     const row = await this.db
       .prepare(
         `SELECT 1 AS unresolved FROM agent_live_orders
-         WHERE dry_run = 0 AND status IN ('POSTED', 'UNKNOWN')
+         WHERE dry_run = 0
+           AND (
+             status IN ('POSTED', 'UNKNOWN')
+             OR (
+               side = 'BUY'
+               AND status IN ('FILLED', 'PARTIALLY_FILLED')
+               AND settled_fee_usd IS NULL
+               AND json_extract(balance_snapshot_json, '$.preSubmission')
+                 IS NOT NULL
+             )
+           )
          LIMIT 1`
       )
       .first<{ unresolved: number }>();
@@ -1542,6 +1646,10 @@ function rowToLiveOrder(row: Record<string, unknown>): LiveOrderRecord {
     createdAt: String(row.created_at),
     filledNotionalUsd: String(row.filled_notional_usd ?? "0"),
     filledShares: String(row.filled_shares ?? "0"),
+    feeEstimateUsd: String(row.fee_estimate_usd ?? "0"),
+    // != null (not truthiness): "0" is a legitimate settled fee.
+    settledFeeUsd:
+      row.settled_fee_usd != null ? String(row.settled_fee_usd) : null,
     averageFillPrice: row.average_fill_price
       ? String(row.average_fill_price)
       : null,

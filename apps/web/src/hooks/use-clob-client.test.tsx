@@ -60,6 +60,7 @@ const legacyClient = vi.hoisted(() => ({
   createMarketOrder: vi.fn(),
   postOrder: vi.fn(),
   updateBalanceAllowance: vi.fn(),
+  getBalanceAllowance: vi.fn(),
 }));
 
 const unifiedSdkMock = vi.hoisted(() => ({
@@ -227,6 +228,9 @@ describe("useClobClient", () => {
     legacyClient.createMarketOrder.mockResolvedValue({ order: true });
     legacyClient.postOrder.mockResolvedValue({ success: true, status: "ok" });
     legacyClient.updateBalanceAllowance.mockResolvedValue({});
+    // Raw 6-decimal CTF units, matching the 5-share on-chain balance the SELL
+    // tests stub through `balanceOfBatch`.
+    legacyClient.getBalanceAllowance.mockResolvedValue({ balance: "5000000" });
     appApprovalsMock.checkAllApprovals.mockResolvedValue(fullyApprovedStatus());
     approvalsMock.readPusdExchangeAllowance.mockResolvedValue(
       BigInt(2_000_000)
@@ -294,7 +298,7 @@ describe("useClobClient", () => {
     });
 
     expect(legacyClient.cancelOrder).toHaveBeenCalledWith({
-      orderID: "order-1",
+      orderId: "order-1",
     });
     expect(response).toEqual({
       success: true,
@@ -457,6 +461,62 @@ describe("useClobClient", () => {
       undefined,
       { approvalScope: { side: "SELL", negRisk: false } }
     );
+    expect(legacyClient.postOrder).toHaveBeenCalled();
+  });
+
+  // The shares exist on-chain but the CLOB has not indexed them yet, so posting
+  // would come back as a generic "not enough balance/allowance". The pre-flight
+  // holds the order back and says what is actually happening instead.
+  // Walks the full `CLOB_BALANCE_SYNC_DELAYS_MS` ladder (~5s of real waiting)
+  // before giving up, so it needs more than the default timeout.
+  it("blocks a SELL whose shares the CLOB has not indexed yet", {
+    timeout: 15_000,
+  }, async () => {
+    viemMock.readContract.mockResolvedValueOnce([BigInt(5_000_000)]); // CTF balanceOfBatch
+    legacyClient.getBalanceAllowance.mockResolvedValue({ balance: "0" });
+
+    const { result } = renderHook(() => useClobClient());
+
+    await act(async () => {
+      await expect(
+        result.current.createOrder({
+          tokenId: "123",
+          conditionId: "condition-1",
+          price: 0.5,
+          size: 2,
+          side: "SELL",
+          orderType: "GTC",
+          negRisk: false,
+        })
+      ).rejects.toThrow(/has not indexed these shares/);
+    });
+
+    expect(legacyClient.postOrder).not.toHaveBeenCalled();
+  });
+
+  // The sync is a real network call now, so it can fail on its own. One failed
+  // attempt is not evidence the shares are missing — the ladder keeps going and
+  // the order goes through on the next successful read.
+  it("retries a SELL sync that fails transiently instead of aborting", async () => {
+    viemMock.readContract.mockResolvedValueOnce([BigInt(5_000_000)]); // CTF balanceOfBatch
+    legacyClient.updateBalanceAllowance.mockRejectedValueOnce(
+      new Error("502 Bad Gateway")
+    );
+
+    const { result } = renderHook(() => useClobClient());
+
+    await act(async () => {
+      await result.current.createOrder({
+        tokenId: "123",
+        conditionId: "condition-1",
+        price: 0.5,
+        size: 2,
+        side: "SELL",
+        orderType: "GTC",
+        negRisk: false,
+      });
+    });
+
     expect(legacyClient.postOrder).toHaveBeenCalled();
   });
 });

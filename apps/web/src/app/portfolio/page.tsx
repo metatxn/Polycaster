@@ -34,6 +34,7 @@ import { useUserDetails } from "@/hooks/use-user-details";
 import { useUserPnL } from "@/hooks/use-user-pnl";
 import { useUserPositions } from "@/hooks/use-user-positions";
 import { useUserTrades } from "@/hooks/use-user-trades";
+import { resolveClosedTimes } from "@/lib/closed-time-resolver";
 import { openWalletModal, preloadWalletModal } from "@/lib/wallet-modal";
 import { buildPortfolioTabUrl, parsePortfolioTab } from "./url-state";
 
@@ -395,33 +396,19 @@ export default function PortfolioPage() {
         position.market.eventSlug || position.market.slug,
       ])
     );
-    const params = new URLSearchParams({ ids: conditionIds.join(",") });
-    const eventSlugs = conditionIds.map(
-      (id) => eventSlugsByConditionId.get(id) ?? ""
+    // Chunking, partial-retry, and backoff live in resolveClosedTimes;
+    // resolved values are merged into state so a retry never wipes what
+    // earlier chunks already answered.
+    return resolveClosedTimes(
+      conditionIds,
+      eventSlugsByConditionId,
+      (resolved) => {
+        setClosedTimes((prev) => {
+          const merged = { ...prev, ...resolved };
+          return areClosedTimesEqual(prev, merged) ? prev : merged;
+        });
+      }
     );
-    if (eventSlugs.some(Boolean)) {
-      params.set("slugs", eventSlugs.join(","));
-    }
-    let cancelled = false;
-
-    fetch(`/api/markets/closed-time?${params.toString()}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        const payload = data as { closedTimes?: Record<string, string> } | null;
-        if (!cancelled && payload?.closedTimes) {
-          const nextClosedTimes = payload.closedTimes;
-          setClosedTimes((prev) =>
-            areClosedTimesEqual(prev, nextClosedTimes) ? prev : nextClosedTimes
-          );
-        }
-      })
-      .catch(() => {
-        // keep fallback timestamps
-      });
-
-    return () => {
-      cancelled = true;
-    };
   }, [lostPositions]);
 
   const mergedHistory = useMemo<Trade[]>(() => {

@@ -10,6 +10,10 @@ import {
   readTradingApprovalStatus,
 } from "@knoww/shared-types/approvals";
 import {
+  type ClobBuilderFeeRates,
+  fetchClobBuilderFeeRates,
+} from "@knoww/shared-types/clob";
+import {
   assertClobPostOrderSuccess,
   CLOB_ASSET_TYPES,
   CLOB_ORDER_TYPES,
@@ -32,6 +36,7 @@ import {
 import {
   buildClobOrderPreflightPlan,
   buildPusdAutoWrapTransactions,
+  estimateBuyTakerFeeRaw,
   formatConditionalShares,
   parseApprovalAmountRaw,
   planPusdAutoWrap,
@@ -121,8 +126,31 @@ export interface CreateOrderParams {
 // Module-level config to avoid hook dependencies
 const CLOB_HOST = CLOB_BASE_URL;
 
+// Builder rates are set by Polymarket per builder code and effectively static,
+// so one fetch per page load is enough. Mirrors the extension's cache in
+// `background/trading-handler.ts` so both surfaces price a trade identically.
+const builderFeeRatesCache = new Map<string, Promise<ClobBuilderFeeRates>>();
+
+function getBuilderFeeRates(builderCode: string): Promise<ClobBuilderFeeRates> {
+  const cached = builderFeeRatesCache.get(builderCode);
+  if (cached) return cached;
+
+  const pending = fetchClobBuilderFeeRates(builderCode, {
+    host: CLOB_HOST,
+  }).catch((err) => {
+    // Don't poison the cache on a transient failure — let the next call retry.
+    builderFeeRatesCache.delete(builderCode);
+    throw err;
+  });
+  builderFeeRatesCache.set(builderCode, pending);
+  return pending;
+}
+
+// `getBalanceAllowance` is not optional: the unified-SDK shim always attaches
+// it (falling back to the standalone `@polymarket/client/actions` function when
+// the client carries no method), so the SELL pre-flight below can rely on it.
 type ClobBalanceAllowanceReadableClient = ClobBalanceAllowanceClient & {
-  getBalanceAllowance?: (
+  getBalanceAllowance: (
     args: ClobBalanceAllowanceTarget
   ) => Promise<{ balance?: string | number | bigint }>;
 };
@@ -247,6 +275,49 @@ export function useClobClient() {
       hasViemWalletProvider(walletClient)
     );
   }, [isConnected, hasCredentials, hasProxyWallet, proxyAddress, walletClient]);
+
+  /**
+   * Estimate the taker fee a BUY would incur, in pUSD base units.
+   *
+   * This is the same computation `buildClobOrderPreflightPlan` runs at submit
+   * time, exposed so the ticket can show the number *before* the user commits.
+   * Returns `null` when the market's fee details cannot be read — callers
+   * should fall back to `estimateFallbackFeeRaw` rather than showing "$0.00",
+   * because a missing fee is not a zero fee.
+   */
+  const estimateBuyFee = useCallback(
+    async (params: {
+      conditionId?: string;
+      size: number;
+      price: number;
+      notional: number;
+      isMarketableBuy?: boolean;
+    }): Promise<bigint | null> => {
+      if (!params.conditionId) return null;
+      const client = await getReadOnlyClient();
+      return estimateBuyTakerFeeRaw(
+        client,
+        params.conditionId,
+        params.size,
+        params.price,
+        params.notional,
+        {
+          // The SDK's parsed market info drops the `tbf` builder bps, so the
+          // builder half has to come from `/fees/builder-fees/{code}` — same
+          // source the extension pre-flight and the CLOB itself use.
+          builderCode: process.env.NEXT_PUBLIC_POLY_BUILDER_CODE,
+          getBuilderFeeRates,
+          isMarketableBuy: params.isMarketableBuy,
+          onError: (err) =>
+            log.warn("fee_info.fetch_failed", {
+              conditionId: params.conditionId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+        }
+      );
+    },
+    [getReadOnlyClient]
+  );
 
   /**
    * Ensure the proxy wallet has enough pUSD to cover a BUY order.
@@ -522,6 +593,12 @@ export function useClobClient() {
         const syncBalanceAllowance = async (options?: {
           requireSellBalance?: boolean;
         }) => {
+          // Now that the shim routes this through the SDK actions it is a real
+          // network call, so a single failure is not proof the shares are
+          // missing — keep walking the ladder and only surface the error if
+          // every attempt failed.
+          let lastSyncError: unknown;
+
           for (const delayMs of CLOB_BALANCE_SYNC_DELAYS_MS) {
             if (delayMs > 0) await wait(delayMs);
 
@@ -533,22 +610,28 @@ export function useClobClient() {
 
               if (
                 !options?.requireSellBalance ||
-                requiredConditionalRaw === null ||
-                !balanceAllowanceClient.getBalanceAllowance
+                requiredConditionalRaw === null
               ) {
                 return;
               }
 
               const balanceAllowance =
                 await balanceAllowanceClient.getBalanceAllowance({
-                  asset_type: CLOB_ASSET_TYPES.CONDITIONAL,
-                  token_id: params.tokenId,
+                  assetType: CLOB_ASSET_TYPES.CONDITIONAL,
+                  tokenId: params.tokenId,
                 });
               const clobBalanceRaw = parseRawUnits(balanceAllowance?.balance);
 
+              // A clean read means any earlier failure was transient: the
+              // shares really are missing, so the friendly message wins.
+              lastSyncError = undefined;
+
               if (clobBalanceRaw >= requiredConditionalRaw) return;
             } catch (err) {
-              if (options?.requireSellBalance) throw err;
+              if (options?.requireSellBalance) {
+                lastSyncError = err;
+                continue;
+              }
               // Non-fatal for legacy paths: the server may still accept the
               // order if its cache is already fresh; postOrder surfaces any
               // real issue.
@@ -557,6 +640,7 @@ export function useClobClient() {
           }
 
           if (options?.requireSellBalance && requiredConditionalRaw !== null) {
+            if (lastSyncError) throw lastSyncError;
             throw new Error(
               "Polymarket has not indexed these shares for trading yet. Please try again in a few seconds."
             );
@@ -571,6 +655,10 @@ export function useClobClient() {
           price: params.price,
           conditionId: params.conditionId,
           marketInfoClient: client,
+          // Same builder-rate source as `estimateBuyFee`, so the collateral we
+          // reserve at submit time matches the fee the ticket previewed.
+          builderCode: process.env.NEXT_PUBLIC_POLY_BUILDER_CODE,
+          getBuilderFeeRates,
           getOpenOrders: () => client.getOpenOrders(),
           onFeeError: (err) =>
             log.warn("fee_info.fetch_failed", {
@@ -667,11 +755,23 @@ export function useClobClient() {
 
           const order = await client.createMarketOrder(
             {
-              tokenID: params.tokenId,
+              tokenId: params.tokenId,
               amount: marketAmount,
               side: params.side,
               // feeRateBps removed (V2: protocol-determined at match time)
+              // FAK/FOK is signed into the order at creation time in V2; it is
+              // no longer a postOrder argument.
+              ...(params.orderType ? { orderType: params.orderType } : {}),
+              // `params.price` is already the slippage-buffered worst price, so
+              // it becomes the maxPrice/minPrice bound the SDK signs in.
               ...(params.price > 0 ? { price: params.price } : {}),
+              // No `maxSpend`: the SDK's default is to sign the full `amount`
+              // and charge fees on top, which is what the ticket quotes and
+              // what `buildClobOrderPreflightPlan` reserves collateral for.
+              // Passing `maxSpend === amount` instead shrinks the signed
+              // `makerAmount` below the entered amount on every BUY, and the
+              // CLOB's `min size: 1` floor is checked against that reduced
+              // number — so small tickets on cheap outcomes were rejected.
             },
             orderOptions
           );
@@ -688,7 +788,7 @@ export function useClobClient() {
 
         const order = await client.createOrder(
           {
-            tokenID: params.tokenId,
+            tokenId: params.tokenId,
             price: params.price,
             size: params.size,
             side: params.side,
@@ -942,7 +1042,7 @@ export function useClobClient() {
 
       try {
         const client = await getClient();
-        const response = await client.cancelOrder({ orderID: orderId });
+        const response = await client.cancelOrder({ orderId });
         return { success: true, response };
       } catch (err) {
         const error =
@@ -1074,6 +1174,7 @@ export function useClobClient() {
     // Actions
     createOrder,
     cancelOrder,
+    estimateBuyFee,
     getOrderBook,
     getOpenOrders,
     deriveCredentials,

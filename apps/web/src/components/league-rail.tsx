@@ -10,14 +10,26 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useSportsWebSocket } from "@/hooks/use-sports-websocket";
+import {
+  applyEndedCorrections,
+  buildEndedCorrections,
+  getCountTagSlugs,
+} from "@/lib/league-rail-counts";
 import { qk } from "@/lib/query-keys";
 import { SPORT_GROUPS, type SportGroup } from "@/lib/sport-categories";
 import { cn } from "@/lib/utils";
 
 interface LeagueCounts {
-  sports: number;
-  live: number;
+  sports: number | null;
+  live: number | null;
   byTagSlug: Record<string, number>;
+  meta?: {
+    generatedAt: string;
+    lastSuccessAt: string | null;
+    ageSeconds: number | null;
+    staleKeys: string[];
+  };
 }
 
 interface LeagueRailProps {
@@ -44,20 +56,6 @@ function getActiveGroupSlug(activeSlug?: string): string | null {
   return null;
 }
 
-function getCountTagSlugs(openGroupSlugs: ReadonlySet<string>) {
-  const slugs = new Set<string>();
-  for (const group of SPORT_GROUPS) {
-    if (group.tagSlug) slugs.add(group.tagSlug);
-
-    if (openGroupSlugs.has(group.slug)) {
-      for (const league of group.leagues) {
-        if (league.tagSlug) slugs.add(league.tagSlug);
-      }
-    }
-  }
-  return Array.from(slugs).sort();
-}
-
 function useLeagueCounts(tagSlugs: string[], enabled = true) {
   return useQuery<LeagueCounts>({
     queryKey: qk.sports.leagueCounts(tagSlugs.join(",")),
@@ -68,8 +66,18 @@ function useLeagueCounts(tagSlugs: string[], enabled = true) {
       if (!res.ok) throw new Error("Failed to load league counts");
       return res.json();
     },
-    staleTime: 60_000,
+    // The server snapshot refreshes when older than ~30s; polling at 15s
+    // (matching the 15s edge cache) keeps the displayed value within one
+    // edge TTL of the served snapshot. Displayed staleness is snapshot age
+    // + edge cache + poll gap — typically 30–45s; see the issue doc's
+    // freshness criterion for the full envelope.
+    staleTime: 15_000,
+    refetchInterval: 15_000,
     refetchOnWindowFocus: false,
+    // Opening/closing a group changes the slug set (new query key). Keep the
+    // previous counts on screen while the new set loads instead of dropping
+    // every badge for a frame.
+    placeholderData: (previousData: LeagueCounts | undefined) => previousData,
     enabled: enabled && tagSlugs.length > 0,
   });
 }
@@ -127,22 +135,26 @@ function RailGroup({
   };
 
   const groupActive = activeSlug === group.slug;
-  const hasChildCounts =
-    group.leagues.length > 0 &&
-    group.leagues.some((league) => countsByTag?.[league.tagSlug] !== undefined);
+
+  // A count can be a number (known), 0 (known empty), or undefined (not
+  // requested for this group state, or the server flagged it unavailable).
+  // Only a KNOWN zero hides anything — unknown must never look empty.
+  const childCounts = group.leagues.map(
+    (league) => countsByTag?.[league.tagSlug]
+  );
+  const knownChildCounts = childCounts.filter(
+    (count): count is number => count !== undefined
+  );
+  const broadCount = countsByTag?.[group.tagSlug];
   const groupCount =
-    hasChildCounts && countsByTag
-      ? group.leagues.reduce(
-          (total, league) => total + (countsByTag[league.tagSlug] ?? 0),
-          0
-        )
-      : countsByTag?.[group.tagSlug];
-  const countsLoaded = countsByTag !== undefined;
+    knownChildCounts.length > 0
+      ? knownChildCounts.reduce((total, count) => total + count, 0)
+      : broadCount;
 
   // Single-league sports (Golf, F1, Boxing, …): render as a leaf, no
   // collapsible affordance. Polymarket does the same.
   if (group.leagues.length === 0) {
-    if (countsLoaded && !groupCount) return null;
+    if (broadCount === 0) return null;
 
     return (
       <Link
@@ -162,11 +174,14 @@ function RailGroup({
     );
   }
 
-  const visibleLeagues = countsLoaded
-    ? group.leagues.filter((league) => (countsByTag[league.tagSlug] ?? 0) > 0)
-    : group.leagues;
+  const allChildrenKnownZero = childCounts.every((count) => count === 0);
+  const closedGroupKnownEmpty =
+    knownChildCounts.length === 0 && broadCount === 0;
+  if (allChildrenKnownZero || closedGroupKnownEmpty) return null;
 
-  if (countsLoaded && visibleLeagues.length === 0) return null;
+  const visibleLeagues = group.leagues.filter(
+    (league) => countsByTag?.[league.tagSlug] !== 0
+  );
 
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange}>
@@ -226,8 +241,14 @@ function RailGroup({
  * - Live (special pseudo-leaf, links to /events/sports/live)
  * - 18 top-level groups, each expandable to its child leagues
  *
- * Live counts come from a single batched /api/events/league-counts call
- * cached for 60s.
+ * Scheduled counts come from a single batched /api/events/league-counts
+ * call (served from the server-side snapshot) polled every 15s. The Live
+ * badge is driven by the shared Sports WebSocket (`live && !ended`,
+ * deduplicated by gameId); the Gamma live total is only the bootstrap
+ * value until the socket has delivered data, and the fallback during
+ * reconnects. WebSocket `ended` transitions are also subtracted from
+ * scheduled league counts, since Gamma keeps counting an ended event
+ * until its market closes.
  */
 export function LeagueRail({
   activeSlug,
@@ -237,10 +258,6 @@ export function LeagueRail({
   countsEnabled = true,
 }: LeagueRailProps) {
   const pathname = usePathname();
-  const defaultOpenGroupSet = useMemo(
-    () => new Set(defaultOpenGroupSlugs),
-    [defaultOpenGroupSlugs]
-  );
 
   // Derive which group should auto-open: the one containing the active slug.
   const activeGroupSlug = useMemo(
@@ -255,11 +272,18 @@ export function LeagueRail({
   const [openGroupSlugs, setOpenGroupSlugs] = useState<Set<string>>(
     () => new Set(initialOpenGroupSlugs)
   );
+  // Keyed on the joined string, not the array: callers pass fresh array
+  // literals every render, and re-running on identity change would re-add
+  // a group the user explicitly closed.
+  const initialOpenGroupKey = initialOpenGroupSlugs.join(",");
   useEffect(() => {
+    const slugsToOpen = initialOpenGroupKey
+      ? initialOpenGroupKey.split(",")
+      : [];
     setOpenGroupSlugs((previousSlugs) => {
       let changed = false;
       const nextSlugs = new Set(previousSlugs);
-      for (const slug of initialOpenGroupSlugs) {
+      for (const slug of slugsToOpen) {
         if (!nextSlugs.has(slug)) {
           nextSlugs.add(slug);
           changed = true;
@@ -267,12 +291,31 @@ export function LeagueRail({
       }
       return changed ? nextSlugs : previousSlugs;
     });
-  }, [initialOpenGroupSlugs]);
+  }, [initialOpenGroupKey]);
   const countTagSlugs = useMemo(
     () => getCountTagSlugs(openGroupSlugs),
     [openGroupSlugs]
   );
   const { data } = useLeagueCounts(countTagSlugs, countsEnabled);
+
+  const { isSettled, liveGames, finishedGames } = useSportsWebSocket({
+    enabled: countsEnabled,
+  });
+  // The socket streams each active game as an individual message with no
+  // completeness marker, so WS-derived counts are only authoritative once
+  // the connection epoch's initial burst has settled — on first connect AND
+  // on reconnects. Until then the snapshot's Gamma values stand.
+  const wsReady = isSettled;
+  const liveCount = wsReady ? liveGames.length : (data?.live ?? undefined);
+
+  const countsByTag = useMemo(() => {
+    if (!data?.byTagSlug) return undefined;
+    if (!wsReady || finishedGames.length === 0) return data.byTagSlug;
+    return applyEndedCorrections(
+      data.byTagSlug,
+      buildEndedCorrections(finishedGames)
+    );
+  }, [data?.byTagSlug, wsReady, finishedGames]);
 
   const isLiveActive = pathname === "/events/sports/live";
 
@@ -306,7 +349,7 @@ export function LeagueRail({
             <Radio className="h-3.5 w-3.5 text-(--kwm-up)" />
             <span>Live</span>
           </span>
-          <CountBadge count={data?.live} isLive />
+          <CountBadge count={liveCount} isLive />
         </Link>
 
         <div className="mx-3 my-1 h-px bg-border/40" />
@@ -316,20 +359,25 @@ export function LeagueRail({
             key={group.slug}
             group={group}
             activeSlug={activeSlug}
-            countsByTag={data?.byTagSlug}
+            countsByTag={countsByTag}
             onNavigate={onNavigate}
             onOpenChange={(isOpen) => {
-              if (!isOpen) return;
               setOpenGroupSlugs((previousSlugs) => {
-                if (previousSlugs.has(group.slug)) return previousSlugs;
+                if (previousSlugs.has(group.slug) === isOpen) {
+                  return previousSlugs;
+                }
                 const nextSlugs = new Set(previousSlugs);
-                nextSlugs.add(group.slug);
+                if (isOpen) {
+                  nextSlugs.add(group.slug);
+                } else {
+                  nextSlugs.delete(group.slug);
+                }
                 return nextSlugs;
               });
             }}
             defaultOpen={
               activeGroupSlug === group.slug ||
-              defaultOpenGroupSet.has(group.slug)
+              defaultOpenGroupSlugs.includes(group.slug)
             }
           />
         ))}

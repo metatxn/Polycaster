@@ -243,6 +243,8 @@ function selectExecutionAdapter(
         repository.getLiveOrderByIdempotencyKey(key),
       listLiveOrders: () => repository.listLiveOrders(),
       hasUnresolvedLiveOrder: () => repository.hasUnresolvedLiveOrder(),
+      applySettledFeeToRunFill: (input) =>
+        repository.applySettledFeeToRunFill(input),
       assertExecutionLock,
       getClobCredential: (key) => repository.getClobCredential(key),
       upsertClobCredential: (record) => repository.upsertClobCredential(record),

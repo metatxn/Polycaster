@@ -265,6 +265,9 @@ module.exports = (_env, argv) => {
       },
       rules: [
         {
+          // Belt-and-suspenders: only fires if the module graph references the
+          // wasm (webpack <=5.108 with `importMeta: false`). The canonical emit
+          // is the explicit CopyPlugin pattern below.
           test: /ort-wasm-simd-threaded\.asyncify\.wasm$/i,
           type: "asset/resource",
           generator: {
@@ -391,6 +394,18 @@ module.exports = (_env, argv) => {
               "ort-wasm-simd-threaded.asyncify.mjs"
             ),
             to: "ort/ort-wasm-simd-threaded.asyncify.mjs",
+          },
+          {
+            // Copy the .wasm explicitly instead of relying on the
+            // asset/resource rule. Since webpack 5.109 (PR #21477),
+            // `importMeta: false` also disables `new URL(..., import.meta.url)`
+            // recognition, so onnxruntime-web's wasm reference never enters the
+            // module graph and the rule stops emitting it.
+            from: path.join(
+              onnxRuntimeDistPath,
+              "ort-wasm-simd-threaded.asyncify.wasm"
+            ),
+            to: "ort/ort-wasm-simd-threaded.asyncify.wasm",
           },
           ...bundledFonts,
         ],

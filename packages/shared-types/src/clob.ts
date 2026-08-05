@@ -341,14 +341,40 @@ export async function fetchClobOrderBooks(
   return data.map(normalizeClobOrderBook);
 }
 
+/**
+ * The human-facing market record: `GET /markets/{conditionId}` — question,
+ * slug, images, tags, end date, `maker_base_fee`/`taker_base_fee`, tokens.
+ *
+ * Deliberately has no unified-SDK branch. The SDK's `fetchMarketInfo` reads a
+ * *different* endpoint (`/clob-markets/{conditionId}`) with a different, much
+ * smaller payload, so routing this through it would silently strip every field
+ * the API routes serve. Use `fetchClobMarketInfo` when you want the fee curve.
+ */
 export function fetchClobMarket<T = unknown>(
   conditionId: string,
   options?: ClobRequestOptions
 ): Promise<T> {
-  if (
-    options?.useUnifiedSdk === true &&
-    canUseUnifiedSdkForPublicRead(options)
-  ) {
+  return fetchClobJson<T>(
+    `markets/${encodeURIComponent(conditionId)}`,
+    undefined,
+    options
+  );
+}
+
+/**
+ * The trading-side view of a condition: `GET /clob-markets/{conditionId}`.
+ *
+ * This is the only endpoint that carries the protocol fee curve (`fd.r` rate,
+ * `fd.e` exponent) that `estimateBuyTakerFeeRaw` needs — `/markets` does not.
+ * The raw response is the compact wire form; the unified SDK returns it parsed
+ * as `{feeInfo: {rate, exponent}, tokens}`. `parseProtocolFeeDetails` reads both
+ * spellings, so either path is a valid input to fee estimation.
+ */
+export function fetchClobMarketInfo<T = unknown>(
+  conditionId: string,
+  options?: ClobRequestOptions
+): Promise<T> {
+  if (canUseUnifiedSdkForPublicRead(options)) {
     if (options?.unifiedClient?.fetchMarketInfo) {
       return options.unifiedClient.fetchMarketInfo({
         conditionId,
@@ -361,7 +387,7 @@ export function fetchClobMarket<T = unknown>(
   }
 
   return fetchClobJson<T>(
-    `markets/${encodeURIComponent(conditionId)}`,
+    `clob-markets/${encodeURIComponent(conditionId)}`,
     undefined,
     options
   );
@@ -457,7 +483,11 @@ interface BuilderFeesResponse {
  * not include builder-specific fees.
  *
  * Returns `{ maker: 0, taker: 0 }` when the builder code is missing or the
- * bytes32 zero sentinel.
+ * bytes32 zero sentinel. Throws when a configured builder's payload is
+ * malformed (non-finite or negative rates) — a builder that should be
+ * attributed but whose rates are unreadable must not quote as fee-free, so
+ * the error propagates to callers whose fee estimate then falls back to the
+ * conservative reserve.
  */
 export async function fetchClobBuilderFeeRates(
   builderCode: string | undefined,
@@ -487,17 +517,38 @@ export async function fetchClobBuilderFeeRates(
     options
   );
 
+  // Absent bps fields are the endpoint's spelling of zero; present fields
+  // must be usable numbers — a negative bps here would flow into
+  // `Decimal.max(0, ...)` downstream and launder the quote into free.
   return {
     maker:
-      (data.builder_maker_fee_rate_bps ?? 0) / CLOB_BUILDER_FEES_BPS_DIVISOR,
+      requireBuilderFeeRateNumber(
+        data.builder_maker_fee_rate_bps ?? 0,
+        "builder_maker_fee_rate_bps"
+      ) / CLOB_BUILDER_FEES_BPS_DIVISOR,
     taker:
-      (data.builder_taker_fee_rate_bps ?? 0) / CLOB_BUILDER_FEES_BPS_DIVISOR,
+      requireBuilderFeeRateNumber(
+        data.builder_taker_fee_rate_bps ?? 0,
+        "builder_taker_fee_rate_bps"
+      ) / CLOB_BUILDER_FEES_BPS_DIVISOR,
   };
 }
 
+function requireBuilderFeeRateNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(
+      `Malformed builder fee rate: ${field} must be a finite non-negative number`
+    );
+  }
+  return value;
+}
+
 function normalizeClobBuilderFeeRates(raw: unknown): ClobBuilderFeeRates {
-  if (!isRecord(raw)) return { maker: 0, taker: 0 };
-  const maker = optionalNumber(raw.maker) ?? 0;
-  const taker = optionalNumber(raw.taker) ?? 0;
-  return { maker, taker };
+  if (!isRecord(raw)) {
+    throw new Error("Malformed builder fee rates payload");
+  }
+  return {
+    maker: requireBuilderFeeRateNumber(raw.maker, "maker"),
+    taker: requireBuilderFeeRateNumber(raw.taker, "taker"),
+  };
 }

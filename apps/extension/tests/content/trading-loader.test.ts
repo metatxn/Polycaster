@@ -120,25 +120,28 @@ test.each([
   [false, 0],
   [undefined, 0],
   ["true", 0],
-] as const)("prefetchTradingRuntime loads only when the shared warm flag is exactly true (%j)", async (storedValue, expectedImports) => {
-  const storageGet = vi.fn().mockResolvedValue({
-    knowwTradingWarmEligible: storedValue,
-  });
-  vi.stubGlobal("chrome", {
-    storage: { local: { get: storageGet } },
-    runtime: { getURL: (path: string) => path },
-  });
-  const loader = await freshLoader();
-  const importEntry = vi.fn().mockResolvedValue({
-    createTradingRuntime: () => runtime("prefetched"),
-  });
+] as const)(
+  "prefetchTradingRuntime loads only when the shared warm flag is exactly true (%j)",
+  async (storedValue, expectedImports) => {
+    const storageGet = vi.fn().mockResolvedValue({
+      knowwTradingWarmEligible: storedValue,
+    });
+    vi.stubGlobal("chrome", {
+      storage: { local: { get: storageGet } },
+      runtime: { getURL: (path: string) => path },
+    });
+    const loader = await freshLoader();
+    const importEntry = vi.fn().mockResolvedValue({
+      createTradingRuntime: () => runtime("prefetched"),
+    });
 
-  loader.prefetchTradingRuntime(importEntry);
-  await vi.waitFor(() => {
-    assert.equal(importEntry.mock.calls.length, expectedImports);
-  });
-  assert.deepEqual(storageGet.mock.calls[0], ["knowwTradingWarmEligible"]);
-});
+    loader.prefetchTradingRuntime(importEntry);
+    await vi.waitFor(() => {
+      assert.equal(importEntry.mock.calls.length, expectedImports);
+    });
+    assert.deepEqual(storageGet.mock.calls[0], ["knowwTradingWarmEligible"]);
+  }
+);
 
 test("the default loader keeps webpack from bundling the runtime import", () => {
   const source = readFileSync(

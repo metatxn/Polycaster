@@ -5,6 +5,12 @@ packages:
 minimumReleaseAge: 10080
 minimumReleaseAgeIgnoreMissingTime: true
 minimumReleaseAgeExclude:
+  # Security-fix escape hatches: each of these is the *only* published version
+  # that clears an open advisory, and each is still inside the 7-day window.
+  # Drop the entry once the pinned version ages past the gate on its own.
+  - "brace-expansion"
+  - "fast-uri"
+  - "hono"
   - "@protobufjs/eventemitter"
   - "@protobufjs/fetch"
   - "@protobufjs/inquire"
@@ -21,16 +27,16 @@ minimumReleaseAgeExclude:
   - "@polymarket/bindings"
 
 catalog:
-  "@biomejs/biome": "2.5.2"
-  "@polymarket/client": "0.1.0-beta.18"
+  "@biomejs/biome": "2.5.6"
+  "@polymarket/client": "0.2.0"
   "@types/react": "19.2.17"
   "@types/react-dom": "19.2.3"
   "decimal.js": "^10.6.0"
-  "react": "19.2.7"
-  "react-dom": "19.2.7"
+  "react": "19.2.8"
+  "react-dom": "19.2.8"
   "react-qr-code": "2.2.0"
   "typescript": "6.0.3"
-  "viem": "2.55.1"
+  "viem": "2.55.10"
 
 packageExtensions:
   "@metamask/connect-multichain@0.12.1":
@@ -43,32 +49,51 @@ peerDependencyRules:
 
 overrides:
   "typescript": "6.0.3"
-  "viem": "2.55.1"
-  "axios": "1.18.0"
-  "@isaacs/brace-expansion": "5.0.6"
-  "brace-expansion": "5.0.6"
-  "fast-xml-parser": "5.9.3"
-  "qs": "6.15.2"
+  "viem": "2.55.10"
+  "axios": "1.18.1"
+  # 5.0.1 is the newest published @isaacs/brace-expansion; the previous 5.0.6
+  # pin was an unresolvable version carried over from the brace-expansion fork.
+  "@isaacs/brace-expansion": "5.0.1"
+  # Unbounded-intermediate-array DoS that bypasses the CVE-2026-14257
+  # mitigation; only fixed in >=5.0.9. Release-age gate waived above.
+  "brace-expansion": "5.0.9"
+  "fast-xml-parser": "5.10.1"
+  "qs": "6.15.3"
   "body-parser": "2.3.0"
   "h3": "1.15.11"
-  "hono": "4.12.26"
-  "postcss": "8.5.15"
-  "minimatch": "10.2.5"
+  # GHSA CORS-middleware ReDoS via Access-Control-Request-Headers is only
+  # fixed in >=4.12.34. Staying on the 4.12 line rather than 4.13.0.
+  # Release-age gate waived above.
+  "hono": "4.12.34"
+  "postcss": "8.5.24"
+  "minimatch": "10.2.6"
   "lodash": "4.18.1"
   "bn.js": "4.12.3"
-  "undici": "7.28.0"
-  "socket.io-parser": "4.2.6"
+  "undici": "7.29.0"
+  "socket.io-parser": "4.2.7"
   "path-to-regexp": "8.4.2"
   "defu": "6.1.7"
-  "protobufjs": "7.6.4"
+  "protobufjs": "7.6.5"
   "uuid": "11.1.1"
-  "fast-uri": "3.1.2"
-  "ws": "8.21.0"
-  "shell-quote": "1.8.4"
+  # CVE-2026-18446 host confusion via backslash authority introducer: patched
+  # in 3.1.5 / 4.1.2 only (4.1.1 is still vulnerable, so bumping the major
+  # would not help). Release-age gate waived above.
+  "fast-uri": "3.1.5"
+  "ws": "8.21.2"
+  "shell-quote": "1.10.0"
   "esbuild": "0.28.1"
   "form-data": "4.0.6"
-  "vite": "8.1.4"
-  "dompurify": "3.4.11"
+  "vite": "8.1.5"
+  "dompurify": "3.4.12"
+  # @huggingface/transformers declares sharp ^0.34.5, which is below the
+  # >=0.35.0 advisory floor. The extension never imports sharp and webpack
+  # does not bundle it, so lifting it also dedupes against the root 0.35.3.
+  "sharp": "0.35.3"
+  # GHSA-frvp-7c67-39w9 (Windows serve-static path traversal via %5C) is only
+  # fixed in >=2.0.5, so the whole 1.x line stays vulnerable. Reached via
+  # apps/web > accounts > wata, which declares ^1.13.7 but imports exactly one
+  # root symbol (`getRequestListener`) — present and unchanged in 2.x.
+  "@hono/node-server": "2.0.12"
   # Force patched adm-zip (GHSA-xcpc-8h2w-3j85: crafted ZIP → 4GB alloc).
   # Pulled transitively via @huggingface/transformers > onnxruntime-node,
   # which still declares ^0.5.16; the override lifts it past the fix.

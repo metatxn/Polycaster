@@ -289,6 +289,14 @@ export default function WhalesPage() {
 
         {activeTab === "insiders" && (
           <div className="pt-8">
+            {insiderData?.stats?.truncated && (
+              <p className="pb-4 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-(--kwm-ink-3)">
+                Scan capped — analyzed first {insiderData.stats.tradersAnalyzed}{" "}
+                of {insiderData.stats.uniqueTradersFound} traders. Select a
+                stricter sensitivity to narrow the field.
+              </p>
+            )}
+
             <InsiderLedger
               activities={sortedInsiders}
               walletSearch={walletSearch}

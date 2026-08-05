@@ -1,8 +1,9 @@
 import { z } from "zod";
 
 /**
- * Shared, strict query validation for the public `/api/events/trending` and
- * `/api/events/new` routes. Both forward caller-controlled paging/filter
+ * Shared, strict query validation for the public `/api/events/trending`,
+ * `/api/events/new`, and `/api/events/breaking` routes. All forward
+ * caller-controlled paging/filter
  * controls to Gamma; without bounds a caller can request oversized pages or
  * malformed filters (CWE-20). This schema enforces numeric bounds, a boolean
  * `closed`, and length-capped cursor/tag strings before anything reaches

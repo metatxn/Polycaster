@@ -8,6 +8,7 @@ import {
 import {
   getSportsWebSocketManager,
   type SportResult,
+  WS_SETTLE_MAX_MS,
 } from "@/lib/sports-websocket-manager";
 import type { ConnectionState } from "@/types/websocket";
 
@@ -26,6 +27,21 @@ const STALE_AGE_MS = 60 * 60 * 1000; // 1 hour
 const LIVE_STALE_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 /** How often the eviction sweep runs */
 const EVICTION_INTERVAL_MS = 60 * 1000; // 1 minute
+/**
+ * Initial-burst quiet window. On connect the sports socket streams every
+ * active game as an individual message with no "snapshot complete" marker,
+ * so WS-derived counts are not authoritative until the epoch has produced
+ * data and then gone quiet for this long (measured from both the connect
+ * and the latest message). Applies per connection epoch — first connect
+ * AND every reconnect.
+ */
+export const WS_SETTLE_MS = 4_000;
+/**
+ * Ceiling on the settle window per epoch — defined in the manager (whose
+ * reconnect reconciliation shares it; see the constant's doc there) and
+ * re-exported so settle-window consumers keep one import site.
+ */
+export { WS_SETTLE_MAX_MS };
 
 interface UseSportsWebSocketOptions {
   enabled?: boolean;
@@ -43,9 +59,9 @@ interface UseMatchedSportsLiveGameOptions {
  * (e.g. "nba-lal-bos-2026-07-03") instead of silently dropping the game
  * from every league-filtered view.
  */
-function gameMatchesLeagues(
+export function gameMatchesLeagues(
   game: SportResult,
-  leagueSet: Set<string>
+  leagueSet: ReadonlySet<string>
 ): boolean {
   const league = game.leagueAbbreviation?.toLowerCase();
   if (league) return leagueSet.has(league);
@@ -118,17 +134,6 @@ function toLiveGameState(
   };
 }
 
-function snapshotToLiveGames(
-  snapshot: Map<string, SportResult>,
-  receivedAt: number
-): Map<string, LiveGameState> {
-  const games = new Map<string, LiveGameState>();
-  for (const [gameId, event] of snapshot) {
-    games.set(gameId, toLiveGameState(event, receivedAt));
-  }
-  return games;
-}
-
 /**
  * Hook that uses the singleton SportsWebSocketManager.
  *
@@ -143,6 +148,8 @@ export function useSportsWebSocket(options: UseSportsWebSocketOptions = {}) {
 
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
+  const [connectedSince, setConnectedSince] = useState<number | null>(null);
+  const [settled, setSettled] = useState(false);
   const [games, setGames] = useState<Map<string, LiveGameState>>(new Map());
   const [lastMessageAt, setLastMessageAt] = useState<number | null>(null);
 
@@ -151,9 +158,72 @@ export function useSportsWebSocket(options: UseSportsWebSocketOptions = {}) {
     const manager = getSportsWebSocketManager();
     const unsubscribe = manager.addConnectionListener((state) => {
       setConnectionState(state);
+      setConnectedSince(manager.getConnectedSince());
     });
     return unsubscribe;
   }, []);
+
+  // Per-epoch settle window: consumers must not treat the game map as
+  // complete off a partially streamed initial burst. An epoch settles once
+  // it has produced data and gone WS_SETTLE_MS quiet (the burst finished
+  // streaming), or unconditionally at WS_SETTLE_MAX_MS — past the
+  // manager's ping watchdog, so a silently dead socket is torn down before
+  // its empty map could become authoritative. Latched per epoch: a message
+  // arriving after settle is an ordinary update, not a reopened burst.
+  const settledEpochRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (connectedSince === null) {
+      settledEpochRef.current = null;
+      setSettled(false);
+      return;
+    }
+    if (settledEpochRef.current === connectedSince) {
+      setSettled(true);
+      return;
+    }
+    const epochDataAt =
+      lastMessageAt !== null && lastMessageAt >= connectedSince
+        ? lastMessageAt
+        : null;
+    const settleAt =
+      epochDataAt === null
+        ? connectedSince + WS_SETTLE_MAX_MS
+        : Math.min(
+            connectedSince + WS_SETTLE_MAX_MS,
+            Math.max(connectedSince + WS_SETTLE_MS, epochDataAt + WS_SETTLE_MS)
+          );
+    const settleNow = () => {
+      settledEpochRef.current = connectedSince;
+      setSettled(true);
+      // The epoch's burst has finished streaming: every still-active game
+      // now carries an in-epoch stamp. A non-ended entry stamped before
+      // the epoch was not re-streamed — it ended or vanished while we were
+      // disconnected — and keeping it would overcount Live until the 2h
+      // stale sweep. Drop it (mirrors the manager's own epoch reconcile).
+      // Ended entries stay: they are never re-streamed and back the
+      // ended-corrections overlay.
+      setGames((prev) => {
+        let dropped = false;
+        const next = new Map<string, LiveGameState>();
+        for (const [key, game] of prev) {
+          if (!game.ended && game.receivedAt < connectedSince) {
+            dropped = true;
+            continue;
+          }
+          next.set(key, game);
+        }
+        return dropped ? next : prev;
+      });
+    };
+    const remaining = settleAt - Date.now();
+    if (remaining <= 0) {
+      settleNow();
+      return;
+    }
+    setSettled(false);
+    const timer = setTimeout(settleNow, remaining);
+    return () => clearTimeout(timer);
+  }, [connectedSince, lastMessageAt]);
 
   // Register as consumer + listen for sport events (store ALL, no filtering)
   useEffect(() => {
@@ -162,6 +232,41 @@ export function useSportsWebSocket(options: UseSportsWebSocketOptions = {}) {
     const manager = getSportsWebSocketManager();
 
     const removeConsumer = manager.addConsumer();
+
+    // Hydrate from the singleton's accumulated map: the manager may already
+    // hold the full stream (mounted after other consumers connected, or
+    // games retained across a manager-level reconnect). Listener-only state
+    // would start empty and undercount until every game re-streams. The
+    // manager map is authoritative — REPLACE local state (even with an
+    // empty map, so manager-side evictions propagate) and keep each game's
+    // original receive stamp so remounts/reconnects do not renew eviction
+    // TTLs.
+    const seedFromSnapshot = () => {
+      const snapshot = manager.getGamesSnapshot();
+      let latestReceivedAt: number | null = null;
+      const seeded = new Map<string, LiveGameState>();
+      for (const [gameId, entry] of snapshot) {
+        seeded.set(gameId, entry);
+        if (latestReceivedAt === null || entry.receivedAt > latestReceivedAt) {
+          latestReceivedAt = entry.receivedAt;
+        }
+      }
+      setGames(seeded);
+      // The stamps carry manager-side data knowledge (the burst may have
+      // arrived before this consumer mounted); fold the newest into
+      // lastMessageAt so the settle window sees the epoch's data.
+      if (latestReceivedAt !== null) {
+        const latest = latestReceivedAt;
+        setLastMessageAt((prev) =>
+          prev === null || latest > prev ? latest : prev
+        );
+      }
+    };
+    // Fires immediately with the current state (covers mounting into an
+    // established connection) and again on every reconnect transition.
+    const removeSeedListener = manager.addConnectionListener((state) => {
+      if (state === "connected") seedFromSnapshot();
+    });
 
     const removeListener = manager.addEventListener((event) => {
       const now = Date.now();
@@ -175,6 +280,7 @@ export function useSportsWebSocket(options: UseSportsWebSocketOptions = {}) {
     });
 
     return () => {
+      removeSeedListener();
       removeListener();
       removeConsumer();
     };
@@ -239,6 +345,15 @@ export function useSportsWebSocket(options: UseSportsWebSocketOptions = {}) {
   return {
     connectionState,
     isConnected: connectionState === "connected",
+    /**
+     * True once the current connection epoch's stream has settled: the
+     * epoch produced data and went WS_SETTLE_MS quiet, or stayed silent to
+     * the WS_SETTLE_MAX_MS ceiling (past the manager's ping watchdog, so
+     * silence means genuinely no active games). Gate anything that treats
+     * the game map as complete (counts, badges) on this rather than on
+     * isConnected/lastMessageAt.
+     */
+    isSettled: enabled && connectionState === "connected" && settled,
     /** Full unfiltered game map (for event-to-game matching) */
     games,
     /** All live (in-progress) games, unfiltered */
@@ -332,10 +447,8 @@ export function useMatchedSportsLiveGame(
       );
       if (!incomingMatch) return;
 
-      const candidateGames = snapshotToLiveGames(
-        manager.getGamesSnapshot(),
-        receivedAt
-      );
+      const candidateGames: Map<string, LiveGameState> =
+        manager.getGamesSnapshot();
       candidateGames.set(gameId, nextGame);
       const bestMatch = matchSportsEventToGame(currentEvent, candidateGames);
       const isBestIncomingMatch =
@@ -351,10 +464,9 @@ export function useMatchedSportsLiveGame(
 
     const currentEvent = eventRef.current;
     if (currentEvent) {
-      const receivedAt = Date.now();
       const bestMatch = matchSportsEventToGame(
         currentEvent,
-        snapshotToLiveGames(manager.getGamesSnapshot(), receivedAt)
+        manager.getGamesSnapshot()
       );
       if (bestMatch) {
         matchedGameIdRef.current = String(bestMatch.gameId);

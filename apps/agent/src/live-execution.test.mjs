@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isSettlementPendingLiveOrder,
+  isUnresolvedLiveOrder,
+} from "./live-accounting.ts";
+import {
   createUnifiedLiveClobClient,
   deriveUnifiedLiveApiCreds,
+  getLiveExecutionConfig,
   LiveExecutionAdapter,
 } from "./live-execution.ts";
 
@@ -41,7 +46,7 @@ function createDeps(runtimeOverrides = {}, options = {}) {
   }
   const credentialRecords = new Map();
   const calls = {
-    createOrder: 0,
+    createMarketOrder: 0,
     deriveApiCreds: 0,
     postOrder: 0,
     syncBalanceAllowance: 0,
@@ -53,8 +58,8 @@ function createDeps(runtimeOverrides = {}, options = {}) {
     updateBalanceAllowance: async () => {
       calls.syncBalanceAllowance += 1;
     },
-    createOrder: async (order) => {
-      calls.createOrder += 1;
+    createMarketOrder: async (order) => {
+      calls.createMarketOrder += 1;
       return { kind: "signed-order", order };
     },
     postOrder: async () => {
@@ -139,11 +144,71 @@ function createDeps(runtimeOverrides = {}, options = {}) {
           calls.sendTransactions += 1;
         },
         syncBalanceAllowance: async (syncClient) => {
-          await syncClient.updateBalanceAllowance({ asset_type: "COLLATERAL" });
+          await syncClient.updateBalanceAllowance({ assetType: "COLLATERAL" });
         },
+        // Instant sleep so the settlement poll doesn't run in real time.
+        sleep: async () => {},
         ...runtimeOverrides,
       },
     },
+  };
+}
+
+function walletBalance(pusdBalanceRaw) {
+  return {
+    balance: 100,
+    balanceRaw: "100000000",
+    pusdBalance: Number(pusdBalanceRaw) / 1e6,
+    pusdBalanceRaw,
+    usdcEBalance: 0,
+    usdcEBalanceRaw: "0",
+    polBalance: 1,
+    polBalanceRaw: "1000000000000000000",
+    tokenBalances: [],
+  };
+}
+
+// A filled real BUY from an earlier run whose settlement debit was never
+// observed inline — the shape the safety gate's reconcilePendingSettlement
+// pass scans for. `preSubmission` overrides merge into the anchor.
+function pendingSettlementOrder(preSubmission = {}) {
+  const createdAt = "2026-05-14T00:00:00.000Z";
+  return {
+    idempotencyKey: "run-0:watch-0:BUY",
+    runId: "run-0",
+    watchlistItemId: "watch-0",
+    tokenId: "token-1",
+    side: "BUY",
+    requestedSizeUsd: "5",
+    price: "0.5",
+    signedOrderHash: "c".repeat(64),
+    orderId: "order-pending",
+    status: "FILLED",
+    submittedAt: createdAt,
+    filledAt: createdAt,
+    createdAt,
+    filledNotionalUsd: "5",
+    filledShares: "10",
+    averageFillPrice: "0.5",
+    feeEstimateUsd: "0.15",
+    settledFeeUsd: null,
+    lastSyncedAt: createdAt,
+    balanceSnapshotJson: JSON.stringify({
+      preSubmission: {
+        capturedAt: createdAt,
+        funderAddress: "0x0000000000000000000000000000000000000001",
+        wallet: {
+          pusdBalanceRaw: "100000000",
+          usdcEBalanceRaw: "0",
+          polBalanceRaw: "1000000000000000000",
+        },
+        conditionalBalanceRaw: "0",
+        ...preSubmission,
+      },
+      postSubmission: null,
+    }),
+    dryRun: false,
+    error: null,
   };
 }
 
@@ -215,7 +280,7 @@ test("adds SELL proceeds when replaying an idempotent filled order", async () =>
 
   assert.equal(fill.status, "FILLED");
   assert.equal(fill.cashAfterUsd, "1005");
-  assert.equal(calls.createOrder, 0);
+  assert.equal(calls.createMarketOrder, 0);
   assert.equal(calls.postOrder, 0);
 });
 
@@ -262,8 +327,59 @@ test("continues subtracting BUY cost when replaying an idempotent filled order",
   const fill = await adapter.execute(baseRequest());
 
   assert.equal(fill.status, "FILLED");
+  // Legacy rows predate `feeEstimateUsd`; the replay treats the absent field as $0.
   assert.equal(fill.cashAfterUsd, "995");
-  assert.equal(calls.createOrder, 0);
+  assert.equal(calls.createMarketOrder, 0);
+  assert.equal(calls.postOrder, 0);
+});
+
+test("replays the recorded BUY fee when the filled order carried one", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const createdAt = "2026-05-14T00:00:00.000Z";
+  const { deps, calls } = createDeps(
+    {},
+    {
+      liveOrders: [
+        {
+          idempotencyKey: "run-1:watch-1:BUY",
+          runId: "run-1",
+          watchlistItemId: "watch-1",
+          tokenId: "token-1",
+          side: "BUY",
+          requestedSizeUsd: "5",
+          price: "0.5",
+          signedOrderHash: "b".repeat(64),
+          orderId: "order-buy",
+          status: "FILLED",
+          submittedAt: createdAt,
+          filledAt: createdAt,
+          createdAt,
+          filledNotionalUsd: "5",
+          filledShares: "10",
+          averageFillPrice: "0.5",
+          feeEstimateUsd: "0.15",
+          lastSyncedAt: createdAt,
+          balanceSnapshotJson: null,
+          dryRun: false,
+          error: null,
+        },
+      ],
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+
+  assert.equal(fill.status, "FILLED");
+  // Replay must debit the same fee the original fill did, or the second run
+  // reports more cash than the first for the identical order.
+  assert.equal(fill.cashAfterUsd, "994.85");
   assert.equal(calls.postOrder, 0);
 });
 
@@ -297,7 +413,20 @@ test("reuses encrypted cached CLOB credentials instead of deriving again", async
   process.env.AGENT_CREDENTIAL_ENCRYPTION_KEY =
     "test-encryption-key-with-enough-entropy";
 
-  const { deps, calls } = createDeps();
+  // The settlement debit lands after the first poll sleep so the first order
+  // reconciles inline; an unreconciled fill would block the second submission
+  // at the safety gate. Both legs flip together: the pUSD debit and the
+  // conditional-token credit for the 10 filled shares.
+  const state = { settled: false };
+  const { deps, calls } = createDeps({
+    sleep: async () => {
+      state.settled = true;
+    },
+    readTradingWalletBalance: async () =>
+      walletBalance(state.settled ? "94850000" : "100000000"),
+    readConditionalBalanceRaw: async () =>
+      BigInt(state.settled ? "110000000" : "100000000"),
+  });
   const adapter = new LiveExecutionAdapter(deps);
 
   const first = await adapter.execute(baseRequest({ runId: "run-cache-1" }));
@@ -337,10 +466,37 @@ test("uses actual CLOB fill amounts instead of optimistic requested size", async
   assert.equal(fill.status, "FILLED");
   assert.equal(fill.notionalUsd, "2.5");
   assert.equal(fill.shares, "5");
+  // The fallback fee reserve (300 bps of the $5 request = $0.15) scales by
+  // the fill ratio: half filled → $0.075 debited on top of the notional.
+  assert.equal(fill.cashAfterUsd, "997.425");
   assert.equal(record.status, "FILLED");
   assert.equal(record.filledNotionalUsd, "2.5");
   assert.equal(record.filledShares, "5");
   assert.equal(record.averageFillPrice, "0.5");
+  assert.equal(record.feeEstimateUsd, "0.075");
+});
+
+test("subtracts the BUY fee reserve from cash on top of the filled notional", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps } = createDeps();
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const record = await deps.getLiveOrderByIdempotencyKey("run-1:watch-1:BUY");
+
+  assert.equal(fill.status, "FILLED");
+  assert.equal(fill.notionalUsd, "5");
+  // The market info carries no fee metadata, so the preflight reserves the
+  // conservative 300 bps fallback: $5 notional + $0.15 fee leaves $994.85,
+  // not the $995 an fee-free debit would.
+  assert.equal(fill.cashAfterUsd, "994.85");
+  assert.equal(record.feeEstimateUsd, "0.15");
 });
 
 test("surfaces partial CLOB fills as PARTIALLY_FILLED instead of FILLED", async () => {
@@ -569,7 +725,19 @@ test("decrypts cached CLOB credentials with a previous key and re-encrypts with 
   process.env.AGENT_CREDENTIAL_ENCRYPTION_KEY = "old-key";
   process.env.AGENT_CREDENTIAL_ENCRYPTION_KEY_VERSION = "v1";
 
-  const { deps, calls } = createDeps();
+  // Settle the first order inline (debit appears after the first poll sleep)
+  // so its pending-reconciliation block doesn't stop the second submission
+  // before the rotated credentials are exercised.
+  const state = { settled: false };
+  const { deps, calls } = createDeps({
+    sleep: async () => {
+      state.settled = true;
+    },
+    readTradingWalletBalance: async () =>
+      walletBalance(state.settled ? "94850000" : "100000000"),
+    readConditionalBalanceRaw: async () =>
+      BigInt(state.settled ? "110000000" : "100000000"),
+  });
   const adapter = new LiveExecutionAdapter(deps);
   await adapter.execute(baseRequest({ runId: "rotation-old" }));
 
@@ -629,6 +797,374 @@ test("blocks real live execution when daily order cap is reached", async () => {
   assert.equal(calls.postOrder, 0);
 });
 
+test("derives the settled BUY fee from the observed balance debit", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  // The settlement debit ($5 notional + $0.25 fee) and the matching
+  // 10-share conditional-token credit land only after the poll's first
+  // sleep, so every pre-submission read still sees the pre-debit balances.
+  const state = { settled: false };
+  const { deps } = createDeps({
+    sleep: async () => {
+      state.settled = true;
+    },
+    readTradingWalletBalance: async () =>
+      walletBalance(state.settled ? "94750000" : "100000000"),
+    readConditionalBalanceRaw: async () =>
+      BigInt(state.settled ? "110000000" : "100000000"),
+  });
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const record = await deps.getLiveOrderByIdempotencyKey("run-1:watch-1:BUY");
+
+  assert.equal(fill.status, "FILLED");
+  // Cash reflects the ACTUAL $0.25 fee, not the $0.15 preflight estimate.
+  assert.equal(fill.cashAfterUsd, "994.75");
+  assert.equal(record.settledFeeUsd, "0.25");
+  assert.equal(record.feeEstimateUsd, "0.15");
+  const snapshot = JSON.parse(record.balanceSnapshotJson);
+  assert.equal(snapshot.preSubmission.wallet.pusdBalanceRaw, "100000000");
+  assert.equal(snapshot.postSubmission.wallet.pusdBalanceRaw, "100000000");
+  assert.equal(snapshot.settlement.wallet.pusdBalanceRaw, "94750000");
+});
+
+test("does not derive an inline fee from a pUSD drop without the conditional-token credit", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  // The wallet loses $5.25 during the poll window but never gains the 10
+  // filled shares (the default conditional read is static): an unrelated
+  // spend, not this order settling. The fee must stay unresolved instead of
+  // being derived from the unrelated debit.
+  const state = { settled: false };
+  const { deps } = createDeps({
+    sleep: async () => {
+      state.settled = true;
+    },
+    readTradingWalletBalance: async () =>
+      walletBalance(state.settled ? "94750000" : "100000000"),
+  });
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const record = await deps.getLiveOrderByIdempotencyKey("run-1:watch-1:BUY");
+
+  assert.equal(fill.status, "FILLED");
+  // Cash falls back to the preflight estimate; the row stays pending so the
+  // safety gate keeps blocking until the fee is actually attributable.
+  assert.equal(fill.cashAfterUsd, "994.85");
+  assert.equal(record.settledFeeUsd, null);
+});
+
+test("blocks the next live order while a filled BUY settlement is unreconciled", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  // Static balance: the settlement debit never becomes observable.
+  const { deps, calls } = createDeps();
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const first = await adapter.execute(baseRequest());
+  const record = await deps.getLiveOrderByIdempotencyKey("run-1:watch-1:BUY");
+  const second = await adapter.execute(
+    baseRequest({ runId: "run-2", watchlistItemId: "watch-2" })
+  );
+
+  assert.equal(first.status, "FILLED");
+  assert.equal(first.cashAfterUsd, "994.85");
+  // The record stays pending (null settled fee) rather than pretending the
+  // estimate was the actual debit, and blocks the next submission.
+  assert.equal(record.settledFeeUsd, null);
+  assert.equal(second.status, "BLOCKED");
+  assert.match(second.reason ?? "", /pending reconciliation/i);
+  assert.equal(calls.postOrder, 1);
+});
+
+test("reconciles a pending settlement from an earlier run before trading again", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps, calls } = createDeps(
+    {
+      // The wallet now shows the settled debit from the pending order:
+      // $5 notional + $0.25 fee below its pre-submission anchor. The default
+      // conditional balance (100000000) against the anchor's "0" supplies
+      // the 10-share fill evidence.
+      readTradingWalletBalance: async () => walletBalance("94750000"),
+    },
+    { liveOrders: [pendingSettlementOrder()] }
+  );
+  const healCalls = [];
+  deps.applySettledFeeToRunFill = async (input) => {
+    healCalls.push(input);
+  };
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const healed = await deps.getLiveOrderByIdempotencyKey("run-0:watch-0:BUY");
+
+  // The safety gate's reconciliation pass derived the fee, unblocking the
+  // new submission in the same run.
+  assert.equal(fill.status, "FILLED");
+  assert.equal(calls.postOrder, 1);
+  assert.equal(healed.settledFeeUsd, "0.25");
+  const snapshot = JSON.parse(healed.balanceSnapshotJson);
+  assert.equal(snapshot.preSubmission.wallet.pusdBalanceRaw, "100000000");
+  assert.equal(snapshot.settlement.wallet.pusdBalanceRaw, "94750000");
+  // The persisted run-item fill was corrected alongside the order row.
+  assert.deepEqual(healCalls, [
+    {
+      runId: "run-0",
+      watchlistItemId: "watch-0",
+      side: "BUY",
+      feeEstimateUsd: "0.15",
+      settledFeeUsd: "0.25",
+    },
+  ]);
+});
+
+test("late reconciliation refuses when the configured wallet no longer matches the anchor", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps, calls } = createDeps(
+    {
+      // A plausible $5.25 debit is visible — but the anchor was captured
+      // from a different wallet, so the delta is meaningless here.
+      readTradingWalletBalance: async () => walletBalance("94750000"),
+    },
+    {
+      liveOrders: [
+        pendingSettlementOrder({
+          funderAddress: "0x0000000000000000000000000000000000000002",
+        }),
+      ],
+    }
+  );
+  const healCalls = [];
+  deps.applySettledFeeToRunFill = async (input) => {
+    healCalls.push(input);
+  };
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const order = await deps.getLiveOrderByIdempotencyKey("run-0:watch-0:BUY");
+
+  assert.equal(fill.status, "BLOCKED");
+  assert.match(fill.reason ?? "", /pending reconciliation/i);
+  assert.equal(calls.postOrder, 0);
+  assert.equal(order.settledFeeUsd, null);
+  assert.deepEqual(healCalls, []);
+});
+
+test("late reconciliation refuses a legacy anchor that never captured a wallet address", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps, calls } = createDeps(
+    {
+      readTradingWalletBalance: async () => walletBalance("94750000"),
+    },
+    {
+      liveOrders: [
+        // JSON.stringify drops the undefined, producing the pre-address
+        // anchor shape older rows carry. Without a recorded wallet there is
+        // no way to prove the delta comes from the same account.
+        pendingSettlementOrder({ funderAddress: undefined }),
+      ],
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const order = await deps.getLiveOrderByIdempotencyKey("run-0:watch-0:BUY");
+
+  assert.equal(fill.status, "BLOCKED");
+  assert.match(fill.reason ?? "", /pending reconciliation/i);
+  assert.equal(calls.postOrder, 0);
+  assert.equal(order.settledFeeUsd, null);
+});
+
+test("late reconciliation refuses a pUSD drop without the conditional-token credit", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const { deps, calls } = createDeps(
+    {
+      // The wallet lost exactly $5.25 — an unrelated spend that LOOKS like
+      // notional + fee. The conditional balance never moved (anchor and
+      // current read are both 100000000), so no shares were credited and
+      // the drop must not be recorded as this order's fee.
+      readTradingWalletBalance: async () => walletBalance("94750000"),
+    },
+    {
+      liveOrders: [
+        pendingSettlementOrder({ conditionalBalanceRaw: "100000000" }),
+      ],
+    }
+  );
+  const healCalls = [];
+  deps.applySettledFeeToRunFill = async (input) => {
+    healCalls.push(input);
+  };
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+  const order = await deps.getLiveOrderByIdempotencyKey("run-0:watch-0:BUY");
+
+  assert.equal(fill.status, "BLOCKED");
+  assert.match(fill.reason ?? "", /pending reconciliation/i);
+  assert.equal(calls.postOrder, 0);
+  assert.equal(order.settledFeeUsd, null);
+  assert.deepEqual(healCalls, []);
+});
+
+test("replays the settled BUY fee in preference to the preflight estimate", async () => {
+  restoreEnv();
+  process.env.AGENT_LIVE_ENABLED = "true";
+  process.env.AGENT_LIVE_DRY_RUN = "false";
+  process.env.AGENT_LIVE_CONFIRMED = "I_UNDERSTAND_THIS_IS_REAL_MONEY";
+  process.env.AGENT_WALLET_PRIVATE_KEY =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  const createdAt = "2026-05-14T00:00:00.000Z";
+  const { deps, calls } = createDeps(
+    {},
+    {
+      liveOrders: [
+        {
+          idempotencyKey: "run-1:watch-1:BUY",
+          runId: "run-1",
+          watchlistItemId: "watch-1",
+          tokenId: "token-1",
+          side: "BUY",
+          requestedSizeUsd: "5",
+          price: "0.5",
+          signedOrderHash: "b".repeat(64),
+          orderId: "order-buy",
+          status: "FILLED",
+          submittedAt: createdAt,
+          filledAt: createdAt,
+          createdAt,
+          filledNotionalUsd: "5",
+          filledShares: "10",
+          averageFillPrice: "0.5",
+          feeEstimateUsd: "0.15",
+          settledFeeUsd: "0.30",
+          lastSyncedAt: createdAt,
+          balanceSnapshotJson: null,
+          dryRun: false,
+          error: null,
+        },
+      ],
+    }
+  );
+  const adapter = new LiveExecutionAdapter(deps);
+
+  const fill = await adapter.execute(baseRequest());
+
+  assert.equal(fill.status, "FILLED");
+  // $1000 − $5 notional − $0.30 settled fee, not the $0.15 estimate.
+  assert.equal(fill.cashAfterUsd, "994.7");
+  assert.equal(calls.postOrder, 0);
+});
+
+test("settlement-pending and unresolved predicates gate on the pre-submission anchor", () => {
+  const base = {
+    idempotencyKey: "run-0:watch-0:BUY",
+    runId: "run-0",
+    watchlistItemId: "watch-0",
+    tokenId: "token-1",
+    side: "BUY",
+    requestedSizeUsd: "5",
+    price: "0.5",
+    signedOrderHash: null,
+    orderId: null,
+    status: "FILLED",
+    submittedAt: null,
+    filledAt: null,
+    createdAt: "2026-05-14T00:00:00.000Z",
+    filledNotionalUsd: "5",
+    filledShares: "10",
+    averageFillPrice: null,
+    feeEstimateUsd: "0.15",
+    settledFeeUsd: null,
+    lastSyncedAt: null,
+    balanceSnapshotJson: null,
+    dryRun: false,
+    error: null,
+  };
+  const anchored = {
+    ...base,
+    balanceSnapshotJson: JSON.stringify({
+      preSubmission: {
+        capturedAt: "2026-05-14T00:00:00.000Z",
+        wallet: { pusdBalanceRaw: "100000000" },
+      },
+      postSubmission: null,
+    }),
+  };
+
+  // Legacy rows without an anchor can never be reconciled, so they must not
+  // block live trading forever.
+  assert.equal(isSettlementPendingLiveOrder(base), false);
+  assert.equal(isUnresolvedLiveOrder(base), false);
+  assert.equal(isSettlementPendingLiveOrder(anchored), true);
+  assert.equal(isUnresolvedLiveOrder(anchored), true);
+  assert.equal(
+    isSettlementPendingLiveOrder({ ...anchored, settledFeeUsd: "0.25" }),
+    false
+  );
+  assert.equal(
+    isUnresolvedLiveOrder({ ...anchored, settledFeeUsd: "0.25" }),
+    false
+  );
+  assert.equal(
+    isSettlementPendingLiveOrder({ ...anchored, dryRun: true }),
+    false
+  );
+  assert.equal(
+    isSettlementPendingLiveOrder({ ...anchored, side: "SELL" }),
+    false
+  );
+  assert.equal(isUnresolvedLiveOrder({ ...base, status: "POSTED" }), true);
+  assert.equal(isUnresolvedLiveOrder({ ...base, status: "UNKNOWN" }), true);
+  assert.equal(
+    isUnresolvedLiveOrder({ ...base, status: "POSTED", dryRun: true }),
+    false
+  );
+});
+
 test("deriveUnifiedLiveApiCreds derives credentials through the unified SDK signer", async () => {
   const walletClient = { account: "wallet-client" };
   const signer = { signer: "viem-signer" };
@@ -674,6 +1210,7 @@ test("createUnifiedLiveClobClient adapts the unified SDK client for live CLOB ex
       config: {
         ...getLiveExecutionConfigForTest(),
         clobHost: "https://clob.polymarket.com",
+        builderCode: "builder-code",
       },
       walletClient,
       funderAddress: "0x0000000000000000000000000000000000000002",
@@ -692,8 +1229,8 @@ test("createUnifiedLiveClobClient adapts the unified SDK client for live CLOB ex
         calls.push(["createSecureClient", input]);
         return { client: unifiedClient };
       },
-      adaptClient: (input) => {
-        calls.push(["adaptClient", input]);
+      adaptClient: (...args) => {
+        calls.push(["adaptClient", ...args]);
         return legacyClient;
       },
     }
@@ -714,8 +1251,53 @@ test("createUnifiedLiveClobClient adapts the unified SDK client for live CLOB ex
         },
       },
     ],
-    ["adaptClient", unifiedClient],
+    ["adaptClient", unifiedClient, { builderCode: "builder-code" }],
   ]);
+});
+
+test("createUnifiedLiveClobClient adapts without attribution when no builder code is configured", async () => {
+  const adaptArgs = [];
+
+  await createUnifiedLiveClobClient(
+    {
+      config: {
+        ...getLiveExecutionConfigForTest(),
+        clobHost: "https://clob.polymarket.com",
+        builderCode: null,
+      },
+      walletClient: {},
+      funderAddress: "0x0000000000000000000000000000000000000002",
+      creds: {
+        apiKey: "api-key",
+        apiSecret: "api-secret",
+        apiPassphrase: "api-passphrase",
+      },
+    },
+    {
+      createViemSigner: () => ({}),
+      createSecureClient: async () => ({ client: {} }),
+      adaptClient: (...args) => {
+        adaptArgs.push(args);
+        return {};
+      },
+    }
+  );
+
+  assert.deepEqual(adaptArgs, [[{}, { builderCode: undefined }]]);
+});
+
+test("getLiveExecutionConfig reads the builder attribution code from POLY_BUILDER_CODE", () => {
+  restoreEnv();
+  delete process.env.POLY_BUILDER_CODE;
+  assert.equal(getLiveExecutionConfig().builderCode, null);
+
+  process.env.POLY_BUILDER_CODE = "  builder-code  ";
+  assert.equal(getLiveExecutionConfig().builderCode, "builder-code");
+
+  // Whitespace-only is "not configured", not an empty attribution code.
+  process.env.POLY_BUILDER_CODE = "   ";
+  assert.equal(getLiveExecutionConfig().builderCode, null);
+  restoreEnv();
 });
 
 test("createUnifiedLiveClobClient rejects non-production CLOB hosts", async () => {
@@ -758,5 +1340,6 @@ function getLiveExecutionConfigForTest() {
     chainId: 137,
     rpcUrl: "https://polygon-rpc.com",
     orderType: "FOK",
+    builderCode: null,
   };
 }

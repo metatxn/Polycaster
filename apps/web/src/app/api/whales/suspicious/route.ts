@@ -11,6 +11,16 @@ import { scoreOwnerCluster } from "@/lib/insider/archetypes/owner-cluster";
 
 const log = createLogger("api.whales.suspicious");
 
+// Server-side floor for the USD filter. The UI's lowest preset sends
+// minUsdValue=100, so this is invisible to real clients — it only stops
+// minUsdValue=0 from turning the trade window into a full-fanout wallet scan.
+const MIN_USD_VALUE_FLOOR = 100;
+
+// Hard cap on wallets sent through the trader-history / wallet-edge batch
+// loaders. Trades from wallets past the cap simply aren't scored (they have
+// no history context), keeping the response valid but bounded.
+const MAX_UNIQUE_TRADERS = 200;
+
 import type {
   AccumulatedTrade,
   AccumulatorContext,
@@ -120,6 +130,10 @@ export interface SuspiciousActivityResponse {
   stats: {
     totalTradesScanned: number;
     uniqueTradersFound: number;
+    /** Traders actually analyzed; capped, so may be < uniqueTradersFound. */
+    tradersAnalyzed: number;
+    /** True when more unique traders were found than could be analyzed. */
+    truncated: boolean;
     newAccountsFound: number;
     suspiciousActivities: number;
     criticalCount: number;
@@ -248,9 +262,9 @@ export async function GET(request: NextRequest) {
 
     // Float params (no upper bound) are outside clampedInt's contract, but
     // still need finite validation so junk cannot leak NaN into comparisons.
-    const minUsdValue = nonNegativeFloatParam(
-      searchParams.get("minUsdValue"),
-      5000
+    const minUsdValue = Math.max(
+      MIN_USD_VALUE_FLOOR,
+      nonNegativeFloatParam(searchParams.get("minUsdValue"), 5000)
     );
     const minShares = nonNegativeFloatParam(searchParams.get("minShares"), 0);
 
@@ -265,6 +279,8 @@ export async function GET(request: NextRequest) {
           stats: {
             totalTradesScanned: 0,
             uniqueTradersFound: 0,
+            tradersAnalyzed: 0,
+            truncated: false,
             newAccountsFound: 0,
             suspiciousActivities: 0,
             criticalCount: 0,
@@ -286,8 +302,17 @@ export async function GET(request: NextRequest) {
       return true;
     });
 
-    // Step 3: Get unique traders
-    const uniqueTraders = [...new Set(largeTrades.map((t) => t.proxyWallet))];
+    // Step 3: Get unique traders (bounded — trades are newest-first, so the
+    // cap keeps the most recent wallets when the window is unusually busy)
+    const allTraders = [...new Set(largeTrades.map((t) => t.proxyWallet))];
+    const uniqueTraders = allTraders.slice(0, MAX_UNIQUE_TRADERS);
+    if (allTraders.length > uniqueTraders.length) {
+      log.warn("traders.truncated", {
+        totalTraders: allTraders.length,
+        analyzedTraders: uniqueTraders.length,
+        minUsdValue,
+      });
+    }
 
     // Step 4: Batch-fetch trader histories using the paginated cache
     const traderHistories = await getTraderHistoriesBatch(uniqueTraders, 10);
@@ -705,7 +730,9 @@ export async function GET(request: NextRequest) {
         activities: limitedActivities,
         stats: {
           totalTradesScanned: recentTrades.length,
-          uniqueTradersFound: uniqueTraders.length,
+          uniqueTradersFound: allTraders.length,
+          tradersAnalyzed: uniqueTraders.length,
+          truncated: allTraders.length > uniqueTraders.length,
           newAccountsFound: [...traderHistories.values()].filter(
             (h) => h.accountAgeHours <= maxAccountAgeHours
           ).length,
@@ -728,6 +755,8 @@ export async function GET(request: NextRequest) {
         stats: {
           totalTradesScanned: 0,
           uniqueTradersFound: 0,
+          tradersAnalyzed: 0,
+          truncated: false,
           newAccountsFound: 0,
           suspiciousActivities: 0,
           criticalCount: 0,

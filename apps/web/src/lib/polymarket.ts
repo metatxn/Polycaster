@@ -153,8 +153,14 @@ export async function fetchOrderBook(tokenId: string): Promise<unknown> {
 /**
  * Fetch market info directly from CLOB API
  */
-export async function fetchMarket(conditionId: string): Promise<unknown> {
-  return fetchClobMarket(conditionId, { host: getClobHost() });
+export async function fetchMarket(
+  conditionId: string,
+  signal?: AbortSignal
+): Promise<unknown> {
+  return fetchClobMarket(conditionId, {
+    host: getClobHost(),
+    ...(signal ? { requestInit: { signal } } : {}),
+  });
 }
 
 /**

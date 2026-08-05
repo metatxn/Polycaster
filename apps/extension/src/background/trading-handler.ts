@@ -20,7 +20,7 @@ import {
 import { POLYGON_CHAIN } from "@knoww/shared-types/chains";
 import {
   fetchClobBuilderFeeRates,
-  fetchClobMarket,
+  fetchClobMarketInfo,
   fetchClobOrderBook,
 } from "@knoww/shared-types/clob";
 import {
@@ -36,14 +36,12 @@ import {
   readCtfOutcomeBalances,
 } from "@knoww/shared-types/ctf";
 import {
-  buildClobBalanceAllowanceTargets,
   buildClobL1Headers,
   type ClobBalanceAllowanceClient,
-  type ClobBalanceAllowanceTarget,
   createOrDeriveClobApiKey,
   getClobPostOrderError,
-  getPolymarketSignatureType,
   POLYMARKET_API,
+  postClobOrderWithRetry,
   syncClobBalanceAllowance,
 } from "@knoww/shared-types/polymarket";
 import type { LegacyClobOrderRequest } from "@knoww/shared-types/polymarket-unified";
@@ -92,11 +90,7 @@ import {
   type BridgeWalletClient,
   createBridgeWalletClient,
 } from "./bridge-signer";
-import {
-  buildClobHmacHeaders,
-  type ClobApiCredentials,
-  fetchClobOpenOrders,
-} from "./clob-open-orders";
+import { createL2ClobClient } from "./clob-open-orders";
 import {
   deployDepositWallet,
   deployProxyWallet,
@@ -147,9 +141,6 @@ function getBuilderFeeRates(
   if (cached) return cached;
   const pending = fetchClobBuilderFeeRates(builderCode, {
     host: CLOB_HOST,
-    // TODO: Move this back to the SDK path once unified SDK exposes builder
-    // fee reads in the extension runtime.
-    useUnifiedSdk: false,
   }).catch((err) => {
     // Don't poison the cache on a transient failure — let the next call retry.
     builderFeeRatesCache.delete(builderCode);
@@ -159,14 +150,13 @@ function getBuilderFeeRates(
   return pending;
 }
 
+// Fee estimation reads `/clob-markets/{conditionId}`, not `/markets/…` — only
+// the former carries the `fd` protocol-fee curve. This used to call
+// `fetchClobMarket`, which meant `parseProtocolFeeDetails` found no `fd` and
+// quietly returned a zero protocol fee on every pre-flight.
 const unifiedMarketInfoClient = {
   getClobMarketInfo(conditionId: string) {
-    return fetchClobMarket(conditionId, {
-      host: CLOB_HOST,
-      // TODO: Move this back to the SDK path once unified SDK market-info reads
-      // are available in the extension runtime.
-      useUnifiedSdk: false,
-    });
+    return fetchClobMarketInfo(conditionId, { host: CLOB_HOST });
   },
 };
 
@@ -176,6 +166,21 @@ function ok(data: unknown): TradingSuccessResponse {
 
 function fail(error: string): TradingErrorResponse {
   return { ok: false, error };
+}
+
+function postExtensionClobOrder(
+  client: ExtensionLegacyClobClient,
+  order: unknown,
+  orderType: string
+): Promise<unknown> {
+  return postClobOrderWithRetry(() => client.postOrder(order, orderType), {
+    onRetry: ({ attempt, error }) =>
+      logWarn("trading.place-order.retry", {
+        attempt,
+        error,
+        orderType,
+      }),
+  });
 }
 
 async function executeDirectTransactions(
@@ -399,11 +404,9 @@ async function handlePlaceOrder(
     builderCode,
     getBuilderFeeRates,
     isMarketableBuy: msg.isMarketableBuy,
-    getOpenOrders: () =>
-      fetchClobOpenOrders({
-        address: msg.address,
-        credentials,
-      }),
+    // The secure client above is already authenticated for this account, so the
+    // preflight reuses it instead of opening a second hand-signed CLOB session.
+    getOpenOrders: () => client.getOpenOrders(),
     onOpenOrdersError: (err) =>
       logWarn("trading.open-orders-fetch-failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -465,25 +468,35 @@ async function handlePlaceOrder(
     const marketAmount =
       msg.side === "SELL" ? msg.size : (msg.amount ?? msg.size);
     const marketOrder: LegacyClobOrderRequest = {
-      tokenID: msg.tokenId,
+      tokenId: msg.tokenId,
       amount: marketAmount,
       side: msg.side,
       // feeRateBps removed (V2: protocol-determined at match time)
+      // FAK/FOK is signed into the order at creation time in V2; it is no
+      // longer a postOrder argument.
+      orderType,
     };
     if (msg.price && msg.price > 0) {
       marketOrder.price = msg.price;
     }
+    // No `maxSpend`: the SDK's default is to sign the full `amount` and charge
+    // fees on top, which is what the panel quotes and what the collateral
+    // preflight reserves. Passing `maxSpend === amount` instead shrinks the
+    // signed `makerAmount` below the entered amount on every BUY, and the
+    // CLOB's `min size: 1` floor is checked against that reduced number — so
+    // small tickets on cheap outcomes were rejected.
 
     logInfo("trading.place-order.market-params", {
       side: msg.side,
       amount: marketAmount,
       price: marketOrder.price,
+      orderType,
       msgSize: msg.size,
       msgAmount: msg.amount,
     });
 
     const order = await client.createMarketOrder(marketOrder);
-    const response = await client.postOrder(order, orderType);
+    const response = await postExtensionClobOrder(client, order, orderType);
 
     const errorMsg = getClobPostOrderError(response);
     if (errorMsg) {
@@ -494,7 +507,7 @@ async function handlePlaceOrder(
   }
 
   logInfo("trading.place-order.limit-params", {
-    tokenID: msg.tokenId,
+    tokenId: msg.tokenId,
     price: msg.price,
     size: msg.size,
     side: msg.side,
@@ -505,7 +518,7 @@ async function handlePlaceOrder(
 
   const order = await client.createOrder(
     {
-      tokenID: msg.tokenId,
+      tokenId: msg.tokenId,
       price: msg.price,
       size: msg.size,
       side: msg.side,
@@ -517,13 +530,13 @@ async function handlePlaceOrder(
 
   const signedOrder = order as Record<string, unknown>;
   logInfo("trading.place-order.signed", {
-    tokenID: signedOrder.tokenId,
+    tokenId: signedOrder.tokenId,
     side: signedOrder.side,
     size: signedOrder.size,
     price: signedOrder.price,
   });
 
-  const response = await client.postOrder(order, orderType);
+  const response = await postExtensionClobOrder(client, order, orderType);
 
   logInfo("trading.place-order.clob-response", {
     txHash: (response as Record<string, unknown>)?.transactionHash,
@@ -684,14 +697,7 @@ async function handleGetOrderBook(
   msg: TradingGetOrderBookMessage
 ): Promise<TradingResponse> {
   try {
-    return ok(
-      await fetchClobOrderBook(msg.tokenId, {
-        host: CLOB_HOST,
-        // TODO: Move this back to the SDK path once unified SDK public reads
-        // support extension order-book fetching reliably.
-        useUnifiedSdk: false,
-      })
-    );
+    return ok(await fetchClobOrderBook(msg.tokenId, { host: CLOB_HOST }));
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err));
   }
@@ -732,29 +738,8 @@ async function handleGetOrderPreflight(
 }
 
 // ── Post-split/merge: tell the CLOB about updated on-chain balances ──
-// Uses direct HTTP + HMAC auth to avoid any wallet/signer interaction.
-
-async function clobUpdateBalanceAllowance(
-  address: string,
-  creds: ClobApiCredentials,
-  target: ClobBalanceAllowanceTarget,
-  signatureType: number = getPolymarketSignatureType()
-): Promise<void> {
-  const endpoint = "/balance-allowance/update";
-  const headers = await buildClobHmacHeaders(address, creds, "GET", endpoint);
-  const params = new URLSearchParams({
-    asset_type: target.asset_type,
-    signature_type: String(signatureType),
-  });
-  if (target.token_id) params.set("token_id", target.token_id);
-  const res = await fetch(`${CLOB_HOST}${endpoint}?${params}`, {
-    method: "GET",
-    headers,
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to update balance allowance: ${res.status}`);
-  }
-}
+// Goes through the SDK's HMAC-authenticated `/balance-allowance/update`, which
+// needs no wallet interaction — see `createL2ClobClient`.
 
 async function syncBalancesAfterCTF(msg: {
   address: string;
@@ -767,20 +752,20 @@ async function syncBalancesAfterCTF(msg: {
 }): Promise<void> {
   // Credentials are injected by the SW (never sent by the content caller).
   if (!msg.credentials || !msg.proxyAddress) return;
-  const credentials = msg.credentials;
 
   const walletMode = normalizeExtensionTradingWalletMode(msg.walletMode);
-  const signatureType: number = getPolymarketSignatureType(walletMode);
-  for (const target of buildClobBalanceAllowanceTargets({
-    tokenIds: [msg.yesTokenId, msg.noTokenId],
-  })) {
-    await clobUpdateBalanceAllowance(
-      msg.address,
-      credentials,
-      target,
-      signatureType
-    );
-  }
+  // The funder decides the `signature_type` the SDK sends, so the balances that
+  // just moved on-chain are the ones the CLOB re-reads.
+  const client = await createL2ClobClient({
+    address: msg.address,
+    credentials: msg.credentials,
+    wallet: walletMode === "eoa" ? msg.address : msg.proxyAddress,
+  });
+
+  await syncClobBalanceAllowance(
+    client as unknown as ClobBalanceAllowanceClient,
+    { tokenIds: [msg.yesTokenId, msg.noTokenId] }
+  );
   logInfo("trading.ctf-balance-synced", {
     conditionId: msg.conditionId,
     address: msg.address,

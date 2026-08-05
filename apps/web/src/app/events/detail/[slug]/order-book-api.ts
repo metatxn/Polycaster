@@ -24,6 +24,8 @@ export type PriceHistoryPoint = {
 
 export type PriceHistoryBatchResponse = {
   success: boolean;
+  /** True when the server could not fetch every requested token. */
+  partial?: boolean;
   histories: Array<{
     tokenId: string;
     history: PriceHistoryPoint[];
@@ -66,8 +68,11 @@ export async function fetchPriceHistoryBatch(
   tokenIds: readonly string[],
   startTs: number,
   fidelity: number
-): Promise<PriceHistoryBatchResponse["histories"]> {
-  if (tokenIds.length === 0) return [];
+): Promise<{
+  histories: PriceHistoryBatchResponse["histories"];
+  partial: boolean;
+}> {
+  if (tokenIds.length === 0) return { histories: [], partial: false };
 
   const response = await fetch("/api/markets/price-history/batch", {
     method: "POST",
@@ -80,5 +85,6 @@ export async function fetchPriceHistoryBatch(
   }
 
   const data = (await response.json()) as PriceHistoryBatchResponse;
-  return data.success ? data.histories : [];
+  if (!data.success) return { histories: [], partial: true };
+  return { histories: data.histories, partial: data.partial === true };
 }

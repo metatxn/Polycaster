@@ -217,6 +217,32 @@ test("fetchUnifiedClobBuilderFeeRates returns SDK-normalized maker and taker rat
   assert.deepEqual(rates, { maker: 0.001, taker: 0.002 });
 });
 
+test("fetchUnifiedClobBuilderFeeRates rejects malformed SDK payloads", async () => {
+  // Malformed rates must not normalize to a fee-free quote for a configured
+  // builder — fail closed so the caller's estimate falls back to the reserve.
+  const payloads = [
+    null,
+    { maker: 0.001 },
+    { maker: 0.001, taker: -0.002 },
+    { maker: Number.NaN, taker: 0.002 },
+    { maker: "0.001", taker: 0.002 },
+  ];
+
+  for (const payload of payloads) {
+    await assert.rejects(
+      fetchUnifiedClobBuilderFeeRates("0xabc", {
+        client: {
+          async fetchBuilderFeeRates() {
+            return payload;
+          },
+        },
+      }),
+      /[Mm]alformed builder fee rate/,
+      JSON.stringify(payload)
+    );
+  }
+});
+
 test("fetchUnifiedClobPrice calls SDK price by token and side", async () => {
   const calls = [];
   const price = await fetchUnifiedClobPrice("123", "BUY", {
@@ -344,15 +370,19 @@ test("adaptUnifiedSecureClientForLegacyClob maps legacy market-order requests to
   });
 
   const signedBuy = await client.createMarketOrder({
-    tokenID: "yes-token",
+    tokenId: "yes-token",
     amount: 12.5,
     side: "BUY",
     price: 0.56,
+    maxSpend: 12.5,
+    orderType: "FOK",
   });
   const signedSell = await client.createMarketOrder({
-    tokenID: "no-token",
+    tokenId: "no-token",
     amount: 4,
     side: "SELL",
+    price: 0.44,
+    orderType: "FAK",
   });
   const posted = await client.postOrder(signedBuy, "FOK");
 
@@ -363,7 +393,9 @@ test("adaptUnifiedSecureClientForLegacyClob maps legacy market-order requests to
         tokenId: "yes-token",
         amount: 12.5,
         side: "BUY",
-        price: 0.56,
+        maxSpend: 12.5,
+        maxPrice: 0.56,
+        orderType: "FOK",
       },
     ],
     [
@@ -372,14 +404,100 @@ test("adaptUnifiedSecureClientForLegacyClob maps legacy market-order requests to
         tokenId: "no-token",
         shares: 4,
         side: "SELL",
+        minPrice: 0.44,
+        orderType: "FAK",
       },
     ],
     ["postOrder", signedBuy],
   ]);
   assert.deepEqual(signedSell, {
-    signed: { tokenId: "no-token", shares: 4, side: "SELL" },
+    signed: {
+      tokenId: "no-token",
+      shares: 4,
+      side: "SELL",
+      minPrice: 0.44,
+      orderType: "FAK",
+    },
   });
   assert.deepEqual(posted, { success: true });
+});
+
+test("adaptUnifiedSecureClientForLegacyClob drops unusable market-order price bounds", async () => {
+  const calls = [];
+  const client = adaptUnifiedSecureClientForLegacyClob({
+    async createMarketOrder(request) {
+      calls.push(request);
+      return { signed: request };
+    },
+    async postOrder() {
+      return { success: true };
+    },
+  });
+
+  // Callers that cannot compute a bound send 0; signing "never fill above
+  // zero" would guarantee a no-fill, so the key must be omitted entirely.
+  await client.createMarketOrder({
+    tokenId: "yes-token",
+    amount: 5,
+    side: "BUY",
+    price: 0,
+  });
+
+  assert.deepEqual(calls, [{ tokenId: "yes-token", amount: 5, side: "BUY" }]);
+});
+
+test("adaptUnifiedSecureClientForLegacyClob refuses order types that lose fill intent", async () => {
+  const client = adaptUnifiedSecureClientForLegacyClob({
+    async createMarketOrder(request) {
+      return { ...request, orderType: request.orderType ?? "FAK" };
+    },
+    async createLimitOrder(request) {
+      return { ...request, orderType: request.expiration ? "GTD" : "GTC" };
+    },
+    async postOrder(order) {
+      return { success: true, order };
+    },
+  });
+
+  // A limit order can only rest as GTC/GTD, so a FOK request must fail loudly
+  // rather than silently become a resting order.
+  await assert.rejects(
+    client.createOrder({
+      tokenId: "yes-token",
+      price: 0.5,
+      size: 10,
+      side: "BUY",
+      orderType: "FOK",
+    }),
+    /cannot be FOK/
+  );
+
+  await assert.rejects(
+    client.createMarketOrder({
+      tokenId: "yes-token",
+      amount: 10,
+      side: "BUY",
+      orderType: "GTC",
+    }),
+    /cannot be GTC/
+  );
+
+  // postOrder no longer carries the order type, so a caller that passes one
+  // must agree with what the order was actually signed as.
+  const resting = await client.createOrder({
+    tokenId: "yes-token",
+    price: 0.5,
+    size: 10,
+    side: "BUY",
+  });
+  await assert.rejects(
+    client.postOrder(resting, "FOK"),
+    /created as GTC but posted as FOK/
+  );
+  assert.deepEqual(await client.postOrder(resting, "GTC"), {
+    success: true,
+    order: resting,
+  });
 });
 
 test("adaptUnifiedSecureClientForLegacyClob maps legacy limit-order and account requests", async () => {
@@ -423,7 +541,7 @@ test("adaptUnifiedSecureClientForLegacyClob maps legacy limit-order and account 
   });
 
   const order = await client.createOrder({
-    tokenID: "yes-token",
+    tokenId: "yes-token",
     price: 0.51,
     size: 3,
     side: "BUY",
@@ -431,13 +549,13 @@ test("adaptUnifiedSecureClientForLegacyClob maps legacy limit-order and account 
   });
   const orders = await client.getOpenOrders();
   await client.updateBalanceAllowance({
-    asset_type: "CONDITIONAL",
-    token_id: "yes-token",
+    assetType: "CONDITIONAL",
+    tokenId: "yes-token",
   });
   const allowance = await client.getBalanceAllowance({
-    asset_type: "COLLATERAL",
+    assetType: "COLLATERAL",
   });
-  const canceled = await client.cancelOrder({ orderID: "order-1" });
+  const canceled = await client.cancelOrder({ orderId: "order-1" });
 
   assert.deepEqual(order, {
     signed: {
@@ -479,18 +597,28 @@ test("adaptUnifiedSecureClientForLegacyClob maps legacy limit-order and account 
   ]);
 });
 
-test("adaptUnifiedSecureClientForLegacyClob treats missing balance allowance update as non-fatal", async () => {
+// `@polymarket/client@0.2.0` exposes balance/allowance only as
+// standalone actions, never as client methods, so a client without the methods
+// is the production case — the adapter has to route to the SDK action rather
+// than resolve to `undefined`. Reaching the action with a stub client fails on
+// the stub's missing internals; what matters is that the sync is attempted at
+// all instead of silently doing nothing.
+test("adaptUnifiedSecureClientForLegacyClob falls back to the SDK balance allowance actions", async () => {
   const client = adaptUnifiedSecureClientForLegacyClob({
     async createLimitOrder(request) {
       return { signed: request };
     },
   });
 
-  await assert.doesNotReject(() =>
+  assert.equal(typeof client.getBalanceAllowance, "function");
+  await assert.rejects(() =>
     client.updateBalanceAllowance({
-      asset_type: "CONDITIONAL",
-      token_id: "yes-token",
+      assetType: "CONDITIONAL",
+      tokenId: "yes-token",
     })
+  );
+  await assert.rejects(() =>
+    client.getBalanceAllowance({ assetType: "COLLATERAL" })
   );
 });
 
@@ -514,12 +642,12 @@ test("adaptUnifiedSecureClientForLegacyClob forwards builder code to signed orde
   );
 
   await client.createMarketOrder({
-    tokenID: "yes-token",
+    tokenId: "yes-token",
     amount: 10,
     side: "BUY",
   });
   await client.createOrder({
-    tokenID: "yes-token",
+    tokenId: "yes-token",
     price: 0.42,
     size: 5,
     side: "BUY",
@@ -577,7 +705,7 @@ test("adaptUnifiedSecureClientForLegacyClob exposes market info and scoring help
   });
 
   const marketInfo = await client.getClobMarketInfo("0xcondition");
-  const singleScoring = await client.isOrderScoring({ order_id: "order-1" });
+  const singleScoring = await client.isOrderScoring({ orderId: "order-1" });
   const batchScoring = await client.areOrdersScoring({
     orderIds: ["order-1", "order-2"],
   });
@@ -647,4 +775,51 @@ test("adaptUnifiedSecureClientForLegacyClob normalizes unified open orders to th
       expiresAt: "2026-05-23T00:00:00.000Z",
     },
   ]);
+});
+
+test("adaptUnifiedSecureClientForLegacyClob stops paging open orders once the limit is met", async () => {
+  // `limit` is a page budget, not just a slice: callers that only want the first
+  // handful of orders must not pay for the rest of a large book.
+  let pagesPulled = 0;
+  const page = (ids) => {
+    pagesPulled += 1;
+    return { items: ids.map((id) => ({ id, tokenId: "token-1" })) };
+  };
+
+  const client = adaptUnifiedSecureClientForLegacyClob({
+    async createMarketOrder() {
+      return {};
+    },
+    async createLimitOrder() {
+      return {};
+    },
+    async postOrder() {
+      return {};
+    },
+    listOpenOrders() {
+      return {
+        async firstPage() {
+          return { ...page(["a", "b", "c"]), nextCursor: "cursor-2" };
+        },
+        async *from() {
+          yield page(["d", "e", "f"]);
+        },
+      };
+    },
+  });
+
+  const limited = await client.getOpenOrders({ limit: 2 });
+  assert.deepEqual(
+    limited.map((order) => order.id),
+    ["a", "b"]
+  );
+  assert.equal(pagesPulled, 1);
+
+  pagesPulled = 0;
+  const all = await client.getOpenOrders();
+  assert.deepEqual(
+    all.map((order) => order.id),
+    ["a", "b", "c", "d", "e", "f"]
+  );
+  assert.equal(pagesPulled, 2);
 });

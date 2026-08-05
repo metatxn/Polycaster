@@ -1241,6 +1241,13 @@ export function createPortfolioSidepanel(
     if (message === "NO_CONTENT_TAB") {
       return "Open knoww.app in a tab to sign this sale.";
     }
+    // Transient CLOB rejections ("order manager not ready, please retry")
+    // are retried with backoff before they ever get here; if one still
+    // lands, the raw server text (with the request URL appended) is noise —
+    // tell the user what to actually do.
+    if (/\bnot ready\b/i.test(message)) {
+      return "Polymarket's order engine is busy. Try again in a few seconds.";
+    }
     if (message && !/\n\s*at\s/.test(message)) return message;
     return "Could not sell this position.";
   }

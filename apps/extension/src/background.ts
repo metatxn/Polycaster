@@ -2138,9 +2138,6 @@ chrome.runtime.onMessage.addListener(
             );
             const data = await fetchClobOrderBook(tokenId, {
               host: POLYMARKET_API.CLOB.BASE,
-              // TODO: Move this back to the SDK path once unified SDK public
-              // reads support extension order-book fetching reliably.
-              useUnifiedSdk: false,
             });
             sendResponse({ ok: true, data } as BackgroundResponse);
           } catch (e) {

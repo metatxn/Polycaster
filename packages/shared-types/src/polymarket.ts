@@ -4,6 +4,8 @@
  * Reference: https://docs.polymarket.com/developers
  */
 
+declare function setTimeout(callback: () => void, delay?: number): unknown;
+
 export const POLYGON_CHAIN_ID = 137;
 export const POLYGON_CHAIN_ID_HEX = "0x89";
 
@@ -60,8 +62,8 @@ export type TradingWalletMode =
   (typeof TRADING_WALLET_MODES)[keyof typeof TRADING_WALLET_MODES];
 
 export interface ClobBalanceAllowanceTarget {
-  asset_type: ClobAssetType;
-  token_id?: string;
+  assetType: ClobAssetType;
+  tokenId?: string;
 }
 
 export interface ClobBalanceAllowanceClient {
@@ -463,6 +465,92 @@ export function assertClobPostOrderSuccess(response: unknown): void {
   if (errorMessage) throw new Error(errorMessage);
 }
 
+/**
+ * POST /order rejections the CLOB asks the caller to retry:
+ * - "order manager not ready, please retry" / "Service is not ready" — the
+ *   market's order manager is warming up and never took the order.
+ * - 425 Too Early — "The matching engine is restarting. Retry with
+ *   exponential backoff." (docs.polymarket.com/resources/error-codes)
+ *
+ * Deliberately do not retry generic 500/transport failures: unlike these
+ * explicit rejection states, they do not prove the order was rejected.
+ */
+const TRANSIENT_CLOB_POST_ORDER_PATTERNS: readonly RegExp[] = [
+  /\bnot ready\b/i,
+  /\bmatching engine is (?:re)?starting\b/i,
+];
+
+export function isTransientClobPostOrderError(error: unknown): boolean {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { status?: unknown }).status === 425
+  ) {
+    return true;
+  }
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return TRANSIENT_CLOB_POST_ORDER_PATTERNS.some((pattern) =>
+    pattern.test(message)
+  );
+}
+
+export interface ClobPostOrderRetryOptions {
+  /** Waits between attempts; attempts = delays + 1. */
+  delaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+  onRetry?: (info: { attempt: number; error: string }) => void;
+}
+
+const DEFAULT_CLOB_POST_ORDER_RETRY_DELAYS_MS: readonly number[] = [
+  500, 1000, 2000,
+];
+
+function defaultRetrySleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Post an order, absorbing the transient rejections above. The SDK's
+ * `postOrder` path has no retry for these states, so a single "order manager
+ * not ready, please retry" would otherwise surface as a failed sale.
+ *
+ * Handles both failure shapes: a thrown `RequestRejectedError` and a resolved
+ * response whose body carries the rejection (`getClobPostOrderError`).
+ */
+export async function postClobOrderWithRetry<T>(
+  post: () => Promise<T>,
+  options: ClobPostOrderRetryOptions = {}
+): Promise<T> {
+  const delays = options.delaysMs ?? DEFAULT_CLOB_POST_ORDER_RETRY_DELAYS_MS;
+  const sleep = options.sleep ?? defaultRetrySleep;
+
+  for (let attempt = 0; ; attempt++) {
+    const isLastAttempt = attempt >= delays.length;
+    let errorMessage: string;
+    try {
+      const response = await post();
+      const bodyError = getClobPostOrderError(response);
+      const isTransientResponse =
+        isTransientClobPostOrderError(response) ||
+        (bodyError !== null && isTransientClobPostOrderError(bodyError));
+      if (isLastAttempt || !isTransientResponse) {
+        return response;
+      }
+      errorMessage = bodyError ?? "CLOB order post rejected with status 425";
+    } catch (error) {
+      if (isLastAttempt || !isTransientClobPostOrderError(error)) throw error;
+      errorMessage = error instanceof Error ? error.message : String(error);
+    }
+    options.onRetry?.({ attempt: attempt + 1, error: errorMessage });
+    await sleep(delays[attempt]);
+  }
+}
+
 export function buildClobBalanceAllowanceTargets(
   options: ClobBalanceAllowanceSyncOptions = {}
 ): ClobBalanceAllowanceTarget[] {
@@ -476,7 +564,7 @@ export function buildClobBalanceAllowanceTargets(
     options.includeConditional ?? uniqueTokenIds.length > 0;
 
   if (includeCollateral) {
-    targets.push({ asset_type: CLOB_ASSET_TYPES.COLLATERAL });
+    targets.push({ assetType: CLOB_ASSET_TYPES.COLLATERAL });
   }
 
   if (includeConditional) {
@@ -486,8 +574,8 @@ export function buildClobBalanceAllowanceTargets(
 
     for (const tokenId of uniqueTokenIds) {
       targets.push({
-        asset_type: CLOB_ASSET_TYPES.CONDITIONAL,
-        token_id: tokenId,
+        assetType: CLOB_ASSET_TYPES.CONDITIONAL,
+        tokenId,
       });
     }
   }

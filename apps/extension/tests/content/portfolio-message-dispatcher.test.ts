@@ -70,41 +70,43 @@ const respondOnCompletionRows = [
   { type: "KNOWW_APPROVE_PORTFOLIO_TRADING" },
 ] as const;
 
-test.each(
-  respondOnCompletionRows
-)("$type is respond-on-completion and delegates exactly once", async (message) => {
-  const response = { success: true, data: { delegated: message.type } };
-  const handle = vi.fn((_message, sendResponse) => {
-    sendResponse(response);
-    return true;
-  });
-  const runtime = fakeRuntime({ handlePortfolioMessage: handle });
-  const load = vi.fn().mockResolvedValue(runtime);
-  const dispatcher = await createHarness({ load });
-  const sendResponse = vi.fn();
+test.each(respondOnCompletionRows)(
+  "$type is respond-on-completion and delegates exactly once",
+  async (message) => {
+    const response = { success: true, data: { delegated: message.type } };
+    const handle = vi.fn((_message, sendResponse) => {
+      sendResponse(response);
+      return true;
+    });
+    const runtime = fakeRuntime({ handlePortfolioMessage: handle });
+    const load = vi.fn().mockResolvedValue(runtime);
+    const dispatcher = await createHarness({ load });
+    const sendResponse = vi.fn();
 
-  assert.equal(dispatcher.dispatch(message, sendResponse), true);
-  assert.equal(sendResponse.mock.calls.length, 0);
-  await flush();
-  assert.equal(load.mock.calls.length, 1);
-  assert.equal(handle.mock.calls.length, 1);
-  assert.deepEqual(sendResponse.mock.calls, [[response]]);
-});
+    assert.equal(dispatcher.dispatch(message, sendResponse), true);
+    assert.equal(sendResponse.mock.calls.length, 0);
+    await flush();
+    assert.equal(load.mock.calls.length, 1);
+    assert.equal(handle.mock.calls.length, 1);
+    assert.deepEqual(sendResponse.mock.calls, [[response]]);
+  }
+);
 
-test.each(
-  respondOnCompletionRows
-)("$type returns the exact error envelope when the bundle fails to load", async (message) => {
-  const dispatcher = await createHarness({
-    load: vi.fn().mockRejectedValue(new Error("runtime unavailable")),
-  });
-  const sendResponse = vi.fn();
+test.each(respondOnCompletionRows)(
+  "$type returns the exact error envelope when the bundle fails to load",
+  async (message) => {
+    const dispatcher = await createHarness({
+      load: vi.fn().mockRejectedValue(new Error("runtime unavailable")),
+    });
+    const sendResponse = vi.fn();
 
-  assert.equal(dispatcher.dispatch(message, sendResponse), true);
-  await flush();
-  assert.deepEqual(sendResponse.mock.calls, [
-    [{ success: false, data: { error: "runtime unavailable" } }],
-  ]);
-});
+    assert.equal(dispatcher.dispatch(message, sendResponse), true);
+    await flush();
+    assert.deepEqual(sendResponse.mock.calls, [
+      [{ success: false, data: { error: "runtime unavailable" } }],
+    ]);
+  }
+);
 
 test("ENABLE acknowledges synchronously, returns false, and swallows load errors", async () => {
   const load = vi.fn().mockRejectedValue(new Error("offline"));

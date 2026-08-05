@@ -1,8 +1,11 @@
+import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
 import { fetchMarket } from "@/lib/polymarket";
+
+const log = createLogger("api.markets.closed-time");
 
 /**
  * Polymarket condition IDs are hex strings, optionally 0x-prefixed.
@@ -12,6 +15,12 @@ const CONDITION_ID_RE = /^(?:0x)?[a-fA-F0-9]{1,128}$/;
 const EVENT_SLUG_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,200}$/;
 const GAMMA_PAGE_SIZE = 500;
 const GAMMA_MAX_PAGES = 5;
+/** Per-request workload cap; callers with more ids must chunk. */
+const MAX_CONDITION_IDS = 50;
+// Keep below Workers' practical outbound-connection ceiling and leave one
+// slot available for unrelated work in the same isolate.
+const UPSTREAM_CONCURRENCY = 5;
+const REQUEST_DEADLINE_MS = 12_000;
 
 interface GammaClosedMarket {
   conditionId?: string;
@@ -37,13 +46,58 @@ function normalizeClosedTime(value?: string | null): string | null {
   return Number.isNaN(new Date(iso).getTime()) ? null : iso;
 }
 
+async function settleWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  task: (item: T) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = {
+          status: "fulfilled",
+          value: await task(items[index]),
+        };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, runWorker)
+  );
+  return results;
+}
+
+function throwIfAborted(signal: AbortSignal) {
+  if (signal.aborted) {
+    throw new DOMException("Upstream deadline exceeded", "AbortError");
+  }
+}
+
 async function fetchGammaClosedTimes(
-  conditionIds: string[]
-): Promise<Record<string, string>> {
+  conditionIds: string[],
+  signal: AbortSignal
+): Promise<{
+  closedTimes: Record<string, string>;
+  failed: boolean;
+}> {
   const wanted = new Map(conditionIds.map((id) => [id.toLowerCase(), id]));
   const closedTimes: Record<string, string> = {};
+  let failed = false;
 
   for (let page = 0; page < GAMMA_MAX_PAGES; page++) {
+    if (signal.aborted) {
+      failed = true;
+      break;
+    }
+
     const url = new URL(POLYMARKET_API.GAMMA.MARKETS);
     url.searchParams.set("closed", "true");
     url.searchParams.set("limit", GAMMA_PAGE_SIZE.toString());
@@ -55,8 +109,16 @@ async function fetchGammaClosedTimes(
       const response = await fetch(url.toString(), {
         headers: { Accept: "application/json" },
         cache: "no-store",
+        signal,
       });
-      if (!response.ok) break;
+      if (!response.ok) {
+        log.warn("gamma.markets_page_non2xx", {
+          page,
+          status: response.status,
+        });
+        failed = true;
+        break;
+      }
 
       const markets = (await response.json()) as GammaClosedMarket[];
       for (const market of markets) {
@@ -75,12 +137,17 @@ async function fetchGammaClosedTimes(
       ) {
         break;
       }
-    } catch {
+    } catch (error) {
+      log.warn("gamma.markets_page_failed", {
+        page,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      failed = true;
       break;
     }
   }
 
-  return closedTimes;
+  return { closedTimes, failed };
 }
 
 function readGammaEvents(data: unknown): GammaClosedEvent[] {
@@ -111,9 +178,11 @@ function pickGammaEventClosedTime(
 }
 
 async function fetchGammaEventClosedTimes(
-  eventSlugsByConditionId: Map<string, string>
-): Promise<Record<string, string>> {
+  eventSlugsByConditionId: Map<string, string>,
+  signal: AbortSignal
+): Promise<{ closedTimes: Record<string, string>; failed: boolean }> {
   const closedTimes: Record<string, string> = {};
+  let failed = false;
   const conditionIdsBySlug = new Map<string, string[]>();
 
   for (const [conditionId, slug] of eventSlugsByConditionId) {
@@ -122,16 +191,27 @@ async function fetchGammaEventClosedTimes(
     conditionIdsBySlug.set(slug, conditionIds);
   }
 
-  await Promise.allSettled(
-    [...conditionIdsBySlug].map(async ([slug, conditionIds]) => {
+  const settled = await settleWithConcurrency(
+    [...conditionIdsBySlug],
+    UPSTREAM_CONCURRENCY,
+    async ([slug, conditionIds]) => {
+      throwIfAborted(signal);
       const url = new URL(POLYMARKET_API.GAMMA.EVENTS);
       url.searchParams.set("slug", slug);
 
       const response = await fetch(url.toString(), {
         headers: { Accept: "application/json" },
         cache: "no-store",
+        signal,
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        log.warn("gamma.event_lookup_non2xx", {
+          slug,
+          status: response.status,
+        });
+        failed = true;
+        return;
+      }
 
       const events = readGammaEvents(await response.json());
       const event = events.find((item) => item.slug === slug) ?? events[0];
@@ -141,10 +221,19 @@ async function fetchGammaEventClosedTimes(
         const closedTime = pickGammaEventClosedTime(event, conditionId);
         if (closedTime) closedTimes[conditionId] = closedTime;
       }
-    })
+    }
   );
 
-  return closedTimes;
+  const rejected = settled.filter((result) => result.status === "rejected");
+  if (rejected.length > 0) {
+    log.warn("gamma.event_lookups_failed", {
+      failedCount: rejected.length,
+      totalCount: settled.length,
+    });
+    failed = true;
+  }
+
+  return { closedTimes, failed };
 }
 
 function pickFallbackMarketTime(data: ClobMarketTime | null): string | null {
@@ -202,11 +291,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const conditionIds = idsParam
+  const requestedIds = idsParam
     .split(",")
     .map((id) => id.trim())
-    .filter(Boolean)
-    .slice(0, 50);
+    .filter(Boolean);
+  // The workload cap protects the Worker; anything past it is reported as
+  // truncated (and kept out of shared caches) instead of silently dropped.
+  const conditionIds = requestedIds.slice(0, MAX_CONDITION_IDS);
+  const truncated = requestedIds.length > MAX_CONDITION_IDS;
 
   if (conditionIds.length === 0) {
     return NextResponse.json(
@@ -240,36 +332,105 @@ export async function GET(request: NextRequest) {
     if (slug) eventSlugsByConditionId.set(conditionId, slug);
   }
 
-  const closedTimes = await fetchGammaClosedTimes(conditionIds);
-  const gammaMissingSlugs = new Map(
-    [...eventSlugsByConditionId].filter(([id]) => !closedTimes[id])
+  const deadlineController = new AbortController();
+  const deadlineId = setTimeout(
+    () => deadlineController.abort(),
+    REQUEST_DEADLINE_MS
   );
-  const gammaEventClosedTimes =
-    await fetchGammaEventClosedTimes(gammaMissingSlugs);
-
-  for (const [id, closedTime] of Object.entries(gammaEventClosedTimes)) {
-    closedTimes[id] = closedTime;
+  const abortOnDisconnect = () => deadlineController.abort();
+  if (request.signal.aborted) {
+    deadlineController.abort();
+  } else {
+    request.signal.addEventListener("abort", abortOnDisconnect, { once: true });
   }
 
-  const missingConditionIds = conditionIds.filter((id) => !closedTimes[id]);
+  try {
+    const signal = deadlineController.signal;
+    const gammaResult = await fetchGammaClosedTimes(conditionIds, signal);
+    const closedTimes = gammaResult.closedTimes;
+    const gammaMissingSlugs = new Map(
+      [...eventSlugsByConditionId].filter(([id]) => !closedTimes[id])
+    );
+    const eventsResult = await fetchGammaEventClosedTimes(
+      gammaMissingSlugs,
+      signal
+    );
 
-  const results = await Promise.allSettled(
-    missingConditionIds.map(async (id) => {
-      const data = (await fetchMarket(id).catch(
-        () => null
-      )) as ClobMarketTime | null;
-      return { id, date: pickFallbackMarketTime(data) };
-    })
-  );
-
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value.date) {
-      closedTimes[result.value.id] = result.value.date;
+    for (const [id, closedTime] of Object.entries(eventsResult.closedTimes)) {
+      closedTimes[id] = closedTime;
     }
-  }
 
-  return NextResponse.json(
-    { success: true, closedTimes },
-    { headers: getCacheHeaders("events") }
-  );
+    const missingConditionIds = conditionIds.filter((id) => !closedTimes[id]);
+
+    let fallbackFailed = signal.aborted;
+    const results = await settleWithConcurrency(
+      missingConditionIds,
+      UPSTREAM_CONCURRENCY,
+      async (id) => {
+        if (signal.aborted) {
+          fallbackFailed = true;
+          throwIfAborted(signal);
+        }
+        const data = (await fetchMarket(id, signal).catch(() => {
+          fallbackFailed = true;
+          return null;
+        })) as ClobMarketTime | null;
+        return { id, date: pickFallbackMarketTime(data) };
+      }
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.date) {
+        closedTimes[result.value.id] = result.value.date;
+      } else if (result.status === "rejected") {
+        fallbackFailed = true;
+      }
+    }
+
+    const unresolvedCount = conditionIds.filter(
+      (id) => !closedTimes[id]
+    ).length;
+    const upstreamFailed =
+      gammaResult.failed || eventsResult.failed || fallbackFailed;
+    if (unresolvedCount > 0) {
+      log.info("resolve.partial", {
+        requested: conditionIds.length,
+        unresolvedCount,
+        upstreamFailed,
+      });
+    }
+
+    // A missing closedTime is cacheable when every upstream answered (the
+    // market genuinely has none), but not when an upstream failure may have
+    // hidden it — caching that would pin an incomplete map for the TTL. A
+    // truncated request is incomplete by construction, so it is never cached.
+    // `partial` is surfaced in the body too: without it, an upstream outage is
+    // indistinguishable from "this market has no closedTime" and clients would
+    // pin fallback timestamps for the life of the page instead of retrying.
+    const partial = unresolvedCount > 0 && upstreamFailed;
+    const degraded = partial || truncated;
+    if (truncated) {
+      log.warn("resolve.truncated", {
+        requested: requestedIds.length,
+        processed: conditionIds.length,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        closedTimes,
+        ...(partial ? { partial } : {}),
+        ...(truncated ? { truncated } : {}),
+      },
+      {
+        headers: degraded
+          ? { "Cache-Control": "no-store" }
+          : getCacheHeaders("events"),
+      }
+    );
+  } finally {
+    clearTimeout(deadlineId);
+    request.signal.removeEventListener("abort", abortOnDisconnect);
+  }
 }

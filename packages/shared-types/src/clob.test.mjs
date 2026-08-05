@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   fetchClobBuilderFeeRates,
   fetchClobMarket,
+  fetchClobMarketInfo,
   fetchClobOrderBook,
   fetchClobOrderBooks,
   fetchClobPrice,
@@ -133,9 +134,46 @@ test("fetchClobMarket does not use an injected unified client unless explicitly 
   }
 });
 
-test("fetchClobMarket uses the unified SDK market-info client only when explicitly enabled", async () => {
+test("fetchClobMarket stays on /markets even when the unified SDK is enabled", async () => {
+  // `fetchMarketInfo` reads `/clob-markets/{id}`, a different and much smaller
+  // payload than `/markets/{id}`. Routing this call through the SDK would strip
+  // every human-facing field (question, slug, images, tags, end date), so
+  // `fetchClobMarket` has no unified branch by design.
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (url) => {
+    requested.push(url);
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { end_date_iso: "2026-01-01T00:00:00Z" };
+      },
+    };
+  };
+
+  try {
+    const market = await fetchClobMarket("0xcondition", {
+      useUnifiedSdk: true,
+      unifiedClient: {
+        async fetchMarketInfo() {
+          throw new Error("market records must not come from the SDK");
+        },
+      },
+    });
+
+    assert.deepEqual(requested, [
+      "https://clob.polymarket.com/markets/0xcondition",
+    ]);
+    assert.deepEqual(market, { end_date_iso: "2026-01-01T00:00:00Z" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchClobMarketInfo uses the unified SDK market-info client when explicitly enabled", async () => {
   const calls = [];
-  const market = await fetchClobMarket("0xcondition", {
+  const info = await fetchClobMarketInfo("0xcondition", {
     useUnifiedSdk: true,
     unifiedClient: {
       async fetchMarketInfo(request) {
@@ -146,7 +184,37 @@ test("fetchClobMarket uses the unified SDK market-info client only when explicit
   });
 
   assert.deepEqual(calls, [{ conditionId: "0xcondition" }]);
-  assert.deepEqual(market, { feeInfo: { rate: 1, exponent: 4 }, tokens: [] });
+  assert.deepEqual(info, { feeInfo: { rate: 1, exponent: 4 }, tokens: [] });
+});
+
+test("fetchClobMarketInfo reads /clob-markets on the raw REST path", async () => {
+  // The `fd` protocol-fee curve only exists on this endpoint, which is why fee
+  // estimation must not be pointed at `/markets/{id}`.
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (url) => {
+    requested.push(url);
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { fd: { r: 0.04, e: 1 }, tbf: 1000 };
+      },
+    };
+  };
+
+  try {
+    const info = await fetchClobMarketInfo("0xcondition", {
+      useUnifiedSdk: false,
+    });
+
+    assert.deepEqual(requested, [
+      "https://clob.polymarket.com/clob-markets/0xcondition",
+    ]);
+    assert.deepEqual(info, { fd: { r: 0.04, e: 1 }, tbf: 1000 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("fetchClobPriceHistory uses the unified SDK client and keeps the existing history envelope", async () => {
@@ -183,6 +251,69 @@ test("fetchClobBuilderFeeRates uses the unified SDK client for default-host read
 
   assert.deepEqual(calls, [{ builderCode: "0xabc" }]);
   assert.deepEqual(rates, { maker: 0.001, taker: 0.002 });
+});
+
+test("fetchClobBuilderFeeRates rejects malformed unified-client payloads", async () => {
+  // A configured builder whose rates are unreadable must not normalize to a
+  // fee-free { maker: 0, taker: 0 } — the throw lets the caller's fee
+  // estimate fall back to the conservative reserve instead.
+  const payloads = [
+    null,
+    "not-a-record",
+    { maker: 0.001 },
+    { maker: 0.001, taker: -0.002 },
+    { maker: Number.NaN, taker: 0.002 },
+    { maker: 0.001, taker: "0.002" },
+  ];
+
+  for (const payload of payloads) {
+    await assert.rejects(
+      fetchClobBuilderFeeRates("0xabc", {
+        unifiedClient: {
+          async fetchBuilderFeeRates() {
+            return payload;
+          },
+        },
+      }),
+      /[Mm]alformed builder fee rate/,
+      JSON.stringify(payload)
+    );
+  }
+});
+
+test("fetchClobBuilderFeeRates rejects malformed direct-endpoint bps", async () => {
+  const responses = [
+    { builder_maker_fee_rate_bps: 10, builder_taker_fee_rate_bps: -20 },
+    { builder_taker_fee_rate_bps: Number.NaN },
+  ];
+
+  for (const body of responses) {
+    await assert.rejects(
+      fetchClobBuilderFeeRates("0xabc", {
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          json: async () => body,
+        }),
+      }),
+      /Malformed builder fee rate/,
+      JSON.stringify(body)
+    );
+  }
+});
+
+test("fetchClobBuilderFeeRates treats absent direct-endpoint bps as zero", async () => {
+  // The REST endpoint omits zero-fee fields; absent is its spelling of zero,
+  // unlike a present-but-invalid value.
+  const rates = await fetchClobBuilderFeeRates("0xabc", {
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ builder_taker_fee_rate_bps: 20 }),
+    }),
+  });
+
+  assert.deepEqual(rates, { maker: 0, taker: 0.002 });
 });
 
 test("fetchClobPrice uses the unified SDK client only when a price side is supplied", async () => {

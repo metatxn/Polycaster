@@ -8,6 +8,8 @@ import {
   type TradingApprovalStatus,
 } from "@knoww/shared-types/approvals";
 import { readTradingWalletBalance } from "@knoww/shared-types/balances";
+import { fetchClobBuilderFeeRates } from "@knoww/shared-types/clob";
+import { PUSD_DECIMALS } from "@knoww/shared-types/contracts";
 import { CTF_JSON_ABI } from "@knoww/shared-types/ctf";
 import {
   type ApiKeyCreds,
@@ -24,6 +26,7 @@ import {
   adaptUnifiedSecureClientForLegacyClob,
   createUnifiedPolymarketSecureClient,
   createUnifiedPolymarketViemSigner,
+  type LegacyClobCompatibleClient,
   type UnifiedSdkTradingClient,
 } from "@knoww/shared-types/polymarket-unified";
 import {
@@ -31,12 +34,22 @@ import {
   buildPusdAutoWrapTransactions,
   DEFAULT_APPROVAL_AMOUNT,
   formatConditionalShares,
+  MIN_MARKETABLE_BUY_TICKET_USD,
   parseApprovalAmountRaw,
   planPusdAutoWrap,
 } from "@knoww/shared-types/trading";
 import Decimal from "decimal.js";
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
+import {
+  blockedFill,
+  estimatedBuyFeeUsd,
+  existingOrderToFill,
+  isSettlementPendingLiveOrder,
+  isUnresolvedLiveOrder,
+  toFilledFill,
+} from "./live-accounting.ts";
 import type {
+  AgentAction,
   AgentClobCredentialRecord,
   AgentClobCredentialUpsert,
   ExecutionAdapter,
@@ -76,6 +89,12 @@ export interface LiveExecutionConfig {
   chainId: number;
   rpcUrl: string;
   orderType: ClobOrderType;
+  /**
+   * Builder attribution code (`POLY_BUILDER_CODE`). Must match the code the
+   * extension and web app use so all three surfaces attribute volume to the
+   * same builder. Null when unset — orders then post unattributed.
+   */
+  builderCode: string | null;
 }
 
 type LivePostOrderResponse = {
@@ -91,25 +110,14 @@ type LivePostOrderResponse = {
   status?: string;
 };
 
-type LiveClobClient = ClobBalanceAllowanceClient & {
-  getOpenOrders(): Promise<unknown>;
-  getClobMarketInfo(conditionId: string): Promise<unknown>;
-  getBalanceAllowance?: (args: {
-    asset_type: string;
-    token_id?: string;
-  }) => Promise<{ balance?: string | number | bigint }>;
-  createOrder(
-    order: {
-      tokenID: string;
-      price: number;
-      size: number;
-      side: string;
-      expiration: number;
-    },
-    options?: { negRisk?: boolean }
-  ): Promise<unknown>;
-  postOrder(order: unknown, orderType?: ClobOrderType): Promise<unknown>;
-};
+/**
+ * The live client is exactly what `adaptUnifiedSecureClientForLegacyClob`
+ * returns. This used to be a hand-copied structural duplicate, which drifted:
+ * it declared a `getBalanceAllowance?` the shim never attached and typed
+ * `getOpenOrders` as `Promise<unknown>`. Importing the shim's own type keeps the
+ * agent honest whenever the shim's surface changes.
+ */
+type LiveClobClient = LegacyClobCompatibleClient;
 
 interface LiveWalletContext {
   signerAddress: Address;
@@ -165,6 +173,8 @@ export interface LiveExecutionRuntime {
       includeConditional?: boolean;
     }
   ): Promise<void>;
+  /** Injectable delay so tests can run the settlement poll without real time. */
+  sleep(ms: number): Promise<void>;
 }
 
 function getRpcUrl(): string {
@@ -198,6 +208,7 @@ export function getLiveExecutionConfig(): LiveExecutionConfig {
     process.env.POLYMARKET_HOST?.trim() ||
     process.env.NEXT_PUBLIC_POLYMARKET_HOST?.trim() ||
     DEFAULT_CLOB_HOST;
+  const builderCode = process.env.POLY_BUILDER_CODE?.trim() || null;
   return {
     enabled,
     dryRun,
@@ -209,6 +220,7 @@ export function getLiveExecutionConfig(): LiveExecutionConfig {
     chainId: POLYGON_CHAIN_ID,
     rpcUrl: getRpcUrl(),
     orderType: configuredLiveOrderType(),
+    builderCode,
   };
 }
 
@@ -247,9 +259,32 @@ export async function createUnifiedLiveClobClient(
     wallet: input.funderAddress,
     credentials: input.creds,
   });
-  return deps.adaptClient(
-    client as unknown as UnifiedSdkTradingClient
-  ) as LiveClobClient;
+  return deps.adaptClient(client as unknown as UnifiedSdkTradingClient, {
+    builderCode: input.config.builderCode ?? undefined,
+  }) as LiveClobClient;
+}
+
+// Memoize the public CLOB builder-fee endpoint per builder code. The rates
+// are effectively static (set by Polymarket per builder), so caching for the
+// lifetime of the worker isolate is safe and avoids one extra round-trip per
+// preflight. Mirrors the extension's cache in background/trading-handler.ts.
+const builderFeeRatesCache = new Map<
+  string,
+  Promise<{ maker: number; taker: number }>
+>();
+
+function getBuilderFeeRates(
+  builderCode: string
+): Promise<{ maker: number; taker: number }> {
+  const cached = builderFeeRatesCache.get(builderCode);
+  if (cached) return cached;
+  const pending = fetchClobBuilderFeeRates(builderCode).catch((err) => {
+    // Don't poison the cache on a transient failure — let the next call retry.
+    builderFeeRatesCache.delete(builderCode);
+    throw err;
+  });
+  builderFeeRatesCache.set(builderCode, pending);
+  return pending;
 }
 
 const DEFAULT_TRADING_APPROVAL_RAW = parseApprovalAmountRaw(
@@ -346,39 +381,6 @@ function parseClobExecution(input: {
   };
 }
 
-function toFilledFill(input: {
-  request: PaperOrderRequest;
-  status: "FILLED" | "PARTIALLY_FILLED";
-  notionalUsd: Decimal;
-  shares: Decimal;
-  price: string;
-  reason: string;
-}): PaperFill {
-  return {
-    id: crypto.randomUUID(),
-    runId: input.request.runId,
-    watchlistItemId: input.request.watchlistItemId,
-    tokenId: input.request.tokenId,
-    status: input.status,
-    side: input.request.action,
-    price: input.price,
-    notionalUsd: input.notionalUsd.toDecimalPlaces(6).toString(),
-    shares: input.shares.toDecimalPlaces(6).toString(),
-    cashAfterUsd:
-      input.request.action === "SELL"
-        ? new Decimal(input.request.portfolio.cashUsd)
-            .add(input.notionalUsd)
-            .toDecimalPlaces(6)
-            .toString()
-        : new Decimal(input.request.portfolio.cashUsd)
-            .sub(input.notionalUsd)
-            .toDecimalPlaces(6)
-            .toString(),
-    reason: input.reason,
-    createdAt: new Date().toISOString(),
-  };
-}
-
 const defaultRuntime: LiveExecutionRuntime = {
   async setupWallet(config) {
     const [viem, viemAccounts, viemChains] = await Promise.all([
@@ -451,6 +453,10 @@ const defaultRuntime: LiveExecutionRuntime = {
   },
 
   syncBalanceAllowance: syncClobBalanceAllowance,
+
+  async sleep(ms) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  },
 };
 
 /**
@@ -472,6 +478,20 @@ export interface LiveExecutionAdapterDeps {
   ) => Promise<LiveOrderRecord | null>;
   listLiveOrders?: () => Promise<LiveOrderRecord[]>;
   hasUnresolvedLiveOrder?: () => Promise<boolean>;
+  /**
+   * Overlay the ACTUAL settled fee onto the run-item fill persisted for this
+   * order once late reconciliation derives it — the fill was stored with the
+   * preflight estimate baked into `cashAfterUsd`, and without this hook the
+   * historical accounting would keep the estimate forever. Must be
+   * idempotent: the reconcile pass retries after partial failures.
+   */
+  applySettledFeeToRunFill?: (input: {
+    runId: string;
+    watchlistItemId: string;
+    side: AgentAction;
+    feeEstimateUsd: string;
+    settledFeeUsd: string;
+  }) => Promise<void>;
   assertExecutionLock?: () => Promise<void>;
   getClobCredential?: (
     key: string
@@ -679,69 +699,97 @@ async function decryptApiCreds(
   return creds;
 }
 
-function blockedFill(request: PaperOrderRequest, reason: string): PaperFill {
-  return {
-    id: crypto.randomUUID(),
-    runId: request.runId,
-    watchlistItemId: request.watchlistItemId,
-    tokenId: request.tokenId,
-    status: "BLOCKED",
-    side: request.action,
-    price: request.price,
-    notionalUsd: "0",
-    shares: "0",
-    cashAfterUsd: request.portfolio.cashUsd,
-    reason,
-    createdAt: new Date().toISOString(),
+/**
+ * One point-in-time balance reading of the trading wallet. Two of these
+ * bracket every live submission — `preSubmission` (post-wrap, pre-`postOrder`)
+ * and `postSubmission` (immediately after `postOrder` returns). V2 settlement
+ * is asynchronous, so neither anchor by itself observes the debit; together
+ * they pin the window the settlement lands in, keeping the actual fee
+ * derivable off-chain even though no API surface reports it. When the
+ * settlement poll does observe the debit, a third `settlement` anchor records
+ * the balance the actual fee was derived from.
+ */
+interface LiveBalanceAnchor {
+  capturedAt: string;
+  /**
+   * Funder wallet the balances were read from. Later-run reconciliation
+   * refuses to derive a fee unless the configured wallet still matches — a
+   * delta read from a different (e.g. rotated) wallet says nothing about
+   * this order's settlement.
+   */
+  funderAddress: string;
+  wallet: {
+    pusdBalanceRaw: string;
+    usdcEBalanceRaw: string;
+    polBalanceRaw: string;
   };
+  conditionalBalanceRaw: string;
 }
 
-function existingOrderToFill(
-  existing: LiveOrderRecord,
-  request: PaperOrderRequest
-): PaperFill {
-  // Map cached audit row back to a PaperFill so the caller flow is
-  // identical to fresh submissions. Dry-runs report BLOCKED (no funds
-  // moved); successful POSTs flip to FILLED once the CLOB confirms a fill.
-  if (existing.status === "FILLED" || existing.status === "PARTIALLY_FILLED") {
-    const notional = new Decimal(
-      existing.filledNotionalUsd || existing.requestedSizeUsd
-    );
-    const shares = new Decimal(existing.filledShares || "0");
-    return {
-      id: existing.idempotencyKey,
-      runId: existing.runId,
-      watchlistItemId: existing.watchlistItemId,
-      tokenId: existing.tokenId,
-      // Preserve the partial/full distinction on idempotent replay so the
-      // runner reduces vs closes the position consistently with the original.
-      status:
-        existing.status === "PARTIALLY_FILLED" ? "PARTIALLY_FILLED" : "FILLED",
-      side: existing.side,
-      price: existing.averageFillPrice ?? existing.price,
-      notionalUsd: notional.toDecimalPlaces(6).toString(),
-      shares: shares.gt(0)
-        ? shares.toDecimalPlaces(6).toString()
-        : notional.div(existing.price).toDecimalPlaces(6).toString(),
-      cashAfterUsd:
-        existing.side === "SELL"
-          ? new Decimal(request.portfolio.cashUsd)
-              .add(notional)
-              .toDecimalPlaces(6)
-              .toString()
-          : new Decimal(request.portfolio.cashUsd)
-              .sub(notional)
-              .toDecimalPlaces(6)
-              .toString(),
-      reason: `idempotent-replay:${existing.status}`,
-      createdAt: existing.createdAt,
-    };
-  }
-  return blockedFill(
-    request,
-    `idempotent-replay:${existing.status}${existing.error ? `:${existing.error}` : ""}`
+function buildBalanceSnapshotJson(
+  preSubmission: LiveBalanceAnchor | null,
+  postSubmission: LiveBalanceAnchor | null,
+  settlement: LiveBalanceAnchor | null = null
+): string | null {
+  if (!preSubmission && !postSubmission && !settlement) return null;
+  return JSON.stringify(
+    settlement
+      ? { preSubmission, postSubmission, settlement }
+      : { preSubmission, postSubmission }
   );
 }
+
+function parseBalanceSnapshot(json: string | null): {
+  preSubmission?: LiveBalanceAnchor | null;
+  postSubmission?: LiveBalanceAnchor | null;
+  settlement?: LiveBalanceAnchor | null;
+} | null {
+  if (!json) return null;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    return parsed as {
+      preSubmission?: LiveBalanceAnchor | null;
+      postSubmission?: LiveBalanceAnchor | null;
+      settlement?: LiveBalanceAnchor | null;
+    };
+  } catch {
+    return null;
+  }
+}
+
+// How long a filled real BUY waits for the asynchronous V2 settlement debit
+// to land before giving up and leaving the order reconciliation-pending.
+// Bounded by attempt count rather than wall-clock so tests can inject an
+// instant `sleep` without the loop spinning in real time.
+const SETTLEMENT_POLL_ATTEMPTS = 15;
+const SETTLEMENT_POLL_INTERVAL_MS = 2_000;
+
+const PUSD_RAW_PER_USD = new Decimal(10).pow(PUSD_DECIMALS);
+
+/**
+ * USD → raw pUSD units, floored so a sub-microdollar remainder from the fill
+ * math can never push the settlement threshold above the actual on-chain
+ * debit.
+ */
+function usdToRawFloor(usd: Decimal): bigint {
+  return BigInt(
+    usd.mul(PUSD_RAW_PER_USD).toDecimalPlaces(0, Decimal.ROUND_DOWN).toString()
+  );
+}
+
+function rawToUsdString(raw: bigint): string {
+  return new Decimal(raw.toString())
+    .div(PUSD_RAW_PER_USD)
+    .toDecimalPlaces(6)
+    .toString();
+}
+
+/**
+ * Outcome shares → raw conditional-token units. CTF positions use the
+ * collateral's 6-decimal scale, so the pUSD conversion applies unchanged.
+ */
+const sharesToRawFloor = usdToRawFloor;
 
 export class LiveExecutionAdapter implements ExecutionAdapter {
   readonly mode = "live" as const;
@@ -817,6 +865,7 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
     let submissionAttempted = false;
     let submissionResponseReceived = false;
     let submissionAccepted = false;
+    let preSubmissionAnchor: LiveBalanceAnchor | null = null;
     const price = new Decimal(request.price);
     const shares =
       request.reduceOnly && request.action === TRADING_SIDES.SELL
@@ -829,6 +878,17 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
       }
       if (!shares.isFinite() || shares.lte(0)) {
         return blockedFill(request, "live execution skipped: invalid size");
+      }
+      // The CLOB rejects a marketable BUY whose signed `makerAmount` is under
+      // $1. Block here rather than burning a signature on a certain reject.
+      if (
+        request.action === TRADING_SIDES.BUY &&
+        notional.lt(MIN_MARKETABLE_BUY_TICKET_USD)
+      ) {
+        return blockedFill(
+          request,
+          `live execution skipped: BUY notional $${notional.toFixed(2)} is below the $${MIN_MARKETABLE_BUY_TICKET_USD.toFixed(2)} minimum`
+        );
       }
       const safetyBlock = await this.checkLiveSafetyGates({
         config,
@@ -860,6 +920,11 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         funderAddress,
       });
 
+      // BUY fee reserve from preflight (estimate ?? conservative fallback), in
+      // raw pUSD units. Fees are charged on top of the filled notional (the
+      // order signs without `maxSpend`), so the fill's cash accounting must
+      // subtract this too, scaled by the actual fill ratio for FAK partials.
+      let buyFeeEstimateRaw: bigint | null = null;
       if (!config.dryRun) {
         const preflight = await buildClobOrderPreflightPlan({
           side: request.action,
@@ -873,12 +938,18 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
           conditionId: request.conditionId,
           marketInfoClient: client,
           getOpenOrders: () => client.getOpenOrders(),
+          builderCode: config.builderCode ?? undefined,
+          getBuilderFeeRates,
+          // The agent only ever posts immediate-or-cancel (FAK/FOK) orders,
+          // so a BUY always crosses the book as taker.
+          isMarketableBuy: true,
         });
 
         if (request.action === TRADING_SIDES.BUY) {
           if (!preflight.buy) {
             return blockedFill(request, "live BUY preflight failed");
           }
+          buyFeeEstimateRaw = preflight.buy.feeRequirementRaw;
           const [balance, approvalStatus] = await Promise.all([
             this.runtime.readTradingWalletBalance(
               wallet.publicClient,
@@ -967,20 +1038,70 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
           }
         }
 
-        await this.runtime.syncBalanceAllowance(client, {
+        // Refreshing the CLOB's per-funder cache is a real network call now
+        // that the shim routes it to the SDK action, so it can fail on its own.
+        // A stale cache is not necessarily fatal — the server may already be
+        // fresh — and `postOrder` surfaces anything that actually blocks the
+        // order, so a failed refresh must not kill an otherwise valid trade.
+        try {
+          await this.runtime.syncBalanceAllowance(client, {
+            tokenId: request.tokenId,
+            includeCollateral: request.action === TRADING_SIDES.BUY,
+            includeConditional: true,
+          });
+        } catch (error) {
+          log.warn("live.balance_allowance_sync.failed", {
+            tokenId: request.tokenId,
+            action: request.action,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        // Post-wrap, pre-submission balance anchor. Persisted with the order
+        // so the CLOB's actual settlement debit — which no API surface
+        // reports — stays derivable off-chain once settlement lands:
+        // fee = preSubmission pUSD − settled pUSD − filled notional. Captured
+        // after the wrap so freshly wrapped USDC.e doesn't read as a phantom
+        // credit inside the debit window.
+        preSubmissionAnchor = await this.captureBalanceAnchor({
+          wallet,
+          funderAddress,
           tokenId: request.tokenId,
-          includeCollateral: request.action === TRADING_SIDES.BUY,
-          includeConditional: true,
         });
+        // Fail closed for BUYs: without this anchor the settlement debit can
+        // never be derived, so a fill would be unreconcilable forever.
+        // Skipping the trade is cheaper than trading blind. SELL fees come
+        // out of the proceeds, so SELLs proceed without it.
+        if (!preSubmissionAnchor && request.action === TRADING_SIDES.BUY) {
+          return blockedFill(
+            request,
+            "live execution blocked: could not capture the pre-submission balance anchor required to reconcile the settled fee"
+          );
+        }
       }
 
-      const signedOrder = await client.createOrder(
+      // The agent only ever wants immediate-or-cancel fills (FAK/FOK), which in
+      // V2 means a market order with a price bound — `createOrder` builds a
+      // resting GTC/GTD limit order and cannot carry FAK/FOK at all. BUY is
+      // quoted in notional USD, SELL in shares; `price` becomes the maxPrice /
+      // minPrice the order is signed with, so it can never fill worse than the
+      // price the decision was made at.
+      const signedOrder = await client.createMarketOrder(
         {
-          tokenID: request.tokenId,
-          price: price.toNumber(),
-          size: shares.toNumber(),
+          tokenId: request.tokenId,
+          amount:
+            request.action === TRADING_SIDES.BUY
+              ? notional.toNumber()
+              : shares.toNumber(),
           side: request.action,
-          expiration: 0,
+          price: price.toNumber(),
+          orderType: config.orderType,
+          // No `maxSpend`: the SDK's default signs the full `amount` and
+          // charges fees on top. Passing `maxSpend === notional` instead
+          // shrinks the signed `makerAmount`, and the CLOB's `min size: 1`
+          // floor is checked against that reduced number. Note the fees land
+          // on top of `AGENT_MAX_LIVE_NOTIONAL_USD`, which caps notional
+          // exposure rather than total debit.
         },
         request.negRisk ? { negRisk: true } : undefined
       );
@@ -1003,9 +1124,14 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         filledAt: null,
         filledNotionalUsd: "0",
         filledShares: "0",
+        feeEstimateUsd: "0",
+        settledFeeUsd: null,
         averageFillPrice: null,
         lastSyncedAt: null,
-        balanceSnapshotJson: null,
+        balanceSnapshotJson: buildBalanceSnapshotJson(
+          preSubmissionAnchor,
+          null
+        ),
         dryRun: config.dryRun,
         error: null,
       });
@@ -1039,12 +1165,54 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
         requestedShares: shares,
         price,
       });
-      const syncedAt = new Date().toISOString();
-      const balanceSnapshotJson = await this.captureBalanceSnapshot({
-        wallet,
-        funderAddress,
-        tokenId: request.tokenId,
+      const buyFeeEstimateUsd = estimatedBuyFeeUsd({
+        feeEstimateRaw:
+          request.action === TRADING_SIDES.BUY ? buyFeeEstimateRaw : null,
+        filledNotionalUsd: execution.filledNotionalUsd,
+        requestedNotionalUsd: notional,
       });
+      const syncedAt = new Date().toISOString();
+      // V2 settlement is asynchronous — the balance right after `postOrder`
+      // usually still shows the pre-debit amount. For a filled BUY, poll
+      // until the debit lands and derive the ACTUAL fee from the balance
+      // delta. On timeout the order persists with `settledFeeUsd` null,
+      // which `isUnresolvedLiveOrder` treats as reconciliation-pending:
+      // further live orders stay blocked — keeping the wallet quiet so the
+      // delta stays attributable — until a later run reconciles it.
+      let settledFeeUsd: string | null = null;
+      let balanceSnapshotJson: string | null;
+      if (
+        request.action === TRADING_SIDES.BUY &&
+        execution.filledShares.gt(0) &&
+        preSubmissionAnchor
+      ) {
+        const settlement = await this.observeSettledFee({
+          wallet,
+          funderAddress,
+          tokenId: request.tokenId,
+          preSubmissionAnchor,
+          filledNotionalUsd: execution.filledNotionalUsd,
+          filledShares: execution.filledShares,
+        });
+        settledFeeUsd = settlement.settledFeeUsd;
+        balanceSnapshotJson = buildBalanceSnapshotJson(
+          preSubmissionAnchor,
+          settlement.postSubmissionAnchor,
+          settlement.settlementAnchor
+        );
+      } else {
+        // SELLs and unfilled orders have no on-top-of-notional fee to
+        // reconcile; a single post-submission anchor still brackets the
+        // window for the audit trail.
+        balanceSnapshotJson = buildBalanceSnapshotJson(
+          preSubmissionAnchor,
+          await this.captureBalanceAnchor({
+            wallet,
+            funderAddress,
+            tokenId: request.tokenId,
+          })
+        );
+      }
       await this.deps.upsertLiveOrder({
         idempotencyKey,
         runId: request.runId,
@@ -1066,6 +1234,8 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
           .toDecimalPlaces(6)
           .toString(),
         filledShares: execution.filledShares.toDecimalPlaces(6).toString(),
+        feeEstimateUsd: buyFeeEstimateUsd.toDecimalPlaces(6).toString(),
+        settledFeeUsd,
         averageFillPrice: execution.averageFillPrice,
         lastSyncedAt: syncedAt,
         balanceSnapshotJson,
@@ -1094,6 +1264,10 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
             : "FILLED",
         notionalUsd: execution.filledNotionalUsd,
         shares: execution.filledShares,
+        feeUsd:
+          settledFeeUsd !== null
+            ? new Decimal(settledFeeUsd)
+            : buyFeeEstimateUsd,
         price: execution.averageFillPrice ?? request.price,
         reason: `live-${config.orderType.toLowerCase()}:${
           execution.status === "PARTIALLY_FILLED" ? "partial" : "submitted"
@@ -1125,9 +1299,17 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
           filledAt: null,
           filledNotionalUsd: "0",
           filledShares: "0",
+          feeEstimateUsd: "0",
+          settledFeeUsd: null,
           averageFillPrice: null,
           lastSyncedAt: null,
-          balanceSnapshotJson: null,
+          // Keep the pre-submission anchor on UNKNOWN/FAILED rows — for an
+          // UNKNOWN order that did fill, it is the only record of the balance
+          // the debit will be measured against.
+          balanceSnapshotJson: buildBalanceSnapshotJson(
+            preSubmissionAnchor,
+            null
+          ),
           dryRun: config.dryRun,
           error: message,
         });
@@ -1274,14 +1456,19 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
 
     if (input.config.dryRun || !this.deps.listLiveOrders) return null;
 
+    // Self-healing pass before the gate reads: a filled real BUY whose
+    // settlement debit was never observed inline blocks all live submissions
+    // (see isUnresolvedLiveOrder). The block has kept the wallet quiet since,
+    // so a fresh balance read can still attribute the delta — try to derive
+    // and persist the settled fee now, then evaluate the gate against the
+    // updated rows. Runs after the emergency stop and allowlist checks so a
+    // stopped agent performs no wallet activity at all.
+    await this.reconcilePendingSettlement(input.config);
+
     const allLiveOrders = await this.deps.listLiveOrders();
     const hasUnresolvedOrder = this.deps.hasUnresolvedLiveOrder
       ? await this.deps.hasUnresolvedLiveOrder()
-      : allLiveOrders.some(
-          (order) =>
-            !order.dryRun &&
-            (order.status === "POSTED" || order.status === "UNKNOWN")
-        );
+      : allLiveOrders.some(isUnresolvedLiveOrder);
     if (hasUnresolvedOrder) {
       return "live execution blocked: an earlier order has an unknown outcome or is pending reconciliation";
     }
@@ -1317,11 +1504,224 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
     return null;
   }
 
-  private async captureBalanceSnapshot(input: {
+  /**
+   * Poll the wallet until the asynchronous V2 settlement debit for a filled
+   * BUY becomes observable, then derive the actual fee:
+   *   fee = preSubmission pUSD − settled pUSD − filled notional.
+   * Settlement is recognized only when BOTH legs of the fill are visible:
+   * the pUSD drop reaching the filled notional (the debit is notional + fee,
+   * fee ≥ 0) AND the conditional-token balance gaining at least the filled
+   * shares. The token credit is what ties the debit to THIS fill — without
+   * it, an unrelated spend landing in the poll window could be misread as
+   * settlement. The first successful capture doubles as the post-submission
+   * anchor. Returns a null fee when the debit never became observable within
+   * the attempt budget, or when the drop implies a fee larger than the
+   * notional — a >100% fee cannot come from the CLOB, so something else
+   * moved the wallet and the delta is no longer attributable to this order.
+   */
+  private async observeSettledFee(input: {
     wallet: LiveWalletContext;
     funderAddress: Address;
     tokenId: string;
-  }): Promise<string | null> {
+    preSubmissionAnchor: LiveBalanceAnchor;
+    filledNotionalUsd: Decimal;
+    filledShares: Decimal;
+  }): Promise<{
+    settledFeeUsd: string | null;
+    postSubmissionAnchor: LiveBalanceAnchor | null;
+    settlementAnchor: LiveBalanceAnchor | null;
+  }> {
+    const preSubmitPusdRaw = BigInt(
+      input.preSubmissionAnchor.wallet.pusdBalanceRaw
+    );
+    const preSubmitConditionalRaw = BigInt(
+      input.preSubmissionAnchor.conditionalBalanceRaw
+    );
+    const filledNotionalRaw = usdToRawFloor(input.filledNotionalUsd);
+    const filledSharesRaw = sharesToRawFloor(input.filledShares);
+    let postSubmissionAnchor: LiveBalanceAnchor | null = null;
+    for (let attempt = 1; attempt <= SETTLEMENT_POLL_ATTEMPTS; attempt++) {
+      if (attempt > 1) {
+        await this.runtime.sleep(SETTLEMENT_POLL_INTERVAL_MS);
+      }
+      const anchor = await this.captureBalanceAnchor(input);
+      if (!anchor) continue;
+      postSubmissionAnchor ??= anchor;
+      const dropRaw = preSubmitPusdRaw - BigInt(anchor.wallet.pusdBalanceRaw);
+      const conditionalGainRaw =
+        BigInt(anchor.conditionalBalanceRaw) - preSubmitConditionalRaw;
+      if (dropRaw < filledNotionalRaw || conditionalGainRaw < filledSharesRaw) {
+        continue;
+      }
+      const feeRaw = dropRaw - filledNotionalRaw;
+      if (feeRaw > filledNotionalRaw) {
+        log.warn("live.settlement.delta_out_of_range", {
+          attempt,
+          dropRaw: dropRaw.toString(),
+          filledNotionalRaw: filledNotionalRaw.toString(),
+        });
+        return {
+          settledFeeUsd: null,
+          postSubmissionAnchor,
+          settlementAnchor: null,
+        };
+      }
+      const settledFeeUsd = rawToUsdString(feeRaw);
+      log.info("live.settlement.reconciled", { attempt, settledFeeUsd });
+      return { settledFeeUsd, postSubmissionAnchor, settlementAnchor: anchor };
+    }
+    log.warn("live.settlement.unobserved", {
+      attempts: SETTLEMENT_POLL_ATTEMPTS,
+      filledNotionalRaw: filledNotionalRaw.toString(),
+    });
+    return {
+      settledFeeUsd: null,
+      postSubmissionAnchor,
+      settlementAnchor: null,
+    };
+  }
+
+  /**
+   * Later-run settlement reconciliation for a filled real BUY whose debit
+   * was not observable inline. Only attempts when EXACTLY one order is
+   * pending — the safety-gate block guarantees the wallet saw no agent
+   * activity since, so with one candidate the balance delta is attributable;
+   * with more than one, no delta can be split and the orders stay blocked
+   * for manual resolution (same escape hatch as UNKNOWN rows). Beyond the
+   * single-candidate rule, acceptance requires (a) the configured wallet to
+   * still be the one the anchor was captured from, and (b) fill-specific
+   * evidence: the conditional-token balance must have gained at least the
+   * filled shares, which only settlement of this order produces. A derived
+   * fee outside [0, filled notional] means something other than settlement
+   * moved the wallet (top-up, external spend) — also left for manual
+   * resolution.
+   */
+  private async reconcilePendingSettlement(
+    config: LiveExecutionConfig
+  ): Promise<void> {
+    if (!this.deps.listLiveOrders) return;
+    try {
+      const pending = (await this.deps.listLiveOrders()).filter(
+        isSettlementPendingLiveOrder
+      );
+      if (pending.length === 0) return;
+      if (pending.length > 1) {
+        log.warn("live.settlement.reconcile_skipped", {
+          reason:
+            "multiple orders pending reconciliation; balance delta is not attributable",
+          count: pending.length,
+        });
+        return;
+      }
+      const order = pending[0];
+      const snapshot = parseBalanceSnapshot(order.balanceSnapshotJson);
+      const preSubmission = snapshot?.preSubmission;
+      if (
+        !preSubmission?.wallet?.pusdBalanceRaw ||
+        preSubmission.conditionalBalanceRaw == null
+      ) {
+        return;
+      }
+      const wallet = await this.runtime.setupWallet(config);
+      const funderAddress = (config.funderAddress ??
+        wallet.signerAddress) as Address;
+      // The anchor's balances belong to the wallet that submitted the order.
+      // If the configured wallet has since rotated (or the anchor predates
+      // address capture), the delta below would be read from a DIFFERENT
+      // wallet and could record an arbitrary movement as the fee.
+      if (
+        !preSubmission.funderAddress ||
+        !sameAddress(preSubmission.funderAddress, funderAddress)
+      ) {
+        log.warn("live.settlement.reconcile_wallet_mismatch", {
+          idempotencyKey: order.idempotencyKey,
+          anchorFunderAddress: preSubmission.funderAddress ?? null,
+          funderAddress,
+        });
+        return;
+      }
+      const anchor = await this.captureBalanceAnchor({
+        wallet,
+        funderAddress,
+        tokenId: order.tokenId,
+      });
+      if (!anchor) return;
+      // Fill-specific evidence: settlement credits the filled shares to the
+      // funder's conditional-token balance in the same batch that debits the
+      // pUSD. A pUSD drop WITHOUT that credit (unrelated spend, withdrawal)
+      // is not this order settling, however plausible the amount looks.
+      const filledSharesRaw = sharesToRawFloor(
+        new Decimal(order.filledShares || "0")
+      );
+      const conditionalGainRaw =
+        BigInt(anchor.conditionalBalanceRaw) -
+        BigInt(preSubmission.conditionalBalanceRaw);
+      if (
+        filledSharesRaw <= BigInt(0) ||
+        conditionalGainRaw < filledSharesRaw
+      ) {
+        log.warn("live.settlement.reconcile_no_fill_evidence", {
+          idempotencyKey: order.idempotencyKey,
+          conditionalGainRaw: conditionalGainRaw.toString(),
+          filledSharesRaw: filledSharesRaw.toString(),
+        });
+        return;
+      }
+      const dropRaw =
+        BigInt(preSubmission.wallet.pusdBalanceRaw) -
+        BigInt(anchor.wallet.pusdBalanceRaw);
+      const filledNotionalRaw = usdToRawFloor(
+        new Decimal(order.filledNotionalUsd || "0")
+      );
+      const feeRaw = dropRaw - filledNotionalRaw;
+      if (feeRaw < BigInt(0) || feeRaw > filledNotionalRaw) {
+        log.warn("live.settlement.reconcile_out_of_range", {
+          idempotencyKey: order.idempotencyKey,
+          dropRaw: dropRaw.toString(),
+          filledNotionalRaw: filledNotionalRaw.toString(),
+        });
+        return;
+      }
+      const settledFeeUsd = rawToUsdString(feeRaw);
+      // Correct the persisted run-item fill BEFORE clearing the pending
+      // order: the hook is idempotent, so if the upsert below fails the next
+      // pass redoes both — whereas the reverse order could strand the
+      // estimate in the stored fill with nothing left to retry.
+      await this.deps.applySettledFeeToRunFill?.({
+        runId: order.runId,
+        watchlistItemId: order.watchlistItemId,
+        side: order.side,
+        feeEstimateUsd: order.feeEstimateUsd,
+        settledFeeUsd,
+      });
+      await this.deps.upsertLiveOrder({
+        ...order,
+        settledFeeUsd,
+        lastSyncedAt: new Date().toISOString(),
+        balanceSnapshotJson: JSON.stringify({
+          preSubmission: snapshot?.preSubmission ?? null,
+          postSubmission: snapshot?.postSubmission ?? null,
+          settlement: anchor,
+        }),
+      });
+      log.info("live.settlement.reconciled_late", {
+        idempotencyKey: order.idempotencyKey,
+        settledFeeUsd,
+      });
+    } catch (error) {
+      // Best-effort: on any failure the gate simply keeps blocking, which is
+      // the safe state.
+      log.warn("live.settlement.reconcile_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async captureBalanceAnchor(input: {
+    wallet: LiveWalletContext;
+    funderAddress: Address;
+    tokenId: string;
+  }): Promise<LiveBalanceAnchor | null> {
     try {
       const [walletBalance, conditionalBalanceRaw] = await Promise.all([
         this.runtime.readTradingWalletBalance(
@@ -1334,15 +1734,16 @@ export class LiveExecutionAdapter implements ExecutionAdapter {
           tokenId: input.tokenId,
         }),
       ]);
-      return JSON.stringify({
+      return {
         capturedAt: new Date().toISOString(),
+        funderAddress: input.funderAddress,
         wallet: {
           pusdBalanceRaw: walletBalance.pusdBalanceRaw,
           usdcEBalanceRaw: walletBalance.usdcEBalanceRaw,
           polBalanceRaw: walletBalance.polBalanceRaw,
         },
         conditionalBalanceRaw: conditionalBalanceRaw.toString(),
-      });
+      };
     } catch (error) {
       log.warn("live.balance_snapshot.failed", { error });
       return null;

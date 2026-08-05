@@ -12,6 +12,7 @@ export {
   calculateSlippage,
   formatSlippageDisplay,
   type MarketOrderPriceResult,
+  normalizeLimitPrice,
   type OrderBook,
   type OrderBookLevel,
   roundDownToTick,

@@ -130,6 +130,14 @@ export interface PaperFill {
   notionalUsd: string;
   shares: string;
   cashAfterUsd: string;
+  /**
+   * ACTUAL settled BUY fee discovered by later-run settlement
+   * reconciliation. Present only on fills originally persisted with the
+   * preflight estimate baked into `cashAfterUsd` and later corrected from
+   * the observed balance delta; doubles as the idempotency marker so the
+   * correction is never applied twice.
+   */
+  settledFeeUsd?: string;
   reason?: string;
   createdAt: string;
 }
@@ -181,7 +189,38 @@ export interface LiveOrderRecord {
   filledNotionalUsd: string;
   filledShares: string;
   averageFillPrice: string | null;
+  /**
+   * Preflight ESTIMATE of the taker fee charged on top of the filled notional
+   * for BUY orders, in USD. Market BUYs sign without `maxSpend`, so the CLOB
+   * debits the fee in addition to `filledNotionalUsd`; cash accounting
+   * subtracts both, and this estimate is the best number available — the
+   * `POST /order` response carries no fee, and no fill/trade surface exists to
+   * read the actual debit back. When fee metadata was unreadable this is the
+   * flat FALLBACK_FEE_BPS reserve, which can understate the real fee on cheap
+   * outcomes. "0" for SELLs (fees come out of proceeds) and for
+   * dry-run/unfilled rows.
+   */
+  feeEstimateUsd: string;
+  /**
+   * ACTUAL settled taker fee in USD for real BUY orders, derived from the
+   * on-chain balance delta once V2 settlement was observed:
+   * pre-submission pUSD − settled pUSD − filled notional. Null until
+   * reconciled; a real filled BUY that carries a pre-submission balance
+   * anchor but a null settled fee is treated as unresolved and blocks
+   * further live orders (see isUnresolvedLiveOrder). Stays null forever for
+   * SELLs, dry-runs, and unfilled orders.
+   */
+  settledFeeUsd: string | null;
   lastSyncedAt: string | null;
+  /**
+   * JSON of `{ preSubmission, postSubmission, settlement? }` balance anchors
+   * (any may be null): the trading wallet's pUSD/USDC.e/POL and conditional
+   * balances captured post-wrap pre-`postOrder`, right after `postOrder`
+   * returned, and — when the settlement poll observed the debit — at the
+   * settled balance `settledFeeUsd` was derived from. V2 settlement is
+   * asynchronous, so the first two anchors bracket rather than observe the
+   * actual debit.
+   */
   balanceSnapshotJson: string | null;
   /** True when the order was signed but not submitted to the CLOB. */
   dryRun: boolean;
@@ -194,6 +233,8 @@ export type LiveOrderUpsert = Omit<
   | "filledNotionalUsd"
   | "filledShares"
   | "averageFillPrice"
+  | "feeEstimateUsd"
+  | "settledFeeUsd"
   | "lastSyncedAt"
   | "balanceSnapshotJson"
 > &
@@ -204,6 +245,8 @@ export type LiveOrderUpsert = Omit<
       | "filledNotionalUsd"
       | "filledShares"
       | "averageFillPrice"
+      | "feeEstimateUsd"
+      | "settledFeeUsd"
       | "lastSyncedAt"
       | "balanceSnapshotJson"
     >

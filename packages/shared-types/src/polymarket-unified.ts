@@ -10,6 +10,12 @@ import {
   type TransactionOutcome,
   type TypedDataPayload,
 } from "@polymarket/client";
+import {
+  fetchBalanceAllowance as fetchSdkBalanceAllowance,
+  fetchBuilderFeeRates as fetchSdkBuilderFeeRates,
+  fetchMarketInfo as fetchSdkMarketInfo,
+  updateBalanceAllowance as updateSdkBalanceAllowance,
+} from "@polymarket/client/actions";
 import type { WalletClient } from "viem";
 import { waitForTransactionReceipt } from "viem/actions";
 import {
@@ -22,10 +28,20 @@ import {
 import {
   type ApiKeyCreds,
   type ApiKeyCredsLike,
+  CLOB_ORDER_TYPES,
+  type ClobOrderType,
   normalizeApiKeyCreds,
   TRADING_SIDES,
   type TradingSide,
 } from "./polymarket.ts";
+
+/**
+ * The only two order types a V2 market order may carry. GTC/GTD are resting
+ * limit-order lifetimes and belong to `createLimitOrder`.
+ */
+export type MarketClobOrderType =
+  | typeof CLOB_ORDER_TYPES.FAK
+  | typeof CLOB_ORDER_TYPES.FOK;
 
 export interface UnifiedPolymarketPublicClient {
   fetchOrderBook(request: { tokenId: string }): Promise<unknown>;
@@ -107,12 +123,31 @@ export function isPolymarketFreshAuthenticationRequiredError(
   );
 }
 
+/**
+ * Market-order request as `@polymarket/client` actually accepts it.
+ *
+ * The SDK validates with zod and **strips unknown keys silently**, so a stray
+ * `price` here does not error — it is dropped, and the SDK derives its own
+ * bound by walking the live book (`estimateMarketPrice`) instead of honouring
+ * the caller's. BUY takes a notional `amount` plus an optional `maxPrice`
+ * ceiling and `maxSpend` cap; SELL takes `shares` plus an optional `minPrice`
+ * floor. `orderType` is baked into the signed order at creation time (it is
+ * not a `postOrder` argument any more) and defaults to FAK.
+ *
+ * `maxSpend` is passed through but no caller sets it: it caps *total* spend
+ * including fees, which makes the SDK shrink the signed `makerAmount` below the
+ * requested `amount` — and the CLOB's `min size: 1` floor applies to that
+ * reduced number. Callers sign the full amount and pay fees on top.
+ */
 type UnifiedSdkMarketOrderRequest = {
   tokenId: string;
   side: TradingSide;
   amount?: number | string;
   shares?: number | string;
-  price?: number | string;
+  maxSpend?: number | string;
+  maxPrice?: number | string;
+  minPrice?: number | string;
+  orderType?: MarketClobOrderType;
   builderCode?: string;
 };
 
@@ -165,19 +200,28 @@ export interface UnifiedSdkTradingClient {
 }
 
 export interface LegacyClobOrderRequest {
-  tokenID?: string;
-  tokenId?: string;
+  tokenId: string;
+  /**
+   * Market orders: the worst price the caller will accept, mapped to the SDK's
+   * `maxPrice` (BUY) / `minPrice` (SELL). Limit orders: the resting price.
+   */
   price?: number | string;
   size?: number | string;
   amount?: number | string;
+  /** Market BUY only — hard ceiling on total spend including builder fees. */
+  maxSpend?: number | string;
   side: TradingSide;
   expiration?: number;
+  /**
+   * Fill semantics. Market orders accept FAK/FOK; limit orders derive GTC/GTD
+   * from `expiration` and must not set this. In V2 the order type is signed
+   * into the order at creation time, so it belongs here and not on `postOrder`.
+   */
+  orderType?: ClobOrderType;
 }
 
 export interface LegacyClobBalanceAllowanceRequest {
-  asset_type?: string;
-  assetType?: string;
-  token_id?: string;
+  assetType: string;
   tokenId?: string;
 }
 
@@ -191,25 +235,25 @@ export interface LegacyClobCompatibleClient {
     options?: unknown
   ): Promise<unknown>;
   postOrder(order: unknown, orderType?: unknown): Promise<unknown>;
-  getOpenOrders(): Promise<LegacyClobOpenOrder[]>;
+  /**
+   * `limit` caps how many pages are pulled, not just how many rows come back —
+   * see `collectUnifiedPaginator`. Omit it to drain the full book.
+   */
+  getOpenOrders(options?: { limit?: number }): Promise<LegacyClobOpenOrder[]>;
   fetchMarketInfo?(request: { conditionId: string }): Promise<unknown>;
   getClobMarketInfo?(conditionId: string): Promise<unknown>;
   updateBalanceAllowance(
     request: LegacyClobBalanceAllowanceRequest
   ): Promise<unknown>;
-  getBalanceAllowance?(
+  getBalanceAllowance(
     request: LegacyClobBalanceAllowanceRequest
   ): Promise<unknown>;
-  cancelOrder(request: {
-    orderID?: string;
-    orderId?: string;
-  }): Promise<unknown>;
-  isOrderScoring(request: { order_id?: string; orderId?: string }): Promise<{
+  cancelOrder(request: { orderId: string }): Promise<unknown>;
+  isOrderScoring(request: { orderId: string }): Promise<{
     scoring: boolean;
   }>;
   areOrdersScoring(request: {
-    orderIds?: string[];
-    order_ids?: string[];
+    orderIds: string[];
   }): Promise<Record<string, boolean>>;
 }
 
@@ -403,9 +447,57 @@ function blockFreshAuthentication(signer: unknown): unknown {
 }
 
 function getLegacyTokenId(request: LegacyClobOrderRequest): string {
-  const tokenId = request.tokenId ?? request.tokenID;
-  if (!tokenId) throw new Error("Polymarket order token id is required");
-  return tokenId;
+  if (!request.tokenId) {
+    throw new Error("Polymarket order token id is required");
+  }
+  return request.tokenId;
+}
+
+/**
+ * Narrow a legacy order type to the FAK/FOK pair a market order may carry.
+ * `undefined` is passed through so the SDK applies its own FAK default.
+ */
+function assertMarketOrderType(
+  orderType?: ClobOrderType
+): MarketClobOrderType | undefined {
+  if (orderType === undefined) return undefined;
+  if (
+    orderType === CLOB_ORDER_TYPES.FAK ||
+    orderType === CLOB_ORDER_TYPES.FOK
+  ) {
+    return orderType;
+  }
+  throw new Error(
+    `Polymarket market orders cannot be ${orderType}; use createOrder for resting GTC/GTD orders`
+  );
+}
+
+/**
+ * Accept a market-order price bound only when it is a usable number. Callers
+ * that cannot compute a bound pass `0`, which must be omitted rather than
+ * signed as "never fill above zero".
+ */
+function optionalPriceBound(
+  price?: number | string
+): number | string | undefined {
+  if (price === undefined || price === null || price === "") return undefined;
+  const numeric = typeof price === "number" ? price : Number(price);
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  return price;
+}
+
+function assertPostedOrderTypeMatches(
+  order: unknown,
+  requestedOrderType: unknown
+): void {
+  if (typeof requestedOrderType !== "string") return;
+  if (!isRecord(order)) return;
+  const signedOrderType = order.orderType;
+  if (typeof signedOrderType !== "string") return;
+  if (signedOrderType === requestedOrderType) return;
+  throw new Error(
+    `Polymarket order was created as ${signedOrderType} but posted as ${requestedOrderType}; set the order type when creating the order`
+  );
 }
 
 function withBuilderCode<TRequest extends Record<string, unknown>>(
@@ -419,13 +511,62 @@ function withBuilderCode<TRequest extends Record<string, unknown>>(
 function mapLegacyBalanceAllowanceRequest(
   request: LegacyClobBalanceAllowanceRequest
 ): UnifiedSdkBalanceAllowanceRequest {
-  const assetType = request.assetType ?? request.asset_type;
+  const { assetType, tokenId } = request;
   if (!assetType) {
     throw new Error("Polymarket balance allowance asset type is required");
   }
-
-  const tokenId = request.tokenId ?? request.token_id;
   return tokenId ? { assetType, tokenId } : { assetType };
+}
+
+type SdkBalanceAllowanceClient = Parameters<
+  typeof updateSdkBalanceAllowance
+>[0];
+type SdkBalanceAllowanceActionRequest = Parameters<
+  typeof updateSdkBalanceAllowance
+>[1];
+
+/**
+ * `@polymarket/client@0.2.0` ships balance/allowance **only** as standalone
+ * actions: nothing in `allActions()` is `updateBalanceAllowance`/
+ * `fetchBalanceAllowance`. Guarding on the client methods therefore never
+ * fires, which is why this sync used to be a silent no-op.
+ *
+ * The sync matters because we post through the raw `postOrder`. Only
+ * `placeMarketOrder`/`placeLimitOrder` carry the SDK's built-in self-heal
+ * (catch "allowance is not enough" → approve on-chain → `updateBalanceAllowance`
+ * → retry once); `postOrder` has none, so refreshing the server's per-funder
+ * cache here is our only protection against a stale-cache rejection.
+ *
+ * The client methods are still tried first — the SDK documents the instance API
+ * as the preferred surface, so a later release that adds them takes over with
+ * no change here.
+ */
+function toSdkBalanceAllowanceArgs(
+  client: UnifiedSdkTradingClient,
+  request: LegacyClobBalanceAllowanceRequest
+): [SdkBalanceAllowanceClient, SdkBalanceAllowanceActionRequest] {
+  return [
+    client as unknown as SdkBalanceAllowanceClient,
+    mapLegacyBalanceAllowanceRequest(
+      request
+    ) as SdkBalanceAllowanceActionRequest,
+  ];
+}
+
+type SdkPublicActionClient = Parameters<typeof fetchSdkMarketInfo>[0];
+
+/**
+ * Same story as balance/allowance above: `fetchMarketInfo` and
+ * `fetchBuilderFeeRates` exist only as standalone actions. They are absent from
+ * both the public (62-key) and secure (97-key) action surfaces, so every
+ * `if (client.fetchMarketInfo)` guard we wrote was dead code.
+ *
+ * These two take a `BaseClient` rather than the `BaseSecureClient` the
+ * balance/allowance pair wants, so both our public and secure clients are valid
+ * arguments — the cast bridges the SDK's nominal branding, not a shape gap.
+ */
+function toSdkPublicActionClient(client: unknown): SdkPublicActionClient {
+  return client as SdkPublicActionClient;
 }
 
 function pageItems(page: UnifiedSdkPaginatorPage<unknown>): unknown[] {
@@ -434,29 +575,50 @@ function pageItems(page: UnifiedSdkPaginatorPage<unknown>): unknown[] {
   return [];
 }
 
+/**
+ * Drain a paginator into a flat list, optionally stopping early.
+ *
+ * `limit` is a page-fetch budget, not just a slice: callers that only need the
+ * first handful of orders (the extension's portfolio badge asks for 5) would
+ * otherwise pay for every page of a large book before throwing the rest away.
+ * The final `slice` keeps the returned count exact, since a page can overshoot.
+ */
 async function collectUnifiedPaginator(
-  paginator: UnifiedSdkPaginator<unknown>
+  paginator: UnifiedSdkPaginator<unknown>,
+  limit?: number
 ): Promise<LegacyClobOpenOrder[]> {
   const items: LegacyClobOpenOrder[] = [];
+  const max =
+    typeof limit === "number" && Number.isFinite(limit)
+      ? Math.max(1, Math.floor(limit))
+      : undefined;
+  const done = () => max !== undefined && items.length >= max;
+  const truncate = () => (max === undefined ? items : items.slice(0, max));
 
   if (typeof paginator.firstPage === "function") {
     const firstPage = await paginator.firstPage();
     items.push(...pageItems(firstPage).map(normalizeLegacyOpenOrder));
 
-    if (firstPage.nextCursor && typeof paginator.from === "function") {
+    if (
+      !done() &&
+      firstPage.nextCursor &&
+      typeof paginator.from === "function"
+    ) {
       for await (const page of paginator.from(firstPage.nextCursor)) {
         items.push(...pageItems(page).map(normalizeLegacyOpenOrder));
+        if (done()) break;
       }
     }
 
-    return items;
+    return truncate();
   }
 
   for await (const page of paginator) {
     items.push(...pageItems(page).map(normalizeLegacyOpenOrder));
+    if (done()) break;
   }
 
-  return items;
+  return truncate();
 }
 
 function recordString(value: Record<string, unknown>, key: string) {
@@ -538,14 +700,28 @@ export function adaptUnifiedSecureClientForLegacyClob(
   const legacyClient: LegacyClobCompatibleClient = {
     async createMarketOrder(request) {
       const tokenId = getLegacyTokenId(request);
-      const baseRequest = {
-        tokenId,
-        side: request.side,
-        ...(request.side === TRADING_SIDES.SELL
-          ? { shares: request.amount ?? request.size }
-          : { amount: request.amount }),
-        ...(request.price !== undefined ? { price: request.price } : {}),
-      };
+      const orderType = assertMarketOrderType(request.orderType);
+      const bound = optionalPriceBound(request.price);
+
+      const baseRequest: UnifiedSdkMarketOrderRequest =
+        request.side === TRADING_SIDES.SELL
+          ? {
+              tokenId,
+              side: request.side,
+              shares: request.amount ?? request.size,
+              ...(bound !== undefined ? { minPrice: bound } : {}),
+            }
+          : {
+              tokenId,
+              side: request.side,
+              amount: request.amount,
+              ...(request.maxSpend !== undefined
+                ? { maxSpend: request.maxSpend }
+                : {}),
+              ...(bound !== undefined ? { maxPrice: bound } : {}),
+            };
+      if (orderType) baseRequest.orderType = orderType;
+
       return client.createMarketOrder(
         withBuilderCode(baseRequest, options.builderCode)
       );
@@ -557,6 +733,17 @@ export function adaptUnifiedSecureClientForLegacyClob(
       }
       if (request.size === undefined) {
         throw new Error("Polymarket limit order size is required");
+      }
+      if (
+        request.orderType === CLOB_ORDER_TYPES.FAK ||
+        request.orderType === CLOB_ORDER_TYPES.FOK
+      ) {
+        // A V2 limit order can only be GTC or GTD. Silently creating a resting
+        // GTC order for a caller that asked for fill-or-kill is the worst
+        // possible failure, so refuse instead.
+        throw new Error(
+          `Polymarket limit orders cannot be ${request.orderType}; use createMarketOrder with a price bound instead`
+        );
       }
 
       const baseRequest = {
@@ -571,21 +758,39 @@ export function adaptUnifiedSecureClientForLegacyClob(
       );
     },
 
-    async postOrder(order) {
+    async postOrder(order, orderType) {
+      // V2 signs the order type into the order itself, so `postOrder` no longer
+      // takes one. Callers that still pass one are only allowed to restate what
+      // the signed order already says — anything else means intent was lost at
+      // creation time and would post silently under the wrong semantics.
+      assertPostedOrderTypeMatches(order, orderType);
       return client.postOrder(order);
     },
 
-    async getOpenOrders() {
+    async getOpenOrders(options) {
       if (!client.listOpenOrders) return [];
-      return collectUnifiedPaginator(client.listOpenOrders());
+      return collectUnifiedPaginator(client.listOpenOrders(), options?.limit);
     },
 
     async updateBalanceAllowance(request) {
-      if (!client.updateBalanceAllowance) {
-        return undefined;
+      if (client.updateBalanceAllowance) {
+        return client.updateBalanceAllowance(
+          mapLegacyBalanceAllowanceRequest(request)
+        );
       }
-      return client.updateBalanceAllowance(
-        mapLegacyBalanceAllowanceRequest(request)
+      return updateSdkBalanceAllowance(
+        ...toSdkBalanceAllowanceArgs(client, request)
+      );
+    },
+
+    async getBalanceAllowance(request) {
+      if (client.fetchBalanceAllowance) {
+        return client.fetchBalanceAllowance(
+          mapLegacyBalanceAllowanceRequest(request)
+        );
+      }
+      return fetchSdkBalanceAllowance(
+        ...toSdkBalanceAllowanceArgs(client, request)
       );
     },
 
@@ -593,38 +798,38 @@ export function adaptUnifiedSecureClientForLegacyClob(
       if (!client.cancelOrder) {
         throw new Error("Unified Polymarket SDK client cannot cancel orders");
       }
-      const orderId = request.orderId ?? request.orderID;
-      if (!orderId) throw new Error("Polymarket order id is required");
-      return client.cancelOrder({ orderId });
+      if (!request.orderId) throw new Error("Polymarket order id is required");
+      return client.cancelOrder({ orderId: request.orderId });
     },
 
     async isOrderScoring(request) {
       if (!client.fetchOrderScoring) return { scoring: false };
-      const orderId = request.orderId ?? request.order_id;
-      if (!orderId) throw new Error("Polymarket order id is required");
-      return { scoring: await client.fetchOrderScoring({ orderId }) };
+      if (!request.orderId) throw new Error("Polymarket order id is required");
+      return {
+        scoring: await client.fetchOrderScoring({ orderId: request.orderId }),
+      };
     },
 
     async areOrdersScoring(request) {
       if (!client.fetchOrdersScoring) return {};
-      return client.fetchOrdersScoring({
-        orderIds: request.orderIds ?? request.order_ids ?? [],
-      });
+      return client.fetchOrdersScoring({ orderIds: request.orderIds ?? [] });
     },
   };
 
-  if (client.fetchMarketInfo) {
-    const fetchMarketInfo = client.fetchMarketInfo;
-    legacyClient.fetchMarketInfo = (request) => fetchMarketInfo(request);
-    legacyClient.getClobMarketInfo = (conditionId) =>
-      fetchMarketInfo({ conditionId });
-  }
-
-  if (client.fetchBalanceAllowance) {
-    const fetchBalanceAllowance = client.fetchBalanceAllowance;
-    legacyClient.getBalanceAllowance = (request) =>
-      fetchBalanceAllowance(mapLegacyBalanceAllowanceRequest(request));
-  }
+  // Attached unconditionally. This used to sit behind `if (client.fetchMarketInfo)`,
+  // which never fired — market info is a standalone action, not a client method —
+  // so every consumer saw `getClobMarketInfo === undefined` and silently fell back
+  // to a flat fee estimate. Prefer the client method if a future release adds one.
+  const fetchMarketInfo = client.fetchMarketInfo
+    ? client.fetchMarketInfo.bind(client)
+    : (request: { conditionId: string }) =>
+        fetchSdkMarketInfo(
+          toSdkPublicActionClient(client),
+          request
+        ) as Promise<unknown>;
+  legacyClient.fetchMarketInfo = (request) => fetchMarketInfo(request);
+  legacyClient.getClobMarketInfo = (conditionId) =>
+    fetchMarketInfo({ conditionId });
 
   return legacyClient;
 }
@@ -737,11 +942,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+// Fail closed on malformed builder-fee payloads: a configured builder whose
+// rates read as missing, non-finite, or negative must not normalize to a
+// fee-free quote — the throw propagates and the caller's fee estimate falls
+// back to the conservative reserve instead.
 function normalizeBuilderFeeRates(raw: unknown): ClobBuilderFeeRates {
-  if (!isRecord(raw)) return { maker: 0, taker: 0 };
-  const maker = typeof raw.maker === "number" ? raw.maker : 0;
-  const taker = typeof raw.taker === "number" ? raw.taker : 0;
-  return { maker, taker };
+  if (!isRecord(raw)) {
+    throw new Error("Malformed builder fee rates payload");
+  }
+  return {
+    maker: requireBuilderFeeRateNumber(raw.maker, "maker"),
+    taker: requireBuilderFeeRateNumber(raw.taker, "taker"),
+  };
+}
+
+function requireBuilderFeeRateNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(
+      `Malformed builder fee rate: ${field} must be a finite non-negative number`
+    );
+  }
+  return value;
 }
 
 export async function fetchUnifiedClobOrderBooks(
@@ -766,6 +987,20 @@ export async function fetchUnifiedClobOrderBooks(
   return Array.isArray(data) ? data.map(normalizeClobOrderBook) : [];
 }
 
+/**
+ * Fee-and-token metadata for a condition, via the SDK's `GET /clob-markets/{id}`.
+ *
+ * **This is not the same payload as `fetchClobMarket`'s `GET /markets/{id}`.**
+ * `/markets` returns the full snake_case market object (question, slug, images,
+ * tags, `maker_base_fee`/`taker_base_fee`) but carries **no** `fd` protocol-fee
+ * block and no `tbf` builder bps. `/clob-markets` returns the trading-side view
+ * — `{fd: {r, e}, tbf, t, mos, mts, nr, …}` — which the SDK parses down to
+ * `{feeInfo: {rate, exponent}, tokens: [{tokenId, outcome}]}`.
+ *
+ * Fee estimation needs `fd`, so it must read *this* endpoint; anything wanting
+ * the human-facing market record must stay on `fetchClobMarket`. The two are not
+ * interchangeable, which is why `fetchClobMarket` has no unified-SDK branch.
+ */
 export async function fetchUnifiedClobMarket<T = unknown>(
   conditionId: string,
   options: UnifiedPolymarketPublicClientOptions = {}
@@ -777,11 +1012,13 @@ export async function fetchUnifiedClobMarket<T = unknown>(
       environment: options.environment,
     });
 
-  if (!client.fetchMarketInfo) {
-    throw new Error("Unified Polymarket SDK client cannot fetch market info");
+  if (client.fetchMarketInfo) {
+    return (await client.fetchMarketInfo({ conditionId })) as T;
   }
 
-  return (await client.fetchMarketInfo({ conditionId })) as T;
+  return (await fetchSdkMarketInfo(toSdkPublicActionClient(client), {
+    conditionId,
+  })) as T;
 }
 
 export async function fetchUnifiedClobPrice<T = unknown>(
@@ -838,11 +1075,15 @@ export async function fetchUnifiedClobBuilderFeeRates(
       environment: options.environment,
     });
 
-  if (!client.fetchBuilderFeeRates) {
-    throw new Error("Unified Polymarket SDK client cannot fetch builder fees");
+  if (client.fetchBuilderFeeRates) {
+    return normalizeBuilderFeeRates(
+      await client.fetchBuilderFeeRates({ builderCode })
+    );
   }
 
   return normalizeBuilderFeeRates(
-    await client.fetchBuilderFeeRates({ builderCode })
+    await fetchSdkBuilderFeeRates(toSdkPublicActionClient(client), {
+      builderCode,
+    })
   );
 }

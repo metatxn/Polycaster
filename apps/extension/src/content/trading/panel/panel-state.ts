@@ -52,6 +52,12 @@ interface PanelState {
   selectedShares: number;
   marketBuyAmount: number;
   limitPrice: number;
+  /**
+   * MARKET only. `true` signs FAK — whatever depth is there fills, the rest is
+   * canceled. `false` signs FOK — all or nothing. Defaults to `true` to match
+   * the web ticket.
+   */
+  allowPartialFill: boolean;
   expirationPreset: ExpirationPreset;
   splitMergeAmount: string;
   outcomeBalances: OutcomeBalances | null;
@@ -64,6 +70,12 @@ interface PanelState {
     key: string;
     requiredCollateral: number;
     requiredCollateralRaw: string;
+    /**
+     * Taker fee for this exact ticket, in USD — `null` when the market's fee
+     * details could not be read. Deliberately not `0`: an unknown fee rendered
+     * as "$0.00" is a worse lie than no fee row at all.
+     */
+    estimatedFee: number | null;
   } | null;
   orderApprovalPreviewInFlightKey: string | null;
   orderApprovalPreviewTimer: ReturnType<typeof setTimeout> | null;
@@ -111,6 +123,7 @@ export const panelState: PanelState = {
   selectedShares: 10,
   marketBuyAmount: 0,
   limitPrice: 0,
+  allowPartialFill: true,
   expirationPreset: "GTC",
   splitMergeAmount: "",
   outcomeBalances: null,

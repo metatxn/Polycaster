@@ -1,5 +1,6 @@
 "use client";
 
+import { formatFeeUsd } from "@knoww/shared-types/trading";
 import { formatTradingFormError } from "@knoww/shared-types/trading-errors";
 import Decimal from "decimal.js";
 import { AnimatePresence, m } from "framer-motion";
@@ -238,14 +239,22 @@ export function TradingForm(props: TradingFormProps) {
     hasMissingTradingApprovals,
     isCheckingTradingApprovals,
     isBelowMarketableBuyMinNotional,
+    minBuyAmount,
+    estimatedFeeUsd,
+    isFeeEstimateFetching,
     minShares,
     maxSellShares,
     hasCredentials,
     isConnected,
+    canTrade,
     handleSetAllowance,
     handleSubmit,
     hasValidTokenId,
-    canFullyFill,
+    canPlaceMarketOrder,
+    partialFill,
+    hasInsufficientLiquidity,
+    isOrderBookUnavailable,
+    isMarketOrderSizeEmpty,
   } = useTradingFormState(props);
 
   const selectedOutcome = outcomes[selectedOutcomeIndex];
@@ -293,13 +302,17 @@ export function TradingForm(props: TradingFormProps) {
       ? props.bestAsk * 100
       : null;
   const limitPriceCents = limitPrice * 100;
-  // Cents per tick (tickSize is in 0..1 units).
-  const tickCents =
-    tickSize && Number.isFinite(tickSize) ? tickSize * 100 : 0.1;
-  // ± stepper in tk-limit-input.
+  // Cents per tick (tickSize is in 0..1 units). Falls back to a cent, matching
+  // the hook's own default — assuming a 0.1¢ tick here instead would step the
+  // price onto a grid a 1¢ market rejects.
+  const effectiveTickSize =
+    tickSize && Number.isFinite(tickSize) ? tickSize : 0.01;
+  const tickCents = effectiveTickSize * 100;
+  // ± stepper in tk-limit-input. `setLimitPrice` snaps the result back onto the
+  // tick grid and clamps it to [tick, 1 - tick], so the cent arithmetic here
+  // cannot drift off-grid or step outside the band the exchange accepts.
   const adjustLimitPrice = (deltaCents: number) => {
-    const next = Math.max(0.1, Math.min(99.9, limitPriceCents + deltaCents));
-    setLimitPrice(next / 100);
+    setLimitPrice((limitPriceCents + deltaCents) / 100);
   };
   // `calculations.potentialWin` is already NET profit (shares − cost). The
   // gross return — what lands back if the outcome resolves in your favor —
@@ -309,12 +322,41 @@ export function TradingForm(props: TradingFormProps) {
   const profitLabel = formatProfitLabel(grossReturn, calculations.total);
   const totalLabel = formatUsd(calculations.total);
   // For a MARKET BUY the displayed share count is the (fractional) quantity the
-  // dollar budget fills, not the `shares` input.
-  const displayShares = isMarketBuy
-    ? Math.round(calculations.size * 100) / 100
-    : shares;
+  // dollar budget fills, not the `shares` input. A MARKET SELL shows the walked
+  // size too, so an FAK partial reads the number we actually sign rather than
+  // the number the user typed.
+  const displayShares =
+    orderType === "MARKET" ? Math.round(calculations.size * 100) / 100 : shares;
   const shareQuantityLabel = formatShareQuantity(displayShares);
   const orderActionLabel = side === "BUY" ? "Buy" : "Sell";
+  // Taker fee and the resulting debit. Rendered only when we actually know the
+  // number — a failed market-fee lookup returns null, and printing "$0.00" for
+  // an unknown fee would be a worse lie than printing nothing (and a total
+  // built on it worse still). Orders sign without `maxSpend`, so the fee is
+  // charged on top of the typed amount rather than taken out of it.
+  const feeRow =
+    side === "BUY" && estimatedFeeUsd !== null ? (
+      <>
+        <div
+          className={`tk-sum-row ${isFeeEstimateFetching ? "opacity-60" : ""}`}
+        >
+          <span className="l">Est. fee</span>
+          <span className="v tabular-nums">
+            {formatFeeUsd(estimatedFeeUsd)}
+          </span>
+        </div>
+        <div
+          className={`tk-sum-row ${isFeeEstimateFetching ? "opacity-60" : ""}`}
+        >
+          <span className="l">Est. total</span>
+          <span className="v tabular-nums">
+            {formatUsd(
+              new Decimal(calculations.total).plus(estimatedFeeUsd).toNumber()
+            )}
+          </span>
+        </div>
+      </>
+    ) : null;
 
   return (
     <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
@@ -759,26 +801,29 @@ export function TradingForm(props: TradingFormProps) {
               (Cost + Return + Profit) since its cost isn't typed directly. */}
           {!isBelowMarketableBuyMinNotional &&
             (orderType === "MARKET" ? (
-              <div className="tk-return-hero">
-                <span className="l">
-                  {side === "BUY"
-                    ? `Return if ${selectedOutcome?.name?.toUpperCase() ?? "YES"}`
-                    : "Proceeds"}
-                </span>
-                <span className="row">
-                  <span className="v tabular-nums">
-                    $
+              <>
+                <div className="tk-return-hero">
+                  <span className="l">
                     {side === "BUY"
-                      ? grossReturn.toFixed(2)
-                      : calculations.total.toFixed(2)}
+                      ? `Return if ${selectedOutcome?.name?.toUpperCase() ?? "YES"}`
+                      : "Proceeds"}
                   </span>
-                  {side === "BUY" && calculations.total > 0 && (
-                    <span className="gain tabular-nums">
-                      {calculations.returnPercent}%
+                  <span className="row">
+                    <span className="v tabular-nums">
+                      $
+                      {side === "BUY"
+                        ? grossReturn.toFixed(2)
+                        : calculations.total.toFixed(2)}
                     </span>
-                  )}
-                </span>
-              </div>
+                    {side === "BUY" && calculations.total > 0 && (
+                      <span className="gain tabular-nums">
+                        {calculations.returnPercent}%
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {feeRow && <div className="tk-summary">{feeRow}</div>}
+              </>
             ) : (
               <div className="tk-summary">
                 <div className="tk-sum-row">
@@ -802,6 +847,7 @@ export function TradingForm(props: TradingFormProps) {
                         ${grossReturn.toFixed(2)}
                       </span>
                     </div>
+                    {feeRow}
                     <div className="tk-sum-row profit">
                       <span className="l">Profit</span>
                       <span className="v up tabular-nums">
@@ -866,6 +912,36 @@ export function TradingForm(props: TradingFormProps) {
                   <span className="body">
                     Limit orders require {minShares} share
                     {minShares === 1 ? "" : "s"} minimum
+                  </span>
+                </div>
+              </m.div>
+            )}
+
+            {/* FAK sized the ticket down to the depth that's actually there.
+                Say so in the user's own units — they typed dollars on a BUY
+                and shares on a SELL — before they sign for less than they
+                asked for. */}
+            {partialFill && !error && (
+              <m.div
+                key="partial-fill"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <div className="tk-warn info">
+                  <AlertCircle className="ic h-4 w-4" />
+                  <span className="body">
+                    {partialFill.requestedUsd !== null
+                      ? `Fills ${formatUsd(partialFill.filledUsd)} of ${formatUsd(
+                          partialFill.requestedUsd
+                        )} (~${formatShareQuantity(partialFill.filledShares)} shares)`
+                      : `Fills ~${formatShareQuantity(partialFill.filledShares)} of ${formatShareQuantity(
+                          partialFill.requestedShares ?? 0
+                        )} shares (${formatUsd(partialFill.filledUsd)})`}
+                    <span className="sub">
+                      That's all the book has right now. Turn off Allow partial
+                      fill to require the full amount.
+                    </span>
                   </span>
                 </div>
               </m.div>
@@ -1026,6 +1102,13 @@ export function TradingForm(props: TradingFormProps) {
                 disabled={
                   isLoading ||
                   isCheckingTradingApprovals ||
+                  // `handleSubmit` returns false immediately when `canTrade`
+                  // is false, without calling the CLOB and without setting
+                  // `error` — so the click would be silently swallowed. The
+                  // gate above only covers `isConnected` and `hasCredentials`;
+                  // `canTrade` additionally requires the proxy wallet and the
+                  // viem wallet client, both of which resolve asynchronously.
+                  !canTrade ||
                   // `hasInsufficientBalance` branch is handled by the
                   // amber Deposit CTA above and doesn't reach this
                   // button, so we don't include it in the disabled set
@@ -1037,7 +1120,7 @@ export function TradingForm(props: TradingFormProps) {
                   (side === "BUY" && isBelowMarketableBuyMinNotional) ||
                   !selectedOutcome ||
                   !hasValidTokenId ||
-                  (orderType === "MARKET" && !canFullyFill)
+                  (orderType === "MARKET" && !canPlaceMarketOrder)
                 }
               >
                 {isLoading ? (
@@ -1049,8 +1132,19 @@ export function TradingForm(props: TradingFormProps) {
                   </>
                 ) : !hasValidTokenId ? (
                   "Trading not available"
-                ) : orderType === "MARKET" && !canFullyFill ? (
+                ) : isMarketOrderSizeEmpty ? (
+                  side === "BUY" ? (
+                    "Enter amount"
+                  ) : (
+                    "Enter shares"
+                  )
+                ) : hasInsufficientLiquidity ? (
+                  // Only when the book was actually walked and came up short.
+                  // A missing book or an empty amount field falls through to
+                  // the specific labels below instead of blaming the market.
                   "Insufficient liquidity"
+                ) : isOrderBookUnavailable ? (
+                  "Order book unavailable"
                 ) : side === "SELL" && maxSellShares <= 0 ? (
                   "No position to sell"
                 ) : side === "SELL" && shares > maxSellShares ? (
@@ -1058,7 +1152,14 @@ export function TradingForm(props: TradingFormProps) {
                 ) : belowLimitMin ? (
                   `Minimum shares: ${minShares}`
                 ) : side === "BUY" && isBelowMarketableBuyMinNotional ? (
-                  "Minimum order: $1"
+                  // Signed without `maxSpend`, so `makerAmount` equals the
+                  // amount and the CLOB's $1 floor applies to it directly.
+                  `Minimum order: $${minBuyAmount.toFixed(2)}`
+                ) : !canTrade ? (
+                  // Connected and credentialled, but the proxy wallet or the
+                  // wallet client has not resolved yet. Transient on a fresh
+                  // load or a reconnect; either way the order cannot be signed.
+                  "Preparing wallet…"
                 ) : needsApproval ? (
                   "Approve"
                 ) : (

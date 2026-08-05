@@ -6,11 +6,19 @@ import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
 import type { GammaEvent } from "@/types/gamma-api";
 
+// No in-repository consumer exists for this route (removal is pending an
+// external-consumer check), so the bounds below only need to stop abuse:
+// previously `limit`, `closed`, and `after_cursor` were forwarded to Gamma
+// verbatim, letting a caller request e.g. `limit=100000`.
+const MAX_LIMIT = 25;
+const MAX_CURSOR_LENGTH = 512;
+const MAX_TAG_LENGTH = 100;
+
 const eventsSchema = z.object({
-  tag: z.string().nullable().optional(),
-  limit: z.string().optional(),
-  after_cursor: z.string().optional(),
-  closed: z.string().optional(),
+  tag: z.string().min(1).max(MAX_TAG_LENGTH).nullable().optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(MAX_LIMIT),
+  after_cursor: z.string().max(MAX_CURSOR_LENGTH).optional(),
+  closed: z.enum(["true", "false"]).default("false"),
 });
 
 /**
@@ -47,10 +55,6 @@ export async function GET(request: NextRequest) {
 
   try {
     const searchParams = request.nextUrl.searchParams;
-    const tag = searchParams.get("tag");
-    const limit = searchParams.get("limit") || "50";
-    const afterCursor = searchParams.get("after_cursor") || undefined;
-    const closed = searchParams.get("closed") || "false";
 
     if (searchParams.has("offset")) {
       return NextResponse.json(
@@ -63,10 +67,10 @@ export async function GET(request: NextRequest) {
     }
 
     const parsed = eventsSchema.safeParse({
-      tag,
-      limit,
-      after_cursor: afterCursor,
-      closed,
+      tag: searchParams.get("tag"),
+      limit: searchParams.get("limit") || undefined,
+      after_cursor: searchParams.get("after_cursor") || undefined,
+      closed: searchParams.get("closed") || undefined,
     });
 
     if (!parsed.success) {
@@ -80,11 +84,11 @@ export async function GET(request: NextRequest) {
     }
 
     const queryParams = new URLSearchParams();
-    queryParams.set("limit", limit);
-    queryParams.set("closed", closed);
+    queryParams.set("limit", String(parsed.data.limit));
+    queryParams.set("closed", parsed.data.closed);
 
-    if (afterCursor) {
-      queryParams.set("after_cursor", afterCursor);
+    if (parsed.data.after_cursor) {
+      queryParams.set("after_cursor", parsed.data.after_cursor);
     }
     if (parsed.data.tag) {
       queryParams.set("tag_slug", parsed.data.tag);

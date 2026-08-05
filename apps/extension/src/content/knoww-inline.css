@@ -2325,6 +2325,29 @@
   grid-column: 1 / -1 !important;
   width: 100% !important;
 }
+/* The lazy trading runtime mounts .knoww-stream-bet inside an intermediate
+   .knoww-stream-bet-host. The host must not create its own box: as a plain
+   div it becomes the grid child instead of the bet, lands in the narrow
+   third `auto` column beside the title and overflows past the card edge. */
+.knoww-stream-bet-host {
+  display: contents !important;
+}
+/* Pre-hydration placeholders (host children until the runtime mounts) follow
+   the same collapsed/expanded visibility as the betting area itself. */
+.knoww-stream-bet-loading,
+.knoww-stream-bet-load-error {
+  display: none !important;
+}
+#knoww-notification-stack
+  .knoww-notification-item--stream.expanded
+  .knoww-stream-bet-loading,
+#knoww-notification-stack
+  .knoww-notification-item--stream.expanded
+  .knoww-stream-bet-load-error {
+  display: block !important;
+  grid-column: 1 / -1 !important;
+  min-width: 0 !important;
+}
 /* Segment selector: 2 outcomes → one row; 3-4 options → 2x2 grid. */
 .knoww-stream-seg-row {
   display: flex !important;
@@ -5000,6 +5023,58 @@
   font-size: 10px !important;
   color: var(--knoww-text-secondary) !important;
   margin-top: 6px !important;
+}
+
+/* ── Partial Fill Toggle (Market mode) ── */
+
+.knoww-tp-partial-fill {
+  margin-top: 2px !important;
+}
+.knoww-tp-pf-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+}
+.knoww-tp-pf-label {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--knoww-text, rgb(231, 233, 234)) !important;
+}
+.knoww-tp-pf-switch {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  width: 34px !important;
+  height: 20px !important;
+  padding: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  cursor: pointer !important;
+  transition: all 0.15s !important;
+}
+.knoww-tp-pf-switch.on {
+  background: rgba(0, 186, 124, 0.35) !important;
+  border-color: rgba(0, 186, 124, 0.5) !important;
+}
+.knoww-tp-pf-knob {
+  position: absolute !important;
+  top: 2px !important;
+  left: 2px !important;
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50% !important;
+  background: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
+  transition: all 0.15s !important;
+}
+.knoww-tp-pf-switch.on .knoww-tp-pf-knob {
+  left: 16px !important;
+  background: rgb(0, 186, 124) !important;
+}
+.knoww-tp-pf-info {
+  font-size: 10px !important;
+  color: var(--knoww-text-secondary) !important;
+  margin-top: 4px !important;
 }
 
 /* ── Execution Info (Market slippage) ── */

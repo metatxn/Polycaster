@@ -99,6 +99,17 @@ export const qk = {
     all: () => ["openOrders"] as const,
     list: (userAddress: string, market?: string) =>
       ["openOrders", userAddress, market] as const,
+    /**
+     * Estimated taker fee for a prospective BUY. Keyed on the rounded ticket
+     * inputs so typing a digit at a time does not fan out into a request per
+     * keystroke — the fee only moves meaningfully with size and price.
+     */
+    buyFeeEstimate: (
+      conditionId: string | undefined,
+      size: string,
+      price: string,
+      notional: string
+    ) => ["buyFeeEstimate", conditionId, size, price, notional] as const,
   },
   positions: {
     all: () => ["userPositions"] as const,

@@ -11,9 +11,9 @@ import { getInitialEvents } from "@/lib/server-cache";
 import { HomeContent } from "../home-content";
 
 export const metadata: Metadata = buildPageMetadata({
-  title: "Live Prediction Markets",
+  title: "Live Polymarket Odds & Prediction Markets",
   description:
-    "Browse active prediction markets, compare odds, and find trending opportunities across politics, crypto, sports, business, and culture.",
+    "Track live prediction-market odds, probability changes, volume, and liquidity across politics, crypto, sports, finance, technology, and world events.",
   path: "/markets",
 });
 

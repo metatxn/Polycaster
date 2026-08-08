@@ -26,6 +26,7 @@ import {
   Wallet,
   Zap,
 } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { AgentDashboard, ExtensionPopup } from "./knoww-sections-live";
 
@@ -34,7 +35,7 @@ import { AgentDashboard, ExtensionPopup } from "./knoww-sections-live";
 /* ------------------------------------------------------------------ */
 
 /** Mono section marker — "02 / The Problem" with an accent index. */
-function SectionLabel({ n, label }: { n: string; label: string }) {
+export function SectionLabel({ n, label }: { n: string; label: string }) {
   return (
     <div className="kw-reveal mb-5 inline-flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.2em]">
       <span className="text-(--kw-accent-text)">{n}</span>
@@ -44,7 +45,7 @@ function SectionLabel({ n, label }: { n: string; label: string }) {
   );
 }
 
-const SECTION =
+export const SECTION =
   "border-b border-(--kw-fg)/10 w-full max-w-[1280px] 2xl:max-w-[1440px] mx-auto px-6 sm:px-8 py-20 md:py-28 lg:py-32";
 
 /* ------------------------------------------------------------------ */
@@ -71,8 +72,7 @@ export function ProblemSection() {
           <div className="kw-reveal">
             <h2 className="text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:text-5xl">
               The internet runs on opinions.
-              <br />
-              <span className="text-(--kw-fg)/65">Knoww adds</span>{" "}
+              <br /> <span className="text-(--kw-fg)/65">Knoww adds</span>{" "}
               <span className="text-(--kw-accent-text)">probabilities.</span>
             </h2>
             <p className="mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
@@ -196,8 +196,7 @@ export function SolutionSection() {
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
           <h2 className="kw-reveal text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:col-span-7 md:text-5xl">
             Knoww brings the market
-            <br />
-            to the{" "}
+            <br /> to the{" "}
             <span className="kw-editorial italic">moment of intent.</span>
           </h2>
           <p className="kw-reveal text-base leading-[1.6] text-(--kw-fg)/80 md:col-span-5">
@@ -236,7 +235,7 @@ export function SolutionSection() {
 /* 3 — Extension                                                      */
 /* ------------------------------------------------------------------ */
 
-const PLATFORMS: Array<{ n: string; soon?: boolean }> = [
+export const PLATFORMS: Array<{ n: string; soon?: boolean }> = [
   { n: "X / Twitter" },
   { n: "Reddit" },
   { n: "News sites" },
@@ -259,9 +258,8 @@ export function ExtensionSection() {
           <div className="kw-reveal">
             <h2 className="text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:text-5xl">
               One extension.
-              <br />
-              50+ websites.
-              <br />
+              <br /> 50+ websites.
+              <br />{" "}
               <span className="text-(--kw-accent-text)">Infinite markets.</span>
             </h2>
             <p className="mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
@@ -286,6 +284,13 @@ export function ExtensionSection() {
                 </span>
               ))}
             </div>
+            <Link
+              href="/extension"
+              className="mt-7 inline-flex items-center gap-1.5 text-[14px] font-medium text-(--kw-accent-text) transition-colors hover:text-(--kw-fg)"
+            >
+              Learn more about the extension
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
 
           <div className="relative flex justify-center">
@@ -437,8 +442,7 @@ export function RadarBlock() {
             <SectionLabel n="R" label="Probability radar" />
             <h2 className="kw-reveal text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:text-5xl">
               Knoww is constantly scanning
-              <br />
-              the internet for{" "}
+              <br /> the internet for{" "}
               <span className="text-(--kw-accent-text)">uncertainty</span>.
             </h2>
             <p className="kw-reveal mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
@@ -485,7 +489,7 @@ export function AgentSection() {
             <SectionLabel n="06" label="AI Agent Layer" />
             <h2 className="kw-reveal text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:text-5xl">
               Next: agents that
-              <br />
+              <br />{" "}
               <span className="text-(--kw-accent-text)">
                 monitor the future
               </span>{" "}
@@ -532,7 +536,7 @@ export function WhyNowSection() {
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
           <h2 className="kw-reveal text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:col-span-7 md:text-5xl">
             Prediction markets are ready.
-            <br />
+            <br />{" "}
             <span className="text-(--kw-fg)/65">Discovery is still </span>
             <span className="text-(--kw-danger-text)">broken</span>
             <span className="text-(--kw-fg)/65">.</span>
@@ -647,7 +651,7 @@ export function UseCasesSection() {
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
           <h2 className="kw-reveal text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:col-span-7 md:text-5xl">
             For everyone who wants
-            <br />
+            <br />{" "}
             <span className="kw-editorial italic">
               signal before consensus.
             </span>
@@ -696,8 +700,7 @@ export function TractionSection() {
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
           <h2 className="kw-reveal text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:col-span-7 md:text-5xl">
             Built fast.
-            <br />
-            Already working{" "}
+            <br /> Already working{" "}
             <span className="text-(--kw-accent-text)">across the internet</span>
             .
           </h2>
@@ -735,8 +738,22 @@ export function TractionSection() {
 
 export function FinalCTASection({
   chromeStoreUrl,
+  badge = "Live on the Chrome Web Store",
+  headingLine1 = "The future won’t just be discussed.",
+  headingItalic = "It’ll be priced.",
+  body = "Join Knoww and get real-time prediction markets wherever the internet debates what happens next.",
+  primaryLabel = "Install Knoww — Free",
+  secondaryLabel = "Explore markets",
+  secondaryHref = "/markets",
 }: {
   chromeStoreUrl: string;
+  badge?: string;
+  headingLine1?: string;
+  headingItalic?: string;
+  body?: string;
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  secondaryHref?: string;
 }) {
   return (
     <section id="cta">
@@ -752,18 +769,17 @@ export function FinalCTASection({
           <div className="relative z-1">
             <span className="inline-flex items-center gap-2 rounded-full border border-(--kw-fg)/15 bg-(--kw-fg)/2 px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.08em] text-(--kw-fg)/70">
               <span className="kw-signal-dot h-1.5 w-1.5" />
-              Closed beta
+              {badge}
             </span>
             <h2 className="mx-auto mt-6 max-w-[900px] text-4xl font-bold leading-[1.04] tracking-[-0.035em] md:text-6xl">
-              The future won’t just be discussed.
-              <br />
+              {headingLine1}
+              <br />{" "}
               <span className="kw-editorial italic text-(--kw-accent-text)">
-                It’ll be priced.
+                {headingItalic}
               </span>
             </h2>
             <p className="mx-auto mt-5 max-w-[60ch] text-base leading-[1.6] text-(--kw-fg)/80">
-              Join Knoww and get real-time prediction markets wherever the
-              internet debates what happens next.
+              {body}
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <a
@@ -772,18 +788,28 @@ export function FinalCTASection({
                 rel="noopener noreferrer"
                 className="group inline-flex items-center gap-2.5 bg-(--kw-fg) px-7 py-4 text-[14px] font-semibold text-(--kw-bg) transition-colors hover:bg-(--kw-fg)/90"
               >
-                Get Early Access
+                {primaryLabel}
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </a>
-              <a
-                href={chromeStoreUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 border-b border-(--kw-fg)/20 px-5 py-4 text-[14px] font-medium text-(--kw-fg)/70 transition-colors hover:border-(--kw-fg) hover:text-(--kw-fg)"
-              >
-                <Activity className="h-4 w-4" />
-                Install Extension Soon
-              </a>
+              {secondaryHref?.startsWith("/") ? (
+                <Link
+                  href={secondaryHref}
+                  className="inline-flex items-center gap-2 border-b border-(--kw-fg)/20 px-5 py-4 text-[14px] font-medium text-(--kw-fg)/70 transition-colors hover:border-(--kw-fg) hover:text-(--kw-fg)"
+                >
+                  <Activity className="h-4 w-4" />
+                  {secondaryLabel}
+                </Link>
+              ) : (
+                <a
+                  href={secondaryHref ?? chromeStoreUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 border-b border-(--kw-fg)/20 px-5 py-4 text-[14px] font-medium text-(--kw-fg)/70 transition-colors hover:border-(--kw-fg) hover:text-(--kw-fg)"
+                >
+                  <Activity className="h-4 w-4" />
+                  {secondaryLabel}
+                </a>
+              )}
             </div>
           </div>
         </div>

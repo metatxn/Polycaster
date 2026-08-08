@@ -141,6 +141,34 @@ export function getKnownTagDefinition(slug: string): KnownTagDefinition | null {
   return KNOWN_TAGS_BY_SLUG.get(normalizeTagSlug(slug)) ?? null;
 }
 
+export interface EventCategoryCrumb {
+  slug: string;
+  label: string;
+}
+
+/**
+ * Pick an event's primary category for breadcrumb trails: the first tag
+ * (in Gamma's order) whose slug maps to a known category listing page.
+ * Gamma sends tags as objects at runtime even where our types say string,
+ * so both shapes are accepted. Null means "no category crumb" — callers
+ * keep the 2-level Markets → event trail.
+ */
+export function findPrimaryCategoryTag(
+  tags: Array<string | { slug?: string; label?: string }> | undefined
+): EventCategoryCrumb | null {
+  for (const tag of tags ?? []) {
+    const rawSlug = typeof tag === "string" ? tag : tag.slug;
+    if (!rawSlug) {
+      continue;
+    }
+    const known = getKnownTagDefinition(rawSlug);
+    if (known) {
+      return { slug: known.slug, label: known.label };
+    }
+  }
+  return null;
+}
+
 export function buildFallbackTags(): NormalizedTag[] {
   return KNOWN_TAG_DEFINITIONS.map(({ slug, label, description }) => ({
     tag: slug,

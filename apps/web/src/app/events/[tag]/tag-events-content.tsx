@@ -194,7 +194,7 @@ export function TagEventsContent({
 
         <section className="mb-5 border-b border-border/40 pb-5">
           <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
-            {tagLabel} Polymarket prediction markets
+            {tagLabel} prediction markets
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
             {initialTag?.description ||
@@ -208,7 +208,10 @@ export function TagEventsContent({
 
         <div className="animate-in fade-in duration-500">
           {error && (
-            <Card className="border-destructive/50 bg-destructive/5 mb-6">
+            <Card
+              data-nosnippet
+              className="border-destructive/50 bg-destructive/5 mb-6"
+            >
               <CardHeader>
                 <CardTitle className="text-destructive flex items-center gap-2">
                   <Sparkles className="h-5 w-5" />
@@ -271,7 +274,7 @@ export function TagEventsContent({
           )}
 
           {!isLoading && events.length === 0 && !error && (
-            <div className="text-center py-24">
+            <div data-nosnippet className="text-center py-24">
               <div
                 className="inline-flex items-center justify-center w-12 h-12 rounded-md mb-5"
                 style={{ background: "var(--kwm-bg-2)" }}

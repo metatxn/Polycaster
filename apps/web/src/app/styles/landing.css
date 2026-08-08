@@ -447,6 +447,35 @@
   );
 }
 
+/* Extension-hero sites index — each row enters with the word-stagger rise,
+   then a soft highlight sweeps down the list forever (the "reading the
+   internet alongside you" motif). Row i's two delays are set inline:
+   `animation-delay: <entrance>, <scan phase>`. Scan slot = 1.2s × 7 rows
+   = the 8.4s cycle, so the sweep is continuous. */
+.kw-index-row {
+  opacity: 0;
+  transform: translateY(14px);
+  animation:
+    kwStaggerIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both,
+    kwIndexScan 8.4s linear infinite;
+}
+@keyframes kwIndexScan {
+  0% {
+    color: color-mix(in srgb, var(--kw-fg) 70%, transparent);
+    background-color: transparent;
+  }
+  4%,
+  11% {
+    color: var(--kw-fg);
+    background-color: color-mix(in srgb, var(--kw-fg) 7%, transparent);
+  }
+  16%,
+  100% {
+    color: color-mix(in srgb, var(--kw-fg) 70%, transparent);
+    background-color: transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kw-signal-dot,
   .kw-float,
@@ -455,6 +484,14 @@
   .kw-bar-fill {
     /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
     animation: none !important;
+  }
+  .kw-index-row {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    opacity: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion guarantee */
+    transform: none !important;
   }
   /* Scoped to match the `.kw-landing .kw-card-lift:hover` rule above so the
      two stay at equal specificity (avoids a descending-specificity warning);

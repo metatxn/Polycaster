@@ -7,16 +7,22 @@ export { cleanMetaText } from "@/lib/meta-text";
 export const SITE_URL = "https://knoww.app";
 export const SITE_NAME = "Knoww";
 
+/**
+ * Brand suffix applied to every page title. A layout that sets a plain-string
+ * title breaks this chain for its children (Next resets the template), so any
+ * layout with metadata-bearing child routes must re-declare it.
+ */
+export const TITLE_TEMPLATE = `%s | ${SITE_NAME}`;
+
 export const DEFAULT_SEO_DESCRIPTION =
   "Track live Polymarket prediction markets, compare odds, and follow market-moving events across politics, crypto, sports, finance, and culture.";
 
 const DESCRIPTION_MAX_LENGTH = 155;
-const PREDICTION_MARKET_TITLE_PATTERN =
-  /\b(prediction market|prediction markets|live odds)\b/i;
 const RESOLVED_MARKET_STATUS_PATTERN = /\b(proposed|resolved)\b/;
-const RESOLVED_MARKET_ONLY_PATTERN = /\bresolved\b/;
 const HISTORICAL_EVENT_MIN_DESCRIPTION_LENGTH = 80;
 const HISTORICAL_EVENT_MIN_VOLUME = new Decimal(10_000);
+
+export type EventSeoStatus = "live" | "closed" | "resolved";
 
 type SeoMarketInput = {
   id?: string | number;
@@ -66,17 +72,67 @@ export function truncateMetaDescription(value: string | undefined | null) {
   return `${text}…`;
 }
 
-export function buildPredictionMarketTitle(title: string | undefined | null) {
+/**
+ * Trading state and settlement state are deliberately separate. Gamma can
+ * close trading before UMA settlement is final, so `closed` must never be
+ * presented as a verified result.
+ */
+export function isEventClosedForSeo(
+  event: Pick<SeoEventInput, "closed" | "ended"> | null | undefined
+) {
+  return event?.closed === true || event?.ended === true;
+}
+
+export function isEventResolvedForSeo(
+  event:
+    | Pick<SeoEventInput, "active" | "closed" | "ended" | "markets">
+    | null
+    | undefined
+) {
+  if (!isEventClosedForSeo(event) || !Array.isArray(event?.markets)) {
+    return false;
+  }
+
+  return (
+    event.markets.length > 0 &&
+    event.markets.every(
+      (market) =>
+        market?.id !== undefined &&
+        market.closed === true &&
+        hasResolvedOnlyStatus(market)
+    )
+  );
+}
+
+export function getEventSeoStatus(
+  event:
+    | Pick<SeoEventInput, "active" | "closed" | "ended" | "markets">
+    | null
+    | undefined
+): EventSeoStatus {
+  if (isEventResolvedForSeo(event)) {
+    return "resolved";
+  }
+  return isEventClosedForSeo(event) ? "closed" : "live";
+}
+
+export function buildEventPageTitle(
+  title: string | undefined | null,
+  { status = "live" }: { status?: EventSeoStatus } = {}
+) {
   const cleaned = cleanMetaText(title);
   if (!cleaned) {
     return "Prediction Markets";
   }
 
-  if (PREDICTION_MARKET_TITLE_PATTERN.test(cleaned)) {
-    return cleaned;
+  switch (status) {
+    case "resolved":
+      return `${cleaned} — Result & Final Odds`;
+    case "closed":
+      return `${cleaned} — Trading Closed & Final Odds`;
+    default:
+      return `${cleaned} — Live Odds & Probability`;
   }
-
-  return `${cleaned} Polymarket Odds`;
 }
 
 export function buildNoIndexMetadata({
@@ -96,28 +152,29 @@ export function buildNoIndexMetadata({
   };
 }
 
-export function buildPredictionMarketDescription({
+export function buildEventPageDescription({
   title,
-  fallback,
+  status = "live",
 }: {
   title: string;
-  fallback?: string | null;
+  status?: EventSeoStatus;
 }) {
-  const cleanedFallback = cleanMetaText(fallback);
-
-  if (
-    cleanedFallback &&
-    cleanedFallback.length <= DESCRIPTION_MAX_LENGTH &&
-    !/this market will resolve|will resolve to|resolution source/i.test(
-      cleanedFallback
-    )
-  ) {
-    return cleanedFallback;
+  switch (status) {
+    case "resolved":
+      return `See the final result, closing probability, and market history for ${title} on Knoww.`;
+    case "closed":
+      return `Trading has ended for ${title}. Review the final trading odds, volume, resolution criteria, and settlement status on Knoww.`;
+    default:
+      return `Follow live odds for ${title}. View the leading outcome, probability movement, volume, liquidity, and resolution date.`;
   }
-
-  return `Track live odds, outcomes, and market context for ${title} on Knoww.`;
 }
 
+/**
+ * Current events are indexable when they contain an open market. Resolved
+ * events remain indexable only when they have durable context and meaningful
+ * trading history; closed-but-unresolved and thin historical pages stay
+ * crawlable with noindex.
+ */
 export function shouldIndexEventPage(event: SeoEventInput | null | undefined) {
   if (!event) {
     return false;
@@ -181,17 +238,12 @@ function hasIndexableResolvedEvent(event: SeoEventInput) {
     cleanMetaText(event.description).length <
       HISTORICAL_EVENT_MIN_DESCRIPTION_LENGTH ||
     !hasMinimumHistoricalVolume(event.volume) ||
-    !Array.isArray(event.markets)
+    !isEventResolvedForSeo(event)
   ) {
     return false;
   }
 
-  return event.markets.some(
-    (market) =>
-      market?.id !== undefined &&
-      market.closed === true &&
-      hasResolvedOnlyStatus(market)
-  );
+  return true;
 }
 
 function hasMinimumHistoricalVolume(value: string | number | null | undefined) {
@@ -211,16 +263,37 @@ function hasMinimumHistoricalVolume(value: string | number | null | undefined) {
 }
 
 function hasResolvedOnlyStatus(market: SeoMarketInput) {
-  return (
-    hasStatusMatching(
-      market.umaResolutionStatus,
-      RESOLVED_MARKET_ONLY_PATTERN
-    ) ||
-    hasStatusMatching(
-      market.umaResolutionStatuses,
-      RESOLVED_MARKET_ONLY_PATTERN
-    )
+  // Prefer Gamma's singular current state when present. Falling back to the
+  // plural payload is safe only when every reported state is final; accepting
+  // "proposed" alongside a stale "resolved" value would overstate settlement.
+  const currentStates = parseResolutionStates(market.umaResolutionStatus);
+  const states =
+    currentStates ?? parseResolutionStates(market.umaResolutionStatuses);
+
+  return Boolean(
+    states?.length && states.every((state) => state === "resolved")
   );
+}
+
+function parseResolutionStates(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === "[]" || normalized === "null") {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(normalized);
+    const states = (Array.isArray(parsed) ? parsed : [parsed])
+      .map((state) => String(state).trim().toLowerCase())
+      .filter(Boolean);
+    return states.length > 0 ? states : null;
+  } catch {
+    return [normalized];
+  }
 }
 
 function hasResolvedMarketStatus(market: SeoMarketInput) {
@@ -262,7 +335,7 @@ export function buildPageMetadata({
 }): Metadata {
   const cleanDescription = truncateMetaDescription(description);
   const canonical = canonicalUrl(path);
-  const images = image ? [image] : ["/logo-512x512.png"];
+  const images = image ? [image] : ["/og-image.png"];
 
   return {
     title,

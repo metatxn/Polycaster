@@ -508,7 +508,7 @@ export function OrderBook({
 
       {/* Error State */}
       {error && (
-        <div className="text-center py-8 text-muted-foreground">
+        <div data-nosnippet className="text-center py-8 text-muted-foreground">
           <p className="text-sm">Failed to load order book</p>
           <Button
             variant="outline"
@@ -524,7 +524,10 @@ export function OrderBook({
 
       {/* No Token ID */}
       {!isTokenValidForRest && !isLoading && !error && (
-        <div className="text-center py-8 text-muted-foreground text-sm">
+        <div
+          data-nosnippet
+          className="text-center py-8 text-muted-foreground text-sm"
+        >
           Select an outcome to view order book
         </div>
       )}
@@ -714,7 +717,12 @@ export function OrderBook({
   // Standalone mode - with collapsible wrapper
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      {/* data-nosnippet: bid/ask ladders and their error states are app UI,
+          not descriptive content for search snippets (SEO §9.1) */}
+      <div
+        data-nosnippet
+        className="rounded-xl border border-border bg-card overflow-hidden"
+      >
         {/* Header */}
         <CollapsibleTrigger asChild>
           <button

@@ -12,6 +12,11 @@ const globals = [
   .map((path) => readFileSync(path, "utf8"))
   .join("\n");
 const landing = readFileSync("src/app/page.tsx", "utf8");
+const landingChrome = readFileSync(
+  "src/components/landing/landing-chrome.tsx",
+  "utf8"
+);
+const landingWithChrome = `${landing}\n${landingChrome}`;
 const sections = readFileSync(
   "src/components/landing/knoww-sections.tsx",
   "utf8"
@@ -83,14 +88,17 @@ test("landing narrative copy uses the upgraded readability classes", () => {
 
 test("landing nav and footer metadata are not rendered as low-contrast microcopy", () => {
   assert.match(
-    landing,
+    landingWithChrome,
     /<nav className="hidden lg:flex items-center gap-8 text-\[14px\] font-medium"/
   );
-  assert.match(landing, /inline-flex items-center py-1/);
-  assert.match(landing, /aria-label="Add to Chrome"/);
-  assert.match(landing, /hidden sm:inline">Add to Chrome/);
-  assert.doesNotMatch(landing, /text-\[12px\]\s+text-\(--kw-fg\)\/60/);
-  assert.match(landing, /text-\[12px\]\s+text-\(--kw-fg\)\/70/);
+  assert.match(landingWithChrome, /inline-flex items-center py-1/);
+  assert.match(landingWithChrome, /aria-label="Add to Chrome"/);
+  assert.match(landingWithChrome, /hidden sm:inline">Add to Chrome/);
+  assert.doesNotMatch(
+    landingWithChrome,
+    /text-\[12px\]\s+text-\(--kw-fg\)\/60/
+  );
+  assert.match(landingWithChrome, /text-\[12px\]\s+text-\(--kw-fg\)\/70/);
 });
 
 test("landing focus-visible outline clears the stronger focus target", () => {

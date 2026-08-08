@@ -582,11 +582,20 @@ export function HomeContent({ initialData }: HomeContentProps) {
           className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-5 sm:mb-6 xl:hidden"
         >
           {/* Left: Editorial title — matches the Fraunces italic used
-              on sibling pages, just one notch smaller since /markets
-              hosts the dense card grid below. */}
-          <h1 className="font-editorial italic font-medium text-4xl sm:text-5xl md:text-6xl leading-[1.02] tracking-tight text-foreground">
-            Markets
-          </h1>
+              on sibling pages, one notch smaller since /markets hosts
+              the dense card grid below (and this H1 runs longer for
+              SEO §7.2). */}
+          <div className="max-w-2xl">
+            <h1 className="font-editorial italic font-medium text-3xl sm:text-4xl md:text-5xl leading-[1.02] tracking-tight text-foreground">
+              Live prediction-market odds
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground leading-6">
+              Every market below shows a live probability implied by real trades
+              on Polymarket. Prices move as traders react to news, so the odds
+              you see reflect what people are willing to stake right now — not a
+              poll or a pundit's call.
+            </p>
+          </div>
 
           {/* Right: Sibling views — mono caps with hairline underline
               active states, same grammar as TopNav. */}
@@ -686,9 +695,13 @@ export function HomeContent({ initialData }: HomeContentProps) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          {/* Error State */}
+          {/* Error State — data-nosnippet: "Feed Error" must never become the
+              page's search snippet (SEO §9.1 acceptance criterion) */}
           {currentData.error && (
-            <div className="py-10 border-y border-destructive/30 mb-6">
+            <div
+              data-nosnippet
+              className="py-10 border-y border-destructive/30 mb-6"
+            >
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mb-3">
                 §&nbsp;&nbsp;Feed Error
               </p>
@@ -836,6 +849,7 @@ export function HomeContent({ initialData }: HomeContentProps) {
             currentData.events.length === 0 &&
             !currentData.error && (
               <m.div
+                data-nosnippet
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className="text-center py-24 border-t border-b border-border/40"
@@ -870,6 +884,99 @@ export function HomeContent({ initialData }: HomeContentProps) {
               </m.div>
             )}
         </m.div>
+
+        {/* Crawlable explainer (SEO §7.4) — static section, no motion
+            wrapper, so the copy ships plainly in the SSR HTML. */}
+        <section
+          aria-labelledby="markets-explainer-heading"
+          className="mt-16 sm:mt-24 border-t border-border/40 pt-10 text-sm leading-6 text-muted-foreground"
+        >
+          <p className="font-mono text-[11px] uppercase tracking-[0.22em] mb-8">
+            § Reading the odds
+          </p>
+          <h2 id="markets-explainer-heading" className="sr-only">
+            How to read prediction-market odds
+          </h2>
+          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4 max-w-6xl">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-2">
+                What the odds mean
+              </h3>
+              <p>
+                Each market's price is a probability. A Yes share trading at 62¢
+                implies a 62% chance the event happens: shares pay $1 if the
+                outcome occurs and nothing if it doesn't, so the price is what
+                traders collectively believe that $1 claim is worth.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-2">
+                How probabilities update
+              </h3>
+              <p>
+                Every market runs on a live order book. When news breaks,
+                traders buy and sell, and the price — the probability — moves
+                with them in real time. Odds here update continuously while a
+                market is open, not on a polling schedule.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-2">
+                Probability, volume, and liquidity
+              </h3>
+              <p>
+                Probability is the current price of the leading outcome. Volume
+                is how much has been traded in total — a rough gauge of how much
+                attention and conviction a market has drawn. Liquidity is how
+                much can be traded right now without moving the price.
+                High-volume, high-liquidity markets tend to carry more reliable
+                odds.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-2">
+                How markets resolve
+              </h3>
+              <p>
+                Each market defines its outcome and resolution criteria up
+                front. When the real-world result is known, the market settles
+                through Polymarket's resolution process (backed by the UMA
+                optimistic oracle): winning shares redeem for $1, losing shares
+                expire worthless.
+              </p>
+            </div>
+          </div>
+          <div className="mt-10 max-w-3xl">
+            <h3 className="text-sm font-semibold text-foreground mb-2">
+              Browse by category
+            </h3>
+            <p className="flex flex-wrap gap-x-4 gap-y-1">
+              {[
+                { href: "/events/politics", label: "Politics" },
+                { href: "/events/crypto", label: "Crypto" },
+                { href: "/events/sports/live", label: "Sports" },
+                { href: "/events/finance", label: "Finance" },
+                { href: "/events/tech", label: "Tech" },
+                { href: "/events/world", label: "World" },
+                { href: "/events/economy", label: "Economy" },
+                { href: "/events/elections", label: "Elections" },
+              ].map((tag) => (
+                <Link
+                  key={tag.href}
+                  href={tag.href}
+                  className="underline underline-offset-4 decoration-foreground/30 hover:decoration-foreground hover:text-foreground transition-colors"
+                >
+                  {tag.label}
+                </Link>
+              ))}
+            </p>
+          </div>
+          <p className="mt-8 max-w-3xl text-xs text-muted-foreground/80">
+            Market data comes from live Polymarket order books. Prediction
+            markets involve real money and prices can move quickly; nothing on
+            this page is financial advice.
+          </p>
+        </section>
 
         {/* Bottom CTA — editorial colophon */}
         <m.section

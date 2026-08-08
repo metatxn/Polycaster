@@ -43,7 +43,11 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed border-destructive/20 bg-destructive/5 text-center space-y-4">
+        // data-nosnippet: error fallbacks make poor search snippets (SEO §9.1)
+        <div
+          data-nosnippet
+          className="flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed border-destructive/20 bg-destructive/5 text-center space-y-4"
+        >
           <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center">
             <AlertCircle className="h-6 w-6 text-destructive" />
           </div>

@@ -3,16 +3,19 @@ import { notFound, permanentRedirect } from "next/navigation";
 import { serializeJsonLd } from "@/lib/json-ld";
 import {
   buildEventDetailPath,
+  buildEventPageDescription,
+  buildEventPageTitle,
   buildPageMetadata,
-  buildPredictionMarketDescription,
-  buildPredictionMarketTitle,
   canonicalUrl,
   cleanMetaText,
+  getEventSeoStatus,
   shouldIndexEventPage,
   truncateMetaDescription,
 } from "@/lib/seo";
-import { getEvent } from "@/lib/server-cache";
+import { getEvent, getRelatedEventsByTag } from "@/lib/server-cache";
+import { findPrimaryCategoryTag } from "@/lib/tag-slugs";
 import EventDetailClient from "./event-detail-client";
+import { EventSeoContent } from "./event-seo-content";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -34,13 +37,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   const cleanTitle = cleanMetaText(event.title);
+  const status = getEventSeoStatus(event);
   const canonicalPath = buildEventDetailPath(slug, event.slug);
   return buildPageMetadata({
-    title: buildPredictionMarketTitle(cleanTitle),
-    description: buildPredictionMarketDescription({
-      title: cleanTitle,
-      fallback: event.description,
-    }),
+    title: buildEventPageTitle(cleanTitle, { status }),
+    description: buildEventPageDescription({ title: cleanTitle, status }),
     path: canonicalPath,
     image: event.image,
     index: shouldIndexEventPage(event),
@@ -72,11 +73,24 @@ export default async function EventDetailPage({ params }: Props) {
   }
 
   const description = truncateMetaDescription(
-    buildPredictionMarketDescription({
-      title: initialEvent.title,
-      fallback: initialEvent.description,
+    buildEventPageDescription({
+      title: cleanMetaText(initialEvent.title),
+      status: getEventSeoStatus(initialEvent),
     })
   );
+  // Category crumb (Markets → Politics → event) only when a tag maps to a
+  // known listing page; the same value drives the visible trail in the
+  // client so structured data always matches rendered content (SEO §12.5).
+  const category = findPrimaryCategoryTag(initialEvent.tags);
+  // Same-category events for the crawlable "Related markets" module (§4).
+  // React cache() + fetch revalidate keep this from adding a fresh Gamma
+  // round-trip on every render.
+  const relatedData = category
+    ? await getRelatedEventsByTag(category.slug)
+    : null;
+  const relatedEvents = (relatedData?.events ?? [])
+    .filter((related) => related.slug && related.slug !== initialEvent.slug)
+    .slice(0, 5);
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "WebPage",
@@ -99,9 +113,19 @@ export default async function EventDetailPage({ params }: Props) {
           name: "Markets",
           item: canonicalUrl("/markets"),
         },
+        ...(category
+          ? [
+              {
+                "@type": "ListItem",
+                position: 2,
+                name: category.label,
+                item: canonicalUrl(`/events/${category.slug}`),
+              },
+            ]
+          : []),
         {
           "@type": "ListItem",
-          position: 2,
+          position: category ? 3 : 2,
           name: initialEvent.title,
           item: canonicalUrl(canonicalPath),
         },
@@ -118,6 +142,14 @@ export default async function EventDetailPage({ params }: Props) {
       <EventDetailClient
         slug={initialEvent.slug || slug}
         initialEvent={initialEvent}
+        category={category}
+        seoContent={
+          <EventSeoContent
+            event={initialEvent}
+            category={category}
+            relatedEvents={relatedEvents}
+          />
+        }
       />
     </>
   );

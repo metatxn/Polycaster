@@ -11,7 +11,12 @@ import { RootRouteShell } from "@/components/root-route-shell";
 import { ThemeProviders } from "@/components/theme-providers";
 import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import { serializeJsonLd } from "@/lib/json-ld";
-import { DEFAULT_SEO_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/seo";
+import {
+  DEFAULT_SEO_DESCRIPTION,
+  SITE_NAME,
+  SITE_URL,
+  TITLE_TEMPLATE,
+} from "@/lib/seo";
 import "./globals.css";
 
 // Variable font — one file covers the full 200-800 weight axis (the
@@ -63,7 +68,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: {
     default: "Knoww — Prediction markets for every opinion",
-    template: "%s | Knoww",
+    template: TITLE_TEMPLATE,
   },
   description: DEFAULT_SEO_DESCRIPTION,
   keywords: ["prediction markets", "polymarket", "trading", "crypto", "odds"],
@@ -92,10 +97,10 @@ export const metadata: Metadata = {
     description: DEFAULT_SEO_DESCRIPTION,
     images: [
       {
-        url: "/logo-512x512.png",
-        width: 512,
-        height: 512,
-        alt: "Knoww prediction markets",
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Knoww — prediction markets for everything you read",
       },
     ],
   },
@@ -103,7 +108,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Knoww — Prediction markets for every opinion",
     description: DEFAULT_SEO_DESCRIPTION,
-    images: ["/logo-512x512.png"],
+    images: ["/og-image.png"],
   },
   robots: {
     index: true,

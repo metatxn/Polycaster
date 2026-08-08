@@ -320,7 +320,9 @@ export function LeagueRail({
   const isLiveActive = pathname === "/events/sports/live";
 
   return (
-    <aside
+    // data-nosnippet: category nav + live counts read as noise in a snippet.
+    <section
+      data-nosnippet
       aria-label="Sport categories"
       className={cn(
         "min-w-0 border border-(--kwm-hl-2) bg-(--kwm-panel)",
@@ -382,7 +384,7 @@ export function LeagueRail({
           />
         ))}
       </nav>
-    </aside>
+    </section>
   );
 }
 
@@ -415,27 +417,29 @@ export function LeagueRailMobile({
     pathname === "/events/sports/live" ? "__live__" : (activeSlug ?? "");
 
   return (
-    <select
-      aria-label="Sport category"
-      value={value}
-      onChange={(e) => {
-        const next = e.target.value;
-        if (next === "__live__") {
-          router.push("/events/sports/live");
-        } else if (next) {
-          router.push(`/events/sports/${next}`);
-        }
-      }}
-      className={cn(
-        "w-full px-3 py-2 text-[13px] bg-(--kwm-bg-2) border border-(--kwm-hl) text-(--kwm-ink) appearance-none",
-        className
-      )}
-    >
-      {allOptions.map((opt) => (
-        <option key={opt.slug} value={opt.slug}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
+    <div data-nosnippet>
+      <select
+        aria-label="Sport category"
+        value={value}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === "__live__") {
+            router.push("/events/sports/live");
+          } else if (next) {
+            router.push(`/events/sports/${next}`);
+          }
+        }}
+        className={cn(
+          "w-full px-3 py-2 text-[13px] bg-(--kwm-bg-2) border border-(--kwm-hl) text-(--kwm-ink) appearance-none",
+          className
+        )}
+      >
+        {allOptions.map((opt) => (
+          <option key={opt.slug} value={opt.slug}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }

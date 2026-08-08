@@ -8,7 +8,7 @@ import {
   PRIORITY_EVENT_CARD_IMAGE_WIDTH,
 } from "@/lib/lcp-images";
 import { buildPageMetadata, canonicalUrl } from "@/lib/seo";
-import { getInitialEventsByTag, getTagDetails } from "@/lib/server-cache";
+import { getInitialEventsByTagStrict, getTagDetails } from "@/lib/server-cache";
 import { isSportSubSlug } from "@/lib/sport-categories";
 import { normalizeTagSlug } from "@/lib/tag-slugs";
 import { TagEventsContent } from "./tag-events-content";
@@ -22,15 +22,22 @@ export async function generateMetadata({
 }: TagEventsPageProps): Promise<Metadata> {
   const { tag } = await params;
   const canonicalTagSlug = normalizeTagSlug(tag);
-  const tagDetails = await getTagDetails(canonicalTagSlug);
+  // Same single-arg call as the page body, so React cache() dedupes the fetch.
+  const [tagDetails, initialData] = await Promise.all([
+    getTagDetails(canonicalTagSlug),
+    getInitialEventsByTagStrict(canonicalTagSlug),
+  ]);
   const label = tagDetails?.label || formatTagTitle(canonicalTagSlug);
 
   return buildPageMetadata({
-    title: `${label} Polymarket Prediction Markets`,
+    title: `Live ${label} Prediction Markets & Odds`,
     description:
       tagDetails?.description ||
       `Browse live ${label.toLowerCase()} Polymarket prediction markets, compare odds, and track active outcomes on Knoww.`,
     path: `/events/${canonicalTagSlug}`,
+    // A successful empty inventory is noindex. Transient upstream failures
+    // throw from the strict helper so crawlers receive a retryable 5xx.
+    index: initialData.events.length > 0,
   });
 }
 
@@ -50,7 +57,7 @@ export default async function TagEventsPage({ params }: TagEventsPageProps) {
   }
 
   const [initialData, initialTag] = await Promise.all([
-    getInitialEventsByTag(canonicalTagSlug),
+    getInitialEventsByTagStrict(canonicalTagSlug),
     getTagDetails(canonicalTagSlug),
   ]);
 

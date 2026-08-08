@@ -111,8 +111,9 @@ export function TopNav() {
 
         {/* Right — search + notifications + wallet + theme. Search
             leads the cluster as the most-used utility; widths step
-            up at 2xl+ where there's more breathing room. */}
-        <div className="flex items-center gap-2 shrink-0">
+            up at 2xl+ where there's more breathing room. data-nosnippet
+            keeps "Connect" and search UI out of search snippets (SEO §9.1). */}
+        <div data-nosnippet className="flex items-center gap-2 shrink-0">
           <MarketSearch variant="boxed" className="w-56 2xl:w-64" />
           {/* Bell renders only when wallet is connected; dropdown opens
               below the nav with `align="end"`. When disconnected the

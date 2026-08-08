@@ -27,6 +27,11 @@ minimumReleaseAgeExclude:
   - "@polymarket/bindings"
   - "nanoid"
   - "dompurify"
+  # wagmi@3.7.6 pins @wagmi/connectors@8.1.0, removing the optional porto peer
+  # that pulls the vulnerable React Native/Metro image-size chain. These
+  # releases were published on 2026-08-03, so waive the release-age gate.
+  - "@wagmi/connectors"
+  - "wagmi"
 
 catalog:
   "@biomejs/biome": "2.5.6"
@@ -39,6 +44,8 @@ catalog:
   "react-qr-code": "2.2.0"
   "typescript": "6.0.3"
   "viem": "2.55.10"
+  "@wagmi/connectors": "8.1.0"
+  "wagmi": "3.7.6"
 
 packageExtensions:
   "@metamask/connect-multichain@0.12.1":

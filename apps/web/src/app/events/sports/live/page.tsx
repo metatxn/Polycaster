@@ -631,9 +631,13 @@ export default function LiveMarketsPage() {
               transition={{ duration: 0.3 }}
               className="min-w-0"
             >
-              {/* Error */}
+              {/* Error — data-nosnippet: "Feed Error" must never become the
+                  page's search snippet (SEO §9.1) */}
               {error && (
-                <div className="border-l-2 border-(--kwm-down) pl-3 py-2 mb-6">
+                <div
+                  data-nosnippet
+                  className="border-l-2 border-(--kwm-down) pl-3 py-2 mb-6"
+                >
                   <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-down) mb-1">
                     Feed Error
                   </p>
@@ -672,7 +676,10 @@ export default function LiveMarketsPage() {
 
               {/* No live events */}
               {!error && !isLoading && liveEventCount === 0 && (
-                <div className="py-16 text-center border-y border-(--kwm-hl)">
+                <div
+                  data-nosnippet
+                  className="py-16 text-center border-y border-(--kwm-hl)"
+                >
                   <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-(--kwm-ink-3) mb-3">
                     No Live Events
                   </p>

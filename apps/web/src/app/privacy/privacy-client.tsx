@@ -614,7 +614,7 @@ export default function PrivacyClient() {
               <p>
                 If you have questions or requests about this Privacy Policy,
                 contact us at{" "}
-                <a href="mailto:privacy@knoww.app">privacy@knoww.app</a>.
+                <a href="mailto:contact.us@knoww.app">contact.us@knoww.app</a>.
               </p>
             </Section>
           </div>

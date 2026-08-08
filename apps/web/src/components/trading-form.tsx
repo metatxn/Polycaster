@@ -359,7 +359,12 @@ export function TradingForm(props: TradingFormProps) {
     ) : null;
 
   return (
-    <div className={disableSticky ? "w-full" : "sticky top-4 w-full"}>
+    // data-nosnippet: the trade ticket (Buy/Sell, amounts, wallet prompts) is
+    // interactive UI, not descriptive content — keep it out of search snippets.
+    <div
+      data-nosnippet
+      className={disableSticky ? "w-full" : "sticky top-4 w-full"}
+    >
       <div className="kw-ticket border border-(--kwm-hl-2) bg-(--kwm-panel) rounded-md overflow-hidden">
         {/* Subject — outcome chip + name + meta */}
         <div className="px-5 pt-4">

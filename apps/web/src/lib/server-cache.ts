@@ -96,12 +96,16 @@ export interface GammaEventFull extends Event {
   image?: string;
 }
 
+const INITIAL_HOME_EVENT_LIMIT = 6;
+const RELATED_EVENT_LIMIT = 6;
+
 async function fetchInitialEventPage(
   tagSlug?: string,
-  seriesId?: number
-): Promise<InitialHomeData | null> {
+  seriesId?: number,
+  limit = 20
+): Promise<InitialHomeData> {
   const params = new URLSearchParams({
-    limit: "20",
+    limit: String(limit),
     closed: "false",
     order: "volume24hr",
     ascending: "false",
@@ -141,7 +145,11 @@ async function fetchInitialEventPage(
 export const getInitialEvents = cache(
   async (): Promise<InitialHomeData | null> => {
     try {
-      return await fetchInitialEventPage();
+      return await fetchInitialEventPage(
+        undefined,
+        undefined,
+        INITIAL_HOME_EVENT_LIMIT
+      );
     } catch (error) {
       logger.error("server_cache.events.fetch_failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -162,6 +170,45 @@ export const getInitialEventsByTag = cache(
       logger.error("server_cache.events_by_tag.fetch_failed", {
         tagSlug: normalizeTagSlug(tagSlug),
         seriesId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+);
+
+/**
+ * Authoritative category inventory for indexable route rendering. Unlike the
+ * best-effort helper above, upstream failures are rethrown so Next serves a
+ * retryable 5xx instead of a misleading 200/noindex empty page.
+ */
+export const getInitialEventsByTagStrict = cache(
+  async (tagSlug: string, seriesId?: number): Promise<InitialHomeData> => {
+    try {
+      return await fetchInitialEventPage(tagSlug, seriesId);
+    } catch (error) {
+      logger.error("server_cache.events_by_tag.strict_fetch_failed", {
+        tagSlug: normalizeTagSlug(tagSlug),
+        seriesId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+);
+
+/** Small best-effort payload for the event detail page's related links. */
+export const getRelatedEventsByTag = cache(
+  async (tagSlug: string): Promise<InitialHomeData | null> => {
+    try {
+      return await fetchInitialEventPage(
+        tagSlug,
+        undefined,
+        RELATED_EVENT_LIMIT
+      );
+    } catch (error) {
+      logger.warn("server_cache.related_events.fetch_failed", {
+        tagSlug: normalizeTagSlug(tagSlug),
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
@@ -314,13 +361,23 @@ export const getEvent = cache(
       const res = await fetch(url, {
         next: { revalidate: CACHE_DURATION.EVENTS },
       });
+      // Only a 404 means "this event does not exist" — that maps to
+      // notFound()/noindex downstream. Any other failure (5xx, rate limit,
+      // network) must throw so the page renders a 5xx instead of a 404;
+      // Googlebot drops 404s from the index but retries 5xx.
+      if (res.status === 404) {
+        logger.warn("server_cache.event.not_found", { slugOrId });
+        return null;
+      }
       if (!res.ok) {
         logger.warn("server_cache.event.fetch_failed", {
           slugOrId,
           status: res.status,
           statusText: res.statusText,
         });
-        return null;
+        throw new Error(
+          `Event fetch failed: ${res.status} ${res.statusText} (${slugOrId})`
+        );
       }
       const event = (await res.json()) as GammaEventFull;
 
@@ -383,7 +440,9 @@ export const getEvent = cache(
         slugOrId,
         error: error instanceof Error ? error.message : String(error),
       });
-      return null;
+      // Transient failures (network, parse, non-404 upstream) propagate so the
+      // route errors with a 5xx rather than serving a not-found page.
+      throw error;
     }
   }
 );

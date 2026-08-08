@@ -257,12 +257,21 @@ export function CommentsSection({
     </>
   );
 
+  // data-nosnippet on both variants: comment threads and their error/empty
+  // states make poor search snippets (SEO §9.1).
   if (variant === "inline") {
-    return <div className={cn("py-4", className)}>{content}</div>;
+    return (
+      <div data-nosnippet className={cn("py-4", className)}>
+        {content}
+      </div>
+    );
   }
 
   return (
-    <div className={cn("border-t border-(--kwm-hl) pt-6", className)}>
+    <div
+      data-nosnippet
+      className={cn("border-t border-(--kwm-hl) pt-6", className)}
+    >
       {content}
     </div>
   );

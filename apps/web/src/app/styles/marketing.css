@@ -319,3 +319,47 @@
   /* biome-ignore lint/complexity/noImportantStyles: see above. */
   margin-bottom: 0.3em !important;
 }
+
+/* Guide/trust-page prose — extends .kw-legal (apply both classes). The
+   kw-legal child-margin rule outranks Tailwind's layered utilities, so
+   heading rhythm is set here with !important like .kw-legal-sub above. */
+.kw-guide h2 {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--kw-fg);
+  /* biome-ignore lint/complexity/noImportantStyles: overrides the .kw-legal
+     child-margin rule at higher precedence — section breaks need more air
+     than paragraph rhythm. */
+  margin-top: 2.4em !important;
+  /* biome-ignore lint/complexity/noImportantStyles: see above. */
+  margin-bottom: 0.5em !important;
+}
+.kw-guide h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--kw-fg);
+  /* biome-ignore lint/complexity/noImportantStyles: see .kw-guide h2. */
+  margin-top: 1.8em !important;
+  /* biome-ignore lint/complexity/noImportantStyles: see above. */
+  margin-bottom: 0.35em !important;
+}
+.kw-guide .kw-guide-example {
+  border: 1px solid color-mix(in srgb, var(--kw-fg) 15%, transparent);
+  background: var(--kw-bg-alt);
+  padding: 1.15em 1.35em 1.25em;
+  max-width: 68ch;
+  /* biome-ignore lint/complexity/noImportantStyles: see .kw-guide h2. */
+  margin-top: 1.4em !important;
+  /* biome-ignore lint/complexity/noImportantStyles: see above. */
+  margin-bottom: 1.4em !important;
+}
+.kw-guide .kw-guide-example-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: color-mix(in srgb, var(--kw-fg) 60%, transparent);
+  margin-bottom: 0.9em;
+}

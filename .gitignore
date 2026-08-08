@@ -92,3 +92,6 @@ ds-bundle/
 # local video production spec (not for the repo)
 docs/onboarding-video-spec.md
 score.wav
+cloudflare-worker-cpu-fix-review*
+2026-08-07-*
+CODE_REVIEW_GUIDED_TRADING_SETUP.md

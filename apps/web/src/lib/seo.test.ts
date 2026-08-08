@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEventDetailPath,
+  buildEventPageDescription,
+  buildEventPageTitle,
   buildNoIndexMetadata,
-  buildPredictionMarketTitle,
+  getEventSeoStatus,
+  isEventClosedForSeo,
+  isEventResolvedForSeo,
   shouldIndexEventPage,
   shouldListEventInSitemap,
 } from "./seo";
@@ -19,17 +23,148 @@ describe("buildEventDetailPath", () => {
   });
 });
 
-describe("buildPredictionMarketTitle", () => {
-  it("adds search intent while cleaning whitespace", () => {
-    expect(buildPredictionMarketTitle("  World Cup Winner  ")).toBe(
-      "World Cup Winner Polymarket Odds"
+describe("buildEventPageTitle", () => {
+  it("applies the live template while cleaning whitespace", () => {
+    expect(buildEventPageTitle("  World Cup Winner  ")).toBe(
+      "World Cup Winner — Live Odds & Probability"
     );
   });
 
-  it("does not duplicate prediction-market wording", () => {
-    expect(buildPredictionMarketTitle("Bitcoin Prediction Market")).toBe(
-      "Bitcoin Prediction Market"
+  it("does not claim a result for a closed but unresolved event", () => {
+    expect(buildEventPageTitle("World Cup Winner", { status: "closed" })).toBe(
+      "World Cup Winner — Trading Closed & Final Odds"
     );
+  });
+
+  it("applies the result template only to resolved events", () => {
+    expect(
+      buildEventPageTitle("World Cup Winner", { status: "resolved" })
+    ).toBe("World Cup Winner — Result & Final Odds");
+  });
+
+  it("falls back to a generic title when the event has no usable title", () => {
+    expect(buildEventPageTitle("   ")).toBe("Prediction Markets");
+  });
+});
+
+describe("buildEventPageDescription", () => {
+  it("embeds the question in the live template", () => {
+    expect(buildEventPageDescription({ title: "World Cup Winner" })).toBe(
+      "Follow live odds for World Cup Winner. View the leading outcome, probability movement, volume, liquidity, and resolution date."
+    );
+  });
+
+  it("describes final trading odds without claiming an unresolved result", () => {
+    expect(
+      buildEventPageDescription({ title: "World Cup Winner", status: "closed" })
+    ).toBe(
+      "Trading has ended for World Cup Winner. Review the final trading odds, volume, resolution criteria, and settlement status on Knoww."
+    );
+  });
+
+  it("embeds the question in the resolved template", () => {
+    expect(
+      buildEventPageDescription({
+        title: "World Cup Winner",
+        status: "resolved",
+      })
+    ).toBe(
+      "See the final result, closing probability, and market history for World Cup Winner on Knoww."
+    );
+  });
+});
+
+describe("isEventClosedForSeo", () => {
+  it("treats closed or ended events as closed and everything else as live", () => {
+    expect(isEventClosedForSeo({ closed: true })).toBe(true);
+    expect(isEventClosedForSeo({ ended: true })).toBe(true);
+    expect(isEventClosedForSeo({ closed: false, ended: false })).toBe(false);
+    expect(isEventClosedForSeo(null)).toBe(false);
+  });
+});
+
+describe("event settlement state", () => {
+  const resolvedMarket = {
+    id: "1",
+    active: false,
+    closed: true,
+    umaResolutionStatus: "resolved",
+  };
+
+  it("distinguishes live, closed-unresolved, and resolved events", () => {
+    expect(
+      getEventSeoStatus({
+        active: true,
+        closed: false,
+        markets: [{ id: "1", active: true, closed: false }],
+      })
+    ).toBe("live");
+    expect(
+      getEventSeoStatus({
+        active: false,
+        closed: true,
+        markets: [{ id: "1", active: false, closed: true }],
+      })
+    ).toBe("closed");
+    expect(
+      getEventSeoStatus({
+        active: false,
+        closed: true,
+        markets: [resolvedMarket],
+      })
+    ).toBe("resolved");
+  });
+
+  it("does not treat proposed or partially settled events as resolved", () => {
+    expect(
+      isEventResolvedForSeo({
+        closed: true,
+        markets: [
+          {
+            id: "1",
+            closed: true,
+            umaResolutionStatus: "proposed",
+          },
+        ],
+      })
+    ).toBe(false);
+    expect(
+      isEventResolvedForSeo({
+        closed: true,
+        markets: [
+          resolvedMarket,
+          { id: "2", closed: true, umaResolutionStatus: "unresolved" },
+        ],
+      })
+    ).toBe(false);
+  });
+
+  it("fails closed when resolution fields conflict or contain mixed states", () => {
+    expect(
+      isEventResolvedForSeo({
+        closed: true,
+        markets: [
+          {
+            id: "1",
+            closed: true,
+            umaResolutionStatus: "proposed",
+            umaResolutionStatuses: '["resolved"]',
+          },
+        ],
+      })
+    ).toBe(false);
+    expect(
+      isEventResolvedForSeo({
+        closed: true,
+        markets: [
+          {
+            id: "1",
+            closed: true,
+            umaResolutionStatuses: '["proposed", "resolved"]',
+          },
+        ],
+      })
+    ).toBe(false);
   });
 });
 
@@ -83,13 +218,13 @@ describe("shouldIndexEventPage", () => {
     ).toBe(false);
   });
 
-  it("indexes resolved events only when they have durable context and meaningful volume", () => {
+  it("indexes durable resolved events with useful context", () => {
     const event = {
       slug: "world-cup-2026-winner",
       title: "World Cup 2026 Winner",
       description:
-        "This market resolves to the team that wins the 2026 FIFA World Cup after the final match is completed and the official result is published.",
-      volume: "250000",
+        "This market resolves from the official tournament result after the final match and includes detailed settlement criteria for readers.",
+      volume: "10000.00",
       active: false,
       closed: true,
       markets: [
@@ -106,13 +241,13 @@ describe("shouldIndexEventPage", () => {
     expect(shouldListEventInSitemap(event)).toBe(true);
   });
 
-  it("does not index thin resolved events solely because they are settled", () => {
+  it("does not index thin resolved events", () => {
     expect(
       shouldIndexEventPage({
-        slug: "thin-resolved-event",
-        title: "Thin Resolved Event",
+        slug: "thin-result",
+        title: "Thin Result",
         description: "Resolved.",
-        volume: "50",
+        volume: "9999.99",
         active: false,
         closed: true,
         markets: [
@@ -123,6 +258,19 @@ describe("shouldIndexEventPage", () => {
             umaResolutionStatus: "resolved",
           },
         ],
+      })
+    ).toBe(false);
+  });
+
+  it("never indexes ended events even when their markets are still open", () => {
+    expect(
+      shouldIndexEventPage({
+        slug: "ended-event",
+        title: "Ended Event",
+        active: true,
+        closed: false,
+        ended: true,
+        markets: [{ id: "1", active: true, closed: false }],
       })
     ).toBe(false);
   });

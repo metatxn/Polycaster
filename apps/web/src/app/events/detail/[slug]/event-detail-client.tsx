@@ -49,6 +49,7 @@ import {
   sportsLiveGameCacheKey,
   writeCachedSportsLiveGame,
 } from "@/lib/sports-live-game-cache";
+import type { EventCategoryCrumb } from "@/lib/tag-slugs";
 import { applyLiveTradingOutcomeQuotes } from "@/lib/trading-outcome-quotes";
 import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
@@ -116,11 +117,19 @@ const TradingForm = dynamic(
 interface EventDetailClientProps {
   slug: string;
   initialEvent?: Event | null;
+  /** Server-resolved category crumb; must stay in sync with the page's
+   *  BreadcrumbList JSON-LD (SEO §12.5). */
+  category?: EventCategoryCrumb | null;
+  /** Server-rendered crawlable market context (SEO §4); rendered below the
+   *  main grid. Passed as a node so its data fetching stays server-side. */
+  seoContent?: React.ReactNode;
 }
 
 export default function EventDetailClient({
   slug: eventSlugOrId,
   initialEvent,
+  category,
+  seoContent,
 }: EventDetailClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1229,7 +1238,9 @@ export default function EventDetailClient({
             </button>
           </div>
 
-          <div className="py-16 border-y border-border/40">
+          {/* data-nosnippet: never let the error state become the page's
+              search snippet (SEO §9.1 acceptance criterion) */}
+          <div data-nosnippet className="py-16 border-y border-border/40">
             <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-4">
               §&nbsp;&nbsp;Not Found
             </p>
@@ -1440,6 +1451,17 @@ export default function EventDetailClient({
             <ChevronLeft className="h-4 w-4" />
             <span>Markets</span>
           </Link>
+          {category && (
+            <>
+              <span>/</span>
+              <Link
+                href={`/events/${category.slug}`}
+                className="hover:text-foreground transition-colors"
+              >
+                {category.label}
+              </Link>
+            </>
+          )}
           <span>/</span>
           <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">
             {event.title}
@@ -1539,8 +1561,9 @@ export default function EventDetailClient({
                     />
                   ))}
 
-                {/* Chart */}
-                <Card>
+                {/* Chart — data-nosnippet: canvas + chart-error text add
+                    nothing to a search snippet */}
+                <Card data-nosnippet>
                   {/* Legend is now rendered as a floating overlay inside the
                   MarketPriceChart itself — dropping the CardHeader saves
                   the ~48px of vertical padding that used to sit above the
@@ -1667,6 +1690,7 @@ export default function EventDetailClient({
                 </div>
               )}
             </div>
+            {seoContent}
           </div>
         </div>
       </main>

@@ -55,8 +55,9 @@ export function Navbar() {
           Knoww
         </Link>
 
-        {/* Right: contextual actions + wallet + theme */}
-        <div className="flex items-center gap-2 ml-auto">
+        {/* Right: contextual actions + wallet + theme — data-nosnippet keeps
+            "Connect"/"Setup Trading" out of search snippets (SEO §9.1) */}
+        <div data-nosnippet className="flex items-center gap-2 ml-auto">
           {isConnected ? (
             <>
               <NotificationBellMobile />

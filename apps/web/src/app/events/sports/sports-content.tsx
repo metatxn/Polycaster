@@ -34,7 +34,7 @@ export function SportsContent({ selectedSport = "" }: SportsContentProps) {
 
   const breadcrumbs = [
     { label: "Markets", href: "/markets" },
-    selectedSport ? { label: "Sports", href: "/events/sports" } : null,
+    selectedSport ? { label: "Sports", href: "/events/sports/live" } : null,
     { label: selectedSport ? sport.label : "Sports" },
   ].filter(Boolean) as { label: string; href?: string }[];
 

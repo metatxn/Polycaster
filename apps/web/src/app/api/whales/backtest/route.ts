@@ -94,6 +94,13 @@ function clampFloat(
  *         description: Backtest failed.
  */
 export async function GET(request: NextRequest) {
+  // Internal tuning harness — never exposed in production. The backtest only
+  // reads public Polymarket data, so a dev server covers every legitimate use;
+  // in production this 180s nodejs job would be an unauthenticated cost sink.
+  if (process.env.NODE_ENV !== "development") {
+    return jsonError("Not found", 404);
+  }
+
   const rateLimitResponse = checkRateLimit(request, {
     interval: 5 * 60 * 1000,
     uniqueTokenPerInterval: 2,

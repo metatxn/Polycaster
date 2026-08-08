@@ -33,11 +33,14 @@ test("data-nosnippet is only attached to Google-supported wrapper elements", () 
   assert.match(leagueRail, /<(?:div|section)\s+data-nosnippet/);
 });
 
-test("homepage metadata uses the audited positioning title", () => {
+// The SEO audit proposed "Prediction Markets While You Browse"; the owner kept
+// the original title, which already leads with the primary keyword. This test
+// locks in that decision so the audit variant is not reintroduced.
+test("homepage metadata uses the owner-approved positioning title", () => {
   const homepage = read("src/app/page.tsx");
 
-  assert.match(homepage, /Knoww — Prediction Markets While You Browse/);
-  assert.doesNotMatch(homepage, /Prediction markets for every opinion/);
+  assert.match(homepage, /Knoww — Prediction markets for every opinion/);
+  assert.doesNotMatch(homepage, /Prediction Markets While You Browse/);
 });
 
 test("landing line breaks preserve word boundaries for crawlers and assistive tech", () => {

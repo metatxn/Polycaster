@@ -114,13 +114,13 @@ async function fetchAllKeysetItems<T, R>(
 
 export const getCachedSitemapEventRoutes = unstable_cache(
   () => fetchSitemapEventRoutes("active"),
-  ["knoww-sitemap-event-routes-v4"],
+  ["knoww-sitemap-event-routes-v5"],
   { revalidate: SITEMAP_REVALIDATE_SECONDS }
 );
 
 export const getCachedEvergreenSitemapEventRoutes = unstable_cache(
   () => fetchSitemapEventRoutes("evergreen"),
-  ["knoww-sitemap-evergreen-event-routes-v1"],
+  ["knoww-sitemap-evergreen-event-routes-v2"],
   { revalidate: SITEMAP_REVALIDATE_SECONDS }
 );
 
@@ -287,21 +287,11 @@ type EventSitemapInput = {
 };
 
 export function buildEventSitemapRoute(event: EventSitemapInput): SitemapRoute {
-  const lastModified = parseSitemapDate(event.updatedAt);
-
+  // Gamma's updatedAt tracks volatile market activity rather than meaningful
+  // page-content edits. Omit lastmod until an editorial timestamp is available.
   return {
     url: canonicalUrl(buildEventDetailPath(event.slug, event.slug)),
-    ...(lastModified ? { lastModified } : {}),
   };
-}
-
-function parseSitemapDate(value: string | undefined) {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function dedupeSitemapRoutes(routes: SitemapRoute[]): SitemapRoute[] {

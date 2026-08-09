@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildIndexNowPayload,
   createIndexNowKeyResponse,
+  type IndexNowSubmissionError,
   normalizeIndexNowUrls,
   parseIndexNowCliUrls,
   submitIndexNow,
@@ -149,6 +150,28 @@ describe("submitIndexNow", () => {
     await expect(
       submitIndexNow(["https://knoww.app/guides"], "Abcd1234-key", fetchMock)
     ).rejects.toThrow("IndexNow submission failed (403)");
+  });
+
+  it("preserves a numeric Retry-After delay for rate-limit handling", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("sensitive upstream detail", {
+        status: 429,
+        headers: { "Retry-After": "7200" },
+      })
+    );
+
+    const submission = submitIndexNow(
+      ["https://knoww.app/guides"],
+      "Abcd1234-key",
+      fetchMock
+    );
+
+    await expect(submission).rejects.toMatchObject({
+      name: "IndexNowSubmissionError",
+      status: 429,
+      retryAfterMs: 7_200_000,
+      message: "IndexNow submission failed (429)",
+    } satisfies Partial<IndexNowSubmissionError>);
   });
 
   it("rejects undocumented success statuses", async () => {

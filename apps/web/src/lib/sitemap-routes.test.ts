@@ -147,7 +147,7 @@ describe("fetchSitemapEventRoutes", () => {
 });
 
 describe("buildEventSitemapRoutes", () => {
-  it("caches only final URL and modification-date fields", () => {
+  it("does not treat volatile market-feed updates as page modifications", () => {
     const event = {
       slug: "world-cup-winner",
       title: "World Cup Winner",
@@ -172,7 +172,6 @@ describe("buildEventSitemapRoutes", () => {
     expect(buildEventSitemapRoutes([event], "active")).toEqual([
       {
         url: "https://knoww.app/events/detail/world-cup-winner",
-        lastModified: new Date("2026-07-12T08:30:00.000Z"),
       },
     ]);
   });
@@ -230,7 +229,7 @@ describe("buildEventSitemapRoutes", () => {
 });
 
 describe("buildEventSitemapRoute", () => {
-  it("uses an event's real updated date", () => {
+  it("omits lastModified when only the volatile feed timestamp is available", () => {
     const route = buildEventSitemapRoute({
       slug: "world-cup-winner",
       updatedAt: "2026-07-12T08:30:00.000Z",
@@ -238,7 +237,6 @@ describe("buildEventSitemapRoute", () => {
 
     expect(route).toEqual({
       url: "https://knoww.app/events/detail/world-cup-winner",
-      lastModified: new Date("2026-07-12T08:30:00.000Z"),
     });
   });
 

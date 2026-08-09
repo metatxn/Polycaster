@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { IndexNowSubmissionError } from "./indexnow";
 import {
   diffIndexNowSitemapSnapshots,
   INDEXNOW_CRON_EXPRESSION,
@@ -7,6 +8,10 @@ import {
   runIndexNowSitemapCron,
   shouldRunIndexNowCron,
 } from "./indexnow-cron";
+
+const SNAPSHOT_KEY = "indexnow:sitemap-snapshot:v2";
+const LEGACY_SNAPSHOT_KEY = "indexnow:sitemap-snapshot:v1";
+const RATE_LIMIT_KEY = "indexnow:rate-limit:v1";
 
 const INDEX_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -42,13 +47,16 @@ function createFetch(
   }) as typeof fetch;
 }
 
-function createStateStore(initialValue: string | null = null): {
+function createStateStore(
+  initialValue: string | null = null,
+  initialKey = SNAPSHOT_KEY
+): {
   state: IndexNowStateStore;
   values: Map<string, string>;
 } {
   const values = new Map<string, string>();
   if (initialValue !== null) {
-    values.set("indexnow:sitemap-snapshot:v1", initialValue);
+    values.set(initialKey, initialValue);
   }
 
   return {
@@ -57,6 +65,9 @@ function createStateStore(initialValue: string | null = null): {
       get: vi.fn(async (key) => values.get(key) ?? null),
       put: vi.fn(async (key, value) => {
         values.set(key, value);
+      }),
+      delete: vi.fn(async (key) => {
+        values.delete(key);
       }),
     },
   };
@@ -138,8 +149,39 @@ describe("runIndexNowSitemapCron", () => {
       batches: 0,
     });
     expect(submit).not.toHaveBeenCalled();
-    expect(values.get("indexnow:sitemap-snapshot:v1")).toBe(
+    expect(values.get(SNAPSHOT_KEY)).toBe(
       JSON.stringify(snapshot([{ url: "https://knoww.app/about" }]))
+    );
+  });
+
+  it("starts a clean v2 baseline instead of diffing the legacy snapshot", async () => {
+    const legacySnapshot = snapshot([
+      {
+        url: "https://knoww.app/events/detail/world-cup-winner",
+        lastModified: "2026-08-09T07:00:00.000Z",
+      },
+    ]);
+    const { state, values } = createStateStore(
+      JSON.stringify(legacySnapshot),
+      LEGACY_SNAPSHOT_KEY
+    );
+    const submit = vi.fn();
+
+    const result = await runIndexNowSitemapCron({
+      state,
+      key: "Abcd1234-key",
+      fetcher: createFetch([
+        { url: "https://knoww.app/events/detail/world-cup-winner" },
+      ]),
+      submit,
+    });
+
+    expect(result).toMatchObject({ outcome: "baseline", submitted: 0 });
+    expect(submit).not.toHaveBeenCalled();
+    expect(values.get(SNAPSHOT_KEY)).toBe(
+      JSON.stringify(
+        snapshot([{ url: "https://knoww.app/events/detail/world-cup-winner" }])
+      )
     );
   });
 
@@ -178,7 +220,7 @@ describe("runIndexNowSitemapCron", () => {
       submitted: 2,
       batches: 1,
     });
-    expect(values.get("indexnow:sitemap-snapshot:v1")).toBe(
+    expect(values.get(SNAPSHOT_KEY)).toBe(
       JSON.stringify(
         snapshot([
           { url: "https://knoww.app/about" },
@@ -219,12 +261,79 @@ describe("runIndexNowSitemapCron", () => {
           { url: "https://knoww.app/guides" },
         ]),
         submit: vi.fn(async () => {
-          throw new Error("IndexNow submission failed (429)");
+          throw new IndexNowSubmissionError(503);
         }),
       })
-    ).rejects.toThrow("IndexNow submission failed (429)");
+    ).rejects.toThrow("IndexNow submission failed (503)");
 
-    expect(values.get("indexnow:sitemap-snapshot:v1")).toBe(serializedPrevious);
+    expect(values.get(SNAPSHOT_KEY)).toBe(serializedPrevious);
+  });
+
+  it("persists a 12-hour fallback cooldown without advancing the pending snapshot", async () => {
+    const now = Date.parse("2026-08-09T10:00:00.000Z");
+    const retryAt = "2026-08-09T22:00:00.000Z";
+    const previous = snapshot([{ url: "https://knoww.app/about" }]);
+    const serializedPrevious = JSON.stringify(previous);
+    const { state, values } = createStateStore(serializedPrevious);
+
+    const result = await runIndexNowSitemapCron({
+      state,
+      key: "Abcd1234-key",
+      fetcher: createFetch([
+        { url: "https://knoww.app/about" },
+        { url: "https://knoww.app/guides" },
+      ]),
+      submit: vi.fn(async () => {
+        throw new IndexNowSubmissionError(429);
+      }),
+      now: () => now,
+    });
+
+    expect(result).toMatchObject({
+      outcome: "rate_limited",
+      discovered: 2,
+      added: 1,
+      submitted: 0,
+      retryAt,
+    });
+    expect(values.get(SNAPSHOT_KEY)).toBe(serializedPrevious);
+    expect(JSON.parse(values.get(RATE_LIMIT_KEY) ?? "null")).toEqual({
+      version: 1,
+      attempt: 1,
+      retryAt,
+    });
+  });
+
+  it("skips sitemap and submission requests while a cooldown is active", async () => {
+    const previous = snapshot([{ url: "https://knoww.app/about" }]);
+    const { state, values } = createStateStore(JSON.stringify(previous));
+    values.set(
+      RATE_LIMIT_KEY,
+      JSON.stringify({
+        version: 1,
+        attempt: 1,
+        retryAt: "2026-08-09T12:00:00.000Z",
+      })
+    );
+    const fetcher = createFetch([{ url: "https://knoww.app/about" }]);
+    const submit = vi.fn();
+
+    const result = await runIndexNowSitemapCron({
+      state,
+      key: "Abcd1234-key",
+      fetcher,
+      submit,
+      now: () => Date.parse("2026-08-09T11:00:00.000Z"),
+    });
+
+    expect(result).toMatchObject({
+      outcome: "cooldown",
+      discovered: 1,
+      submitted: 0,
+      retryAt: "2026-08-09T12:00:00.000Z",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("fails closed when stored state is malformed", async () => {
@@ -241,7 +350,7 @@ describe("runIndexNowSitemapCron", () => {
     ).rejects.toThrow("IndexNow snapshot is malformed");
 
     expect(submit).not.toHaveBeenCalled();
-    expect(values.get("indexnow:sitemap-snapshot:v1")).toBe("not-json");
+    expect(values.get(SNAPSHOT_KEY)).toBe("not-json");
   });
 
   it("rejects foreign sitemap segments without fetching them", async () => {

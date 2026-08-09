@@ -8,14 +8,23 @@ import { createLogger } from "@knoww/logger";
 // checks, so keep this import boundary explicitly acknowledged.
 // @ts-expect-error OpenNext emits this module at build time.
 import { default as openNextWorker } from "./.open-next/worker.js";
+import { shouldRunAgentCron } from "./src/lib/agent-cron-schedule";
+import {
+  runIndexNowSitemapCron,
+  shouldRunIndexNowCron,
+} from "./src/lib/indexnow-cron";
 
-const log = createLogger("agent.cron");
+const agentLog = createLogger("agent.cron");
+const indexNowLog = createLogger("indexnow.cron");
 
-interface AgentWorkerEnv extends CloudflareEnv {
+interface WorkerEnv extends CloudflareEnv {
   AGENT_DB: D1Database;
   AGENT_CRON_ENABLED?: string;
   AGENT_CRON_EXECUTION_MODE?: string;
   AGENT_CRON_LOCK_LEASE_MS?: string;
+  INDEXNOW_CRON_ENABLED?: string;
+  INDEXNOW_KEY?: string;
+  INDEXNOW_STATE: KVNamespace;
 }
 
 export default {
@@ -23,37 +32,80 @@ export default {
 
   async scheduled(
     controller: ScheduledController,
-    env: AgentWorkerEnv,
+    env: WorkerEnv,
     ctx: ExecutionContext
   ) {
-    ctx.waitUntil(
-      (async () => {
-        if (
-          env.AGENT_CRON_ENABLED === "true" &&
-          env.AGENT_CRON_EXECUTION_MODE === "live" &&
-          !env.AGENT_DB
-        ) {
-          log.error("tick.live_storage_unavailable", {
-            cron: controller.cron,
+    if (shouldRunIndexNowCron(controller.cron, env.INDEXNOW_CRON_ENABLED)) {
+      ctx.waitUntil(runScheduledIndexNow(controller, env));
+    }
+
+    if (shouldRunAgentCron(controller.cron, env.AGENT_CRON_ENABLED)) {
+      ctx.waitUntil(
+        (async () => {
+          if (
+            env.AGENT_CRON_ENABLED === "true" &&
+            env.AGENT_CRON_EXECUTION_MODE === "live" &&
+            !env.AGENT_DB
+          ) {
+            agentLog.error("tick.live_storage_unavailable", {
+              cron: controller.cron,
+            });
+            return;
+          }
+          const repository = createAgentRepository(
+            env.AGENT_DB as AgentD1Database | undefined
+          );
+          const result = await runScheduledAgentTick(repository, {
+            env: {
+              AGENT_CRON_ENABLED: env.AGENT_CRON_ENABLED,
+              AGENT_CRON_EXECUTION_MODE: env.AGENT_CRON_EXECUTION_MODE,
+              AGENT_CRON_LOCK_LEASE_MS: env.AGENT_CRON_LOCK_LEASE_MS,
+            },
           });
-          return;
-        }
-        const repository = createAgentRepository(
-          env.AGENT_DB as AgentD1Database | undefined
-        );
-        const result = await runScheduledAgentTick(repository, {
-          env: {
-            AGENT_CRON_ENABLED: env.AGENT_CRON_ENABLED,
-            AGENT_CRON_EXECUTION_MODE: env.AGENT_CRON_EXECUTION_MODE,
-            AGENT_CRON_LOCK_LEASE_MS: env.AGENT_CRON_LOCK_LEASE_MS,
-          },
-        });
-        log.info("tick.finished", {
-          cron: controller.cron,
-          scheduledTime: new Date(controller.scheduledTime).toISOString(),
-          ...result,
-        });
-      })()
-    );
+          agentLog.info("tick.finished", {
+            cron: controller.cron,
+            scheduledTime: new Date(controller.scheduledTime).toISOString(),
+            ...result,
+          });
+        })()
+      );
+    }
   },
-} satisfies ExportedHandler<AgentWorkerEnv>;
+} satisfies ExportedHandler<WorkerEnv>;
+
+async function runScheduledIndexNow(
+  controller: ScheduledController,
+  env: WorkerEnv
+): Promise<void> {
+  const startedAt = Date.now();
+  const scheduledTime = new Date(controller.scheduledTime).toISOString();
+  indexNowLog.info("run.started", {
+    cron: controller.cron,
+    scheduledTime,
+  });
+
+  try {
+    if (!env.INDEXNOW_STATE) {
+      throw new Error("IndexNow state binding is unavailable");
+    }
+
+    const result = await runIndexNowSitemapCron({
+      state: env.INDEXNOW_STATE,
+      key: env.INDEXNOW_KEY,
+    });
+    indexNowLog.info("run.finished", {
+      cron: controller.cron,
+      scheduledTime,
+      durationMs: Date.now() - startedAt,
+      ...result,
+    });
+  } catch (error) {
+    indexNowLog.error("run.failed", {
+      cron: controller.cron,
+      scheduledTime,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
+}

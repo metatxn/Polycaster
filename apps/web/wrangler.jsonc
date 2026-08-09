@@ -21,16 +21,26 @@
   },
 
   "triggers": {
-    // Agent cron is disabled for now. Re-add a schedule such as
-    // "*/5 * * * *" only when automatic agent runs should be deployed.
-    "crons": []
+    // IndexNow sitemap reconciliation runs hourly. Cron Triggers use UTC.
+    // Re-add a separate schedule such as "*/5 * * * *" only when automatic
+    // agent runs should also be deployed and AGENT_CRON_ENABLED is set to true.
+    "crons": ["0 * * * *"]
   },
 
   "vars": {
     "AGENT_CRON_ENABLED": "false",
     "AGENT_CRON_EXECUTION_MODE": "paper",
-    "AGENT_CRON_LOCK_LEASE_MS": "600000"
+    "AGENT_CRON_LOCK_LEASE_MS": "600000",
+    "INDEXNOW_CRON_ENABLED": "true"
   },
+
+  "kv_namespaces": [
+    {
+      // Wrangler provisions this namespace on the first deploy and writes its
+      // generated ID back here when deployment runs from the CLI.
+      "binding": "INDEXNOW_STATE"
+    }
+  ],
 
   "r2_buckets": [
     {

@@ -1,4 +1,5 @@
 import {
+  IndexNowSubmissionError,
   type IndexNowSubmissionResult,
   isValidIndexNowKey,
   normalizeIndexNowUrls,
@@ -8,8 +9,17 @@ import {
 export const INDEXNOW_CRON_EXPRESSION = "0 * * * *";
 
 const INDEXNOW_SITEMAP_INDEX_URL = "https://knoww.app/sitemap.xml";
-const INDEXNOW_SNAPSHOT_KEY = "indexnow:sitemap-snapshot:v1";
+// v2 intentionally starts a clean baseline after market-feed timestamps were
+// removed from sitemap entries. Reusing v1 would submit every market once as
+// an artificial lastmod-only update during deployment.
+const INDEXNOW_SNAPSHOT_KEY = "indexnow:sitemap-snapshot:v2";
+const INDEXNOW_RATE_LIMIT_KEY = "indexnow:rate-limit:v1";
 const INDEXNOW_BATCH_SIZE = 10_000;
+const MIN_RATE_LIMIT_DELAY_MS = 60 * 1000;
+const DEFAULT_RATE_LIMIT_DELAY_MS = 12 * 60 * 60 * 1000;
+const MAX_RATE_LIMIT_DELAY_MS = 48 * 60 * 60 * 1000;
+const MAX_RATE_LIMIT_ATTEMPT = 8;
+const MAX_RATE_LIMIT_STATE_BYTES = 1024;
 const MAX_SITEMAP_SEGMENTS = 20;
 const MAX_SITEMAP_URLS = 50_000;
 const MAX_SITEMAP_BYTES = 5 * 1024 * 1024;
@@ -32,6 +42,7 @@ type Submitter = (
 export interface IndexNowStateStore {
   get(key: string): Promise<string | null>;
   put(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 
 export interface IndexNowSnapshotEntry {
@@ -51,14 +62,21 @@ export interface IndexNowSnapshotDiff {
   changed: string[];
 }
 
+interface IndexNowRateLimitState {
+  version: 1;
+  attempt: number;
+  retryAt: string;
+}
+
 export interface IndexNowCronResult {
-  outcome: "baseline" | "unchanged" | "submitted";
+  outcome: "baseline" | "unchanged" | "submitted" | "rate_limited" | "cooldown";
   discovered: number;
   added: number;
   updated: number;
   removed: number;
   submitted: number;
   batches: number;
+  retryAt?: string;
 }
 
 interface RunIndexNowSitemapCronOptions {
@@ -66,6 +84,7 @@ interface RunIndexNowSitemapCronOptions {
   key: string | undefined;
   fetcher?: Fetcher;
   submit?: Submitter;
+  now?: () => number;
 }
 
 export function shouldRunIndexNowCron(
@@ -121,25 +140,45 @@ export async function runIndexNowSitemapCron({
   key,
   fetcher = fetch,
   submit = submitIndexNow,
+  now = Date.now,
 }: RunIndexNowSitemapCronOptions): Promise<IndexNowCronResult> {
   if (!isValidIndexNowKey(key)) {
     throw new Error("IndexNow key is unavailable or invalid");
   }
 
-  const serializedPrevious = await state.get(INDEXNOW_SNAPSHOT_KEY);
+  const [serializedPrevious, serializedRateLimit] = await Promise.all([
+    state.get(INDEXNOW_SNAPSHOT_KEY),
+    state.get(INDEXNOW_RATE_LIMIT_KEY),
+  ]);
   const previous = serializedPrevious
     ? parseStoredSnapshot(serializedPrevious)
     : null;
+  const rateLimit = serializedRateLimit
+    ? parseStoredRateLimit(serializedRateLimit)
+    : null;
+  if (rateLimit && Date.parse(rateLimit.retryAt) > now()) {
+    return {
+      ...buildResult("cooldown", previous?.entries.length ?? 0),
+      retryAt: rateLimit.retryAt,
+    };
+  }
+
   const current = await fetchCurrentSitemapSnapshot(fetcher);
   const serializedCurrent = serializeSnapshot(current);
 
   if (!previous) {
     await state.put(INDEXNOW_SNAPSHOT_KEY, serializedCurrent);
+    if (rateLimit) {
+      await state.delete(INDEXNOW_RATE_LIMIT_KEY);
+    }
     return buildResult("baseline", current.entries.length);
   }
 
   const diff = diffIndexNowSitemapSnapshots(previous, current);
   if (diff.changed.length === 0) {
+    if (rateLimit) {
+      await state.delete(INDEXNOW_RATE_LIMIT_KEY);
+    }
     return buildResult("unchanged", current.entries.length);
   }
 
@@ -154,12 +193,38 @@ export async function runIndexNowSitemapCron({
     offset += INDEXNOW_BATCH_SIZE
   ) {
     const batch = diff.changed.slice(offset, offset + INDEXNOW_BATCH_SIZE);
-    const result = await submit(batch, key, submitWithTimeout);
-    submitted += result.submitted;
-    batches += 1;
+    try {
+      const result = await submit(batch, key, submitWithTimeout);
+      submitted += result.submitted;
+      batches += 1;
+    } catch (error) {
+      if (!(error instanceof IndexNowSubmissionError) || error.status !== 429) {
+        throw error;
+      }
+
+      const nextRateLimit = buildRateLimitState(
+        rateLimit,
+        error.retryAfterMs,
+        now()
+      );
+      await state.put(INDEXNOW_RATE_LIMIT_KEY, JSON.stringify(nextRateLimit));
+      return {
+        outcome: "rate_limited",
+        discovered: current.entries.length,
+        added: diff.added.length,
+        updated: diff.updated.length,
+        removed: diff.removed.length,
+        submitted,
+        batches,
+        retryAt: nextRateLimit.retryAt,
+      };
+    }
   }
 
   await state.put(INDEXNOW_SNAPSHOT_KEY, serializedCurrent);
+  if (rateLimit) {
+    await state.delete(INDEXNOW_RATE_LIMIT_KEY);
+  }
 
   return {
     outcome: "submitted",
@@ -173,7 +238,7 @@ export async function runIndexNowSitemapCron({
 }
 
 function buildResult(
-  outcome: "baseline" | "unchanged",
+  outcome: "baseline" | "unchanged" | "cooldown",
   discovered: number
 ): IndexNowCronResult {
   return {
@@ -184,6 +249,77 @@ function buildResult(
     removed: 0,
     submitted: 0,
     batches: 0,
+  };
+}
+
+function buildRateLimitState(
+  previous: IndexNowRateLimitState | null,
+  providerDelayMs: number | null,
+  nowMs: number
+): IndexNowRateLimitState {
+  const attempt = Math.min(
+    (previous?.attempt ?? 0) + 1,
+    MAX_RATE_LIMIT_ATTEMPT
+  );
+  const fallbackDelayMs = Math.min(
+    DEFAULT_RATE_LIMIT_DELAY_MS * 2 ** (attempt - 1),
+    MAX_RATE_LIMIT_DELAY_MS
+  );
+  const requestedDelayMs =
+    providerDelayMs !== null &&
+    Number.isFinite(providerDelayMs) &&
+    providerDelayMs >= 0
+      ? providerDelayMs
+      : fallbackDelayMs;
+  const delayMs = Math.min(
+    Math.max(requestedDelayMs, MIN_RATE_LIMIT_DELAY_MS),
+    MAX_RATE_LIMIT_DELAY_MS
+  );
+
+  return {
+    version: 1,
+    attempt,
+    retryAt: new Date(nowMs + delayMs).toISOString(),
+  };
+}
+
+function parseStoredRateLimit(serialized: string): IndexNowRateLimitState {
+  if (
+    new TextEncoder().encode(serialized).byteLength > MAX_RATE_LIMIT_STATE_BYTES
+  ) {
+    throw new Error("IndexNow rate-limit state is malformed");
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch {
+    throw new Error("IndexNow rate-limit state is malformed");
+  }
+
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    !Number.isInteger(value.attempt) ||
+    (value.attempt as number) < 1 ||
+    (value.attempt as number) > MAX_RATE_LIMIT_ATTEMPT ||
+    typeof value.retryAt !== "string"
+  ) {
+    throw new Error("IndexNow rate-limit state is malformed");
+  }
+
+  const retryAtMs = Date.parse(value.retryAt);
+  if (
+    Number.isNaN(retryAtMs) ||
+    new Date(retryAtMs).toISOString() !== value.retryAt
+  ) {
+    throw new Error("IndexNow rate-limit state is malformed");
+  }
+
+  return {
+    version: 1,
+    attempt: value.attempt as number,
+    retryAt: value.retryAt,
   };
 }
 

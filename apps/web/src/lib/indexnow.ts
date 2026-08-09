@@ -24,6 +24,18 @@ export interface IndexNowSubmissionResult {
   submitted: number;
 }
 
+export class IndexNowSubmissionError extends Error {
+  readonly retryAfterMs: number | null;
+  readonly status: number;
+
+  constructor(status: number, retryAfterMs: number | null = null) {
+    super(`IndexNow submission failed (${status})`);
+    this.name = "IndexNowSubmissionError";
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 type FetchIndexNow = (
   input: string | URL | Request,
   init?: RequestInit
@@ -82,6 +94,24 @@ export function normalizeIndexNowUrls(values: readonly string[]): string[] {
   }
 
   return [...new Set(values.map(normalizeIndexNowUrl))];
+}
+
+function parseRetryAfterMs(value: string | null, nowMs = Date.now()) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (/^\d+$/.test(normalized)) {
+    const seconds = Number(normalized);
+    return Number.isSafeInteger(seconds) &&
+      seconds <= Number.MAX_SAFE_INTEGER / 1000
+      ? seconds * 1000
+      : null;
+  }
+
+  const retryAt = Date.parse(normalized);
+  return Number.isNaN(retryAt) || retryAt <= nowMs ? null : retryAt - nowMs;
 }
 
 /**
@@ -153,7 +183,12 @@ export async function submitIndexNow(
   });
 
   if (response.status !== 200 && response.status !== 202) {
-    throw new Error(`IndexNow submission failed (${response.status})`);
+    throw new IndexNowSubmissionError(
+      response.status,
+      response.status === 429
+        ? parseRetryAfterMs(response.headers.get("Retry-After"))
+        : null
+    );
   }
 
   return {

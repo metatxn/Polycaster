@@ -93,12 +93,17 @@ async function runScheduledIndexNow(
       state: env.INDEXNOW_STATE,
       key: env.INDEXNOW_KEY,
     });
-    indexNowLog.info("run.finished", {
+    const details = {
       cron: controller.cron,
       scheduledTime,
       durationMs: Date.now() - startedAt,
       ...result,
-    });
+    };
+    if (result.outcome === "rate_limited") {
+      indexNowLog.warn("run.rate_limited", details);
+    } else {
+      indexNowLog.info("run.finished", details);
+    }
   } catch (error) {
     indexNowLog.error("run.failed", {
       cron: controller.cron,

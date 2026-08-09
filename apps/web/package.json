@@ -11,6 +11,7 @@
     "start": "next start",
     "soak": "node scripts/soak-memory.mjs",
     "soak:assert": "SOAK_ASSERT=1 node scripts/soak-memory.mjs",
+    "indexnow": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/submit-indexnow.mts",
     "lint": "biome check",
     "format": "biome format --write",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",

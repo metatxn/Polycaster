@@ -161,12 +161,12 @@
    directly beneath it. Pairs with a hairline base border on the
    element itself. */
 .kw-landing .kw-glass-bar {
-  background: color-mix(in srgb, var(--kw-bg) 70%, transparent);
+  background: color-mix(in srgb, var(--kw-bg) 84%, transparent);
   backdrop-filter: blur(22px) saturate(180%);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
 }
 [data-scheme="light"] .kw-glass-bar {
-  background: color-mix(in srgb, var(--kw-bg) 78%, transparent);
+  background: color-mix(in srgb, var(--kw-bg) 92%, transparent);
 }
 
 /* Fine film grain — masks gradient banding on the big radial glows and
@@ -186,8 +186,7 @@
   opacity: 0.035;
 }
 
-/* Graceful degradation: solidify glass where the platform can't frost
-   (older engines) or the user asks for less transparency. */
+/* Graceful degradation: solidify glass where the platform can't frost. */
 @supports not (
     (backdrop-filter: blur(1px)) or
     (-webkit-backdrop-filter: blur(1px))
@@ -199,19 +198,6 @@
     background: var(--kw-bg);
   }
 }
-@media (prefers-reduced-transparency: reduce) {
-  .kw-landing .kw-glass {
-    background: var(--kw-bg-card);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  .kw-landing .kw-glass-bar {
-    background: var(--kw-bg);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-}
-
 /* Animated confidence / progress fill. */
 @keyframes kwBarIn {
   from {

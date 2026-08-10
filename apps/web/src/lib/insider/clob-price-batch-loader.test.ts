@@ -6,6 +6,15 @@ import {
   resolveReferencePrice,
 } from "./clob-price-batch-loader";
 
+const clobMocks = vi.hoisted(() => ({
+  fetchClobOrderBooks: vi.fn(),
+}));
+
+vi.mock("@knoww/shared-types/clob", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@knoww/shared-types/clob")>()),
+  fetchClobOrderBooks: clobMocks.fetchClobOrderBooks,
+}));
+
 function book(
   assetId: string,
   bids: Array<{ price: string; size: string }>,
@@ -52,6 +61,17 @@ describe("midpointFromOrderBook", () => {
 });
 
 describe("createClobPriceBatchLoader", () => {
+  it("disables the unified SDK even when no abort signal is supplied", async () => {
+    clobMocks.fetchClobOrderBooks.mockResolvedValueOnce([]);
+    const load = createClobPriceBatchLoader();
+
+    await load(["token-a"]);
+
+    expect(clobMocks.fetchClobOrderBooks).toHaveBeenCalledWith(["token-a"], {
+      useUnifiedSdk: false,
+    });
+  });
+
   it("propagates an aggregate abort instead of caching fallback prices", async () => {
     const controller = new AbortController();
     const fetchOrderBooks = vi.fn(

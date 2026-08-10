@@ -9,6 +9,7 @@ import { createLogger } from "@knoww/logger";
 // @ts-expect-error OpenNext emits this module at build time.
 import { default as openNextWorker } from "./.open-next/worker.js";
 import { shouldRunAgentCron } from "./src/lib/agent-cron-schedule";
+import { withTrustedClientIp } from "./src/lib/client-ip";
 import {
   runIndexNowSitemapCron,
   shouldRunIndexNowCron,
@@ -28,7 +29,9 @@ interface WorkerEnv extends CloudflareEnv {
 }
 
 export default {
-  fetch: openNextWorker.fetch,
+  fetch(request, env, ctx) {
+    return openNextWorker.fetch(withTrustedClientIp(request), env, ctx);
+  },
 
   async scheduled(
     controller: ScheduledController,

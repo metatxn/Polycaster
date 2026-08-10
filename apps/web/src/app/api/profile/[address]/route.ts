@@ -67,31 +67,46 @@ interface PnLData {
   volume?: { total?: number };
 }
 
+interface UpstreamResult<T> {
+  data: T;
+  failed: boolean;
+}
+
+function upstreamSuccess<T>(data: T): UpstreamResult<T> {
+  return { data, failed: false };
+}
+
+function upstreamFailure<T>(fallback: T): UpstreamResult<T> {
+  return { data: fallback, failed: true };
+}
+
 async function fetchPublicProfile(
   address: string
-): Promise<PublicProfile | null> {
+): Promise<UpstreamResult<PublicProfile | null>> {
   try {
     const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/profile/${address}`,
       { next: { revalidate: 300 } } // Cache for 5 minutes
     );
-    if (!response.ok) return null;
-    return response.json() as Promise<PublicProfile>;
+    if (!response.ok) return upstreamFailure(null);
+    return upstreamSuccess((await response.json()) as PublicProfile);
   } catch {
-    return null;
+    return upstreamFailure(null);
   }
 }
 
-async function fetchUserPnL(address: string): Promise<PnLData | null> {
+async function fetchUserPnL(
+  address: string
+): Promise<UpstreamResult<PnLData | null>> {
   try {
     const response = await fetchWithTimeout(
       `https://user-pnl-api.polymarket.com/pnl/${address}`,
       { next: { revalidate: 60 } }
     );
-    if (!response.ok) return null;
-    return response.json() as Promise<PnLData>;
+    if (!response.ok) return upstreamFailure(null);
+    return upstreamSuccess((await response.json()) as PnLData);
   } catch {
-    return null;
+    return upstreamFailure(null);
   }
 }
 
@@ -104,50 +119,52 @@ interface LeaderboardEntry {
 async function fetchLeaderboardRank(
   address: string,
   timePeriod: string
-): Promise<{ rank: string; pnl: number; vol: number } | null> {
+): Promise<UpstreamResult<LeaderboardEntry | null>> {
   try {
     const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/v1/leaderboard?user=${address}&timePeriod=${timePeriod}`,
       { next: { revalidate: 60 } }
     );
-    if (!response.ok) return null;
+    if (!response.ok) return upstreamFailure(null);
     const data = (await response.json()) as LeaderboardEntry[];
     if (Array.isArray(data) && data.length > 0) {
-      return {
+      return upstreamSuccess({
         rank: data[0].rank,
         pnl: data[0].pnl,
         vol: data[0].vol,
-      };
+      });
     }
-    return null;
+    return upstreamSuccess(null);
   } catch {
-    return null;
+    return upstreamFailure(null);
   }
 }
 
-async function fetchPositions(address: string) {
+async function fetchPositions(
+  address: string
+): Promise<UpstreamResult<unknown>> {
   try {
     const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/positions?user=${address}`,
       { next: { revalidate: 60 } }
     );
-    if (!response.ok) return [];
-    return response.json();
+    if (!response.ok) return upstreamFailure([]);
+    return upstreamSuccess(await response.json());
   } catch {
-    return [];
+    return upstreamFailure([]);
   }
 }
 
-async function fetchTrades(address: string) {
+async function fetchTrades(address: string): Promise<UpstreamResult<unknown>> {
   try {
     const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/trades?user=${address}&limit=100`,
       { next: { revalidate: 60 } }
     );
-    if (!response.ok) return [];
-    return response.json();
+    if (!response.ok) return upstreamFailure([]);
+    return upstreamSuccess(await response.json());
   } catch {
-    return [];
+    return upstreamFailure([]);
   }
 }
 
@@ -192,14 +209,14 @@ export async function GET(
 
     // Fetch all data in parallel
     const [
-      publicProfile,
-      pnlData,
-      positions,
-      trades,
-      rankAll,
-      rankDay,
-      rankWeek,
-      rankMonth,
+      publicProfileResult,
+      pnlDataResult,
+      positionsResult,
+      tradesResult,
+      rankAllResult,
+      rankDayResult,
+      rankWeekResult,
+      rankMonthResult,
     ] = await Promise.all([
       fetchPublicProfile(address),
       fetchUserPnL(address),
@@ -210,6 +227,25 @@ export async function GET(
       fetchLeaderboardRank(address, "WEEK"),
       fetchLeaderboardRank(address, "MONTH"),
     ]);
+
+    const upstreamFailed = [
+      publicProfileResult,
+      pnlDataResult,
+      positionsResult,
+      tradesResult,
+      rankAllResult,
+      rankDayResult,
+      rankWeekResult,
+      rankMonthResult,
+    ].some((result) => result.failed);
+    const publicProfile = publicProfileResult.data;
+    const pnlData = pnlDataResult.data;
+    const positions = positionsResult.data;
+    const trades = tradesResult.data;
+    const rankAll = rankAllResult.data;
+    const rankDay = rankDayResult.data;
+    const rankWeek = rankWeekResult.data;
+    const rankMonth = rankMonthResult.data;
 
     // Calculate total volume from P&L data or rankings
     const totalVolume = rankAll?.vol || pnlData?.volume?.total || 0;
@@ -237,7 +273,9 @@ export async function GET(
     };
 
     return NextResponse.json(profile, {
-      headers: getCacheHeaders("leaderboard"),
+      headers: upstreamFailed
+        ? { "Cache-Control": "no-store" }
+        : getCacheHeaders("leaderboard"),
     });
   } catch (error) {
     log.error("fetch.failed", { error });

@@ -1,20 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { readTrustedClientIp } from "./client-ip";
 import { rateLimit } from "./rate-limit";
-
-/**
- * Get the client IP for rate limiting.
- * Priority: Cloudflare > real-ip > forwarded > fallback.
- */
-function getClientIp(request: NextRequest): string {
-  const cfConnectingIp = request.headers.get("cf-connecting-ip");
-  const realIp = request.headers.get("x-real-ip");
-  const forwarded = request.headers.get("x-forwarded-for");
-
-  return (
-    (cfConnectingIp || realIp || forwarded?.split(",")[0])?.trim() ||
-    "anonymous"
-  );
-}
 
 /**
  * Normalize a pathname to its route template so that dynamic segments
@@ -86,7 +72,7 @@ function normalizeRoutePath(pathname: string): string {
  *   (dynamic segments are normalized)
  */
 function getRateLimitKey(request: NextRequest): string {
-  const ip = getClientIp(request);
+  const ip = readTrustedClientIp(request);
   const route = normalizeRoutePath(request.nextUrl.pathname);
   return `${route}:${ip}`;
 }

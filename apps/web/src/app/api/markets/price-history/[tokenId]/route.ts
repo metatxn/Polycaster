@@ -84,10 +84,11 @@ export async function GET(
       : alignPriceHistoryStartTs(parsedQuery.startTs, fidelity);
 
     // Fetch from Polymarket CLOB API
-    const data = await fetchCachedClobPriceHistory(tokenId, {
-      startTs,
-      fidelity,
-    });
+    const data = await fetchCachedClobPriceHistory(
+      tokenId,
+      { startTs, fidelity },
+      { signal: request.signal }
+    );
 
     // Return with cache headers - price history can be cached longer
     return NextResponse.json(

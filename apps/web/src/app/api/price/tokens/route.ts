@@ -182,7 +182,7 @@ export async function GET(request: NextRequest) {
         } satisfies TokenPricesResponse,
         {
           status: 200,
-          headers: getCacheHeaders("priceHistory"),
+          headers: { "Cache-Control": "no-store" },
         }
       );
     }
@@ -258,7 +258,7 @@ export async function GET(request: NextRequest) {
           stale: true,
           timestamp: cachedPrices.timestamp,
         } satisfies TokenPricesResponse,
-        { headers: getCacheHeaders("priceHistory") }
+        { headers: { "Cache-Control": "no-store" } }
       );
     }
 
@@ -278,7 +278,7 @@ export async function GET(request: NextRequest) {
       } satisfies TokenPricesResponse,
       {
         status: 200, // Return 200 with fallback prices instead of 500
-        headers: getCacheHeaders("priceHistory"),
+        headers: { "Cache-Control": "no-store" },
       }
     );
   }

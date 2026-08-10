@@ -91,7 +91,7 @@ export function createClobPriceBatchLoader(
               useUnifiedSdk: false,
               requestInit: { signal },
             }
-          : undefined
+          : { useUnifiedSdk: false }
       ));
   const cache = new Map<string, PriceCacheEntry>();
 

@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
           cached: true,
           stale: true,
         },
-        { headers: getCacheHeaders("priceHistory") }
+        { headers: { "Cache-Control": "no-store" } }
       );
     }
 

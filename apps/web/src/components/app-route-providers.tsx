@@ -1,19 +1,20 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { State } from "wagmi";
 import { MainContent } from "@/components/main-content";
 import { ThemedToaster } from "@/components/themed-toaster";
 import ContextProvider from "@/context";
 
 export function AppRouteProviders({
   children,
-  cookies,
+  initialState,
 }: {
   children: ReactNode;
-  cookies: string | null;
+  initialState: State | undefined;
 }) {
   return (
-    <ContextProvider cookies={cookies}>
+    <ContextProvider initialState={initialState}>
       <MainContent>{children}</MainContent>
       <ThemedToaster />
     </ContextProvider>

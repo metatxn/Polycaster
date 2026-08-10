@@ -98,8 +98,10 @@ async function loadTraderHistory(
     fetchedAt: now,
   };
 
-  evictStaleEntries();
-  traderHistoryCache.set(address, entry);
+  if (!snapshot.partial) {
+    evictStaleEntries();
+    traderHistoryCache.set(address, entry);
+  }
 
   return {
     history: entry,

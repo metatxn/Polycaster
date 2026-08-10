@@ -850,6 +850,10 @@ export async function GET(request: NextRequest) {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
+  if (request.signal.aborted) {
+    return createSuspiciousErrorResponse(true);
+  }
+
   const key = requestComputationKey(request);
   let pending = inFlightRequests.get(key);
   if (!pending) {

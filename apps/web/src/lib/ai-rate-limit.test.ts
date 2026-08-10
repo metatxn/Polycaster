@@ -1,11 +1,12 @@
 import type { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it } from "vitest";
 import { checkAiRateLimit } from "./ai-rate-limit";
+import { TRUSTED_CLIENT_IP_HEADER } from "./client-ip";
 import { _resetRateLimitStore } from "./rate-limit";
 
 function makeRequest(ip: string): NextRequest {
   return {
-    headers: new Headers({ "cf-connecting-ip": ip }),
+    headers: new Headers({ [TRUSTED_CLIENT_IP_HEADER]: ip }),
     nextUrl: new URL("http://localhost/api/ai/extract-topics"),
   } as unknown as NextRequest;
 }

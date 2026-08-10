@@ -51,4 +51,34 @@ describe("getTraderHistoriesWithTradesBatch", () => {
     );
     expect(result?.tradesByAddress.get("0xabc")).toHaveLength(100);
   });
+
+  it("does not cache a history derived from a partial snapshot", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(
+        new DOMException("Request timed out", "TimeoutError")
+      )
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            type: "TRADE",
+            conditionId: "condition-1",
+            side: "BUY",
+            outcomeIndex: 0,
+            price: 0.4,
+            size: 25,
+            timestamp: 1_700_000_000,
+          },
+        ])
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getTraderHistory } = await import("./trader-history-cache");
+    const first = await getTraderHistory("0xDEF");
+    const second = await getTraderHistory("0xDEF");
+
+    expect(first.totalTrades).toBe(0);
+    expect(second.totalTrades).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

@@ -194,12 +194,10 @@ describe("GET /api/whales/suspicious", () => {
   it("returns 504 when the aggregate request signal is aborted", async () => {
     const controller = new AbortController();
     controller.abort(new DOMException("Request timed out", "TimeoutError"));
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new DOMException("Request timed out", "TimeoutError");
-      })
-    );
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException("Request timed out", "TimeoutError");
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const response = await GET(
       new NextRequest("https://knoww.app/api/whales/suspicious", {
@@ -212,6 +210,7 @@ describe("GET /api/whales/suspicious", () => {
       success: false,
       error: "Suspicious activity upstream request timed out",
     });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shares identical concurrent computations without retaining the result", async () => {

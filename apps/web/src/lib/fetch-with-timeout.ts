@@ -3,6 +3,50 @@ export interface RequestDeadline {
   dispose: () => void;
 }
 
+function keepDeadlineUntilBodyConsumed(
+  response: Response,
+  deadline: RequestDeadline
+): Response {
+  if (!response.body) {
+    deadline.dispose();
+    return response;
+  }
+
+  const reader = response.body.getReader();
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    deadline.dispose();
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await reader.read();
+        if (result.done) {
+          dispose();
+          controller.close();
+          return;
+        }
+        controller.enqueue(result.value);
+      } catch (error) {
+        dispose();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      dispose();
+      await reader.cancel(reason);
+    },
+  });
+
+  return new Response(body, {
+    headers: response.headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
 export function isAbortLikeError(error: unknown): boolean {
   if (!error || typeof error !== "object" || !("name" in error)) return false;
   const { name } = error as { name?: unknown };
@@ -18,23 +62,28 @@ export function createRequestDeadline(
   parentSignal?: AbortSignal | null
 ): RequestDeadline {
   const controller = new AbortController();
-  const abortFromParent = () => controller.abort(parentSignal?.reason);
+  let disposed = false;
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason);
+    dispose();
+  };
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException("Request timed out", "TimeoutError"));
+    dispose();
+  }, timeoutMs);
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    clearTimeout(timeoutId);
+    parentSignal?.removeEventListener("abort", abortFromParent);
+  };
 
   if (parentSignal?.aborted) abortFromParent();
   else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
 
-  const timeoutId = setTimeout(
-    () =>
-      controller.abort(new DOMException("Request timed out", "TimeoutError")),
-    timeoutMs
-  );
-
   return {
     signal: controller.signal,
-    dispose: () => {
-      clearTimeout(timeoutId);
-      parentSignal?.removeEventListener("abort", abortFromParent);
-    },
+    dispose,
   };
 }
 
@@ -46,9 +95,11 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
   const deadline = createRequestDeadline(timeoutMs, init.signal);
   try {
-    return await fetch(input, { ...init, signal: deadline.signal });
-  } finally {
+    const response = await fetch(input, { ...init, signal: deadline.signal });
+    return keepDeadlineUntilBodyConsumed(response, deadline);
+  } catch (error) {
     deadline.dispose();
+    throw error;
   }
 }
 

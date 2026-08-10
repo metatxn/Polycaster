@@ -1,6 +1,8 @@
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
+import { type Config, cookieToInitialState } from "wagmi";
 import { AppRouteProviders } from "@/components/app-route-providers";
+import { config } from "@/config";
 
 /**
  * Request-bound wallet state is scoped to product routes so static/editorial
@@ -12,7 +14,14 @@ export async function WalletRouteProviders({
   children: ReactNode;
 }) {
   const requestHeaders = await headers();
-  const cookies = requestHeaders.get("cookie");
+  const initialState = cookieToInitialState(
+    config as Config,
+    requestHeaders.get("cookie")
+  );
 
-  return <AppRouteProviders cookies={cookies}>{children}</AppRouteProviders>;
+  return (
+    <AppRouteProviders initialState={initialState}>
+      {children}
+    </AppRouteProviders>
+  );
 }

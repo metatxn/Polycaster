@@ -4,8 +4,11 @@
  * derived WalletEdge instead.
  */
 
+import { createLogger } from "@knoww/logger";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+
+const log = createLogger("insider.wallet-trades-cache");
 
 export interface WalletTradeRecord {
   conditionId: string;
@@ -20,6 +23,7 @@ export interface WalletActivitySnapshot {
   trades: WalletTradeRecord[];
   earliestTradeTimestamp: number | null;
   totalTrades: number;
+  partial: boolean;
 }
 
 const MAX_PAGES = 5;
@@ -37,11 +41,16 @@ interface RawActivityTrade {
   timestamp?: number;
 }
 
+interface WalletTradesPage {
+  rows: RawActivityTrade[];
+  failed: boolean;
+}
+
 async function fetchWalletTradesPage(
   address: string,
   offset: number,
   signal?: AbortSignal
-): Promise<RawActivityTrade[]> {
+): Promise<WalletTradesPage> {
   try {
     const url = `${POLYMARKET_API.DATA.BASE}/activity?user=${address.toLowerCase()}&limit=${PAGE_SIZE}&offset=${offset}`;
     const response = await fetchWithTimeout(url, {
@@ -49,12 +58,28 @@ async function fetchWalletTradesPage(
       next: { revalidate: 300 },
       signal,
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      log.warn("page.response.failed", {
+        address,
+        offset,
+        status: response.status,
+      });
+      return { rows: [], failed: true };
+    }
     const data = (await response.json()) as RawActivityTrade[];
-    return Array.isArray(data) ? data : [];
+    if (!Array.isArray(data)) {
+      log.warn("page.response.failed", {
+        address,
+        offset,
+        status: response.status,
+      });
+      return { rows: [], failed: true };
+    }
+    return { rows: data, failed: false };
   } catch (error) {
     if (signal?.aborted) throw error;
-    return [];
+    log.warn("page.fetch.failed", { address, offset, error });
+    return { rows: [], failed: true };
   }
 }
 
@@ -71,8 +96,18 @@ export async function fetchWalletActivitySnapshot(
   const trades: WalletTradeRecord[] = [];
   let earliestTradeTimestamp = Number.POSITIVE_INFINITY;
   let totalTrades = 0;
+  let partial = false;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const rows = await fetchWalletTradesPage(address, page * PAGE_SIZE, signal);
+    const result = await fetchWalletTradesPage(
+      address,
+      page * PAGE_SIZE,
+      signal
+    );
+    if (result.failed) {
+      partial = true;
+      break;
+    }
+    const { rows } = result;
     if (rows.length === 0) break;
     for (const r of rows) {
       if (r.type !== "TRADE") continue;
@@ -114,6 +149,7 @@ export async function fetchWalletActivitySnapshot(
       ? earliestTradeTimestamp
       : null,
     totalTrades,
+    partial,
   };
 }
 

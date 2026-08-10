@@ -1,12 +1,41 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const logger = vi.hoisted(() => ({ warn: vi.fn() }));
+
+vi.mock("@knoww/logger", () => ({
+  createLogger: () => logger,
+}));
+
 afterEach(() => {
+  logger.warn.mockClear();
   vi.restoreAllMocks();
   vi.resetModules();
   vi.unstubAllGlobals();
 });
 
 describe("getWalletTrades", () => {
+  it("marks an upstream response failure as a partial snapshot", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 503 }))
+    );
+
+    const { fetchWalletActivitySnapshot } = await import(
+      "./wallet-trades-cache"
+    );
+    const snapshot = await fetchWalletActivitySnapshot("0xABC");
+
+    expect(snapshot).toMatchObject({
+      trades: [],
+      totalTrades: 0,
+      partial: true,
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "page.response.failed",
+      expect.objectContaining({ status: 503 })
+    );
+  });
+
   it("does not retain full wallet histories between completed calls", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json([

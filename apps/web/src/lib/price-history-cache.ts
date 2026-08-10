@@ -183,9 +183,10 @@ export async function fetchCachedClobPriceHistory(
 ): Promise<ClobPriceHistoryResponse> {
   const key = cacheKey(tokenId, params);
   const cache = await openRegionalCache();
-  const cached = await readRegionalCache(cache, key);
-  if (cached) return cached;
   if (options.signal?.aborted) throw abortError(options.signal);
+  const cached = await readRegionalCache(cache, key);
+  if (options.signal?.aborted) throw abortError(options.signal);
+  if (cached) return cached;
 
   let sharedRequest = inFlight.get(key);
   if (!sharedRequest) {

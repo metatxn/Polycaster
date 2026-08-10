@@ -56,8 +56,15 @@ function sweepExpiredEntries(now: number): void {
   }
 }
 
-function evictOldestEntryAtCapacity(): void {
+function evictOldestEntryAtCapacity(now: number): void {
   if (rateLimitMap.size < RATE_LIMIT_MAX_ENTRIES) return;
+
+  for (const [key, value] of rateLimitMap) {
+    if (now > value.resetTime) {
+      rateLimitMap.delete(key);
+      return;
+    }
+  }
 
   const oldestKey = rateLimitMap.keys().next().value;
   if (oldestKey !== undefined) rateLimitMap.delete(oldestKey);
@@ -93,7 +100,7 @@ export function rateLimit(
 
   // If no store exists or reset time has passed, create new store
   if (!store || now > store.resetTime) {
-    if (!store) evictOldestEntryAtCapacity();
+    if (!store) evictOldestEntryAtCapacity(now);
     const resetTime = now + options.interval;
     rateLimitMap.set(uniqueId, {
       count: 1,

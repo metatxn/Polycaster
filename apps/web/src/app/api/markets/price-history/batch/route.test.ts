@@ -77,6 +77,19 @@ describe("POST /api/markets/price-history/batch", () => {
     expect(fetchClobPriceHistory).toHaveBeenCalledTimes(40);
   });
 
+  it("bypasses the Next data cache for upstream price-history requests", async () => {
+    vi.mocked(fetchClobPriceHistory).mockResolvedValue({ history: [] });
+
+    const res = await POST(makeRequest({ tokenIds: makeTokenIds(1) }));
+    const [, , options] = vi.mocked(fetchClobPriceHistory).mock.calls[0];
+
+    expect(res.status).toBe(200);
+    expect(options?.requestInit).toEqual(
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(options?.requestInit?.next).toBeUndefined();
+  });
+
   it("rejects requests whose estimated point count exceeds the worker budget", async () => {
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
 

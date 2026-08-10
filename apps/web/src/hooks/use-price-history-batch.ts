@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { alignPriceHistoryStartTs } from "@/lib/price-history-time";
 import { qk } from "@/lib/query-keys";
 
 /**
@@ -69,7 +70,10 @@ export function useBatchPriceHistory(
   // Stable, deduped, sorted list — keeps the query key invariant under
   // reorderings of the input.
   const normalized = Array.from(new Set(tokenIds.filter(Boolean))).sort();
-  const startTs = Math.floor(Date.now() / 1000) - lookbackDays * 24 * 60 * 60;
+  const startTs = alignPriceHistoryStartTs(
+    Math.floor(Date.now() / 1000) - lookbackDays * 24 * 60 * 60,
+    fidelity
+  );
 
   return useQuery({
     queryKey: qk.market.priceHistoryBatch(normalized, lookbackDays, fidelity),

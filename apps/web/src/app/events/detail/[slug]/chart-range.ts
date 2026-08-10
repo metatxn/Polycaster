@@ -1,6 +1,7 @@
 import Decimal from "decimal.js";
 import type { TimeRange } from "@/components/market-price-chart";
 import type { Event } from "@/hooks/use-event-detail";
+import { alignPriceHistoryStartTs } from "@/lib/price-history-time";
 import { isTeamMatchupEvent } from "./team-matchup-hero";
 
 /**
@@ -68,15 +69,20 @@ export function getChartRangePriceHistoryRequest(
       ? Math.min(parsedStart, nowSec)
       : fallback;
 
+    const fidelity = computeAllRangeFidelity(Math.max(60, nowSec - startTs));
     return {
-      startTs,
-      fidelity: computeAllRangeFidelity(Math.max(60, nowSec - startTs)),
+      startTs: alignPriceHistoryStartTs(startTs, fidelity),
+      fidelity,
     };
   }
 
+  const fidelity = chartTimeRangeToFidelity[timeRange];
   return {
-    startTs: nowSec - chartTimeRangeToStartTsOffset[timeRange],
-    fidelity: chartTimeRangeToFidelity[timeRange],
+    startTs: alignPriceHistoryStartTs(
+      nowSec - chartTimeRangeToStartTsOffset[timeRange],
+      fidelity
+    ),
+    fidelity,
   };
 }
 

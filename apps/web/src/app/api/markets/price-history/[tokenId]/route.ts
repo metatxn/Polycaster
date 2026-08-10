@@ -1,8 +1,5 @@
 import { createLogger } from "@knoww/logger";
-import {
-  ClobRequestError,
-  fetchClobPriceHistory,
-} from "@knoww/shared-types/clob";
+import { ClobRequestError } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { jsonError } from "@/lib/api-error";
@@ -14,21 +11,10 @@ import {
 } from "@/lib/api-query";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+import { fetchCachedClobPriceHistory } from "@/lib/price-history-cache";
+import { alignPriceHistoryStartTs } from "@/lib/price-history-time";
 
 const log = createLogger("api.markets.price-history");
-
-/**
- * Price history response from Polymarket CLOB API
- * @see https://docs.polymarket.com/api-reference/pricing/get-price-history-for-a-traded-token
- */
-interface PriceHistoryPoint {
-  t: number; // UTC timestamp (seconds)
-  p: number; // Price (0-1)
-}
-
-interface PolymarketPriceHistoryResponse {
-  history: PriceHistoryPoint[];
-}
 
 /**
  * GET /api/markets/price-history/[tokenId]
@@ -83,7 +69,7 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     // If no startTs provided, default to 30 days ago.
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
-    const { fidelity, startTs } = z
+    const parsedQuery = z
       .object({
         fidelity: clampedInt(1, 1440, 60),
         startTs: clampedInt(0, 4102444800, thirtyDaysAgo),
@@ -92,18 +78,16 @@ export async function GET(
         fidelity: orAbsent(searchParams.get("fidelity")),
         startTs: orAbsent(searchParams.get("startTs")),
       });
+    const fidelity = parsedQuery.fidelity;
+    const startTs = searchParams.has("startTs")
+      ? parsedQuery.startTs
+      : alignPriceHistoryStartTs(parsedQuery.startTs, fidelity);
 
     // Fetch from Polymarket CLOB API
-    const data = await fetchClobPriceHistory<PolymarketPriceHistoryResponse>(
-      tokenId,
-      { startTs, fidelity },
-      {
-        requestInit: {
-          headers: { "Content-Type": "application/json" },
-          next: { revalidate: 60 }, // Cache for 1 minute
-        },
-      }
-    );
+    const data = await fetchCachedClobPriceHistory(tokenId, {
+      startTs,
+      fidelity,
+    });
 
     // Return with cache headers - price history can be cached longer
     return NextResponse.json(

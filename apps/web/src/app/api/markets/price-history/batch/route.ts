@@ -1,23 +1,18 @@
 import { createLogger } from "@knoww/logger";
-import {
-  ClobRequestError,
-  fetchClobPriceHistory,
-} from "@knoww/shared-types/clob";
+import { ClobRequestError } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import { getCacheHeaders } from "@/lib/cache-headers";
+import { fetchCachedClobPriceHistory } from "@/lib/price-history-cache";
+import { alignPriceHistoryStartTs } from "@/lib/price-history-time";
 
 const log = createLogger("api.markets.price-history.batch");
 
 interface PriceHistoryPoint {
   t: number;
   p: number;
-}
-
-interface PolymarketPriceHistoryResponse {
-  history: PriceHistoryPoint[];
 }
 
 type BatchEntryStatus = "ok" | "timeout" | "upstream_error" | "not_found";
@@ -111,15 +106,11 @@ async function fetchOne(
   const onOuterAbort = () => controller.abort();
   outerSignal.addEventListener("abort", onOuterAbort, { once: true });
   try {
-    const data = await fetchClobPriceHistory<PolymarketPriceHistoryResponse>(
+    const data = await fetchCachedClobPriceHistory(
       tokenId,
       { startTs, fidelity },
       {
-        requestInit: {
-          headers: { "Content-Type": "application/json" },
-          next: { revalidate: 60 },
-          signal: controller.signal,
-        },
+        signal: controller.signal,
       }
     );
     return { tokenId, status: "ok", history: data.history ?? [] };
@@ -236,7 +227,9 @@ export async function POST(request: NextRequest) {
     const tokenIds = Array.from(new Set(parsed.data.tokenIds));
     const fidelity = parsed.data.fidelity ?? DEFAULT_FIDELITY;
     const nowTs = Math.floor(Date.now() / 1000);
-    const startTs = parsed.data.startTs ?? nowTs - 30 * 24 * 60 * 60;
+    const startTs =
+      parsed.data.startTs ??
+      alignPriceHistoryStartTs(nowTs - 30 * 24 * 60 * 60, fidelity);
     const estimatedTotalPoints = estimateTotalPoints(
       tokenIds.length,
       startTs,

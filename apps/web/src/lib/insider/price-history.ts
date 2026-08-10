@@ -7,10 +7,8 @@
  * price at T, and where did the market go N minutes after?"
  */
 
-import {
-  type ClobPriceHistoryPoint,
-  fetchClobPriceHistory,
-} from "@knoww/shared-types/clob";
+import type { ClobPriceHistoryPoint } from "@knoww/shared-types/clob";
+import { fetchCachedClobPriceHistory } from "@/lib/price-history-cache";
 
 export type PriceBucket = ClobPriceHistoryPoint;
 
@@ -23,7 +21,7 @@ export async function fetchPriceHistory(
   fidelityMinutes = 5
 ): Promise<PriceBucket[]> {
   try {
-    const data = await fetchClobPriceHistory(
+    const data = await fetchCachedClobPriceHistory(
       tokenId,
       {
         startTs: Math.floor(startTs),
@@ -31,7 +29,7 @@ export async function fetchPriceHistory(
         fidelity: fidelityMinutes,
       },
       {
-        requestInit: { next: { revalidate: 300 } },
+        cacheTtlSeconds: 300,
       }
     );
     return data.history ?? [];

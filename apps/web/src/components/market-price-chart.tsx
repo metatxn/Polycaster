@@ -20,6 +20,7 @@ import {
 } from "lightweight-charts";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { alignPriceHistoryStartTs } from "@/lib/price-history-time";
 import { qk } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
@@ -385,6 +386,7 @@ export function MarketPriceChart({
     startTs = nowSec - timeRangeToStartTsOffset[timeRange];
     fidelity = timeRangeToFidelity[timeRange];
   }
+  startTs = alignPriceHistoryStartTs(startTs, fidelity);
 
   // Combine primary + secondary tokens into the fetch set. When "Both" is
   // off, the series builder hides the secondary rows; the fetch still runs

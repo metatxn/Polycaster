@@ -1,3 +1,4 @@
+import { WalletRouteProviders } from "@/components/wallet-route-providers";
 import { buildPageMetadata, TITLE_TEMPLATE } from "@/lib/seo";
 import "@/app/styles/product.css";
 
@@ -19,5 +20,5 @@ export const metadata = {
 export default function WhalesLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return children;
+  return <WalletRouteProviders>{children}</WalletRouteProviders>;
 }

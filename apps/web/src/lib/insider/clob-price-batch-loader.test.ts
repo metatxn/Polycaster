@@ -52,6 +52,21 @@ describe("midpointFromOrderBook", () => {
 });
 
 describe("createClobPriceBatchLoader", () => {
+  it("propagates an aggregate abort instead of caching fallback prices", async () => {
+    const controller = new AbortController();
+    const fetchOrderBooks = vi.fn(
+      async (_ids: readonly string[], signal?: AbortSignal) => {
+        expect(signal).toBe(controller.signal);
+        throw new DOMException("Request timed out", "TimeoutError");
+      }
+    );
+    const load = createClobPriceBatchLoader({ fetchOrderBooks });
+
+    await expect(load(["token-a"], controller.signal)).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+  });
+
   it("deduplicates token ids and maps responses by asset_id", async () => {
     const fetchOrderBooks = vi.fn(async () => [
       book(

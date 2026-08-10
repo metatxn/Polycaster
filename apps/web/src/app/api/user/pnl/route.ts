@@ -4,6 +4,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import {
+  createRequestDeadline,
+  fetchWithTimeout,
+  isAbortLikeError,
+} from "@/lib/fetch-with-timeout";
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.user.pnl");
@@ -76,6 +81,7 @@ const ACTIVITY_PAGE_SIZE = 100;
 const MAX_ACTIVITY_PAGES = 10;
 const POSITIONS_PAGE_SIZE = 100;
 const MAX_POSITIONS_PAGES = 10;
+const REQUEST_DEADLINE_MS = 25_000;
 
 /**
  * Helper to convert null/empty to undefined for optional fields
@@ -200,7 +206,8 @@ function pageCrossesStartDate(
 
 async function fetchActivity(
   user: string,
-  startDate: Date | null
+  startDate: Date | null,
+  signal?: AbortSignal
 ): Promise<ActivityResult> {
   const startTimestampMs = startDate?.getTime() ?? null;
   const trades: NormalizedTradeData[] = [];
@@ -209,11 +216,12 @@ async function fetchActivity(
 
   for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
     const offset = page * ACTIVITY_PAGE_SIZE;
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${DATA_API_BASE}/activity?user=${user.toLowerCase()}&limit=${ACTIVITY_PAGE_SIZE}&offset=${offset}`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 60 },
+        signal,
       }
     );
 
@@ -253,16 +261,20 @@ async function fetchActivity(
   return { trades, pagesFetched, truncated: true };
 }
 
-async function fetchPositions(user: string): Promise<PositionsResult> {
+async function fetchPositions(
+  user: string,
+  signal?: AbortSignal
+): Promise<PositionsResult> {
   const positions: PositionData[] = [];
   const seen = new Set<string>();
 
   for (let page = 0; page < MAX_POSITIONS_PAGES; page++) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${DATA_API_BASE}/positions?user=${user.toLowerCase()}&sizeThreshold=.1&limit=${POSITIONS_PAGE_SIZE}&offset=${page * POSITIONS_PAGE_SIZE}`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 60 },
+        signal,
       }
     );
     if (!response.ok) throw new Error("Failed to fetch positions");
@@ -325,6 +337,8 @@ async function fetchPositions(user: string): Promise<PositionsResult> {
  *         description: Rate limit exceeded.
  *       500:
  *         description: Request failed.
+ *       504:
+ *         description: Upstream request timed out.
  */
 export async function GET(request: NextRequest) {
   // Rate limit: 30 requests per minute (expensive endpoint)
@@ -332,6 +346,8 @@ export async function GET(request: NextRequest) {
     uniqueTokenPerInterval: 30,
   });
   if (rateLimitResponse) return rateLimitResponse;
+
+  const deadline = createRequestDeadline(REQUEST_DEADLINE_MS, request.signal);
 
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -392,15 +408,16 @@ export async function GET(request: NextRequest) {
     const pnlInterval = intervalMap[period] || "all";
 
     // Fetch P&L from Polymarket's dedicated P&L API
-    const pnlApiResponse = await fetch(
+    const pnlApiResponse = await fetchWithTimeout(
       `${USER_PNL_API}/user-pnl?user_address=${user.toLowerCase()}&interval=${pnlInterval}&fidelity=1d`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 60 },
+        signal: deadline.signal,
       }
     );
 
-    const positionsResult = await fetchPositions(user);
+    const positionsResult = await fetchPositions(user, deadline.signal);
     const allPositions = positionsResult.positions;
 
     // Filter to show only OPEN positions
@@ -412,7 +429,7 @@ export async function GET(request: NextRequest) {
       return isOpenPosition || isWinningRedeemable;
     });
 
-    const activity = await fetchActivity(user, startDate);
+    const activity = await fetchActivity(user, startDate, deadline.signal);
     const trades = activity.trades;
 
     // Try to get P&L from dedicated API, fallback to position-based calculation
@@ -600,6 +617,13 @@ export async function GET(request: NextRequest) {
       pnlHistory: pnlApiData,
     });
   } catch (error) {
+    if (deadline.signal.aborted || isAbortLikeError(error)) {
+      log.warn("calculate.timeout", { timeoutMs: REQUEST_DEADLINE_MS });
+      return NextResponse.json(
+        { success: false, error: "P&L request timed out" },
+        { status: 504 }
+      );
+    }
     log.error("calculate.failed", { error });
     return NextResponse.json(
       {
@@ -608,5 +632,7 @@ export async function GET(request: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    deadline.dispose();
   }
 }

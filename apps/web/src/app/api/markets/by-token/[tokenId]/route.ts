@@ -2,6 +2,7 @@ import { createLogger } from "@knoww/logger";
 import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 
 const log = createLogger("api.markets.by-token");
 
@@ -138,18 +139,21 @@ export async function GET(
 
         const eventSlug = await resolveEventSlug(market);
 
-        return NextResponse.json({
-          success: true,
-          market: {
-            question: market.question || market.title || "Unknown Market",
-            slug: market.slug || market.marketSlug || "",
-            eventSlug,
-            conditionId: market.conditionId || "",
-            outcome,
-            endDate: market.endDate || market.endDateIso || null,
-            icon: market.image || market.icon || null,
+        return NextResponse.json(
+          {
+            success: true,
+            market: {
+              question: market.question || market.title || "Unknown Market",
+              slug: market.slug || market.marketSlug || "",
+              eventSlug,
+              conditionId: market.conditionId || "",
+              outcome,
+              endDate: market.endDate || market.endDateIso || null,
+              icon: market.image || market.icon || null,
+            },
           },
-        });
+          { headers: getCacheHeaders("events") }
+        );
       }
     }
 

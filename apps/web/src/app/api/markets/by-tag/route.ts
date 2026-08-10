@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { fetchGammaKeysetPage } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
 
@@ -116,16 +117,19 @@ export async function GET(request: NextRequest) {
       ["markets", "data"]
     );
 
-    return NextResponse.json({
-      success: true,
-      count: page.items.length,
-      markets: page.items,
-      tag_id: parsedTagId,
-      pagination: {
-        hasMore: Boolean(page.nextCursor),
-        nextCursor: page.nextCursor,
+    return NextResponse.json(
+      {
+        success: true,
+        count: page.items.length,
+        markets: page.items,
+        tag_id: parsedTagId,
+        pagination: {
+          hasMore: Boolean(page.nextCursor),
+          nextCursor: page.nextCursor,
+        },
       },
-    });
+      { headers: getCacheHeaders("events") }
+    );
   } catch (error) {
     logger.error("markets.by_tag.fetch_failed", {
       error: error instanceof Error ? error.message : String(error),

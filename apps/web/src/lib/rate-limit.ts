@@ -22,6 +22,9 @@ interface RateLimitStore {
 
 const rateLimitMap = new Map<string, RateLimitStore>();
 
+/** Keep per-isolate identity churn from turning the limiter into a leak. */
+export const RATE_LIMIT_MAX_ENTRIES = 10_000;
+
 interface RateLimitOptions {
   interval: number; // Time window in milliseconds
   uniqueTokenPerInterval: number; // Max requests per interval
@@ -51,6 +54,13 @@ function sweepExpiredEntries(now: number): void {
       rateLimitMap.delete(key);
     }
   }
+}
+
+function evictOldestEntryAtCapacity(): void {
+  if (rateLimitMap.size < RATE_LIMIT_MAX_ENTRIES) return;
+
+  const oldestKey = rateLimitMap.keys().next().value;
+  if (oldestKey !== undefined) rateLimitMap.delete(oldestKey);
 }
 
 /** Test-only introspection helper. Not for production use. */
@@ -83,6 +93,7 @@ export function rateLimit(
 
   // If no store exists or reset time has passed, create new store
   if (!store || now > store.resetTime) {
+    if (!store) evictOldestEntryAtCapacity();
     const resetTime = now + options.interval;
     rateLimitMap.set(uniqueId, {
       count: 1,

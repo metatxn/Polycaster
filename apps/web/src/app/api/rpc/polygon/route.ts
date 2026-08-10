@@ -2,6 +2,11 @@ import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import {
+  createRequestDeadline,
+  fetchWithTimeout,
+  isAbortLikeError,
+} from "@/lib/fetch-with-timeout";
 import { isAllowedOrigin } from "@/lib/origin-guard";
 
 const log = createLogger("api.rpc.polygon");
@@ -18,6 +23,7 @@ const log = createLogger("api.rpc.polygon");
 // Per-endpoint timeout. Keep this low so failed public RPCs do not hold the
 // user request open for too long while the proxy tries fallbacks.
 const PER_ENDPOINT_TIMEOUT_MS = 5000;
+const REQUEST_DEADLINE_MS = 20_000;
 
 // Maximum request body size (100KB — well above any legitimate JSON-RPC payload)
 const MAX_BODY_SIZE = 100 * 1024;
@@ -463,23 +469,22 @@ type EndpointFetchResult =
 
 async function fetchFromEndpoint(
   endpoint: RpcEndpoint,
-  body: unknown
+  body: unknown,
+  signal?: AbortSignal
 ): Promise<EndpointFetchResult> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    PER_ENDPOINT_TIMEOUT_MS
-  );
-
   try {
-    const response = await fetch(endpoint.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      endpoint.url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal,
       },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+      PER_ENDPOINT_TIMEOUT_MS
+    );
 
     if (!response.ok) {
       log.warn("upstream.non2xx", {
@@ -528,7 +533,8 @@ async function fetchFromEndpoint(
     });
     return { kind: "success", data, status: response.status };
   } catch (error) {
-    const isAbortError = error instanceof Error && error.name === "AbortError";
+    if (signal?.aborted) throw error;
+    const isAbortError = isAbortLikeError(error);
     log.warn(isAbortError ? "upstream.timeout" : "upstream.fetch_failed", {
       provider: endpoint.provider,
       endpoint: endpoint.name,
@@ -537,8 +543,6 @@ async function fetchFromEndpoint(
     });
     markEndpointUnhealthy(endpoint, isAbortError ? "timeout" : "fetch_failed");
     return { kind: "failed" };
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
@@ -565,6 +569,8 @@ async function fetchFromEndpoint(
  *         description: Request failed.
  *       502:
  *         description: Upstream unavailable or response exceeded the byte cap.
+ *       504:
+ *         description: Aggregate upstream fallback deadline exceeded.
  */
 export async function POST(request: NextRequest) {
   const requestOrigin = request.headers.get("origin");
@@ -590,6 +596,8 @@ export async function POST(request: NextRequest) {
 
   // Parse JSON body with dedicated error handling
   let body: unknown;
+  const deadline = createRequestDeadline(REQUEST_DEADLINE_MS, request.signal);
+
   try {
     const rawBody = await request.text();
     if (rawBody.length > MAX_BODY_SIZE) {
@@ -669,7 +677,7 @@ export async function POST(request: NextRequest) {
     });
 
     for (const endpoint of endpoints) {
-      const result = await fetchFromEndpoint(endpoint, body);
+      const result = await fetchFromEndpoint(endpoint, body, deadline.signal);
       if (result.kind === "success") {
         return NextResponse.json(result.data, {
           status: result.status,
@@ -689,8 +697,14 @@ export async function POST(request: NextRequest) {
     });
     return jsonError("RPC upstream unavailable", 502, corsHeaders);
   } catch (error) {
+    if (deadline.signal.aborted || isAbortLikeError(error)) {
+      log.warn("proxy.timeout", { timeoutMs: REQUEST_DEADLINE_MS });
+      return jsonError("RPC upstream request timed out", 504, corsHeaders);
+    }
     log.error("proxy.failed", { error });
     return jsonError("Internal server error", 500, corsHeaders);
+  } finally {
+    deadline.dispose();
   }
 }
 

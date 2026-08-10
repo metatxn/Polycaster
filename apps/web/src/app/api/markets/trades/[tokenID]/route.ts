@@ -2,6 +2,7 @@ import { createLogger } from "@knoww/logger";
 import { ClobRequestError } from "@knoww/shared-types/clob";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { fetchTrades } from "@/lib/polymarket";
 
 const log = createLogger("api.markets.trades");
@@ -50,11 +51,14 @@ export async function GET(
     // Fetch trades directly from CLOB API
     const trades = await fetchTrades(tokenID);
 
-    return NextResponse.json({
-      success: true,
-      tokenID,
-      trades,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        tokenID,
+        trades,
+      },
+      { headers: getCacheHeaders("realtime") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
     // Never reflect the upstream/exception message to the client (CWE-209).

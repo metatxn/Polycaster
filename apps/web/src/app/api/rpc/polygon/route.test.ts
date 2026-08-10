@@ -47,6 +47,7 @@ function oversizedStreamResponse(totalBytes: number): Response {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
@@ -228,5 +229,35 @@ describe("POST /api/rpc/polygon", () => {
     expect(res.status).toBe(502);
     expect(body.error).toContain("unavailable");
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("returns 504 when the aggregate fallback deadline expires", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_input: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () =>
+                reject(
+                  init.signal?.reason ??
+                    new DOMException("Request timed out", "TimeoutError")
+                ),
+              { once: true }
+            );
+          })
+      )
+    );
+
+    const responsePromise = POST(makeRequest(rpcCall("eth_blockNumber")));
+    await vi.advanceTimersByTimeAsync(40_000);
+    const response = await responsePromise;
+
+    expect(response.status).toBe(504);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "RPC upstream request timed out",
+    });
   });
 });

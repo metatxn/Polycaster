@@ -3,14 +3,21 @@ import {
   fetchClobOrderBooks,
 } from "@knoww/shared-types/clob";
 import Decimal from "decimal.js";
+import { isAbortLikeError } from "@/lib/fetch-with-timeout";
 
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 50;
 const DEFAULT_MAX_ENTRIES = 1_000;
 
 type FetchOrderBooks = (
-  tokenIds: readonly string[]
+  tokenIds: readonly string[],
+  signal?: AbortSignal
 ) => Promise<ClobOrderBook[]>;
+
+type LoadPrices = (
+  tokenIds: readonly string[],
+  signal?: AbortSignal
+) => Promise<Map<string, number | null>>;
 
 interface PriceCacheEntry {
   expiresAt: number;
@@ -63,7 +70,7 @@ export function resolveReferencePrice(
 
 export function createClobPriceBatchLoader(
   options: ClobPriceBatchLoaderOptions = {}
-): (tokenIds: readonly string[]) => Promise<Map<string, number | null>> {
+): LoadPrices {
   const batchSize = Math.max(
     1,
     Math.floor(options.batchSize ?? DEFAULT_BATCH_SIZE)
@@ -74,7 +81,18 @@ export function createClobPriceBatchLoader(
   );
   const ttlMs = Math.max(1, options.ttlMs ?? DEFAULT_TTL_MS);
   const now = options.now ?? Date.now;
-  const fetchOrderBooks = options.fetchOrderBooks ?? fetchClobOrderBooks;
+  const fetchOrderBooks: FetchOrderBooks =
+    options.fetchOrderBooks ??
+    ((tokenIds, signal) =>
+      fetchClobOrderBooks(
+        tokenIds,
+        signal
+          ? {
+              useUnifiedSdk: false,
+              requestInit: { signal },
+            }
+          : undefined
+      ));
   const cache = new Map<string, PriceCacheEntry>();
 
   function cachePrice(tokenId: string, price: number | null): void {
@@ -87,7 +105,7 @@ export function createClobPriceBatchLoader(
     }
   }
 
-  return async (tokenIds) => {
+  return async (tokenIds, signal) => {
     const uniqueTokenIds = [...new Set(tokenIds.filter(Boolean))];
     const prices = new Map<string, number | null>();
     const uncached: string[] = [];
@@ -109,8 +127,11 @@ export function createClobPriceBatchLoader(
       const batch = uncached.slice(index, index + batchSize);
       let books: ClobOrderBook[] = [];
       try {
-        books = await fetchOrderBooks(batch);
-      } catch {
+        books = signal
+          ? await fetchOrderBooks(batch, signal)
+          : await fetchOrderBooks(batch);
+      } catch (error) {
+        if (signal?.aborted || isAbortLikeError(error)) throw error;
         // Preserve the route's existing trade-price fallback on upstream errors.
       }
 

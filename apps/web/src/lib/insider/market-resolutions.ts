@@ -178,6 +178,12 @@ interface KBCacheEntry {
 let kbCache: KBCacheEntry | null = null;
 let kbBuildPromise: Promise<ResolutionKnowledgeBase> | null = null;
 
+/** Return only a fresh in-memory KB without starting background work. */
+export function peekCachedKB(): ResolutionKnowledgeBase | null {
+  if (!kbCache || Date.now() - kbCache.fetchedAt > KB_TTL_MS) return null;
+  return kbCache.kb;
+}
+
 /**
  * Keep a background promise alive past the response on Cloudflare Workers.
  * Without waitUntil, detached work is killed when the response is sent —

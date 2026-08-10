@@ -1,21 +1,14 @@
 /**
- * Per-wallet trade history cache — enriched with the fields needed
- * to compute the category-specialist archetype (slug for categorization,
- * conditionId for market-resolution lookup, side/outcomeIndex/price/size
- * for P&L).
- *
- * Separate from `trader-history-cache.ts` to avoid bloating the lean
- * entry shape that the live `/api/whales/suspicious` route depends on.
- * That cache answers "how old is this wallet" fast; this one answers
- * "what did this wallet actually do."
+ * Transient per-wallet trade loader. Full trade histories are intentionally
+ * never retained at module scope: the live route caches the much smaller
+ * derived WalletEdge instead.
  */
 
 import { POLYMARKET_API } from "@/constants/polymarket";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 
 export interface WalletTradeRecord {
   conditionId: string;
-  slug: string;
-  eventSlug: string;
   side: "BUY" | "SELL";
   outcomeIndex: number;
   price: number;
@@ -23,17 +16,14 @@ export interface WalletTradeRecord {
   timestamp: number;
 }
 
-interface CacheEntry {
+export interface WalletActivitySnapshot {
   trades: WalletTradeRecord[];
-  fetchedAt: number;
+  earliestTradeTimestamp: number | null;
+  totalTrades: number;
 }
 
-const CACHE_TTL_MS = 15 * 60 * 1000;
-const MAX_CACHE_SIZE = 500;
 const MAX_PAGES = 5;
 const PAGE_SIZE = 100;
-
-const cache = new Map<string, CacheEntry>();
 
 interface RawActivityTrade {
   type?: string;
@@ -47,68 +37,56 @@ interface RawActivityTrade {
   timestamp?: number;
 }
 
-function evictStale() {
-  const now = Date.now();
-  const stale: string[] = [];
-  for (const [k, v] of cache) {
-    if (now - v.fetchedAt > CACHE_TTL_MS) stale.push(k);
-  }
-  for (const k of stale) cache.delete(k);
-  if (cache.size > MAX_CACHE_SIZE) {
-    const sorted = [...cache.entries()].sort(
-      (a, b) => a[1].fetchedAt - b[1].fetchedAt
-    );
-    for (let i = 0; i < sorted.length - MAX_CACHE_SIZE; i++) {
-      cache.delete(sorted[i][0]);
-    }
-  }
-}
-
 async function fetchWalletTradesPage(
   address: string,
-  offset: number
+  offset: number,
+  signal?: AbortSignal
 ): Promise<RawActivityTrade[]> {
   try {
     const url = `${POLYMARKET_API.DATA.BASE}/activity?user=${address.toLowerCase()}&limit=${PAGE_SIZE}&offset=${offset}`;
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: { Accept: "application/json" },
       next: { revalidate: 300 },
+      signal,
     });
     if (!response.ok) return [];
     const data = (await response.json()) as RawActivityTrade[];
     return Array.isArray(data) ? data : [];
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return [];
   }
 }
 
 /**
- * Fetch (or return cached) per-wallet trade history, filtered to only
- * TRADE activities. Walks up to 500 activities (5 pages × 100); beyond
- * that we'd be looking at a power-user whose specialty signal is
- * strong regardless of tail.
+ * Walk up to 500 activities while deriving the lean history summary and,
+ * optionally, the records needed for WalletEdge calculation in one pass.
  */
-export async function getWalletTrades(
-  rawAddress: string
-): Promise<WalletTradeRecord[]> {
+export async function fetchWalletActivitySnapshot(
+  rawAddress: string,
+  collectTrades = true,
+  signal?: AbortSignal
+): Promise<WalletActivitySnapshot> {
   const address = rawAddress.toLowerCase();
-  const now = Date.now();
-
-  const cached = cache.get(address);
-  if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached.trades;
-  }
-
   const trades: WalletTradeRecord[] = [];
+  let earliestTradeTimestamp = Number.POSITIVE_INFINITY;
+  let totalTrades = 0;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const rows = await fetchWalletTradesPage(address, page * PAGE_SIZE);
+    const rows = await fetchWalletTradesPage(address, page * PAGE_SIZE, signal);
     if (rows.length === 0) break;
     for (const r of rows) {
       if (r.type !== "TRADE") continue;
+      totalTrades += 1;
+      if (
+        typeof r.timestamp === "number" &&
+        r.timestamp < earliestTradeTimestamp
+      ) {
+        earliestTradeTimestamp = r.timestamp;
+      }
+      if (!collectTrades) continue;
       if (
         !(
           r.conditionId &&
-          r.slug &&
           r.side &&
           typeof r.outcomeIndex === "number" &&
           typeof r.price === "number" &&
@@ -120,8 +98,6 @@ export async function getWalletTrades(
       }
       trades.push({
         conditionId: r.conditionId,
-        slug: r.slug,
-        eventSlug: r.eventSlug ?? r.slug,
         side: r.side,
         outcomeIndex: r.outcomeIndex,
         price: r.price,
@@ -132,21 +108,34 @@ export async function getWalletTrades(
     if (rows.length < PAGE_SIZE) break;
   }
 
-  evictStale();
-  cache.set(address, { trades, fetchedAt: now });
-  return trades;
+  return {
+    trades,
+    earliestTradeTimestamp: Number.isFinite(earliestTradeTimestamp)
+      ? earliestTradeTimestamp
+      : null,
+    totalTrades,
+  };
+}
+
+export async function getWalletTrades(
+  rawAddress: string,
+  signal?: AbortSignal
+): Promise<WalletTradeRecord[]> {
+  return (await fetchWalletActivitySnapshot(rawAddress, true, signal)).trades;
 }
 
 export async function getWalletTradesBatch(
   addresses: string[],
-  concurrency = 6
+  concurrency = 6,
+  signal?: AbortSignal
 ): Promise<Map<string, WalletTradeRecord[]>> {
   const results = new Map<string, WalletTradeRecord[]>();
   for (let i = 0; i < addresses.length; i += concurrency) {
     const batch = addresses.slice(i, i + concurrency);
     const entries = await Promise.all(
       batch.map(
-        async (a) => [a.toLowerCase(), await getWalletTrades(a)] as const
+        async (a) =>
+          [a.toLowerCase(), await getWalletTrades(a, signal)] as const
       )
     );
     for (const [addr, trades] of entries) results.set(addr, trades);

@@ -1,11 +1,16 @@
 import { createLogger } from "@knoww/logger";
 import Decimal from "decimal.js";
-import { type NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { clampedInt, nonNegativeFloatParam, orAbsent } from "@/lib/api-query";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+import {
+  createRequestDeadline,
+  fetchWithTimeout,
+  waitForAbort,
+} from "@/lib/fetch-with-timeout";
 import { scoreFundingCluster } from "@/lib/insider/archetypes/funding-cluster";
 import { scoreOwnerCluster } from "@/lib/insider/archetypes/owner-cluster";
 
@@ -20,6 +25,31 @@ const MIN_USD_VALUE_FLOOR = 100;
 // loaders. Trades from wallets past the cap simply aren't scored (they have
 // no history context), keeping the response valid but bounded.
 const MAX_UNIQUE_TRADERS = 200;
+const REQUEST_DEADLINE_MS = 25_000;
+
+interface SerializedResponse {
+  body: string;
+  headers: [string, string][];
+  status: number;
+}
+
+const inFlightRequests = new Map<string, Promise<SerializedResponse>>();
+
+function requestComputationKey(request: NextRequest): string {
+  const url = new URL(request.url);
+  url.searchParams.sort();
+  return `${url.pathname}?${url.searchParams.toString()}`;
+}
+
+async function serializeResponse(
+  response: NextResponse
+): Promise<SerializedResponse> {
+  return {
+    body: await response.text(),
+    headers: [...response.headers.entries()],
+    status: response.status,
+  };
+}
 
 import type {
   AccumulatedTrade,
@@ -45,14 +75,17 @@ import {
   getWalletFundingBatch,
   type WalletFunding,
 } from "@/lib/insider/funding-source";
-import { getCachedKB } from "@/lib/insider/market-resolutions";
+import { getCachedKB, peekCachedKB } from "@/lib/insider/market-resolutions";
 import { getSafeOwnersBatch, type SafeOwners } from "@/lib/insider/safe-owner";
 import {
   type PriceIndependentTradeContext,
   planSuspiciousPriceCandidates,
 } from "@/lib/insider/suspicious-price-plan";
 import { getCachedWalletEdgesBatch } from "@/lib/insider/wallet-edge-cache";
-import { getTraderHistoriesBatch } from "@/lib/trader-history-cache";
+import {
+  getTraderHistoriesBatch,
+  getTraderHistoriesWithTradesBatch,
+} from "@/lib/trader-history-cache";
 
 /**
  * Suspicious/Insider Activity Detection API v2
@@ -145,6 +178,32 @@ export interface SuspiciousActivityResponse {
   error?: string;
 }
 
+function createSuspiciousErrorResponse(timedOut: boolean): NextResponse {
+  return NextResponse.json(
+    {
+      success: false,
+      activities: [],
+      stats: {
+        totalTradesScanned: 0,
+        uniqueTradersFound: 0,
+        tradersAnalyzed: 0,
+        truncated: false,
+        newAccountsFound: 0,
+        suspiciousActivities: 0,
+        criticalCount: 0,
+        highCount: 0,
+        mediumCount: 0,
+        repeatOffenders: 0,
+      },
+      lastUpdated: new Date().toISOString(),
+      error: timedOut
+        ? "Suspicious activity upstream request timed out"
+        : "Failed to fetch suspicious activity",
+    } satisfies SuspiciousActivityResponse,
+    { status: timedOut ? 504 : 500 }
+  );
+}
+
 interface TradeData {
   proxyWallet: string;
   side: "BUY" | "SELL";
@@ -192,18 +251,23 @@ function volumeWeightedAveragePrice(rows: AccumulatedTrade[]): number {
   return weighted.div(totalSize).toNumber();
 }
 
-async function fetchRecentTrades(limit = 500): Promise<TradeData[]> {
+async function fetchRecentTrades(
+  limit = 500,
+  signal?: AbortSignal
+): Promise<TradeData[]> {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/trades?limit=${limit}`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 60 },
+        signal,
       }
     );
     if (!response.ok) return [];
     return response.json();
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return [];
   }
 }
@@ -229,12 +293,11 @@ async function fetchRecentTrades(limit = 500): Promise<TradeData[]> {
  *         description: Rate limit exceeded.
  *       500:
  *         description: Request failed.
+ *       504:
+ *         description: Upstream request deadline exceeded.
  */
-export async function GET(request: NextRequest) {
-  const rateLimitResponse = checkRateLimit(request, {
-    uniqueTokenPerInterval: 10,
-  });
-  if (rateLimitResponse) return rateLimitResponse;
+async function computeSuspiciousResponse(request: NextRequest) {
+  const deadline = createRequestDeadline(REQUEST_DEADLINE_MS, request.signal);
 
   try {
     const { searchParams } = new URL(request.url);
@@ -269,7 +332,7 @@ export async function GET(request: NextRequest) {
     const minShares = nonNegativeFloatParam(searchParams.get("minShares"), 0);
 
     // Step 1: Fetch recent trades globally
-    const recentTrades = await fetchRecentTrades(500);
+    const recentTrades = await fetchRecentTrades(500, deadline.signal);
 
     if (recentTrades.length === 0) {
       return NextResponse.json(
@@ -314,8 +377,20 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Step 4: Batch-fetch trader histories using the paginated cache
-    const traderHistories = await getTraderHistoriesBatch(uniqueTraders, 10);
+    // Step 4: When the resolution KB is already warm, derive trader history
+    // and edge-ready records from the same activity pages. The records remain
+    // request-local and are discarded after WalletEdge calculation.
+    const warmKb = peekCachedKB();
+    const combinedHistory = warmKb
+      ? await getTraderHistoriesWithTradesBatch(
+          uniqueTraders,
+          10,
+          deadline.signal
+        )
+      : null;
+    const traderHistories = combinedHistory
+      ? combinedHistory.histories
+      : await getTraderHistoriesBatch(uniqueTraders, 10, deadline.signal);
 
     // Step 5: Pre-compute per-wallet market involvement for
     // account-loader's repeat-offender factor.
@@ -412,10 +487,17 @@ export async function GET(request: NextRequest) {
     // here and serves Phase 2 only. Subsequent requests (after the
     // background build settles, typically <60s) get the full
     // ensemble including specialist.
-    const kb = getCachedKB({ minVolumeUsd: 1000, maxPages: 10 });
+    const kb = warmKb ?? getCachedKB({ minVolumeUsd: 1000, maxPages: 10 });
     const walletEdges = kb
-      ? await getCachedWalletEdgesBatch(uniqueTraders, kb, 6)
+      ? await getCachedWalletEdgesBatch(
+          uniqueTraders,
+          kb,
+          6,
+          combinedHistory?.tradesByAddress,
+          deadline.signal
+        )
       : new Map();
+    combinedHistory?.tradesByAddress.clear();
 
     // Step 7: Build the complete price-independent scoring context first.
     // This lets us prove which trades cannot meet the threshold even under
@@ -463,7 +545,10 @@ export async function GET(request: NextRequest) {
       })),
       minSuspicionScore
     );
-    const priceCache = await loadCurrentClobPrices(priceCandidateIds);
+    const priceCache = await loadCurrentClobPrices(
+      priceCandidateIds,
+      deadline.signal
+    );
 
     // Step 9: Analyze trades. Run every trade (not just new-account
     // trades) through the ensemble — size-hider and timing-cluster are
@@ -576,7 +661,11 @@ export async function GET(request: NextRequest) {
 
     const fundingMap =
       specialistWallets.size > 0
-        ? await getWalletFundingBatch([...specialistWallets], 4)
+        ? await getWalletFundingBatch(
+            [...specialistWallets],
+            4,
+            deadline.signal
+          )
         : new Map<string, WalletFunding>();
 
     const funderToSpecialistWallets = new Map<string, Set<string>>();
@@ -644,7 +733,7 @@ export async function GET(request: NextRequest) {
     ];
     const ownerMap =
       flaggedWallets.length > 0
-        ? await getSafeOwnersBatch(flaggedWallets)
+        ? await getSafeOwnersBatch(flaggedWallets, deadline.signal)
         : new Map<string, SafeOwners>();
 
     const ownerToFlaggedWallets = new Map<string, Set<string>>();
@@ -748,26 +837,43 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     log.error("fetch.failed", { error });
-    return NextResponse.json(
-      {
-        success: false,
-        activities: [],
-        stats: {
-          totalTradesScanned: 0,
-          uniqueTradersFound: 0,
-          tradersAnalyzed: 0,
-          truncated: false,
-          newAccountsFound: 0,
-          suspiciousActivities: 0,
-          criticalCount: 0,
-          highCount: 0,
-          mediumCount: 0,
-          repeatOffenders: 0,
-        },
-        lastUpdated: new Date().toISOString(),
-        error: "Failed to fetch suspicious activity",
-      } satisfies SuspiciousActivityResponse,
-      { status: 500 }
-    );
+    const timedOut = deadline.signal.aborted;
+    return createSuspiciousErrorResponse(timedOut);
+  } finally {
+    deadline.dispose();
   }
+}
+
+export async function GET(request: NextRequest) {
+  const rateLimitResponse = checkRateLimit(request, {
+    uniqueTokenPerInterval: 10,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const key = requestComputationKey(request);
+  let pending = inFlightRequests.get(key);
+  if (!pending) {
+    const computationRequest = new NextRequest(request.url);
+    const computation =
+      computeSuspiciousResponse(computationRequest).then(serializeResponse);
+    pending = computation.finally(() => {
+      if (inFlightRequests.get(key) === pending) {
+        inFlightRequests.delete(key);
+      }
+    });
+    inFlightRequests.set(key, pending);
+  }
+
+  let response: SerializedResponse;
+  try {
+    response = await waitForAbort(pending, request.signal);
+  } catch (error) {
+    const timedOut = request.signal.aborted;
+    log.error("shared-computation.failed", { error, timedOut });
+    return createSuspiciousErrorResponse(timedOut);
+  }
+  return new NextResponse(response.body, {
+    headers: response.headers,
+    status: response.status,
+  });
 }

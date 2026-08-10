@@ -67,6 +67,27 @@ function makePosition(
 }
 
 describe("GET /api/user/positions", () => {
+  it("returns 504 for an upstream timeout", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("Request timed out", "TimeoutError");
+      })
+    );
+
+    const res = await GET(
+      new NextRequest(
+        "https://knoww.app/api/user/positions?user=0x0000000000000000000000000000000000000001"
+      )
+    );
+
+    expect(res.status).toBe(504);
+    await expect(res.json()).resolves.toMatchObject({
+      success: false,
+      error: "Request to Polymarket timed out",
+    });
+  });
+
   it("merges open and redeemable positions with one merged page slice", () => {
     const source = readSource("src/app/api/user/positions/route.ts");
 

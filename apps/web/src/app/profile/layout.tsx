@@ -1,3 +1,4 @@
+import { WalletRouteProviders } from "@/components/wallet-route-providers";
 import { buildNoIndexMetadata } from "@/lib/seo";
 import "@/app/styles/product.css";
 
@@ -10,5 +11,5 @@ export const metadata = buildNoIndexMetadata({
 export default function ProfileLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return children;
+  return <WalletRouteProviders>{children}</WalletRouteProviders>;
 }

@@ -11,10 +11,15 @@ vi.mock("@/lib/cache-headers", () => ({
 
 vi.mock("@/lib/trader-history-cache", () => ({
   getTraderHistoriesBatch: vi.fn(async () => new Map()),
+  getTraderHistoriesWithTradesBatch: vi.fn(async () => ({
+    histories: new Map(),
+    tradesByAddress: new Map(),
+  })),
 }));
 
 vi.mock("@/lib/insider/market-resolutions", () => ({
   getCachedKB: vi.fn(() => null),
+  peekCachedKB: vi.fn(() => null),
 }));
 
 vi.mock("@/lib/insider/wallet-edge-cache", () => ({
@@ -34,7 +39,12 @@ vi.mock("@/lib/insider/clob-price-batch-loader", () => ({
   resolveReferencePrice: vi.fn(() => null),
 }));
 
-import { getTraderHistoriesBatch } from "@/lib/trader-history-cache";
+import { loadCurrentClobPrices } from "@/lib/insider/clob-price-batch-loader";
+import { getCachedWalletEdgesBatch } from "@/lib/insider/wallet-edge-cache";
+import {
+  getTraderHistoriesBatch,
+  getTraderHistoriesWithTradesBatch,
+} from "@/lib/trader-history-cache";
 import { GET } from "./route";
 
 interface SuspiciousStats {
@@ -115,5 +125,113 @@ describe("GET /api/whales/suspicious", () => {
     expect(body.stats.uniqueTradersFound).toBe(50);
     expect(body.stats.tradersAnalyzed).toBe(50);
     expect(body.stats.truncated).toBe(false);
+  });
+
+  it("passes history-loader trades to the edge cache when the KB is warm", async () => {
+    const marketResolutionModule = await import(
+      "@/lib/insider/market-resolutions"
+    );
+    const peekCachedKB = (
+      marketResolutionModule as unknown as {
+        peekCachedKB: ReturnType<typeof vi.fn>;
+      }
+    ).peekCachedKB;
+    const kb = {
+      byConditionId: new Map(),
+      fetched: 0,
+      indexed: 0,
+    };
+    peekCachedKB.mockReturnValue(kb);
+    const tradesByAddress = new Map([["0xabc", []]]);
+    vi.mocked(getTraderHistoriesWithTradesBatch).mockResolvedValueOnce({
+      histories: new Map(),
+      tradesByAddress,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json([makeTrade(1)]))
+    );
+
+    await GET(
+      new NextRequest("https://knoww.app/api/whales/suspicious?minUsdValue=100")
+    );
+
+    expect(getTraderHistoriesWithTradesBatch).toHaveBeenCalledOnce();
+    expect(getTraderHistoriesBatch).not.toHaveBeenCalled();
+    expect(getCachedWalletEdgesBatch).toHaveBeenCalledWith(
+      expect.any(Array),
+      kb,
+      6,
+      tradesByAddress,
+      expect.any(AbortSignal)
+    );
+    expect(loadCurrentClobPrices).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(AbortSignal)
+    );
+  });
+
+  it("returns an empty successful response when the recent-trades call times out", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("Request timed out", "TimeoutError");
+      })
+    );
+
+    const response = await GET(
+      new NextRequest("https://knoww.app/api/whales/suspicious")
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      activities: [],
+      stats: { totalTradesScanned: 0 },
+    });
+  });
+
+  it("returns 504 when the aggregate request signal is aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException("Request timed out", "TimeoutError"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("Request timed out", "TimeoutError");
+      })
+    );
+
+    const response = await GET(
+      new NextRequest("https://knoww.app/api/whales/suspicious", {
+        signal: controller.signal,
+      })
+    );
+
+    expect(response.status).toBe(504);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: "Suspicious activity upstream request timed out",
+    });
+  });
+
+  it("shares identical concurrent computations without retaining the result", async () => {
+    const fetchMock = vi.fn(async () => Response.json([makeTrade(1)]));
+    vi.stubGlobal("fetch", fetchMock);
+    const url =
+      "https://knoww.app/api/whales/suspicious?minUsdValue=100&limit=50";
+
+    const [first, second] = await Promise.all([
+      GET(new NextRequest(url)),
+      GET(new NextRequest(url)),
+    ]);
+    const third = await GET(new NextRequest(url));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({ success: true });
+    await expect(second.json()).resolves.toMatchObject({ success: true });
+    await expect(third.json()).resolves.toMatchObject({ success: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

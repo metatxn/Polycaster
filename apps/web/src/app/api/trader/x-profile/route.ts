@@ -3,6 +3,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import {
+  createRequestDeadline,
+  fetchWithTimeout,
+  isAbortLikeError,
+} from "@/lib/fetch-with-timeout";
+import {
   buildTraderXProfileIndex,
   normalizeXHandle,
   type TraderXProfile,
@@ -16,6 +21,7 @@ const INDEX_TTL_MS = 30 * 60 * 1000;
 const LEADERBOARD_LIMIT = 50;
 const LEADERBOARD_MAX_OFFSET = 1000;
 const LEADERBOARD_ORDERS = ["PNL", "VOL"] as const;
+const INDEX_REFRESH_DEADLINE_MS = 12_000;
 
 let cachedIndex: {
   expiresAt: number;
@@ -50,6 +56,8 @@ let indexInFlight: Promise<Map<string, TraderXProfile>> | null = null;
  *         description: Rate limit exceeded.
  *       500:
  *         description: Failed to resolve trader profile.
+ *       504:
+ *         description: Leaderboard indexing timed out.
  */
 export async function GET(request: NextRequest) {
   const rateLimitResponse = checkRateLimit(request, {
@@ -84,6 +92,13 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      log.warn("resolve.timeout", { timeoutMs: INDEX_REFRESH_DEADLINE_MS });
+      return NextResponse.json(
+        { success: false, error: "Trader profile request timed out" },
+        { status: 504 }
+      );
+    }
     log.error("resolve.failed", {
       error: error instanceof Error ? error.message : String(error),
     });
@@ -112,6 +127,8 @@ async function getTraderXProfileIndex(): Promise<Map<string, TraderXProfile>> {
 async function refreshTraderXProfileIndex(): Promise<
   Map<string, TraderXProfile>
 > {
+  const deadline = createRequestDeadline(INDEX_REFRESH_DEADLINE_MS);
+
   // All page coordinates are known up front — fetch them concurrently
   // instead of ~42 serial round-trips. Later offsets past the end of the
   // leaderboard return short/empty pages, which buildTraderXProfileIndex
@@ -120,26 +137,31 @@ async function refreshTraderXProfileIndex(): Promise<
   for (let o = 0; o <= LEADERBOARD_MAX_OFFSET; o += LEADERBOARD_LIMIT) {
     offsets.push(o);
   }
-  // fetchLeaderboardPage already returns [] on any fetch/non-ok error,
-  // so no extra .catch() wrapper is needed.
-  const pages = await Promise.all(
-    LEADERBOARD_ORDERS.flatMap((orderBy) =>
-      offsets.map((offset) => fetchLeaderboardPage(orderBy, offset))
-    )
-  );
-  const traders: unknown[] = pages.flat();
+  try {
+    const pages = await Promise.all(
+      LEADERBOARD_ORDERS.flatMap((orderBy) =>
+        offsets.map((offset) =>
+          fetchLeaderboardPage(orderBy, offset, deadline.signal)
+        )
+      )
+    );
+    const traders: unknown[] = pages.flat();
 
-  const index = buildTraderXProfileIndex(traders);
-  cachedIndex = {
-    expiresAt: Date.now() + INDEX_TTL_MS,
-    index,
-  };
-  return index;
+    const index = buildTraderXProfileIndex(traders);
+    cachedIndex = {
+      expiresAt: Date.now() + INDEX_TTL_MS,
+      index,
+    };
+    return index;
+  } finally {
+    deadline.dispose();
+  }
 }
 
 async function fetchLeaderboardPage(
   orderBy: (typeof LEADERBOARD_ORDERS)[number],
-  offset: number
+  offset: number,
+  signal?: AbortSignal
 ): Promise<unknown[]> {
   const params = new URLSearchParams({
     category: "OVERALL",
@@ -149,7 +171,7 @@ async function fetchLeaderboardPage(
     offset: String(offset),
   });
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${POLYMARKET_API.DATA.BASE}/v1/leaderboard?${params.toString()}`,
     {
       headers: {
@@ -158,6 +180,7 @@ async function fetchLeaderboardPage(
       next: {
         revalidate: 1800,
       },
+      signal,
     }
   );
 

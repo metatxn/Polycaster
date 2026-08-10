@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.profile");
@@ -235,7 +236,9 @@ export async function GET(
       },
     };
 
-    return NextResponse.json(profile);
+    return NextResponse.json(profile, {
+      headers: getCacheHeaders("leaderboard"),
+    });
   } catch (error) {
     log.error("fetch.failed", { error });
     return jsonError("Failed to fetch profile", 500);

@@ -1,7 +1,8 @@
+import { WalletRouteProviders } from "@/components/wallet-route-providers";
 import "@/app/styles/product.css";
 
 export default function LeaderboardLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return children;
+  return <WalletRouteProviders>{children}</WalletRouteProviders>;
 }

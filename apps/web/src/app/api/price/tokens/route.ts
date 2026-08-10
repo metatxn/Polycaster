@@ -1,6 +1,7 @@
 import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 
 const log = createLogger("api.price.tokens");
 
@@ -150,12 +151,15 @@ export async function GET(request: NextRequest) {
       // Build response with mapped symbols
       const mappedPrices = buildMappedPrices(cachedPrices.prices);
 
-      return NextResponse.json({
-        prices: mappedPrices,
-        data: cachedPrices.data,
-        cached: true,
-        timestamp: cachedPrices.timestamp,
-      } satisfies TokenPricesResponse);
+      return NextResponse.json(
+        {
+          prices: mappedPrices,
+          data: cachedPrices.data,
+          cached: true,
+          timestamp: cachedPrices.timestamp,
+        } satisfies TokenPricesResponse,
+        { headers: getCacheHeaders("priceHistory") }
+      );
     }
 
     const apiKey = process.env.COINMARKET_API_KEY;
@@ -176,7 +180,10 @@ export async function GET(request: NextRequest) {
           timestamp: Date.now(),
           warning: "Using fallback prices - API key not configured",
         } satisfies TokenPricesResponse,
-        { status: 200 }
+        {
+          status: 200,
+          headers: getCacheHeaders("priceHistory"),
+        }
       );
     }
 
@@ -227,12 +234,15 @@ export async function GET(request: NextRequest) {
     // Build response with mapped symbols
     const mappedPrices = buildMappedPrices(prices);
 
-    return NextResponse.json({
-      prices: mappedPrices,
-      data,
-      cached: false,
-      timestamp: cachedPrices.timestamp,
-    } satisfies TokenPricesResponse);
+    return NextResponse.json(
+      {
+        prices: mappedPrices,
+        data,
+        cached: false,
+        timestamp: cachedPrices.timestamp,
+      } satisfies TokenPricesResponse,
+      { headers: getCacheHeaders("priceHistory") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
 
@@ -240,13 +250,16 @@ export async function GET(request: NextRequest) {
     if (cachedPrices) {
       const mappedPrices = buildMappedPrices(cachedPrices.prices);
 
-      return NextResponse.json({
-        prices: mappedPrices,
-        data: cachedPrices.data,
-        cached: true,
-        stale: true,
-        timestamp: cachedPrices.timestamp,
-      } satisfies TokenPricesResponse);
+      return NextResponse.json(
+        {
+          prices: mappedPrices,
+          data: cachedPrices.data,
+          cached: true,
+          stale: true,
+          timestamp: cachedPrices.timestamp,
+        } satisfies TokenPricesResponse,
+        { headers: getCacheHeaders("priceHistory") }
+      );
     }
 
     // Return fallback prices as last resort
@@ -263,7 +276,10 @@ export async function GET(request: NextRequest) {
         timestamp: Date.now(),
         error: "Failed to fetch prices, using fallback values",
       } satisfies TokenPricesResponse,
-      { status: 200 } // Return 200 with fallback prices instead of 500
+      {
+        status: 200, // Return 200 with fallback prices instead of 500
+        headers: getCacheHeaders("priceHistory"),
+      }
     );
   }
 }

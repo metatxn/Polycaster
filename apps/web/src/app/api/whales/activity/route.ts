@@ -7,8 +7,13 @@ import { jsonError } from "@/lib/api-error";
 import { clampedInt, firstIssueMessage, orAbsent } from "@/lib/api-query";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { getCacheHeaders } from "@/lib/cache-headers";
+import {
+  createRequestDeadline,
+  fetchWithTimeout,
+} from "@/lib/fetch-with-timeout";
 
 const log = createLogger("api.whales.activity");
+const REQUEST_DEADLINE_MS = 25_000;
 
 /**
  * Coercing/clamping query validation. Bounds and defaults mirror the
@@ -120,54 +125,65 @@ interface GlobalTradeData {
 
 async function fetchTopTraders(
   limit = 20,
-  timePeriod: "DAY" | "WEEK" | "MONTH" | "ALL" = "WEEK"
+  timePeriod: "DAY" | "WEEK" | "MONTH" | "ALL" = "WEEK",
+  signal?: AbortSignal
 ): Promise<LeaderboardTrader[]> {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/v1/leaderboard?category=OVERALL&timePeriod=${timePeriod}&orderBy=VOL&limit=${limit}`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 300 },
+        signal,
       }
     );
     if (!response.ok) return [];
     return await response.json();
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return [];
   }
 }
 
 async function fetchTraderActivity(
   address: string,
-  limit = 50
+  limit = 50,
+  signal?: AbortSignal
 ): Promise<TradeActivity[]> {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/activity?user=${address.toLowerCase()}&limit=${Math.min(limit, 100)}`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 60 },
+        signal,
       }
     );
     if (!response.ok) return [];
     return await response.json();
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return [];
   }
 }
 
-async function fetchGlobalLargeTrades(limit = 200): Promise<GlobalTradeData[]> {
+async function fetchGlobalLargeTrades(
+  limit = 200,
+  signal?: AbortSignal
+): Promise<GlobalTradeData[]> {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${POLYMARKET_API.DATA.BASE}/trades?limit=${limit}`,
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 60 },
+        signal,
       }
     );
     if (!response.ok) return [];
     return await response.json();
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return [];
   }
 }
@@ -193,6 +209,8 @@ async function fetchGlobalLargeTrades(limit = 200): Promise<GlobalTradeData[]> {
  *         description: Rate limit exceeded.
  *       500:
  *         description: Request failed.
+ *       504:
+ *         description: Upstream request timed out.
  */
 export async function GET(request: NextRequest) {
   const rateLimitResponse = checkRateLimit(request, {
@@ -201,6 +219,7 @@ export async function GET(request: NextRequest) {
   if (rateLimitResponse) return rateLimitResponse;
 
   const fetchStartTime = Date.now();
+  const deadline = createRequestDeadline(REQUEST_DEADLINE_MS, request.signal);
 
   try {
     const { searchParams } = new URL(request.url);
@@ -243,8 +262,8 @@ export async function GET(request: NextRequest) {
     );
 
     const [topTraders, globalTrades] = await Promise.all([
-      fetchTopTraders(whaleCount, "MONTH"),
-      fetchGlobalLargeTrades(200),
+      fetchTopTraders(whaleCount, "MONTH", deadline.signal),
+      fetchGlobalLargeTrades(200, deadline.signal),
     ]);
 
     const seenTxHashes = new Set<string>();
@@ -267,7 +286,8 @@ export async function GET(request: NextRequest) {
           batch.map(async (trader) => {
             const activities = await fetchTraderActivity(
               trader.proxyWallet,
-              adjustedTradesPerWhale
+              adjustedTradesPerWhale,
+              deadline.signal
             );
             return { trader, activities };
           })
@@ -414,6 +434,22 @@ export async function GET(request: NextRequest) {
       { headers: getCacheHeaders("whales") }
     );
   } catch (error) {
+    const timedOut = deadline.signal.aborted;
+    if (timedOut) {
+      log.warn("fetch.timeout", { timeoutMs: REQUEST_DEADLINE_MS });
+      return NextResponse.json(
+        {
+          success: false,
+          activities: [],
+          whaleCount: 0,
+          totalTrades: 0,
+          lastUpdated: new Date().toISOString(),
+          dataAge: Date.now() - fetchStartTime,
+          error: "Whale activity request timed out",
+        } satisfies WhaleActivityResponse,
+        { status: 504 }
+      );
+    }
     log.error("fetch.failed", { error });
     return NextResponse.json(
       {
@@ -427,5 +463,7 @@ export async function GET(request: NextRequest) {
       } satisfies WhaleActivityResponse,
       { status: 500 }
     );
+  } finally {
+    deadline.dispose();
   }
 }

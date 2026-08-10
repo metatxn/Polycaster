@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { CACHE_DURATION, POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { fetchGammaKeysetPage, resolveGammaTagId } from "@/lib/gamma-keyset";
 import { logger } from "@/lib/logger";
 
@@ -101,19 +102,22 @@ export async function GET(request: NextRequest) {
         CACHE_DURATION.SPORTS_LIST
       );
       if (!tagId) {
-        return NextResponse.json({
-          success: true,
-          count: 0,
-          markets: [],
-          filters: {
-            sport: parsedSport || "all",
-            league: parsedLeague || "all",
-            tag: tagSlug,
+        return NextResponse.json(
+          {
+            success: true,
+            count: 0,
+            markets: [],
+            filters: {
+              sport: parsedSport || "all",
+              league: parsedLeague || "all",
+              tag: tagSlug,
+            },
+            pagination: {
+              hasMore: false,
+            },
           },
-          pagination: {
-            hasMore: false,
-          },
-        });
+          { headers: getCacheHeaders("events") }
+        );
       }
 
       queryParams.set("tag_id", tagId);
@@ -128,20 +132,23 @@ export async function GET(request: NextRequest) {
       ["markets", "data"]
     );
 
-    return NextResponse.json({
-      success: true,
-      count: page.items.length,
-      markets: page.items,
-      filters: {
-        sport: parsedSport || "all",
-        league: parsedLeague || "all",
-        tag: tagSlug || "all",
+    return NextResponse.json(
+      {
+        success: true,
+        count: page.items.length,
+        markets: page.items,
+        filters: {
+          sport: parsedSport || "all",
+          league: parsedLeague || "all",
+          tag: tagSlug || "all",
+        },
+        pagination: {
+          hasMore: Boolean(page.nextCursor),
+          nextCursor: page.nextCursor,
+        },
       },
-      pagination: {
-        hasMore: Boolean(page.nextCursor),
-        nextCursor: page.nextCursor,
-      },
-    });
+      { headers: getCacheHeaders("events") }
+    );
   } catch (error) {
     logger.error("sports.markets.fetch_failed", {
       error: error instanceof Error ? error.message : String(error),

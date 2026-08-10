@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { logger } from "@/lib/logger";
 
 // Validation schema
@@ -103,11 +104,14 @@ export async function GET(request: NextRequest) {
 
     const data = (await response.json()) as Record<string, unknown>;
 
-    return NextResponse.json({
-      success: true,
-      count: Array.isArray(data) ? data.length : 0,
-      teams: Array.isArray(data) ? data : [],
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        count: Array.isArray(data) ? data.length : 0,
+        teams: Array.isArray(data) ? data : [],
+      },
+      { headers: getCacheHeaders("static") }
+    );
   } catch (error) {
     logger.error("sports.teams.fetch_failed", {
       error: error instanceof Error ? error.message : String(error),

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _rateLimitStoreSize,
   _resetRateLimitStore,
+  RATE_LIMIT_MAX_ENTRIES,
   rateLimit,
 } from "./rate-limit";
 
@@ -43,5 +44,34 @@ describe("rateLimit", () => {
     vi.advanceTimersByTime(61_000);
     rateLimit("fresh", opts);
     expect(_rateLimitStoreSize()).toBe(1); // only "fresh" remains
+  });
+
+  it("never retains more identities than the hard store cap", () => {
+    const opts = { interval: 60_000, uniqueTokenPerInterval: 5 };
+
+    for (let i = 0; i < RATE_LIMIT_MAX_ENTRIES + 50; i++) {
+      rateLimit(`flood-${i}`, opts);
+    }
+
+    expect(_rateLimitStoreSize()).toBe(RATE_LIMIT_MAX_ENTRIES);
+    expect(
+      rateLimit(`flood-${RATE_LIMIT_MAX_ENTRIES + 49}`, opts).remaining
+    ).toBe(3);
+  });
+
+  it("evicts an expired identity before the oldest active identity", () => {
+    const active = { interval: 60_000, uniqueTokenPerInterval: 5 };
+    const expiresSoon = { interval: 1_000, uniqueTokenPerInterval: 5 };
+    rateLimit("active-oldest", active);
+    rateLimit("expired", expiresSoon);
+    for (let i = 0; i < RATE_LIMIT_MAX_ENTRIES - 2; i++) {
+      rateLimit(`active-${i}`, active);
+    }
+
+    vi.advanceTimersByTime(2_000);
+    rateLimit("newcomer", active);
+
+    expect(rateLimit("active-oldest", active).remaining).toBe(3);
+    expect(_rateLimitStoreSize()).toBe(RATE_LIMIT_MAX_ENTRIES);
   });
 });

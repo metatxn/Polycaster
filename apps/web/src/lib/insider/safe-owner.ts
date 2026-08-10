@@ -24,6 +24,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { erc20Abi } from "viem";
+import { isAbortLikeError, waitForAbort } from "@/lib/fetch-with-timeout";
 import { getPublicClient } from "@/lib/rpc";
 
 const log = createLogger("safe-owner");
@@ -107,7 +108,8 @@ function writeToCache(result: SafeOwners): void {
  * are cached individually.
  */
 export async function getSafeOwnersBatch(
-  addresses: string[]
+  addresses: string[],
+  signal?: AbortSignal
 ): Promise<Map<string, SafeOwners>> {
   const out = new Map<string, SafeOwners>();
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()))];
@@ -129,14 +131,17 @@ export async function getSafeOwnersBatch(
     const client = getPublicClient();
     // One multicall round-trip instead of N eth_calls. Multicall3
     // batches many view reads efficiently.
-    const results = await client.multicall({
-      allowFailure: true,
-      contracts: toFetch.map((addr) => ({
-        address: addr as `0x${string}`,
-        abi: SAFE_ABI,
-        functionName: "getOwners" as const,
-      })),
-    });
+    const results = await waitForAbort(
+      client.multicall({
+        allowFailure: true,
+        contracts: toFetch.map((addr) => ({
+          address: addr as `0x${string}`,
+          abi: SAFE_ABI,
+          functionName: "getOwners" as const,
+        })),
+      }),
+      signal
+    );
 
     for (let i = 0; i < toFetch.length; i++) {
       const addr = toFetch[i];
@@ -158,6 +163,7 @@ export async function getSafeOwnersBatch(
       out.set(addr, value);
     }
   } catch (err) {
+    if (signal?.aborted || isAbortLikeError(err)) throw err;
     log.error("multicall.failed", { error: err });
     // Populate failures with empty results so callers don't re-query
     // in tight loops on transient RPC outages.

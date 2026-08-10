@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { sanitizeUpstreamBody } from "@/lib/upstream-error";
 import { isValidAddress } from "@/lib/validation";
 
@@ -119,11 +120,14 @@ export async function GET(request: NextRequest) {
 
     // Handle 404 - profile not found
     if (response.status === 404) {
-      return NextResponse.json({
-        success: true,
-        profile: null,
-        message: "Profile not found",
-      });
+      return NextResponse.json(
+        {
+          success: true,
+          profile: null,
+          message: "Profile not found",
+        },
+        { headers: getCacheHeaders("leaderboard") }
+      );
     }
 
     if (!response.ok) {
@@ -144,10 +148,13 @@ export async function GET(request: NextRequest) {
 
     const profile: PublicProfile = await response.json();
 
-    return NextResponse.json({
-      success: true,
-      profile,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        profile,
+      },
+      { headers: getCacheHeaders("leaderboard") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
     return NextResponse.json(

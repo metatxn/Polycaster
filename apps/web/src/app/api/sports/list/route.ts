@@ -2,6 +2,7 @@ import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 
 const log = createLogger("api.sports.list");
 
@@ -58,11 +59,14 @@ export async function GET(request: NextRequest) {
 
     const data = (await response.json()) as Record<string, unknown>;
 
-    return NextResponse.json({
-      success: true,
-      count: data?.length || 0,
-      sports: data,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        count: data?.length || 0,
+        sports: data,
+      },
+      { headers: getCacheHeaders("static") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
     return NextResponse.json(

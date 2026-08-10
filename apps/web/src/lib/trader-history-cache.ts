@@ -1,15 +1,13 @@
-import { POLYMARKET_API } from "@/constants/polymarket";
+import {
+  fetchWalletActivitySnapshot,
+  type WalletTradeRecord,
+} from "@/lib/insider/wallet-trades-cache";
 
-interface TraderHistoryEntry {
+export interface TraderHistoryEntry {
   firstTradeDate: string | null;
   totalTrades: number;
   accountAgeHours: number;
   fetchedAt: number;
-}
-
-interface ActivityData {
-  timestamp: number;
-  type: string;
 }
 
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -48,97 +46,107 @@ function evictStaleEntries() {
  * first trade date. Walks backwards through pages until no more data or
  * we've seen enough to be confident in the earliest timestamp.
  */
-async function fetchFullTraderHistory(
-  address: string
-): Promise<{ firstTradeDate: string | null; totalTrades: number }> {
-  const pageSize = 100;
-  let offset = 0;
-  let earliestTimestamp = Infinity;
-  let totalTradeCount = 0;
-  const maxPages = 5; // Cap at 500 activities to avoid excessive API calls
-
-  for (let page = 0; page < maxPages; page++) {
-    try {
-      const response = await fetch(
-        `${POLYMARKET_API.DATA.BASE}/activity?user=${address.toLowerCase()}&limit=${pageSize}&offset=${offset}`,
-        {
-          headers: { Accept: "application/json" },
-          next: { revalidate: 300 },
-        }
-      );
-
-      if (!response.ok) break;
-
-      const activities: ActivityData[] = await response.json();
-      if (!activities || activities.length === 0) break;
-
-      const trades = activities.filter((a) => a.type === "TRADE");
-      totalTradeCount += trades.length;
-
-      for (const trade of trades) {
-        if (trade.timestamp < earliestTimestamp) {
-          earliestTimestamp = trade.timestamp;
-        }
-      }
-
-      // If we got fewer results than the page size, we've reached the end
-      if (activities.length < pageSize) break;
-
-      offset += pageSize;
-    } catch {
-      break;
-    }
-  }
-
-  if (earliestTimestamp === Infinity) {
-    return { firstTradeDate: null, totalTrades: 0 };
-  }
-
-  return {
-    firstTradeDate: new Date(earliestTimestamp * 1000).toISOString(),
-    totalTrades: totalTradeCount,
-  };
+interface TraderHistoryLoadResult {
+  history: TraderHistoryEntry;
+  trades?: WalletTradeRecord[];
 }
 
 /**
  * Get trader history with caching. Returns account age, first trade date,
  * and total trade count. Uses paginated fetch for accurate first-seen time.
  */
-export async function getTraderHistory(
-  rawAddress: string
-): Promise<TraderHistoryEntry> {
+async function loadTraderHistory(
+  rawAddress: string,
+  collectTrades: boolean,
+  signal?: AbortSignal
+): Promise<TraderHistoryLoadResult> {
   const address = rawAddress.toLowerCase();
   const now = Date.now();
   const cached = traderHistoryCache.get(address);
 
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
     return {
-      ...cached,
-      accountAgeHours:
-        cached.firstTradeDate === null
-          ? UNKNOWN_ACCOUNT_AGE_HOURS
-          : (now - new Date(cached.firstTradeDate).getTime()) /
-            (1000 * 60 * 60),
+      history: {
+        ...cached,
+        accountAgeHours:
+          cached.firstTradeDate === null
+            ? UNKNOWN_ACCOUNT_AGE_HOURS
+            : (now - new Date(cached.firstTradeDate).getTime()) /
+              (1000 * 60 * 60),
+      },
     };
   }
 
-  const history = await fetchFullTraderHistory(address);
+  const snapshot = await fetchWalletActivitySnapshot(
+    address,
+    collectTrades,
+    signal
+  );
+  const firstTradeDate =
+    snapshot.earliestTradeTimestamp === null
+      ? null
+      : new Date(snapshot.earliestTradeTimestamp * 1000).toISOString();
   const accountAgeHours =
-    history.firstTradeDate === null
+    firstTradeDate === null
       ? UNKNOWN_ACCOUNT_AGE_HOURS
-      : (now - new Date(history.firstTradeDate).getTime()) / (1000 * 60 * 60);
+      : (now - new Date(firstTradeDate).getTime()) / (1000 * 60 * 60);
 
   const entry: TraderHistoryEntry = {
-    firstTradeDate: history.firstTradeDate,
-    totalTrades: history.totalTrades,
+    firstTradeDate,
+    totalTrades: snapshot.totalTrades,
     accountAgeHours,
     fetchedAt: now,
   };
 
-  evictStaleEntries();
-  traderHistoryCache.set(address, entry);
+  if (!snapshot.partial) {
+    evictStaleEntries();
+    traderHistoryCache.set(address, entry);
+  }
 
-  return entry;
+  return {
+    history: entry,
+    ...(collectTrades ? { trades: snapshot.trades } : {}),
+  };
+}
+
+export async function getTraderHistory(
+  rawAddress: string,
+  signal?: AbortSignal
+): Promise<TraderHistoryEntry> {
+  return (await loadTraderHistory(rawAddress, false, signal)).history;
+}
+
+export interface TraderHistoriesWithTrades {
+  histories: Map<string, TraderHistoryEntry>;
+  tradesByAddress: Map<string, WalletTradeRecord[]>;
+}
+
+export async function getTraderHistoriesWithTradesBatch(
+  addresses: string[],
+  concurrency = 10,
+  signal?: AbortSignal
+): Promise<TraderHistoriesWithTrades> {
+  const histories = new Map<string, TraderHistoryEntry>();
+  const tradesByAddress = new Map<string, WalletTradeRecord[]>();
+
+  for (let i = 0; i < addresses.length; i += concurrency) {
+    const batch = addresses.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map(async (address) => ({
+        address,
+        result: await loadTraderHistory(address, true, signal),
+      }))
+    );
+
+    for (const { address, result } of batchResults) {
+      histories.set(address, result.history);
+      if (result.trades) {
+        tradesByAddress.set(address.toLowerCase(), result.trades);
+      }
+    }
+  }
+
+  return { histories, tradesByAddress };
 }
 
 /**
@@ -146,7 +154,8 @@ export async function getTraderHistory(
  */
 export async function getTraderHistoriesBatch(
   addresses: string[],
-  concurrency = 10
+  concurrency = 10,
+  signal?: AbortSignal
 ): Promise<Map<string, TraderHistoryEntry>> {
   const results = new Map<string, TraderHistoryEntry>();
 
@@ -154,7 +163,7 @@ export async function getTraderHistoriesBatch(
     const batch = addresses.slice(i, i + concurrency);
     const batchResults = await Promise.all(
       batch.map(async (address) => {
-        const history = await getTraderHistory(address);
+        const history = await getTraderHistory(address, signal);
         return { address, history };
       })
     );

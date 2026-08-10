@@ -6,8 +6,6 @@ import {
   JetBrains_Mono,
   Plus_Jakarta_Sans,
 } from "next/font/google";
-import { headers } from "next/headers";
-import { RootRouteShell } from "@/components/root-route-shell";
 import { ThemeProviders } from "@/components/theme-providers";
 import { CLOB_BASE_URL, CLOB_WS_BASE_URL } from "@/constants/polymarket";
 import { serializeJsonLd } from "@/lib/json-ld";
@@ -116,14 +114,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const requestHeaders = await headers();
-  const cookies = requestHeaders.get("cookie");
-
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [
@@ -170,9 +165,7 @@ export default async function RootLayout({
       <body
         className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} ${fraunces.variable} ${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        <ThemeProviders>
-          <RootRouteShell cookies={cookies}>{children}</RootRouteShell>
-        </ThemeProviders>
+        <ThemeProviders>{children}</ThemeProviders>
       </body>
     </html>
   );

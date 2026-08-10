@@ -4,6 +4,7 @@ import { z } from "zod";
 import { POLYMARKET_API } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { readJsonBodyWithLimit } from "@/lib/api-request-body";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { sanitizeUpstreamBody } from "@/lib/upstream-error";
 import { isValidAddress } from "@/lib/validation";
 import type { Comment } from "@/types/comments";
@@ -169,15 +170,18 @@ export async function GET(request: NextRequest) {
 
     const comments: Comment[] = await response.json();
 
-    return NextResponse.json({
-      success: true,
-      comments,
-      pagination: {
-        limit: parsed.data.limit,
-        offset: parsed.data.offset,
-        hasMore: comments.length === parsed.data.limit,
+    return NextResponse.json(
+      {
+        success: true,
+        comments,
+        pagination: {
+          limit: parsed.data.limit,
+          offset: parsed.data.offset,
+          hasMore: comments.length === parsed.data.limit,
+        },
       },
-    });
+      { headers: getCacheHeaders("search") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
     return NextResponse.json(

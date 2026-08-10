@@ -34,6 +34,40 @@ afterEach(() => {
 });
 
 describe("fetchCachedClobPriceHistory", () => {
+  it("does not read the regional cache for an already-aborted caller", async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException("Request aborted", "AbortError"));
+
+    await expect(
+      fetchCachedClobPriceHistory(
+        "10000000005",
+        { startTs: 500, fidelity: 1 },
+        { signal: controller.signal }
+      )
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(cacheMatch).not.toHaveBeenCalled();
+    expect(fetchClobPriceHistory).not.toHaveBeenCalled();
+  });
+
+  it("does not return a cache hit after its caller aborts", async () => {
+    const controller = new AbortController();
+    cacheMatch.mockImplementationOnce(async () => {
+      controller.abort(new DOMException("Request aborted", "AbortError"));
+      return new Response(JSON.stringify({ history: [{ t: 600, p: 0.57 }] }));
+    });
+
+    await expect(
+      fetchCachedClobPriceHistory(
+        "10000000006",
+        { startTs: 600, fidelity: 1 },
+        { signal: controller.signal }
+      )
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(fetchClobPriceHistory).not.toHaveBeenCalled();
+  });
+
   it("uses the regional cache instead of the Next data cache", async () => {
     vi.mocked(fetchClobPriceHistory).mockResolvedValue({
       history: [{ t: 100, p: 0.42 }],

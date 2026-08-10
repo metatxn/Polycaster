@@ -6,6 +6,15 @@ import {
   resolveReferencePrice,
 } from "./clob-price-batch-loader";
 
+const clobMocks = vi.hoisted(() => ({
+  fetchClobOrderBooks: vi.fn(),
+}));
+
+vi.mock("@knoww/shared-types/clob", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@knoww/shared-types/clob")>()),
+  fetchClobOrderBooks: clobMocks.fetchClobOrderBooks,
+}));
+
 function book(
   assetId: string,
   bids: Array<{ price: string; size: string }>,
@@ -52,6 +61,32 @@ describe("midpointFromOrderBook", () => {
 });
 
 describe("createClobPriceBatchLoader", () => {
+  it("disables the unified SDK even when no abort signal is supplied", async () => {
+    clobMocks.fetchClobOrderBooks.mockResolvedValueOnce([]);
+    const load = createClobPriceBatchLoader();
+
+    await load(["token-a"]);
+
+    expect(clobMocks.fetchClobOrderBooks).toHaveBeenCalledWith(["token-a"], {
+      useUnifiedSdk: false,
+    });
+  });
+
+  it("propagates an aggregate abort instead of caching fallback prices", async () => {
+    const controller = new AbortController();
+    const fetchOrderBooks = vi.fn(
+      async (_ids: readonly string[], signal?: AbortSignal) => {
+        expect(signal).toBe(controller.signal);
+        throw new DOMException("Request timed out", "TimeoutError");
+      }
+    );
+    const load = createClobPriceBatchLoader({ fetchOrderBooks });
+
+    await expect(load(["token-a"], controller.signal)).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+  });
+
   it("deduplicates token ids and maps responses by asset_id", async () => {
     const fetchOrderBooks = vi.fn(async () => [
       book(

@@ -2,6 +2,7 @@ import { createLogger } from "@knoww/logger";
 import { type NextRequest, NextResponse } from "next/server";
 import { jsonError } from "@/lib/api-error";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 
 const log = createLogger("api.price.pol");
 
@@ -65,10 +66,13 @@ export async function GET(request: NextRequest) {
   try {
     // Check if we have a valid cached price
     if (cachedPrice && Date.now() - cachedPrice.timestamp < CACHE_DURATION) {
-      return NextResponse.json({
-        price: cachedPrice.price,
-        cached: true,
-      });
+      return NextResponse.json(
+        {
+          price: cachedPrice.price,
+          cached: true,
+        },
+        { headers: getCacheHeaders("priceHistory") }
+      );
     }
 
     const apiKey = process.env.COINMARKET_API_KEY;
@@ -112,20 +116,26 @@ export async function GET(request: NextRequest) {
       timestamp: Date.now(),
     };
 
-    return NextResponse.json({
-      price,
-      cached: false,
-    });
+    return NextResponse.json(
+      {
+        price,
+        cached: false,
+      },
+      { headers: getCacheHeaders("priceHistory") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
 
     // Return cached price if available, even if expired
     if (cachedPrice) {
-      return NextResponse.json({
-        price: cachedPrice.price,
-        cached: true,
-        stale: true,
-      });
+      return NextResponse.json(
+        {
+          price: cachedPrice.price,
+          cached: true,
+          stale: true,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     return jsonError("Failed to fetch POL price", 500);

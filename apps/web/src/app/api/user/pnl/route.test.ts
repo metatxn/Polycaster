@@ -40,6 +40,26 @@ afterEach(() => {
 });
 
 describe("GET /api/user/pnl", () => {
+  it("returns 504 when an upstream request exceeds its deadline", async () => {
+    const upstreamFetch = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        if (!init?.signal) throw new Error("missing upstream abort signal");
+        throw new DOMException("Request timed out", "TimeoutError");
+      }
+    );
+    vi.stubGlobal("fetch", upstreamFetch);
+
+    const req = new NextRequest(
+      "https://knoww.app/api/user/pnl?user=0x0000000000000000000000000000000000000001"
+    );
+
+    const res = await GET(req);
+    const body = (await res.json()) as { error: string };
+
+    expect(res.status).toBe(504);
+    expect(body.error).toBe("P&L request timed out");
+  });
+
   it("returns a sanitized validation error for invalid query parameters", async () => {
     const req = new NextRequest(
       "https://knoww.app/api/user/pnl?user=0x0000000000000000000000000000000000000001&period=forever"

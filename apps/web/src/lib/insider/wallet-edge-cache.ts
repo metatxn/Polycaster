@@ -21,7 +21,7 @@
 
 import type { ResolutionKnowledgeBase } from "./market-resolutions";
 import { computeWalletEdge, type WalletEdge } from "./wallet-edge";
-import { getWalletTrades } from "./wallet-trades-cache";
+import { getWalletTrades, type WalletTradeRecord } from "./wallet-trades-cache";
 
 const TTL_MS = 60 * 60 * 1000; // 1h
 const MAX_ENTRIES = 1000;
@@ -53,7 +53,9 @@ function trimCache(): void {
  */
 export async function getCachedWalletEdge(
   address: string,
-  kb: ResolutionKnowledgeBase
+  kb: ResolutionKnowledgeBase,
+  preloadedTrades?: WalletTradeRecord[],
+  signal?: AbortSignal
 ): Promise<WalletEdge> {
   const key = address.toLowerCase();
   const cached = cache.get(key);
@@ -61,7 +63,7 @@ export async function getCachedWalletEdge(
     return cached.edge;
   }
 
-  const trades = await getWalletTrades(address);
+  const trades = preloadedTrades ?? (await getWalletTrades(address, signal));
   const edge = computeWalletEdge(address, trades, kb);
   cache.set(key, { edge, storedAt: Date.now() });
   trimCache();
@@ -75,14 +77,26 @@ export async function getCachedWalletEdge(
 export async function getCachedWalletEdgesBatch(
   addresses: string[],
   kb: ResolutionKnowledgeBase,
-  concurrency = 6
+  concurrency = 6,
+  preloadedTradesByAddress: ReadonlyMap<
+    string,
+    WalletTradeRecord[]
+  > = new Map(),
+  signal?: AbortSignal
 ): Promise<Map<string, WalletEdge>> {
   const out = new Map<string, WalletEdge>();
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()))];
   for (let i = 0; i < unique.length; i += concurrency) {
     const batch = unique.slice(i, i + concurrency);
     const results = await Promise.all(
-      batch.map((addr) => getCachedWalletEdge(addr, kb))
+      batch.map((addr) =>
+        getCachedWalletEdge(
+          addr,
+          kb,
+          preloadedTradesByAddress.get(addr),
+          signal
+        )
+      )
     );
     for (let j = 0; j < batch.length; j++) {
       out.set(batch[j], results[j]);

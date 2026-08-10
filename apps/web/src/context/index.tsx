@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { LazyMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { type ReactNode, useState } from "react";
-import { type Config, cookieToInitialState, WagmiProvider } from "wagmi";
+import { type Config, type State, WagmiProvider } from "wagmi";
 import { wagmiAdapter } from "@/config";
 import { EventFilterProvider } from "@/context/event-filter-context";
 import { OnboardingProvider } from "@/context/onboarding-context";
@@ -30,16 +30,11 @@ const ReactQueryDevtools =
 
 function ContextProvider({
   children,
-  cookies,
+  initialState,
 }: {
   children: ReactNode;
-  cookies: string | null;
+  initialState: State | undefined;
 }) {
-  const initialState = cookieToInitialState(
-    wagmiAdapter.wagmiConfig as Config,
-    cookies
-  );
-
   /** Lazy-init so each SSR render gets its own client; the browser side
    *  reuses the singleton via `getQueryClient`. */
   const [queryClient] = useState(getQueryClient);

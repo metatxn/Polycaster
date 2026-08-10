@@ -20,6 +20,7 @@
 
 import { createLogger } from "@knoww/logger";
 import { classifyFunder, type FunderCategory } from "@/constants/cex-addresses";
+import { fetchWithTimeout, isAbortLikeError } from "@/lib/fetch-with-timeout";
 
 const log = createLogger("insider.funding-source");
 
@@ -72,12 +73,13 @@ interface AlchemyResponse {
 }
 
 async function fetchFirstTransfers(
-  address: string
+  address: string,
+  signal?: AbortSignal
 ): Promise<AlchemyTransfer[] | null> {
   const url = getAlchemyUrl();
   if (!url) return null;
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -94,6 +96,7 @@ async function fetchFirstTransfers(
           },
         ],
       }),
+      signal,
     });
     if (!response.ok) return null;
     const data = (await response.json()) as AlchemyResponse;
@@ -104,6 +107,7 @@ async function fetchFirstTransfers(
     const transfers = data.result?.transfers;
     return Array.isArray(transfers) ? transfers : [];
   } catch (err) {
+    if (signal?.aborted || isAbortLikeError(err)) throw err;
     log.error("fetch.failed", { error: err });
     return null;
   }
@@ -136,7 +140,8 @@ function emptyFunding(address: string): WalletFunding {
  * null-check.
  */
 export async function getWalletFunding(
-  address: string
+  address: string,
+  signal?: AbortSignal
 ): Promise<WalletFunding> {
   const key = address.toLowerCase();
   const cached = cache.get(key);
@@ -144,7 +149,7 @@ export async function getWalletFunding(
     return cached.value;
   }
 
-  const transfers = await fetchFirstTransfers(address);
+  const transfers = await fetchFirstTransfers(address, signal);
   if (!transfers || transfers.length === 0) {
     const empty = emptyFunding(address);
     cache.set(key, { value: empty, storedAt: Date.now() });
@@ -182,13 +187,24 @@ export async function getWalletFunding(
  */
 export async function getWalletFundingBatch(
   addresses: string[],
-  concurrency = 4
+  concurrency = 4,
+  signal?: AbortSignal
 ): Promise<Map<string, WalletFunding>> {
   const out = new Map<string, WalletFunding>();
   const unique = [...new Set(addresses.map((a) => a.toLowerCase()))];
   for (let i = 0; i < unique.length; i += concurrency) {
     const batch = unique.slice(i, i + concurrency);
-    const results = await Promise.all(batch.map((a) => getWalletFunding(a)));
+    const results = await Promise.all(
+      batch.map(async (a) => {
+        try {
+          return await getWalletFunding(a, signal);
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          log.warn("batch.item.degraded", { address: a, error });
+          return emptyFunding(a);
+        }
+      })
+    );
     for (const r of results) out.set(r.address, r);
   }
   return out;

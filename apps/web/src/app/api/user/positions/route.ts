@@ -3,11 +3,17 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import {
+  createRequestDeadline,
+  fetchWithTimeout,
+  isAbortLikeError,
+} from "@/lib/fetch-with-timeout";
 import { summarizeUserPositions } from "@/lib/user-position-summary";
 import { isValidAddress } from "@/lib/validation";
 
 const log = createLogger("api.user.positions");
 const UPSTREAM_TIMEOUT_MS = 10_000;
+const REQUEST_DEADLINE_MS = 25_000;
 const POSITIONS_UPSTREAM_MAX_PAGES = 5;
 const POSITIONS_UPSTREAM_MAX_PAGE_SIZE = 100;
 // The merged row space (lost removed, redeemables merged, re-sorted) is only
@@ -93,7 +99,8 @@ const querySchema = z.object({
 
 async function fetchPolymarketPositionsPage(
   queryParams: URLSearchParams,
-  upstreamOffset: number
+  upstreamOffset: number,
+  signal?: AbortSignal
 ): Promise<
   | { success: true; batch: PolymarketPosition[] }
   | { success: false; response: NextResponse }
@@ -102,18 +109,19 @@ async function fetchPolymarketPositionsPage(
   pageQueryParams.set("offset", upstreamOffset.toString());
   const fullUrl = `${DATA_API_BASE}/positions?${pageQueryParams.toString()}`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-
   let response: Response;
   try {
-    response = await fetch(fullUrl, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      signal: controller.signal,
-    });
+    response = await fetchWithTimeout(
+      fullUrl,
+      {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal,
+      },
+      UPSTREAM_TIMEOUT_MS
+    );
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (isAbortLikeError(error)) {
       return {
         success: false,
         response: NextResponse.json(
@@ -137,8 +145,6 @@ async function fetchPolymarketPositionsPage(
         { status: 502 }
       ),
     };
-  } finally {
-    clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
@@ -168,6 +174,7 @@ async function fetchPolymarketPositions(
     limit: number;
     offset: number;
     maxPages: number;
+    signal?: AbortSignal;
     stopWhen?: (positions: PolymarketPosition[]) => boolean;
   }
 ): Promise<
@@ -182,7 +189,8 @@ async function fetchPolymarketPositions(
   for (let page = 0; page < options.maxPages; page++) {
     const pageResult = await fetchPolymarketPositionsPage(
       queryParams,
-      upstreamOffset
+      upstreamOffset,
+      options.signal
     );
     if (!pageResult.success) return pageResult;
 
@@ -208,7 +216,8 @@ async function fetchPolymarketPositions(
     // probe failure keep the conservative "capped" answer.
     const probe = await fetchPolymarketPositionsPage(
       queryParams,
-      upstreamOffset
+      upstreamOffset,
+      options.signal
     );
     if (probe.success && probe.batch.length === 0) {
       scanCapped = false;
@@ -278,6 +287,8 @@ function sortByCurrentValueDesc(
  *         description: Rate limit exceeded.
  *       500:
  *         description: Request failed.
+ *       504:
+ *         description: Upstream request timed out.
  */
 export async function GET(request: NextRequest) {
   // Rate limit: 60 requests per minute
@@ -285,6 +296,8 @@ export async function GET(request: NextRequest) {
     uniqueTokenPerInterval: 60,
   });
   if (rateLimitResponse) return rateLimitResponse;
+
+  const deadline = createRequestDeadline(REQUEST_DEADLINE_MS, request.signal);
 
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -362,6 +375,7 @@ export async function GET(request: NextRequest) {
       limit: upstreamPageSize,
       offset: 0,
       maxPages: maxScanPages,
+      signal: deadline.signal,
       stopWhen: (items) =>
         items.filter((item) => !isLostRedeemablePosition(item)).length >=
         fetchTarget,
@@ -374,6 +388,7 @@ export async function GET(request: NextRequest) {
         limit: upstreamPageSize,
         offset: 0,
         maxPages: maxScanPages,
+        signal: deadline.signal,
         stopWhen: (items) => items.length >= fetchTarget,
       }
     );
@@ -493,6 +508,12 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (deadline.signal.aborted || isAbortLikeError(error)) {
+      return NextResponse.json(
+        { success: false, error: "Request to Polymarket timed out" },
+        { status: 504 }
+      );
+    }
     log.error("fetch.failed", { error });
     return NextResponse.json(
       {
@@ -501,5 +522,7 @@ export async function GET(request: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    deadline.dispose();
   }
 }

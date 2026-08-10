@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ERROR_MESSAGES } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
+import { getCacheHeaders } from "@/lib/cache-headers";
 import { sanitizeUpstreamBody } from "@/lib/upstream-error";
 import { isValidAddress } from "@/lib/validation";
 
@@ -160,32 +161,38 @@ export async function GET(request: NextRequest) {
     const data: PolymarketUserDetails[] = await response.json();
 
     if (!data || data.length === 0) {
-      return NextResponse.json({
-        success: true,
-        user,
-        details: null,
-        message: "User not found in leaderboard",
-      });
+      return NextResponse.json(
+        {
+          success: true,
+          user,
+          details: null,
+          message: "User not found in leaderboard",
+        },
+        { headers: getCacheHeaders("leaderboard") }
+      );
     }
 
     const userDetails = data[0];
 
-    return NextResponse.json({
-      success: true,
-      user,
-      timePeriod,
-      category,
-      details: {
-        rank: parseInt(userDetails.rank, 10),
-        proxyWallet: userDetails.proxyWallet,
-        userName: userDetails.userName,
-        xUsername: userDetails.xUsername || null,
-        verifiedBadge: userDetails.verifiedBadge,
-        volume: userDetails.vol,
-        pnl: userDetails.pnl,
-        profileImage: userDetails.profileImage || null,
+    return NextResponse.json(
+      {
+        success: true,
+        user,
+        timePeriod,
+        category,
+        details: {
+          rank: parseInt(userDetails.rank, 10),
+          proxyWallet: userDetails.proxyWallet,
+          userName: userDetails.userName,
+          xUsername: userDetails.xUsername || null,
+          verifiedBadge: userDetails.verifiedBadge,
+          volume: userDetails.vol,
+          pnl: userDetails.pnl,
+          profileImage: userDetails.profileImage || null,
+        },
       },
-    });
+      { headers: getCacheHeaders("leaderboard") }
+    );
   } catch (error) {
     log.error("fetch.failed", { error });
     return NextResponse.json(

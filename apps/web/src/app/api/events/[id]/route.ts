@@ -89,7 +89,12 @@ export async function GET(
     });
 
     if (!eventResponse.ok) {
-      if (eventResponse.status === 404) {
+      // Gamma returns 422 (not 404) for a malformed slug. At this public
+      // route it has the same safe, user-facing meaning: no event exists.
+      if (
+        eventResponse.status === 404 ||
+        (!isEventId && eventResponse.status === 422)
+      ) {
         return NextResponse.json(
           {
             success: false,

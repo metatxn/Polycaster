@@ -10,6 +10,10 @@ const outcomesTable = readFileSync(
   "src/app/events/detail/[slug]/outcomes-table.tsx",
   "utf8"
 );
+const eventDetailClient = readFileSync(
+  "src/app/events/detail/[slug]/event-detail-client.tsx",
+  "utf8"
+);
 const commentsSection = readFileSync(
   "src/components/comments/comments-section.tsx",
   "utf8"
@@ -32,6 +36,10 @@ test("event detail controls expose names without replacing their visible labels"
     outcomesTable,
     /aria-label=\{`\$\{isExpanded \? "Collapse" : "Expand"\}/
   );
+});
+
+test("market detail pages do not render comments", () => {
+  assert.doesNotMatch(eventDetailClient, /CommentsSection/);
 });
 
 test("light product signal colors clear contrast on tinted trading surfaces", () => {

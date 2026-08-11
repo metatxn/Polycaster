@@ -19,7 +19,6 @@ import {
   useState,
 } from "react";
 import { ChromeHeader } from "@/components/app-layout";
-import { CommentsSection } from "@/components/comments";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { LeagueRail, LeagueRailMobile } from "@/components/league-rail";
 import type { TimeRange } from "@/components/market-price-chart";
@@ -51,7 +50,6 @@ import {
 } from "@/lib/sports-live-game-cache";
 import type { EventCategoryCrumb } from "@/lib/tag-slugs";
 import { applyLiveTradingOutcomeQuotes } from "@/lib/trading-outcome-quotes";
-import type { TokenMarketMap } from "@/types/comments";
 import type { OutcomeData, TradingSide } from "@/types/market";
 import { CandidateTicker } from "./candidate-ticker";
 import {
@@ -495,7 +493,6 @@ export default function EventDetailClient({
     selectedMarket,
     tradingOutcomes: staticTradingOutcomes,
     currentTokenId,
-    tokenMarketMap,
     sortedMarketData,
   } = useMemo(() => {
     if (!event || openMarkets.length === 0) {
@@ -503,7 +500,6 @@ export default function EventDetailClient({
         selectedMarket: null,
         tradingOutcomes: [] as OutcomeData[],
         currentTokenId: "",
-        tokenMarketMap: new Map() as TokenMarketMap,
         sortedMarketData: [] as Array<{
           id: string;
           conditionId: string;
@@ -633,44 +629,10 @@ export default function EventDetailClient({
 
     const tokenId = outcomes[selectedOutcomeIndex]?.tokenId || "";
 
-    // Build token to market mapping for comments position display.
-    // For binary events (one market on the page, e.g. "Hantavirus
-    // pandemic?") we leave marketName empty so the comment pill
-    // falls back to the Yes/No outcome label and reads as the tight
-    // "124 NO" form. For multi-outcome events (FIFA, elections —
-    // multiple markets in the same group) we keep the short
-    // `groupItemTitle` (e.g. "Arsenal") so users can tell which
-    // option the position is on.
-    const isMultiOutcomeEvent = marketData.length > 1;
-    const tokenMap: TokenMarketMap = new Map();
-    for (const market of marketData) {
-      const marketName = isMultiOutcomeEvent
-        ? market.groupItemTitle || market.question || ""
-        : "";
-
-      if (market.yesTokenId) {
-        const yesOutcome = market.rawOutcomes?.[0] || "Yes";
-        tokenMap.set(market.yesTokenId, {
-          tokenId: market.yesTokenId,
-          marketName,
-          outcome: yesOutcome,
-        });
-      }
-      if (market.noTokenId) {
-        const noOutcome = market.rawOutcomes?.[1] || "No";
-        tokenMap.set(market.noTokenId, {
-          tokenId: market.noTokenId,
-          marketName,
-          outcome: noOutcome,
-        });
-      }
-    }
-
     return {
       selectedMarket: selected,
       tradingOutcomes: outcomes,
       currentTokenId: tokenId,
-      tokenMarketMap: tokenMap,
       sortedMarketData,
     };
   }, [event, openMarkets, selectedMarketId, selectedOutcomeIndex]);
@@ -1676,19 +1638,6 @@ export default function EventDetailClient({
                   </ErrorBoundary>
                 )}
               </div>
-
-              {/* Comments Section - appears after trading form on mobile, below outcomes on desktop */}
-              {event?.id && (
-                <div className="lg:col-span-2">
-                  <ErrorBoundary name="Comments Section">
-                    <CommentsSection
-                      eventId={Number.parseInt(event.id, 10)}
-                      variant="card"
-                      tokenMarketMap={tokenMarketMap}
-                    />
-                  </ErrorBoundary>
-                </div>
-              )}
             </div>
             {seoContent}
           </div>

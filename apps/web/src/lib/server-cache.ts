@@ -99,10 +99,15 @@ export interface GammaEventFull extends Event {
 const INITIAL_HOME_EVENT_LIMIT = 6;
 const RELATED_EVENT_LIMIT = 6;
 
+interface InitialEventPageOptions {
+  cache?: RequestCache;
+}
+
 async function fetchInitialEventPage(
   tagSlug?: string,
   seriesId?: number,
-  limit = 20
+  limit = 20,
+  options: InitialEventPageOptions = {}
 ): Promise<InitialHomeData> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -122,7 +127,9 @@ async function fetchInitialEventPage(
     {
       endpoint: POLYMARKET_API.GAMMA.EVENTS_KEYSET,
       params,
-      revalidate: CACHE_DURATION.EVENTS,
+      ...(options.cache
+        ? { cache: options.cache }
+        : { revalidate: CACHE_DURATION.EVENTS }),
     },
     ["events", "data"]
   );
@@ -204,7 +211,8 @@ export const getRelatedEventsByTag = cache(
       return await fetchInitialEventPage(
         tagSlug,
         undefined,
-        RELATED_EVENT_LIMIT
+        RELATED_EVENT_LIMIT,
+        { cache: "no-store" }
       );
     } catch (error) {
       logger.warn("server_cache.related_events.fetch_failed", {
@@ -358,15 +366,16 @@ export const getEvent = cache(
         ? `${POLYMARKET_API.GAMMA.EVENTS}/${slugOrId}`
         : `${POLYMARKET_API.GAMMA.EVENTS}/slug/${encodeURIComponent(slugOrId)}`;
 
-      const res = await fetch(url, {
-        next: { revalidate: CACHE_DURATION.EVENTS },
-      });
-      // Only a 404 means "this event does not exist" — that maps to
-      // notFound()/noindex downstream. Any other failure (5xx, rate limit,
-      // network) must throw so the page renders a 5xx instead of a 404;
-      // Googlebot drops 404s from the index but retries 5xx.
-      if (res.status === 404) {
-        logger.warn("server_cache.event.not_found", { slugOrId });
+      const res = await fetch(url, { cache: "no-store" });
+      // Gamma rejects malformed slugs with 422 rather than 404. Both mean
+      // there is no renderable event, so map them to notFound()/noindex.
+      // Other failures (5xx, rate limit, network) must throw so the page
+      // renders a retryable 5xx instead of a misleading 404.
+      if (res.status === 404 || (!isNumericId && res.status === 422)) {
+        logger.warn("server_cache.event.not_found", {
+          slugOrId,
+          status: res.status,
+        });
         return null;
       }
       if (!res.ok) {
@@ -389,7 +398,7 @@ export const getEvent = cache(
         try {
           const childrenUrl = `${POLYMARKET_API.GAMMA.EVENTS}?parent_event_id=${event.id}&limit=50&closed=false`;
           const childrenRes = await fetch(childrenUrl, {
-            next: { revalidate: CACHE_DURATION.EVENTS },
+            cache: "no-store",
           });
           if (childrenRes.ok) {
             type EventMarket = NonNullable<GammaEventFull["markets"]>[number];

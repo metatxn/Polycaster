@@ -80,6 +80,10 @@ describe("tag event fetch policies", () => {
 
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(requestUrl.searchParams.get("limit")).toBe("6");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      cache: "no-store",
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("next");
   });
 });
 
@@ -99,6 +103,19 @@ describe("getEvent", () => {
     );
 
     await expect(getEvent("missing-event-slug")).resolves.toBeNull();
+  });
+
+  it("treats an invalid upstream slug as not found", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: "Unprocessable Entity",
+      } satisfies Partial<Response>)
+    );
+
+    await expect(getEvent("esportsworldcup.com")).resolves.toBeNull();
   });
 
   // A 404 lets the route call notFound(), which drops the URL from Google's
@@ -149,5 +166,33 @@ describe("getEvent", () => {
       id: "event-9",
       slug: "event-nine",
     });
+  });
+
+  it("bypasses Next's R2-backed data cache for event detail reads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "event-cache",
+          slug: "event-cache",
+          markets: [],
+        }),
+      } satisfies Partial<Response>)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [],
+      } satisfies Partial<Response>);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getEvent("event-cache");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init).toMatchObject({ cache: "no-store" });
+      expect(init).not.toHaveProperty("next");
+    }
   });
 });

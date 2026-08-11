@@ -28,7 +28,7 @@ import { formatCents, formatVolume, relativeTime } from "@/lib/formatters";
  *   3. Utility bar — breadcrumb + LIVE + aggregate stats
  *   4. Filter bar — view tabs + advanced filter pills + filter search
  *   5. Top of Book — three featured market cards with outcome bars
- *   6. The Book — dense sortable table with 30D sparkline + Move + Trade
+ *   6. The Book — dense sortable table with 30D sparkline + Trade
  *
  * Numeric cells use Geist Mono with `tabular-nums` so prices align across
  * rows. Mobile/tablet (< lg) fall back to the standard card grid in the
@@ -218,15 +218,6 @@ function Spark({
       />
     </svg>
   );
-}
-
-/** Compute the cents move between the last two history points.
- *  Returns null when there are fewer than two points. */
-function moveCents(history: PriceHistoryPoint[] | undefined): number | null {
-  if (!history || history.length < 2) return null;
-  const last = history[history.length - 1].p;
-  const prev = history[history.length - 2].p;
-  return Math.round((last - prev) * 100);
 }
 
 // ============================================================
@@ -722,13 +713,21 @@ function ArrowUR() {
 
 // ============================================================
 // The Book — dense table backed entirely by real fields.
-// Columns: Market · Leader · 30D · Vol 24h ± · Liquidity · Move ·
-// Trade button. The 30D sparkline and Move column are driven by
-// the price-history batch endpoint; the Vol 24h ± delta is
-// computed from volume24hr / volume1wk.
+// Columns: Market · Leader · 30D · Vol 24h ± · Liquidity ·
+// Trade button. The 30D sparkline is driven by the price-history
+// batch endpoint; the Vol 24h ± delta is computed from
+// volume24hr / volume1wk.
+//
+// A "Move" column previously sat between Liquidity and Trade. It
+// was removed: the batch runs at hourly fidelity, so the last two
+// points differ by well under half a cent for most markets and
+// `Math.round` collapsed them to 0 — which rendered as the same
+// em-dash as "no history at all". The column was empty for the
+// overwhelming majority of rows and could not distinguish "flat"
+// from "unknown". The 30D sparkline carries direction instead.
 // ============================================================
 const BOOK_GRID =
-  "grid grid-cols-[minmax(0,2.2fr)_minmax(0,1.4fr)_110px_140px_120px_90px_100px] items-center gap-4";
+  "grid grid-cols-[minmax(0,2.2fr)_minmax(0,1.4fr)_110px_140px_120px_100px] items-center gap-4";
 
 function BookHead() {
   return (
@@ -747,7 +746,6 @@ function BookHead() {
         Vol 24h <span style={{ color: "var(--kwm-up)" }}>↓</span>
       </span>
       <span className="text-right">Liquidity</span>
-      <span className="text-right">Move</span>
       <span />
     </div>
   );
@@ -773,10 +771,6 @@ function BookRow({
   // input is zero so we don't divide by zero or print noise.
   const volDelta =
     vol24 > 0 && vol1wk > 0 ? (vol24 / (vol1wk / 7) - 1) * 100 : null;
-  // Cent change between the last two history points (most recent
-  // move). Used in the Move column. Null when history isn't loaded
-  // or has fewer than 2 points.
-  const move = moveCents(history);
   // Spark tint follows the leader's overall direction — green for
   // up (yes ≥ 50%), red for down. Falls back to ink-3 if no leader.
   const sparkColor = leader
@@ -884,7 +878,7 @@ function BookRow({
           token). Some leader tokens — typically newly-created or low-
           volume markets — return an empty history from CLOB. Show a
           dash in that case so the column reads as "no history" rather
-          than visually collapsing. Matches the Move-column em-dash. */}
+          than visually collapsing. */}
       <div className="justify-self-end">
         {history && history.length >= 2 ? (
           <Spark data={history} w={100} h={22} color={sparkColor} />
@@ -926,30 +920,6 @@ function BookRow({
         style={{ color: "var(--kwm-ink)", letterSpacing: "-0.01em" }}
       >
         {formatVolume(liq)}
-      </span>
-
-      {/* Move — last cent change between two consecutive history
-          points. Empty when history isn't loaded or has no movement. */}
-      <span
-        className="text-right font-(family-name:--font-geist-mono) text-[13px] tabular-nums"
-        style={{
-          color:
-            move === null
-              ? "var(--kwm-ink-3)"
-              : move > 0
-                ? "var(--kwm-up)"
-                : move < 0
-                  ? "var(--kwm-down)"
-                  : "var(--kwm-ink-3)",
-        }}
-      >
-        {move === null
-          ? "—"
-          : move > 0
-            ? `▲ ${move}¢`
-            : move < 0
-              ? `▼ ${Math.abs(move)}¢`
-              : "—"}
       </span>
 
       {/* Trade */}
@@ -1016,10 +986,6 @@ export function TableSkeleton({ rows = 15 }: { rows?: number }) {
           />
           <div
             className="h-3 w-16 rounded-sm justify-self-end"
-            style={{ background: "var(--kwm-bg-3)" }}
-          />
-          <div
-            className="h-3 w-12 rounded-sm justify-self-end"
             style={{ background: "var(--kwm-bg-3)" }}
           />
           <div

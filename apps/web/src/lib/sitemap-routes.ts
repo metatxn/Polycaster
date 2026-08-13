@@ -40,6 +40,7 @@ const SITEMAP_PAGE_LIMIT = "100";
 // the full catalog, but SEO should not ask crawlers to revisit thousands of
 // low-volume or duplicate market detail URLs every hour.
 const SITEMAP_MAX_EVENTS = 1000;
+const DURABLE_PENDING_SITEMAP_MAX_EVENTS = 500;
 const EVERGREEN_SITEMAP_MAX_EVENTS = 500;
 
 export type SitemapMarketKind = "active" | "evergreen";
@@ -114,13 +115,13 @@ async function fetchAllKeysetItems<T, R>(
 
 export const getCachedSitemapEventRoutes = unstable_cache(
   () => fetchSitemapEventRoutes("active"),
-  ["knoww-sitemap-event-routes-v5"],
+  ["knoww-sitemap-event-routes-v6"],
   { revalidate: SITEMAP_REVALIDATE_SECONDS }
 );
 
 export const getCachedEvergreenSitemapEventRoutes = unstable_cache(
   () => fetchSitemapEventRoutes("evergreen"),
-  ["knoww-sitemap-evergreen-event-routes-v2"],
+  ["knoww-sitemap-evergreen-event-routes-v3"],
   { revalidate: SITEMAP_REVALIDATE_SECONDS }
 );
 
@@ -158,7 +159,16 @@ export function buildEventSitemapRoutes(
         return false;
       }
       const status = getEventSeoStatus(event);
-      return kind === "active" ? status === "live" : status === "resolved";
+      if (kind === "active") {
+        // Gamma can set `ended` before it flips the top-level `closed` flag.
+        // Keep substantial pending/disputed pages discoverable from the same
+        // closed=false feed until they migrate to the historical segment.
+        return status === "live" || event.closed !== true;
+      }
+
+      return (
+        event.closed === true && (status === "resolved" || status === "closed")
+      );
     })
     .flatMap((event) =>
       event.slug ? [buildEventSitemapRoute({ ...event, slug: event.slug })] : []
@@ -192,6 +202,19 @@ export function buildSitemapEventQueries(kind: SitemapMarketKind = "active") {
         limit: SITEMAP_PAGE_LIMIT,
       }),
       maxItems: SITEMAP_MAX_EVENTS,
+    },
+    {
+      // A finished event can remain closed=false while settlement is pending,
+      // but its 24-hour volume quickly becomes zero. A total-volume pass keeps
+      // substantial pending/disputed pages discoverable during that interval.
+      params: new URLSearchParams({
+        closed: "false",
+        archived: "false",
+        order: "volume",
+        ascending: "false",
+        limit: SITEMAP_PAGE_LIMIT,
+      }),
+      maxItems: DURABLE_PENDING_SITEMAP_MAX_EVENTS,
     },
   ];
 }

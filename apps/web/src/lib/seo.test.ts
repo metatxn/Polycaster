@@ -262,11 +262,38 @@ describe("shouldIndexEventPage", () => {
     ).toBe(false);
   });
 
-  it("never indexes ended events even when their markets are still open", () => {
+  it("indexes substantial ended events while settlement is disputed", () => {
+    const event = {
+      slug: "cs2-pure-drama-2026-08-05",
+      title: "Counter-Strike: PURE vs Drama eSports",
+      description:
+        "This completed match page retains the market rules, trading history, settlement source, and current dispute status for readers following the final resolution.",
+      volume: "37780.37",
+      active: true,
+      closed: false,
+      ended: true,
+      markets: [
+        {
+          id: "3355610",
+          active: true,
+          closed: false,
+          umaResolutionStatus: "disputed",
+        },
+      ],
+    };
+
+    expect(getEventSeoStatus(event)).toBe("closed");
+    expect(shouldIndexEventPage(event)).toBe(true);
+    expect(shouldListEventInSitemap(event)).toBe(true);
+  });
+
+  it("keeps thin ended events out of the index", () => {
     expect(
       shouldIndexEventPage({
-        slug: "ended-event",
-        title: "Ended Event",
+        slug: "thin-ended-event",
+        title: "Thin Ended Event",
+        description: "Trading ended.",
+        volume: "9999.99",
         active: true,
         closed: false,
         ended: true,

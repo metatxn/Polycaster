@@ -170,10 +170,10 @@ export function buildEventPageDescription({
 }
 
 /**
- * Current events are indexable when they contain an open market. Resolved
- * events remain indexable only when they have durable context and meaningful
- * trading history; closed-but-unresolved and thin historical pages stay
- * crawlable with noindex.
+ * Current events are indexable when they contain an open market. Closed or
+ * ended events remain indexable when they have durable context, meaningful
+ * trading history, and a market record readers can follow through settlement.
+ * Thin historical pages stay crawlable with noindex.
  */
 export function shouldIndexEventPage(event: SeoEventInput | null | undefined) {
   if (!event) {
@@ -194,7 +194,7 @@ export function shouldIndexEventPage(event: SeoEventInput | null | undefined) {
     event.active !== false &&
     hasIndexableOpenMarket(event);
 
-  return isCurrentEvent || hasIndexableResolvedEvent(event);
+  return isCurrentEvent || hasIndexableHistoricalEvent(event);
 }
 
 export function shouldListEventInSitemap(
@@ -232,18 +232,19 @@ function hasIndexableOpenMarket(event: SeoEventInput) {
   return true;
 }
 
-function hasIndexableResolvedEvent(event: SeoEventInput) {
+function hasIndexableHistoricalEvent(event: SeoEventInput) {
   if (
     !event.slug ||
+    !isEventClosedForSeo(event) ||
     cleanMetaText(event.description).length <
       HISTORICAL_EVENT_MIN_DESCRIPTION_LENGTH ||
     !hasMinimumHistoricalVolume(event.volume) ||
-    !isEventResolvedForSeo(event)
+    !Array.isArray(event.markets)
   ) {
     return false;
   }
 
-  return true;
+  return event.markets.some((market) => market?.id !== undefined);
 }
 
 function hasMinimumHistoricalVolume(value: string | number | null | undefined) {

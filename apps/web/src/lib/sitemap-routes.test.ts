@@ -116,11 +116,20 @@ describe("buildSitemapEventQueries", () => {
   it("queries active events for the live-markets segment", () => {
     const queries = buildSitemapEventQueries("active");
 
-    expect(queries).toHaveLength(1);
+    expect(queries).toHaveLength(2);
     expect(queries[0].params.get("active")).toBe("true");
     expect(queries[0].params.get("closed")).toBe("false");
     expect(queries[0].params.get("archived")).toBe("false");
     expect(queries[0].params.get("order")).toBe("volume24hr");
+  });
+
+  it("also queries durable closed-false events after their daily volume drops", () => {
+    const queries = buildSitemapEventQueries("active");
+
+    expect(queries[1].params.get("active")).toBeNull();
+    expect(queries[1].params.get("closed")).toBe("false");
+    expect(queries[1].params.get("archived")).toBe("false");
+    expect(queries[1].params.get("order")).toBe("volume");
   });
 
   it("queries closed events separately for durable evergreen results", () => {
@@ -204,7 +213,7 @@ describe("buildEventSitemapRoutes", () => {
     ]);
   });
 
-  it("omits closed-unresolved pages from both market sitemaps", () => {
+  it("includes substantial closed-unresolved pages in the evergreen sitemap", () => {
     const event = {
       slug: "unsettled-final",
       title: "Unsettled Final",
@@ -224,6 +233,38 @@ describe("buildEventSitemapRoutes", () => {
     };
 
     expect(buildEventSitemapRoutes([event], "active")).toEqual([]);
+    expect(buildEventSitemapRoutes([event], "evergreen")).toEqual([
+      {
+        url: "https://knoww.app/events/detail/unsettled-final",
+      },
+    ]);
+  });
+
+  it("keeps substantial ended-disputed pages discoverable while upstream flags remain active", () => {
+    const event = {
+      slug: "cs2-pure-drama-2026-08-05",
+      title: "Counter-Strike: PURE vs Drama eSports",
+      description:
+        "This completed match page retains the market rules, trading history, settlement source, and current dispute status for readers following the final resolution.",
+      volume: "37780.37",
+      active: true,
+      closed: false,
+      ended: true,
+      markets: [
+        {
+          id: "3355610",
+          active: true,
+          closed: false,
+          umaResolutionStatus: "disputed",
+        },
+      ],
+    };
+
+    expect(buildEventSitemapRoutes([event], "active")).toEqual([
+      {
+        url: "https://knoww.app/events/detail/cs2-pure-drama-2026-08-05",
+      },
+    ]);
     expect(buildEventSitemapRoutes([event], "evergreen")).toEqual([]);
   });
 });

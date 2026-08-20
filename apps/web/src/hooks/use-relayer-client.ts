@@ -286,6 +286,20 @@ export function useRelayerClient() {
         );
         log.debug("approvals.status", approvalStatus);
 
+        // Refuse to build approvals from an unreliable read (unless every
+        // flag is already true, which failed reads can only under-report).
+        // A failed read scores its grant as missing, so proceeding would
+        // request a pointless signature — and re-approving pusdCtf at the
+        // entered amount can shrink a larger standing allowance.
+        if (!approvalStatus.allReadsOk && !approvalStatus.allApproved) {
+          log.warn("approvals.status_unreliable", {
+            readFailures: approvalStatus.readFailures,
+          });
+          throw new Error(
+            "Could not verify your current approvals (network issue reading the chain). No transaction was sent — please try again."
+          );
+        }
+
         const approvalTxs = options.approvalScope
           ? buildClobOrderApprovalTransactions(
               approvalStatus,

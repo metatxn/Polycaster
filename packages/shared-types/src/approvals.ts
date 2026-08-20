@@ -71,6 +71,16 @@ export interface TradingApprovalStatus {
   ctfOperationsApproved: boolean;
   /** True when neg-risk conversion adapter approvals are complete. */
   negRiskConversionApproved: boolean;
+  /**
+   * Status keys whose multicall read failed (e.g. "pusdCtfExchange"). A
+   * failed read scores its flag false, so any entry here means the false
+   * flags are unreliable: treat the status as "unknown", never as "not
+   * approved". Always set by readTradingApprovalStatus; optional only so
+   * hand-built status literals stay valid.
+   */
+  readFailures?: string[];
+  /** True when every multicall read succeeded, so false flags are trustworthy. */
+  allReadsOk?: boolean;
 }
 
 export interface ClobOrderApprovalRequirement {
@@ -287,6 +297,23 @@ export async function readErc1155Approval(
   }
 }
 
+/**
+ * Index-aligned with the multicall contracts array in
+ * readTradingApprovalStatus — reordering one requires reordering the other.
+ */
+const APPROVAL_READ_LABELS = [
+  "pusdCtf",
+  "pusdCtfExchange",
+  "pusdNegRiskExchange",
+  "pusdCtfCollateralAdapter",
+  "pusdNegRiskCtfCollateralAdapter",
+  "usdcOnramp",
+  "ctfExchangeApproval",
+  "ctfNegRiskExchangeApproval",
+  "ctfCollateralAdapterApproval",
+  "ctfNegRiskCollateralAdapterApproval",
+] as const;
+
 export async function readTradingApprovalStatus(
   client: PublicClient,
   owner: Address,
@@ -298,6 +325,7 @@ export async function readTradingApprovalStatus(
 
   const results = await client.multicall({
     allowFailure: true,
+    // Order must match APPROVAL_READ_LABELS.
     contracts: [
       {
         address: PUSD_ADDRESS,
@@ -402,7 +430,13 @@ export async function readTradingApprovalStatus(
   // wrap-funded BUY and re-trigger setup/approval prompts forever.
   const allApproved = clobTradingApproved;
 
+  const readFailures = APPROVAL_READ_LABELS.filter(
+    (_, index) => results[index].status === "failure"
+  );
+
   return {
+    readFailures: [...readFailures],
+    allReadsOk: readFailures.length === 0,
     pusdCtf,
     pusdCtfExchange,
     pusdNegRiskExchange,

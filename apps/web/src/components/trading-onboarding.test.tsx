@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { qk } from "@/lib/query-keys";
 import { TradingOnboarding } from "./trading-onboarding";
@@ -68,8 +74,12 @@ vi.mock("@/hooks/use-proxy-wallet", () => ({
   useProxyWallet: () => proxyWalletState,
 }));
 
+const approvalsState = vi.hoisted(() => ({
+  checkAllApprovals: vi.fn(),
+}));
+
 vi.mock("@/lib/approvals", () => ({
-  checkAllApprovals: vi.fn().mockResolvedValue({ allApproved: false }),
+  checkAllApprovals: approvalsState.checkAllApprovals,
 }));
 
 vi.mock("@/lib/wallet-modal", () => ({
@@ -87,6 +97,13 @@ describe("TradingOnboarding", () => {
     relayerState.proxyAddress = "0x0000000000000000000000000000000000000002";
     relayerState.hasDeployedSafe = true;
     relayerState.approveUsdcForTrading.mockResolvedValue({ success: true });
+    // A clean negative: every read succeeded, approvals genuinely missing.
+    // Individual tests override this to exercise the unreliable-read path.
+    approvalsState.checkAllApprovals.mockResolvedValue({
+      allApproved: false,
+      allReadsOk: true,
+      readFailures: [],
+    });
     credentialsState.hasCredentials = false;
     credentialsState.isLoading = false;
     proxyWalletState.isDeployed = true;
@@ -125,6 +142,55 @@ describe("TradingOnboarding", () => {
         queryKey: qk.wallet.allUsdcAllowances(),
       });
     });
+  });
+
+  it("commits a clean negative verdict from a single check", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TradingOnboarding />
+      </QueryClientProvider>
+    );
+
+    // The approve step must still onboard a genuinely-unapproved user:
+    // one reliable check, no retries.
+    await screen.findByRole("button", { name: /approve/i });
+    await waitFor(() => {
+      expect(approvalsState.checkAllApprovals).toHaveBeenCalledTimes(1);
+    });
+
+    // The deploy effect re-runs after isCheckingApproval settles; a committed
+    // verdict (hasUsdcApproval !== null) must not trigger another check.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 25)));
+    expect(approvalsState.checkAllApprovals).toHaveBeenCalledTimes(1);
+  });
+
+  it("degrades to not-approved after capped unreliable checks", async () => {
+    approvalsState.checkAllApprovals.mockResolvedValue({
+      allApproved: false,
+      allReadsOk: false,
+      readFailures: ["pusdCtfExchange"],
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TradingOnboarding />
+      </QueryClientProvider>
+    );
+
+    // Unreliable reads leave the verdict null, so the deploy effect retries
+    // exactly once more before the cap degrades the step to pending.
+    await waitFor(() => {
+      expect(approvalsState.checkAllApprovals).toHaveBeenCalledTimes(2);
+    });
+
+    const approveButton = await screen.findByRole("button", {
+      name: /approve/i,
+    });
+    expect(approveButton).toBeEnabled();
+
+    // Capped: the degraded verdict must stop the check loop.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 25)));
+    expect(approvalsState.checkAllApprovals).toHaveBeenCalledTimes(2);
   });
 
   it("blocks vault deployment while legacy Safe detection is pending", async () => {

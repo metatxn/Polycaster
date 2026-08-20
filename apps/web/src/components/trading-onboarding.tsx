@@ -226,8 +226,16 @@ export function TradingOnboarding({
    *  steps already done on mount should NOT auto-trigger onComplete). */
   const prevAllCompleteRef = useRef<boolean | null>(null);
 
+  /** Unreliable approval checks (RPC failures) get this many attempts
+   *  before the step degrades to "not approved". The cap matters because
+   *  the deploy effect re-runs the check whenever hasUsdcApproval is null —
+   *  without it, a dead RPC would loop the check forever. */
+  const approvalCheckAttemptsRef = useRef(0);
+  const MAX_APPROVAL_CHECK_ATTEMPTS = 2;
+
   useEffect(() => {
     setHasUsdcApproval(null);
+    approvalCheckAttemptsRef.current = 0;
     setSteps((prev) =>
       prev.map((step) => {
         if (step.id === "connect") {
@@ -275,13 +283,40 @@ export function TradingOnboarding({
   const checkUsdcApproval = useCallback(async () => {
     if (!hasProxyWallet || !proxyAddress || isCheckingApproval) return;
     setIsCheckingApproval(true);
+
+    // A reliable verdict — or a capped run of unreliable ones — resolves
+    // hasUsdcApproval away from null; only an unreliable result below the
+    // cap leaves it null so the deploy effect re-runs the check.
+    const recordUnreliableAttempt = () => {
+      approvalCheckAttemptsRef.current += 1;
+      if (approvalCheckAttemptsRef.current >= MAX_APPROVAL_CHECK_ATTEMPTS) {
+        // Degrading to "not approved" here is safe: it only shows the step
+        // as pending inside an already-open modal, and clicking APPROVE
+        // re-checks fresh — short-circuiting with no signature if the
+        // grants exist. It never auto-opens the modal (the context gate
+        // treats unknown as unknown).
+        setHasUsdcApproval(false);
+      }
+    };
+
     try {
       const status = await checkAllApprovals(proxyAddress);
       log.debug("approvals.status", { status });
-      setHasUsdcApproval(status.allApproved);
+      // allApproved=true is reliable even with failed reads (a failed read
+      // only under-reports); false is only reliable when every read
+      // succeeded.
+      if (status.allApproved || status.allReadsOk) {
+        approvalCheckAttemptsRef.current = 0;
+        setHasUsdcApproval(status.allApproved);
+      } else {
+        log.warn("approvals.check_unreliable", {
+          readFailures: status.readFailures,
+        });
+        recordUnreliableAttempt();
+      }
     } catch (err) {
       log.error("approvals.check_failed", { error: err });
-      setHasUsdcApproval(false);
+      recordUnreliableAttempt();
     } finally {
       setIsCheckingApproval(false);
     }

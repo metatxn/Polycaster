@@ -196,7 +196,17 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           const { checkAllApprovals } = await import("@/lib/approvals");
           const status = await checkAllApprovals(safeAddress);
           log.debug("approvals.status", { status });
-          setHasApprovals(status.allApproved);
+          if (status.allApproved || status.allReadsOk) {
+            setHasApprovals(status.allApproved);
+          } else {
+            // Unreliable negative (some reads failed): fail open like the
+            // catch below — a false here gets persisted to the stored
+            // session and would keep prompting until a clean read.
+            log.warn("approvals.status_unreliable", {
+              readFailures: status.readFailures,
+            });
+            setHasApprovals(true);
+          }
         } catch (err) {
           log.error("approvals.check_failed", { error: err });
           // Fall back to assuming approvals are set if safe is deployed

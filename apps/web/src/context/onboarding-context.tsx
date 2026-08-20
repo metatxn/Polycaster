@@ -156,26 +156,68 @@ export function OnboardingProvider({ children }: OnboardingProviderProps) {
   // uses — previously this checked USDC.e→CTFExchange (a V1 allowance that
   // can be set without any V2 approval existing), which produced both false
   // positives for V1-only users and false negatives for clean V2 users.
+  //
+  // A failed or partial read must never become "not approved": this check
+  // runs during the page-load RPC burst, where the multicall transiently
+  // 429s. Scoring that as false auto-opened the approval prompt for users
+  // whose grants all exist on-chain (clicking APPROVE then re-read in a
+  // quiet moment, found everything set, and requested no signature — so
+  // the modal returned on every reload). A verdict is only committed when
+  // it is reliable; otherwise we re-check on a delay and, if reads never
+  // stabilize, stay in the "unknown" state, which suppresses the modal.
   useEffect(() => {
+    // Skip if no proxy wallet, or we've already checked this proxy address
+    if (!hasProxyWallet || !proxyAddress) return;
+    if (checkedProxyAddressRef.current === proxyAddress) return;
+
+    checkedProxyAddressRef.current = proxyAddress;
+    // A wallet switch must restart from "unknown": the terminal unreliable
+    // path below commits nothing, which is only safe when the previous
+    // wallet's verdict isn't still sitting in state.
+    setHasUsdcApproval(null);
+
+    // Delays between full re-checks after an unreliable result, on top of
+    // the fast retries checkAllApprovals does internally.
+    const RECHECK_DELAYS_MS = [5000, 15000];
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+    // The proxy address changed mid-flight if a newer effect run re-pinned
+    // the ref; a stale loop must stop touching state.
+    const isCurrent = () => checkedProxyAddressRef.current === proxyAddress;
+
     const checkApproval = async () => {
-      // Skip if no proxy wallet or already checking
-      if (!hasProxyWallet || !proxyAddress) return;
-
-      // Skip if we've already checked this proxy address
-      if (checkedProxyAddressRef.current === proxyAddress) return;
-
-      checkedProxyAddressRef.current = proxyAddress;
       setIsCheckingUsdcApproval(true);
-
       try {
-        const status = await checkAllApprovals(proxyAddress);
-        log.debug("approvals.v2_check", { proxyAddress, ...status });
-        setHasUsdcApproval(status.allApproved);
-      } catch (err) {
-        log.error("approvals.v2_check_failed", { error: err });
-        setHasUsdcApproval(false);
+        for (let attempt = 0; attempt <= RECHECK_DELAYS_MS.length; attempt++) {
+          if (attempt > 0) {
+            await sleep(RECHECK_DELAYS_MS[attempt - 1]);
+            if (!isCurrent()) return;
+          }
+          try {
+            const status = await checkAllApprovals(proxyAddress);
+            if (!isCurrent()) return;
+            // allApproved=true is reliable even with failed reads (a failed
+            // read only under-reports); false is only reliable when every
+            // read succeeded.
+            if (status.allApproved || status.allReadsOk) {
+              log.debug("approvals.v2_check", { proxyAddress, ...status });
+              setHasUsdcApproval(status.allApproved);
+              return;
+            }
+            log.warn("approvals.v2_check_unreliable", {
+              proxyAddress,
+              readFailures: status.readFailures,
+            });
+          } catch (err) {
+            if (!isCurrent()) return;
+            log.error("approvals.v2_check_failed", { error: err });
+          }
+        }
+        // No reliable verdict: leave hasUsdcApproval null (unknown). The
+        // modal stays suppressed — prompting for approvals we can't read
+        // is worse than waiting for the next page load.
       } finally {
-        setIsCheckingUsdcApproval(false);
+        if (isCurrent()) setIsCheckingUsdcApproval(false);
       }
     };
 

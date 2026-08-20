@@ -5,6 +5,7 @@ import {
   buildClobOrderApprovalTransactions,
   buildTradingApprovalTransactions,
   isClobOrderApproved,
+  readTradingApprovalStatus,
 } from "./approvals.ts";
 import {
   COLLATERAL_ONRAMP_ADDRESS,
@@ -165,6 +166,90 @@ test("neg-risk SELL scoped approvals grant the missing NegRiskCtfCollateralAdapt
       NEG_RISK_CTF_EXCHANGE_ADDRESS,
     ].sort()
   );
+});
+
+// ── readTradingApprovalStatus read-failure semantics ──
+//
+// The multicall index order mirrors APPROVAL_READ_LABELS in approvals.ts:
+// 0 pusdCtf, 1 pusdCtfExchange, 2 pusdNegRiskExchange,
+// 3 pusdCtfCollateralAdapter, 4 pusdNegRiskCtfCollateralAdapter,
+// 5 usdcOnramp, 6 ctfExchangeApproval, 7 ctfNegRiskExchangeApproval,
+// 8 ctfCollateralAdapterApproval, 9 ctfNegRiskCollateralAdapterApproval.
+
+const OWNER = "0x0000000000000000000000000000000000000001";
+
+function allowanceOk() {
+  return { status: "success", result: 100_000_000n };
+}
+
+function operatorOk() {
+  return { status: "success", result: true };
+}
+
+function failedRead() {
+  return { status: "failure", error: new Error("rpc 429") };
+}
+
+function fullyApprovedResults() {
+  return [
+    allowanceOk(),
+    allowanceOk(),
+    allowanceOk(),
+    allowanceOk(),
+    allowanceOk(),
+    allowanceOk(),
+    operatorOk(),
+    operatorOk(),
+    operatorOk(),
+    operatorOk(),
+  ];
+}
+
+function stubClient(results) {
+  return { multicall: async () => results };
+}
+
+test("readTradingApprovalStatus reports clean reads as reliable", async () => {
+  const status = await readTradingApprovalStatus(
+    stubClient(fullyApprovedResults()),
+    OWNER
+  );
+
+  assert.equal(status.allReadsOk, true);
+  assert.deepEqual(status.readFailures, []);
+  assert.equal(status.allApproved, true);
+});
+
+test("readTradingApprovalStatus labels failed reads by status key", async () => {
+  const results = fullyApprovedResults();
+  results[1] = failedRead(); // pusdCtfExchange
+  results[9] = failedRead(); // ctfNegRiskCollateralAdapterApproval
+
+  const status = await readTradingApprovalStatus(stubClient(results), OWNER);
+
+  assert.equal(status.allReadsOk, false);
+  assert.deepEqual(status.readFailures, [
+    "pusdCtfExchange",
+    "ctfNegRiskCollateralAdapterApproval",
+  ]);
+  // A failed read scores its flag false — which is exactly why callers must
+  // treat allReadsOk=false negatives as unknown, not as missing grants.
+  assert.equal(status.pusdCtfExchange, false);
+  assert.equal(status.ctfNegRiskCollateralAdapterApproval, false);
+  assert.equal(status.allApproved, false);
+});
+
+test("readTradingApprovalStatus keeps allApproved=true when only a non-gating read fails", async () => {
+  const results = fullyApprovedResults();
+  results[5] = failedRead(); // usdcOnramp — excluded from allApproved
+
+  const status = await readTradingApprovalStatus(stubClient(results), OWNER);
+
+  // Failed reads only under-report, so a positive verdict stays trustworthy
+  // even when allReadsOk is false.
+  assert.equal(status.allReadsOk, false);
+  assert.deepEqual(status.readFailures, ["usdcOnramp"]);
+  assert.equal(status.allApproved, true);
 });
 
 test("trading approval batch uses MaxUint256 for pUSD exchange approvals", () => {

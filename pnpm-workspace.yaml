@@ -25,7 +25,6 @@ minimumReleaseAgeExclude:
   - "@polymarket/client"
   - "@polymarket/types"
   - "@polymarket/bindings"
-  - "nanoid"
   - "dompurify"
   # wagmi@3.7.6 pins @wagmi/connectors@8.1.0, removing the optional porto peer
   # that pulls the vulnerable React Native/Metro image-size chain. These
@@ -75,11 +74,11 @@ overrides:
   # Release-age gate waived above.
   "hono": "4.12.34"
   "postcss": "8.5.24"
-  # GHSA-2v37-7h3g-55p8: a custom alphabet with size 0 spins forever. Fixed on
-  # the 3.x line in 3.3.17 — the floor the advisory names, and all postcss
-  # (^3.3.11) needs. Release-age gate waived above; drop the waiver after
-  # 2026-08-10, when 3.3.17 ages past the gate on its own.
-  "nanoid": "3.3.17"
+  # GHSA-2v37-7h3g-55p8: a custom alphabet with size 0 spins forever. The
+  # advisory was revised — the 3.3.17 fix was incomplete and the patched
+  # floor is now 3.3.18 (published 2026-08-07, already past the release-age
+  # gate, so no waiver needed).
+  "nanoid": "3.3.18"
   "minimatch": "10.2.6"
   "lodash": "4.18.1"
   "bn.js": "4.12.3"

@@ -213,6 +213,34 @@ describe("buildEventSitemapRoutes", () => {
     ]);
   });
 
+  it("lists high-volume resolved pages with rendered outcome context", () => {
+    const event = {
+      slug: "will-xauusd-hit-week-of-august-10-2026",
+      title: "What will Gold (XAUUSD) hit Week of August 10 2026?",
+      description: "What will Gold (XAUUSD) hit Week of August 10 2026?",
+      volume: "51033.27",
+      active: true,
+      closed: true,
+      archived: false,
+      markets: [
+        {
+          id: "1",
+          active: false,
+          closed: true,
+          outcomePrices: '["1", "0"]',
+          umaResolutionStatus: "resolved",
+        },
+      ],
+    };
+
+    expect(buildEventSitemapRoutes([event], "active")).toEqual([]);
+    expect(buildEventSitemapRoutes([event], "evergreen")).toEqual([
+      {
+        url: "https://knoww.app/events/detail/will-xauusd-hit-week-of-august-10-2026",
+      },
+    ]);
+  });
+
   it("includes substantial closed-unresolved pages in the evergreen sitemap", () => {
     const event = {
       slug: "unsettled-final",

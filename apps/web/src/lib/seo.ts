@@ -28,6 +28,7 @@ type SeoMarketInput = {
   id?: string | number;
   active?: boolean;
   closed?: boolean;
+  outcomePrices?: string | null;
   umaResolutionStatus?: string | null;
   umaResolutionStatuses?: string | null;
 };
@@ -173,7 +174,8 @@ export function buildEventPageDescription({
  * Current events are indexable when they contain an open market. Closed or
  * ended events remain indexable when they have durable context, meaningful
  * trading history, and a market record readers can follow through settlement.
- * Thin historical pages stay crawlable with noindex.
+ * Fully resolved pages may use rendered outcome data when their source
+ * description is brief. Thin historical pages stay crawlable with noindex.
  */
 export function shouldIndexEventPage(event: SeoEventInput | null | undefined) {
   if (!event) {
@@ -236,8 +238,7 @@ function hasIndexableHistoricalEvent(event: SeoEventInput) {
   if (
     !event.slug ||
     !isEventClosedForSeo(event) ||
-    cleanMetaText(event.description).length <
-      HISTORICAL_EVENT_MIN_DESCRIPTION_LENGTH ||
+    !hasDurableHistoricalContext(event) ||
     !hasMinimumHistoricalVolume(event.volume) ||
     !Array.isArray(event.markets)
   ) {
@@ -245,6 +246,46 @@ function hasIndexableHistoricalEvent(event: SeoEventInput) {
   }
 
   return event.markets.some((market) => market?.id !== undefined);
+}
+
+function hasDurableHistoricalContext(event: SeoEventInput) {
+  if (
+    cleanMetaText(event.description).length >=
+    HISTORICAL_EVENT_MIN_DESCRIPTION_LENGTH
+  ) {
+    return true;
+  }
+
+  if (!isEventResolvedForSeo(event)) {
+    return false;
+  }
+
+  // Resolved pages render a final-outcome summary from Gamma's outcomePrices.
+  // Treat that verified market payload as durable context even when Gamma's
+  // source description only repeats the event title.
+  return Boolean(
+    event.markets?.some((market) => hasRenderableOutcomePrice(market))
+  );
+}
+
+function hasRenderableOutcomePrice(market: SeoMarketInput | null | undefined) {
+  if (!market?.outcomePrices) {
+    return false;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(market.outcomePrices);
+    if (!Array.isArray(parsed)) {
+      return false;
+    }
+
+    const leadingPrice = Number(parsed[0]);
+    return (
+      Number.isFinite(leadingPrice) && leadingPrice >= 0 && leadingPrice <= 1
+    );
+  } catch {
+    return false;
+  }
 }
 
 function hasMinimumHistoricalVolume(value: string | number | null | undefined) {

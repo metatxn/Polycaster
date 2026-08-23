@@ -241,6 +241,30 @@ describe("shouldIndexEventPage", () => {
     expect(shouldListEventInSitemap(event)).toBe(true);
   });
 
+  it("indexes high-volume resolved events with rendered outcome context", () => {
+    const event = {
+      slug: "will-xauusd-hit-week-of-august-10-2026",
+      title: "What will Gold (XAUUSD) hit Week of August 10 2026?",
+      description: "What will Gold (XAUUSD) hit Week of August 10 2026?",
+      volume: "51033.27",
+      active: true,
+      closed: true,
+      markets: [
+        {
+          id: "1",
+          active: false,
+          closed: true,
+          groupItemTitle: "↑ $4,400",
+          outcomePrices: '["1", "0"]',
+          umaResolutionStatus: "resolved",
+        },
+      ],
+    };
+
+    expect(shouldIndexEventPage(event)).toBe(true);
+    expect(shouldListEventInSitemap(event)).toBe(true);
+  });
+
   it("does not index thin resolved events", () => {
     expect(
       shouldIndexEventPage({
@@ -285,6 +309,27 @@ describe("shouldIndexEventPage", () => {
     expect(getEventSeoStatus(event)).toBe("closed");
     expect(shouldIndexEventPage(event)).toBe(true);
     expect(shouldListEventInSitemap(event)).toBe(true);
+  });
+
+  it("does not index resolved events without source or outcome context", () => {
+    expect(
+      shouldIndexEventPage({
+        slug: "context-free-result",
+        title: "Context-free Result",
+        description: "Resolved.",
+        volume: "250000",
+        active: false,
+        closed: true,
+        markets: [
+          {
+            id: "1",
+            active: false,
+            closed: true,
+            umaResolutionStatus: "resolved",
+          },
+        ],
+      })
+    ).toBe(false);
   });
 
   it("keeps thin ended events out of the index", () => {

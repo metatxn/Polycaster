@@ -93,11 +93,6 @@ export default function LandingPage() {
               the balanced vertical centering. */}
             <div className="grid grid-cols-12 gap-8 xl:gap-12 items-center min-[1024px]:max-[1279px]:landscape:items-start">
               <div className="col-span-12 lg:landscape:col-span-7 xl:col-span-7 [text-shadow:0_2px_22px_var(--kw-bg),0_0_8px_var(--kw-bg)]">
-                <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-(--kw-fg)/60 mb-6">
-                  <span className="kw-signal-dot w-1.5 h-1.5" />
-                  Issue № 01 — The Prediction Layer
-                </div>
-
                 {/* Keyword-bearing H1 (SEO audit §5.2). Three descending
                     lines — the widest is "Prediction markets" (18ch), which
                     the responsive sizes are tuned against so the block never

@@ -301,11 +301,7 @@ export default function ExtensionPage() {
         />
       </main>
 
-      <LandingFooter
-        stamp="№ 03 — Summer 2026"
-        tagline="A field guide to the extension"
-        issueLine="№ 03 · 2026"
-      />
+      <LandingFooter />
     </LandingShell>
   );
 }

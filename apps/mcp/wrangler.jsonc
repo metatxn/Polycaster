@@ -1,0 +1,36 @@
+/**
+ * Knoww MCP Worker (mcp.knoww.app/mcp).
+ *
+ * The top-level configuration is the production shape and fails closed:
+ * MCP_AUTH_MODE anything other than "dev-bypass" rejects every request with
+ * 401 until the OAuth provider lands (mcp.md PR 8). Local development runs
+ * `wrangler dev --env local`, which is the only place the bypass exists.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "knoww-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // No workers.dev URL: the only public entry point is the custom domain,
+  // attached in the deployment PR (mcp.md PR 9).
+  "workers_dev": false,
+  // "routes": [{ "pattern": "mcp.knoww.app", "custom_domain": true }],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "MCP_AUTH_MODE": "oauth-required",
+    "MCP_ALLOWED_HOSTNAMES": "mcp.knoww.app",
+    "MCP_ALLOWED_ORIGIN_HOSTNAMES": "knoww.app,www.knoww.app"
+  },
+  "env": {
+    "local": {
+      "vars": {
+        "MCP_AUTH_MODE": "dev-bypass",
+        "MCP_ALLOWED_HOSTNAMES": "localhost,127.0.0.1",
+        "MCP_ALLOWED_ORIGIN_HOSTNAMES": "localhost,127.0.0.1"
+      }
+    }
+  }
+}

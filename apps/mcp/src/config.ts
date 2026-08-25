@@ -1,0 +1,22 @@
+export interface WorkerConfig {
+  authMode: "dev-bypass" | "oauth-required";
+  allowedHostnames: string[];
+  allowedOriginHostnames: string[];
+}
+
+function splitHostnames(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+export function workerConfigFromEnv(env: Env): WorkerConfig {
+  return {
+    // Fail closed: anything but the exact dev marker gets production auth.
+    authMode:
+      env.MCP_AUTH_MODE === "dev-bypass" ? "dev-bypass" : "oauth-required",
+    allowedHostnames: splitHostnames(env.MCP_ALLOWED_HOSTNAMES),
+    allowedOriginHostnames: splitHostnames(env.MCP_ALLOWED_ORIGIN_HOSTNAMES),
+  };
+}

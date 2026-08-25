@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [
+      "./cloudflare-env.d.ts",
+      "node",
+      "@cloudflare/vitest-pool-workers/types"
+    ],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": true,
+    "sourceMap": true,
+    "declaration": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "paths": {
+      "@knoww/logger": ["../../packages/logger/src/index.ts"],
+      "@knoww/services": ["../../packages/knoww-services/src/index.ts"],
+      "@knoww/shared-types": ["../../packages/shared-types/src/index.ts"],
+      "@knoww/shared-types/*": ["../../packages/shared-types/src/*"]
+    }
+  },
+  "include": ["src/**/*", "vitest.config.ts"]
+}

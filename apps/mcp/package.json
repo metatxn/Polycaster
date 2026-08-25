@@ -1,0 +1,33 @@
+{
+  "name": "@knoww/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env local",
+    "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
+    "deploy": "wrangler deploy --env=\"\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check",
+    "format": "biome format --write",
+    "test": "vitest run",
+    "cf-typegen": "wrangler types ./cloudflare-env.d.ts"
+  },
+  "dependencies": {
+    "@knoww/logger": "workspace:*",
+    "@knoww/services": "workspace:*",
+    "@knoww/shared-types": "workspace:*",
+    "@modelcontextprotocol/server": "2.0.0",
+    "agents": "0.21.0",
+    "decimal.js": "catalog:",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@cloudflare/vitest-pool-workers": "0.21.3",
+    "@types/node": "26.2.0",
+    "typescript": "catalog:",
+    "vitest": "^4.1.10",
+    "wrangler": "4.123.0"
+  }
+}

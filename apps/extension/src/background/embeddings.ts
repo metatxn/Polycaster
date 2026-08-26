@@ -63,6 +63,7 @@ const RERANK_DTYPE = "q8";
 const RERANK_BATCH_SIZE = 8;
 
 let pipelineInstance: Promise<FeatureExtractionPipeline> | null = null;
+let warmUpPromise: Promise<void> | null = null;
 let rerankerInstance: Promise<{
   tokenizer: PreTrainedTokenizer;
   model: PreTrainedModel;
@@ -656,5 +657,20 @@ export async function rerankMarketPairs(
  * Call once from the offscreen document during idle time.
  */
 export function warmUp(): Promise<void> {
-  return getInstance().then(() => undefined);
+  if (warmUpPromise) return warmUpPromise;
+
+  warmUpPromise = getInstance()
+    .then(async (extractor) => {
+      const output = await extractor(["Knoww scoring warm-up"], {
+        pooling: "cls",
+        normalize: true,
+      });
+      output.dispose();
+    })
+    .catch((error) => {
+      warmUpPromise = null;
+      throw error;
+    });
+
+  return warmUpPromise;
 }

@@ -8,6 +8,7 @@ import type {
   PolymarketTagsCache,
 } from "../types/market";
 import type { UserSettings } from "../types/settings";
+import { startDiscoveryWarmup } from "./discovery-warmup";
 import { loadPlatformAdapter } from "./platform-loader";
 import { prefetchTradingRuntime } from "./trading-loader";
 import { startXTraderPnlBadges } from "./x-pnl-badges";
@@ -127,65 +128,33 @@ export function observeFirstMountedTradingCard(
     startXTraderPnlBadges();
   }
 
-  // Pre-fetch data from enabled sources (cached for 24h)
-  // MEMORY OPTIMIZATION: Only prefetch when tab is visible and after a delay
-  // This reduces initial memory footprint and defers loading until needed
-  const deferredPrefetch = (): void => {
-    // Skip prefetch if tab is hidden
+  // Kalshi remains idle-loaded because it is disabled by default and is not
+  // part of the Polymarket first-card path.
+  const deferredKalshiPrefetch = (): void => {
     if (document.hidden) {
       log("⏸️ Tab hidden, deferring prefetch");
       return;
     }
 
-    const prefetchPromises: Promise<void>[] = [];
-
-    // Pre-fetch Polymarket tags if enabled
-    if (ENABLED_SOURCES?.polymarket) {
-      prefetchPromises.push(
-        fetchPolymarketTags()
-          .then((tags: PolymarketTagsCache | null) => {
-            if (tags) {
-              log("Pre-fetched", tags.list?.length || 0, "Polymarket tags");
-            }
-          })
-          .catch((error: unknown) => {
-            if (isDebugMode()) {
-              logger.error("polymarket.prefetch_failed", { error });
-            }
-          })
-      );
-    }
-
-    // Pre-fetch Kalshi categories ONLY if enabled (lazy loading)
-    // This saves memory when Kalshi is disabled
     if (ENABLED_SOURCES?.kalshi && window.KNOWW_KALSHI) {
-      prefetchPromises.push(
-        window.KNOWW_KALSHI.fetchKalshiCategories()
-          .then((categories: KalshiCategoriesCache | null) => {
-            if (categories) {
-              log(
-                "Pre-fetched",
-                categories.categories?.length || 0,
-                "Kalshi categories"
-              );
-            }
-          })
-          .catch(() => {})
-      );
+      void window.KNOWW_KALSHI.fetchKalshiCategories()
+        .then((categories: KalshiCategoriesCache | null) => {
+          if (categories) {
+            log(
+              "Pre-fetched",
+              categories.categories?.length || 0,
+              "Kalshi categories"
+            );
+          }
+        })
+        .catch(() => {});
     }
-
-    // Wait for all prefetches (don't block startup)
-    Promise.all(prefetchPromises).catch(() => {});
   };
 
-  // Defer prefetch to reduce initial memory spike
   const { scheduleIdle } = window.KNOWW_UTILS;
-  scheduleIdle(deferredPrefetch, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
-
-  scheduleIdle(() => {
-    if (document.hidden) return;
-    void safeSendMessage({ type: "scoring:prewarm-offscreen" });
-  }, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
+  if (ENABLED_SOURCES?.kalshi) {
+    scheduleIdle(deferredKalshiPrefetch, PRELOAD_WARMUP_IDLE_TIMEOUT_MS);
+  }
 
   // Streaming surfaces (Twitch/YouTube/…) have no feed of posts. Instead of
   // scanning the page and running the relevance pipeline, surface a single
@@ -200,6 +169,24 @@ export function observeFirstMountedTradingCard(
     window.KNOWW_STREAMING?.initStreamingMarkets?.();
     return;
   }
+
+  startDiscoveryWarmup({
+    isHidden: () => document.hidden,
+    onError: (target, error) => {
+      if (isDebugMode()) {
+        logger.error("discovery.prewarm_failed", { error, target });
+      }
+    },
+    warmScoring: () => safeSendMessage({ type: "scoring:prewarm-offscreen" }),
+    warmTags: ENABLED_SOURCES?.polymarket
+      ? async () => {
+          const tags: PolymarketTagsCache | null = await fetchPolymarketTags();
+          if (tags) {
+            log("Pre-fetched", tags.list?.length || 0, "Polymarket tags");
+          }
+        }
+      : undefined,
+  });
 
   // Determine site-specific selectors using platform registry
   let itemSelector: string;

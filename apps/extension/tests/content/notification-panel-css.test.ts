@@ -262,6 +262,23 @@ test("notification stack snapshot includes trending and supports sidepanel focus
   assert.equal(/KNOWW_FOCUS_NOTIFICATION_MARKET/.test(uiSource), true);
 });
 
+test("notification stack starts trending fetch without an artificial wait", () => {
+  const uiSource = readSource("src/content/ui/notifications.ts");
+  const timerSource = extractFunctionSource(
+    uiSource,
+    "startTrendingFetchTimer"
+  );
+  const openSource = extractFunctionSource(uiSource, "openNotificationStack");
+
+  assert.equal(/const TRENDING_FETCH_DELAY_MS = 0;/.test(uiSource), true);
+  assert.equal(
+    /setTimeout\([\s\S]*TRENDING_FETCH_DELAY_MS/.test(timerSource),
+    true
+  );
+  assert.equal(/startTrendingFetchTimer\(\)/.test(openSource), true);
+  assert.equal(/scheduled \(10s\)/.test(openSource), false);
+});
+
 test("notification stack supports sidepanel search requests", () => {
   const uiSource = readSource("src/content/ui/notifications.ts");
   const searchSource = extractFunctionSource(

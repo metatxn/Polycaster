@@ -2388,9 +2388,8 @@ async function validateMarketRelevance(
 }
 
 // ============================================
-// TRENDING MARKETS FALLBACK
-// Fetches high-volume active markets when feed-based
-// discovery takes too long (>10s)
+// TRENDING MARKETS
+// Fetches high-volume active markets independently of feed discovery.
 // ============================================
 
 let trendingMarketsCache: { markets: Market[]; fetchedAt: number } | null =
@@ -2399,8 +2398,8 @@ const TRENDING_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Fetch trending/popular markets sorted by 24h volume.
- * Used as a fallback when the notification stack has no
- * feed-discovered markets after a timeout.
+ * Used to populate the notification stack while feed-specific discovery runs
+ * independently. Feed-discovered markets keep display priority in the UI.
  */
 async function fetchTrendingMarkets(): Promise<Market[]> {
   const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;

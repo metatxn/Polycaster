@@ -169,7 +169,7 @@ function resolveNotificationCaps(): { active: number; scrolled: number } {
 const SCROLLED_OUT_GRACE_MS = 8000;
 
 // Trending markets state
-const TRENDING_FETCH_DELAY_MS = 10_000;
+const TRENDING_FETCH_DELAY_MS = 0;
 const TRENDING_SHUFFLE_INTERVAL_MS = 60_000;
 const MAX_TRENDING_DISPLAY = 2;
 const MAX_EXPANDED_TRENDING_DISPLAY = 10;
@@ -2175,9 +2175,8 @@ function appendTrendingSection(
 }
 
 /**
- * Schedule the initial trending fetch.
- * Fires after TRENDING_FETCH_DELAY_MS so the extension has time
- * to discover feed-relevant markets first.
+ * Schedule the initial trending fetch on the next task so panel setup can
+ * finish without withholding useful markets from the user.
  */
 function startTrendingFetchTimer(): void {
   // No trending on streaming surfaces.
@@ -2524,10 +2523,10 @@ function openNotificationStack(
     log("Notification stack initialized");
   }
 
-  // Fetch trending markets after a short delay so they appear in
-  // the notification stack alongside (or in place of) feed-discovered markets.
+  // Start trending discovery on the next task. Feed-discovered markets keep
+  // display priority when both sources have results.
   startTrendingFetchTimer();
-  log("Trending markets fetch scheduled (10s)");
+  log("Trending markets fetch scheduled immediately");
 
   // Update theme immediately after creation (DOM might be more ready now)
   setTimeout(() => {

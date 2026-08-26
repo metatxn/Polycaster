@@ -12,6 +12,7 @@ import type {
   MarketSearchResult,
 } from "../types/market";
 import { getPreferredOutcomeNames } from "./market-context";
+import { isMarketWithinDisplayPriceCap } from "./market-price-filter";
 import {
   type RelevanceTelemetryCandidate,
   recordRelevanceTelemetry,
@@ -445,6 +446,7 @@ function allocateBatchInjections(
       if (plannedPostMarketPairs.has(pairKey)) return false;
       if (!isMarketInjectableForPost(selection.postKey, market.id))
         return false;
+      if (!isMarketWithinDisplayPriceCap(market)) return false;
 
       return (
         (plannedActiveCounts.get(market.id) ??
@@ -998,13 +1000,18 @@ async function analyzePostAndFindMarket(
     try {
       const directResolution = await currentPlatform.resolveDirectMarkets(post);
       if (directResolution?.markets.length) {
-        return {
-          markets: directResolution.markets,
-          topics: directResolution.topics?.length
-            ? directResolution.topics
-            : ["sports"],
-          postText: directResolution.postText || text || extractedText,
-        };
+        const displayableMarkets = directResolution.markets.filter(
+          ({ market }) => isMarketWithinDisplayPriceCap(market)
+        );
+        if (displayableMarkets.length > 0) {
+          return {
+            markets: displayableMarkets,
+            topics: directResolution.topics?.length
+              ? directResolution.topics
+              : ["sports"],
+            postText: directResolution.postText || text || extractedText,
+          };
+        }
       }
       if (directResolution?.bypassGenericSearch) {
         log(
@@ -1063,6 +1070,7 @@ async function analyzePostAndFindMarket(
   const markets: Market[] = [];
   const seenMarkets = new Set<string>();
   for (const market of [...directMarkets, ...searchedMarkets]) {
+    if (!isMarketWithinDisplayPriceCap(market)) continue;
     const key = market.id || market.slug || market.title;
     if (!key || seenMarkets.has(key)) continue;
     seenMarkets.add(key);
@@ -1935,7 +1943,11 @@ function injectMarketCards(
   // Policy A: inject at most one card per post, but keep a fallback candidate
   // available if the top candidate for this post is blocked elsewhere.
   const newMarkets = marketsData
-    .filter(({ market }) => isMarketInjectableForPost(postKey, market.id))
+    .filter(
+      ({ market }) =>
+        isMarketWithinDisplayPriceCap(market) &&
+        isMarketInjectableForPost(postKey, market.id)
+    )
     .slice(0, 1);
 
   if (newMarkets.length === 0) {

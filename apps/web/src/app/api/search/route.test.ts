@@ -44,6 +44,61 @@ describe("GET /api/search", () => {
     expect(res.headers.get("vary")).toContain("Origin");
   });
 
+  it("returns active results when Gamma includes incomplete archived markets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          events: [
+            {
+              id: "event-with-archived-market",
+              title: "Live event with an archived market",
+              active: true,
+              closed: false,
+              markets: [
+                {
+                  slug: "active-market",
+                  active: true,
+                  closed: false,
+                  outcomes: ["Yes", "No"],
+                  outcomePrices: [0.6, 0.4],
+                },
+                {
+                  slug: "archived-market",
+                  active: false,
+                  closed: true,
+                  archived: true,
+                  outcomes: ["Yes", "No"],
+                  outcomePrices: [],
+                },
+              ],
+            },
+          ],
+          tags: [],
+          profiles: null,
+          hasMore: false,
+        })
+      )
+    );
+
+    const res = await GET(
+      new NextRequest(
+        "https://knoww.app/api/search?q=archived-market-contract-test&limit=8&source=extension",
+        { headers: { origin: extensionOrigin } }
+      )
+    );
+    const body = (await res.json()) as {
+      degraded?: boolean;
+      events: Array<{ markets?: Array<{ slug?: string }> }>;
+    };
+
+    expect(res.status).toBe(200);
+    expect(body.degraded).toBeUndefined();
+    expect(body.events[0].markets).toEqual([
+      expect.objectContaining({ slug: "active-market" }),
+    ]);
+  });
+
   it("returns a gateway error status when upstream search fails", async () => {
     vi.stubGlobal(
       "fetch",

@@ -1,3 +1,4 @@
+import { isPriceCentsWithinDisplayCap } from "../content/market-price-filter";
 import { type RuntimeResponse, sendRuntimeMessage } from "./messaging";
 import { escapeHtml } from "./shared";
 
@@ -115,11 +116,18 @@ function renderMeta(market: SnapshotMarket): string {
   return `<div class="knoww-notification-meta">${parts.map((part) => `<span>${escapeHtml(part)}</span>`).join('<span class="knoww-notification-meta-dot"></span>')}</div>`;
 }
 
+function filterDisplayableMarkets(markets: SnapshotMarket[]): SnapshotMarket[] {
+  return markets.filter((market) =>
+    isPriceCentsWithinDisplayCap(market.priceCents)
+  );
+}
+
 export function renderMarketRows(
   markets: SnapshotMarket[] = [],
   status: "active" | "seen" | "trending"
 ): string {
-  if (markets.length === 0) {
+  const displayableMarkets = filterDisplayableMarkets(markets);
+  if (displayableMarkets.length === 0) {
     return '<div class="knoww-stack-empty knoww-sidepanel-empty"><span class="knoww-stack-empty-sub">No markets in this section.</span></div>';
   }
   const statusClass =
@@ -127,7 +135,7 @@ export function renderMarketRows(
       ? "knoww-notification-unavailable"
       : "knoww-notification-active";
   const statusAttr = status === "seen" ? "scrolled-out" : status;
-  return markets
+  return displayableMarkets
     .map(
       (market, index) => `
         <button type="button" class="knoww-notification-item knoww-source-${escapeHtml(market.source)} ${statusClass}"
@@ -151,9 +159,9 @@ export function renderSection(
 }
 
 export function renderSnapshotSections(snapshot: NotificationSnapshot): string {
-  const active = snapshot.active || [];
-  const trending = snapshot.trending || [];
-  const seen = snapshot.seen || [];
+  const active = filterDisplayableMarkets(snapshot.active || []);
+  const trending = filterDisplayableMarkets(snapshot.trending || []);
+  const seen = filterDisplayableMarkets(snapshot.seen || []);
   return `${renderSection("Active now", active.length, "active", renderMarketRows(active, "active"))}${
     trending.length
       ? renderSection(

@@ -6,6 +6,7 @@ import type {
   NestedMarket,
 } from "../../types/market";
 import { setCspSafeImageSrc } from "../image-proxy";
+import { isMarketWithinDisplayPriceCap } from "../market-price-filter";
 import type { StreamBetHandle, TradingRuntime } from "../trading-runtime-types";
 import { escapeSelectorValue } from "../utils";
 import {
@@ -1834,6 +1835,7 @@ function selectRepresentativeMarketEntries(markets: InjectedMarketEntry[]): {
 
   for (const marketData of markets) {
     if (!marketData?.market?.id) continue;
+    if (!isMarketWithinDisplayPriceCap(marketData.market)) continue;
 
     const classified = classifyInjectedMarketEntry(marketData, now);
     const current = representatives.get(marketData.market.id);
@@ -2072,7 +2074,7 @@ export async function fetchAndCacheTrending(): Promise<void> {
   try {
     const { fetchTrendingMarkets } = window.KNOWW_API;
     const trending = await fetchTrendingMarkets();
-    trendingPool = trending;
+    trendingPool = trending.filter(isMarketWithinDisplayPriceCap);
     visibleTrending = pickRandomTrending();
     log(
       `🔥 [Trending] Pool: ${trendingPool.length}, showing: ${visibleTrending.length}`
@@ -2130,7 +2132,12 @@ function getVisibleTrendingMarkets(
       ? trendingPool
       : visibleTrending;
 
-  return source.filter((m) => !realMarketIds.has(m.id)).slice(0, cappedLimit);
+  return source
+    .filter(
+      (market) =>
+        isMarketWithinDisplayPriceCap(market) && !realMarketIds.has(market.id)
+    )
+    .slice(0, cappedLimit);
 }
 
 /**
@@ -2703,6 +2710,7 @@ export async function searchNotificationStackMarkets(
 ): Promise<Record<string, string>[]> {
   const events = await window.KNOWW_API.searchPolymarketEvents(query, []);
   return events
+    .filter(isMarketWithinDisplayPriceCap)
     .slice(0, 5)
     .map((market) => summarizeSnapshotMarket(market, "trending"));
 }

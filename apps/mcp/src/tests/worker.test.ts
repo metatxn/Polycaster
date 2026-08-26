@@ -761,6 +761,57 @@ describe("search_markets tool (dev bypass)", () => {
     expect("nextCursor" in meta).toBe(false);
   });
 
+  it("ignores incomplete archived markets in otherwise active events", async () => {
+    expectGammaFetch(
+      "public-search archived market",
+      gammaUrl("/public-search", "q=archived"),
+      () =>
+        Response.json({
+          events: [
+            {
+              id: "evt-archived",
+              title: "Live event with an archived market",
+              active: true,
+              closed: false,
+              markets: [
+                {
+                  id: "mkt-active",
+                  active: true,
+                  closed: false,
+                  outcomes: '["Yes","No"]',
+                  outcomePrices: '["0.6","0.4"]',
+                },
+                {
+                  id: "mkt-archived",
+                  active: false,
+                  closed: true,
+                  archived: true,
+                  outcomes: '["Yes","No"]',
+                  outcomePrices: "[]",
+                },
+              ],
+            },
+          ],
+          tags: [],
+          profiles: [],
+          hasMore: false,
+        })
+    );
+
+    const { message } = await callSearchMarkets(16, { query: "archived" });
+
+    expect(message.error).toBeUndefined();
+    const result = message.result as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.events).toEqual([
+      expect.objectContaining({
+        id: "evt-archived",
+        totalMarkets: 1,
+        markets: [expect.objectContaining({ id: "mkt-active" })],
+      }),
+    ]);
+  });
+
   it("merges tag results when a category is given, normalized to a slug", async () => {
     expectGammaFetch(
       "public-search q=election",

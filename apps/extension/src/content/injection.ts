@@ -14,6 +14,10 @@ import type {
 import { getPreferredOutcomeNames } from "./market-context";
 import { isMarketWithinDisplayPriceCap } from "./market-price-filter";
 import {
+  partitionViewportBatch,
+  processBatchProgressively,
+} from "./post-analysis-batching";
+import {
   type RelevanceTelemetryCandidate,
   recordRelevanceTelemetry,
 } from "./relevance-telemetry";
@@ -500,7 +504,10 @@ function enqueueCooldownPendingPosts(posts: PendingPostEntry[]): number {
   return added;
 }
 
-function dequeueCooldownPendingPosts(itemSelector: string): PendingPostEntry[] {
+function dequeueCooldownPendingPosts(
+  itemSelector: string,
+  batchSize: number
+): PendingPostEntry[] {
   const drained = cooldownPendingPosts.splice(0, cooldownPendingPosts.length);
   const ready: PendingPostEntry[] = [];
 
@@ -517,7 +524,15 @@ function dequeueCooldownPendingPosts(itemSelector: string): PendingPostEntry[] {
     ready.push(entry);
   }
 
-  return ready;
+  const viewportHeight =
+    window.innerHeight || document.documentElement.clientHeight || 1;
+  const { selected, deferred } = partitionViewportBatch(
+    ready,
+    batchSize,
+    viewportHeight
+  );
+  cooldownPendingPosts.push(...deferred);
+  return selected;
 }
 
 async function scoreMarketsBatch(
@@ -2119,35 +2134,27 @@ function injectMarketCard(
 }
 
 async function analyzeBatchSelections(
-  posts: Array<{ post: Element; key: string | null }>
+  posts: Array<{ post: Element; key: string | null }>,
+  onSelection: (
+    selection: BatchCandidateSelection
+  ) => void | Promise<void> = () => {}
 ): Promise<BatchCandidateSelection[]> {
   const { log } = window.KNOWW_UTILS;
-  const selections = new Array<BatchCandidateSelection | null>(
-    posts.length
-  ).fill(null);
-  let nextIndex = 0;
 
-  const workerCount = Math.min(ANALYZE_BATCH_CONCURRENCY, posts.length);
-  if (workerCount === 0) return [];
-
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-
-      if (currentIndex >= posts.length) return;
-
-      const { post, key } = posts[currentIndex];
-      if (injectedIntoPosts.has(post)) continue;
+  return processBatchProgressively(
+    posts,
+    ANALYZE_BATCH_CONCURRENCY,
+    async ({ post, key }) => {
+      if (injectedIntoPosts.has(post)) return null;
 
       const postKey = key ?? getPostIdentityKey(post);
-      if (!postKey) continue;
+      if (!postKey) return null;
 
       try {
         const result = await analyzePostAndFindMarket(post);
-        if (!result?.markets || result.markets.length === 0) continue;
+        if (!result?.markets || result.markets.length === 0) return null;
 
-        selections[currentIndex] = {
+        return {
           post,
           postKey,
           topics: result.topics,
@@ -2155,15 +2162,26 @@ async function analyzeBatchSelections(
         };
       } catch (error) {
         log("⚠️ [PostAnalyzer] analyzePostAndFindMarket failed:", error);
+        return null;
       }
-    }
-  });
-
-  await Promise.all(workers);
-
-  return selections.filter(
-    (selection): selection is BatchCandidateSelection => selection !== null
+    },
+    onSelection
   );
+}
+
+function injectBatchSelection(
+  selection: BatchCandidateSelection
+): AllocatedInjection | null {
+  const planned = allocateBatchInjections([selection]);
+
+  for (const plan of planned) {
+    const injected = injectMarketCards(plan.post, [plan.market], plan.topics, {
+      postKey: plan.postKey,
+    });
+    if (injected) return plan;
+  }
+
+  return null;
 }
 
 /**
@@ -2297,7 +2315,10 @@ async function processVisiblePosts(options: {
     return;
   }
 
-  const postsReadyForAnalysis = dequeueCooldownPendingPosts(itemSelector);
+  const postsReadyForAnalysis = dequeueCooldownPendingPosts(
+    itemSelector,
+    CONFIG.POSTS_TO_ANALYZE
+  );
   if (postsReadyForAnalysis.length === 0) {
     if (isDebug) {
       log(`🔄 [PostScanner] No pending posts remained eligible for analysis`);
@@ -2324,42 +2345,41 @@ async function processVisiblePosts(options: {
   }
 
   try {
-    const batchSelections = await analyzeBatchSelections(postsReadyForAnalysis);
-    const plannedInjections = allocateBatchInjections(batchSelections);
+    let injectionsThisBatch = 0;
+    const maxInjections = resolveMaxInjectionsPerBatch();
+    const batchSelections = await analyzeBatchSelections(
+      postsReadyForAnalysis,
+      (selection) => {
+        if (injectionsThisBatch >= maxInjections) return;
+
+        const plan = injectBatchSelection(selection);
+        if (!plan) {
+          if (isDebug) {
+            log(
+              `⚠️ [PostAnalyzer] Injection failed, trying next completed post...`
+            );
+          }
+          return;
+        }
+
+        injectionsThisBatch++;
+        postsSinceLastInjection = 0;
+
+        if (isDebug) {
+          log(
+            `🎉 [PostAnalyzer] Injected "${plan.market.market.title?.slice(
+              0,
+              50
+            )}..." (${injectionsThisBatch}/${maxInjections} this batch)`
+          );
+        }
+      }
+    );
 
     if (isDebug) {
       log(
-        `🧭 [PostAnalyzer] Planned ${plannedInjections.length} injection(s) from ${batchSelections.length} post candidate set(s)`
+        `🧭 [PostAnalyzer] Injected ${injectionsThisBatch} card(s) from ${batchSelections.length} completed candidate set(s)`
       );
-    }
-
-    let injectionsThisBatch = 0;
-    for (const plan of plannedInjections) {
-      const injected = injectMarketCards(
-        plan.post,
-        [plan.market],
-        plan.topics,
-        { postKey: plan.postKey }
-      );
-
-      if (!injected) {
-        if (isDebug) {
-          log(`⚠️ [PostAnalyzer] Injection failed, trying next planned post...`);
-        }
-        continue;
-      }
-
-      injectionsThisBatch++;
-      postsSinceLastInjection = 0;
-
-      if (isDebug) {
-        log(
-          `🎉 [PostAnalyzer] Injected "${plan.market.market.title?.slice(
-            0,
-            50
-          )}..." (${injectionsThisBatch}/${resolveMaxInjectionsPerBatch()} this batch)`
-        );
-      }
     }
 
     if (isDebug) {
@@ -2599,7 +2619,10 @@ async function processQueuedPosts(options: {
     return;
   }
 
-  const postsReadyForAnalysis = dequeueCooldownPendingPosts(itemSelector);
+  const postsReadyForAnalysis = dequeueCooldownPendingPosts(
+    itemSelector,
+    CONFIG.POSTS_TO_ANALYZE
+  );
   if (postsReadyForAnalysis.length === 0) {
     return;
   }
@@ -2616,25 +2639,20 @@ async function processQueuedPosts(options: {
 
   isAnalyzing = true;
   try {
-    const batchSelections = await analyzeBatchSelections(postsReadyForAnalysis);
-    const plannedInjections = allocateBatchInjections(batchSelections);
-
     let injectionsThisBatch = 0;
-    for (const plan of plannedInjections) {
-      const injected = injectMarketCards(
-        plan.post,
-        [plan.market],
-        plan.topics,
-        { postKey: plan.postKey }
-      );
-      if (!injected) continue;
+    const maxInjections = resolveMaxInjectionsPerBatch();
+    await analyzeBatchSelections(postsReadyForAnalysis, (selection) => {
+      if (injectionsThisBatch >= maxInjections) return;
+
+      const plan = injectBatchSelection(selection);
+      if (!plan) return;
 
       injectionsThisBatch++;
       postsSinceLastInjection = 0;
       log(
-        `🎉 [QueueProcessor] Successfully injected card! (${injectionsThisBatch}/${resolveMaxInjectionsPerBatch()} this batch)`
+        `🎉 [QueueProcessor] Successfully injected card! (${injectionsThisBatch}/${maxInjections} this batch)`
       );
-    }
+    });
   } finally {
     isAnalyzing = false;
   }

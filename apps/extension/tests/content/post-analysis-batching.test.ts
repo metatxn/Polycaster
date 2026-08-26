@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  appendUniquePostEntries,
   partitionViewportBatch,
   processBatchProgressively,
   selectViewportBatch,
@@ -86,6 +87,26 @@ test("partitionViewportBatch keeps unselected posts pending in priority order", 
   assert.deepEqual(
     partitioned.deferred.map(({ id }) => id),
     ["just-below", "far-below", "far-above"]
+  );
+});
+
+test("appendUniquePostEntries merges pending posts in one deduplicated pass", () => {
+  const unkeyed = entry("unkeyed", 0, 100);
+  const pending = [
+    { ...entry("first", 0, 100), key: "post-1" },
+    { ...unkeyed, key: null },
+  ];
+  const added = appendUniquePostEntries(pending, [
+    { ...entry("same-key-new-element", 0, 100), key: "post-1" },
+    { ...unkeyed, key: null },
+    { ...entry("second", 0, 100), key: "post-2" },
+    { ...entry("new-unkeyed", 0, 100), key: null },
+  ]);
+
+  assert.equal(added, 2);
+  assert.deepEqual(
+    pending.map(({ id }) => id),
+    ["first", "unkeyed", "second", "new-unkeyed"]
   );
 });
 

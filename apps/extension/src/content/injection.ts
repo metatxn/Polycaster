@@ -14,6 +14,7 @@ import type {
 import { getPreferredOutcomeNames } from "./market-context";
 import { isMarketWithinDisplayPriceCap } from "./market-price-filter";
 import {
+  appendUniquePostEntries,
   partitionViewportBatch,
   processBatchProgressively,
 } from "./post-analysis-batching";
@@ -486,22 +487,10 @@ function allocateBatchInjections(
 const cooldownPendingPosts: PendingPostEntry[] = [];
 
 function enqueueCooldownPendingPosts(posts: PendingPostEntry[]): number {
-  let added = 0;
-
-  for (const entry of posts) {
-    if (!entry.post.isConnected) continue;
-
-    const exists = entry.key
-      ? cooldownPendingPosts.some((pending) => pending.key === entry.key)
-      : cooldownPendingPosts.some((pending) => pending.post === entry.post);
-
-    if (exists) continue;
-
-    cooldownPendingPosts.push(entry);
-    added++;
-  }
-
-  return added;
+  return appendUniquePostEntries(
+    cooldownPendingPosts,
+    posts.filter(({ post }) => post.isConnected)
+  );
 }
 
 function dequeueCooldownPendingPosts(
@@ -531,7 +520,7 @@ function dequeueCooldownPendingPosts(
     batchSize,
     viewportHeight
   );
-  cooldownPendingPosts.push(...deferred);
+  appendUniquePostEntries(cooldownPendingPosts, deferred);
   return selected;
 }
 

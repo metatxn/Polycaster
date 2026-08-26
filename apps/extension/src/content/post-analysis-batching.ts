@@ -4,6 +4,45 @@ export interface ViewportPostEntry {
   };
 }
 
+interface PendingPostEntryLike {
+  key: string | null;
+  post: object;
+}
+
+export function appendUniquePostEntries<T extends PendingPostEntryLike>(
+  pending: T[],
+  incoming: T[]
+): number {
+  const pendingKeys = new Set<string>();
+  const pendingElements = new Set<object>();
+
+  for (const entry of pending) {
+    if (entry.key) {
+      pendingKeys.add(entry.key);
+    } else {
+      pendingElements.add(entry.post);
+    }
+  }
+
+  let added = 0;
+  for (const entry of incoming) {
+    const exists = entry.key
+      ? pendingKeys.has(entry.key)
+      : pendingElements.has(entry.post);
+    if (exists) continue;
+
+    pending.push(entry);
+    if (entry.key) {
+      pendingKeys.add(entry.key);
+    } else {
+      pendingElements.add(entry.post);
+    }
+    added++;
+  }
+
+  return added;
+}
+
 interface RankedEntry<T> {
   entry: T;
   index: number;

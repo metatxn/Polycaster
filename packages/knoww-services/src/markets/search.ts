@@ -34,6 +34,9 @@ export interface Market {
   id?: string;
   slug?: string;
   question?: string;
+  active?: boolean;
+  closed?: boolean;
+  archived?: boolean;
   outcomes?: string | string[];
   outcomePrices?: string | (string | number)[];
   groupItemTitle?: string;
@@ -80,11 +83,31 @@ export interface SearchFetchOptions extends ServiceFetchOptions {
   fullMarketRecords?: boolean;
 }
 
+function removeUnavailableNestedMarkets(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+
+  return value.filter((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return true;
+    }
+
+    const market = entry as Record<string, unknown>;
+    return !(
+      market.active === false ||
+      market.closed === true ||
+      market.archived === true
+    );
+  });
+}
+
 const marketSchema = z
   .object({
     id: z.string().min(1).optional(),
     slug: z.string().min(1).optional(),
     question: z.string().optional(),
+    active: z.boolean().optional(),
+    closed: z.boolean().optional(),
+    archived: z.boolean().optional(),
     outcomes: gammaStringArraySchema.optional(),
     outcomePrices: gammaProbabilityArraySchema.optional(),
     groupItemTitle: z.string().optional(),
@@ -129,7 +152,10 @@ const searchEventSchema = z
     live: z.boolean().optional(),
     ended: z.boolean().optional(),
     competitive: z.number().finite().optional(),
-    markets: z.array(marketSchema).optional(),
+    markets: z.preprocess(
+      removeUnavailableNestedMarkets,
+      z.array(marketSchema).optional()
+    ),
     topOutcome: z
       .object({
         name: z.string().min(1),

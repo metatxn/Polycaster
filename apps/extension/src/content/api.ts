@@ -13,6 +13,7 @@ import type {
 } from "../types/market";
 import type { MarketLinkHint } from "../types/platform";
 import { KNOWW_CONFIG } from "./config";
+import { isMarketWithinDisplayPriceCap } from "./market-price-filter";
 import { findMatchingLiveMarket } from "./market-token-resolution";
 import {
   buildMarketGateText,
@@ -1800,7 +1801,14 @@ async function resolvePolymarketMarketsFromHints(
       market = await fetchDirectPolymarketMarketByTitle(hint.title);
     }
 
-    if (!market || market.closed === true || market.active === false) continue;
+    if (
+      !market ||
+      market.closed === true ||
+      market.active === false ||
+      !isMarketWithinDisplayPriceCap(market)
+    ) {
+      continue;
+    }
 
     const key = market.id || market.slug || market.title;
     if (!key || seen.has(key)) continue;
@@ -1902,7 +1910,9 @@ async function searchAllMarkets(
   }
 
   // Deduplicate by title similarity (markets from different sources might have similar titles)
-  const deduplicatedMarkets = deduplicateMarkets(allMarkets);
+  const deduplicatedMarkets = deduplicateMarkets(allMarkets).filter(
+    isMarketWithinDisplayPriceCap
+  );
 
   // Sort by volume (highest first)
   deduplicatedMarkets.sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0));
@@ -2464,7 +2474,7 @@ async function fetchTrendingMarkets(): Promise<Market[]> {
 
   // Sort by volume and keep top 10 (UI picks a random 2 to display)
   allTrending.sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0));
-  const result = allTrending.slice(0, 10);
+  const result = allTrending.filter(isMarketWithinDisplayPriceCap).slice(0, 10);
 
   trendingMarketsCache = { markets: result, fetchedAt: now };
   log("Cached", result.length, "trending markets");

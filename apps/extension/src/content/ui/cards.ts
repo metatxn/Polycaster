@@ -7,6 +7,7 @@ import type { Market, NestedMarket } from "../../types/market";
 import { escapeHtml } from "../html-escape";
 import { setCspSafeImageSrc } from "../image-proxy";
 import { prioritizeByPreferredOutcomeNames } from "../market-context";
+import { isMarketWithinDisplayPriceCap } from "../market-price-filter";
 import type { PanelOpenArgs, TradingRuntime } from "../trading-runtime-types";
 import { resolvePrimarySportsMoneyline } from "./stream-bet-calc";
 
@@ -772,6 +773,13 @@ function startLiveMarketPriceUpdates(
       await window.KNOWW_API?.fetchPolymarketEventRefresh?.(market);
     if (freshMarket && document.body.contains(card)) {
       mergeFreshMarketIntoCurrent(market, freshMarket);
+      if (!isMarketWithinDisplayPriceCap(market)) {
+        card.remove();
+        window.KNOWW_UI?.updateNotificationStack?.(
+          window.KNOWW_INJECTION?.getInjectedMarkets?.() ?? []
+        );
+        return;
+      }
       updateInlineCardPrices(card, state, market);
     }
 

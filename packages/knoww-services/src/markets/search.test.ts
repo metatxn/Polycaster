@@ -395,6 +395,74 @@ describe("fetchPublicSearchEvents", () => {
     ]);
   });
 
+  it("drops unavailable nested markets before validating outcome prices", async () => {
+    const { fetchImpl } = recordingFetch(() =>
+      jsonResponse({
+        events: [
+          {
+            id: "e1",
+            title: "Live event with an archived market",
+            markets: [
+              {
+                slug: "active-market",
+                active: true,
+                closed: false,
+                outcomes: ["Yes", "No"],
+                outcomePrices: [0.6, 0.4],
+              },
+              {
+                slug: "archived-market",
+                active: false,
+                closed: true,
+                archived: true,
+                outcomes: ["Yes", "No"],
+                outcomePrices: [],
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    const result = await fetchPublicSearchEvents("bitcoin", 5, { fetchImpl });
+
+    expect(result.events[0].markets).toEqual([
+      {
+        slug: "active-market",
+        active: true,
+        closed: false,
+        outcomes: ["Yes", "No"],
+        outcomePrices: [0.6, 0.4],
+      },
+    ]);
+  });
+
+  it("still rejects mismatched outcome prices for active markets", async () => {
+    const { fetchImpl } = recordingFetch(() =>
+      jsonResponse({
+        events: [
+          {
+            id: "e1",
+            title: "Malformed active market",
+            markets: [
+              {
+                slug: "active-market",
+                active: true,
+                closed: false,
+                outcomes: ["Yes", "No"],
+                outcomePrices: [],
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    await expect(
+      fetchPublicSearchEvents("bitcoin", 5, { fetchImpl })
+    ).rejects.toBeInstanceOf(UpstreamSearchError);
+  });
+
   it("rejects a full-record response when a nested market omits its ID", async () => {
     const { fetchImpl } = recordingFetch(() =>
       jsonResponse({

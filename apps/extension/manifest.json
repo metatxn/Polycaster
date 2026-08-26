@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Knoww — Every opinion is a position",
-  "version": "2.5.50",
+  "version": "2.5.52",
   "description": "A prediction market layer for the open internet.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -18,8 +18,15 @@
     },
     "default_title": "Knoww"
   },
-  "permissions": ["storage", "offscreen", "scripting", "sidePanel"],
-  "host_permissions": ["__GENERATED_BY_WEBPACK_BUILD__"],
+  "permissions": [
+    "storage",
+    "offscreen",
+    "scripting",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "__GENERATED_BY_WEBPACK_BUILD__"
+  ],
   "side_panel": {
     "default_path": "sidepanel.html"
   },
@@ -45,7 +52,9 @@
         "*.wasm",
         "*.mjs"
       ],
-      "matches": ["__GENERATED_BY_WEBPACK_BUILD__"]
+      "matches": [
+        "__GENERATED_BY_WEBPACK_BUILD__"
+      ]
     }
   ],
   "options_page": "options.html"

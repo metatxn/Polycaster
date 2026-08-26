@@ -8,12 +8,15 @@ import {
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import Decimal from "decimal.js";
 import { z } from "zod";
+import { MARKETS_READ_SCOPE } from "../auth/scopes";
 import { currentRequestId } from "../context";
 import {
   KnowwToolError,
+  requireToolScope,
   toKnowwToolError,
   toolFailureContent,
 } from "../errors/tool-error";
+import { requireToolQuota } from "../quota";
 import { isAbortLike } from "./gamma";
 import { buildToolMeta, READ_ONLY_ANNOTATIONS, toolMetaSchema } from "./meta";
 
@@ -264,6 +267,8 @@ async function handleGetOrderbook(
   context: ServerContext
 ) {
   try {
+    requireToolScope(MARKETS_READ_SCOPE);
+    await requireToolQuota("get_orderbook");
     const tokenId = resolveTokenId(args);
     let snapshot: OrderbookSnapshot | null;
     try {

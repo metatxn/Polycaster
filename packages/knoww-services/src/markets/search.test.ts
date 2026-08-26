@@ -271,7 +271,7 @@ describe("fetchPublicSearchEvents", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("queries gamma public-search with the exact active-only parameter set", async () => {
+  it("requests compact active market records by default", async () => {
     const { fetchImpl, calls } = recordingFetch(() =>
       jsonResponse({ events: [] })
     );
@@ -296,6 +296,20 @@ describe("fetchPublicSearchEvents", () => {
     expect(
       new Headers(calls[0].init?.headers as HeadersInit).get("accept")
     ).toBe("application/json");
+  });
+
+  it("requests full active market records when nested market IDs are required", async () => {
+    const { fetchImpl, calls } = recordingFetch(() =>
+      jsonResponse({ events: [] })
+    );
+
+    await fetchPublicSearchEvents("bitcoin", 5, {
+      fetchImpl,
+      fullMarketRecords: true,
+    });
+
+    const url = new URL(calls[0].url);
+    expect(url.searchParams.get("optimized")).toBe("false");
   });
 
   it("tags events as search results and passes tags, profiles, and pagination through", async () => {
@@ -329,6 +343,82 @@ describe("fetchPublicSearchEvents", () => {
 
     const result = await fetchPublicSearchEvents("bitcoin", 5, { fetchImpl });
     expect(result.pagination).toEqual({ hasMore: false, totalResults: 2 });
+  });
+
+  it("normalizes null collections and preserves top-level hasMore", async () => {
+    const { fetchImpl } = recordingFetch(() =>
+      jsonResponse({
+        events: null,
+        tags: null,
+        profiles: null,
+        hasMore: true,
+      })
+    );
+
+    const result = await fetchPublicSearchEvents("bitcoin", 5, { fetchImpl });
+    expect(result).toEqual({
+      events: [],
+      tags: [],
+      profiles: [],
+      pagination: { hasMore: true, totalResults: 0 },
+    });
+  });
+
+  it("accepts compact nested market records identified by slug", async () => {
+    const { fetchImpl } = recordingFetch(() =>
+      jsonResponse({
+        events: [
+          {
+            id: "e1",
+            title: "Compact event",
+            markets: [
+              {
+                slug: "will-bitcoin-reach-100k",
+                question: "Will Bitcoin reach $100k?",
+                outcomes: ["Yes", "No"],
+                outcomePrices: [0.6, 0.4],
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    const result = await fetchPublicSearchEvents("bitcoin", 5, { fetchImpl });
+    expect(result.events[0].markets).toEqual([
+      {
+        slug: "will-bitcoin-reach-100k",
+        question: "Will Bitcoin reach $100k?",
+        outcomes: ["Yes", "No"],
+        outcomePrices: [0.6, 0.4],
+      },
+    ]);
+  });
+
+  it("rejects a full-record response when a nested market omits its ID", async () => {
+    const { fetchImpl } = recordingFetch(() =>
+      jsonResponse({
+        events: [
+          {
+            id: "e1",
+            title: "Incomplete full event",
+            markets: [
+              {
+                slug: "will-bitcoin-reach-100k",
+                question: "Will Bitcoin reach $100k?",
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    await expect(
+      fetchPublicSearchEvents("bitcoin", 5, {
+        fetchImpl,
+        fullMarketRecords: true,
+      })
+    ).rejects.toBeInstanceOf(UpstreamSearchError);
   });
 
   it("rejects malformed nested market data", async () => {

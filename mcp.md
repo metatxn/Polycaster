@@ -96,6 +96,12 @@ The existing web Worker could branch `/mcp` before the OpenNext handler, but the
 
 The dedicated Worker is therefore the production choice. A short-lived local prototype may run in the existing Worker, but production code should target `apps/mcp`.
 
+### Release ownership
+
+GitHub Actions validates every pull request and never deploys the Worker. Running the required check without workflow-level path filters prevents unrelated pull requests from being blocked by a permanently pending check. Branch protection must require `MCP CI / quality` and block direct pushes to `main`. After the manually approved first production deployment, Cloudflare Workers Builds becomes the sole automatic production deployer for MCP-affecting merges to `main`.
+
+Knoww does not run a remote MCP staging environment. Local Workers-native tests, CI, and a production dry run are the predeployment gates. The first remote OAuth and client smoke tests run against production during an attended release with rollback commands ready. The production build watches `apps/mcp`, its shared service packages, and workspace dependency files. This avoids duplicate deployers and prevents unrelated web or extension changes from releasing the MCP Worker.
+
 ### No Hono initially
 
 Hono is a router and middleware framework. It does not provide MCP semantics or make the server stateless. The Cloudflare MCP handler already handles the initial `/mcp` route and its protocol requirements.
@@ -339,9 +345,9 @@ Tokens must be audience-bound to the MCP resource. Do not accept:
 
 ### Authentication and consent
 
-Knoww may reuse its wallet login or account login to authenticate the person in the browser. After authentication, the OAuth consent page must show the MCP client and requested scopes. The MCP Worker then issues its own bound access token to the MCP client.
+The implemented login path authenticates the person in the browser with an EVM wallet signature. The MCP host opens the page; the human connects the wallet and approves the signature. The consent page shows the MCP client and requested scopes, then the MCP Worker issues its own audience-bound access token to the MCP client.
 
-A wallet signature may prove account ownership during login. It must not become the long-lived MCP credential.
+The wallet signature is bound to a five-minute, atomically consumed challenge, the OAuth client, the MCP resource, and the requested scopes. It proves account ownership only. It never becomes the long-lived MCP credential and is never shown to the model. The initial implementation verifies EOAs; EIP-1271 smart-contract-wallet support remains future work.
 
 ### Required metadata
 
@@ -371,6 +377,7 @@ Initial scopes:
 | `orders:read` | Read the authenticated user's order state in a later phase |
 | `trade:intent:create` | Create a non-executing trade intent in a later phase |
 | `trade:execute` | Execute an approved trade in a future separately reviewed phase |
+| `x402:pay` | Attempt a future x402-gated tool; does not itself authorize wallet spending or satisfy payment |
 
 Scope rules:
 
@@ -380,6 +387,40 @@ Scope rules:
 - A client with `markets:read` cannot infer `portfolio:read` data through another tool.
 - Administrative operations are never available through public MCP scopes.
 - Scope changes must take effect within the documented token lifetime or through an immediate entitlement check.
+
+Only `markets:read` is active today. `x402:pay` is reserved in code and documentation but is not advertised or grantable until a paid tool, pricing policy, facilitator path, and payment verification tests exist.
+
+`x402:pay` is a Knoww-defined OAuth capability. It is not a standard scope supplied by the x402 protocol.
+
+### x402 payment boundary
+
+x402 is a payment protocol, not an authentication system. OAuth identifies the user and client and limits which tools they may attempt. x402 proves that the price for a particular request was paid.
+
+A future paid tool should require both its domain scope and `x402:pay`. For example, a premium market-analysis tool could require `markets:read` plus `x402:pay`. The OAuth scope only allows the paid flow to begin. It must not:
+
+- Give Knoww, the model, or the MCP server control of the payer's private key
+- Count as user approval for an amount
+- Bypass x402 payment-proof verification
+- Replace per-payment budgets, allowlists, or user confirmation in the agent host
+
+The expected future flow is:
+
+1. The authenticated agent calls a paid MCP tool.
+2. Knoww returns an x402 payment requirement with an exact asset, network, recipient, amount, and expiry.
+3. The agent host checks its budget and policy. Its wallet component—not the language model—signs the payment payload.
+4. The agent retries with the x402 payment signature.
+5. Knoww or its approved facilitator verifies and settles the payment before returning the paid result.
+
+Use the x402 V2 headers and payload model current at implementation time. Keep OAuth Bearer tokens, wallet-login signatures, and x402 payment signatures separate in storage, logs, validation, and error handling.
+
+Before activating this flow:
+
+- Prove that each supported MCP host exposes the x402 payment challenge to its wallet or payment component and preserves the retry headers.
+- Bind the quote and accepted proof to the verified principal, OAuth client, tool name, canonical request hash, network, asset, recipient, exact amount, expiry, and a one-time payment identifier.
+- Store quote consumption, idempotency, settlement, and any refund state in a strongly consistent system. Never rely on isolate memory or eventually consistent KV for spend correctness.
+- Represent amounts in integer base units or Decimal.js. Never use binary floating point for pricing, settlement, or refunds.
+- Define budget ceilings, asset and recipient allowlists, confirmation thresholds, replay protection, facilitator trust, timeout behavior, partial-refund behavior, and reconciliation before launch.
+- Start with paid read-only data. Do not combine the first x402 release with order placement, trading custody, or delegated trade signing.
 
 ### Revocation and entitlement checks
 
@@ -638,16 +679,12 @@ Use stable machine-readable codes:
 
 ### Required layers
 
-Use at least two layers:
+The initial release uses four controls:
 
-1. Cloudflare edge or WAF controls for unauthenticated floods and malformed traffic.
-2. A Workers Rate Limiting binding after authentication for user, client, and tool-class limits.
-
-Suggested rate-limit key:
-
-```text
-userId:clientId:toolClass
-```
+1. An authentication-route limit keyed by route and source IP.
+2. A coarse edge limit for unauthenticated MCP floods and readiness abuse.
+3. A free-plan principal limit keyed by plan and verified principal.
+4. A free-plan per-tool limit keyed by plan, verified principal, and fixed tool name.
 
 Do not use IP address as the primary authenticated quota key. Many legitimate users share IP addresses.
 
@@ -655,12 +692,12 @@ Do not use IP address as the primary authenticated quota key. Many legitimate us
 
 Treat these as rollout defaults, not permanent product promises:
 
-| Class | Example tools | Initial limit |
-| --- | --- | --- |
-| Discovery | Server and tool discovery | 120 calls per minute per client |
-| Standard read | Market, event, price, trader reads | 60 calls per minute per user and client |
-| Expensive analysis | Whale and suspicious-activity tools | 10 calls per minute per user and client |
-| Future write | Intent creation or order actions | 5 calls per minute plus a concurrency limit |
+| Class | Initial limit |
+| --- | --- |
+| OAuth authorization, token, and registration route | 30 calls per minute per source IP |
+| MCP edge | 300 calls per minute per source IP |
+| Free-plan principal | 120 calls per minute |
+| Free-plan tool | 30 calls per minute per tool |
 
 The Workers Rate Limiting API is permissive and eventually consistent within a Cloudflare location. Use it for abuse controls. Do not use it as the source of truth for billing, prepaid credits, daily trading caps, or exact usage accounting.
 
@@ -726,19 +763,16 @@ Tool annotations and model confirmations do not replace these controls.
 
 Use `@knoww/logger`. Do not add `console.log`, `console.error`, or ad hoc JSON logging.
 
-Recommended events:
+Current events:
 
 ```text
 mcp.request.started
 mcp.request.finished
 mcp.request.failed
 mcp.auth.denied
-mcp.scope.denied
-mcp.rate_limited
-mcp.tool.started
-mcp.tool.finished
-mcp.tool.failed
-mcp.upstream.failed
+mcp.quota.principal.denied
+mcp.health.readiness.failed
+mcp.tools.tool.failed
 ```
 
 Safe fields:
@@ -765,7 +799,7 @@ Do not log:
 - Full tool output
 - Upstream payloads that may contain personal data
 
-Required metrics:
+The release dashboard must derive these metrics from Workers request telemetry and structured logs:
 
 - Requests per tool and client
 - Success, validation failure, authorization failure, rate limit, and upstream failure counts
@@ -798,7 +832,7 @@ Deliverables:
 - Create `apps/mcp` with package, TypeScript, Wrangler, lint, test, typecheck, dev, and deploy scripts.
 - Add exact compatible dependencies.
 - Generate Worker binding types.
-- Add the server factory and one local-only health check through tests, not a public route unless needed.
+- Add the server factory and public liveness and readiness probes for Cloudflare monitoring.
 - Add structured logging and request IDs.
 - Add the shared error types.
 - Add CI commands through the existing recursive workspace scripts.
@@ -853,7 +887,11 @@ Deliverables:
 - Filter tools by granted scopes.
 - Recheck scopes inside handlers.
 - Add Workers Rate Limiting bindings.
+- Add edge, plan, principal, and per-tool quotas.
 - Add production Host and Origin allowlists.
+- Add the production custom domain and keep OAuth state isolated from the web application.
+- Add an OpenAPI contract for conventional HTTP endpoints.
+- Add a checked-in rollout and rollback runbook.
 - Add auth, quota, and redaction tests.
 
 Acceptance criteria:
@@ -1023,9 +1061,10 @@ Version 1 is complete when:
 
 ## Product questions that do not block the scaffold
 
-The scaffold and Priority 0 contracts can begin while product owners decide:
+The current read-only implementation can proceed while product owners decide:
 
-- Which account or wallet login appears on the OAuth consent page
+- Whether to add a Knoww account-login alternative to wallet consent
+- Whether and how to support EIP-1271 smart-contract wallets
 - Whether free and paid users receive different quotas
 - Which remote MCP clients Knoww officially supports at launch
 - Whether public trader and whale tools ship in version 1 or the next release
@@ -1051,5 +1090,8 @@ Framework and protocol decisions in this document are based on these primary sou
 - [MCP Streamable HTTP specification](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/basic/transports/streamable-http.mdx)
 - [MCP authorization specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 - [MCP tool specification](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)
+- [x402 HTTP 402 concepts](https://docs.x402.org/core-concepts/http-402)
+- [x402 V2 specification](https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md)
+- [Cloudflare Agents x402 payments](https://developers.cloudflare.com/agents/tools/payments/x402/)
 
 Implementation agents must recheck version-sensitive APIs against these sources and the pinned package type definitions. If the docs and installed types disagree, stop and document the conflict before choosing a pattern.

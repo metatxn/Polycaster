@@ -10,12 +10,15 @@ import {
 } from "@knoww/services";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { MARKETS_READ_SCOPE } from "../auth/scopes";
 import { currentRequestId } from "../context";
 import {
   KnowwToolError,
+  requireToolScope,
   toKnowwToolError,
   toolFailureContent,
 } from "../errors/tool-error";
+import { requireToolQuota } from "../quota";
 import { toDecimalString } from "./decimal";
 import {
   cleanDescription,
@@ -330,6 +333,8 @@ function summaryText(
 
 async function handleGetEvent(args: GetEventInput, context: ServerContext) {
   try {
+    requireToolScope(MARKETS_READ_SCOPE);
+    await requireToolQuota("get_event");
     const identifier = resolveEventIdentifier(args);
     let detail: GammaEventDetail | null;
     try {

@@ -1,10 +1,9 @@
 /**
  * Knoww MCP Worker (mcp.knoww.app/mcp).
  *
- * The top-level configuration is the production shape and fails closed:
- * MCP_AUTH_MODE anything other than "dev-bypass" rejects every request with
- * 401 until the OAuth provider lands (mcp.md PR 8). Local development runs
- * `wrangler dev --env local`, which is the only place the bypass exists.
+ * The top-level configuration is the production shape and requires OAuth.
+ * Local development runs `wrangler dev --env local`, which is the only place
+ * where the explicit authentication bypass is configured.
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -12,22 +11,129 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-  // No workers.dev URL: the only public entry point is the custom domain,
-  // attached in the deployment PR (mcp.md PR 9).
+  // No workers.dev URL: the only public entry point is the custom domain.
   "workers_dev": false,
-  // "routes": [{ "pattern": "mcp.knoww.app", "custom_domain": true }],
+  "routes": [{ "pattern": "mcp.knoww.app", "custom_domain": true }],
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "head_sampling_rate": 1
   },
+  "kv_namespaces": [
+    {
+      // Wrangler provisions this namespace on the first deployment. OAuth
+      // tokens, grants, authorization codes, and registered clients live here.
+      "binding": "OAUTH_KV"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_AUTH_CHALLENGES",
+        "class_name": "WalletChallengeStore"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["WalletChallengeStore"]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "MCP_AUTH_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      // Coarse abuse protection before OAuth token processing. Authenticated
+      // traffic is also constrained by the principal and tool bindings below.
+      "name": "MCP_EDGE_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "MCP_FREE_PRINCIPAL_RATE_LIMITER",
+      "namespace_id": "1003",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "MCP_FREE_TOOL_RATE_LIMITER",
+      "namespace_id": "1004",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    }
+  ],
   "vars": {
     "MCP_AUTH_MODE": "oauth-required",
+    "MCP_CANONICAL_RESOURCE": "https://mcp.knoww.app/mcp",
     "MCP_ALLOWED_HOSTNAMES": "mcp.knoww.app",
-    "MCP_ALLOWED_ORIGIN_HOSTNAMES": "knoww.app,www.knoww.app"
+    "MCP_ALLOWED_ORIGIN_HOSTNAMES": "mcp.knoww.app,knoww.app,www.knoww.app"
   },
   "env": {
     "local": {
+      "routes": [],
+      "kv_namespaces": [
+        {
+          "binding": "OAUTH_KV"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "MCP_AUTH_CHALLENGES",
+            "class_name": "WalletChallengeStore"
+          }
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "MCP_AUTH_RATE_LIMITER",
+          "namespace_id": "1001",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
+        },
+        {
+          "name": "MCP_EDGE_RATE_LIMITER",
+          "namespace_id": "1002",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "MCP_FREE_PRINCIPAL_RATE_LIMITER",
+          "namespace_id": "1003",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
+        },
+        {
+          "name": "MCP_FREE_TOOL_RATE_LIMITER",
+          "namespace_id": "1004",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
+        }
+      ],
       "vars": {
         "MCP_AUTH_MODE": "dev-bypass",
+        "MCP_CANONICAL_RESOURCE": "http://localhost:8787/mcp",
         "MCP_ALLOWED_HOSTNAMES": "localhost,127.0.0.1",
         "MCP_ALLOWED_ORIGIN_HOSTNAMES": "localhost,127.0.0.1"
       }

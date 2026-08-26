@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: Knoww MCP HTTP endpoints
+  version: 0.1.0
+  description: >-
+    HTTP contract for Knoww MCP health probes and OAuth endpoints. The /mcp
+    request and tool schemas are defined by the Model Context Protocol.
+servers:
+  - url: https://mcp.knoww.app
+    description: Production
+tags:
+  - name: Operations
+  - name: OAuth
+  - name: MCP
+paths:
+  /healthz:
+    get:
+      operationId: getMcpLiveness
+      summary: Check Worker liveness
+      tags: [Operations]
+      responses:
+        "200":
+          description: The Worker can serve requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /readyz:
+    get:
+      operationId: getMcpReadiness
+      summary: Check OAuth state-store readiness
+      tags: [Operations]
+      responses:
+        "200":
+          description: Required stateful bindings responded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: A required stateful binding did not respond.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /.well-known/oauth-protected-resource/mcp:
+    get:
+      operationId: getMcpProtectedResourceMetadata
+      summary: Read MCP protected-resource metadata
+      tags: [OAuth]
+      responses:
+        "200":
+          description: RFC 9728 protected-resource metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /.well-known/oauth-authorization-server:
+    get:
+      operationId: getMcpAuthorizationServerMetadata
+      summary: Read OAuth authorization-server metadata
+      tags: [OAuth]
+      responses:
+        "200":
+          description: RFC 8414 authorization-server metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /authorize:
+    get:
+      operationId: beginMcpAuthorization
+      summary: Begin OAuth authorization and wallet consent
+      tags: [OAuth]
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            const: code
+        - name: client_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: scope
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: code_challenge
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema:
+            type: string
+            const: S256
+        - name: resource
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+      responses:
+        "200":
+          description: Wallet consent page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "302":
+          description: OAuth error redirect to the registered client.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    post:
+      operationId: completeMcpAuthorization
+      summary: Approve or deny wallet consent
+      tags: [OAuth]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [challenge, decision]
+              properties:
+                challenge:
+                  type: string
+                  pattern: "^[A-Za-z0-9]{8,128}$"
+                decision:
+                  type: string
+                  enum: [allow, deny]
+                wallet_address:
+                  type: string
+                chain_id:
+                  type: integer
+                  minimum: 1
+                signature:
+                  type: string
+      responses:
+        "302":
+          description: Redirect to the registered client with a code or error.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: Form body exceeds 16 KiB.
+        "415":
+          description: Form content type is required.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /authorize/message:
+    post:
+      operationId: createMcpWalletMessage
+      summary: Build the wallet message for an active consent challenge
+      tags: [OAuth]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [challenge, wallet_address, chain_id]
+              properties:
+                challenge:
+                  type: string
+                  pattern: "^[A-Za-z0-9]{8,128}$"
+                wallet_address:
+                  type: string
+                chain_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: Message that the selected wallet must sign.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: Form body exceeds 16 KiB.
+        "415":
+          description: Form content type is required.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /oauth/token:
+    post:
+      operationId: exchangeMcpOAuthToken
+      summary: Exchange or refresh an OAuth token
+      tags: [OAuth]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: OAuth token response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type]
+                additionalProperties: true
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                  expires_in:
+                    type: integer
+                  refresh_token:
+                    type: string
+                  scope:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          description: OAuth token request body exceeds 64 KiB.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /oauth/register:
+    post:
+      operationId: registerMcpOAuthClient
+      summary: Register an OAuth client dynamically
+      tags: [OAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: OAuth dynamic client registration response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [client_id]
+                additionalProperties: true
+                properties:
+                  client_id:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          description: Registration request body exceeds 1 MiB.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /mcp:
+    post:
+      operationId: callKnowwMcp
+      summary: Send a Model Context Protocol request
+      description: >-
+        The JSON-RPC and tool schemas follow the negotiated MCP protocol
+        version. This OpenAPI document does not duplicate those schemas.
+      tags: [MCP]
+      security:
+        - mcpOAuth: ["markets:read"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: MCP JSON or event-stream response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: MCP request body exceeds 1 MiB.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+components:
+  securitySchemes:
+    mcpOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: /authorize
+          tokenUrl: /oauth/token
+          scopes:
+            markets:read: Read prediction-market data.
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, requestId]
+      properties:
+        status:
+          type: string
+          enum: [ok, ready, unavailable]
+        service:
+          type: string
+          const: knoww-mcp
+        requestId:
+          type: string
+          format: uuid
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            requestId:
+              type: string
+  responses:
+    BadRequest:
+      description: The request is invalid.
+    Unauthorized:
+      description: Authentication failed or is required.
+    Forbidden:
+      description: The caller lacks the required permission.
+    MethodNotAllowed:
+      description: The HTTP method is not allowed.
+    RateLimited:
+      description: The applicable request quota was exceeded.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            const: 60
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+externalDocs:
+  description: Model Context Protocol 2026-07-28 specification
+  url: https://modelcontextprotocol.io/specification/2026-07-28

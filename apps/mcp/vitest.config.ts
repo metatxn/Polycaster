@@ -11,5 +11,8 @@ export default defineConfig({
   ],
   test: {
     include: ["src/**/*.test.ts"],
+    // Durable Object startup can exceed Vitest's 5-second default when all
+    // Workers suites initialize concurrently on a cold CI runner.
+    testTimeout: 10_000,
   },
 });

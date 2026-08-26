@@ -7,12 +7,15 @@ import {
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import Decimal from "decimal.js";
 import { z } from "zod";
+import { MARKETS_READ_SCOPE } from "../auth/scopes";
 import { currentRequestId } from "../context";
 import {
   KnowwToolError,
+  requireToolScope,
   toKnowwToolError,
   toolFailureContent,
 } from "../errors/tool-error";
+import { requireToolQuota } from "../quota";
 import { isAbortLike } from "./gamma";
 import { buildToolMeta, READ_ONLY_ANNOTATIONS, toolMetaSchema } from "./meta";
 
@@ -172,6 +175,8 @@ export function registerGetPriceHistoryTool(server: McpServer): void {
     },
     async (args: HistoryArgs, context: ServerContext) => {
       try {
+        requireToolScope(MARKETS_READ_SCOPE);
+        await requireToolQuota("get_price_history");
         const tokenId = resolveTokenId(args);
         const { startMs, endMs } = resolveWindow(args);
         const fidelityMinutes =

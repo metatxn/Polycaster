@@ -9,12 +9,15 @@ import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import Decimal from "decimal.js";
 import { z } from "zod";
+import { MARKETS_READ_SCOPE } from "../auth/scopes";
 import { currentRequestId } from "../context";
 import {
   KnowwToolError,
+  requireToolScope,
   toKnowwToolError,
   toolFailureContent,
 } from "../errors/tool-error";
+import { requireToolQuota } from "../quota";
 import { toDecimalString } from "./decimal";
 import {
   cleanDescription,
@@ -314,6 +317,8 @@ function summaryText(market: MarketDetail): string {
 
 async function handleGetMarket(args: GetMarketInput, context: ServerContext) {
   try {
+    requireToolScope(MARKETS_READ_SCOPE);
+    await requireToolQuota("get_market");
     const identifier = resolveIdentifier(args);
     let detail: GammaMarketDetail | null;
     try {

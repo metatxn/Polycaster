@@ -31,7 +31,8 @@ export interface ExactTopOutcome {
 }
 
 export interface Market {
-  id: string;
+  id?: string;
+  slug?: string;
   question?: string;
   outcomes?: string | string[];
   outcomePrices?: string | (string | number)[];
@@ -74,11 +75,15 @@ export interface TagEventsResult {
   truncated: boolean;
 }
 
-export type SearchFetchOptions = ServiceFetchOptions;
+export interface SearchFetchOptions extends ServiceFetchOptions {
+  /** Request complete nested market records, including stable market IDs. */
+  fullMarketRecords?: boolean;
+}
 
 const marketSchema = z
   .object({
-    id: z.string().min(1),
+    id: z.string().min(1).optional(),
+    slug: z.string().min(1).optional(),
     question: z.string().optional(),
     outcomes: gammaStringArraySchema.optional(),
     outcomePrices: gammaProbabilityArraySchema.optional(),
@@ -86,6 +91,12 @@ const marketSchema = z
   })
   .passthrough()
   .superRefine((market, context) => {
+    if (market.id === undefined && market.slug === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Market must include an id or slug",
+      });
+    }
     if (market.outcomes === undefined || market.outcomePrices === undefined) {
       return;
     }
@@ -331,7 +342,7 @@ export async function fetchPublicSearchEvents(
   params.set("limit_per_type", String(Math.min(limit, 10)));
   params.set("cache", "true");
   params.set("search_tags", "true");
-  params.set("optimized", "true");
+  params.set("optimized", options?.fullMarketRecords ? "false" : "true");
   params.set("events_status", "active");
   params.set("keep_closed_markets", "0");
   params.set("closed", "false");
@@ -343,16 +354,37 @@ export async function fetchPublicSearchEvents(
 
   const parsed = z
     .object({
-      events: z.array(searchEventSchema).default([]),
-      tags: z.array(z.unknown()).default([]),
-      profiles: z.array(z.unknown()).default([]),
+      events: z
+        .array(searchEventSchema)
+        .nullish()
+        .transform((events) => events ?? []),
+      tags: z
+        .array(z.unknown())
+        .nullish()
+        .transform((tags) => tags ?? []),
+      profiles: z
+        .array(z.unknown())
+        .nullish()
+        .transform((profiles) => profiles ?? []),
       pagination: paginationSchema.optional(),
+      hasMore: z.boolean().optional(),
     })
     .passthrough()
     .safeParse(payload);
   if (!parsed.success) {
     throw new UpstreamSearchError(
       "Gamma public search returned a malformed payload"
+    );
+  }
+
+  if (
+    options?.fullMarketRecords &&
+    parsed.data.events.some((event) =>
+      event.markets?.some((market) => market.id === undefined)
+    )
+  ) {
+    throw new UpstreamSearchError(
+      "Gamma full public search omitted a nested market ID"
     );
   }
 
@@ -364,7 +396,7 @@ export async function fetchPublicSearchEvents(
     tags: parsed.data.tags,
     profiles: parsed.data.profiles,
     pagination: parsed.data.pagination || {
-      hasMore: false,
+      hasMore: parsed.data.hasMore ?? false,
       totalResults: parsed.data.events.length,
     },
   };

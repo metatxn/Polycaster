@@ -10,8 +10,14 @@ import {
 import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { MARKETS_READ_SCOPE } from "../auth/scopes";
 import { currentRequestId } from "../context";
-import { KnowwToolError, toolFailureContent } from "../errors/tool-error";
+import {
+  KnowwToolError,
+  requireToolScope,
+  toolFailureContent,
+} from "../errors/tool-error";
+import { requireToolQuota } from "../quota";
 import { toDecimalString } from "./decimal";
 import { knowwEventUrl } from "./gamma";
 import { buildToolMeta, READ_ONLY_ANNOTATIONS, toolMetaSchema } from "./meta";
@@ -128,6 +134,12 @@ function marketOutcomes(market: Market): {
 }
 
 function summarizeMarket(market: Market): MarketSummary {
+  if (!market.id) {
+    throw new KnowwToolError(
+      "UPSTREAM_UNAVAILABLE",
+      "Search returned a market without a stable identifier."
+    );
+  }
   const { outcomes, totalOutcomes, truncated } = marketOutcomes(market);
   return {
     id: market.id,
@@ -188,6 +200,8 @@ async function handleSearchMarkets(
   context: ServerContext
 ) {
   try {
+    requireToolScope(MARKETS_READ_SCOPE);
+    await requireToolQuota("search_markets");
     const tagSlugs: string[] = [];
     if (args.category !== undefined) {
       const slug = normalizeCategorySlug(args.category);
@@ -204,7 +218,7 @@ async function handleSearchMarkets(
       args.query,
       args.limit,
       tagSlugs,
-      { signal: context.mcpReq.signal }
+      { signal: context.mcpReq.signal, fullMarketRecords: true }
     );
     if (data.degraded && data.events.length === 0) {
       throw new KnowwToolError(

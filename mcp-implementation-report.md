@@ -1,6 +1,6 @@
 # Knoww MCP implementation report
 
-Date: 2026-08-25
+Date: 2026-08-26
 
 Branch: `mcp`
 
@@ -8,27 +8,27 @@ Plan: [mcp.md](mcp.md)
 
 ## Status
 
-The local implementation now provides five read-only tools from a dedicated Cloudflare Worker in `apps/mcp`: `search_markets`, `get_market`, `get_event`, `get_orderbook`, and `get_price_history`.
+The implementation provides five read-only tools from a dedicated Cloudflare Worker in `apps/mcp`: `search_markets`, `get_market`, `get_event`, `get_orderbook`, and `get_price_history`. Production-shaped requests now pass through an OAuth 2.1 authorization-code flow with wallet-based human consent, S256 PKCE, audience-bound tokens, and `markets:read` enforcement.
 
-The implementation is ready for code review, but it is not ready for production traffic. Production OAuth, distributed rate limits, the `mcp.knoww.app` route, deployment, and live smoke tests remain pending. Until OAuth is implemented, the production configuration fails closed with `401 UNAUTHENTICATED`; only the explicit local environment enables the development bypass.
+The code is a production release candidate. The repository contains one remote MCP environment: production. It has a custom-domain route, layered quotas, health probes, security headers, an MCP-specific PR gate, an HTTP contract, and a rollout and rollback runbook. Production traffic remains off until an approved operator verifies Cloudflare resources and alerts and performs the first attended deployment. After that bootstrap release, Cloudflare Workers Builds owns production deployment from `main`; GitHub Actions remains verification-only. Only the explicit local environment enables the development bypass.
 
 ## Verification
 
 | Target | Result |
 |---|---|
-| `apps/mcp` tests | 93/93 across 7 files |
+| `apps/mcp` tests | 133/133 across 13 files |
 | `apps/mcp` typecheck and Biome | Pass |
 | MCP protocol coverage | Legacy `initialize` at 2025-11-25 and modern `server/discover` at 2026-07-28 both pass |
-| Worker dry-run | Pass; 1,144.52 KiB upload, 203.50 KiB gzip; no environment-selection warning |
-| `packages/knoww-services` tests | 93/93 across 5 files |
+| Worker dry-run | Pass; the production OAuth bundle builds with no environment-selection warning |
+| Cloudflare build rehearsal | Pass from `/apps/mcp`; frozen workspace install and the exact production deploy command complete in dry-run mode |
+| Browser consent smoke test | Page rendered without console errors; missing-wallet feedback was announced; Lighthouse Accessibility, Best Practices, and Agentic Browsing scored 100 (SEO 75 on the intentionally non-indexable consent page) |
+| `packages/knoww-services` tests | 97/97 across 5 files |
 | `packages/knoww-services` typecheck and Biome | Pass |
-| `apps/web` typecheck | Pass |
-| `apps/web` Vitest | 628 passed; 13 known failures in two localStorage-dependent hook files |
-| `apps/web` Node tests | 82/82 pass |
-| Production dependency audit | Pass; 0 vulnerabilities across 1,219 production dependencies |
+| `apps/web` typecheck and affected search-route tests | Pass; 6/6 search-route tests |
+| `apps/extension` typecheck and tests | Pass; 661/661 tests |
+| Production dependency audit | Pass; no known vulnerabilities reported by `pnpm audit --prod --audit-level=high` |
+| Release automation | `MCP CI / quality` runs on every pull request; production Cloudflare Workers Builds settings and watch paths documented |
 | Diff whitespace check | Pass after refreshing the staged MCP files |
-
-The 13 web failures are unchanged from the earlier baseline recorded during this work. They fail before the MCP search route is exercised because Node was started without a localStorage backing file. They are not fixed in this change.
 
 ## Delivered behavior
 
@@ -39,6 +39,8 @@ The work is organized as planned implementation slices rather than submitted pul
 3. **Event detail.** Child-event fan-out runs only for `negRisk: true` events. Child and fallback failures degrade the market list without hiding the parent event. Service caps and partial results are explicit through response text, `marketsIncomplete`, and `meta.truncated`.
 4. **Order books.** CLOB snapshots are validated before use, including token identity, price bounds, positive sizes, tick size, minimum order size, and timestamp shape. Bids and asks are sorted locally, depth sums use Decimal.js, and old snapshots are marked stale.
 5. **Price history.** CLOB history points require safe timestamps inside the requested window and prices from 0 to 1. Points are sorted by time and prices become decimal strings. Series over 1,000 points are downsampled with endpoints retained and `meta.truncated` set.
+6. **OAuth and scopes.** `@cloudflare/workers-oauth-provider@0.10.3` owns discovery, client registration, grants, token exchange, refresh rotation, revocation, and audience validation. The browser consent flow verifies an EOA wallet signature against a five-minute challenge stored in a Durable Object and consumed atomically. Access-token scopes are copied into encrypted per-token properties during authorization-code and refresh exchange, then checked before MCP dispatch and again inside every tool.
+7. **Production controls.** The Worker exposes liveness and stateful-binding readiness probes, applies HSTS and baseline response security headers, rejects oversized MCP, OAuth token, and registration bodies before parsing, and enforces separate authentication, edge, free-plan principal, and per-tool quotas.
 
 All tools are read-only and return the shared error format with retry guidance. Tool failures emit `mcp.tools.tool.failed` with only `toolName`, `requestId`, error `code`, and `retryable`; raw errors, messages, and stacks are not logged or returned. The Worker handler also has a safe `onerror` hook.
 
@@ -55,9 +57,12 @@ All tools are read-only and return the shared error format with retry guidance. 
 ## Dependency and configuration changes
 
 - `agents` is pinned to `0.21.0`.
-- The unused `@cloudflare/workers-oauth-provider` dependency was removed. It should be added with the OAuth implementation, not before it.
+- `@cloudflare/workers-oauth-provider` is pinned to `0.10.3` and is now used by the Worker.
+- `viem` is added from the workspace catalog for EVM address normalization and EOA message-signature verification.
+- Wrangler defines the production custom domain, OAuth KV binding, wallet-challenge Durable Object, and four rate-limit layers. Deployment must confirm that the resources are provisioned in the intended Cloudflare account and that the configured rate-limit namespace IDs do not collide with another Worker.
 - The stale global `nanoid: 3.3.17` override was replaced with a targeted redirect from `3.3.17` to patched `3.3.18`. Consumers that require NanoID 5 now resolve `5.1.16` instead of being forced onto the wrong major.
 - Worker build and deploy scripts pass `--env=""` explicitly, so Wrangler uses the top-level production configuration without warning.
+- The MCP GitHub Actions workflow runs verification on every pull request so its required check is never skipped by path filters. Cloudflare Workers Builds is the sole automatic production deployer after the bootstrap release, preventing duplicate deployments from the same merge.
 
 `pnpm install` still reports an upstream peer warning: `agents@0.21.0` brings Babel 8 decorator plugins while the wider workspace currently resolves `@babel/core@7.29.7`. The MCP Worker typecheck, tests, and bundle all pass. This warning should be revisited when the workspace moves to Babel 8 or when Agents adjusts that dependency edge; adding an unused Babel runtime dependency here would not improve the Worker.
 
@@ -71,15 +76,26 @@ All tools are read-only and return the shared error format with retry guidance. 
 
 ## Remaining production work
 
-1. **OAuth and scopes.** Select the identity provider and client-registration policy, add verified principal and scope handling, and add the OAuth Provider dependency. This requires owner decisions and deployment secrets.
-2. **Distributed limits.** Add Cloudflare rate-limit bindings and quotas by principal, tool, and plan. Keep the current input and output bounds as the first protection layer.
-3. **Deployment.** Attach the `mcp.knoww.app` custom domain, configure production bindings, and deploy with authorized Cloudflare access.
-4. **Live verification.** Run authentication, protocol, tool, cancellation, rate-limit, and observability smoke tests against the deployed endpoint.
+The remaining gates require remote Cloudflare access or a product decision. They cannot be completed by a local code change.
+
+1. **Repository protection.** Require pull requests and the `MCP CI / quality` check on `main`, and block direct pushes so Cloudflare cannot deploy an unverified commit.
+2. **Cloudflare preparation.** Confirm automatic KV provisioning, the Durable Object migration, custom-domain TLS, all four rate-limit bindings, Workers Logs, alerts, and unique production rate-limit namespace IDs.
+3. **Production activation and live verification.** Run the first attended production deployment through the approved Cloudflare identity. Immediately verify health, readiness, OAuth, protocol, all tools, cancellation, quotas, and observability with both CIMD and DCR clients. Capture the version ID and test evidence, then monitor the release thresholds for one hour.
+4. **Production automation.** Connect the existing `knoww-mcp` Worker to this repository using the Workers Builds settings in `apps/mcp/OPERATIONS.md` only after the first deployment passes its observation window.
+5. **Identity scope.** Record EOA-only wallet support in launch communication. Knoww account login and EIP-1271 verification remain future compatibility work, not blockers for an explicitly EOA-only release.
+
+## x402 scope assessment
+
+`x402:pay` is reserved but deliberately inactive. It is absent from OAuth metadata and requests for it return `invalid_scope`. Activating it now would falsely imply that a paid tool, price contract, facilitator, and payment-proof verifier already exist.
+
+In a future paid-tool release, `x402:pay` should permit the client to attempt an x402-gated tool. It must not authorize the MCP server or model to spend from a wallet. The agent host must apply budget and confirmation policy, and its wallet component must sign each payment payload. The server must require the relevant domain scope as well as a valid x402 payment proof before returning paid output.
+
+This is a Knoww-defined OAuth scope, not a scope defined by x402 itself. Before activation, prove that the target MCP hosts preserve the x402 challenge and retry headers, choose the supported network, asset, recipient, facilitator, and settlement policy, and bind every quote and proof to the authenticated principal, OAuth client, tool, canonical request hash, amount, expiry, and one-time payment identifier. Store idempotency and settlement state in a strongly consistent system, use Decimal.js or integer base units for amounts, and launch with paid read-only data before considering any trading action.
 
 ## Locked MCP versions
 
-`agents@0.21.0`, `@modelcontextprotocol/server@2.0.0`, `zod@4.4.3`, `decimal.js@10.6.0`, `@cloudflare/vitest-pool-workers@0.21.3`, `vitest@4.1.10`, and `wrangler@4.123.0`.
+`agents@0.21.0`, `@modelcontextprotocol/server@2.0.0`, `@cloudflare/workers-oauth-provider@0.10.3`, `zod@4.4.3`, `decimal.js@10.6.0`, `viem@2.55.10`, `@cloudflare/vitest-pool-workers@0.21.3`, `vitest@4.1.10`, and `wrangler@4.123.0`.
 
 ## Change-set hygiene
 
-The working tree also contains pre-existing dependency upgrades in `apps/agent`, `apps/extension`, `apps/video`, and parts of `apps/web` and `pnpm-lock.yaml`. They were preserved and not reverted. Before opening review requests, split those upgrades from the MCP implementation or clearly identify them as a separate dependency-maintenance change.
+This work changes the MCP package, its documentation, Wrangler bindings, the MCP CI workflow, the shared market-search service, and the workspace lockfile entry required by the pinned OAuth dependency. No web or extension source file is changed by the MCP implementation.

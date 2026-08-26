@@ -1,37 +1,22 @@
 import { createLogger } from "@knoww/logger";
-import { createMcpHandler, type StatelessMcpHandler } from "agents/mcp/server";
+import { oauthProviderFor } from "./auth/provider";
+import { FREE_MCP_PLAN, MARKETS_READ_SCOPE } from "./auth/scopes";
+import type { McpOAuthEnv } from "./auth/types";
+import { boundPublicRequestBody } from "./body-limit";
 import { type WorkerConfig, workerConfigFromEnv } from "./config";
-import { currentRequestId, requestContext } from "./context";
-import { createKnowwMcpServer } from "./server";
+import { type RequestPrincipal, requestContext } from "./context";
+import { handleHealthRequest } from "./health";
+import { dispatchMcpRequest } from "./mcp-handler";
+import {
+  checkEdgeQuota,
+  checkPrincipalQuota,
+  quotaResponse,
+  toolLimiterFor,
+} from "./quota";
+
+export { WalletChallengeStore } from "./auth/challenge-store";
 
 const log = createLogger("mcp");
-
-// Vars are static per deployment, so this holds one handler in practice; the
-// map only exists because config must be read from the per-request env.
-const handlerCache = new Map<string, StatelessMcpHandler>();
-
-function handlerFor(config: WorkerConfig): StatelessMcpHandler {
-  const key = JSON.stringify([
-    config.allowedHostnames,
-    config.allowedOriginHostnames,
-  ]);
-  let handler = handlerCache.get(key);
-  if (!handler) {
-    handler = createMcpHandler(() => createKnowwMcpServer(), {
-      route: "/mcp",
-      allowedHostnames: config.allowedHostnames,
-      allowedOriginHostnames: config.allowedOriginHostnames,
-      onerror(error) {
-        log.error("handler.failed", {
-          requestId: currentRequestId(),
-          errorName: error.name,
-        });
-      },
-    });
-    handlerCache.set(key, handler);
-  }
-  return handler;
-}
 
 function errorResponse(
   status: number,
@@ -42,7 +27,123 @@ function errorResponse(
 ): Response {
   return Response.json(
     { error: { code, message, requestId } },
-    { status, headers: { "x-request-id": requestId, ...extraHeaders } }
+    {
+      status,
+      headers: {
+        "cache-control": "no-store",
+        "x-request-id": requestId,
+        ...extraHeaders,
+      },
+    }
+  );
+}
+
+function finalizeResponse(
+  response: Response,
+  requestId: string,
+  useHsts: boolean
+): Response {
+  const finalized = new Response(response.body, response);
+  finalized.headers.set("x-request-id", requestId);
+  finalized.headers.set("x-content-type-options", "nosniff");
+  finalized.headers.set("referrer-policy", "no-referrer");
+  finalized.headers.set(
+    "permissions-policy",
+    "camera=(), geolocation=(), microphone=()"
+  );
+  if (useHsts) {
+    finalized.headers.set("strict-transport-security", "max-age=31536000");
+  }
+  return finalized;
+}
+
+function inboundHostname(request: Request): string | null {
+  const hostHeader = request.headers.get("host");
+  if (!hostHeader) {
+    return new URL(request.url).hostname.toLowerCase();
+  }
+  if (hostHeader !== hostHeader.trim() || /[\s/\\@?#,]/u.test(hostHeader)) {
+    return null;
+  }
+  try {
+    const parsed = new URL(`http://${hostHeader}`);
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+    return parsed.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isAuthRateLimitedPath(pathname: string): boolean {
+  return (
+    pathname === "/authorize" ||
+    pathname === "/authorize/message" ||
+    pathname === "/oauth/token" ||
+    pathname === "/oauth/register"
+  );
+}
+
+async function checkAuthRateLimit(
+  request: Request,
+  env: Env
+): Promise<boolean> {
+  if (request.method === "OPTIONS") return true;
+  const url = new URL(request.url);
+  if (!isAuthRateLimitedPath(url.pathname)) return true;
+  const clientAddress = request.headers.get("cf-connecting-ip") ?? "unknown";
+  const outcome = await env.MCP_AUTH_RATE_LIMITER.limit({
+    key: `${url.pathname}:${clientAddress}`,
+  });
+  return outcome.success;
+}
+
+async function dispatchDevelopmentRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  config: WorkerConfig,
+  requestId: string
+): Promise<Response> {
+  if (new URL(request.url).pathname !== "/mcp") {
+    return errorResponse(404, "NOT_FOUND", "Not found.", requestId);
+  }
+  const principal: RequestPrincipal = {
+    authMethod: "dev-bypass",
+    id: "local-development",
+    plan: FREE_MCP_PLAN,
+    scopes: [MARKETS_READ_SCOPE],
+  };
+  if (!(await checkPrincipalQuota(env, principal))) {
+    return quotaResponse(requestId);
+  }
+  return requestContext.run(
+    {
+      requestId,
+      principal,
+      toolRateLimiter: toolLimiterFor(env, principal.plan),
+    },
+    () => dispatchMcpRequest(request, env, ctx, config)
+  );
+}
+
+function dispatchOAuthRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  config: WorkerConfig,
+  requestId: string
+): Promise<Response> {
+  const provider = oauthProviderFor(config);
+  return requestContext.run({ requestId }, () =>
+    provider.fetch(request, env as McpOAuthEnv, ctx)
   );
 }
 
@@ -62,54 +163,90 @@ const worker = {
     });
 
     try {
-      if (url.pathname !== "/mcp") {
-        log.info("request.finished", {
-          requestId,
-          status: 404,
-          durationMs: Date.now() - startedAt,
-        });
-        return errorResponse(404, "NOT_FOUND", "Not found.", requestId);
-      }
-
       const config = workerConfigFromEnv(env);
-      if (config.authMode !== "dev-bypass") {
-        log.warn("auth.denied", {
+      const useHsts = new URL(config.canonicalResource).protocol === "https:";
+      const hostname = inboundHostname(request);
+      if (!hostname || !config.allowedHostnames.includes(hostname)) {
+        log.warn("request.denied", { requestId, reason: "invalid_host" });
+        return finalizeResponse(
+          errorResponse(403, "FORBIDDEN", "Forbidden.", requestId),
           requestId,
-          reason: "oauth_not_yet_available",
-        });
-        return errorResponse(
-          401,
-          "UNAUTHENTICATED",
-          "Authentication required.",
-          requestId,
-          { "www-authenticate": 'Bearer realm="knoww-mcp"' }
+          useHsts
         );
       }
 
-      // Run the MCP handler inside the request context so tool callbacks can
-      // stamp their meta with the same id the worker logs and echoes in the
-      // x-request-id header.
-      const response = await requestContext.run({ requestId }, () =>
-        handlerFor(config)(request, env, ctx)
-      );
+      let response: Response;
+      if (!(await checkEdgeQuota(request, env))) {
+        log.warn("request.denied", {
+          requestId,
+          path: url.pathname,
+          reason: "edge_rate_limited",
+        });
+        response = quotaResponse(requestId);
+      } else if (
+        config.authMode === "oauth-required" &&
+        !(await checkAuthRateLimit(request, env))
+      ) {
+        log.warn("auth.denied", { requestId, reason: "rate_limited" });
+        response = errorResponse(
+          429,
+          "RATE_LIMITED",
+          "Too many authentication requests.",
+          requestId,
+          { "retry-after": "60" }
+        );
+      } else {
+        const boundedRequest = await boundPublicRequestBody(request, requestId);
+        if (boundedRequest instanceof Response) {
+          response = boundedRequest;
+        } else {
+          const healthResponse = await handleHealthRequest(
+            boundedRequest,
+            env,
+            requestId
+          );
+          if (healthResponse) {
+            response = healthResponse;
+          } else if (config.authMode === "dev-bypass") {
+            response = await dispatchDevelopmentRequest(
+              boundedRequest,
+              env,
+              ctx,
+              config,
+              requestId
+            );
+          } else {
+            response = await dispatchOAuthRequest(
+              boundedRequest,
+              env,
+              ctx,
+              config,
+              requestId
+            );
+          }
+        }
+      }
+
       log.info("request.finished", {
         requestId,
         status: response.status,
         durationMs: Date.now() - startedAt,
       });
-      const withId = new Response(response.body, response);
-      withId.headers.set("x-request-id", requestId);
-      return withId;
+      return finalizeResponse(response, requestId, useHsts);
     } catch (error) {
       log.error("request.failed", {
         requestId,
         errorName: error instanceof Error ? error.name : "UnknownError",
       });
-      return errorResponse(
-        500,
-        "INTERNAL_ERROR",
-        "Something went wrong.",
-        requestId
+      return finalizeResponse(
+        errorResponse(
+          500,
+          "INTERNAL_ERROR",
+          "Something went wrong.",
+          requestId
+        ),
+        requestId,
+        url.protocol === "https:"
       );
     }
   },

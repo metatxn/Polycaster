@@ -13,6 +13,7 @@ import worker from "../index";
  */
 const DEV_VARS = {
   MCP_AUTH_MODE: "dev-bypass",
+  MCP_CANONICAL_RESOURCE: "http://localhost:8787/mcp",
   MCP_ALLOWED_HOSTNAMES: "localhost,127.0.0.1",
   MCP_ALLOWED_ORIGIN_HOSTNAMES: "localhost,127.0.0.1",
 } as const;
@@ -217,6 +218,16 @@ describe("MCP endpoint (dev bypass)", () => {
     expect(response.status).toBe(403);
   });
 
+  it("rejects a malformed Host header that embeds an allowlisted hostname", async () => {
+    const response = await dispatch(
+      mcpRequest(initializeBody(51), {
+        headers: { host: "evil.example@localhost" },
+      }),
+      devEnv
+    );
+    expect(response.status).toBe(403);
+  });
+
   it("rejects a present Origin header outside the allowlist", async () => {
     const response = await dispatch(
       mcpRequest(initializeBody(6), {
@@ -245,7 +256,260 @@ describe("MCP endpoint (dev bypass)", () => {
 });
 
 describe("MCP endpoint (production auth mode)", () => {
-  it("rejects requests with 401 before MCP dispatch until OAuth lands", async () => {
+  it("rejects a declared MCP body larger than 1 MiB before OAuth processing", async () => {
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/mcp", {
+        method: "POST",
+        headers: {
+          host: "mcp.knoww.app",
+          "content-length": String(1024 * 1024 + 1),
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+      env
+    );
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get("x-request-id")).toBeTruthy();
+    expect(await response.text()).not.toContain("stack");
+  });
+
+  it("rejects a chunked MCP body larger than 1 MiB", async () => {
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/mcp", {
+        method: "POST",
+        headers: {
+          host: "mcp.knoww.app",
+          "content-type": "application/json",
+        },
+        body: "x".repeat(1024 * 1024 + 1),
+      }),
+      env
+    );
+
+    expect(response.status).toBe(413);
+  });
+
+  it("rejects an oversized OAuth token form before provider parsing", async () => {
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/oauth/token", {
+        method: "POST",
+        headers: {
+          host: "mcp.knoww.app",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: `grant_type=refresh_token&refresh_token=${"x".repeat(64 * 1024)}`,
+      }),
+      env
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_request",
+    });
+  });
+
+  it("rejects an oversized OAuth registration before provider parsing", async () => {
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/oauth/register", {
+        method: "POST",
+        headers: {
+          host: "mcp.knoww.app",
+          "content-length": String(1024 * 1024 + 1),
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+      env
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_request",
+    });
+  });
+
+  it("applies the OAuth quota before reading an oversized token form", async () => {
+    const keys: string[] = [];
+    const limiter = {
+      limit: async ({ key }: { key: string }) => {
+        keys.push(key);
+        return { success: false };
+      },
+    } as RateLimit;
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/oauth/token", {
+        method: "POST",
+        headers: {
+          host: "mcp.knoww.app",
+          "cf-connecting-ip": "192.0.2.13",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: `grant_type=refresh_token&refresh_token=${"x".repeat(64 * 1024)}`,
+      }),
+      { ...env, MCP_AUTH_RATE_LIMITER: limiter }
+    );
+
+    expect(response.status).toBe(429);
+    expect(keys).toEqual(["/oauth/token:192.0.2.13"]);
+  });
+
+  it("rejects MCP traffic when the unauthenticated edge quota is exhausted", async () => {
+    const keys: string[] = [];
+    const limiter = {
+      limit: async ({ key }: { key: string }) => {
+        keys.push(key);
+        return { success: false };
+      },
+    } as RateLimit;
+    const response = await dispatch(
+      mcpRequest(initializeBody(70), {
+        url: "https://mcp.knoww.app/mcp",
+        headers: { "cf-connecting-ip": "192.0.2.10" },
+      }),
+      { ...env, MCP_EDGE_RATE_LIMITER: limiter }
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(keys).toEqual(["source:192.0.2.10"]);
+  });
+
+  it("rate limits the public liveness route", async () => {
+    const keys: string[] = [];
+    const limiter = {
+      limit: async ({ key }: { key: string }) => {
+        keys.push(key);
+        return { success: false };
+      },
+    } as RateLimit;
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/healthz", {
+        headers: {
+          host: "mcp.knoww.app",
+          "cf-connecting-ip": "192.0.2.11",
+        },
+      }),
+      { ...env, MCP_EDGE_RATE_LIMITER: limiter }
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(keys).toEqual(["source:192.0.2.11"]);
+  });
+
+  it("rate limits public OAuth discovery", async () => {
+    const keys: string[] = [];
+    const limiter = {
+      limit: async ({ key }: { key: string }) => {
+        keys.push(key);
+        return { success: false };
+      },
+    } as RateLimit;
+    const response = await dispatch(
+      new Request(
+        "https://mcp.knoww.app/.well-known/oauth-protected-resource/mcp",
+        {
+          headers: {
+            host: "mcp.knoww.app",
+            "cf-connecting-ip": "192.0.2.12",
+          },
+        }
+      ),
+      { ...env, MCP_EDGE_RATE_LIMITER: limiter }
+    );
+
+    expect(response.status).toBe(429);
+    expect(keys).toEqual(["source:192.0.2.12"]);
+  });
+
+  it("applies the edge quota to unknown paths", async () => {
+    const keys: string[] = [];
+    const limiter = {
+      limit: async ({ key }: { key: string }) => {
+        keys.push(key);
+        return { success: false };
+      },
+    } as RateLimit;
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/random-path", {
+        headers: {
+          host: "mcp.knoww.app",
+          "cf-connecting-ip": "192.0.2.14",
+        },
+      }),
+      { ...env, MCP_EDGE_RATE_LIMITER: limiter }
+    );
+
+    expect(response.status).toBe(429);
+    expect(keys).toEqual(["source:192.0.2.14"]);
+  });
+
+  it("serves an unauthenticated liveness probe with production security headers", async () => {
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/healthz", {
+        headers: { host: "mcp.knoww.app" },
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("strict-transport-security")).toBe(
+      "max-age=31536000"
+    );
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("www-authenticate")).toBeNull();
+    await expect(response.json()).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("serves a readiness probe after checking stateful bindings", async () => {
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/readyz", {
+        headers: { host: "mcp.knoww.app" },
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ status: "ready" });
+  });
+
+  it("fails readiness safely when a stateful binding is unavailable", async () => {
+    const failingKv = {
+      get: async () => {
+        throw new Error("private binding failure");
+      },
+    } as unknown as KVNamespace;
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/readyz", {
+        headers: { host: "mcp.knoww.app" },
+      }),
+      { ...env, OAUTH_KV: failingKv }
+    );
+
+    expect(response.status).toBe(503);
+    const body = await response.text();
+    expect(body).toContain('"status":"unavailable"');
+    expect(body).not.toContain("private binding failure");
+    expect(body).not.toContain("stack");
+  });
+
+  it("rejects non-GET health checks", async () => {
+    const response = await dispatch(
+      new Request("https://mcp.knoww.app/healthz", {
+        method: "POST",
+        headers: { host: "mcp.knoww.app" },
+      }),
+      env
+    );
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET");
+  });
+
+  it("rejects unauthenticated requests with OAuth discovery metadata", async () => {
     const response = await dispatch(
       mcpRequest(initializeBody(7), { url: "https://mcp.knoww.app/mcp" }),
       env
@@ -253,11 +517,12 @@ describe("MCP endpoint (production auth mode)", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(response.headers.get("www-authenticate")).toContain(
+      'resource_metadata="https://mcp.knoww.app/.well-known/oauth-protected-resource/mcp"'
+    );
     expect(response.headers.get("x-request-id")).toBeTruthy();
 
-    const body = (await response.json()) as { error?: { code?: string } };
-    expect(body.error?.code).toBe("UNAUTHENTICATED");
-    expect(JSON.stringify(body)).not.toContain("stack");
+    expect(await response.text()).not.toContain("stack");
   });
 
   it("treats an unrecognized auth mode as oauth-required (fail closed)", async () => {
@@ -266,6 +531,18 @@ describe("MCP endpoint (production auth mode)", () => {
       { ...env, MCP_AUTH_MODE: "dev-bypass-typo" } as unknown as Env
     );
     expect(response.status).toBe(401);
+  });
+
+  it("does not send HSTS for explicit local development", async () => {
+    const response = await dispatch(
+      new Request("http://localhost/healthz", {
+        headers: { host: "localhost" },
+      }),
+      devEnv
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("strict-transport-security")).toBeNull();
   });
 });
 
@@ -312,7 +589,8 @@ interface ToolCallResult {
 
 async function callSearchMarkets(
   id: number,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  testEnv: Env = devEnv
 ): Promise<{ response: Response; message: JsonRpcResponse }> {
   const response = await dispatch(
     mcpRequest(
@@ -324,7 +602,7 @@ async function callSearchMarkets(
       },
       { headers: { "mcp-protocol-version": PROTOCOL_VERSION } }
     ),
-    devEnv
+    testEnv
   );
   const message = await readJsonRpc(response);
   return { response, message };
@@ -391,6 +669,29 @@ describe("search_markets tool (dev bypass)", () => {
       },
     ],
   };
+
+  it("returns a tool-level retry signal when the per-tool quota is exhausted", async () => {
+    const keys: string[] = [];
+    const limiter = {
+      limit: async ({ key }: { key: string }) => {
+        keys.push(key);
+        return { success: false };
+      },
+    } as RateLimit;
+
+    const { response, message } = await callSearchMarkets(
+      9,
+      { query: "bitcoin" },
+      { ...devEnv, MCP_FREE_TOOL_RATE_LIMITER: limiter }
+    );
+
+    expect(response.status).toBe(200);
+    const result = message.result as ToolCallResult;
+    expect(result.isError).toBe(true);
+    expect(result.content?.[0]?.text).toContain("RATE_LIMITED");
+    expect(result.content?.[0]?.text).toContain("Retry after 60 seconds");
+    expect(keys).toEqual(["free:local-development:search_markets"]);
+  });
 
   it("returns event summaries with decimal-string prices and request metadata", async () => {
     expectGammaFetch(

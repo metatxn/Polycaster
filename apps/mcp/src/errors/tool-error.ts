@@ -1,5 +1,6 @@
 import { createLogger } from "@knoww/logger";
-import { currentRequestId } from "../context";
+import type { ActiveMcpScope } from "../auth/scopes";
+import { currentPrincipal, currentRequestId } from "../context";
 
 const log = createLogger("mcp.tools");
 
@@ -39,6 +40,23 @@ export class KnowwToolError extends Error {
     this.code = code;
     this.retryable = RETRYABLE_CODES.has(code);
     this.retryAfterSeconds = options?.retryAfterSeconds;
+  }
+}
+
+/** Defense in depth: every tool rechecks its scope at execution time. */
+export function requireToolScope(requiredScope: ActiveMcpScope): void {
+  const principal = currentPrincipal();
+  if (!principal) {
+    throw new KnowwToolError(
+      "UNAUTHENTICATED",
+      "Authenticate before calling this tool."
+    );
+  }
+  if (!principal.scopes.includes(requiredScope)) {
+    throw new KnowwToolError(
+      "FORBIDDEN",
+      `This tool requires the ${requiredScope} scope.`
+    );
   }
 }
 

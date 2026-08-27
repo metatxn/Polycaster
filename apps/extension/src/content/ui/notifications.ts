@@ -22,6 +22,7 @@ import {
   SOURCE_CONFIG,
   toDecimal,
 } from "./cards";
+import { showWelcomeForUpTo } from "./welcome-visibility";
 
 // ============================================
 // NOTIFICATION STACK COMPONENT
@@ -970,9 +971,8 @@ export function createNotificationStack(): HTMLElement {
   contentArea.appendChild(itemsContainer);
   contentArea.appendChild(emptyState);
 
-  // Wire up first-run welcome. If the user has never dismissed the welcome
-  // card, swap the "Searching for markets…" scanning row for the richer
-  // welcome message. Reverts permanently once they click "Got it".
+  // Show the first-run welcome briefly, then return to the compact scanning
+  // state. Once shown, it stays dismissed for this browser profile.
   const welcomeEl = emptyState.querySelector<HTMLElement>(
     "[data-knoww-welcome]"
   );
@@ -983,21 +983,20 @@ export function createNotificationStack(): HTMLElement {
     "[data-knoww-welcome-dismiss]"
   );
 
-  const dismissWelcome = () => {
-    // setProperty with "important" because .knoww-stack-welcome has
-    // `display: flex !important` — a plain inline style would lose to it.
-    if (welcomeEl) welcomeEl.style.setProperty("display", "none", "important");
-    if (scanningEl) scanningEl.style.display = "";
-    persistWelcomeSeen();
-    void window.KNOWW_ANALYTICS?.track("welcome_dismissed", {});
-  };
+  let dismissWelcome: (() => void) | null = null;
 
-  welcomeDismissBtn?.addEventListener("click", dismissWelcome);
+  welcomeDismissBtn?.addEventListener("click", () => {
+    dismissWelcome?.();
+    void window.KNOWW_ANALYTICS?.track("welcome_dismissed", {});
+  });
 
   void readPersistedWelcomeSeen().then((seen) => {
     if (!seen && welcomeEl && scanningEl) {
-      welcomeEl.style.removeProperty("display");
-      scanningEl.style.display = "none";
+      dismissWelcome = showWelcomeForUpTo(
+        welcomeEl,
+        scanningEl,
+        persistWelcomeSeen
+      );
       void window.KNOWW_ANALYTICS?.track("welcome_shown", {});
     }
   });

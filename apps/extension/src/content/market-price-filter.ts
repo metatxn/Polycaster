@@ -69,3 +69,22 @@ export function isMarketWithinDisplayPriceCap(market: Market): boolean {
     isPriceWithinDisplayCap(price.toString())
   );
 }
+
+export function filterNestedMarketsByDisplayPriceCap(
+  market: Market
+): Market | null {
+  if (!market.markets || market.markets.length === 0) {
+    return isMarketWithinDisplayPriceCap(market) ? market : null;
+  }
+
+  const eligibleMarkets = market.markets.filter((nestedMarket) =>
+    parseGammaNumberArray(nestedMarket.outcomePrices).every((price) =>
+      isPriceWithinDisplayCap(price)
+    )
+  );
+
+  if (eligibleMarkets.length === 0) return null;
+  if (eligibleMarkets.length === market.markets.length) return market;
+
+  return { ...market, markets: eligibleMarkets };
+}

@@ -279,6 +279,28 @@ test("notification stack starts trending fetch without an artificial wait", () =
   assert.equal(/scheduled \(10s\)/.test(openSource), false);
 });
 
+test("trending fetch keeps six events and prunes nested markets", () => {
+  const apiSource = readSource("src/content/api.ts");
+  const trendingSource = extractFunctionSource(
+    apiSource,
+    "fetchTrendingMarkets"
+  );
+
+  assert.equal(/const TRENDING_CANDIDATE_LIMIT = 6;/.test(apiSource), true);
+  assert.equal(
+    /limit=\$\{TRENDING_CANDIDATE_LIMIT\}/.test(trendingSource),
+    true
+  );
+  assert.equal(
+    /\.map\(filterNestedMarketsByDisplayPriceCap\)/.test(trendingSource),
+    true
+  );
+  assert.equal(
+    /\.slice\(0, TRENDING_CANDIDATE_LIMIT\)/.test(trendingSource),
+    true
+  );
+});
+
 test("notification stack supports sidepanel search requests", () => {
   const uiSource = readSource("src/content/ui/notifications.ts");
   const searchSource = extractFunctionSource(

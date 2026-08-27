@@ -3,8 +3,9 @@
 // ============================================
 
 import { createLogger } from "@knoww/logger";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { scheduleSettingsSave } from "./settings-auto-save";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
@@ -492,10 +493,34 @@ function Divider() {
 // Main Options App Component
 function OptionsApp() {
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [statusVisible, setStatusVisible] = useState(false);
   const [version] = useState(() => chrome.runtime.getManifest().version);
   const [hasToken, setHasToken] = useState(false);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipInitialAutoSaveRef = useRef(true);
+
+  const showStatus = useCallback((message: string) => {
+    if (statusTimerRef.current !== null) {
+      clearTimeout(statusTimerRef.current);
+    }
+    setStatus(message);
+    setStatusVisible(true);
+    statusTimerRef.current = setTimeout(() => {
+      setStatusVisible(false);
+      statusTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (statusTimerRef.current !== null) {
+        clearTimeout(statusTimerRef.current);
+      }
+    },
+    []
+  );
 
   // Load settings on mount
   useEffect(() => {
@@ -524,6 +549,7 @@ function OptionsApp() {
           },
         };
         setSettings(loadedSettings);
+        setSettingsLoaded(true);
       }
     );
 
@@ -543,65 +569,58 @@ function OptionsApp() {
     );
   }, []);
 
-  // Show status message
-  const showStatus = useCallback((message: string) => {
-    setStatus(message);
-    setStatusVisible(true);
-    setTimeout(() => setStatusVisible(false), 2000);
-  }, []);
-
-  // Save settings
-  const saveSettings = useCallback(() => {
-    chrome.storage.sync.set({ knowwSettings: settings }, () => {
-      showStatus("Settings saved!");
-
-      if (settings.usageAnalyticsEnabled) {
-        chrome.runtime.sendMessage({
-          type: "analytics:track",
-          event: "settings_updated",
-          properties: {
-            analyticsEnabled: settings.usageAnalyticsEnabled,
-            notificationStackEnabled: settings.showNotificationStack,
-            notificationPanelSurface: settings.notificationPanelSurface,
-            aiExtractionEnabled: settings.aiExtractionEnabled,
-            personalizationEnabled: settings.personalizationEnabled,
-          },
-        });
-      }
-
-      broadcastSettingsToSupportedTabs(settings);
-    });
-  }, [settings, showStatus]);
-
-  const updateDebugMode = useCallback(
-    (debugMode: boolean) => {
-      const nextSettings = { ...settings, debugMode };
-      setSettings(nextSettings);
+  const persistSettings = useCallback(
+    (nextSettings: UserSettings) => {
       chrome.storage.sync.set({ knowwSettings: nextSettings }, () => {
         if (chrome.runtime.lastError) {
-          log.error("settings.debug_mode_save_failed", {
+          log.error("settings.save_failed", {
             error: chrome.runtime.lastError.message,
           });
-          showStatus("Could not save Debug Mode.");
+          showStatus("Could not save settings.");
           return;
         }
 
+        showStatus("Settings saved.");
+
+        if (nextSettings.usageAnalyticsEnabled) {
+          chrome.runtime.sendMessage({
+            type: "analytics:track",
+            event: "settings_updated",
+            properties: {
+              analyticsEnabled: nextSettings.usageAnalyticsEnabled,
+              notificationStackEnabled: nextSettings.showNotificationStack,
+              notificationPanelSurface: nextSettings.notificationPanelSurface,
+              aiExtractionEnabled: nextSettings.aiExtractionEnabled,
+              personalizationEnabled: nextSettings.personalizationEnabled,
+            },
+          });
+        }
+
         broadcastSettingsToSupportedTabs(nextSettings);
-        showStatus(debugMode ? "Debug Mode enabled." : "Debug Mode disabled.");
       });
     },
-    [settings, showStatus]
+    [showStatus]
   );
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (skipInitialAutoSaveRef.current) {
+      skipInitialAutoSaveRef.current = false;
+      return;
+    }
+    return scheduleSettingsSave(settings, persistSettings);
+  }, [persistSettings, settings, settingsLoaded]);
+
+  const updateDebugMode = useCallback((debugMode: boolean) => {
+    setSettings((prev) => ({ ...prev, debugMode }));
+  }, []);
 
   // Reset settings
   const resetSettings = useCallback(() => {
     if (confirm("Reset all settings to defaults?")) {
       setSettings(DEFAULT_USER_SETTINGS);
-      chrome.storage.sync.set({ knowwSettings: DEFAULT_USER_SETTINGS }, () => {
-        showStatus("Settings reset to defaults!");
-      });
     }
-  }, [showStatus]);
+  }, []);
 
   // Update nested settings
   const updatePlatform = useCallback(
@@ -1082,23 +1101,14 @@ function OptionsApp() {
         </SettingRow>
       </Section>
 
-      {/* Save Button */}
-      <div className="save-container">
-        <span
-          className={`status ${statusVisible ? "visible" : ""}`}
-          id="status"
-        >
-          {status}
-        </span>
-        <button
-          type="button"
-          className="save-btn"
-          id="save-btn"
-          onClick={saveSettings}
-        >
-          Save Settings
-        </button>
-      </div>
+      <span
+        className={`status ${statusVisible ? "visible" : ""}`}
+        id="status"
+        role="status"
+        aria-live="polite"
+      >
+        {status}
+      </span>
 
       <button
         type="button"

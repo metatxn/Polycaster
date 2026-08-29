@@ -28,6 +28,10 @@ import {
   writeSetupDismissed,
 } from "../content/trading/setup-flow-storage";
 import {
+  type LoadingMessageInput,
+  startLoadingMessageSequence,
+} from "../loading-messages";
+import {
   readStoredWalletMode,
   sendRuntimeMessage,
   writeStoredWalletMode,
@@ -587,6 +591,17 @@ const PORTFOLIO_CONNECT_TIMEOUT_MS = 90_000;
 const PORTFOLIO_CONNECT_POLL_MS = 1_000;
 const WALLETCONNECT_WALLET_UUID = "__knoww_walletconnect_mobile__";
 
+function showPortfolioLoading(
+  container: HTMLElement | null,
+  messages: LoadingMessageInput
+): () => void {
+  if (!container) return () => {};
+  const status = document.createElement("div");
+  status.className = "knoww-portfolio-loading";
+  container.replaceChildren(status);
+  return startLoadingMessageSequence(status, messages);
+}
+
 export function createPortfolioSetup(
   dependencies: PortfolioSetupDependencies
 ): PortfolioSetupHandle {
@@ -656,7 +671,8 @@ export function createPortfolioSetup(
     if (portfolioDisconnecting) return;
     portfolioDisconnecting = true;
     button.classList.add("is-busy");
-    button.title = "Disconnecting…";
+    button.title = "Disconnecting your wallet...";
+    button.setAttribute("aria-label", "Disconnecting your wallet...");
     void sendRuntimeMessage({
       type: "analytics:track",
       event: "wallet_disconnected",
@@ -667,6 +683,7 @@ export function createPortfolioSetup(
       portfolioDisconnecting = false;
       button.classList.remove("is-busy");
       button.title = "Disconnect wallet";
+      button.setAttribute("aria-label", "Disconnect wallet");
     }
   }
 
@@ -679,7 +696,8 @@ export function createPortfolioSetup(
     // The active account is changing under any open funding flow — reset it.
     dependencies.resetFunding();
     button.classList.add("is-busy");
-    button.title = "Switching wallet…";
+    button.title = "Switching your wallet...";
+    button.setAttribute("aria-label", "Switching your wallet...");
     void sendRuntimeMessage({
       type: "analytics:track",
       event: "wallet_switch_clicked",
@@ -718,6 +736,7 @@ export function createPortfolioSetup(
       portfolioSwitching = false;
       button.classList.remove("is-busy");
       button.title = "Switch wallet";
+      button.setAttribute("aria-label", "Switch wallet");
     }
   }
 
@@ -781,11 +800,11 @@ export function createPortfolioSetup(
     const container = dependencies.root.querySelector<HTMLElement>(
       "[data-sidepanel-portfolio]"
     );
-    if (container) {
-      container.innerHTML = `
-      <div class="knoww-portfolio-loading">Connecting wallet...</div>
-    `;
-    }
+    let stopLoading = showPortfolioLoading(container, [
+      "Connecting your wallet...",
+      "Check your wallet to continue...",
+      "Complete the connection when you're ready...",
+    ]);
 
     const response = await sendRuntimeMessage({
       type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
@@ -796,6 +815,7 @@ export function createPortfolioSetup(
       | undefined;
 
     if (response.ok === false || payload?.success === false) {
+      stopLoading();
       dependencies.invalidatePortfolio();
       portfolioConnectError =
         payload?.data?.error || response.error || "Failed to connect wallet.";
@@ -803,14 +823,16 @@ export function createPortfolioSetup(
       return;
     }
 
-    if (container) {
-      container.innerHTML = `
-      <div class="knoww-portfolio-loading">Approve the wallet prompts...</div>
-    `;
-    }
+    stopLoading();
+    stopLoading = showPortfolioLoading(container, [
+      "Approve in your wallet...",
+      "Check your wallet for the approval...",
+      "Complete the approval when you're ready...",
+    ]);
 
     const sessionAddress = await waitForPortfolioSessionAddress();
     if (!sessionAddress) {
+      stopLoading();
       dependencies.invalidatePortfolio();
       portfolioConnectError =
         "Wallet connection did not finish. Approve the wallet prompts and try again.";
@@ -820,6 +842,7 @@ export function createPortfolioSetup(
 
     portfolioConnectError = null;
     portfolioTradingError = null;
+    stopLoading();
     dependencies.invalidatePortfolio();
     await dependencies.reloadPortfolio();
   }
@@ -839,7 +862,7 @@ export function createPortfolioSetup(
             ? `<div class="knoww-pf-wc-qr">${qr}</div>`
             : error
               ? `<div class="knoww-pf-wc-status is-error">${escapeHtml(error)}</div>`
-              : `<div class="knoww-pf-wc-status"><span class="knoww-pf-wc-spinner" aria-hidden="true"></span>Preparing secure link…</div>`
+              : `<div class="knoww-pf-wc-status"><span class="knoww-pf-wc-spinner" aria-hidden="true"></span>Creating your QR...</div>`
         }
       </div>
       <span class="knoww-pf-wc-hint">Works with MetaMask, Rainbow, Trust &amp; any WalletConnect wallet.</span>
@@ -958,11 +981,11 @@ export function createPortfolioSetup(
     const container = dependencies.root.querySelector<HTMLElement>(
       "[data-sidepanel-portfolio]"
     );
-    if (container) {
-      container.innerHTML = `
-      <div class="knoww-portfolio-loading">Creating trading wallet...</div>
-    `;
-    }
+    let stopLoading = showPortfolioLoading(container, [
+      "Creating your account...",
+      "Setting up your trading access...",
+      "Preparing your account for you...",
+    ]);
 
     const walletMode = await resolvePreferredPortfolioWalletMode(ownerAddress);
     const response = await sendRuntimeMessage({
@@ -972,6 +995,7 @@ export function createPortfolioSetup(
     });
 
     if (response.ok === false) {
+      stopLoading();
       dependencies.invalidatePortfolio();
       portfolioTradingError =
         response.error || "Failed to create trading wallet.";
@@ -985,11 +1009,12 @@ export function createPortfolioSetup(
     const proxyAddress =
       typeof payload?.proxyAddress === "string" ? payload.proxyAddress : null;
     if (payload?.alreadyDeployed !== true) {
-      if (container) {
-        container.innerHTML = `
-        <div class="knoww-portfolio-loading">Confirming trading wallet...</div>
-      `;
-      }
+      stopLoading();
+      stopLoading = showPortfolioLoading(container, [
+        "Confirming your account...",
+        "Checking your account on Polygon...",
+        "Preparing your trading access...",
+      ]);
       const deployed = await waitForPortfolioTradingWalletDeployment({
         ownerAddress,
         expectedProxyAddress: proxyAddress,
@@ -1025,9 +1050,10 @@ export function createPortfolioSetup(
         sleep,
       });
       if (!deployed) {
+        stopLoading();
         dependencies.invalidatePortfolio();
         portfolioTradingError =
-          "Trading wallet creation is still confirming. Refresh in a moment.";
+          "Your account is being confirmed. Refresh in a moment.";
         if (container) await dependencies.reloadPortfolio();
         return;
       }
@@ -1035,6 +1061,7 @@ export function createPortfolioSetup(
 
     dependencies.invalidatePortfolio();
     portfolioTradingError = null;
+    stopLoading();
     await dependencies.reloadPortfolio();
   }
 
@@ -1068,11 +1095,11 @@ export function createPortfolioSetup(
     const container = dependencies.root.querySelector<HTMLElement>(
       "[data-sidepanel-portfolio]"
     );
-    if (container) {
-      container.innerHTML = `
-      <div class="knoww-portfolio-loading">Approve the permissions signature...</div>
-    `;
-    }
+    const stopLoading = showPortfolioLoading(container, [
+      "Approve in your wallet...",
+      "Check your wallet for the approval...",
+      "Complete the approval when you're ready...",
+    ]);
 
     // The signature has to be produced in a content tab (where the wallet is
     // injected) — the side panel is not a tab, so a direct relayer-approve fails
@@ -1089,6 +1116,7 @@ export function createPortfolioSetup(
       | undefined;
 
     if (response.ok === false || payload?.success === false) {
+      stopLoading();
       dependencies.invalidatePortfolio();
       portfolioTradingError =
         payload?.data?.error ||
@@ -1112,16 +1140,18 @@ export function createPortfolioSetup(
       ? await waitForPortfolioApproval(proxyAddress)
       : "unverified";
     if (waitResult !== "approved") {
+      stopLoading();
       dependencies.invalidatePortfolio();
       portfolioTradingError =
         waitResult === "unverified"
-          ? "Couldn't verify the approval yet — it may still be confirming. Refresh in a moment."
+          ? "Approval status is updating. Refresh in a moment to check."
           : "Approval didn't complete. Approve the wallet signature and try again.";
       if (container) await dependencies.reloadPortfolio();
       return;
     }
 
     portfolioTradingError = null;
+    stopLoading();
     dependencies.invalidatePortfolio();
     await dependencies.reloadPortfolio();
   }
@@ -1130,11 +1160,11 @@ export function createPortfolioSetup(
     const container = dependencies.root.querySelector<HTMLElement>(
       "[data-sidepanel-portfolio]"
     );
-    if (container) {
-      container.innerHTML = `
-      <div class="knoww-portfolio-loading">Approve the trading signature...</div>
-    `;
-    }
+    const stopLoading = showPortfolioLoading(container, [
+      "Sign in your wallet...",
+      "Check your wallet for the signature...",
+      "Complete the signature when you're ready...",
+    ]);
 
     const response = await sendRuntimeMessage({
       type: "KNOWW_ENABLE_PORTFOLIO_TRADING",
@@ -1145,6 +1175,7 @@ export function createPortfolioSetup(
       | undefined;
 
     if (response.ok === false || payload?.success === false) {
+      stopLoading();
       dependencies.invalidatePortfolio();
       portfolioTradingError =
         payload?.data?.error || response.error || "Failed to enable trading.";
@@ -1154,6 +1185,7 @@ export function createPortfolioSetup(
 
     const enabled = await waitForPortfolioTradingEnabled(ownerAddress);
     if (!enabled) {
+      stopLoading();
       dependencies.invalidatePortfolio();
       portfolioTradingError =
         "Trading was not enabled. Approve the wallet signature and try again.";
@@ -1162,6 +1194,7 @@ export function createPortfolioSetup(
     }
 
     portfolioTradingError = null;
+    stopLoading();
     dependencies.invalidatePortfolio();
     await dependencies.reloadPortfolio();
   }

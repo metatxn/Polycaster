@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import type { TradingSetupAllowanceReadStatus } from "../content/trading/setup-flow";
 import { hasDeployedTradingWallet } from "../content/trading/setup-gates";
+import { startLoadingMessageSequence } from "../loading-messages";
 import {
   consumeRequestedSidePanelView,
   fetchKnowwJson,
@@ -1487,8 +1488,7 @@ export function createPortfolioSidepanel(
     button.classList.remove("is-armed", "is-error");
     button.classList.add("is-busy");
     const label = button.querySelector("[data-cancel-label]");
-    // Keep the label short so it fits the fixed button width without overflow.
-    if (label) label.textContent = "…";
+    if (label) label.textContent = "Cancelling your order...";
 
     const result = await cancelPortfolioOpenOrder(ownerAddress, orderId);
     if (result.ok) {
@@ -1795,7 +1795,7 @@ export function createPortfolioSidepanel(
               // read-only store portfolio must not offer the affordance.
               __STORE_BUILD__
                 ? ""
-                : `<button type="button" class="knoww-portfolio-position-action danger ${confirming ? "is-confirming" : ""}" ${confirming ? "data-portfolio-position-sell-confirm" : "data-portfolio-position-sell"} data-position-id="${escapeHtml(position.id)}" ${selling ? "disabled" : ""}>Sell Position</button>`
+                : `<button type="button" class="knoww-portfolio-position-action danger ${confirming ? "is-confirming" : ""}" ${confirming ? "data-portfolio-position-sell-confirm" : "data-portfolio-position-sell"} data-position-id="${escapeHtml(position.id)}" ${selling ? "disabled" : ""}>${selling ? "Selling your position..." : "Sell Position"}</button>`
             }
             <button type="button" class="knoww-portfolio-position-action icon" data-portfolio-position-close data-position-id="${escapeHtml(position.id)}">X</button>
           </div>
@@ -2136,24 +2136,37 @@ export function createPortfolioSidepanel(
     );
     if (!container) return;
     const loadGeneration = ++portfolioLoadGeneration;
+    let stopLoadingMessages = (): void => {};
 
     // Only show the loading wipe on the very first load. On a refresh we keep the
     // current render in place so a transient failure never flashes an empty hero.
     const previous = portfolioLoaded ? latestPortfolioData : null;
     if (!previous) {
-      container.innerHTML = `
-      <div class="knoww-portfolio-loading">Loading portfolio...</div>
-    `;
+      const status = document.createElement("div");
+      status.className = "knoww-portfolio-loading";
+      container.replaceChildren(status);
+      stopLoadingMessages = startLoadingMessageSequence(status, [
+        "Opening your portfolio...",
+        "Checking your latest positions...",
+        "Bringing your portfolio up to date...",
+      ]);
     }
 
     const address = await setupUi.getSessionAddress();
-    if (loadGeneration !== portfolioLoadGeneration) return;
+    if (loadGeneration !== portfolioLoadGeneration) {
+      stopLoadingMessages();
+      return;
+    }
     if (!address) {
       portfolioLoaded = false;
       latestPortfolioData = null;
       setupUi.reset();
       await setupUi.prepareSignedOut();
-      if (loadGeneration !== portfolioLoadGeneration) return;
+      if (loadGeneration !== portfolioLoadGeneration) {
+        stopLoadingMessages();
+        return;
+      }
+      stopLoadingMessages();
       container.innerHTML = setupUi.renderSignedOut();
       return;
     }
@@ -2177,12 +2190,20 @@ export function createPortfolioSidepanel(
           loadGeneration === portfolioLoadGeneration &&
           address === data.ownerAddress
       );
-      if (!reconciled || loadGeneration !== portfolioLoadGeneration) return;
+      if (!reconciled || loadGeneration !== portfolioLoadGeneration) {
+        stopLoadingMessages();
+        return;
+      }
       portfolioLoaded = true;
       latestPortfolioData = data;
+      stopLoadingMessages();
       container.innerHTML = renderPortfolioContent(data);
     } catch {
-      if (loadGeneration !== portfolioLoadGeneration) return;
+      if (loadGeneration !== portfolioLoadGeneration) {
+        stopLoadingMessages();
+        return;
+      }
+      stopLoadingMessages();
       // Transient refresh failure (upstream timeout / 5xx / rate-limit). Keep the
       // last good snapshot visible with a subtle "couldn't refresh" notice rather
       // than wiping the hero to $0 — an empty render is indistinguishable from an

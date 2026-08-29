@@ -262,6 +262,45 @@ test("notification stack snapshot includes trending and supports sidepanel focus
   assert.equal(/KNOWW_FOCUS_NOTIFICATION_MARKET/.test(uiSource), true);
 });
 
+test("notification stack starts trending fetch without an artificial wait", () => {
+  const uiSource = readSource("src/content/ui/notifications.ts");
+  const timerSource = extractFunctionSource(
+    uiSource,
+    "startTrendingFetchTimer"
+  );
+  const openSource = extractFunctionSource(uiSource, "openNotificationStack");
+
+  assert.equal(/const TRENDING_FETCH_DELAY_MS = 0;/.test(uiSource), true);
+  assert.equal(
+    /setTimeout\([\s\S]*TRENDING_FETCH_DELAY_MS/.test(timerSource),
+    true
+  );
+  assert.equal(/startTrendingFetchTimer\(\)/.test(openSource), true);
+  assert.equal(/scheduled \(10s\)/.test(openSource), false);
+});
+
+test("trending fetch keeps six events and prunes nested markets", () => {
+  const apiSource = readSource("src/content/api.ts");
+  const trendingSource = extractFunctionSource(
+    apiSource,
+    "fetchTrendingMarkets"
+  );
+
+  assert.equal(/const TRENDING_CANDIDATE_LIMIT = 6;/.test(apiSource), true);
+  assert.equal(
+    /limit=\$\{TRENDING_CANDIDATE_LIMIT\}/.test(trendingSource),
+    true
+  );
+  assert.equal(
+    /\.map\(filterNestedMarketsByDisplayPriceCap\)/.test(trendingSource),
+    true
+  );
+  assert.equal(
+    /\.slice\(0, TRENDING_CANDIDATE_LIMIT\)/.test(trendingSource),
+    true
+  );
+});
+
 test("notification stack supports sidepanel search requests", () => {
   const uiSource = readSource("src/content/ui/notifications.ts");
   const searchSource = extractFunctionSource(
@@ -559,7 +598,7 @@ test("notification empty and seen-earlier states expose clearer actions", () => 
   const uiSource = readSource("src/content/ui/notifications.ts");
   const css = readInlineCss();
 
-  assert.equal(/No markets found on this page yet/.test(uiSource), true);
+  assert.equal(/Checking this page for markets\.\.\./.test(uiSource), true);
   // The "Browse trending" CTA was removed from the empty state (market
   // browsing lives in the sidebar now) — lock the removal so the dead
   // affordance doesn't creep back without its handler.

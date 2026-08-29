@@ -9,6 +9,10 @@ import {
   type FundingToken,
 } from "../../../funding";
 import { createTradingPanelFundingGateway } from "../../../funding/gateways/trading-panel-gateway";
+import {
+  type LoadingMessageInput,
+  startLoadingMessageSequence,
+} from "../../../loading-messages";
 import { WalletBridge } from "../bridge";
 import {
   CHAIN_METADATA,
@@ -46,7 +50,7 @@ export interface DepositViewUiPort {
     properties?: Record<string, string | number | boolean | null | undefined>
   ): void;
   buildInlineError(rawMessage: string | null | undefined): HTMLElement;
-  setButtonLoading(button: HTMLElement, text: string): void;
+  setButtonLoading(button: HTMLElement, text: LoadingMessageInput): void;
   setupViewUi: SetupViewUiPort;
   icons: {
     refresh: string;
@@ -92,7 +96,10 @@ function trackPanelAnalytics(
 function buildInlineError(rawMessage: string | null | undefined): HTMLElement {
   return requireUi().buildInlineError(rawMessage);
 }
-function setButtonLoading(button: HTMLElement, text: string): void {
+function setButtonLoading(
+  button: HTMLElement,
+  text: LoadingMessageInput
+): void {
   requireUi().setButtonLoading(button, text);
 }
 const setupViewUi: SetupViewUiPort = {
@@ -889,7 +896,7 @@ function renderDepositTokenStep(
     const loader = el("div", "knoww-tp-loading-section");
     loader.appendChild(el("div", "knoww-tp-spinner"));
     loader.appendChild(
-      el("div", "knoww-tp-loading-text", "Loading wallet balances...")
+      el("div", "knoww-tp-loading-text", "Checking your wallet...")
     );
     form.appendChild(loader);
     return;
@@ -1021,7 +1028,9 @@ function renderDepositBridgeSelectStep(
   if (state.loading) {
     const loader = el("div", "knoww-tp-loading-section");
     loader.appendChild(el("div", "knoww-tp-spinner"));
-    loader.appendChild(el("div", "knoww-tp-loading-text", "Loading assets..."));
+    loader.appendChild(
+      el("div", "knoww-tp-loading-text", "Finding available assets for you...")
+    );
     form.appendChild(loader);
     return;
   }
@@ -1197,6 +1206,7 @@ function renderDepositAmountStep(
     const recvVal = el("span", "knoww-tp-deposit-detail-value");
     if (state.quoteLoading) {
       recvVal.appendChild(el("span", "knoww-tp-deposit-inline-spinner"));
+      recvVal.appendChild(el("span", "", "Getting your quote..."));
     } else if (state.quote) {
       recvVal.appendChild(
         document.createTextNode(
@@ -1323,7 +1333,14 @@ function renderBridgeAddressReady(
   if (state.loading) {
     const loader = el("div", "knoww-tp-loading-section");
     loader.appendChild(el("div", "knoww-tp-spinner"));
+    const label = el("div", "knoww-tp-loading-text");
+    loader.appendChild(label);
     form.appendChild(loader);
+    startLoadingMessageSequence(label, [
+      "Creating your deposit address...",
+      "Checking the address details...",
+      "Preparing your deposit details for you...",
+    ]);
     return;
   }
 
@@ -1626,14 +1643,21 @@ function renderDepositConfirmStep(
     infoBanner.innerHTML = I.check;
     const infoText = el("div", "");
     infoText.appendChild(el("div", "", "Transaction confirmed on-chain!"));
-    infoText.appendChild(
-      el(
-        "div",
-        "",
-        isDirect
-          ? "Finalizing direct pUSD transfer..."
-          : "Waiting for bridge to credit pUSD to your wallet..."
-      )
+    const progress = el("div", "");
+    infoText.appendChild(progress);
+    startLoadingMessageSequence(
+      progress,
+      isDirect
+        ? [
+            "Adding funds to your balance...",
+            "Checking your updated balance...",
+            "Keeping your balance up to date...",
+          ]
+        : [
+            "Funds are on the way...",
+            "Checking your transfer...",
+            "Updating your balance for you...",
+          ]
     );
     infoText.style.fontSize = "11px";
     infoBanner.appendChild(infoText);
@@ -1662,12 +1686,12 @@ function renderDepositConfirmStep(
   // Primary action
   const btn = el("button", "knoww-tp-submit deposit");
   if (state.step === "submitting") {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirm in Wallet...`;
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Confirm in your wallet...`;
     btn.disabled = true;
     btn.classList.add("loading");
     form.appendChild(btn);
   } else if (state.step === "confirming") {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Waiting for credit...`;
+    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Funds are on the way...`;
     btn.disabled = true;
     btn.classList.add("loading");
     form.appendChild(btn);
@@ -1787,7 +1811,11 @@ export function renderDepositForm(p: HTMLElement, ctx: TradingContext): void {
     enableBtn.textContent = enableTradingError ? "Retry" : "Enable Trading";
     enableBtn.onclick = (e) => {
       e.stopPropagation();
-      setButtonLoading(enableBtn, "Waiting for signature…");
+      setButtonLoading(enableBtn, [
+        "Sign in your wallet...",
+        "Check your wallet for the signature...",
+        "Complete the signature when you're ready...",
+      ]);
       panelState.activeView = "order";
       TradingService.deriveCredentials();
     };

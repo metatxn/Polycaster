@@ -13,7 +13,10 @@ import type {
 } from "../types/market";
 import type { MarketLinkHint } from "../types/platform";
 import { KNOWW_CONFIG } from "./config";
-import { isMarketWithinDisplayPriceCap } from "./market-price-filter";
+import {
+  filterNestedMarketsByDisplayPriceCap,
+  isMarketWithinDisplayPriceCap,
+} from "./market-price-filter";
 import { findMatchingLiveMarket } from "./market-token-resolution";
 import {
   buildMarketGateText,
@@ -2388,19 +2391,19 @@ async function validateMarketRelevance(
 }
 
 // ============================================
-// TRENDING MARKETS FALLBACK
-// Fetches high-volume active markets when feed-based
-// discovery takes too long (>10s)
+// TRENDING MARKETS
+// Fetches high-volume active markets independently of feed discovery.
 // ============================================
 
 let trendingMarketsCache: { markets: Market[]; fetchedAt: number } | null =
   null;
 const TRENDING_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const TRENDING_CANDIDATE_LIMIT = 6;
 
 /**
  * Fetch trending/popular markets sorted by 24h volume.
- * Used as a fallback when the notification stack has no
- * feed-discovered markets after a timeout.
+ * Used to populate the notification stack while feed-specific discovery runs
+ * independently. Feed-discovered markets keep display priority in the UI.
  */
 async function fetchTrendingMarkets(): Promise<Market[]> {
   const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;
@@ -2427,7 +2430,7 @@ async function fetchTrendingMarkets(): Promise<Market[]> {
   // Fetch top Polymarket events by volume
   if (ENABLED_SOURCES?.polymarket) {
     try {
-      const url = `${POLYMARKET_EVENTS_KEYSET_API_URL}?closed=false&limit=10&order=volume24hr&ascending=false`;
+      const url = `${POLYMARKET_EVENTS_KEYSET_API_URL}?closed=false&limit=${TRENDING_CANDIDATE_LIMIT}&order=volume24hr&ascending=false`;
       const resp = await safeSendMessage({ type: "fetch-text", url });
 
       if (resp?.ok && "text" in resp && resp.text) {
@@ -2472,9 +2475,12 @@ async function fetchTrendingMarkets(): Promise<Market[]> {
     }
   }
 
-  // Sort by volume and keep top 10 (UI picks a random 2 to display)
+  // Sort by volume and keep the six highest-volume eligible events.
   allTrending.sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0));
-  const result = allTrending.filter(isMarketWithinDisplayPriceCap).slice(0, 10);
+  const result = allTrending
+    .map(filterNestedMarketsByDisplayPriceCap)
+    .filter((market): market is Market => market !== null)
+    .slice(0, TRENDING_CANDIDATE_LIMIT);
 
   trendingMarketsCache = { markets: result, fetchedAt: now };
   log("Cached", result.length, "trending markets");

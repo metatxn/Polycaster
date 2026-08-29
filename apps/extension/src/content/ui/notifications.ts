@@ -1,5 +1,6 @@
 import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import { Decimal } from "decimal.js";
+import { startLoadingMessageSequence } from "../../loading-messages";
 import type {
   InjectedMarketEntry,
   Market,
@@ -22,6 +23,7 @@ import {
   SOURCE_CONFIG,
   toDecimal,
 } from "./cards";
+import { showWelcomeForUpTo } from "./welcome-visibility";
 
 // ============================================
 // NOTIFICATION STACK COMPONENT
@@ -59,13 +61,18 @@ export function createStreamBetHost(market: Market): HTMLElement {
   let handle: StreamBetHandle | null = null;
   let disposed = false;
   let attempt = 0;
+  let stopLoadingMessages: (() => void) | null = null;
 
   const renderLoading = (): void => {
+    stopLoadingMessages?.();
     const status = document.createElement("div");
     status.className = "knoww-stream-bet-loading";
-    status.setAttribute("role", "status");
-    status.textContent = "Loading trading…";
     host.replaceChildren(status);
+    stopLoadingMessages = startLoadingMessageSequence(status, [
+      "Getting trading ready for you...",
+      "Checking your trading setup...",
+      "Preparing your trading controls...",
+    ]);
   };
 
   const startHydration = async (): Promise<void> => {
@@ -74,6 +81,10 @@ export function createStreamBetHost(market: Market): HTMLElement {
     renderLoading();
     try {
       const runtime = await streamTradingRuntimePort.load();
+      if (currentAttempt === attempt) {
+        stopLoadingMessages?.();
+        stopLoadingMessages = null;
+      }
       if (disposed || currentAttempt !== attempt || !host.isConnected) return;
       const nextHandle = runtime.hydrateStreamBet(host, {
         market,
@@ -90,6 +101,8 @@ export function createStreamBetHost(market: Market): HTMLElement {
       handle = nextHandle;
     } catch {
       if (disposed || currentAttempt !== attempt || !host.isConnected) return;
+      stopLoadingMessages?.();
+      stopLoadingMessages = null;
       const error = document.createElement("div");
       error.className = "knoww-stream-bet-load-error";
       const message = document.createElement("span");
@@ -111,6 +124,8 @@ export function createStreamBetHost(market: Market): HTMLElement {
       if (disposed) return;
       disposed = true;
       attempt += 1;
+      stopLoadingMessages?.();
+      stopLoadingMessages = null;
       handle?.dispose();
       handle = null;
       streamControllers.delete(host);
@@ -169,7 +184,7 @@ function resolveNotificationCaps(): { active: number; scrolled: number } {
 const SCROLLED_OUT_GRACE_MS = 8000;
 
 // Trending markets state
-const TRENDING_FETCH_DELAY_MS = 10_000;
+const TRENDING_FETCH_DELAY_MS = 0;
 const TRENDING_SHUFFLE_INTERVAL_MS = 60_000;
 const MAX_TRENDING_DISPLAY = 2;
 const MAX_EXPANDED_TRENDING_DISPLAY = 10;
@@ -958,21 +973,20 @@ export function createNotificationStack(): HTMLElement {
     <div class="knoww-stack-scanning" data-knoww-scanning>
       <div class="knoww-stack-empty-title-row">
         <span class="knoww-stack-empty-pulse" aria-hidden="true"></span>
-        <span class="knoww-stack-empty-title">No markets found on this page yet</span>
+        <span class="knoww-stack-empty-title">Checking this page for markets...</span>
         <span class="knoww-stack-empty-dots" aria-hidden="true">
           <span></span><span></span><span></span>
         </span>
       </div>
-      <span class="knoww-stack-empty-sub">Scroll your feed to discover matches &mdash; browse markets from the Knoww sidebar.</span>
+      <span class="knoww-stack-empty-sub">Keep browsing. We'll add matches here.</span>
     </div>
   `;
 
   contentArea.appendChild(itemsContainer);
   contentArea.appendChild(emptyState);
 
-  // Wire up first-run welcome. If the user has never dismissed the welcome
-  // card, swap the "Searching for markets…" scanning row for the richer
-  // welcome message. Reverts permanently once they click "Got it".
+  // Show the first-run welcome briefly, then return to the compact scanning
+  // state. Once shown, it stays dismissed for this browser profile.
   const welcomeEl = emptyState.querySelector<HTMLElement>(
     "[data-knoww-welcome]"
   );
@@ -983,21 +997,31 @@ export function createNotificationStack(): HTMLElement {
     "[data-knoww-welcome-dismiss]"
   );
 
-  const dismissWelcome = () => {
-    // setProperty with "important" because .knoww-stack-welcome has
-    // `display: flex !important` — a plain inline style would lose to it.
-    if (welcomeEl) welcomeEl.style.setProperty("display", "none", "important");
-    if (scanningEl) scanningEl.style.display = "";
-    persistWelcomeSeen();
-    void window.KNOWW_ANALYTICS?.track("welcome_dismissed", {});
-  };
+  const scanningTitle = scanningEl?.querySelector<HTMLElement>(
+    ".knoww-stack-empty-title"
+  );
+  if (!isStreamSurface() && scanningTitle) {
+    startLoadingMessageSequence(scanningTitle, [
+      "Checking this page for markets...",
+      "Looking for relevant matches for you...",
+      "Keep browsing. We're checking this page for you...",
+    ]);
+  }
 
-  welcomeDismissBtn?.addEventListener("click", dismissWelcome);
+  let dismissWelcome: (() => void) | null = null;
+
+  welcomeDismissBtn?.addEventListener("click", () => {
+    dismissWelcome?.();
+    void window.KNOWW_ANALYTICS?.track("welcome_dismissed", {});
+  });
 
   void readPersistedWelcomeSeen().then((seen) => {
     if (!seen && welcomeEl && scanningEl) {
-      welcomeEl.style.removeProperty("display");
-      scanningEl.style.display = "none";
+      dismissWelcome = showWelcomeForUpTo(
+        welcomeEl,
+        scanningEl,
+        persistWelcomeSeen
+      );
       void window.KNOWW_ANALYTICS?.track("welcome_shown", {});
     }
   });
@@ -1155,6 +1179,12 @@ function setupSearchFunctionality(
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
   let isSearchOpen = false;
   let currentSearchQuery = ""; // Track current query to ignore stale results
+  let stopSearchMessages: (() => void) | null = null;
+
+  const stopSearchStatus = (): void => {
+    stopSearchMessages?.();
+    stopSearchMessages = null;
+  };
 
   toggleBtn.onclick = () => {
     const stack = container.closest<HTMLElement>(".knoww-notification-stack");
@@ -1176,14 +1206,16 @@ function setupSearchFunctionality(
       input.focus();
       clearBtn.style.display = "flex";
     } else {
+      stopSearchStatus();
       input.value = "";
-      resultsContainer.innerHTML = "";
+      resultsContainer.replaceChildren();
       clearBtn.style.display = "none";
       currentSearchQuery = "";
     }
   };
 
   clearBtn.onclick = () => {
+    stopSearchStatus();
     void window.KNOWW_ANALYTICS?.track("extension_search_cleared");
     if (input.value.trim() === "") {
       isSearchOpen = false;
@@ -1193,7 +1225,7 @@ function setupSearchFunctionality(
       currentSearchQuery = "";
     } else {
       input.value = "";
-      resultsContainer.innerHTML = "";
+      resultsContainer.replaceChildren();
       input.focus();
       currentSearchQuery = "";
     }
@@ -1202,18 +1234,25 @@ function setupSearchFunctionality(
   input.oninput = () => {
     const query = input.value.trim();
     currentSearchQuery = query;
+    stopSearchStatus();
 
     if (searchTimeout) {
       clearTimeout(searchTimeout);
     }
 
     if (query.length < 2) {
-      resultsContainer.innerHTML = "";
+      resultsContainer.replaceChildren();
       return;
     }
 
-    resultsContainer.innerHTML =
-      '<div class="knoww-search-loading">Searching...</div>';
+    const loading = document.createElement("div");
+    loading.className = "knoww-search-loading";
+    resultsContainer.replaceChildren(loading);
+    stopSearchMessages = startLoadingMessageSequence(loading, [
+      "Searching markets for you...",
+      "Checking market matches for you...",
+      "Preparing your results...",
+    ]);
 
     const searchQuery = query; // Capture query for this search request
     searchTimeout = setTimeout(async () => {
@@ -1229,6 +1268,7 @@ function setupSearchFunctionality(
         if (currentSearchQuery !== searchQuery) {
           return;
         }
+        stopSearchStatus();
 
         if (events.length === 0) {
           resultsContainer.innerHTML =
@@ -1246,12 +1286,13 @@ function setupSearchFunctionality(
         if (currentSearchQuery !== searchQuery) {
           return;
         }
+        stopSearchStatus();
         void window.KNOWW_ANALYTICS?.track("extension_search_failed", {
           query: searchQuery,
         });
         log("Search error:", e);
         resultsContainer.innerHTML =
-          '<div class="knoww-search-empty">Search failed</div>';
+          '<div class="knoww-search-empty">Search failed. Try again.</div>';
       }
     }, 300);
   };
@@ -1265,6 +1306,7 @@ function setupSearchFunctionality(
     ) {
       void window.KNOWW_ANALYTICS?.track("extension_search_dismissed");
       isSearchOpen = false;
+      stopSearchStatus();
       container.classList.remove("knoww-search-open");
       toggleBtn.classList.remove("knoww-search-active");
     }
@@ -2175,9 +2217,8 @@ function appendTrendingSection(
 }
 
 /**
- * Schedule the initial trending fetch.
- * Fires after TRENDING_FETCH_DELAY_MS so the extension has time
- * to discover feed-relevant markets first.
+ * Schedule the initial trending fetch on the next task so panel setup can
+ * finish without withholding useful markets from the user.
  */
 function startTrendingFetchTimer(): void {
   // No trending on streaming surfaces.
@@ -2524,10 +2565,10 @@ function openNotificationStack(
     log("Notification stack initialized");
   }
 
-  // Fetch trending markets after a short delay so they appear in
-  // the notification stack alongside (or in place of) feed-discovered markets.
+  // Start trending discovery on the next task. Feed-discovered markets keep
+  // display priority when both sources have results.
   startTrendingFetchTimer();
-  log("Trending markets fetch scheduled (10s)");
+  log("Trending markets fetch scheduled immediately");
 
   // Update theme immediately after creation (DOM might be more ready now)
   setTimeout(() => {

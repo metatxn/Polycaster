@@ -10,6 +10,7 @@ import {
   pipeline,
 } from "@huggingface/transformers";
 import { logDebug, logInfo, logWarn } from "@knoww/logger";
+import { getInferenceDevice, type InferenceDevice } from "./inference-device";
 import { LRUCache } from "./lru-cache";
 
 env.allowLocalModels = false;
@@ -63,10 +64,11 @@ const RERANK_DTYPE = "q8";
 const RERANK_BATCH_SIZE = 8;
 
 let pipelineInstance: Promise<FeatureExtractionPipeline> | null = null;
+let warmUpPromise: Promise<void> | null = null;
 let rerankerInstance: Promise<{
   tokenizer: PreTrainedTokenizer;
   model: PreTrainedModel;
-  device: "webgpu" | "wasm";
+  device: InferenceDevice;
 }> | null = null;
 let rerankQueue: Promise<void> = Promise.resolve();
 
@@ -126,11 +128,8 @@ function buildPipelineOptions(): {
 async function createPipelineInstance(): Promise<FeatureExtractionPipeline> {
   await preloadOnnxWasm();
   const baseOptions = buildPipelineOptions();
-  const webgpuAvailable =
-    Boolean((env as { IS_WEBGPU_AVAILABLE?: boolean }).IS_WEBGPU_AVAILABLE) ||
-    (typeof navigator !== "undefined" && "gpu" in navigator);
-  logDebug("embeddings.webgpu-check", { available: webgpuAvailable });
-  if (webgpuAvailable) {
+  const selectedDevice = await getInferenceDevice();
+  if (selectedDevice.device === "webgpu") {
     try {
       return await pipeline<"feature-extraction">(
         "feature-extraction",
@@ -183,7 +182,7 @@ function disposeTensors(value: unknown): void {
 async function createRerankerInstance(): Promise<{
   tokenizer: PreTrainedTokenizer;
   model: PreTrainedModel;
-  device: "webgpu" | "wasm";
+  device: InferenceDevice;
 }> {
   await preloadOnnxWasm();
   const tokenizer = await AutoTokenizer.from_pretrained(RERANK_MODEL_ID);
@@ -200,11 +199,9 @@ async function createRerankerInstance(): Promise<{
       }
     },
   } as const;
-  const webgpuAvailable =
-    Boolean((env as { IS_WEBGPU_AVAILABLE?: boolean }).IS_WEBGPU_AVAILABLE) ||
-    (typeof navigator !== "undefined" && "gpu" in navigator);
+  const selectedDevice = await getInferenceDevice();
 
-  if (webgpuAvailable) {
+  if (selectedDevice.device === "webgpu") {
     try {
       const model = await AutoModelForSequenceClassification.from_pretrained(
         RERANK_MODEL_ID,
@@ -656,5 +653,20 @@ export async function rerankMarketPairs(
  * Call once from the offscreen document during idle time.
  */
 export function warmUp(): Promise<void> {
-  return getInstance().then(() => undefined);
+  if (warmUpPromise) return warmUpPromise;
+
+  warmUpPromise = getInstance()
+    .then(async (extractor) => {
+      const output = await extractor(["Knoww scoring warm-up"], {
+        pooling: "cls",
+        normalize: true,
+      });
+      output.dispose();
+    })
+    .catch((error) => {
+      warmUpPromise = null;
+      throw error;
+    });
+
+  return warmUpPromise;
 }

@@ -124,7 +124,7 @@ function renderSidepanelShell(root: HTMLElement): void {
       </div>
       ${renderMarketsSurface()}
       <div class="knoww-sidepanel-panel knoww-sidepanel-portfolio" data-sidepanel-portfolio hidden>
-        <div class="knoww-portfolio-loading">Loading portfolio...</div>
+        <div class="knoww-portfolio-loading">Opening your portfolio...</div>
       </div>
       ${renderMarketsFooter()}
     </div>

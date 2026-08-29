@@ -1,4 +1,5 @@
 import { SHOW_EOA_OPTION } from "@knoww/shared-types/polymarket";
+import type { LoadingMessageInput } from "../../../loading-messages";
 import { SETUP_APPROVAL_DEFAULT, type SetupFlow } from "../setup-flow";
 import { writeSetupDismissed } from "../setup-flow-storage";
 import { type TradingContext, TradingService } from "../trading-service";
@@ -11,7 +12,7 @@ export interface SetupViewUiPort {
     text?: string
   ): HTMLElementTagNameMap[K];
   buildInlineError(message: string | null | undefined): HTMLElement;
-  setButtonLoading(button: HTMLElement, label: string): void;
+  setButtonLoading(button: HTMLElement, label: LoadingMessageInput): void;
   rerender(): void;
 }
 
@@ -134,7 +135,11 @@ export function addSetupFlow(
       const button = ui.el("button", "knoww-tp-btn-enable", "Create vault");
       button.onclick = (event) => {
         event.stopPropagation();
-        ui.setButtonLoading(button, "Waiting for signature…");
+        ui.setButtonLoading(button, [
+          "Sign in your wallet...",
+          "Check your wallet for the signature...",
+          "Complete the signature when you're ready...",
+        ]);
         TradingService.deployWallet().catch(() => {
           // Error flows through ctx.error; the next render surfaces it here.
         });
@@ -158,7 +163,11 @@ export function addSetupFlow(
       button.onclick = (event) => {
         event.stopPropagation();
         const amount = Number((input.value || "").trim());
-        ui.setButtonLoading(button, "Waiting for signature…");
+        ui.setButtonLoading(button, [
+          "Approve in your wallet...",
+          "Check your wallet for the approval...",
+          "Complete the approval when you're ready...",
+        ]);
         TradingService.approveUsdc(
           false,
           Number.isFinite(amount) && amount > 0
@@ -180,7 +189,11 @@ export function addSetupFlow(
       );
       button.onclick = (event) => {
         event.stopPropagation();
-        ui.setButtonLoading(button, "Waiting for signature…");
+        ui.setButtonLoading(button, [
+          "Sign in your wallet...",
+          "Check your wallet for the signature...",
+          "Complete the signature when you're ready...",
+        ]);
         TradingService.deriveCredentials();
       };
       section.appendChild(button);

@@ -3,8 +3,13 @@
 // ============================================
 
 import { createLogger } from "@knoww/logger";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  type LoadingMessageInput,
+  startLoadingMessageUpdates,
+} from "./loading-messages";
+import { scheduleSettingsSave } from "./settings-auto-save";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
 
@@ -492,10 +497,59 @@ function Divider() {
 // Main Options App Component
 function OptionsApp() {
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [statusVisible, setStatusVisible] = useState(false);
   const [version] = useState(() => chrome.runtime.getManifest().version);
   const [hasToken, setHasToken] = useState(false);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusSequenceStopRef = useRef<(() => void) | null>(null);
+  const skipInitialAutoSaveRef = useRef(true);
+
+  const showStatus = useCallback((message: string) => {
+    statusSequenceStopRef.current?.();
+    statusSequenceStopRef.current = null;
+    if (statusTimerRef.current !== null) {
+      clearTimeout(statusTimerRef.current);
+    }
+    setStatus(message);
+    setStatusVisible(true);
+    statusTimerRef.current = setTimeout(() => {
+      setStatusVisible(false);
+      statusTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  const startStatusSequence = useCallback(
+    (messages: LoadingMessageInput): (() => void) => {
+      if (statusTimerRef.current !== null) {
+        clearTimeout(statusTimerRef.current);
+        statusTimerRef.current = null;
+      }
+      setStatusVisible(true);
+      statusSequenceStopRef.current?.();
+      const stopUpdates = startLoadingMessageUpdates(setStatus, messages);
+      statusSequenceStopRef.current = stopUpdates;
+      return () => {
+        stopUpdates();
+        if (statusSequenceStopRef.current === stopUpdates) {
+          statusSequenceStopRef.current = null;
+        }
+      };
+    },
+    []
+  );
+
+  useEffect(
+    () => () => {
+      if (statusTimerRef.current !== null) {
+        clearTimeout(statusTimerRef.current);
+      }
+      statusSequenceStopRef.current?.();
+      statusSequenceStopRef.current = null;
+    },
+    []
+  );
 
   // Load settings on mount
   useEffect(() => {
@@ -524,6 +578,7 @@ function OptionsApp() {
           },
         };
         setSettings(loadedSettings);
+        setSettingsLoaded(true);
       }
     );
 
@@ -543,65 +598,59 @@ function OptionsApp() {
     );
   }, []);
 
-  // Show status message
-  const showStatus = useCallback((message: string) => {
-    setStatus(message);
-    setStatusVisible(true);
-    setTimeout(() => setStatusVisible(false), 2000);
-  }, []);
-
-  // Save settings
-  const saveSettings = useCallback(() => {
-    chrome.storage.sync.set({ knowwSettings: settings }, () => {
-      showStatus("Settings saved!");
-
-      if (settings.usageAnalyticsEnabled) {
-        chrome.runtime.sendMessage({
-          type: "analytics:track",
-          event: "settings_updated",
-          properties: {
-            analyticsEnabled: settings.usageAnalyticsEnabled,
-            notificationStackEnabled: settings.showNotificationStack,
-            notificationPanelSurface: settings.notificationPanelSurface,
-            aiExtractionEnabled: settings.aiExtractionEnabled,
-            personalizationEnabled: settings.personalizationEnabled,
-          },
-        });
-      }
-
-      broadcastSettingsToSupportedTabs(settings);
-    });
-  }, [settings, showStatus]);
-
-  const updateDebugMode = useCallback(
-    (debugMode: boolean) => {
-      const nextSettings = { ...settings, debugMode };
-      setSettings(nextSettings);
+  const persistSettings = useCallback(
+    (nextSettings: UserSettings) => {
+      showStatus("Saving your changes...");
       chrome.storage.sync.set({ knowwSettings: nextSettings }, () => {
         if (chrome.runtime.lastError) {
-          log.error("settings.debug_mode_save_failed", {
+          log.error("settings.save_failed", {
             error: chrome.runtime.lastError.message,
           });
-          showStatus("Could not save Debug Mode.");
+          showStatus("Could not save settings.");
           return;
         }
 
+        showStatus("Settings saved.");
+
+        if (nextSettings.usageAnalyticsEnabled) {
+          chrome.runtime.sendMessage({
+            type: "analytics:track",
+            event: "settings_updated",
+            properties: {
+              analyticsEnabled: nextSettings.usageAnalyticsEnabled,
+              notificationStackEnabled: nextSettings.showNotificationStack,
+              notificationPanelSurface: nextSettings.notificationPanelSurface,
+              aiExtractionEnabled: nextSettings.aiExtractionEnabled,
+              personalizationEnabled: nextSettings.personalizationEnabled,
+            },
+          });
+        }
+
         broadcastSettingsToSupportedTabs(nextSettings);
-        showStatus(debugMode ? "Debug Mode enabled." : "Debug Mode disabled.");
       });
     },
-    [settings, showStatus]
+    [showStatus]
   );
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (skipInitialAutoSaveRef.current) {
+      skipInitialAutoSaveRef.current = false;
+      return;
+    }
+    return scheduleSettingsSave(settings, persistSettings);
+  }, [persistSettings, settings, settingsLoaded]);
+
+  const updateDebugMode = useCallback((debugMode: boolean) => {
+    setSettings((prev) => ({ ...prev, debugMode }));
+  }, []);
 
   // Reset settings
   const resetSettings = useCallback(() => {
     if (confirm("Reset all settings to defaults?")) {
       setSettings(DEFAULT_USER_SETTINGS);
-      chrome.storage.sync.set({ knowwSettings: DEFAULT_USER_SETTINGS }, () => {
-        showStatus("Settings reset to defaults!");
-      });
     }
-  }, [showStatus]);
+  }, []);
 
   // Update nested settings
   const updatePlatform = useCallback(
@@ -630,6 +679,7 @@ function OptionsApp() {
         "Are you sure you want to disconnect your wallet? You will need to sign in again to trade."
       )
     ) {
+      showStatus("Disconnecting your wallet...");
       chrome.runtime.sendMessage({ type: "auth:logout" }, (response) => {
         if (chrome.runtime.lastError) {
           log.error("auth.logout_failed", {
@@ -651,12 +701,18 @@ function OptionsApp() {
         } else {
           log.error("auth.logout_bad_response", { response });
           setHasToken(false);
+          showStatus("Could not disconnect your wallet.");
         }
       });
     }
   }, [settings.usageAnalyticsEnabled, showStatus]);
 
   const handleExportDiagnostics = useCallback(() => {
+    const stopStatus = startStatusSequence([
+      "Preparing your export...",
+      "Collecting your diagnostics...",
+      "Packaging the report for you...",
+    ]);
     chrome.tabs.query({}, async (tabs) => {
       const inspectableTabs = tabs.filter(
         (tab): tab is chrome.tabs.Tab & { id: number } =>
@@ -696,6 +752,7 @@ function OptionsApp() {
       const respondingTabCount = tabExports.filter(Boolean).length;
 
       if (diagnosticCount === 0) {
+        stopStatus();
         showStatus(
           respondingTabCount === 0
             ? "No content-script diagnostics found. Reload Kalshi and try again."
@@ -720,13 +777,19 @@ function OptionsApp() {
           tabs: tabsWithDiagnostics,
         }
       );
+      stopStatus();
       showStatus(
         `Exported ${eventCount} events and ${feedbackCount} feedback entries.`
       );
     });
-  }, [showStatus, version]);
+  }, [showStatus, startStatusSequence, version]);
 
   const handleClearDiagnostics = useCallback(() => {
+    const stopStatus = startStatusSequence([
+      "Clearing diagnostics...",
+      "Checking the cleanup...",
+      "Refreshing your diagnostics view...",
+    ]);
     chrome.tabs.query({}, async (tabs) => {
       const inspectableTabs = tabs.filter(
         (tab): tab is chrome.tabs.Tab & { id: number } =>
@@ -740,9 +803,10 @@ function OptionsApp() {
           })
         )
       );
+      stopStatus();
       showStatus("Diagnostics cleared.");
     });
-  }, [showStatus]);
+  }, [showStatus, startStatusSequence]);
 
   return (
     <div className="container">
@@ -1056,6 +1120,7 @@ function OptionsApp() {
                   "Clear all personalization data? This cannot be undone."
                 )
               ) {
+                showStatus("Clearing personalization...");
                 chrome.storage.local.remove("knowwPreferences", () => {
                   showStatus("Personalization data cleared!");
                   chrome.tabs.query({}, (tabs) => {
@@ -1082,23 +1147,14 @@ function OptionsApp() {
         </SettingRow>
       </Section>
 
-      {/* Save Button */}
-      <div className="save-container">
-        <span
-          className={`status ${statusVisible ? "visible" : ""}`}
-          id="status"
-        >
-          {status}
-        </span>
-        <button
-          type="button"
-          className="save-btn"
-          id="save-btn"
-          onClick={saveSettings}
-        >
-          Save Settings
-        </button>
-      </div>
+      <span
+        className={`status ${statusVisible ? "visible" : ""}`}
+        id="status"
+        role="status"
+        aria-live="polite"
+      >
+        {status}
+      </span>
 
       <button
         type="button"

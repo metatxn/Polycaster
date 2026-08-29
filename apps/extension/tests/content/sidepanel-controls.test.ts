@@ -888,7 +888,8 @@ test("side panel position rows expose exact inline action labels", () => {
   );
   assert.equal(/data-portfolio-position-close/.test(sidepanelSource), true);
   assert.equal(/>View</.test(sidepanelSource), true);
-  assert.equal(/>Sell Position</.test(sidepanelSource), true);
+  assert.equal(/"Sell Position"/.test(sidepanelSource), true);
+  assert.equal(/"Selling your position\.\.\."/.test(sidepanelSource), true);
   assert.equal(/>X</.test(sidepanelSource), true);
   assert.equal(
     /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.45fr\)\s+34px/.test(
@@ -1165,5 +1166,5 @@ test("approval wait distinguishes unverified reads from a confirmed non-approval
     /sawCleanRead \? "not-approved" : "unverified"/.test(sidepanelSource),
     true
   );
-  assert.equal(/Couldn't verify the approval yet/.test(sidepanelSource), true);
+  assert.equal(/Approval status is updating/.test(sidepanelSource), true);
 });

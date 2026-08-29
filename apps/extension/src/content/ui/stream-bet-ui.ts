@@ -1,3 +1,7 @@
+import {
+  type LoadingMessageInput,
+  startLoadingMessageUpdates,
+} from "../../loading-messages";
 import type { Market } from "../../types/market";
 import type { StreamBetHydrateArgs } from "../trading-runtime-types";
 import {
@@ -289,6 +293,9 @@ export function buildStreamBetting(
   let depositing = false;
   let lastError: string | null = null;
   let busy: string | null = null;
+  let transactionMessage: string | null = null;
+  let stopBusyMessages: (() => void) | null = null;
+  let stopTransactionMessages: (() => void) | null = null;
   let holdingGen = 0;
   // Holdings footer + BUY/SELL apply ONLY to genuine binary (Yes/No) markets:
   // getOutcomeBalances and pickHolding assume a Yes/No token pair. A
@@ -298,17 +305,39 @@ export function buildStreamBetting(
   const twoSided =
     options.length === 2 && !options[0].isMulti && !options[1].isMulti;
 
-  const runSetup = (label: string, fn: () => Promise<unknown>): void => {
-    busy = label;
-    renderAction();
+  const runSetup = (
+    messages: LoadingMessageInput,
+    fn: () => Promise<unknown>
+  ): void => {
+    stopBusyMessages?.();
+    stopBusyMessages = startLoadingMessageUpdates((message) => {
+      busy = message;
+      renderAction();
+    }, messages);
     fn()
       .catch(() => {
         /* leave state; the action re-renders to the current readiness */
       })
       .finally(() => {
+        stopBusyMessages?.();
+        stopBusyMessages = null;
         busy = null;
         renderAction();
       });
+  };
+
+  const startTransactionProgress = (messages: LoadingMessageInput): void => {
+    stopTransactionMessages?.();
+    stopTransactionMessages = startLoadingMessageUpdates((message) => {
+      transactionMessage = message;
+      renderAction();
+    }, messages);
+  };
+
+  const stopTransactionProgress = (): void => {
+    stopTransactionMessages?.();
+    stopTransactionMessages = null;
+    transactionMessage = null;
   };
 
   // Balance settles asynchronously after a trade/deposit (V2 fill settlement,
@@ -331,7 +360,11 @@ export function buildStreamBetting(
     const opt = options[selectedIdx];
     const balanceBefore = trading().getContext().balance;
     txStatus = "placing";
-    renderAction();
+    startTransactionProgress([
+      "Placing your trade...",
+      "Sending your trade to the market...",
+      "Checking the trade status for you...",
+    ]);
     trading()
       .placeBuy(market, opt, getStreamStake())
       .then(() => {
@@ -350,6 +383,7 @@ export function buildStreamBetting(
         void trading().refreshBalance();
       })
       .finally(() => {
+        stopTransactionProgress();
         renderAction();
         window.setTimeout(() => {
           if (txStatus === "placed" || txStatus === "failed") {
@@ -365,7 +399,11 @@ export function buildStreamBetting(
     const opt = options[holding.outcomeIndex];
     const balanceBefore = trading().getContext().balance;
     txStatus = "placing";
-    renderAction();
+    startTransactionProgress([
+      "Selling your position...",
+      "Sending your sell order...",
+      "Checking the sale status for you...",
+    ]);
     trading()
       .placeSell({
         side: "SELL",
@@ -385,6 +423,7 @@ export function buildStreamBetting(
         void trading().refreshBalance();
       })
       .finally(() => {
+        stopTransactionProgress();
         renderAction();
         window.setTimeout(() => {
           if (txStatus === "placed" || txStatus === "failed") {
@@ -723,7 +762,7 @@ export function buildStreamBetting(
         btn.classList.remove("rose");
         btn.classList.add("ghost");
         btn.disabled = true;
-        btn.innerHTML = `<span class="knoww-stream-spin"></span> Selling…`;
+        btn.innerHTML = `<span class="knoww-stream-spin"></span> ${transactionMessage ?? "Selling your position..."}`;
       } else if (txStatus === "placed") {
         btn.classList.remove("rose");
         btn.classList.add("green");
@@ -817,7 +856,14 @@ export function buildStreamBetting(
         btn.onclick = (e) => {
           e.stopPropagation();
           // Inline: triggers the wallet's own connect + signature popups.
-          runSetup("Connecting…", () => trading().ensureReady());
+          runSetup(
+            [
+              "Connecting your wallet...",
+              "Check your wallet to continue...",
+              "Complete the connection when you're ready...",
+            ],
+            () => trading().ensureReady()
+          );
         };
         break;
       case "setup":
@@ -835,7 +881,14 @@ export function buildStreamBetting(
         hint.textContent = "One-time signature to enable trading";
         btn.onclick = (e) => {
           e.stopPropagation();
-          runSetup("Enabling…", () => trading().ensureReady());
+          runSetup(
+            [
+              "Getting trading ready for you...",
+              "Check your wallet for the signature...",
+              "Complete the signature when you're ready...",
+            ],
+            () => trading().ensureReady()
+          );
         };
         break;
       case "insufficient":
@@ -854,13 +907,20 @@ export function buildStreamBetting(
         btn.onclick = (e) => {
           e.stopPropagation();
           const negRisk = trading().isNegRisk(market, opt.marketIndex);
-          runSetup("Approving…", () => trading().approveUsdc(negRisk));
+          runSetup(
+            [
+              "Approve in your wallet...",
+              "Check your wallet for the approval...",
+              "Complete the approval when you're ready...",
+            ],
+            () => trading().approveUsdc(negRisk)
+          );
         };
         break;
       case "placing":
         btn.classList.add("ghost");
         btn.disabled = true;
-        btn.innerHTML = `<span class="knoww-stream-spin"></span> Placing trade…`;
+        btn.innerHTML = `<span class="knoww-stream-spin"></span> ${transactionMessage ?? "Placing your trade..."}`;
         break;
       case "placed":
         btn.classList.add("green");
@@ -944,6 +1004,8 @@ export function buildStreamBetting(
     if (disposed) return;
     disposed = true;
     holdingGen += 1;
+    stopBusyMessages?.();
+    stopTransactionProgress();
     unsubState();
     wrap.removeEventListener("knoww-stream-expanded", handleExpanded);
     wrap.removeEventListener("knoww-stream-collapsed", handleCollapsed);

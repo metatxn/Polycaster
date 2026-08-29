@@ -18,7 +18,7 @@ const MESSAGE_TIMEOUT_MS = 20_000;
 const DERIVATION_WAIT_POLL_MS = 500;
 const DERIVATION_WAIT_TIMEOUT_MS = 120_000;
 const ACTIVE_DERIVATION_MESSAGE =
-  "Another trading enable request is already waiting in your wallet. Confirm or reject the existing wallet request before retrying.";
+  "A trading request is already open in your wallet. Check it before trying again.";
 
 function sendTradingMsg<T>(
   message: Record<string, unknown>,

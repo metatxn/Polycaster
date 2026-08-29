@@ -10,6 +10,10 @@
  * Split/Merge accessible via "..." dropdown menu.
  */
 
+import {
+  type LoadingMessageInput,
+  startLoadingMessageSequence,
+} from "../../loading-messages";
 import { escapeHtml } from "../html-escape";
 import { getNonce, WALLETCONNECT_WALLET_UUID, WalletBridge } from "./bridge";
 import { CredentialManager } from "./credentials";
@@ -67,7 +71,7 @@ declare const require: (request: string) => unknown;
 
 // Debounce window for the preflight call. The user typing in the shares input
 // would otherwise fire one round-trip per keystroke; the preview state stays
-// "Checking allowance..." during the debounce so the gate is never wrong.
+// "Checking trade approval..." during the debounce so the gate is never wrong.
 const LIVE_PANEL_REFRESH_INTERVAL = 10000;
 
 function trackPanelAnalytics(
@@ -214,8 +218,16 @@ function elHtml<K extends keyof HTMLElementTagNameMap>(
   return n;
 }
 
-function setButtonLoading(btn: HTMLElement, text: string): void {
-  btn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span> ${text}`;
+function setButtonLoading(btn: HTMLElement, text: LoadingMessageInput): void {
+  const spinner = el("span", "knoww-tp-spinner");
+  spinner.style.width = "14px";
+  spinner.style.height = "14px";
+  spinner.style.display = "inline-block";
+  spinner.style.verticalAlign = "middle";
+  spinner.style.marginRight = "6px";
+  const label = el("span");
+  btn.replaceChildren(spinner, label);
+  startLoadingMessageSequence(label, text);
   btn.style.pointerEvents = "none";
   btn.style.opacity = "0.7";
 }
@@ -594,12 +606,15 @@ function addHeader(
 
     const refreshBtn = elHtml("button", "knoww-tp-header-action", I.refresh);
     refreshBtn.title = "Refresh balance";
+    refreshBtn.setAttribute("aria-label", "Refresh balance");
     refreshBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("trading_panel_balance_refreshed", {
         marketId: panelState.panelOpts?.market.id,
       });
       refreshBtn.classList.add("spinning");
+      refreshBtn.title = "Refreshing your balance...";
+      refreshBtn.setAttribute("aria-label", "Refreshing your balance...");
       TradingService.refreshBalance()
         .then(() => {
           if (
@@ -618,6 +633,8 @@ function addHeader(
         .catch(() => {})
         .finally(() => {
           refreshBtn.classList.remove("spinning");
+          refreshBtn.title = "Refresh balance";
+          refreshBtn.setAttribute("aria-label", "Refresh balance");
           rerender();
         });
     };
@@ -629,13 +646,15 @@ function addHeader(
       I.switchWallet
     );
     switchBtn.title = "Switch wallet";
+    switchBtn.setAttribute("aria-label", "Switch wallet");
     switchBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("wallet_switch_clicked");
       switchBtn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block"></span>`;
       switchBtn.style.pointerEvents = "none";
       switchBtn.style.opacity = "0.7";
-      switchBtn.title = "Switching wallet…";
+      switchBtn.title = "Switching your wallet...";
+      switchBtn.setAttribute("aria-label", "Switching your wallet...");
       void TradingService.switchWallet()
         .catch(() => {})
         .finally(() => {
@@ -646,6 +665,7 @@ function addHeader(
 
     const dcBtn = elHtml("button", "knoww-tp-header-action", I.disconnect);
     dcBtn.title = "Disconnect wallet";
+    dcBtn.setAttribute("aria-label", "Disconnect wallet");
     dcBtn.onclick = (e) => {
       e.stopPropagation();
       trackPanelAnalytics("wallet_disconnected");
@@ -655,7 +675,8 @@ function addHeader(
       dcBtn.innerHTML = `<span class="knoww-tp-spinner" style="width:14px;height:14px;display:inline-block"></span>`;
       dcBtn.style.pointerEvents = "none";
       dcBtn.style.opacity = "0.7";
-      dcBtn.title = "Disconnecting…";
+      dcBtn.title = "Disconnecting your wallet...";
+      dcBtn.setAttribute("aria-label", "Disconnecting your wallet...");
       void TradingService.disconnect().catch(() => {
         TradingService.reset();
         CredentialManager.clear(address).catch(() => {});
@@ -679,7 +700,13 @@ function addHeader(
 }
 
 function connectMobileWallet(btn?: HTMLElement): void {
-  if (btn) setButtonLoading(btn, "Preparing QR…");
+  if (btn) {
+    setButtonLoading(btn, [
+      "Opening your wallet...",
+      "Preparing your connection...",
+      "Checking the connection for you...",
+    ]);
+  }
   trackPanelAnalytics("wallet_connect_clicked", {
     walletProvider: "walletconnect_mobile",
   });
@@ -696,7 +723,7 @@ function addMobileWalletPairing(p: HTMLElement): void {
       "knoww-tp-connect-msg",
       mobileState.qrUri
         ? "Scan with MetaMask Mobile or any WalletConnect wallet"
-        : "Preparing mobile wallet connection…"
+        : "Opening your mobile wallet..."
     )
   );
 
@@ -771,8 +798,11 @@ function addDisconnected(p: HTMLElement): void {
       item.innerHTML = `<img src="${escapeHtml(w.icon)}" alt="" class="knoww-tp-wallet-item-icon" /><span>${escapeHtml(w.name)}</span>`;
       item.onclick = (e) => {
         e.stopPropagation();
-        item.style.opacity = "0.6";
-        item.style.pointerEvents = "none";
+        setButtonLoading(item, [
+          `Connecting to ${w.name}...`,
+          "Check your wallet to continue...",
+          "Complete the connection when you're ready...",
+        ]);
         trackPanelAnalytics("wallet_connect_clicked", {
           walletProvider: w.rdns || w.name,
         });
@@ -791,7 +821,11 @@ function addDisconnected(p: HTMLElement): void {
     );
     btn.onclick = (e) => {
       e.stopPropagation();
-      setButtonLoading(btn, "Connecting…");
+      setButtonLoading(btn, [
+        "Connecting your wallet...",
+        "Check your wallet to continue...",
+        "Complete the connection when you're ready...",
+      ]);
       trackPanelAnalytics("wallet_connect_clicked", {
         walletProvider: "auto_select",
       });
@@ -840,14 +874,16 @@ function addDisconnected(p: HTMLElement): void {
   p.appendChild(s);
 }
 
-function addLoading(p: HTMLElement, text: string): void {
+function addLoading(p: HTMLElement, text: LoadingMessageInput): void {
   const s = el("div", "knoww-tp-loading-section");
   s.appendChild(el("div", "knoww-tp-spinner"));
-  s.appendChild(el("div", "knoww-tp-loading-text", text));
+  const label = el("div", "knoww-tp-loading-text");
+  s.appendChild(label);
   p.appendChild(s);
+  startLoadingMessageSequence(label, text);
 }
 
-// Bounds the "Loading trading wallet…" spinner (isDeployed still unknown):
+// Bounds the account lookup spinner (isDeployed still unknown):
 // under a sustained RPC outage the resolve never settles, and without a
 // deadline a returning credentialed user is stuck on the spinner forever.
 const WALLET_RESOLVE_SPINNER_TIMEOUT_MS = 15_000;
@@ -980,7 +1016,11 @@ function render(
       addMobileWalletPairing(panel);
       return;
     }
-    addLoading(panel, "Connecting wallet...");
+    addLoading(panel, [
+      "Connecting your wallet...",
+      "Check your wallet to continue...",
+      "Complete the connection when you're ready...",
+    ]);
     return;
   }
   if (state === "switching-chain") {
@@ -988,7 +1028,11 @@ function render(
     return;
   }
   if (state === "restoring-session") {
-    addLoading(panel, "Restoring trading session…");
+    addLoading(panel, [
+      "Restoring your session...",
+      "Checking your account details...",
+      "Getting everything ready for you...",
+    ]);
     return;
   }
 
@@ -1009,7 +1053,11 @@ function render(
   }
 
   if (state === "deploying") {
-    addLoading(panel, "Deploying your trading wallet…");
+    addLoading(panel, [
+      "Creating your account...",
+      "Setting up your trading access...",
+      "Preparing your account for you...",
+    ]);
     return;
   } else if (ctx.isDeployed === null && ctx.proxyAddress) {
     // Initial on-chain deployment check still in flight (first balance fetch).
@@ -1031,7 +1079,11 @@ function render(
         rerender();
       }, WALLET_RESOLVE_SPINNER_TIMEOUT_MS - waitedMs);
     }
-    addLoading(panel, "Loading trading wallet…");
+    addLoading(panel, [
+      "Opening your trading account...",
+      "Checking your account details...",
+      "Getting your account ready for you...",
+    ]);
     return;
   } else if (
     ctx.proxyAddress &&
@@ -1040,18 +1092,26 @@ function render(
     ctx.approvalReadStatus !== "complete" &&
     setupSurfaceMode !== "complete"
   ) {
-    addLoading(panel, "Checking approvals...");
+    addLoading(panel, "Checking your trading setup...");
     return;
   } else if (state === "deriving-credentials") {
     // CLOB credential signing is in flight — show the neutral spinner, not the
     // setup flow (which would otherwise render since credentials aren't set yet).
-    addLoading(panel, "Confirm signature in your wallet...");
+    addLoading(panel, [
+      "Sign in your wallet...",
+      "Check your wallet for the signature...",
+      "Complete the signature when you're ready...",
+    ]);
     return;
   } else if (state === "approving" && setupSurfaceMode !== "complete") {
     // Approval signature in flight from the setup wizard — a re-render must
     // not rebuild a clickable Approve button mid-signature (double submit).
     // Fully-onboarded users fall through to the order form instead.
-    addLoading(panel, "Confirm approval in your wallet...");
+    addLoading(panel, [
+      "Approve in your wallet...",
+      "Check your wallet for the approval...",
+      "Complete the approval when you're ready...",
+    ]);
     return;
   } else if (
     setupSurfaceMode === "wizard" &&

@@ -1,4 +1,5 @@
 import { isPriceCentsWithinDisplayCap } from "../content/market-price-filter";
+import { startLoadingMessageSequence } from "../loading-messages";
 import { type RuntimeResponse, sendRuntimeMessage } from "./messaging";
 import { escapeHtml } from "./shared";
 
@@ -194,7 +195,7 @@ export function renderMarketsSurface(): string {
       <input type="text" class="knoww-search-input" id="knoww-search-input" placeholder="Search Polymarket..." autocomplete="off" />
       <button type="button" class="knoww-search-clear" id="knoww-search-clear" aria-label="Clear search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
     </div><div class="knoww-search-results" id="knoww-search-results"></div></div>
-    <div class="knoww-stack-content knoww-sidepanel-panel" data-sidepanel-markets><div class="knoww-stack-items" data-sidepanel-items><div class="knoww-stack-empty"><span class="knoww-stack-empty-title">Loading markets</span></div></div></div>`;
+    <div class="knoww-stack-content knoww-sidepanel-panel" data-sidepanel-markets><div class="knoww-stack-items" data-sidepanel-items><div class="knoww-stack-empty"><span class="knoww-stack-empty-title" data-sidepanel-markets-loading>Finding markets for you...</span></div></div></div>`;
 }
 
 export function renderMarketsFooter(): string {
@@ -225,22 +226,46 @@ export function installMarkets(
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let currentSearchQuery = "";
   let searchGeneration = 0;
+  let stopSearchMessages: (() => void) | null = null;
+
+  const initialLoading = root.querySelector<HTMLElement>(
+    "[data-sidepanel-markets-loading]"
+  );
+  const stopInitialLoading = initialLoading
+    ? startLoadingMessageSequence(initialLoading, [
+        "Finding markets for you...",
+        "Checking the latest activity...",
+        "Bringing the latest markets to you...",
+      ])
+    : () => {};
+
+  const stopSearchStatus = (): void => {
+    stopSearchMessages?.();
+    stopSearchMessages = null;
+  };
 
   const refresh = async (): Promise<void> => {
-    const response = await ports.send({
-      type: "KNOWW_GET_NOTIFICATION_STACK_SNAPSHOT",
-      trendingLimit: 5,
-    });
     const items = root.querySelector<HTMLElement>("[data-sidepanel-items]");
     const live = root.querySelector<HTMLElement>("[data-sidepanel-live]");
     if (!items) return;
-    if (live) live.textContent = formatLiveTimeLabel();
-    if (response.ok === false) {
+    try {
+      const response = await ports.send({
+        type: "KNOWW_GET_NOTIFICATION_STACK_SNAPSHOT",
+        trendingLimit: 5,
+      });
+      if (live) live.textContent = formatLiveTimeLabel();
+      if (response.ok === false) {
+        items.innerHTML =
+          '<div class="knoww-stack-empty"><span class="knoww-stack-empty-title">No supported page connected</span><span class="knoww-stack-empty-sub">Open a page with Knoww markets and refresh this sidebar.</span></div>';
+        return;
+      }
+      items.innerHTML = renderSnapshotSections(getSnapshotPayload(response));
+    } catch {
       items.innerHTML =
-        '<div class="knoww-stack-empty"><span class="knoww-stack-empty-title">No supported page connected</span><span class="knoww-stack-empty-sub">Open a page with Knoww markets and refresh this sidebar.</span></div>';
-      return;
+        '<div class="knoww-stack-empty"><span class="knoww-stack-empty-title">Couldn\'t load markets</span><span class="knoww-stack-empty-sub">We\'ll try again shortly.</span></div>';
+    } finally {
+      stopInitialLoading();
     }
-    items.innerHTML = renderSnapshotSections(getSnapshotPayload(response));
   };
 
   const searchInput = root.querySelector<HTMLInputElement>(
@@ -252,23 +277,39 @@ export function installMarkets(
     currentSearchQuery = query;
     const generation = ++searchGeneration;
     if (searchTimer) clearTimeout(searchTimer);
+    stopSearchStatus();
     if (!results) return;
     if (query.length < 2) {
       results.replaceChildren();
       return;
     }
-    results.innerHTML = '<div class="knoww-search-loading">Searching...</div>';
+    const loading = document.createElement("div");
+    loading.className = "knoww-search-loading";
+    results.replaceChildren(loading);
+    stopSearchMessages = startLoadingMessageSequence(loading, [
+      "Searching markets for you...",
+      "Checking market matches for you...",
+      "Preparing your results...",
+    ]);
     searchTimer = setTimeout(() => {
       void ports
         .send({ type: "KNOWW_SEARCH_NOTIFICATION_MARKETS", query })
         .then((response) => {
           if (generation !== searchGeneration || currentSearchQuery !== query)
             return;
+          stopSearchStatus();
           const found =
             response.ok === false ? [] : getSearchResultsPayload(response);
           results.innerHTML = found.length
             ? renderMarketRows(found, "trending")
             : '<div class="knoww-search-empty">No markets found</div>';
+        })
+        .catch(() => {
+          if (generation !== searchGeneration || currentSearchQuery !== query)
+            return;
+          stopSearchStatus();
+          results.innerHTML =
+            '<div class="knoww-search-empty">Search failed. Try again.</div>';
         });
     }, SEARCH_DEBOUNCE_MS);
   };
@@ -288,6 +329,7 @@ export function installMarkets(
     }
     if (target?.closest("#knoww-search-clear")) {
       if (searchTimer) clearTimeout(searchTimer);
+      stopSearchStatus();
       currentSearchQuery = "";
       searchGeneration++;
       root.querySelector("#knoww-search-results")?.replaceChildren();
@@ -370,6 +412,8 @@ export function installMarkets(
     refresh,
     dispose() {
       searchGeneration++;
+      stopInitialLoading();
+      stopSearchStatus();
       if (searchTimer) clearTimeout(searchTimer);
       if (refreshTimer) clearInterval(refreshTimer);
       searchInput?.removeEventListener("input", onSearchInput);

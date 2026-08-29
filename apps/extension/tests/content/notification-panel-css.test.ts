@@ -598,7 +598,7 @@ test("notification empty and seen-earlier states expose clearer actions", () => 
   const uiSource = readSource("src/content/ui/notifications.ts");
   const css = readInlineCss();
 
-  assert.equal(/No markets found on this page yet/.test(uiSource), true);
+  assert.equal(/Checking this page for markets\.\.\./.test(uiSource), true);
   // The "Browse trending" CTA was removed from the empty state (market
   // browsing lives in the sidebar now) — lock the removal so the dead
   // affordance doesn't creep back without its handler.

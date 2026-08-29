@@ -21,6 +21,7 @@ import {
   createSidepanelFundingGateway,
   type SidepanelWalletTokenSource,
 } from "../funding/gateways/sidepanel-gateway";
+import { startLoadingMessageSequence } from "../loading-messages";
 import { sendRuntimeMessage } from "./messaging";
 import {
   escapeHtml,
@@ -725,6 +726,8 @@ export function createFundingUi(
   let fundFlow: PortfolioFundAction | null = null;
   let fundDepositSource: "wallet" | "cross-chain" = "wallet";
   let lastFundScreenKey: string | null = null;
+  let stopFundProbeMessages: (() => void) | null = null;
+  let stopFundStatusMessages: (() => void) | null = null;
   // Bumped by every open and by every teardown (close / reset / account change /
   // post-submit refresh). The async wallet-mode probe in openPortfolioFunds
   // compares against it so a stale probe can never dispatch into a view the user
@@ -787,7 +790,7 @@ export function createFundingUi(
     btn.disabled = loading;
     if (labelEl) {
       labelEl.textContent = loading
-        ? (loadingLabel ?? "Working…")
+        ? (loadingLabel ?? "Checking your request...")
         : btn.dataset.idleLabel || labelEl.textContent || "";
     }
   }
@@ -869,7 +872,7 @@ export function createFundingUi(
       <div class="knoww-pf-fund-field-top"><span>${escapeHtml(label)}</span></div>
       <div class="knoww-pf-fund-select">
         <select ${dataAttr} aria-label="${escapeHtml(label)}">
-          <option value="">Loading…</option>
+          <option value="">Finding available assets for you...</option>
         </select>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
       </div>
@@ -1033,7 +1036,7 @@ export function createFundingUi(
   ): string {
     let body: string;
     if (state.loading) {
-      body = `<div class="knoww-pf-fund-status is-info">Loading your wallet…</div>`;
+      body = `<div class="knoww-pf-fund-status is-info">Checking your wallet...</div>`;
     } else if (state.error) {
       body = `<div class="knoww-pf-fund-status is-error">${escapeHtml(fundErrorCopy(state.error))}</div>`;
     } else if (state.tokens.length === 0) {
@@ -1147,6 +1150,10 @@ export function createFundingUi(
    * `isFundViewOpen` invariant above intact. */
   function resetFundOpenState(): void {
     cancelFundOpen();
+    stopFundProbeMessages?.();
+    stopFundProbeMessages = null;
+    stopFundStatusMessages?.();
+    stopFundStatusMessages = null;
     fundFlow = null;
     fundDepositSource = "wallet";
     lastFundScreenKey = null;
@@ -1485,7 +1492,7 @@ export function createFundingUi(
       if (state.quoteLoading) {
         setPortfolioWithdrawQuote(
           "info",
-          `<div class="knoww-pf-withdraw-quote-row"><span>Route</span><strong>Checking quote...</strong></div>`
+          `<div class="knoww-pf-withdraw-quote-row"><span>Route</span><strong>Getting your quote...</strong></div>`
         );
       } else if (state.error?.code === "QUOTE_FAILED") {
         setPortfolioWithdrawQuote(
@@ -1506,7 +1513,7 @@ export function createFundingUi(
       return;
     }
     if (state.quoteLoading) {
-      setFundSubmitLoading(true, "Getting quote…");
+      setFundSubmitLoading(true, "Getting your quote...");
       return;
     }
     setFundSubmitLoading(false);
@@ -1514,24 +1521,47 @@ export function createFundingUi(
 
   function syncFundProgress(state: FundingState): void {
     const action = fundFlow ?? "deposit";
+    stopFundStatusMessages?.();
+    stopFundStatusMessages = null;
     if (state.step === "submitting" || state.step === "confirming") {
       const flow = state.command.flow;
       setFundSubmitLoading(
         true,
-        flow === "deposit" ? "Depositing…" : "Withdrawing…"
+        flow === "deposit"
+          ? "Depositing your funds..."
+          : "Withdrawing your funds..."
       );
       if (state.step === "submitting") {
-        setPortfolioFundStatus(
-          "info",
-          "Confirm the transaction in your wallet…"
-        );
+        setPortfolioFundStatus("info", "Confirm in your wallet...");
       } else if (flow === "withdraw") {
-        setPortfolioFundStatus(
-          "info",
-          "Withdrawal sent. Waiting for completion…"
-        );
+        setPortfolioFundStatus("info", "Your withdrawal is on the way...");
       } else {
-        setPortfolioFundStatus("info", "Processing your deposit…");
+        setPortfolioFundStatus("info", "Your deposit is on the way...");
+      }
+      const status =
+        getPortfolioContainer()?.querySelector<HTMLElement>(
+          "[data-fund-status]"
+        );
+      if (status) {
+        const messages =
+          state.step === "submitting"
+            ? [
+                "Confirm in your wallet...",
+                "Check your wallet to continue...",
+                "Complete the confirmation when you're ready...",
+              ]
+            : flow === "withdraw"
+              ? [
+                  "Your withdrawal is on the way...",
+                  "Checking your withdrawal...",
+                  "Updating the status for you...",
+                ]
+              : [
+                  "Your deposit is on the way...",
+                  "Checking your deposit...",
+                  "Updating your balance for you...",
+                ];
+        stopFundStatusMessages = startLoadingMessageSequence(status, messages);
       }
       return;
     }
@@ -1671,7 +1701,11 @@ export function createFundingUi(
       <button type="button" class="knoww-pf-fund-submit primary" data-portfolio-fund="${action}">
         <span class="knoww-pf-submit-label">Retry</span>
       </button>`
-      : `<div class="knoww-portfolio-loading">Loading…</div>`;
+      : `<div class="knoww-portfolio-loading" data-fund-probe-loading>${
+          action === "deposit"
+            ? "Preparing your deposit..."
+            : "Preparing your withdrawal..."
+        }</div>`;
     return `
     <div class="knoww-pf-fund" data-fund-probe>
       <div class="knoww-pf-fund-head">
@@ -1779,10 +1813,31 @@ export function createFundingUi(
     // The signing wallet mode must be known before START (the machine threads it
     // into the command fingerprint). Resolving it is async, so show a brief
     // loading state instead of a blank flash.
+    stopFundProbeMessages?.();
     container.innerHTML = renderFundProbe(action);
+    const probeStatus = container.querySelector<HTMLElement>(
+      "[data-fund-probe-loading]"
+    );
+    if (probeStatus) {
+      stopFundProbeMessages = startLoadingMessageSequence(probeStatus, [
+        action === "deposit"
+          ? "Preparing your deposit..."
+          : "Preparing your withdrawal...",
+        "Checking your wallet setup...",
+        action === "deposit"
+          ? "Getting the deposit ready for you..."
+          : "Getting the withdrawal ready for you...",
+      ]);
+    }
     void (async () => {
       const walletMode = await resolveFundWalletMode(address);
-      if (token !== fundOpenToken) return; // closed or reopened during the probe
+      if (token !== fundOpenToken) {
+        stopFundProbeMessages?.();
+        stopFundProbeMessages = null;
+        return;
+      }
+      stopFundProbeMessages?.();
+      stopFundProbeMessages = null;
       const target = getPortfolioContainer();
       // If some external render replaced the probe screen anyway, releasing the
       // view beats painting a funding screen over foreign content. The machine

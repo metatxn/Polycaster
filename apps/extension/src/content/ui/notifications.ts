@@ -1,5 +1,6 @@
 import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import { Decimal } from "decimal.js";
+import { startLoadingMessageSequence } from "../../loading-messages";
 import type {
   InjectedMarketEntry,
   Market,
@@ -60,13 +61,18 @@ export function createStreamBetHost(market: Market): HTMLElement {
   let handle: StreamBetHandle | null = null;
   let disposed = false;
   let attempt = 0;
+  let stopLoadingMessages: (() => void) | null = null;
 
   const renderLoading = (): void => {
+    stopLoadingMessages?.();
     const status = document.createElement("div");
     status.className = "knoww-stream-bet-loading";
-    status.setAttribute("role", "status");
-    status.textContent = "Loading trading…";
     host.replaceChildren(status);
+    stopLoadingMessages = startLoadingMessageSequence(status, [
+      "Getting trading ready for you...",
+      "Checking your trading setup...",
+      "Preparing your trading controls...",
+    ]);
   };
 
   const startHydration = async (): Promise<void> => {
@@ -75,6 +81,10 @@ export function createStreamBetHost(market: Market): HTMLElement {
     renderLoading();
     try {
       const runtime = await streamTradingRuntimePort.load();
+      if (currentAttempt === attempt) {
+        stopLoadingMessages?.();
+        stopLoadingMessages = null;
+      }
       if (disposed || currentAttempt !== attempt || !host.isConnected) return;
       const nextHandle = runtime.hydrateStreamBet(host, {
         market,
@@ -91,6 +101,8 @@ export function createStreamBetHost(market: Market): HTMLElement {
       handle = nextHandle;
     } catch {
       if (disposed || currentAttempt !== attempt || !host.isConnected) return;
+      stopLoadingMessages?.();
+      stopLoadingMessages = null;
       const error = document.createElement("div");
       error.className = "knoww-stream-bet-load-error";
       const message = document.createElement("span");
@@ -112,6 +124,8 @@ export function createStreamBetHost(market: Market): HTMLElement {
       if (disposed) return;
       disposed = true;
       attempt += 1;
+      stopLoadingMessages?.();
+      stopLoadingMessages = null;
       handle?.dispose();
       handle = null;
       streamControllers.delete(host);
@@ -959,12 +973,12 @@ export function createNotificationStack(): HTMLElement {
     <div class="knoww-stack-scanning" data-knoww-scanning>
       <div class="knoww-stack-empty-title-row">
         <span class="knoww-stack-empty-pulse" aria-hidden="true"></span>
-        <span class="knoww-stack-empty-title">No markets found on this page yet</span>
+        <span class="knoww-stack-empty-title">Checking this page for markets...</span>
         <span class="knoww-stack-empty-dots" aria-hidden="true">
           <span></span><span></span><span></span>
         </span>
       </div>
-      <span class="knoww-stack-empty-sub">Scroll your feed to discover matches &mdash; browse markets from the Knoww sidebar.</span>
+      <span class="knoww-stack-empty-sub">Keep browsing. We'll add matches here.</span>
     </div>
   `;
 
@@ -982,6 +996,17 @@ export function createNotificationStack(): HTMLElement {
   const welcomeDismissBtn = emptyState.querySelector<HTMLButtonElement>(
     "[data-knoww-welcome-dismiss]"
   );
+
+  const scanningTitle = scanningEl?.querySelector<HTMLElement>(
+    ".knoww-stack-empty-title"
+  );
+  if (!isStreamSurface() && scanningTitle) {
+    startLoadingMessageSequence(scanningTitle, [
+      "Checking this page for markets...",
+      "Looking for relevant matches for you...",
+      "Keep browsing. We're checking this page for you...",
+    ]);
+  }
 
   let dismissWelcome: (() => void) | null = null;
 
@@ -1154,6 +1179,12 @@ function setupSearchFunctionality(
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
   let isSearchOpen = false;
   let currentSearchQuery = ""; // Track current query to ignore stale results
+  let stopSearchMessages: (() => void) | null = null;
+
+  const stopSearchStatus = (): void => {
+    stopSearchMessages?.();
+    stopSearchMessages = null;
+  };
 
   toggleBtn.onclick = () => {
     const stack = container.closest<HTMLElement>(".knoww-notification-stack");
@@ -1175,14 +1206,16 @@ function setupSearchFunctionality(
       input.focus();
       clearBtn.style.display = "flex";
     } else {
+      stopSearchStatus();
       input.value = "";
-      resultsContainer.innerHTML = "";
+      resultsContainer.replaceChildren();
       clearBtn.style.display = "none";
       currentSearchQuery = "";
     }
   };
 
   clearBtn.onclick = () => {
+    stopSearchStatus();
     void window.KNOWW_ANALYTICS?.track("extension_search_cleared");
     if (input.value.trim() === "") {
       isSearchOpen = false;
@@ -1192,7 +1225,7 @@ function setupSearchFunctionality(
       currentSearchQuery = "";
     } else {
       input.value = "";
-      resultsContainer.innerHTML = "";
+      resultsContainer.replaceChildren();
       input.focus();
       currentSearchQuery = "";
     }
@@ -1201,18 +1234,25 @@ function setupSearchFunctionality(
   input.oninput = () => {
     const query = input.value.trim();
     currentSearchQuery = query;
+    stopSearchStatus();
 
     if (searchTimeout) {
       clearTimeout(searchTimeout);
     }
 
     if (query.length < 2) {
-      resultsContainer.innerHTML = "";
+      resultsContainer.replaceChildren();
       return;
     }
 
-    resultsContainer.innerHTML =
-      '<div class="knoww-search-loading">Searching...</div>';
+    const loading = document.createElement("div");
+    loading.className = "knoww-search-loading";
+    resultsContainer.replaceChildren(loading);
+    stopSearchMessages = startLoadingMessageSequence(loading, [
+      "Searching markets for you...",
+      "Checking market matches for you...",
+      "Preparing your results...",
+    ]);
 
     const searchQuery = query; // Capture query for this search request
     searchTimeout = setTimeout(async () => {
@@ -1228,6 +1268,7 @@ function setupSearchFunctionality(
         if (currentSearchQuery !== searchQuery) {
           return;
         }
+        stopSearchStatus();
 
         if (events.length === 0) {
           resultsContainer.innerHTML =
@@ -1245,12 +1286,13 @@ function setupSearchFunctionality(
         if (currentSearchQuery !== searchQuery) {
           return;
         }
+        stopSearchStatus();
         void window.KNOWW_ANALYTICS?.track("extension_search_failed", {
           query: searchQuery,
         });
         log("Search error:", e);
         resultsContainer.innerHTML =
-          '<div class="knoww-search-empty">Search failed</div>';
+          '<div class="knoww-search-empty">Search failed. Try again.</div>';
       }
     }, 300);
   };
@@ -1264,6 +1306,7 @@ function setupSearchFunctionality(
     ) {
       void window.KNOWW_ANALYTICS?.track("extension_search_dismissed");
       isSearchOpen = false;
+      stopSearchStatus();
       container.classList.remove("knoww-search-open");
       toggleBtn.classList.remove("knoww-search-active");
     }

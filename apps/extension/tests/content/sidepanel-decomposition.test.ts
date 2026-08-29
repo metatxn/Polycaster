@@ -195,6 +195,7 @@ describe("sidepanel decomposition", () => {
       open: vi.fn(),
     });
     root.addEventListener("click", (event) => handle.handleClick(event));
+    await Promise.resolve();
     expect(vi.getTimerCount()).toBe(1);
 
     const minimize = root.querySelector<HTMLButtonElement>(

@@ -18,6 +18,10 @@ import {
   parsePusdUnits,
 } from "@knoww/shared-types/trading";
 import { Decimal } from "decimal.js";
+import {
+  type LoadingMessageInput,
+  startLoadingMessageSequence,
+} from "../../../loading-messages";
 import type { ClobOrderType } from "../../../types/chrome-messages";
 import { balanceChanged } from "../../ui/outcome-balances";
 import { type TradingContext, TradingService } from "../trading-service";
@@ -96,6 +100,17 @@ function elHtml<K extends keyof HTMLElementTagNameMap>(
   html: string
 ): HTMLElementTagNameMap[K] {
   return requireUi().elHtml(tag, cls, html);
+}
+function setSubmitLoading(
+  button: HTMLButtonElement,
+  messages: LoadingMessageInput
+): void {
+  const spinner = el("span", "knoww-tp-submit-spinner");
+  const label = el("span");
+  button.replaceChildren(spinner, label);
+  startLoadingMessageSequence(label, messages);
+  button.disabled = true;
+  button.classList.add("loading");
 }
 function rerender(): void {
   requireUi().rerender();
@@ -609,7 +624,7 @@ export function refreshDynamicUI(): void {
       posIndicator.textContent = info.label;
       posIndicator.className = `knoww-tp-order-position ${info.cls}`;
     } else if (!hasCurrentOrderBook(ctx, opts) || !ctx.orderBook) {
-      posIndicator.textContent = "Loading order book...";
+      posIndicator.textContent = "Checking live prices for you...";
       posIndicator.className = "knoww-tp-order-position muted";
     } else if (ctx.orderBookError) {
       posIndicator.textContent = "Order book unavailable";
@@ -1033,7 +1048,11 @@ function addLimitPrice(
     );
   } else if (!hasCurrentOrderBook(ctx, opts) || !ctx.orderBook) {
     section.appendChild(
-      el("div", "knoww-tp-order-position muted", "Loading order book...")
+      el(
+        "div",
+        "knoww-tp-order-position muted",
+        "Checking live prices for you..."
+      )
     );
   } else if (ctx.orderBookError) {
     section.appendChild(
@@ -1499,7 +1518,7 @@ function addOrderSummary(
         "span",
         "knoww-tp-summary-value",
         orderBookStatus === "loading"
-          ? "Loading order book…"
+          ? "Checking live prices for you..."
           : "Order book unavailable"
       )
     );
@@ -1740,28 +1759,35 @@ function addSubmitButton(
   btn.setAttribute("type", "button");
 
   if (panelState.orderSettling) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Settling...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setSubmitLoading(btn, [
+      "Checking your order...",
+      "Confirming the latest order status...",
+      "Keeping the order status updated for you...",
+    ]);
   } else if (isSubmitting) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> ${state === "approving" ? "Approving..." : "Placing Order..."}`;
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setSubmitLoading(
+      btn,
+      state === "approving"
+        ? [
+            "Approve in your wallet...",
+            "Check your wallet for the approval...",
+            "Complete the approval when you're ready...",
+          ]
+        : [
+            "Placing your order...",
+            "Sending your order to the market...",
+            "Checking the order status for you...",
+          ]
+    );
   } else if (sellBalancesLoading) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Loading position...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setSubmitLoading(btn, "Checking your position...");
   } else if (isCheckingApprovalRequirement) {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Checking allowance...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setSubmitLoading(btn, "Checking trade approval...");
   } else if (noAmount) {
     btn.textContent = "Enter Amount";
     btn.disabled = true;
   } else if (orderBookStatus === "loading") {
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Loading order book...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setSubmitLoading(btn, "Checking live prices for you...");
   } else if (orderBookStatus === "unavailable") {
     btn.textContent = "Order book unavailable";
     btn.disabled = true;
@@ -1901,9 +1927,11 @@ function addSubmitButton(
     }
 
     // Immediately show loading state on the button before the async call
-    btn.innerHTML = `<span class="knoww-tp-submit-spinner"></span> Placing Order...`;
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setSubmitLoading(btn, [
+      "Placing your order...",
+      "Sending your order to the market...",
+      "Checking the order status for you...",
+    ]);
     pauseLivePanelRefresh();
 
     try {

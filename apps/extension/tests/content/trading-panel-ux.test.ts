@@ -107,7 +107,7 @@ test("returning wallet restoration renders a loading state instead of a blank pa
     true
   );
   assert.equal(
-    /state === "restoring-session"[\s\S]{0,160}addLoading\(panel, "Restoring trading session…"\);/.test(
+    /state === "restoring-session"[\s\S]{0,200}"Restoring your session\.\.\."/.test(
       panelSource
     ),
     true
@@ -447,7 +447,7 @@ test("trading card keeps first degraded approval read in a checking state", () =
     true
   );
   assert.equal(
-    /ctx\.approvalReadStatus !== "complete"[\s\S]*Checking approvals/.test(
+    /ctx\.approvalReadStatus !== "complete"[\s\S]*Checking your trading setup/.test(
       panelSource
     ),
     true
@@ -460,7 +460,7 @@ test("trading card does not let approval spinner override persisted setup comple
   assert.notEqual(renderStart, -1);
   const renderSource = panelSource.slice(renderStart);
   const spinnerIndex = renderSource.indexOf(
-    'addLoading(panel, "Checking approvals...'
+    'addLoading(panel, "Checking your trading setup...'
   );
   const setupGateIndex = renderSource.indexOf('setupSurfaceMode === "wizard"');
 
@@ -468,7 +468,7 @@ test("trading card does not let approval spinner override persisted setup comple
   assert.notEqual(setupGateIndex, -1);
   assert.equal(spinnerIndex < setupGateIndex, true);
   assert.equal(
-    /setupSurfaceMode !== "complete"[\s\S]*Checking approvals/.test(
+    /setupSurfaceMode !== "complete"[\s\S]*Checking your trading setup/.test(
       renderSource
     ),
     true

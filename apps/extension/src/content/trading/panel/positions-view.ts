@@ -3,6 +3,10 @@ import {
   normalizeCtfPusdAmount,
 } from "@knoww/shared-types/ctf";
 import {
+  type LoadingMessageInput,
+  startLoadingMessageSequence,
+} from "../../../loading-messages";
+import {
   balanceToNumber,
   formatBalance,
   hasDisplayPosition,
@@ -34,6 +38,19 @@ export interface PositionsViewUiPort {
     type: "success" | "error"
   ): void;
   icons: { back: string; alert: string };
+}
+
+function setPositionActionLoading(
+  button: HTMLButtonElement,
+  messages: LoadingMessageInput,
+  ui: PositionsViewUiPort
+): void {
+  const spinner = ui.el("span", "knoww-tp-submit-spinner");
+  const label = ui.el("span");
+  button.replaceChildren(spinner, label);
+  startLoadingMessageSequence(label, messages);
+  button.disabled = true;
+  button.classList.add("loading");
 }
 
 export function refreshSplitMergeState(
@@ -244,10 +261,15 @@ export function renderSplitForm(
 
   const btn = ui.el("button", "knoww-tp-submit split");
   if (ctx.state === "splitting") {
-    btn.innerHTML =
-      '<span class="knoww-tp-submit-spinner"></span> Splitting...';
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setPositionActionLoading(
+      btn,
+      [
+        "Splitting your pUSD...",
+        "Creating your market shares...",
+        "Checking the new balances for you...",
+      ],
+      ui
+    );
   } else if (!canonicalAmount || !displayAmount) {
     btn.textContent = panelState.splitMergeAmount.trim()
       ? "Invalid Amount"
@@ -380,7 +402,7 @@ export function renderMergeForm(
         "knoww-tp-info-msg",
         panelState.outcomeBalancesLoaded
           ? "Balances unavailable."
-          : "Loading balances..."
+          : "Checking your position..."
       )
     );
   }
@@ -448,16 +470,22 @@ export function renderMergeForm(
 
   const btn = ui.el("button", "knoww-tp-submit merge");
   if (ctx.state === "merging") {
-    btn.innerHTML = '<span class="knoww-tp-submit-spinner"></span> Merging...';
-    btn.disabled = true;
-    btn.classList.add("loading");
+    setPositionActionLoading(
+      btn,
+      [
+        "Merging your shares...",
+        "Returning pUSD to your balance...",
+        "Checking the updated balance for you...",
+      ],
+      ui
+    );
   } else if (!canonicalAmount || !displayAmount) {
     btn.textContent = panelState.splitMergeAmount.trim()
       ? "Invalid Amount"
       : "Enter Amount";
     btn.disabled = true;
   } else if (!panelState.outcomeBalances) {
-    btn.textContent = "Loading Balances";
+    btn.textContent = "Checking your position...";
     btn.disabled = true;
   } else if (exceedsBalance) {
     btn.textContent = "Insufficient Shares";

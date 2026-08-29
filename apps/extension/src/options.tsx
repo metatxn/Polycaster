@@ -5,6 +5,10 @@
 import { createLogger } from "@knoww/logger";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  type LoadingMessageInput,
+  startLoadingMessageUpdates,
+} from "./loading-messages";
 import { scheduleSettingsSave } from "./settings-auto-save";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
@@ -499,9 +503,12 @@ function OptionsApp() {
   const [version] = useState(() => chrome.runtime.getManifest().version);
   const [hasToken, setHasToken] = useState(false);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusSequenceStopRef = useRef<(() => void) | null>(null);
   const skipInitialAutoSaveRef = useRef(true);
 
   const showStatus = useCallback((message: string) => {
+    statusSequenceStopRef.current?.();
+    statusSequenceStopRef.current = null;
     if (statusTimerRef.current !== null) {
       clearTimeout(statusTimerRef.current);
     }
@@ -513,11 +520,33 @@ function OptionsApp() {
     }, 2000);
   }, []);
 
+  const startStatusSequence = useCallback(
+    (messages: LoadingMessageInput): (() => void) => {
+      if (statusTimerRef.current !== null) {
+        clearTimeout(statusTimerRef.current);
+        statusTimerRef.current = null;
+      }
+      setStatusVisible(true);
+      statusSequenceStopRef.current?.();
+      const stopUpdates = startLoadingMessageUpdates(setStatus, messages);
+      statusSequenceStopRef.current = stopUpdates;
+      return () => {
+        stopUpdates();
+        if (statusSequenceStopRef.current === stopUpdates) {
+          statusSequenceStopRef.current = null;
+        }
+      };
+    },
+    []
+  );
+
   useEffect(
     () => () => {
       if (statusTimerRef.current !== null) {
         clearTimeout(statusTimerRef.current);
       }
+      statusSequenceStopRef.current?.();
+      statusSequenceStopRef.current = null;
     },
     []
   );
@@ -571,6 +600,7 @@ function OptionsApp() {
 
   const persistSettings = useCallback(
     (nextSettings: UserSettings) => {
+      showStatus("Saving your changes...");
       chrome.storage.sync.set({ knowwSettings: nextSettings }, () => {
         if (chrome.runtime.lastError) {
           log.error("settings.save_failed", {
@@ -649,6 +679,7 @@ function OptionsApp() {
         "Are you sure you want to disconnect your wallet? You will need to sign in again to trade."
       )
     ) {
+      showStatus("Disconnecting your wallet...");
       chrome.runtime.sendMessage({ type: "auth:logout" }, (response) => {
         if (chrome.runtime.lastError) {
           log.error("auth.logout_failed", {
@@ -670,12 +701,18 @@ function OptionsApp() {
         } else {
           log.error("auth.logout_bad_response", { response });
           setHasToken(false);
+          showStatus("Could not disconnect your wallet.");
         }
       });
     }
   }, [settings.usageAnalyticsEnabled, showStatus]);
 
   const handleExportDiagnostics = useCallback(() => {
+    const stopStatus = startStatusSequence([
+      "Preparing your export...",
+      "Collecting your diagnostics...",
+      "Packaging the report for you...",
+    ]);
     chrome.tabs.query({}, async (tabs) => {
       const inspectableTabs = tabs.filter(
         (tab): tab is chrome.tabs.Tab & { id: number } =>
@@ -715,6 +752,7 @@ function OptionsApp() {
       const respondingTabCount = tabExports.filter(Boolean).length;
 
       if (diagnosticCount === 0) {
+        stopStatus();
         showStatus(
           respondingTabCount === 0
             ? "No content-script diagnostics found. Reload Kalshi and try again."
@@ -739,13 +777,19 @@ function OptionsApp() {
           tabs: tabsWithDiagnostics,
         }
       );
+      stopStatus();
       showStatus(
         `Exported ${eventCount} events and ${feedbackCount} feedback entries.`
       );
     });
-  }, [showStatus, version]);
+  }, [showStatus, startStatusSequence, version]);
 
   const handleClearDiagnostics = useCallback(() => {
+    const stopStatus = startStatusSequence([
+      "Clearing diagnostics...",
+      "Checking the cleanup...",
+      "Refreshing your diagnostics view...",
+    ]);
     chrome.tabs.query({}, async (tabs) => {
       const inspectableTabs = tabs.filter(
         (tab): tab is chrome.tabs.Tab & { id: number } =>
@@ -759,9 +803,10 @@ function OptionsApp() {
           })
         )
       );
+      stopStatus();
       showStatus("Diagnostics cleared.");
     });
-  }, [showStatus]);
+  }, [showStatus, startStatusSequence]);
 
   return (
     <div className="container">
@@ -1075,6 +1120,7 @@ function OptionsApp() {
                   "Clear all personalization data? This cannot be undone."
                 )
               ) {
+                showStatus("Clearing personalization...");
                 chrome.storage.local.remove("knowwPreferences", () => {
                   showStatus("Personalization data cleared!");
                   chrome.tabs.query({}, (tabs) => {

@@ -9,6 +9,7 @@ import {
   type LoadingMessageInput,
   startLoadingMessageUpdates,
 } from "./loading-messages";
+import { describeRelevanceThreshold } from "./relevance-threshold-policy";
 import { scheduleSettingsSave } from "./settings-auto-save";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
@@ -879,13 +880,10 @@ function OptionsApp() {
       <Section title="Display Settings">
         <SettingRow
           label="Relevance Threshold"
-          description={
-            settings.relevanceThreshold <= 0.3
-              ? "Shows more markets, but some might be loosely related to the post."
-              : settings.relevanceThreshold >= 0.6
-                ? "Shows fewer markets, but they will be highly accurate matches."
-                : "Balanced: Shows a good mix of relevant markets."
-          }
+          description={describeRelevanceThreshold(
+            settings.relevanceThreshold,
+            settings.aiExtractionEnabled
+          )}
         >
           <div className="range-container">
             <input

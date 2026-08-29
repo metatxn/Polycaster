@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   buildMarketGateText,
   CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
+  describeRelevanceThreshold,
   determineScoringMode,
   evaluateCandidateGate,
   getEffectiveThreshold,
@@ -138,6 +139,27 @@ test("getEffectiveThreshold only floors hybrid mode", () => {
   assert.equal(getEffectiveThreshold(0.62, "hybrid"), 0.62);
   assert.equal(getEffectiveThreshold(0.45, "lexical"), 0.45);
   assert.equal(getEffectiveThreshold(0.45, "heuristic"), 0.45);
+});
+
+test("threshold disclosure explains the effective floor when AI matching is off", () => {
+  assert.equal(
+    describeRelevanceThreshold(0.3, false),
+    "Configured threshold: 0.30. AI-assisted matching is off, so the validator fallback rejects scores below 0.50."
+  );
+});
+
+test("threshold disclosure distinguishes AI-approved non-hybrid matches", () => {
+  assert.equal(
+    describeRelevanceThreshold(0.3, true),
+    "Configured threshold: 0.30. Hybrid matching and the validator fallback require 0.50. AI-approved lexical or heuristic matches can use 0.30."
+  );
+});
+
+test("threshold disclosure reports the configured value when it is already strict", () => {
+  assert.equal(
+    describeRelevanceThreshold(0.6, false),
+    "Configured threshold: 0.60. All scoring paths require at least 0.60."
+  );
 });
 
 test("buildMarketGateText keeps nested markets opt-in to preserve default platform scoring", () => {

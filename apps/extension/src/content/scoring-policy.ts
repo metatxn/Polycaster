@@ -1,11 +1,15 @@
+import {
+  describeRelevanceThreshold,
+  EMBEDDING_FLOOR,
+  FAIL_OPEN_FLOOR,
+} from "../relevance-threshold-policy";
 import type { ContextGateResult } from "../types/chrome-messages";
 import type { Market } from "../types/market";
 import { buildMarketContextText } from "./market-context";
 
 export type ScoringMode = "hybrid" | "lexical" | "heuristic";
 
-export const EMBEDDING_FLOOR = 0.5;
-export const FAIL_OPEN_FLOOR = 0.5;
+export { describeRelevanceThreshold, EMBEDDING_FLOOR, FAIL_OPEN_FLOOR };
 export const AI_GATE_RETRY_FLOOR = 0.6;
 export const HEURISTIC_STRICT_SHARED_NOUNS = 3;
 export const HIGH_PRECISION_SINGLE_SIGNAL_FLOOR = 0.7;

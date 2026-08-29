@@ -1,6 +1,6 @@
 # Browser extension context-matching model review
 
-**Status:** Findings and recommendations. No implementation changes are included in this report.
+**Status:** Findings, recommendations, and implementation tracking. The first behavior-preserving threshold disclosure was implemented on the review branch on 2026-08-29.
 
 **Reviewed:** 2026-08-29
 
@@ -16,7 +16,7 @@ The extension has the right broad pieces, but they are connected in a way that l
 - Candidate recall is the first ceiling for posts without a direct market URL. Polymarket search requests only eight events, and the combined search-derived path allows at most ten markets to reach local scoring. Direct-link markets are resolved separately. A better local model cannot recover a search candidate that was never returned.
 - The market representation often omits child outcomes, dates, and resolution details. Those fields frequently distinguish the correct prediction market from a topically similar one.
 - BM25, dense similarity, and hand-written gates use incompatible score scales and fixed thresholds. The current combined score is not a probability, even though the UI displays it as a match percentage.
-- The configured default threshold is `0.3`, but the effective default floor is `0.5` in every scoring mode because the disabled AI validator returns no result and triggers a separate fail-open rule.
+- The configured default threshold is `0.3`, but the effective default floor is `0.5` in every scoring mode because the disabled AI validator returns no result and triggers a separate fail-open rule. The first remediation now discloses this split in settings; matching behavior is unchanged.
 - The checked-in benchmark is too small and too easy to select a replacement model. All tested configurations already achieve a 100 percent Hit@1 rate on 20 hand-written cases.
 
 My recommendation is to keep Arctic Embed S as the default first-stage model, promote MiniLM to a production top-K reranker, and turn Wink from a hard decision-maker into one set of features among several. Fix retrieval breadth, candidate text, lexical normalization, and threshold calibration before changing the default embedding model.
@@ -430,17 +430,17 @@ When any BM25 score is nonzero, hybrid mode uses 70 percent embedding and 30 per
 
 **Recommendation:** Measure and calibrate each mode separately. Replace the displayed percentage with a calibrated probability or a non-numeric relevance label.
 
-#### K7. The configured threshold is silently raised to 0.5 in every mode
+#### K7. The default path raises the configured threshold to 0.5 in every mode
 
 **Priority:** P0
 
-**Evidence:** `apps/extension/src/types/settings.ts:164-179`, `apps/extension/src/content/scoring-policy.ts:7-8` and `:771-785`, `apps/extension/src/content/api.ts:2311-2319`, and `apps/extension/src/content/injection.ts:1677-1739`.
+**Evidence:** `apps/extension/src/types/settings.ts:164-179`, `apps/extension/src/relevance-threshold-policy.ts:1-30`, `apps/extension/src/content/scoring-policy.ts:775-788`, `apps/extension/src/content/api.ts:2311-2319`, `apps/extension/src/content/injection.ts:1693-1734`, and `apps/extension/src/options.tsx:881-906`.
 
 The default user threshold is `0.3`. Hybrid mode directly applies `max(0.5, configuredThreshold)`. Lexical and heuristic candidates still enter the validation loop; with AI disabled, the validator returns no result and the unavailable-validator rule rejects scores below `0.5`.
 
-**Effect:** The effective default minimum is `0.5` in every scoring mode. The user setting does not control the behavior it claims to control, and valid candidates between `0.3` and `0.5` are silently removed.
+**Effect:** The effective default minimum is `0.5` in every scoring mode. The user setting does not fully control the matching behavior, and valid candidates between `0.3` and `0.5` are removed. The settings page now explains the effective floor, so this is no longer hidden from the user.
 
-**Recommendation:** Remove the unrelated unavailable-validator floor from the AI-disabled path. Then replace the single raw-score setting with a calibrated product-level sensitivity control, or map sensitivity levels to explicit per-mode thresholds.
+**Recommendation:** Split the fix. First, disclose the configured and effective thresholds without changing matching behavior. That change is implemented in commit `5a47be9`. Do not lower the unavailable-validator floor until the evaluation set includes real no-match cases and measures false positives by scoring mode. A later change can remove or recalibrate the floor using those results. The final UI should replace the raw score with a product-level sensitivity control or explicit per-mode thresholds.
 
 #### K8. Model revisions are not pinned
 
@@ -636,7 +636,7 @@ The checked-in harness runs under Node against locally cached model files. It do
 
 **Evidence:** `apps/extension/src/content/relevance-telemetry.ts:51-65` and `:146-180`.
 
-Detailed relevance telemetry is enabled only in debug mode, held in memory, capped at 500 events, and available through manual export.
+Detailed relevance telemetry is enabled only in debug mode, held in memory, capped at 500 events, and available through manual export. Existing per-post counters are also debug-only. They cannot support a week-long production baseline in their current form.
 
 **Effect:** The team lacks a representative labeled stream for threshold and gate calibration.
 
@@ -787,7 +787,11 @@ The embedding tests focus on warm-up and device fallback with mocked outputs. Th
 
 ## Phased implementation plan
 
-### Phase 0. Build evidence before changing the default model
+### Phase 0. Build evidence and check capacity before widening retrieval
+
+Add privacy-reviewed aggregate counters before changing ranking behavior. Record per-post retrieval count, search-proxy failure class, degraded-to-empty responses, gate rejection reason, validator state, scoring mode, and the final selection result. Do not persist raw post text by default. The current debug-only in-memory telemetry is useful for local diagnosis, but it is not a representative production baseline.
+
+Load-test the `knoww.app` search proxy at the proposed query count and candidate limit before widening retrieval. Test one active tab and several concurrent tabs. Measure rate-limit responses, latency, empty degraded responses, and recovery time. Add request deadlines, bounded retries with backoff, and a client-side capacity guard before increasing steady-state request volume. The current fixed 900 ms content queue is per tab and does not provide cross-tab backoff.
 
 Create a versioned evaluation set with 500 to 1,000 real, consented, and anonymized post snapshots plus contemporaneous market snapshots.
 
@@ -815,20 +819,22 @@ Measure each stage separately:
 
 ### Phase 1. Unlock existing quality and recall
 
-1. Remove the hidden unavailable-validator `0.5` floor from the AI-disabled path.
+1. Disclose the configured threshold and its effective floors without changing matching behavior. Completed in commit `5a47be9`.
 2. Split and disclose the two optional remote AI controls.
-3. Raise Polymarket retrieval from 8 to 20 and raise the downstream caps in the same change.
-4. Add a true MiniLM shadow path that records scores without changing card output.
-5. After shadow evaluation, put production MiniLM reranking behind a distinct feature flag.
-6. Use an explicit two-stage rerank ordering rather than the mixed comparator.
-7. Bound the reranker queue and cancel superseded work.
-8. Add a maximum stale-cache age.
-9. Pin model revisions and version embedding caches.
-10. Benchmark the length and language prefilters before they can end retrieval.
+3. Run a bounded child-context pilot on the existing Fox Sports feature-flag path. Cap child count and text length before comparing it with the current title-only path.
+4. Lower or remove the unavailable-validator `0.5` floor only if the evaluation set shows an acceptable false-positive rate for lexical and heuristic matches between `0.3` and `0.5`.
+5. Raise Polymarket retrieval from 8 to 20 and raise downstream caps only after the proxy capacity test passes.
+6. Add a true MiniLM shadow path that records scores without changing card output.
+7. After shadow evaluation, put production MiniLM reranking behind a distinct feature flag.
+8. Use an explicit two-stage rerank ordering rather than the mixed comparator.
+9. Bound the reranker queue and cancel superseded work.
+10. Add a maximum stale-cache age.
+11. Pin model revisions and version embedding caches.
+12. Benchmark the length and language prefilters before they can end retrieval.
 
 ### Phase 2. Fix the text that models receive
 
-1. Build child-level market documents.
+1. Expand the bounded child-context pilot only after measuring candidate quality, document length, scoring latency, and memory. Keep a hard child-count and text-length cap.
 2. Include outcome names, dates, resolution criteria, aliases, and tickers.
 3. Add bounded quote, image-alt, and article-lead context where available.
 4. Normalize BM25 documents and queries identically.

@@ -18,6 +18,7 @@ import {
 import {
   flushAnalyticsQueue,
   queueAnalyticsEvent,
+  submitSiteSupportRequest,
 } from "./background/analytics";
 import {
   clearClobCredentialDerivationsForTab,
@@ -53,6 +54,8 @@ import {
 } from "./background/extension-session";
 import { createPortfolioFundAttemptStore } from "./background/portfolio-fund-attempts";
 import { createPortfolioFundIdempotencyCoordinator } from "./background/portfolio-fund-idempotency";
+import { handleRelevanceAggregateMessage } from "./background/relevance-aggregate-messages";
+import { createRelevanceAggregateStore } from "./background/relevance-aggregate-store";
 // `./background/portfolio-funds` is the only on-chain money-movement module
 // (it pulls in bridge-signer + relayer-client + viem wallet clients). It is
 // NOT imported statically: the store-compliant build must not ship it. Every
@@ -69,7 +72,24 @@ import {
   tradingOpNeedsCredentials,
 } from "./background/trading-credential-mediation";
 import { TRADING_WARM_ELIGIBLE_STORAGE_KEY } from "./content/trading-warm-flag";
-import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
+import { canUseProductionReranker } from "./context-promotion";
+import {
+  createSearchRequestScheduler,
+  isCapacityManagedExtensionRequest,
+  runSearchWithRetry,
+  SearchQueueCapacityError,
+  SearchQueueDeadlineError,
+} from "./search-request-policy";
+import {
+  getUnsupportedSiteHostname,
+  normalizeSiteSupportHostname,
+  OPEN_SITE_SUPPORT_PROMPT_MESSAGE,
+} from "./site-support";
+import {
+  SUPPORTED_MATCH_PATTERNS,
+  UNSUPPORTED_SITE_SUPPORT_EXCLUDE_PATTERNS,
+  UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS,
+} from "./supported-hosts";
 import type {
   BackgroundResponse,
   FetchImageDataUrlMessage,
@@ -88,21 +108,37 @@ import {
   fingerprintPortfolioFundIntent,
   isPortfolioFundIdempotencyKey,
 } from "./types/portfolio-fund-intent";
-import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
+import {
+  DEFAULT_USER_SETTINGS,
+  mergeStoredUserSettings,
+  type StoredUserSettings,
+  type UserSettings,
+} from "./types/settings";
 
 // ── Programmatic content script registration ──
 // Instead of declaring content_scripts in manifest.json (which would
 // require <all_urls> and load on every site), we register them only
 // for supported platforms via chrome.scripting.
 const CONTENT_SCRIPT_ID = "knoww-content";
+const UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID = "knoww-unsupported-site-support";
 const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
 const SETTINGS_STORAGE_KEY = "knowwSettings";
 const CONTENT_SCRIPT_REINJECT_SETTLE_MS = 500;
 const SIDEPANEL_REQUESTED_VIEW_KEY = "knoww_sidepanel_requested_view";
+const SEARCH_ATTEMPT_TIMEOUT_MS = 4_000;
+const SEARCH_REQUEST_MAX_ELAPSED_MS = 5_000;
+const searchRequestScheduler = createSearchRequestScheduler({
+  maximumPending: 8,
+  maximumQueueWaitMs: 5_000,
+  minimumStartIntervalMs: 300,
+});
 const portfolioFundIdempotency = createPortfolioFundIdempotencyCoordinator(
   chrome.storage.local
 );
 const portfolioFundAttempts = createPortfolioFundAttemptStore(
+  chrome.storage.local
+);
+const relevanceAggregateStore = createRelevanceAggregateStore(
   chrome.storage.local
 );
 
@@ -129,30 +165,18 @@ function getSidePanelApi(): ChromeSidePanelApi | undefined {
     .sidePanel;
 }
 
-function mergeUserSettings(stored?: Partial<UserSettings>): UserSettings {
-  return {
-    ...DEFAULT_USER_SETTINGS,
-    ...(stored || {}),
-    platforms: {
-      ...DEFAULT_USER_SETTINGS.platforms,
-      ...(stored?.platforms || {}),
-    },
-    sources: {
-      ...DEFAULT_USER_SETTINGS.sources,
-      ...(stored?.sources || {}),
-      kalshi: DEFAULT_USER_SETTINGS.sources.kalshi,
-    },
-  };
-}
-
 async function readUserSettings(): Promise<UserSettings> {
   return new Promise((resolve) => {
     chrome.storage.sync.get(
       { [SETTINGS_STORAGE_KEY]: DEFAULT_USER_SETTINGS },
       (result) => {
         resolve(
-          mergeUserSettings(
-            result[SETTINGS_STORAGE_KEY] as Partial<UserSettings> | undefined
+          mergeStoredUserSettings(
+            result[SETTINGS_STORAGE_KEY] as StoredUserSettings | undefined,
+            {
+              forceDefaultKalshi: true,
+              productionRerankerPromoted: canUseProductionReranker(),
+            }
           )
         );
       }
@@ -182,16 +206,14 @@ async function persistNotificationPanelSurface(
 }
 
 function applySidePanelActionBehavior(
-  surface: UserSettings["notificationPanelSurface"]
+  _surface: UserSettings["notificationPanelSurface"]
 ): void {
   const sidePanel = getSidePanelApi();
   if (!sidePanel?.setPanelBehavior) return;
 
-  sidePanel
-    .setPanelBehavior({ openPanelOnActionClick: surface === "sidebar" })
-    .catch(() => {
-      // Older Chrome versions can support sidePanel.open without this helper.
-    });
+  sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {
+    // Older Chrome versions can support sidePanel.open without this helper.
+  });
 }
 
 async function refreshNotificationPanelSurfaceCache(): Promise<
@@ -206,7 +228,10 @@ async function refreshNotificationPanelSurfaceCache(): Promise<
 function updateNotificationPanelSurfaceFromSettings(
   settings: Partial<UserSettings> | undefined
 ): void {
-  const merged = mergeUserSettings(settings);
+  const merged = mergeStoredUserSettings(settings, {
+    forceDefaultKalshi: true,
+    productionRerankerPromoted: canUseProductionReranker(),
+  });
   cachedNotificationPanelSurface = merged.notificationPanelSurface;
   applySidePanelActionBehavior(merged.notificationPanelSurface);
 }
@@ -294,6 +319,79 @@ function notifyRequestedSidePanelView(view?: SidePanelView): void {
       void chrome.runtime.lastError;
     }
   );
+}
+
+function sendSiteSupportPromptMessage(
+  tabId: number,
+  reveal: boolean
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: OPEN_SITE_SUPPORT_PROMPT_MESSAGE, reveal },
+      (response?: { surface?: string }) => {
+        const delivered =
+          !chrome.runtime.lastError &&
+          response?.surface === "unsupported-site-prompt";
+        resolve(delivered);
+      }
+    );
+  });
+}
+
+async function injectUnsupportedSiteSupportPrompt(
+  tabId: number
+): Promise<void> {
+  await chrome.scripting.insertCSS({
+    target: { tabId },
+    files: ["markets-panel-navbar.css", "unsupported-site-prompt.css"],
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["unsupported-site.js"],
+  });
+}
+
+async function showUnsupportedSiteSupportPrompt(
+  tabId: number,
+  options: { reveal: boolean }
+): Promise<void> {
+  if (await sendSiteSupportPromptMessage(tabId, options.reveal)) return;
+
+  try {
+    await injectUnsupportedSiteSupportPrompt(tabId);
+    if (options.reveal) {
+      await sendSiteSupportPromptMessage(tabId, true);
+    }
+  } catch (error) {
+    logWarn("site-support.prompt-injection-failed", {
+      tabId,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+async function refreshOpenUnsupportedSitePrompts(): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS,
+    });
+    await Promise.all(
+      tabs.map(async (tab) => {
+        if (
+          typeof tab.id !== "number" ||
+          !getUnsupportedSiteHostname(tab.url)
+        ) {
+          return;
+        }
+        await showUnsupportedSiteSupportPrompt(tab.id, { reveal: false });
+      })
+    );
+  } catch (error) {
+    logWarn("site-support.open-tabs-refresh-failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
 }
 
 function sendOpenFloatingPanel(tabId: number): void {
@@ -518,29 +616,42 @@ function forwardToPortfolioSigningTab(
 async function registerContentScripts(): Promise<void> {
   try {
     const existing = await chrome.scripting.getRegisteredContentScripts({
-      ids: [CONTENT_SCRIPT_ID],
+      ids: [CONTENT_SCRIPT_ID, UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID],
     });
-    if (existing.length > 0) {
-      await chrome.scripting.updateContentScripts([
-        {
-          id: CONTENT_SCRIPT_ID,
-          matches: SUPPORTED_MATCH_PATTERNS,
-          js: ["content.js"],
-          runAt: "document_end",
-        },
-      ]);
-    } else {
-      await chrome.scripting.registerContentScripts([
-        {
-          id: CONTENT_SCRIPT_ID,
-          matches: SUPPORTED_MATCH_PATTERNS,
-          js: ["content.js"],
-          runAt: "document_end",
-        },
-      ]);
+    const existingIds = new Set(existing.map((script) => script.id));
+    const registrations: chrome.scripting.RegisteredContentScript[] = [
+      {
+        id: CONTENT_SCRIPT_ID,
+        matches: SUPPORTED_MATCH_PATTERNS,
+        js: ["content.js"],
+        css: ["markets-panel-navbar.css"],
+        runAt: "document_end",
+      },
+      {
+        id: UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID,
+        matches: UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS,
+        excludeMatches: UNSUPPORTED_SITE_SUPPORT_EXCLUDE_PATTERNS,
+        js: ["unsupported-site.js"],
+        css: ["markets-panel-navbar.css", "unsupported-site-prompt.css"],
+        runAt: "document_idle",
+      },
+    ];
+    const updates = registrations.filter((script) =>
+      existingIds.has(script.id)
+    );
+    const additions = registrations.filter(
+      (script) => !existingIds.has(script.id)
+    );
+    if (updates.length > 0) {
+      await chrome.scripting.updateContentScripts(updates);
     }
-  } catch {
-    // Fallback: script may already be registered from a previous SW lifecycle
+    if (additions.length > 0) {
+      await chrome.scripting.registerContentScripts(additions);
+    }
+  } catch (error) {
+    logWarn("background.content-script-registration-failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
 }
 
@@ -697,6 +808,121 @@ function isFetchJsonMessage(message: unknown): message is FetchJsonMessage {
     (message as FetchJsonMessage).type === "fetch-json" &&
     typeof (message as FetchJsonMessage).url === "string"
   );
+}
+
+interface FetchJsonAttemptResult {
+  data?: unknown;
+  error?: string;
+  ok: boolean;
+  responseUrl?: string;
+  retryAfterMs?: number;
+  retryable?: boolean;
+  status?: number;
+}
+
+function getRetryAfterMs(response: Response): number | undefined {
+  const value = response.headers.get("retry-after");
+  if (!value) return undefined;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
+
+  const retryAt = Date.parse(value);
+  return Number.isNaN(retryAt) ? undefined : Math.max(0, retryAt - Date.now());
+}
+
+async function performFetchJson(
+  message: FetchJsonMessage,
+  timeoutMs: number
+): Promise<FetchJsonAttemptResult> {
+  const urlValidation = isAllowedUrl(message.url);
+  if (!urlValidation.valid) {
+    return {
+      ok: false,
+      error: urlValidation.error || "URL not allowed",
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const bodyStr = message.body
+      ? typeof message.body === "string"
+        ? message.body
+        : JSON.stringify(message.body)
+      : "";
+
+    const isGet = (message.method || "POST").toUpperCase() === "GET";
+    const headers: Record<string, string> = {
+      ...(isGet ? {} : { "Content-Type": "application/json" }),
+      Accept: "application/json",
+      ...message.headers,
+    };
+
+    const hasAuthorizationHeader =
+      typeof headers.Authorization === "string" ||
+      typeof headers.authorization === "string";
+    if (!hasAuthorizationHeader && isKnowwApiUrl(message.url)) {
+      const authorization = await getExtensionAuthorizationHeader();
+      if (authorization) headers.Authorization = authorization;
+    }
+
+    const options: RequestInit = {
+      method: message.method || "POST",
+      headers,
+      signal: controller.signal,
+    };
+    if (bodyStr) options.body = bodyStr;
+
+    const response = await fetch(message.url, options);
+    if (!isAllowedRedirect(message.url, response.url)) {
+      return {
+        ok: false,
+        status: response.status,
+        error: "Security: t.co redirect target is not allowed",
+      };
+    }
+    if (response.status === 401 && isKnowwApiUrl(message.url)) {
+      await clearExtensionAccessToken();
+    }
+
+    const text = await response.text();
+    try {
+      return {
+        ok: true,
+        status: response.status,
+        data: JSON.parse(text),
+        responseUrl: response.url,
+        retryAfterMs: getRetryAfterMs(response),
+      };
+    } catch {
+      return {
+        ok: false,
+        status: response.status,
+        error: `Invalid JSON response: ${text.substring(0, 100)}`,
+      };
+    }
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      retryable: errorName === "AbortError" || error instanceof TypeError,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function toBackgroundResponse(
+  result: FetchJsonAttemptResult
+): BackgroundResponse {
+  const {
+    retryAfterMs: _retryAfterMs,
+    retryable: _retryable,
+    ...response
+  } = result;
+  return response as BackgroundResponse;
 }
 
 function isFetchImageDataUrlMessage(
@@ -998,6 +1224,7 @@ chrome.runtime.onMessage.addListener(
       negRisk?: boolean;
       marketId?: string;
       query?: string;
+      hostname?: string;
       walletUuid?: string;
       trendingLimit?: number;
       visible?: boolean;
@@ -1020,6 +1247,29 @@ chrome.runtime.onMessage.addListener(
       attemptId?: string;
       outcome?: string;
     };
+
+    const relevanceAggregateResponse = handleRelevanceAggregateMessage(
+      message,
+      sender.id,
+      chrome.runtime.id,
+      relevanceAggregateStore
+    );
+    if (relevanceAggregateResponse) {
+      void relevanceAggregateResponse
+        .then((response) => {
+          sendResponse(response as BackgroundResponse);
+        })
+        .catch((error) => {
+          logWarn("relevance_aggregate.message_failed", {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          });
+          sendResponse({
+            ok: false,
+            error: "Failed to process relevance aggregate telemetry",
+          } as BackgroundResponse);
+        });
+      return true;
+    }
 
     // Relay signing responses from content script → offscreen document.
     // Content script's chrome.runtime.sendMessage only reliably reaches the
@@ -2119,6 +2369,56 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (msg?.type === "site-support:request") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      const expectedSenderUrl = chrome.runtime.getURL("sidepanel.html");
+      const hostname = normalizeSiteSupportHostname(
+        typeof msg.hostname === "string" ? msg.hostname : ""
+      );
+      if (!hostname || hostname !== msg.hostname) {
+        sendResponse({
+          ok: false,
+          error: "Invalid website hostname",
+        } as BackgroundResponse);
+        return true;
+      }
+
+      const senderHostname = getUnsupportedSiteHostname(
+        sender.tab?.url ?? sender.url
+      );
+      const authorizedSurface =
+        sender.url === expectedSenderUrl || senderHostname === hostname;
+      if (senderReject || !authorizedSurface) {
+        sendResponse({
+          ok: false,
+          error: "This request must come from a Knoww support prompt",
+        } as BackgroundResponse);
+        return true;
+      }
+
+      void submitSiteSupportRequest(hostname)
+        .then((submitted) => {
+          sendResponse(
+            submitted
+              ? ({ ok: true, data: null } as BackgroundResponse)
+              : ({
+                  ok: false,
+                  error: "Unable to send the website support request",
+                } as BackgroundResponse)
+          );
+        })
+        .catch((error) => {
+          logWarn("site_support.request_failed", {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          });
+          sendResponse({
+            ok: false,
+            error: "Unable to send the website support request",
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
     // Orderbook fetch — lightweight public API call, no crypto needed.
     // Handle directly in the service worker to avoid offscreen boot latency.
     if (
@@ -2403,81 +2703,45 @@ chrome.runtime.onMessage.addListener(
 
     // Fetch JSON (POST)
     if (isFetchJsonMessage(message)) {
-      (async () => {
-        const urlValidation = isAllowedUrl(message.url);
-        if (!urlValidation.valid) {
-          sendResponse({
-            ok: false,
-            error: urlValidation.error || "URL not allowed",
-          });
-          return;
-        }
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+      void (async () => {
         try {
-          const bodyStr = message.body
-            ? typeof message.body === "string"
-              ? message.body
-              : JSON.stringify(message.body)
-            : "";
-
-          const isGet = (message.method || "POST").toUpperCase() === "GET";
-          const headers: Record<string, string> = {
-            ...(isGet ? {} : { "Content-Type": "application/json" }),
-            Accept: "application/json",
-            ...message.headers,
-          };
-
-          const hasAuthorizationHeader =
-            typeof headers.Authorization === "string" ||
-            typeof headers.authorization === "string";
-          if (!hasAuthorizationHeader && isKnowwApiUrl(message.url)) {
-            const authorization = await getExtensionAuthorizationHeader();
-            if (authorization) {
-              headers.Authorization = authorization;
-            }
-          }
-
-          const options: RequestInit = {
-            method: message.method || "POST",
-            headers,
-            signal: controller.signal,
-          };
-          if (bodyStr) options.body = bodyStr;
-
-          const res = await fetch(message.url, options);
-          clearTimeout(timeoutId);
-          if (!isAllowedRedirect(message.url, res.url)) {
-            sendResponse({
-              ok: false,
-              status: res.status,
-              error: "Security: t.co redirect target is not allowed",
-            });
-            return;
-          }
-          if (res.status === 401 && isKnowwApiUrl(message.url)) {
-            await clearExtensionAccessToken();
-          }
-          const text = await res.text();
-          try {
-            const data = JSON.parse(text);
-            sendResponse({
-              ok: true,
-              status: res.status,
-              data,
-              responseUrl: res.url,
-            });
-          } catch {
-            sendResponse({
-              ok: false,
-              error: `Invalid JSON response: ${text.substring(0, 100)}`,
-            });
-          }
-        } catch (e) {
-          clearTimeout(timeoutId);
+          const result = isCapacityManagedExtensionRequest(
+            message,
+            isKnowwApiUrl
+          )
+            ? await searchRequestScheduler.enqueue(() =>
+                runSearchWithRetry(
+                  ({ timeoutMs }) =>
+                    performFetchJson(
+                      message,
+                      Math.min(timeoutMs, SEARCH_ATTEMPT_TIMEOUT_MS)
+                    ),
+                  {
+                    maximumAttempts: 2,
+                    maximumElapsedMs: SEARCH_REQUEST_MAX_ELAPSED_MS,
+                  }
+                )
+              )
+            : await performFetchJson(message, 30_000);
+          sendResponse(toBackgroundResponse(result));
+        } catch (error) {
+          const queueWaitMs =
+            error instanceof SearchQueueCapacityError ||
+            error instanceof SearchQueueDeadlineError
+              ? error.queueWaitMs
+              : undefined;
+          logWarn("background.search-request-skipped", {
+            reason:
+              error instanceof SearchQueueCapacityError
+                ? "capacity"
+                : error instanceof SearchQueueDeadlineError
+                  ? "deadline"
+                  : "unexpected",
+            queueWaitMs,
+          });
           sendResponse({
             ok: false,
-            error: e instanceof Error ? e.message : String(e),
+            error: "Search request could not be completed",
           });
         }
       })();
@@ -2514,6 +2778,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 chrome.action.onClicked.addListener((tab) => {
   if (typeof tab.id !== "number") return;
 
+  const unsupportedHostname = getUnsupportedSiteHostname(tab.url);
+  if (unsupportedHostname) {
+    void showUnsupportedSiteSupportPrompt(tab.id, { reveal: true });
+    return;
+  }
+
   const openFloatingPanel = () => sendOpenFloatingPanel(tab.id as number);
   const openSidePanel = () => {
     void openKnowwSidePanel(resolveSidePanelContext(tab)).catch(() => {
@@ -2545,7 +2815,7 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  registerContentScripts();
+  void registerContentScripts().then(() => refreshOpenUnsupportedSitePrompts());
   if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
     void queueAnalyticsEvent({
       event: "extension_installed",

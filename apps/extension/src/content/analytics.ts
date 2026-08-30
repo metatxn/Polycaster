@@ -7,8 +7,6 @@ function getPageContext(): AnalyticsProperties {
 
   return {
     host: window.location.hostname,
-    page_url: window.location.href,
-    page_path: window.location.pathname,
     platform: platformName,
   };
 }

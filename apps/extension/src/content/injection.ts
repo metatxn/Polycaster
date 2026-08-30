@@ -2,6 +2,7 @@
 // TIMELINE INJECTION LOGIC
 // ============================================
 
+import { hasActiveContextCalibration } from "../context-calibration";
 import type {
   ContextGateResult,
   ScoreMarketsSuccessResponse,
@@ -11,17 +12,37 @@ import type {
   Market,
   MarketSearchResult,
 } from "../types/market";
-import { getPreferredOutcomeNames } from "./market-context";
-import { isMarketWithinDisplayPriceCap } from "./market-price-filter";
+import {
+  boundMarketContextText,
+  getPreferredOutcomeNames,
+} from "./market-context";
+import {
+  filterNestedMarketsByDisplayPriceCap,
+  isMarketWithinDisplayPriceCap,
+} from "./market-price-filter";
 import {
   appendUniquePostEntries,
   partitionViewportBatch,
   processBatchProgressively,
 } from "./post-analysis-batching";
 import {
+  checkPropositionCompatibility,
+  type PropositionConflictType,
+  shouldBlockCandidateForProposition,
+} from "./proposition-check";
+import {
+  buildRelevancePipelineAggregateSample,
+  compareLexicalShadowScores,
+  recordRelevanceAggregate,
+} from "./relevance-aggregate-recorder";
+import {
   type RelevanceTelemetryCandidate,
   recordRelevanceTelemetry,
 } from "./relevance-telemetry";
+import {
+  rankCandidatesByBaseScore,
+  selectTopBaseCandidates,
+} from "./rerank-shadow";
 import {
   buildMarketGateText,
   determineScoringMode,
@@ -134,6 +155,7 @@ const liveInjectedCardRefs = new Map<string, LiveInjectedCardRef>();
 let postsSinceLastInjection = 0;
 let totalPostsProcessed = 0;
 let isAnalyzing = false;
+let directLinkDrainScheduled = false;
 let invalidExtensionContextLogged = false;
 // PERFORMANCE: LRU Set replaces plain Set — O(1) eviction, no Array.from() copies
 const processedPostKeys = new LRUSet(150);
@@ -351,23 +373,10 @@ function isMarketInjectableForPost(postKey: string, marketId: string): boolean {
 function selectTopCandidatesForPost(
   candidates: MarketSearchResult[]
 ): MarketSearchResult[] {
-  if (candidates.length === 0) return [];
-
-  const sorted = [...candidates].sort((a, b) => {
-    if (
-      typeof a.rerankScore === "number" &&
-      typeof b.rerankScore === "number"
-    ) {
-      return b.rerankScore - a.rerankScore;
-    }
-    return b.score - a.score;
+  return selectTopBaseCandidates(candidates, {
+    maximumCandidates: MAX_CANDIDATES_PER_POST,
+    scoreGap: POST_CANDIDATE_SCORE_GAP,
   });
-  const topScore = sorted[0].score;
-  const minimumScore = Math.max(0, topScore - POST_CANDIDATE_SCORE_GAP);
-
-  return sorted
-    .filter((entry) => entry.score >= minimumScore)
-    .slice(0, MAX_CANDIDATES_PER_POST);
 }
 
 function syncInjectedCardTrackingFromDom(): void {
@@ -515,13 +524,62 @@ function dequeueCooldownPendingPosts(
 
   const viewportHeight =
     window.innerHeight || document.documentElement.clientHeight || 1;
-  const { selected, deferred } = partitionViewportBatch(
-    ready,
+  const directLinkEntries: PendingPostEntry[] = [];
+  const regularEntries: PendingPostEntry[] = [];
+  for (const entry of ready) {
+    (postHasExplicitPolymarketLink(entry.post)
+      ? directLinkEntries
+      : regularEntries
+    ).push(entry);
+  }
+  const directPartition = partitionViewportBatch(
+    directLinkEntries,
     batchSize,
     viewportHeight
   );
-  appendUniquePostEntries(cooldownPendingPosts, deferred);
-  return selected;
+  const regularPartition = partitionViewportBatch(
+    regularEntries,
+    Math.max(0, batchSize - directPartition.selected.length),
+    viewportHeight
+  );
+  appendUniquePostEntries(cooldownPendingPosts, [
+    ...directPartition.deferred,
+    ...regularPartition.deferred,
+  ]);
+  return [...directPartition.selected, ...regularPartition.selected];
+}
+
+function postHasExplicitPolymarketLink(post: Element): boolean {
+  try {
+    return (
+      window.KNOWW_PLATFORM?.getCurrentPlatform?.()
+        ?.extractMarketLinkHints?.(post)
+        ?.some((hint) => hint.source === "polymarket") === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shouldAnalyzeCooldownPendingPosts(cooldownPosts: number): boolean {
+  if (cooldownPendingPosts.length === 0) return false;
+  if (postsSinceLastInjection >= cooldownPosts) return true;
+  return cooldownPendingPosts.some(({ post }) =>
+    postHasExplicitPolymarketLink(post)
+  );
+}
+
+function schedulePendingDirectLinkDrain(itemSelector: string): void {
+  const hasPendingDirectLink = cooldownPendingPosts.some(({ post }) =>
+    postHasExplicitPolymarketLink(post)
+  );
+  if (!hasPendingDirectLink || directLinkDrainScheduled) return;
+
+  directLinkDrainScheduled = true;
+  scheduleIdle(() => {
+    directLinkDrainScheduled = false;
+    void processVisiblePosts({ itemSelector });
+  }, QUEUED_POST_PROCESS_IDLE_TIMEOUT_MS);
 }
 
 async function scoreMarketsBatch(
@@ -533,10 +591,12 @@ async function scoreMarketsBatch(
     includeBm25?: boolean;
     includeContextGate?: boolean;
     includeRerank?: boolean;
+    rerankRequestKey?: string;
   } = {}
 ): Promise<{
   similarities: number[];
   bm25Scores: number[];
+  lexicalShadowScores: number[];
   rerankScores: number[];
   rerankMetrics?: ScoreMarketsSuccessResponse["rerankMetrics"];
   contextGateResults: ContextGateResult[];
@@ -549,6 +609,7 @@ async function scoreMarketsBatch(
     includeBm25 = true,
     includeContextGate = true,
     includeRerank = false,
+    rerankRequestKey,
   } = features;
 
   try {
@@ -561,6 +622,7 @@ async function scoreMarketsBatch(
       includeBm25,
       includeContextGate,
       includeRerank,
+      rerankRequestKey,
     });
 
     if (isScoreMarketsSuccessResponse(response)) {
@@ -570,6 +632,9 @@ async function scoreMarketsBatch(
       return {
         similarities: response.similarities,
         bm25Scores: response.bm25Scores,
+        lexicalShadowScores: Array.isArray(response.lexicalShadowScores)
+          ? response.lexicalShadowScores
+          : new Array<number>(marketTexts.length).fill(0),
         rerankScores: response.rerankScores ?? [],
         rerankMetrics: response.rerankMetrics,
         contextGateResults,
@@ -589,6 +654,7 @@ async function scoreMarketsBatch(
   return {
     similarities: fallbackScores,
     bm25Scores: fallbackScores,
+    lexicalShadowScores: fallbackScores,
     rerankScores: [],
     contextGateResults: fallbackGateResults,
     usedEmbeddings: false,
@@ -1004,10 +1070,21 @@ async function analyzePostAndFindMarket(
     try {
       const directResolution = await currentPlatform.resolveDirectMarkets(post);
       if (directResolution?.markets.length) {
-        const displayableMarkets = directResolution.markets.filter(
-          ({ market }) => isMarketWithinDisplayPriceCap(market)
-        );
+        const displayableMarkets = directResolution.markets.flatMap((entry) => {
+          const market = filterNestedMarketsByDisplayPriceCap(entry.market);
+          return market ? [{ ...entry, market }] : [];
+        });
         if (displayableMarkets.length > 0) {
+          recordRelevanceAggregate(
+            buildRelevancePipelineAggregateSample({
+              scoringMode: "none",
+              contextMode: "direct",
+              candidates: displayableMarkets.map(() => ({
+                gatePassed: true,
+                shown: true,
+              })),
+            })
+          );
           return {
             markets: displayableMarkets,
             topics: directResolution.topics?.length
@@ -1018,6 +1095,13 @@ async function analyzePostAndFindMarket(
         }
       }
       if (directResolution?.bypassGenericSearch) {
+        recordRelevanceAggregate(
+          buildRelevancePipelineAggregateSample({
+            scoringMode: "none",
+            contextMode: "direct",
+            candidates: [],
+          })
+        );
         log(
           "Skipping generic market search after structured direct-market resolution"
         );
@@ -1026,6 +1110,20 @@ async function analyzePostAndFindMarket(
     } catch (error) {
       log("Direct market resolution failed:", error);
     }
+  }
+
+  if (linkHints.length > 0 && directMarkets.length === 0) {
+    recordRelevanceAggregate(
+      buildRelevancePipelineAggregateSample({
+        scoringMode: "none",
+        contextMode: "direct",
+        candidates: [],
+      })
+    );
+    log(
+      "Skipping generic market search because the explicit Polymarket link was unavailable"
+    );
+    return null;
   }
 
   if ((!text || text.length < 20) && directMarkets.length === 0) {
@@ -1073,8 +1171,9 @@ async function analyzePostAndFindMarket(
   const directMarketIds = new Set(directMarkets.map((market) => market.id));
   const markets: Market[] = [];
   const seenMarkets = new Set<string>();
-  for (const market of [...directMarkets, ...searchedMarkets]) {
-    if (!isMarketWithinDisplayPriceCap(market)) continue;
+  for (const candidate of [...directMarkets, ...searchedMarkets]) {
+    const market = filterNestedMarketsByDisplayPriceCap(candidate);
+    if (!market) continue;
     const key = market.id || market.slug || market.title;
     if (!key || seenMarkets.has(key)) continue;
     seenMarkets.add(key);
@@ -1082,17 +1181,28 @@ async function analyzePostAndFindMarket(
   }
 
   if (markets.length === 0) {
+    recordRelevanceAggregate(
+      buildRelevancePipelineAggregateSample({
+        scoringMode: "none",
+        contextMode: includeNestedMarketContext
+          ? "nested_bounded"
+          : "title_only",
+        candidates: [],
+      })
+    );
     log("No markets found for this post from any source");
     return null;
   }
 
   // --- BATCH SCORING WITH EMBEDDINGS + BM25 ---
   let marketScores: number[] = [];
+  let lexicalShadowMarketScores: number[] = [];
   let contextGateResults: ContextGateResult[] = [];
   let marketTexts: string[] = [];
   let gateTexts: string[] = [];
   const rerankScoresByIndex = new Map<number, number>();
   let scoringMode: ScoringMode = "heuristic";
+  let scoringError = false;
   try {
     marketTexts = markets.map((m) => {
       let rich = includeNestedMarketContext
@@ -1109,7 +1219,7 @@ async function analyzePostAndFindMarket(
       if (!includeNestedMarketContext && m.description) {
         rich += ` ${m.description.slice(0, 120)}`;
       }
-      return rich;
+      return boundMarketContextText(rich);
     });
 
     gateTexts = markets.map((market) =>
@@ -1179,6 +1289,35 @@ async function analyzePostAndFindMarket(
       );
     }
 
+    const hasLexicalShadowSignal = scoring.lexicalShadowScores.some(
+      (score) => score > 0
+    );
+    if (scoring.source === "offscreen") {
+      if (scoring.usedEmbeddings) {
+        const semanticWeight = hasLexicalShadowSignal ? 0.7 : 1;
+        const lexicalWeight = hasLexicalShadowSignal ? 0.3 : 0;
+        lexicalShadowMarketScores = scoring.similarities.map(
+          (embedding, index) =>
+            embedding * semanticWeight +
+            (scoring.lexicalShadowScores[index] ?? 0) * lexicalWeight
+        );
+      } else {
+        const heuristicScores = markets.map((market) =>
+          calculateRelevanceScore([text], market, {
+            includeNestedMarketContext,
+          })
+        );
+        lexicalShadowMarketScores = hasLexicalShadowSignal
+          ? scoring.lexicalShadowScores.map(
+              (lexical, index) =>
+                lexical * 0.8 + (heuristicScores[index] ?? 0) * 0.2
+            )
+          : heuristicScores;
+      }
+    }
+
+    // MiniLM is diagnostics-only in this phase. Its scores are recorded below
+    // but must not affect gate decisions, candidate admission, or display order.
     if (isDebug && scoringMode !== "heuristic" && marketScores.length > 0) {
       const candidateIndexes = marketScores
         .map((score, index) => ({ index, score }))
@@ -1209,6 +1348,9 @@ async function analyzePostAndFindMarket(
             includeBm25: false,
             includeContextGate: false,
             includeRerank: true,
+            rerankRequestKey: postKey
+              ? `${currentPlatform?.name ?? "unknown"}:${postKey}`
+              : undefined,
           }
         );
 
@@ -1237,6 +1379,8 @@ async function analyzePostAndFindMarket(
             queueWaitMs,
             model: rerank.rerankMetrics?.model,
             dtype: rerank.rerankMetrics?.dtype,
+            revision: rerank.rerankMetrics?.revision,
+            manifestVersion: rerank.rerankMetrics?.manifestVersion,
             device: rerank.rerankMetrics?.device,
             after,
           });
@@ -1250,6 +1394,7 @@ async function analyzePostAndFindMarket(
       }
     }
   } catch (e) {
+    scoringError = true;
     scoringMode = "heuristic";
     log("⚠️ Heuristic scoring — scoring error:", e);
     marketScores = markets.map((m) =>
@@ -1278,7 +1423,48 @@ async function analyzePostAndFindMarket(
     }
   }
 
+  let metricsGateBlocked = 0;
+  let metricsGateZeroSignal = 0;
+  let metricsGateSingleSignal = 0;
+  let metricsGateLowOverlap = 0;
+  let metricsGateDisabledSource = 0;
+  let metricsGateRecovered = 0;
+  let metricsRetryEligible = 0;
+  let metricsLegacyRelaxedShadowEligible = 0;
+  let metricsBelowThreshold = 0;
+  const metricsPropositionConflicts: Record<PropositionConflictType, number> = {
+    date: 0,
+    direction: 0,
+    entity: 0,
+    numericThreshold: 0,
+    outcome: 0,
+  };
+  const propositionGateActive = hasActiveContextCalibration();
+
   const recordTelemetry = () => {
+    recordRelevanceAggregate(
+      buildRelevancePipelineAggregateSample({
+        scoringMode,
+        contextMode: includeNestedMarketContext
+          ? "nested_bounded"
+          : "title_only",
+        candidates: telemetryCandidates,
+        scoringError,
+        lexicalShadow: lexicalShadowAggregate,
+        gateCounters: {
+          blocked: metricsGateBlocked + metricsGateDisabledSource,
+          zeroSignal: metricsGateZeroSignal,
+          singleSignal: metricsGateSingleSignal,
+          lowOverlap: metricsGateLowOverlap,
+          disabledSource: metricsGateDisabledSource,
+          recovered: metricsGateRecovered,
+          retryEligible: metricsRetryEligible,
+          legacyRelaxedShadowEligible: metricsLegacyRelaxedShadowEligible,
+          thresholdBlocked: metricsBelowThreshold,
+          propositionConflicts: metricsPropositionConflicts,
+        },
+      })
+    );
     recordRelevanceTelemetry({
       platform: currentPlatform?.name ?? "unknown",
       postKey,
@@ -1326,6 +1512,17 @@ async function analyzePostAndFindMarket(
     CONFIG.MIN_RELEVANCE_SCORE,
     scoringMode
   );
+  const comparableIndexes = markets
+    .map((market, index) => ({ market, index }))
+    .filter(({ market }) => !directMarketIds.has(market.id))
+    .map(({ index }) => index);
+  const lexicalShadowAggregate = compareLexicalShadowScores({
+    activeScores: comparableIndexes.map((index) => marketScores[index]),
+    shadowScores: comparableIndexes.map(
+      (index) => lexicalShadowMarketScores[index]
+    ),
+    threshold: effectiveThreshold,
+  });
 
   // Track best market PER SOURCE for debug visibility, but retain multiple
   // post-level candidates so allocation can fall back if the top candidate
@@ -1347,19 +1544,13 @@ async function analyzePostAndFindMarket(
     gateText: string;
   }> = [];
 
-  let metricsGateBlocked = 0;
-  let metricsGateZeroSignal = 0;
-  let metricsGateSingleSignal = 0;
-  let metricsGateRecovered = 0;
-  let metricsRetryEligible = 0;
-  let metricsBelowThreshold = 0;
-
   for (let i = 0; i < markets.length; i++) {
     const market = markets[i];
     const source = market.source || "polymarket";
     const telemetryCandidate = telemetryCandidates[i];
 
     if (!bestBySource[source]) {
+      metricsGateDisabledSource++;
       if (telemetryCandidate) {
         telemetryCandidate.gateReason = `disabled-source:${source}`;
       }
@@ -1383,6 +1574,7 @@ async function analyzePostAndFindMarket(
             details: "direct-polymarket-link",
           },
           recoveryGate: undefined,
+          legacyRelaxedShadowEligible: false,
           retryEligible: false,
           usedFallbackGate: false,
           usedRecoveryGate: false,
@@ -1406,6 +1598,10 @@ async function analyzePostAndFindMarket(
           ? "gate-single-signal"
           : "gate-low-overlap";
 
+    if (gateDecision.legacyRelaxedShadowEligible) {
+      metricsLegacyRelaxedShadowEligible++;
+    }
+
     if (gateDecision.usedRecoveryGate && gateDecision.recoveryGate) {
       metricsGateRecovered++;
       log(
@@ -1417,6 +1613,7 @@ async function analyzePostAndFindMarket(
       metricsGateBlocked++;
       if (signals === 0) metricsGateZeroSignal++;
       else if (signals === 1) metricsGateSingleSignal++;
+      else metricsGateLowOverlap++;
       if (telemetryCandidate) {
         telemetryCandidate.gatePassed = false;
         telemetryCandidate.gateReason = `${gateReason}; ${gate.details}`;
@@ -1436,6 +1633,36 @@ async function analyzePostAndFindMarket(
         metricsRetryEligible++;
       }
       continue;
+    }
+
+    if (!isDirectPolymarketLink) {
+      const proposition = checkPropositionCompatibility(
+        text,
+        gateTexts[i] || market.title || ""
+      );
+      if (!proposition.compatible) {
+        for (const conflictType of proposition.conflictTypes) {
+          metricsPropositionConflicts[conflictType]++;
+        }
+        if (
+          shouldBlockCandidateForProposition(proposition, propositionGateActive)
+        ) {
+          metricsGateBlocked++;
+          if (telemetryCandidate) {
+            telemetryCandidate.gatePassed = false;
+            telemetryCandidate.gateReason = `proposition-conflict:${proposition.conflictTypes.join(",")}`;
+          }
+          log("Typed proposition conflict blocked candidate", {
+            conflictTypes: proposition.conflictTypes,
+            marketId: market.id,
+          });
+          continue;
+        }
+        log("Typed proposition conflict observed in shadow", {
+          conflictTypes: proposition.conflictTypes,
+          marketId: market.id,
+        });
+      }
     }
     if (telemetryCandidate) {
       telemetryCandidate.gatePassed = true;
@@ -1530,7 +1757,7 @@ async function analyzePostAndFindMarket(
     !hasPassedMarket &&
     gateBlockedHighScorers.length > 0 &&
     scoringMode === "hybrid" &&
-    CONFIG.USE_AI_EXTRACTION &&
+    CONFIG.USE_AI_GATE_RETRY &&
     window.KNOWW_API?.extractKeywordsWithAI
   ) {
     log(
@@ -1628,10 +1855,10 @@ async function analyzePostAndFindMarket(
     !hasPassedMarket &&
     gateBlockedHighScorers.length > 0 &&
     scoringMode === "hybrid" &&
-    !CONFIG.USE_AI_EXTRACTION
+    !CONFIG.USE_AI_GATE_RETRY
   ) {
     log(
-      `🤖 [AI Retry] Skipped — AI-assisted matching is disabled in settings (${gateBlockedHighScorers.length} high-scoring market(s) blocked by gate)`
+      `🤖 [AI Retry] Skipped — AI gate retry is disabled in settings (${gateBlockedHighScorers.length} high-scoring market(s) blocked by gate)`
     );
   }
 
@@ -1659,7 +1886,7 @@ async function analyzePostAndFindMarket(
   }
 
   log(
-    `📊 Post metrics: mode=${scoringMode} searched=${markets.length} gate-blocked=${metricsGateBlocked} (zero-signal=${metricsGateZeroSignal} single-signal=${metricsGateSingleSignal}) recovered=${metricsGateRecovered} retry-eligible=${metricsRetryEligible}`
+    `📊 Post metrics: mode=${scoringMode} searched=${markets.length} gate-blocked=${metricsGateBlocked} (zero-signal=${metricsGateZeroSignal} single-signal=${metricsGateSingleSignal}) recovered=${metricsGateRecovered} retry-eligible=${metricsRetryEligible} legacy-relaxed-shadow=${metricsLegacyRelaxedShadowEligible}`
   );
 
   log(
@@ -1745,21 +1972,11 @@ async function analyzePostAndFindMarket(
     return null;
   }
 
-  // Sort by rerank score when both candidates were in the debug top-K rerank
-  // set; otherwise keep the existing score semantics.
-  relevantMarkets.sort((a, b) => {
-    if (
-      typeof a.rerankScore === "number" &&
-      typeof b.rerankScore === "number"
-    ) {
-      return b.rerankScore - a.rerankScore;
-    }
-    return b.score - a.score;
-  });
+  const baseOrderedRelevantMarkets = rankCandidatesByBaseScore(relevantMarkets);
   if (isDebug && relevantMarkets.some((entry) => entry.rerankScore != null)) {
     log(
-      `${XENCODER_AB_PREFIX} final-order`,
-      relevantMarkets.map((entry) => ({
+      `${XENCODER_AB_PREFIX} shadow-display-order`,
+      baseOrderedRelevantMarkets.map((entry) => ({
         title: entry.market.title?.slice(0, 80),
         baseScore: Number(entry.score.toFixed(4)),
         rerankScore:
@@ -1769,7 +1986,9 @@ async function analyzePostAndFindMarket(
       }))
     );
   }
-  const topRelevantMarkets = selectTopCandidatesForPost(relevantMarkets);
+  const topRelevantMarkets = selectTopCandidatesForPost(
+    baseOrderedRelevantMarkets
+  );
   topRelevantMarkets.forEach((entry, index) => {
     const telemetryCandidate = telemetryByMarketId.get(entry.market.id);
     if (telemetryCandidate) {
@@ -2280,6 +2499,9 @@ async function processVisiblePosts(options: {
 
   const newlyDeferredPosts = enqueueCooldownPendingPosts(newPosts);
   postsSinceLastInjection += newlyDeferredPosts;
+  const shouldAnalyzePendingPosts = shouldAnalyzeCooldownPendingPosts(
+    CONFIG.COOLDOWN_POSTS
+  );
 
   if (isDebug) {
     log(`📊 [PostScanner] Stats update:`);
@@ -2289,21 +2511,18 @@ async function processVisiblePosts(options: {
     log(`   • Cooldown pending posts: ${cooldownPendingPosts.length}`);
     log(
       `   • Will analyze for markets: ${
-        postsSinceLastInjection >= CONFIG.COOLDOWN_POSTS
-          ? "YES ✅"
-          : "NO (waiting for cooldown)"
+        shouldAnalyzePendingPosts ? "YES ✅" : "NO (waiting for cooldown)"
       }`
     );
   }
 
   // Respect user's Injection Frequency setting (COOLDOWN_POSTS)
-  if (postsSinceLastInjection < CONFIG.COOLDOWN_POSTS) {
+  if (!shouldAnalyzePendingPosts) {
     if (isDebug) {
       log(`🔄 [PostScanner] ========== SCAN END ==========\n`);
     }
     return;
   }
-
   const postsReadyForAnalysis = dequeueCooldownPendingPosts(
     itemSelector,
     CONFIG.POSTS_TO_ANALYZE
@@ -2381,6 +2600,7 @@ async function processVisiblePosts(options: {
     }
   } finally {
     isAnalyzing = false;
+    schedulePendingDirectLinkDrain(itemSelector);
   }
 
   if (isDebug) {
@@ -2602,12 +2822,14 @@ async function processQueuedPosts(options: {
 
   const newlyDeferredPosts = enqueueCooldownPendingPosts(newPosts);
   postsSinceLastInjection += newlyDeferredPosts;
+  const shouldAnalyzePendingPosts = shouldAnalyzeCooldownPendingPosts(
+    CONFIG.COOLDOWN_POSTS
+  );
 
   // Respect user's Injection Frequency setting (COOLDOWN_POSTS)
-  if (postsSinceLastInjection < CONFIG.COOLDOWN_POSTS) {
+  if (!shouldAnalyzePendingPosts) {
     return;
   }
-
   const postsReadyForAnalysis = dequeueCooldownPendingPosts(
     itemSelector,
     CONFIG.POSTS_TO_ANALYZE
@@ -2644,6 +2866,7 @@ async function processQueuedPosts(options: {
     });
   } finally {
     isAnalyzing = false;
+    schedulePendingDirectLinkDrain(itemSelector);
   }
 }
 

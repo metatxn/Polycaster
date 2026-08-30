@@ -124,11 +124,11 @@ const ManifoldMarketsAdapter = createBasicAdapter({
   // heuristic otherwise drops posts like "Starmer out before July?".
   bypassEnglishCheck: true,
   // Market-question vs market-question comparisons rarely share 2+
-  // meaningful nouns, so accept a single high-score signal — same reasoning
-  // as kalshi-website.
+  // meaningful nouns. This enables calibrated single-signal recovery and
+  // observes the historical score-only rule in shadow, as on Kalshi.
   relaxContextGate: true,
-  // Manifold surfaces 40+ markets per page and relaxContextGate unlocks many
-  // candidates; align the per-batch and panel caps with Kalshi.
+  // Manifold surfaces 40+ markets per page; align the per-batch and panel
+  // caps with Kalshi.
   maxInjectionsPerBatch: 20,
   maxActiveNotificationItems: 20,
   maxNotificationItems: 40,

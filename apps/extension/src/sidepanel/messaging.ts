@@ -1,4 +1,9 @@
 import {
+  normalizeSiteSupportHostname,
+  SHOW_SITE_SUPPORT_REQUEST_MESSAGE,
+  SIDEPANEL_SITE_SUPPORT_REQUEST_KEY,
+} from "../site-support";
+import {
   TRADING_CREDENTIALS_UPDATED_MESSAGE,
   TRADING_SESSION_DISCONNECTED_MESSAGE,
   TRADING_WALLET_CONNECTED_MESSAGE,
@@ -111,10 +116,30 @@ export function consumeRequestedSidePanelView(
   });
 }
 
+export function consumeRequestedSiteSupportHostname(
+  storage: SessionStoragePort = chrome.storage.session,
+  runtime: Pick<typeof chrome.runtime, "lastError"> = chrome.runtime
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    storage.get(SIDEPANEL_SITE_SUPPORT_REQUEST_KEY, (result) => {
+      const hostname = normalizeSiteSupportHostname(
+        typeof result[SIDEPANEL_SITE_SUPPORT_REQUEST_KEY] === "string"
+          ? result[SIDEPANEL_SITE_SUPPORT_REQUEST_KEY]
+          : ""
+      );
+      storage.remove(SIDEPANEL_SITE_SUPPORT_REQUEST_KEY, () => {
+        void runtime.lastError;
+      });
+      resolve(hostname);
+    });
+  });
+}
+
 export interface SidepanelMessageHandlers {
   onSessionDisconnected(): void;
   onWalletConnected(): void;
   onShowView(view: SidePanelView): void;
+  onShowSiteSupport(hostname: string): void;
   onCredentialsUpdated(): void;
 }
 
@@ -122,10 +147,18 @@ interface MessageRuntimePort {
   lastError?: { message?: string };
   onMessage: {
     addListener(
-      callback: (message: { type?: unknown; view?: unknown }) => boolean
+      callback: (message: {
+        type?: unknown;
+        view?: unknown;
+        hostname?: unknown;
+      }) => boolean
     ): void;
     removeListener(
-      callback: (message: { type?: unknown; view?: unknown }) => boolean
+      callback: (message: {
+        type?: unknown;
+        view?: unknown;
+        hostname?: unknown;
+      }) => boolean
     ): void;
   };
 }
@@ -143,7 +176,11 @@ export function installSidepanelMessageListener(
 ): () => void {
   const runtime = ports.runtime ?? chrome.runtime;
   const sessionStorage = ports.sessionStorage ?? chrome.storage.session;
-  const listener = (message: { type?: unknown; view?: unknown }): boolean => {
+  const listener = (message: {
+    type?: unknown;
+    view?: unknown;
+    hostname?: unknown;
+  }): boolean => {
     if (message?.type === TRADING_SESSION_DISCONNECTED_MESSAGE) {
       handlers.onSessionDisconnected();
       return false;
@@ -159,6 +196,16 @@ export function installSidepanelMessageListener(
       if (message.view === "markets" || message.view === "portfolio") {
         handlers.onShowView(message.view);
       }
+      return false;
+    }
+    if (message?.type === SHOW_SITE_SUPPORT_REQUEST_MESSAGE) {
+      sessionStorage.remove(SIDEPANEL_SITE_SUPPORT_REQUEST_KEY, () => {
+        void runtime.lastError;
+      });
+      const hostname = normalizeSiteSupportHostname(
+        typeof message.hostname === "string" ? message.hostname : ""
+      );
+      if (hostname) handlers.onShowSiteSupport(hostname);
       return false;
     }
     if (message?.type === TRADING_CREDENTIALS_UPDATED_MESSAGE) {

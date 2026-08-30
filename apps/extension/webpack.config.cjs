@@ -52,9 +52,18 @@ function buildHostPermissions(hostsSource, devMode, storeBuild) {
     hostsSource,
     "SUPPORTED_MATCH_PATTERNS"
   );
+  const unsupportedSiteSupportPatterns = extractStringArray(
+    hostsSource,
+    "UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS"
+  );
   const apiPatterns = extractStringArray(hostsSource, "API_HOST_PERMISSIONS");
   const extra = devMode ? ["http://localhost/*"] : [];
-  const merged = [...sitePatterns, ...apiPatterns, ...extra];
+  const merged = [
+    ...sitePatterns,
+    ...unsupportedSiteSupportPatterns,
+    ...apiPatterns,
+    ...extra,
+  ];
   const filtered = storeBuild
     ? merged.filter((pattern) => !TRADING_ONLY_HOST_PERMISSIONS.has(pattern))
     : merged;
@@ -89,6 +98,19 @@ function buildWarMatches(hostsSource) {
   const unique = [...new Set(normalizedPatterns)];
   unique.sort();
   return unique;
+}
+
+function buildUnsupportedSiteSupportWebAccessibleResources(hostsSource) {
+  return {
+    resources: [
+      "fonts/fraunces-italic-500.woff2",
+      "fonts/jetbrains-mono-500.woff2",
+    ],
+    matches: extractStringArray(
+      hostsSource,
+      "UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS"
+    ),
+  };
 }
 
 const transformersEntry = require.resolve("@huggingface/transformers");
@@ -199,6 +221,13 @@ function createTypeScriptRule() {
   };
 }
 
+function createInlineImageRule() {
+  return {
+    test: /\.png$/i,
+    type: "asset/inline",
+  };
+}
+
 function createResolveConfig() {
   return {
     extensions: [".tsx", ".ts", ".js"],
@@ -245,6 +274,7 @@ module.exports = (_env, argv) => {
       content: "./src/content/index.ts",
       options: "./src/options.tsx",
       sidepanel: "./src/sidepanel.ts",
+      "unsupported-site": "./src/unsupported-site.ts",
       "page-bridge": "./src/page-bridge.ts",
     },
     output: {
@@ -275,6 +305,7 @@ module.exports = (_env, argv) => {
           },
         },
         createTypeScriptRule(),
+        createInlineImageRule(),
         {
           test: /\.m?js$/,
           resolve: { fullySpecified: false },
@@ -360,6 +391,10 @@ module.exports = (_env, argv) => {
                   manifest.web_accessible_resources[0].matches =
                     buildWarMatches(hostsSource);
                 }
+                manifest.web_accessible_resources ??= [];
+                manifest.web_accessible_resources.push(
+                  buildUnsupportedSiteSupportWebAccessibleResources(hostsSource)
+                );
                 if (storeBuild) {
                   // Drop the "prediction market" framing that flags CWS
                   // review; the store build surfaces relevant markets and
@@ -387,6 +422,14 @@ module.exports = (_env, argv) => {
           { from: "styles.css", to: "styles.css" },
           { from: "icons", to: "icons" },
           { from: "src/content/knoww-inline.css", to: "knoww-inline.css" },
+          {
+            from: "src/content/markets-panel-navbar.css",
+            to: "markets-panel-navbar.css",
+          },
+          {
+            from: "src/content/unsupported-site-prompt.css",
+            to: "unsupported-site-prompt.css",
+          },
           { from: "src/offscreen/offscreen.html", to: "offscreen.html" },
           {
             from: path.join(
@@ -471,7 +514,7 @@ module.exports = (_env, argv) => {
     },
     devtool: isProduction ? false : "cheap-module-source-map",
     module: {
-      rules: [createTypeScriptRule()],
+      rules: [createTypeScriptRule(), createInlineImageRule()],
     },
     resolve: createResolveConfig(),
     plugins: [

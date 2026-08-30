@@ -10,8 +10,13 @@ import {
   pipeline,
 } from "@huggingface/transformers";
 import { logDebug, logInfo, logWarn } from "@knoww/logger";
+import {
+  buildEmbeddingCacheNamespace,
+  CONTEXT_MODEL_MANIFEST,
+} from "../model-manifest";
 import { getInferenceDevice, type InferenceDevice } from "./inference-device";
 import { LRUCache } from "./lru-cache";
+import { createRerankWorkQueue } from "./rerank-work-queue";
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -56,11 +61,13 @@ async function preloadOnnxWasm(): Promise<void> {
   onnxEnv.wasm.wasmPaths = { mjs: mjsUrl, wasm: wasmUrl };
 }
 
-const EMBEDDING_MODEL_ID = "Snowflake/snowflake-arctic-embed-s";
-const EMBEDDING_DTYPE = "int8";
+const EMBEDDING_MODEL = CONTEXT_MODEL_MANIFEST.embedding;
+const EMBEDDING_MODEL_ID = EMBEDDING_MODEL.id;
+const EMBEDDING_DTYPE = EMBEDDING_MODEL.dtype;
 const RERANK_LOG_PREFIX = "[XENCODER-AB]";
-const RERANK_MODEL_ID = "Xenova/ms-marco-MiniLM-L-6-v2";
-const RERANK_DTYPE = "q8";
+const RERANK_MODEL = CONTEXT_MODEL_MANIFEST.reranker;
+const RERANK_MODEL_ID = RERANK_MODEL.id;
+const RERANK_DTYPE = RERANK_MODEL.dtype;
 const RERANK_BATCH_SIZE = 8;
 
 let pipelineInstance: Promise<FeatureExtractionPipeline> | null = null;
@@ -70,10 +77,11 @@ let rerankerInstance: Promise<{
   model: PreTrainedModel;
   device: InferenceDevice;
 }> | null = null;
-let rerankQueue: Promise<void> = Promise.resolve();
+const rerankWorkQueue = createRerankWorkQueue();
 
 function buildPipelineOptions(): {
   dtype: typeof EMBEDDING_DTYPE;
+  revision: string;
   progress_callback: (progress: ProgressInfo) => void;
 } {
   // Transformers.js fires progress events on every fetched chunk, which
@@ -86,6 +94,7 @@ function buildPipelineOptions(): {
 
   return {
     dtype: EMBEDDING_DTYPE,
+    revision: EMBEDDING_MODEL.revision,
     progress_callback: (progress: ProgressInfo) => {
       switch (progress.status) {
         case "progress_total": {
@@ -155,11 +164,20 @@ async function createPipelineInstance(): Promise<FeatureExtractionPipeline> {
 
 function getInstance() {
   if (pipelineInstance === null) {
-    logInfo("embeddings.load-start", { model: EMBEDDING_MODEL_ID });
+    logInfo("embeddings.load-start", {
+      model: EMBEDDING_MODEL_ID,
+      revision: EMBEDDING_MODEL.revision,
+      manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
+    });
     const start = Date.now();
     pipelineInstance = createPipelineInstance()
       .then((p) => {
-        logInfo("embeddings.loaded", { elapsedMs: Date.now() - start });
+        logInfo("embeddings.loaded", {
+          elapsedMs: Date.now() - start,
+          model: EMBEDDING_MODEL_ID,
+          revision: EMBEDDING_MODEL.revision,
+          manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
+        });
         return p;
       })
       .catch((error) => {
@@ -185,9 +203,12 @@ async function createRerankerInstance(): Promise<{
   device: InferenceDevice;
 }> {
   await preloadOnnxWasm();
-  const tokenizer = await AutoTokenizer.from_pretrained(RERANK_MODEL_ID);
+  const tokenizer = await AutoTokenizer.from_pretrained(RERANK_MODEL_ID, {
+    revision: RERANK_MODEL.revision,
+  });
   const baseOptions = {
     dtype: RERANK_DTYPE,
+    revision: RERANK_MODEL.revision,
     progress_callback: (progress: ProgressInfo) => {
       if (progress.status === "download") {
         logInfo("rerank.download", {
@@ -236,6 +257,8 @@ function getRerankerInstance() {
       prefix: RERANK_LOG_PREFIX,
       model: RERANK_MODEL_ID,
       dtype: RERANK_DTYPE,
+      revision: RERANK_MODEL.revision,
+      manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
     });
     rerankerInstance = createRerankerInstance()
       .then((instance) => {
@@ -243,6 +266,8 @@ function getRerankerInstance() {
           prefix: RERANK_LOG_PREFIX,
           elapsedMs: Date.now() - start,
           device: instance.device,
+          revision: RERANK_MODEL.revision,
+          manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
         });
         return instance;
       })
@@ -256,13 +281,9 @@ function getRerankerInstance() {
 
 // ── IndexedDB persistence layer ──────────────────────────────────────
 
-function sanitizeCachePart(value: string): string {
-  return value.replace(/[^a-zA-Z0-9.-]+/g, "-").replace(/^-|-$/g, "");
-}
-
-const IDB_NAME = `knoww-embeddings-${sanitizeCachePart(
-  EMBEDDING_MODEL_ID
-)}-${EMBEDDING_DTYPE}`;
+const IDB_NAME = `knoww-embeddings-${buildEmbeddingCacheNamespace(
+  EMBEDDING_MODEL
+)}`;
 const IDB_VERSION = 3;
 const IDB_STORE = "vectors";
 const IDB_MAX_ENTRIES = 2000;
@@ -451,7 +472,7 @@ async function getEmbeddings(texts: string[]): Promise<Float32Array[]> {
   for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
     const batch = texts.slice(i, i + EMBEDDING_BATCH_SIZE);
     const output = await extractor(batch, {
-      pooling: "cls",
+      pooling: EMBEDDING_MODEL.pooling,
       normalize: true,
     });
     try {
@@ -474,7 +495,7 @@ export async function computeSimilarities(
 ): Promise<number[]> {
   const start = Date.now();
 
-  const queryText = `Represent this sentence for searching relevant passages: ${postText}`;
+  const queryText = `${EMBEDDING_MODEL.queryPrefix}${postText}`;
 
   const allTexts = [queryText, ...marketTexts];
   const uniqueTexts = Array.from(new Set(allTexts));
@@ -543,6 +564,9 @@ export async function computeSimilarities(
     l1Hits,
     idbHits,
     computed: textsToEmbed.length,
+    model: EMBEDDING_MODEL_ID,
+    revision: EMBEDDING_MODEL.revision,
+    manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
   });
   return similarities;
 }
@@ -555,6 +579,8 @@ export interface RerankResult {
     queueWaitMs: number;
     model: string;
     dtype: string;
+    revision: string;
+    manifestVersion: string;
     device: "webgpu" | "wasm";
   };
 }
@@ -574,6 +600,8 @@ async function runRerankMarketPairs(
         queueWaitMs,
         model: RERANK_MODEL_ID,
         dtype: RERANK_DTYPE,
+        revision: RERANK_MODEL.revision,
+        manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
         device: "wasm",
       },
     };
@@ -613,6 +641,9 @@ async function runRerankMarketPairs(
     elapsedMs,
     queueWaitMs,
     device,
+    model: RERANK_MODEL_ID,
+    revision: RERANK_MODEL.revision,
+    manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
   });
 
   return {
@@ -623,6 +654,8 @@ async function runRerankMarketPairs(
       queueWaitMs,
       model: RERANK_MODEL_ID,
       dtype: RERANK_DTYPE,
+      revision: RERANK_MODEL.revision,
+      manifestVersion: CONTEXT_MODEL_MANIFEST.manifestVersion,
       device,
     },
   };
@@ -630,22 +663,13 @@ async function runRerankMarketPairs(
 
 export async function rerankMarketPairs(
   postText: string,
-  marketTexts: string[]
+  marketTexts: string[],
+  request: { requestKey?: string } = {}
 ): Promise<RerankResult> {
   const queuedAt = Date.now();
-  let releaseNext: () => void = () => {};
-  const previous = rerankQueue;
-  rerankQueue = new Promise<void>((resolve) => {
-    releaseNext = resolve;
-  });
-
-  await previous;
-  const queueWaitMs = Date.now() - queuedAt;
-  try {
-    return await runRerankMarketPairs(postText, marketTexts, queueWaitMs);
-  } finally {
-    releaseNext();
-  }
+  return rerankWorkQueue.enqueue(request.requestKey, () =>
+    runRerankMarketPairs(postText, marketTexts, Date.now() - queuedAt)
+  );
 }
 
 /**
@@ -658,7 +682,7 @@ export function warmUp(): Promise<void> {
   warmUpPromise = getInstance()
     .then(async (extractor) => {
       const output = await extractor(["Knoww scoring warm-up"], {
-        pooling: "cls",
+        pooling: EMBEDDING_MODEL.pooling,
         normalize: true,
       });
       output.dispose();

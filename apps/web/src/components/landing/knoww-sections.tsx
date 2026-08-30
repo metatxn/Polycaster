@@ -65,7 +65,7 @@ const COMMENTS: Array<{ t: string; x: number; y: number; r: number }> = [
 
 export function ProblemSection() {
   return (
-    <section className="bg-(--kw-bg-alt)">
+    <section className="bg-(--kw-bg-alt)" data-landing-section="problem">
       <div className={SECTION}>
         <SectionLabel n="02" label="The Problem" />
         <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
@@ -190,7 +190,7 @@ function FeatureCard({
 
 export function SolutionSection() {
   return (
-    <section id="solution">
+    <section id="solution" data-landing-section="solution">
       <div className={SECTION}>
         <SectionLabel n="03" label="The Solution" />
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
@@ -251,7 +251,7 @@ export const PLATFORMS: Array<{ n: string; soon?: boolean }> = [
 
 export function ExtensionSection() {
   return (
-    <section id="extension">
+    <section id="extension" data-landing-section="extension">
       <div className={SECTION}>
         <SectionLabel n="04" label="Chrome Extension" />
         <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
@@ -286,6 +286,9 @@ export function ExtensionSection() {
             </div>
             <Link
               href="/extension"
+              data-landing-cta="learn_extension"
+              data-landing-location="extension_section"
+              data-landing-destination="extension_page"
               className="mt-7 inline-flex items-center gap-1.5 text-[14px] font-medium text-(--kw-accent-text) transition-colors hover:text-(--kw-fg)"
             >
               Learn more about the extension
@@ -336,7 +339,11 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section id="how" className="bg-(--kw-bg-alt)">
+    <section
+      id="how"
+      className="bg-(--kw-bg-alt)"
+      data-landing-section="how_it_works"
+    >
       <div className={SECTION}>
         <SectionLabel n="05" label="How it works" />
         <h2 className="kw-reveal max-w-[900px] text-3xl font-bold leading-[1.05] tracking-[-0.03em] md:text-5xl">
@@ -402,7 +409,7 @@ const RADAR_FEED = [
 
 export function RadarBlock() {
   return (
-    <section>
+    <section data-landing-section="radar">
       <div className={SECTION}>
         <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
           <div className="kw-reveal flex justify-center">
@@ -482,7 +489,7 @@ const AGENT_BULLETS = [
 
 export function AgentSection() {
   return (
-    <section id="agent">
+    <section id="agent" data-landing-section="agent">
       <div className={SECTION}>
         <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-[1fr_1.1fr]">
           <div>
@@ -530,7 +537,7 @@ export function AgentSection() {
 
 export function WhyNowSection() {
   return (
-    <section className="bg-(--kw-bg-alt)">
+    <section className="bg-(--kw-bg-alt)" data-landing-section="why_now">
       <div className={SECTION}>
         <SectionLabel n="07" label="Why now" />
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
@@ -645,7 +652,7 @@ const USE_CASES = [
 
 export function UseCasesSection() {
   return (
-    <section id="use-cases">
+    <section id="use-cases" data-landing-section="use_cases">
       <div className={SECTION}>
         <SectionLabel n="08" label="Use cases" />
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
@@ -694,7 +701,7 @@ const METRICS = [
 
 export function TractionSection() {
   return (
-    <section className="bg-(--kw-bg-alt)">
+    <section className="bg-(--kw-bg-alt)" data-landing-section="traction">
       <div className={SECTION}>
         <SectionLabel n="09" label="Where we are" />
         <div className="mb-12 grid grid-cols-1 items-end gap-8 md:grid-cols-12">
@@ -756,7 +763,7 @@ export function FinalCTASection({
   secondaryHref?: string;
 }) {
   return (
-    <section id="cta">
+    <section id="cta" data-landing-section="final_cta">
       <div className="mx-auto w-full max-w-[1280px] 2xl:max-w-[1440px] px-6 py-20 sm:px-8 md:py-28">
         <div
           className="relative overflow-hidden rounded-[22px] border border-(--kw-fg)/15 px-6 py-20 text-center md:px-12"
@@ -786,6 +793,9 @@ export function FinalCTASection({
                 href={chromeStoreUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                data-landing-cta="install_extension"
+                data-landing-location="final_cta"
+                data-landing-destination="chrome_web_store"
                 className="group inline-flex items-center gap-2.5 bg-(--kw-fg) px-7 py-4 text-[14px] font-semibold text-(--kw-bg) transition-colors hover:bg-(--kw-fg)/90"
               >
                 {primaryLabel}
@@ -794,6 +804,9 @@ export function FinalCTASection({
               {secondaryHref?.startsWith("/") ? (
                 <Link
                   href={secondaryHref}
+                  data-landing-cta="explore_markets"
+                  data-landing-location="final_cta"
+                  data-landing-destination="web_app"
                   className="inline-flex items-center gap-2 border-b border-(--kw-fg)/20 px-5 py-4 text-[14px] font-medium text-(--kw-fg)/70 transition-colors hover:border-(--kw-fg) hover:text-(--kw-fg)"
                 >
                   <Activity className="h-4 w-4" />
@@ -804,6 +817,9 @@ export function FinalCTASection({
                   href={secondaryHref ?? chromeStoreUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  data-landing-cta="explore_markets"
+                  data-landing-location="final_cta"
+                  data-landing-destination="web_app"
                   className="inline-flex items-center gap-2 border-b border-(--kw-fg)/20 px-5 py-4 text-[14px] font-medium text-(--kw-fg)/70 transition-colors hover:border-(--kw-fg) hover:text-(--kw-fg)"
                 >
                   <Activity className="h-4 w-4" />

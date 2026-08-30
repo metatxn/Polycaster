@@ -8,6 +8,7 @@ import type {
 } from "../../types/market";
 import { setCspSafeImageSrc } from "../image-proxy";
 import { isMarketWithinDisplayPriceCap } from "../market-price-filter";
+import { installRuntimePortDisconnectHandler } from "../runtime-port-lifecycle";
 import type { StreamBetHandle, TradingRuntime } from "../trading-runtime-types";
 import { escapeSelectorValue } from "../utils";
 import {
@@ -23,6 +24,11 @@ import {
   SOURCE_CONFIG,
   toDecimal,
 } from "./cards";
+import {
+  createMarketsPanelNavbar,
+  setMarketsPanelNavbarMinimized,
+} from "./markets-panel-navbar";
+import { createMarketsPanelSearch } from "./markets-panel-search";
 import { showWelcomeForUpTo } from "./welcome-visibility";
 
 // ============================================
@@ -264,7 +270,7 @@ function ensureNotificationStackLifecyclePort(): void {
         disconnectNotificationStackLifecyclePort();
       }
     }, NOTIFICATION_STACK_LIFECYCLE_PING_MS);
-    port.onDisconnect.addListener(() => {
+    installRuntimePortDisconnectHandler(port, () => {
       if (notificationStackLifecyclePort === port) {
         notificationStackLifecyclePort = null;
       }
@@ -290,18 +296,6 @@ const STACK_EXPANDED_SESSION_KEY = "knoww-stack-expanded";
 const NOTIFICATION_STACK_VIEWPORT_MARGIN = 12;
 const NOTIFICATION_STACK_PORT_NAME = "knoww-notification-stack";
 const NOTIFICATION_STACK_LIFECYCLE_PING_MS = 20_000;
-
-const STACK_MINIMIZE_ICON_HTML = `
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <polyline points="6 9 12 15 18 9"/>
-  </svg>
-`;
-
-const STACK_EXPAND_ICON_HTML = `
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <polyline points="18 15 12 9 6 15"/>
-  </svg>
-`;
 
 type StackFilter = "all" | "active" | "seen" | "trending";
 
@@ -381,19 +375,11 @@ function persistStackExpanded(value: boolean): void {
 
 function applyMinimizedState(
   container: HTMLElement,
-  toggleBtn: HTMLElement,
+  toggleBtn: HTMLButtonElement,
   minimized: boolean
 ): void {
   container.classList.toggle("knoww-stack-minimized", minimized);
-  toggleBtn.innerHTML = minimized
-    ? STACK_EXPAND_ICON_HTML
-    : STACK_MINIMIZE_ICON_HTML;
-  toggleBtn.title = minimized ? "Expand" : "Minimize";
-  toggleBtn.setAttribute(
-    "aria-label",
-    minimized ? "Expand markets panel" : "Minimize markets panel"
-  );
-  toggleBtn.setAttribute("aria-expanded", minimized ? "false" : "true");
+  setMarketsPanelNavbarMinimized(toggleBtn, minimized);
 }
 
 function applyStackExpandedState(
@@ -817,126 +803,20 @@ export function createNotificationStack(): HTMLElement {
     `Creating notification stack with platform: ${platformName}, theme: ${theme}`
   );
 
-  // Header
-  const header = document.createElement("div");
-  header.className = "knoww-stack-header";
+  const navbar = createMarketsPanelNavbar();
+  const header = navbar.header;
+  const headerTitle = navbar.title;
+  const settingsBtn = navbar.settingsButton;
+  const sidebarBtn = navbar.sidebarButton;
+  const searchToggle = navbar.searchButton;
+  const minimizeToggle = navbar.minimizeButton;
+  const closeBtn = navbar.closeButton;
 
-  const headerTitle = document.createElement("div");
-  headerTitle.className = "knoww-stack-title";
-  const brandIconUrl =
-    getSafeRuntimeUrl("icons/icon-128.png") || "icons/icon-128.png";
-  headerTitle.innerHTML = `
-    <span class="knoww-stack-icon" aria-hidden="true">
-      <img src="${brandIconUrl}" alt="Knoww" width="20" height="20" />
-    </span>
-    <span>Markets</span>
-  `;
-
-  const headerRight = document.createElement("div");
-  headerRight.className = "knoww-stack-header-right";
-
-  const settingsBtn = document.createElement("button");
-  settingsBtn.className = "knoww-stack-settings";
-  settingsBtn.type = "button";
-  settingsBtn.innerHTML = `
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 5 15.08a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8.92 5a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
-    </svg>
-  `;
-  settingsBtn.title = "Settings";
-  settingsBtn.setAttribute("aria-label", "Open extension settings");
-
-  const sidebarBtn = document.createElement("button");
-  sidebarBtn.className = "knoww-stack-sidebar";
-  sidebarBtn.type = "button";
-  sidebarBtn.innerHTML = `
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="16" rx="2"/>
-      <path d="M15 4v16"/>
-      <path d="m10 9 3 3-3 3"/>
-    </svg>
-  `;
-  sidebarBtn.title = "Move to browser sidebar";
-  sidebarBtn.setAttribute(
-    "aria-label",
-    "Move markets panel to browser sidebar"
-  );
-
-  const searchToggle = document.createElement("button");
-  searchToggle.className = "knoww-search-toggle";
-  searchToggle.id = "knoww-search-toggle";
-  searchToggle.type = "button";
-  searchToggle.innerHTML = `
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <circle cx="11" cy="11" r="8"></circle>
-      <path d="M21 21l-4.35-4.35"></path>
-    </svg>
-  `;
-  searchToggle.title = "Search markets";
-
-  const minimizeToggle = document.createElement("button");
-  minimizeToggle.className = "knoww-stack-minimize";
-  minimizeToggle.id = "knoww-stack-minimize";
-  minimizeToggle.type = "button";
-  minimizeToggle.innerHTML = STACK_MINIMIZE_ICON_HTML;
-  minimizeToggle.title = "Minimize";
-  minimizeToggle.setAttribute("aria-label", "Minimize");
-  minimizeToggle.setAttribute("aria-expanded", "true");
-
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "knoww-stack-close";
-  closeBtn.id = "knoww-stack-close";
-  closeBtn.type = "button";
-  closeBtn.innerHTML = `
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M18 6 6 18M6 6l12 12"/>
-    </svg>
-  `;
-  closeBtn.title = "Close";
-  closeBtn.setAttribute("aria-label", "Close markets panel");
-
-  headerRight.appendChild(settingsBtn);
-  headerRight.appendChild(sidebarBtn);
-  headerRight.appendChild(searchToggle);
-  headerRight.appendChild(minimizeToggle);
-  headerRight.appendChild(closeBtn);
-  header.appendChild(headerTitle);
-  header.appendChild(headerRight);
-
-  // Search container
-  const searchContainer = document.createElement("div");
-  searchContainer.className = "knoww-search-container";
-  searchContainer.id = "knoww-search-container";
-
-  const searchInputWrapper = document.createElement("div");
-  searchInputWrapper.className = "knoww-search-input-wrapper";
-
-  const searchInput = document.createElement("input");
-  searchInput.type = "text";
-  searchInput.className = "knoww-search-input";
-  searchInput.id = "knoww-search-input";
-  searchInput.placeholder = "Search Polymarket...";
-
-  const clearBtn = document.createElement("button");
-  clearBtn.className = "knoww-search-clear";
-  clearBtn.id = "knoww-search-clear";
-  clearBtn.innerHTML = `
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M18 6L6 18M6 6l12 12"/>
-    </svg>
-  `;
-  clearBtn.style.display = "none";
-
-  searchInputWrapper.appendChild(searchInput);
-  searchInputWrapper.appendChild(clearBtn);
-
-  const searchResults = document.createElement("div");
-  searchResults.className = "knoww-search-results";
-  searchResults.id = "knoww-search-results";
-
-  searchContainer.appendChild(searchInputWrapper);
-  searchContainer.appendChild(searchResults);
+  const search = createMarketsPanelSearch();
+  const searchContainer = search.container;
+  const searchInput = search.input;
+  const clearBtn = search.clearButton;
+  const searchResults = search.results;
 
   const stackTabs = createStackTabs();
   stackTabs.id = "knoww-stack-tabs";
@@ -1188,7 +1068,7 @@ function setupSearchFunctionality(
 
   toggleBtn.onclick = () => {
     const stack = container.closest<HTMLElement>(".knoww-notification-stack");
-    const minimizeToggle = stack?.querySelector<HTMLElement>(
+    const minimizeToggle = stack?.querySelector<HTMLButtonElement>(
       "#knoww-stack-minimize"
     );
     if (stack?.classList.contains("knoww-stack-minimized") && minimizeToggle) {

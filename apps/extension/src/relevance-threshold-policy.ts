@@ -3,7 +3,7 @@ export const FAIL_OPEN_FLOOR = 0.5;
 
 export function describeRelevanceThreshold(
   configuredThreshold: number,
-  aiAssistedMatchingEnabled: boolean
+  aiCandidateValidationEnabled: boolean
 ): string {
   const configured = configuredThreshold.toFixed(2);
 
@@ -14,8 +14,8 @@ export function describeRelevanceThreshold(
     return `Configured threshold: ${configured}. All scoring paths require at least ${configured}.`;
   }
 
-  if (!aiAssistedMatchingEnabled) {
-    return `Configured threshold: ${configured}. AI-assisted matching is off, so the validator fallback rejects scores below ${Math.max(configuredThreshold, FAIL_OPEN_FLOOR).toFixed(2)}.`;
+  if (!aiCandidateValidationEnabled) {
+    return `Configured threshold: ${configured}. AI candidate validation is off, so the validator fallback rejects scores below ${Math.max(configuredThreshold, FAIL_OPEN_FLOOR).toFixed(2)}.`;
   }
 
   const hybridFloor = Math.max(configuredThreshold, EMBEDDING_FLOOR).toFixed(2);
@@ -24,8 +24,8 @@ export function describeRelevanceThreshold(
   );
 
   if (hybridFloor === validatorFloor) {
-    return `Configured threshold: ${configured}. Hybrid matching and the validator fallback require ${hybridFloor}. AI-approved lexical or heuristic matches can use ${configured}.`;
+    return `Configured threshold: ${configured}. Hybrid matching and the validator fallback require ${hybridFloor}. Lexical or heuristic matches approved by AI candidate validation can use ${configured}.`;
   }
 
-  return `Configured threshold: ${configured}. Hybrid matching requires ${hybridFloor}, and the validator fallback requires ${validatorFloor}. AI-approved lexical or heuristic matches can use ${configured}.`;
+  return `Configured threshold: ${configured}. Hybrid matching requires ${hybridFloor}, and the validator fallback requires ${validatorFloor}. Lexical or heuristic matches approved by AI candidate validation can use ${configured}.`;
 }

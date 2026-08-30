@@ -1,8 +1,15 @@
 import type { Market } from "../types/market";
+import {
+  buildMarketContextDocument,
+  CONTEXT_DOCUMENT_LIMITS,
+  type ContextDocument,
+} from "./context-documents";
 
 const DIACRITIC_RE = /[\u0300-\u036f]/g;
 const NON_WORD_RE = /[^a-z0-9]+/g;
-const MAX_NESTED_CONTEXT_PARTS = 160;
+export const MAX_NESTED_CONTEXT_CHILDREN = 20;
+export const MAX_MARKET_CONTEXT_TEXT_LENGTH =
+  CONTEXT_DOCUMENT_LIMITS.totalCharacters;
 
 export function normalizeMarketContextText(value: string): string {
   return value
@@ -40,28 +47,78 @@ export function getNestedMarketContextParts(
   market: Pick<Market, "markets">
 ): string[] {
   const parts: string[] = [];
+  let includedChildren = 0;
   for (const nested of market.markets || []) {
     if (!isActiveNestedMarket(nested)) continue;
     const label = getNestedMarketLabel(nested);
-    if (label) parts.push(label);
-    if (nested.question) parts.push(nested.question);
-    if (parts.length >= MAX_NESTED_CONTEXT_PARTS) break;
+    const childParts = [label, nested.question || ""].filter(Boolean);
+    if (childParts.length === 0) continue;
+    parts.push(...childParts);
+    includedChildren++;
+    if (includedChildren >= MAX_NESTED_CONTEXT_CHILDREN) break;
   }
   return parts;
 }
 
+export function boundMarketContextText(value: string): string {
+  const compacted = value.replace(/\s+/g, " ").trim();
+  if (compacted.length <= MAX_MARKET_CONTEXT_TEXT_LENGTH) return compacted;
+
+  const truncated = compacted.slice(0, MAX_MARKET_CONTEXT_TEXT_LENGTH);
+  const lastSpace = truncated.lastIndexOf(" ");
+  return lastSpace >= MAX_MARKET_CONTEXT_TEXT_LENGTH * 0.8
+    ? truncated.slice(0, lastSpace)
+    : truncated;
+}
+
 export function buildMarketContextText(
-  market: Pick<Market, "title" | "description" | "markets">
+  market: Pick<
+    Market,
+    | "title"
+    | "description"
+    | "markets"
+    | "outcomes"
+    | "startDate"
+    | "endDate"
+    | "ticker"
+    | "tags"
+  >
 ): string {
-  return [
-    market.title || "",
-    market.description || "",
-    ...getNestedMarketContextParts(market),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return buildMarketContextDocumentFromMarket(market).text;
+}
+
+export function buildMarketContextDocumentFromMarket(
+  market: Pick<
+    Market,
+    | "title"
+    | "description"
+    | "markets"
+    | "outcomes"
+    | "startDate"
+    | "endDate"
+    | "ticker"
+    | "tags"
+  >
+): ContextDocument {
+  return buildMarketContextDocument({
+    title: market.title || "",
+    ticker: market.ticker,
+    outcomes: (market.outcomes ?? [])
+      .map((outcome) => outcome.name || outcome.title || "")
+      .filter(Boolean),
+    activeChildren: (market.markets ?? [])
+      .filter(isActiveNestedMarket)
+      .map((nested) => ({
+        label: getNestedMarketLabel(nested),
+        question: nested.question,
+      })),
+    startDate: market.startDate,
+    endDate: market.endDate,
+    aliases: (market.tags ?? [])
+      .map((tag) => tag.label || tag.slug || "")
+      .filter(Boolean),
+    description: market.description,
+  });
 }
 
 export function getPreferredOutcomeNames(

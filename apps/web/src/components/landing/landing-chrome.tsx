@@ -7,7 +7,11 @@ import { LandingThemeDropdown } from "@/components/landing/landing-theme-dropdow
 export const CHROME_STORE_URL =
   "https://chromewebstore.google.com/detail/knoww-%E2%80%94-every-opinion-is/naoaonihikedoiemhbolbnolibpmojgf";
 
-export type LandingNavLink = { label: string; href: string };
+export type LandingNavLink = {
+  label: string;
+  href: string;
+  analytics?: { cta: string; destination: string };
+};
 
 /** Header nav for the editorial/content pages (guides, about, how-it-works). */
 export const CONTENT_NAV: LandingNavLink[] = [
@@ -36,11 +40,29 @@ export function LandingHeader({ nav }: { nav: LandingNavLink[] }) {
         <nav className="hidden lg:flex items-center gap-8 text-[14px] font-medium">
           {nav.map((item) =>
             item.href.startsWith("/") ? (
-              <Link key={item.href} href={item.href} className={NAV_LINK_CLASS}>
+              <Link
+                key={item.href}
+                href={item.href}
+                data-landing-cta={item.analytics?.cta}
+                data-landing-location={
+                  item.analytics ? "header_nav" : undefined
+                }
+                data-landing-destination={item.analytics?.destination}
+                className={NAV_LINK_CLASS}
+              >
                 {item.label}
               </Link>
             ) : (
-              <a key={item.href} href={item.href} className={NAV_LINK_CLASS}>
+              <a
+                key={item.href}
+                href={item.href}
+                data-landing-cta={item.analytics?.cta}
+                data-landing-location={
+                  item.analytics ? "header_nav" : undefined
+                }
+                data-landing-destination={item.analytics?.destination}
+                className={NAV_LINK_CLASS}
+              >
                 {item.label}
               </a>
             )
@@ -54,6 +76,9 @@ export function LandingHeader({ nav }: { nav: LandingNavLink[] }) {
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Add to Chrome"
+            data-landing-cta="install_extension"
+            data-landing-location="header"
+            data-landing-destination="chrome_web_store"
             className="inline-flex items-center gap-2 bg-(--kw-fg) text-(--kw-bg) px-3 py-2 text-[14px] font-medium hover:bg-(--kw-fg)/90 transition-colors whitespace-nowrap sm:px-4"
           >
             <Download className="w-3.5 h-3.5" />

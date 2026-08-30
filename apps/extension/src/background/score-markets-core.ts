@@ -2,6 +2,7 @@ import type {
   ContextGateResult,
   ScoreMarketsMessage,
 } from "../types/chrome-messages";
+import { getRerankQueueSkipDetails } from "./rerank-work-queue";
 
 interface NormalizedScoreMarketsMessage {
   postText: string;
@@ -11,11 +12,13 @@ interface NormalizedScoreMarketsMessage {
   includeBm25: boolean;
   includeContextGate: boolean;
   includeRerank: boolean;
+  rerankRequestKey: string | undefined;
 }
 
 export interface ScoreMarketsResult {
   similarities: number[];
   bm25Scores: number[];
+  lexicalShadowScores: number[];
   contextGateResults: ContextGateResult[];
   usedEmbeddings: boolean;
   rerankScores?: number[];
@@ -25,6 +28,8 @@ export interface ScoreMarketsResult {
     queueWaitMs: number;
     model: string;
     dtype: string;
+    revision: string;
+    manifestVersion: string;
     device: "webgpu" | "wasm";
   };
   usedRerank?: boolean;
@@ -36,13 +41,15 @@ export interface ScoreMarketsDeps {
     marketTexts: string[]
   ) => Promise<number[]>;
   bm25Score: (postText: string, marketTexts: string[]) => number[];
+  stableLexicalScore: (postText: string, marketTexts: string[]) => number[];
   nlpContextGateBatch: (
     postText: string,
     gateTexts: string[]
   ) => ContextGateResult[];
   rerankMarketPairs?: (
     postText: string,
-    marketTexts: string[]
+    marketTexts: string[],
+    request: { requestKey?: string }
   ) => Promise<{
     scores: number[];
     metrics: {
@@ -51,6 +58,8 @@ export interface ScoreMarketsDeps {
       queueWaitMs: number;
       model: string;
       dtype: string;
+      revision: string;
+      manifestVersion: string;
       device: "webgpu" | "wasm";
     };
   }>;
@@ -78,6 +87,11 @@ function normalizeRequest(
   const includeBm25 = message.includeBm25 ?? true;
   const includeContextGate = message.includeContextGate ?? false;
   const includeRerank = message.includeRerank ?? false;
+  const rerankRequestKey =
+    typeof message.rerankRequestKey === "string" &&
+    message.rerankRequestKey.length > 0
+      ? message.rerankRequestKey.slice(0, 256)
+      : undefined;
   const marketTexts = message.marketTexts || [];
   const gateTexts =
     message.gateTexts && message.gateTexts.length === marketTexts.length
@@ -92,12 +106,14 @@ function normalizeRequest(
     includeBm25,
     includeContextGate,
     includeRerank,
+    rerankRequestKey,
   };
 }
 
 export function createScoreMarkets({
   computeSimilarities,
   bm25Score,
+  stableLexicalScore,
   nlpContextGateBatch,
   rerankMarketPairs,
   logWarn,
@@ -113,6 +129,7 @@ export function createScoreMarkets({
       includeBm25,
       includeContextGate,
       includeRerank,
+      rerankRequestKey,
     } = normalizeRequest(message);
 
     if (!postText || marketTexts.length === 0) {
@@ -120,6 +137,7 @@ export function createScoreMarkets({
       return {
         similarities: includeEmbeddings ? empty : [],
         bm25Scores: includeBm25 ? empty : [],
+        lexicalShadowScores: includeBm25 ? empty : [],
         contextGateResults: [],
         usedEmbeddings: false,
         rerankScores: includeRerank ? empty : undefined,
@@ -132,6 +150,7 @@ export function createScoreMarkets({
     let usedEmbeddings = false;
     let similarities = includeEmbeddings ? createZeroScores() : [];
     let bm25Scores = includeBm25 ? createZeroScores() : [];
+    let lexicalShadowScores = includeBm25 ? createZeroScores() : [];
     let rerankScores = includeRerank ? createZeroScores() : undefined;
     let rerankMetrics: ScoreMarketsResult["rerankMetrics"];
     let usedRerank = false;
@@ -161,19 +180,43 @@ export function createScoreMarkets({
         });
         bm25Scores = createZeroScores();
       }
+
+      try {
+        lexicalShadowScores = padArray(
+          stableLexicalScore(postText, marketTexts),
+          count,
+          () => 0
+        );
+      } catch (error) {
+        logWarn("scoring.lexical-shadow-failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        lexicalShadowScores = createZeroScores();
+      }
     }
 
     if (includeRerank && rerankMarketPairs) {
       try {
-        const rerank = await rerankMarketPairs(postText, marketTexts);
+        const rerank = await rerankMarketPairs(postText, marketTexts, {
+          requestKey: rerankRequestKey,
+        });
         rerankScores = padArray(rerank.scores, count, () => 0);
         rerankMetrics = rerank.metrics;
         usedRerank = true;
       } catch (error) {
-        logWarn("scoring.rerank-failed", {
-          prefix: "[XENCODER-AB]",
-          message: error instanceof Error ? error.message : String(error),
-        });
+        const skipped = getRerankQueueSkipDetails(error);
+        if (skipped) {
+          logWarn("scoring.rerank-skipped", {
+            prefix: "[XENCODER-AB]",
+            reason: skipped.reason,
+            queueWaitMs: skipped.queueWaitMs,
+          });
+        } else {
+          logWarn("scoring.rerank-failed", {
+            prefix: "[XENCODER-AB]",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
         rerankScores = createZeroScores();
       }
     }
@@ -206,6 +249,7 @@ export function createScoreMarkets({
     return {
       similarities,
       bm25Scores,
+      lexicalShadowScores,
       contextGateResults,
       usedEmbeddings,
       rerankScores,

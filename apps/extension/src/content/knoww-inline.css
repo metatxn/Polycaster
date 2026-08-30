@@ -1,28 +1,4 @@
 /* ============================================ */
-/* EDITORIAL FONTS                                */
-/* ============================================ */
-/* Fonts are bundled as web_accessible_resources and loaded from the
-   extension origin (chrome-extension://<id>/fonts/...). Relative URLs
-   here resolve against this stylesheet's URL, which means they work
-   under both file:// (the dev preview) and chrome-extension:// at runtime
-   without build-time URL rewriting. Host-page CSP does not gate these
-   loads — chrome-extension:// is privileged. */
-@font-face {
-  font-family: "KnowwEditorial";
-  font-style: italic;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/fraunces-italic-500.woff2") format("woff2");
-}
-@font-face {
-  font-family: "KnowwMono";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/jetbrains-mono-500.woff2") format("woff2");
-}
-
-/* ============================================ */
 /* CSS VARIABLES - Platform-specific theming */
 /* ============================================ */
 :root {
@@ -1675,68 +1651,6 @@
 .knoww-stack-minimize svg {
   width: 16px !important;
   height: 16px !important;
-}
-
-/* Search container */
-.knoww-search-container {
-  display: none !important;
-  padding: 12px !important;
-  border-bottom: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
-}
-
-.knoww-search-container.knoww-search-open {
-  display: block !important;
-}
-
-.knoww-search-input-wrapper {
-  position: relative !important;
-  display: flex !important;
-  align-items: center !important;
-}
-
-.knoww-search-input {
-  width: 100% !important;
-  padding: 10px 36px 10px 12px !important;
-  background: var(--knoww-card-bg, rgb(32, 35, 39)) !important;
-  border: 1px solid var(--knoww-border, rgb(47, 51, 54)) !important;
-  border-radius: 20px !important;
-  color: var(--knoww-text, rgb(231, 233, 234)) !important;
-  font-size: 14px !important;
-  outline: none !important;
-  font-family: inherit !important;
-}
-
-.knoww-search-input:focus {
-  border-color: var(--knoww-accent, rgb(29, 155, 240)) !important;
-}
-
-.knoww-search-input::placeholder {
-  color: var(--knoww-text-secondary, rgb(113, 118, 123)) !important;
-}
-
-.knoww-search-clear {
-  position: absolute !important;
-  right: 8px !important;
-  width: 24px !important;
-  height: 24px !important;
-  border-radius: 50% !important;
-  background: var(--knoww-border, rgb(47, 51, 54)) !important;
-  border: none !important;
-  cursor: pointer !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  color: var(--knoww-text, rgb(231, 233, 234)) !important;
-  transition: background 0.15s ease !important;
-}
-
-.knoww-search-clear:hover {
-  background: rgb(63, 67, 71) !important;
-}
-
-.knoww-search-clear svg {
-  width: 14px !important;
-  height: 14px !important;
 }
 
 /* Search results */
@@ -6575,107 +6489,6 @@
   color: var(--kse-tab-active-ink) !important;
 }
 
-/* ─── Header ─── */
-#knoww-notification-stack .knoww-stack-header {
-  padding: 10px 14px !important;
-  border-bottom: 1px solid var(--kse-hairline) !important;
-  background: transparent !important;
-}
-
-#knoww-notification-stack .knoww-stack-title {
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  color: var(--kse-ink) !important;
-}
-
-#knoww-notification-stack .knoww-stack-icon {
-  width: 22px !important;
-  height: 22px !important;
-  border-radius: 5px !important;
-  background: transparent !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  flex-shrink: 0 !important;
-  overflow: hidden !important;
-}
-
-#knoww-notification-stack .knoww-stack-icon img {
-  width: 22px !important;
-  height: 22px !important;
-  display: block !important;
-  border-radius: 5px !important;
-  object-fit: cover !important;
-}
-
-#knoww-notification-stack .knoww-stack-title span {
-  font-family:
-    "KnowwMono", "SF Mono", "SFMono-Regular", "Consolas", monospace !important;
-  font-size: 10px !important;
-  font-weight: 400 !important;
-  letter-spacing: 0.12em !important;
-  text-transform: uppercase !important;
-  color: var(--kse-ink) !important;
-}
-
-#knoww-notification-stack .knoww-stack-header-right {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-}
-
-/* Header buttons — uniform ghost outline shared by search/chevron/close */
-#knoww-notification-stack .knoww-search-toggle,
-#knoww-notification-stack .knoww-stack-settings,
-#knoww-notification-stack .knoww-stack-sidebar,
-#knoww-notification-stack .knoww-stack-minimize,
-#knoww-notification-stack .knoww-stack-popout,
-#knoww-notification-stack .knoww-stack-close {
-  width: 26px !important;
-  height: 26px !important;
-  border-radius: 4px !important;
-  background: transparent !important;
-  border: 1px solid var(--kse-hairline) !important;
-  color: var(--kse-ink-2) !important;
-  padding: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  cursor: pointer !important;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease,
-    border-color 0.15s ease !important;
-}
-
-#knoww-notification-stack .knoww-search-toggle:hover,
-#knoww-notification-stack .knoww-stack-settings:hover,
-#knoww-notification-stack .knoww-stack-sidebar:hover,
-#knoww-notification-stack .knoww-stack-minimize:hover,
-#knoww-notification-stack .knoww-stack-popout:hover,
-#knoww-notification-stack .knoww-stack-close:hover {
-  background: var(--kse-control-hover) !important;
-  color: var(--kse-ink) !important;
-  border-color: var(--kse-hairline-2) !important;
-}
-
-#knoww-notification-stack .knoww-search-toggle.knoww-search-active {
-  background: var(--kse-control-active) !important;
-  color: var(--kse-ink) !important;
-  border-color: var(--kse-hairline-2) !important;
-}
-
-#knoww-notification-stack .knoww-search-toggle svg,
-#knoww-notification-stack .knoww-stack-settings svg,
-#knoww-notification-stack .knoww-stack-sidebar svg,
-#knoww-notification-stack .knoww-stack-minimize svg,
-#knoww-notification-stack .knoww-stack-popout svg,
-#knoww-notification-stack .knoww-stack-close svg {
-  width: 12px !important;
-  height: 12px !important;
-}
-
 /* ─── Section header ─── */
 #knoww-notification-stack .knoww-stack-section-header {
   display: flex !important;
@@ -6995,36 +6808,6 @@
 
 #knoww-notification-stack.knoww-stack-minimized .knoww-stack-footer {
   display: none !important;
-}
-
-/* ─── Search container retains the editorial palette ─── */
-#knoww-notification-stack .knoww-search-container {
-  border-bottom: 1px solid var(--kse-hairline) !important;
-  background: transparent !important;
-}
-
-#knoww-notification-stack .knoww-search-input {
-  background: var(--kse-bg-3) !important;
-  border: 1px solid var(--kse-hairline) !important;
-  color: var(--kse-ink) !important;
-  font-family: inherit !important;
-}
-
-#knoww-notification-stack .knoww-search-input:focus {
-  border-color: var(--kse-hairline-2) !important;
-}
-
-#knoww-notification-stack .knoww-search-input::placeholder {
-  color: var(--kse-ink-dim) !important;
-}
-
-#knoww-notification-stack .knoww-search-clear {
-  background: var(--kse-hairline) !important;
-  color: var(--kse-ink) !important;
-}
-
-#knoww-notification-stack .knoww-search-clear:hover {
-  background: var(--kse-hairline-2) !important;
 }
 
 #knoww-notification-stack .knoww-stack-empty {

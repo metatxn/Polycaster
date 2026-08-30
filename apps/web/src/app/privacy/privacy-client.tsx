@@ -276,6 +276,13 @@ export default function PrivacyClient() {
                   queries to run.
                 </li>
                 <li>
+                  <strong>Unsupported-site prompt</strong>: to show the support
+                  request prompt automatically, the Extension has host access on
+                  HTTP and HTTPS pages. On unsupported sites, this lightweight
+                  prompt reads only the current hostname. It does not inspect
+                  page text, links, forms, or the full page address.
+                </li>
+                <li>
                   <strong>Extension settings and local preference data</strong>{" "}
                   (for example enabled platforms/sources, learned click/ignore
                   preferences, local caches, and similar state) are stored using
@@ -289,13 +296,20 @@ export default function PrivacyClient() {
                   session.
                 </li>
                 <li>
-                  <strong>Extension usage analytics</strong>: if enabled in the
-                  Extension settings, we may collect product analytics such as
+                  <strong>Extension usage analytics</strong>: usage analytics is
+                  enabled by default and can be turned off in Extension
+                  settings. While enabled, we may collect product events such as
                   extension startup, supported-site detection, market card
                   impressions and clicks, trading panel opens, settings changes,
-                  platform name, host, and page URL/path. We do not design these
-                  analytics events to include raw page text or full page
-                  content.
+                  platform name, and host. These events do not include page
+                  addresses or raw page text.
+                </li>
+                <li>
+                  <strong>Website support requests</strong>: if you select
+                  &ldquo;Request support for this website,&rdquo; the Extension
+                  sends the normalized domain shown in the request screen and an
+                  anonymous installation identifier. It does not send the page
+                  address or page contents with that request.
                 </li>
                 <li>
                   <strong>AI-assisted matching inputs</strong>: if AI-assisted
@@ -444,11 +458,10 @@ export default function PrivacyClient() {
                   ranking.
                 </li>
                 <li>
-                  If you enable usage analytics, the Extension sends only
-                  product events needed to measure product adoption and feature
-                  usage. These events may include host, page URL or path,
-                  platform, and feature interaction metadata, but are not
-                  designed to include raw page text.
+                  While usage analytics is enabled, the Extension sends product
+                  events used to measure product adoption and feature usage.
+                  These events may include host, platform, and feature
+                  interaction metadata, but not page addresses or raw page text.
                 </li>
               </ul>
 
@@ -457,11 +470,12 @@ export default function PrivacyClient() {
                 The Extension may communicate with{" "}
                 <ExternalLink href="https://knoww.app">knoww.app</ExternalLink>{" "}
                 to support AI-assisted matching, extension authentication,
-                analytics ingestion (if enabled), trading-related features, and
-                other Extension-backed functionality. Depending on the feature,
-                this may include wallet address, signed authentication messages,
-                short-lived session tokens, content excerpts, market metadata,
-                and product interaction metadata.
+                analytics ingestion (if enabled), explicit website support
+                requests, trading-related features, and other Extension-backed
+                functionality. Depending on the feature, this may include wallet
+                address, signed authentication messages, short-lived session
+                tokens, content excerpts, market metadata, and product
+                interaction metadata.
               </p>
             </Section>
 

@@ -40,6 +40,7 @@ export interface ScoreMarketsMessage {
   includeBm25?: boolean;
   includeContextGate?: boolean;
   includeRerank?: boolean;
+  rerankRequestKey?: string;
 }
 
 export interface ScoringPrewarmMessage {
@@ -232,6 +233,11 @@ export interface AnalyticsTrackMessage {
   properties?: Record<string, string | number | boolean | null | undefined>;
 }
 
+export interface SiteSupportRequestMessage {
+  type: "site-support:request";
+  hostname: string;
+}
+
 export interface PortfolioSwitchWalletMessage {
   type: "KNOWW_SWITCH_PORTFOLIO_WALLET";
 }
@@ -322,6 +328,7 @@ export type BackgroundMessage =
   | TradingMessage
   | SigningResponseMessage
   | AnalyticsTrackMessage
+  | SiteSupportRequestMessage
   | PortfolioSwitchWalletMessage
   | PortfolioDepositMessage
   | PortfolioWithdrawMessage
@@ -372,6 +379,7 @@ export interface ScoreMarketsSuccessResponse {
   ok: true;
   similarities: number[];
   bm25Scores: number[];
+  lexicalShadowScores: number[];
   rerankScores?: number[];
   rerankMetrics?: {
     count: number;
@@ -379,6 +387,8 @@ export interface ScoreMarketsSuccessResponse {
     queueWaitMs: number;
     model: string;
     dtype: string;
+    revision: string;
+    manifestVersion: string;
     device: "webgpu" | "wasm";
   };
   contextGateResults: ContextGateResult[];

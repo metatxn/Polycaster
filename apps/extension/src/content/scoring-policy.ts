@@ -510,13 +510,17 @@ export interface GateDecisionInput {
   score: number;
   gate?: ContextGateResult;
   /**
-   * When true, the gate passes at `distinct >= 1` provided the score clears
-   * `AI_GATE_RETRY_FLOOR`. Set by platforms where both sides are short market
-   * questions (kalshi.com). Default (false) keeps the standard 2+ distinct
-   * signals requirement.
+   * Enables platform-specific handling for short market-question pairs. The
+   * active single-signal path still requires specific entity and promoted
+   * rerank evidence; the historical score-only path is observed in shadow.
    */
   relaxed?: boolean;
   includeNestedMarketContext?: boolean;
+  rerankEvidence?: {
+    score: number;
+    threshold: number;
+    promotionStatus: "failed" | "insufficient_evidence" | "passed";
+  };
 }
 
 interface BuildMarketGateTextOptions {
@@ -527,9 +531,39 @@ export interface GateDecisionResult {
   gate: ContextGateResult;
   recoveryGate?: ContextGateResult;
   pass: boolean;
+  /**
+   * True when the historical relaxed score-plus-one-signal rule would have
+   * admitted a domain-compatible candidate that the active gate rejected.
+   * This is observational only and must not be used for admission.
+   */
+  legacyRelaxedShadowEligible: boolean;
   retryEligible: boolean;
   usedFallbackGate: boolean;
   usedRecoveryGate: boolean;
+  evidence: {
+    wink: {
+      state: "failed" | "passed" | "unavailable";
+    };
+    lexical: {
+      passed: boolean;
+      meaningfulNouns: number;
+      sharedEntities: number;
+    };
+    specificEntity: {
+      count: number;
+    };
+    domain: {
+      state: "compatible" | "incompatible" | "unknown";
+      post: MarketDomain[];
+      market: MarketDomain[];
+    };
+    rerank: {
+      score: number | null;
+      threshold: number | null;
+      promoted: boolean;
+      passed: boolean;
+    };
+  };
 }
 
 function normalizeDomainToken(value: string | undefined): string {
@@ -592,8 +626,7 @@ function hasCompatibleDomain(
   postDomains: Set<MarketDomain>,
   marketDomains: Set<MarketDomain>
 ): boolean {
-  if (marketDomains.size === 0) return true;
-  if (postDomains.size === 0) return false;
+  if (marketDomains.size === 0 || postDomains.size === 0) return true;
 
   for (const marketDomain of marketDomains) {
     const compatible = DOMAIN_COMPATIBILITY[marketDomain];
@@ -814,15 +847,51 @@ export function evaluateCandidateGate({
   gate,
   relaxed,
   includeNestedMarketContext = false,
+  rerankEvidence,
 }: GateDecisionInput): GateDecisionResult {
   const gateText = buildMarketGateText(market, {
     includeNestedMarkets: includeNestedMarketContext,
   });
   const fallbackGate = naiveContextGate(postText, gateText);
+  const sharedHighPrecisionSignals = getSharedHighPrecisionSignals(
+    postText,
+    gateText
+  );
+  const postDomains = inferPostDomains(postText, matchedTags);
+  const marketDomains = inferMarketDomains(market, includeNestedMarketContext);
+  const domainCompatible = hasCompatibleDomain(postDomains, marketDomains);
+  const fallbackOverridesWink =
+    gate?.pass === false &&
+    fallbackGate.pass &&
+    fallbackGate.sharedEntities >= 1 &&
+    postDomains.size > 0 &&
+    marketDomains.size > 0 &&
+    domainCompatible;
   let resolvedGate = gate ?? fallbackGate;
-  let gatePass = resolvedGate.pass;
+  if (fallbackOverridesWink) {
+    resolvedGate = {
+      ...fallbackGate,
+      details: `${fallbackGate.details}; wink=failed-local-high-precision-pass`,
+    };
+  }
+  let gatePass =
+    gate?.pass === true || gate === undefined
+      ? gate?.pass === true || fallbackGate.pass
+      : fallbackOverridesWink;
   let usedRecoveryGate = false;
   let recoveryGate: ContextGateResult | undefined;
+  const specificEntityCount = Math.max(
+    fallbackGate.sharedEntities,
+    gate?.sharedEntities ?? 0,
+    sharedHighPrecisionSignals.length
+  );
+  const rerankPromoted = rerankEvidence?.promotionStatus === "passed";
+  const rerankPassed =
+    rerankPromoted &&
+    Number.isFinite(rerankEvidence?.score) &&
+    Number.isFinite(rerankEvidence?.threshold) &&
+    (rerankEvidence?.score ?? -Infinity) >=
+      (rerankEvidence?.threshold ?? Infinity);
 
   if (scoringMode === "heuristic") {
     gatePass =
@@ -831,12 +900,25 @@ export function evaluateCandidateGate({
         resolvedGate.sharedNouns >= HEURISTIC_STRICT_SHARED_NOUNS);
   }
 
-  // Platform-specific relaxation: short market questions rarely share the
-  // default two distinct signals. Accept a single signal provided the score
-  // already cleared the AI retry floor (so quality is still gated by score).
-  if (!gatePass && relaxed && score >= AI_GATE_RETRY_FLOOR) {
-    const hasSingleSignal =
-      resolvedGate.meaningfulNouns >= 1 || resolvedGate.sharedEntities >= 1;
+  const hasSingleSignal =
+    resolvedGate.meaningfulNouns >= 1 || resolvedGate.sharedEntities >= 1;
+  const legacyRelaxedWouldRecover =
+    !gatePass &&
+    relaxed === true &&
+    score >= AI_GATE_RETRY_FLOOR &&
+    hasSingleSignal &&
+    domainCompatible;
+
+  // The active platform-specific relaxation requires calibrated rerank
+  // evidence. The historical score-plus-one-signal rule above is retained
+  // only as shadow telemetry.
+  if (
+    !gatePass &&
+    relaxed &&
+    score >= AI_GATE_RETRY_FLOOR &&
+    specificEntityCount > 0 &&
+    rerankPassed
+  ) {
     if (hasSingleSignal) {
       gatePass = true;
     }
@@ -845,26 +927,25 @@ export function evaluateCandidateGate({
   if (
     !gatePass &&
     scoringMode === "hybrid" &&
-    score >= HIGH_PRECISION_SINGLE_SIGNAL_FLOOR
+    score >= HIGH_PRECISION_SINGLE_SIGNAL_FLOOR &&
+    specificEntityCount > 0 &&
+    rerankPassed
   ) {
-    const sharedHighPrecisionSignals = getSharedHighPrecisionSignals(
-      postText,
-      gateText
-    );
-    if (sharedHighPrecisionSignals.length > 0) {
-      recoveryGate = fallbackGate;
-      resolvedGate = {
-        ...fallbackGate,
-        details: `${fallbackGate.details}; high-precision-single-signal=[${sharedHighPrecisionSignals.join(",")}]`,
-      };
-      gatePass = true;
-      usedRecoveryGate = gate !== undefined;
-    }
+    recoveryGate = fallbackGate;
+    resolvedGate = {
+      ...fallbackGate,
+      details: `${fallbackGate.details}; calibrated-rerank-recovery=${rerankEvidence?.score}>=${rerankEvidence?.threshold}; specific=[${sharedHighPrecisionSignals.join(",")}]`,
+    };
+    gatePass = true;
+    usedRecoveryGate = true;
   }
 
-  const postDomains = inferPostDomains(postText, matchedTags);
-  const marketDomains = inferMarketDomains(market, includeNestedMarketContext);
-  const domainCompatible = hasCompatibleDomain(postDomains, marketDomains);
+  const domainState =
+    postDomains.size === 0 || marketDomains.size === 0
+      ? "unknown"
+      : domainCompatible
+        ? "compatible"
+        : "incompatible";
   if (gatePass && !domainCompatible) {
     gatePass = false;
     resolvedGate = withDomainGateDetails(
@@ -878,6 +959,7 @@ export function evaluateCandidateGate({
     gate: resolvedGate,
     recoveryGate,
     pass: gatePass,
+    legacyRelaxedShadowEligible: legacyRelaxedWouldRecover && !gatePass,
     retryEligible:
       !gatePass &&
       domainCompatible &&
@@ -886,5 +968,32 @@ export function evaluateCandidateGate({
       (resolvedGate.meaningfulNouns >= 1 || resolvedGate.sharedEntities >= 1),
     usedFallbackGate: gate === undefined,
     usedRecoveryGate,
+    evidence: {
+      wink: {
+        state:
+          gate === undefined ? "unavailable" : gate.pass ? "passed" : "failed",
+      },
+      lexical: {
+        passed: fallbackGate.pass,
+        meaningfulNouns: fallbackGate.meaningfulNouns,
+        sharedEntities: fallbackGate.sharedEntities,
+      },
+      specificEntity: { count: specificEntityCount },
+      domain: {
+        state: domainState,
+        post: [...postDomains].sort(),
+        market: [...marketDomains].sort(),
+      },
+      rerank: {
+        score: Number.isFinite(rerankEvidence?.score)
+          ? (rerankEvidence?.score ?? null)
+          : null,
+        threshold: Number.isFinite(rerankEvidence?.threshold)
+          ? (rerankEvidence?.threshold ?? null)
+          : null,
+        promoted: rerankPromoted,
+        passed: rerankPassed,
+      },
+    },
   };
 }

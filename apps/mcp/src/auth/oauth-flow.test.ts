@@ -162,6 +162,9 @@ describe("MCP wallet OAuth flow", () => {
     expect(consentResponse.headers.get("content-security-policy")).toContain(
       "default-src 'none'"
     );
+    expect(consentResponse.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://agent.example"
+    );
     expect(consentResponse.headers.get("cache-control")).toBe("no-store");
     expect(consentResponse.headers.get("referrer-policy")).toBe("same-origin");
     const html = await consentResponse.text();

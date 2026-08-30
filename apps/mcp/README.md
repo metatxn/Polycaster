@@ -658,6 +658,15 @@ tsconfig.json
 
 Leave the exclude paths empty. After an MCP-affecting pull request is merged, confirm that the merge commit receives a successful `Workers Builds: knoww-mcp` status and reaches the `knoww-mcp` Worker. A successful `Workers Builds: knoww` status covers only the website Worker.
 
+To verify the production trigger without changing Worker behavior:
+
+1. Push a documentation-only change under `apps/mcp` to a pull-request branch. No production build should start because non-production branch builds are disabled.
+2. Merge the pull request into `main`. The merge commit should receive a `Workers Builds: knoww-mcp` check.
+3. Open the check details and confirm that the script is `knoww-mcp`, the branch is `main`, and the build uses the merge commit.
+4. Confirm that the same commit appears in the `knoww-mcp` deployment history, then check `/healthz` and `/readyz`.
+
+If the branch push starts a production build, check the production branch setting. If the merge to `main` does not create a `Workers Builds: knoww-mcp` check, check the Git connection and build watch paths before deploying manually.
+
 Once this connection is enabled, repeated manual MCP deployments should not be part of the normal release process. Use the manual Wrangler deployment and rollback commands in [OPERATIONS.md](OPERATIONS.md) only for the bootstrap release, controlled recovery, or rollback.
 
 ## Troubleshooting

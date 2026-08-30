@@ -624,6 +624,42 @@ The repository now contains the production route, OAuth and quota bindings, prob
 
 There is no remote staging Worker. The first live CIMD, DCR, wallet OAuth, quota, and tool checks run against production immediately after the first attended deployment. Protect `main` so `MCP CI / quality` is required and direct pushes are blocked. Follow [OPERATIONS.md](OPERATIONS.md) for the exact release checks, monitoring thresholds, Cloudflare build settings, and rollback commands.
 
+### Automatic production deployments
+
+Configure the GitHub repository connection on the existing `knoww-mcp` Worker in **Workers & Pages > knoww-mcp > Settings > Builds**. Do not configure these settings only on the `knoww` website Worker. That Worker has a separate deployment pipeline and does not deploy the MCP server.
+
+Use the following Cloudflare Workers Builds settings:
+
+| Setting | Value |
+|---|---|
+| Git repository | `metatxn/Knoww` |
+| Production branch | `main` |
+| Root directory | `/apps/mcp` |
+| Build command | `pnpm --dir ../.. install --frozen-lockfile` |
+| Deploy command | `pnpm exec wrangler deploy --env="" --strict` |
+| Non-production branch builds | Disabled |
+| Build caching | Enabled |
+| Build variable | `NODE_VERSION=24` |
+| Build variable | `PNPM_VERSION=10.25.0` |
+| Build variable | `SKIP_DEPENDENCY_INSTALL=1` |
+
+Set the production build watch include paths to:
+
+```text
+apps/mcp/*
+packages/knoww-services/*
+packages/logger/*
+packages/shared-types/*
+package.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+tsconfig.json
+```
+
+Leave the exclude paths empty. After an MCP-affecting pull request is merged, confirm that the merge commit receives a successful `Workers Builds: knoww-mcp` status and reaches the `knoww-mcp` Worker. A successful `Workers Builds: knoww` status covers only the website Worker.
+
+Once this connection is enabled, repeated manual MCP deployments should not be part of the normal release process. Use the manual Wrangler deployment and rollback commands in [OPERATIONS.md](OPERATIONS.md) only for the bootstrap release, controlled recovery, or rollback.
+
 ## Troubleshooting
 
 ### OAuth discovery appears during local testing

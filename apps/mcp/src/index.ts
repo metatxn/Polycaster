@@ -46,7 +46,9 @@ function finalizeResponse(
   const finalized = new Response(response.body, response);
   finalized.headers.set("x-request-id", requestId);
   finalized.headers.set("x-content-type-options", "nosniff");
-  finalized.headers.set("referrer-policy", "no-referrer");
+  if (!finalized.headers.has("referrer-policy")) {
+    finalized.headers.set("referrer-policy", "no-referrer");
+  }
   finalized.headers.set(
     "permissions-policy",
     "camera=(), geolocation=(), microphone=()"

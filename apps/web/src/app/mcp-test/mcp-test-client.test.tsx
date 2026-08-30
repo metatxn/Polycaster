@@ -7,7 +7,27 @@ afterEach(() => {
 });
 
 describe("McpTestClient", () => {
-  it("connects, discovers tools, and runs the selected tool", async () => {
+  it("shows the complete documented tool catalog before connecting", () => {
+    render(<McpTestClient />);
+
+    expect(
+      screen.getByRole("button", { name: /^TOOLsearch_markets/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^TOOLget_market/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^TOOLget_event/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^TOOLget_orderbook/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^TOOLget_price_history/i })
+    ).toBeInTheDocument();
+  });
+
+  it("connects, discovers tools, and runs an operation", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
       const request = JSON.parse(String(init?.body)) as { method: string };
       if (request.method === "initialize") {
@@ -46,19 +66,18 @@ describe("McpTestClient", () => {
     render(<McpTestClient />);
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    await screen.findByRole("option", { name: "search_markets" });
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Connected to knoww-mcp 0.1.0. Found 1 tool."
-    );
-    expect(screen.getByLabelText("Arguments as JSON")).toHaveValue(
+    await screen.findByText("Connected to knoww-mcp 0.1.0. Found 1 tool.");
+    expect(screen.getByLabelText("Arguments for search_markets")).toHaveValue(
       '{\n  "query": "bitcoin",\n  "limit": 3\n}'
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Execute search_markets" })
+    );
 
     await waitFor(() => {
       expect(
-        screen.getByRole("region", { name: "Response output" })
+        screen.getByRole("region", { name: "search_markets response" })
       ).toHaveTextContent('"title": "Bitcoin"');
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -83,12 +102,14 @@ describe("McpTestClient", () => {
 
     render(<McpTestClient />);
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await screen.findByRole("option", { name: "search_markets" });
+    await screen.findByText("Connected to knoww-mcp. Found 1 tool.");
 
-    fireEvent.change(screen.getByLabelText("Arguments as JSON"), {
+    fireEvent.change(screen.getByLabelText("Arguments for search_markets"), {
       target: { value: "not json" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Execute search_markets" })
+    );
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Arguments must be a JSON object."

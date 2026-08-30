@@ -44,7 +44,7 @@ export function McpOperation({
           onClick={onToggle}
           className="flex w-full items-center gap-3 px-3 py-3 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 sm:px-4"
         >
-          <span className="w-14 shrink-0 rounded bg-sky-600 px-2 py-1 text-center font-mono text-[11px] font-bold text-white">
+          <span className="w-14 shrink-0 rounded bg-sky-700 px-2 py-1 text-center font-mono text-[11px] font-bold text-white">
             TOOL
           </span>
           <code className="min-w-0 shrink-0 text-sm font-semibold">
@@ -142,6 +142,7 @@ export function McpOperation({
                   onClick={onExecute}
                   disabled={!available || busy}
                   aria-label={`Execute ${tool.name}`}
+                  className="bg-sky-700 text-white hover:bg-sky-800"
                 >
                   {busy ? (
                     <LoaderCircle className="animate-spin" aria-hidden="true" />

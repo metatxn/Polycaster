@@ -120,6 +120,20 @@ export function protectedResourceMetadataUrl(endpoint: string): string {
   ).toString();
 }
 
+export function isLocalMcpEndpoint(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
 function authorizationServerMetadataUrl(issuer: string): string {
   const url = new URL(secureUrl(issuer, "Authorization server"));
   const path = url.pathname === "/" ? "" : url.pathname;
@@ -278,9 +292,17 @@ export async function finishOAuthAuthorization(
     throw new Error("OAuth state validation failed.");
   }
   const callbackIssuer = callback.get("iss");
+  const normalizedCallbackIssuer = callbackIssuer
+    ? secureUrl(callbackIssuer, "OAuth callback issuer")
+    : null;
+  const normalizedTransactionIssuer = secureUrl(
+    transaction.issuer,
+    "OAuth transaction issuer"
+  );
   if (
     (transaction.issuerRequired && !callbackIssuer) ||
-    (callbackIssuer && callbackIssuer !== transaction.issuer)
+    (normalizedCallbackIssuer &&
+      normalizedCallbackIssuer !== normalizedTransactionIssuer)
   ) {
     throw new Error("OAuth issuer validation failed.");
   }

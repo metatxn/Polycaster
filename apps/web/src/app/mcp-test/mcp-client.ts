@@ -23,6 +23,11 @@ export interface McpTool {
   };
 }
 
+interface McpRequestOptions {
+  accessToken?: string;
+  fetchImpl?: typeof fetch;
+}
+
 function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<JsonRpcResponse>;
@@ -82,15 +87,20 @@ function validateEndpoint(endpoint: string): string {
 export async function sendMcpRequest(
   endpoint: string,
   body: JsonRpcRequest,
-  fetchImpl: typeof fetch = fetch
+  options: McpRequestOptions = {}
 ): Promise<JsonRpcResponse> {
+  const headers: Record<string, string> = {
+    Accept: "application/json, text/event-stream",
+    "Content-Type": "application/json",
+    "Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+  };
+  if (options.accessToken) {
+    headers.Authorization = `Bearer ${options.accessToken}`;
+  }
+  const fetchImpl = options.fetchImpl ?? fetch;
   const response = await fetchImpl(validateEndpoint(endpoint), {
     method: "POST",
-    headers: {
-      Accept: "application/json, text/event-stream",
-      "Content-Type": "application/json",
-      "Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
-    },
+    headers,
     body: JSON.stringify(body),
   });
 

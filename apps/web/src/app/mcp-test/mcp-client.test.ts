@@ -61,7 +61,7 @@ describe("sendMcpRequest", () => {
     await sendMcpRequest(
       "http://127.0.0.1:8787/mcp",
       { jsonrpc: "2.0", id: 7, method: "tools/list", params: {} },
-      fetchImpl
+      { fetchImpl }
     );
 
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -83,6 +83,29 @@ describe("sendMcpRequest", () => {
     );
   });
 
+  it("sends an access token in the authorization header", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ jsonrpc: "2.0", id: 8, result: { tools: [] } })
+      );
+
+    await sendMcpRequest(
+      "https://mcp.knoww.app/mcp",
+      { jsonrpc: "2.0", id: 8, method: "tools/list", params: {} },
+      { accessToken: "private-access-token", fetchImpl }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://mcp.knoww.app/mcp",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer private-access-token",
+        }),
+      })
+    );
+  });
+
   it("rejects endpoints that are not HTTP URLs before fetching", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
@@ -90,7 +113,7 @@ describe("sendMcpRequest", () => {
       sendMcpRequest(
         "javascript:alert(1)",
         { jsonrpc: "2.0", id: 1, method: "tools/list" },
-        fetchImpl
+        { fetchImpl }
       )
     ).rejects.toThrow("Enter an http:// or https:// MCP endpoint.");
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -103,7 +126,7 @@ describe("sendMcpRequest", () => {
       sendMcpRequest(
         "http://user:password@127.0.0.1:8787/mcp",
         { jsonrpc: "2.0", id: 1, method: "tools/list" },
-        fetchImpl
+        { fetchImpl }
       )
     ).rejects.toThrow("Do not include credentials in the endpoint URL.");
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -118,7 +141,7 @@ describe("sendMcpRequest", () => {
       sendMcpRequest(
         "http://localhost:8787/mcp",
         { jsonrpc: "2.0", id: 1, method: "tools/list" },
-        fetchImpl
+        { fetchImpl }
       )
     ).rejects.toThrow("MCP server returned HTTP 403.");
   });

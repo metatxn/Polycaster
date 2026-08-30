@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   buildMarketGateText,
   CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
+  describeRelevanceThreshold,
   determineScoringMode,
   evaluateCandidateGate,
   getEffectiveThreshold,
@@ -140,6 +141,27 @@ test("getEffectiveThreshold only floors hybrid mode", () => {
   assert.equal(getEffectiveThreshold(0.45, "heuristic"), 0.45);
 });
 
+test("threshold disclosure explains the effective floor when AI matching is off", () => {
+  assert.equal(
+    describeRelevanceThreshold(0.3, false),
+    "Configured threshold: 0.30. AI candidate validation is off, so the validator fallback rejects scores below 0.50."
+  );
+});
+
+test("threshold disclosure distinguishes AI-approved non-hybrid matches", () => {
+  assert.equal(
+    describeRelevanceThreshold(0.3, true),
+    "Configured threshold: 0.30. Hybrid matching and the validator fallback require 0.50. Lexical or heuristic matches approved by AI candidate validation can use 0.30."
+  );
+});
+
+test("threshold disclosure reports the configured value when it is already strict", () => {
+  assert.equal(
+    describeRelevanceThreshold(0.6, false),
+    "Configured threshold: 0.60. All scoring paths require at least 0.60."
+  );
+});
+
 test("buildMarketGateText keeps nested markets opt-in to preserve default platform scoring", () => {
   const market = createMarket({
     title: "World Cup Winner",
@@ -251,6 +273,11 @@ test("evaluateCandidateGate accepts high-score Hyperliquid protocol overlap", ()
       details:
         "nouns=[hyperliquid] meaningful=[hyperliquid] entities=[] distinct=1",
     }),
+    rerankEvidence: {
+      score: 4.2,
+      threshold: 3.5,
+      promotionStatus: "passed",
+    },
   });
 
   assert.equal(decision.pass, true);
@@ -273,6 +300,11 @@ test("evaluateCandidateGate recovers Hyperliquid X handle aliases", () => {
       sharedEntities: 0,
       details: "nouns=[] meaningful=[] entities=[] distinct=0",
     }),
+    rerankEvidence: {
+      score: 4.2,
+      threshold: 3.5,
+      promotionStatus: "passed",
+    },
   });
 
   assert.equal(decision.pass, true);
@@ -296,7 +328,7 @@ test("evaluateCandidateGate still rejects Phantom esports false positives", () =
   });
 
   assert.equal(decision.pass, false);
-  assert.ok(/domain-gate=reject/.test(decision.gate.details));
+  assert.equal(decision.evidence.domain.state, "incompatible");
 });
 
 test("evaluateCandidateGate does not recover a single weak noun overlap", () => {
@@ -413,16 +445,96 @@ test("evaluateCandidateGate keeps compatible business and tech domains", () => {
   assert.equal(decision.pass, true);
 });
 
+test("evaluateCandidateGate treats an unknown post domain as neutral", () => {
+  const decision = evaluateCandidateGate({
+    postText: "Zephyr Acme update",
+    market: createMarket({
+      title: "Will Zephyr Acme win the championship?",
+      category: "Sports",
+      tags: [{ slug: "sports", label: "Sports" }],
+    }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.82,
+    gate: createGate({
+      pass: true,
+      meaningfulNouns: 2,
+      sharedEntities: 1,
+      details: "nouns=[zephyr,acme] distinct=2",
+    }),
+  });
+
+  assert.equal(decision.pass, true);
+  assert.equal(decision.evidence.domain.state, "unknown");
+});
+
+test("a Wink miss does not override a passing local overlap gate", () => {
+  const decision = evaluateCandidateGate({
+    postText: "OpenAI Anthropic model release",
+    market: createMarket({ title: "OpenAI Anthropic model release date" }),
+    matchedTags: [],
+    scoringMode: "hybrid",
+    score: 0.76,
+    gate: createGate({ pass: false, details: "wink-miss" }),
+  });
+
+  assert.equal(decision.pass, true);
+  assert.equal(decision.evidence.wink.state, "failed");
+  assert.equal(decision.evidence.lexical.passed, true);
+});
+
+test("single-signal recovery requires promoted rerank evidence and its calibrated threshold", () => {
+  const input = {
+    postText: "When is Hyperliquid listing TROLL?",
+    market: createMarket({
+      title: "Hyperliquid listed on Binance?",
+      category: "Crypto",
+    }),
+    matchedTags: [] as string[],
+    scoringMode: "hybrid" as const,
+    score: 0.8,
+    gate: createGate({
+      meaningfulNouns: 1,
+      details: "nouns=[hyperliquid] distinct=1",
+    }),
+  };
+
+  assert.equal(evaluateCandidateGate(input).pass, false);
+  assert.equal(
+    evaluateCandidateGate({
+      ...input,
+      rerankEvidence: {
+        score: 4.2,
+        threshold: 3.5,
+        promotionStatus: "passed",
+      },
+    }).pass,
+    true
+  );
+  assert.equal(
+    evaluateCandidateGate({
+      ...input,
+      rerankEvidence: {
+        score: 4.2,
+        threshold: 3.5,
+        promotionStatus: "insufficient_evidence",
+      },
+    }).pass,
+    false
+  );
+});
+
 test("shouldFailOpen keeps the shared score floor behavior", () => {
   assert.equal(shouldFailOpen(0.49), false);
   assert.equal(shouldFailOpen(0.5), true);
   assert.equal(shouldFailOpen(0.73), true);
 });
 
-test("evaluateCandidateGate relaxed passes a single-signal high-score match (kalshi)", () => {
+test("evaluateCandidateGate reports legacy relaxed recovery in shadow only", () => {
   // Mirrors the live Kalshi case "More tech layoffs in 2026..." vs
-  // "Tech Layoffs Up or Down in 2026?" — both sides share only `tech` but the
-  // score is decisively high, so the relaxed gate should accept it.
+  // "Tech Layoffs Up or Down in 2026?". The old relaxed rule would recover
+  // this single-signal pair, while the active gate still rejects it without
+  // promoted rerank evidence.
   const decision = evaluateCandidateGate({
     postText: "More tech layoffs in 2026 than in 2025?",
     market: createMarket({ title: "Tech Layoffs Up or Down in 2026?" }),
@@ -437,7 +549,8 @@ test("evaluateCandidateGate relaxed passes a single-signal high-score match (kal
     relaxed: true,
   });
 
-  assert.equal(decision.pass, true);
+  assert.equal(decision.pass, false);
+  assert.equal(decision.legacyRelaxedShadowEligible, true);
 });
 
 test("evaluateCandidateGate relaxed still rejects single-signal low-score matches", () => {
@@ -460,6 +573,7 @@ test("evaluateCandidateGate relaxed still rejects single-signal low-score matche
   });
 
   assert.equal(decision.pass, false);
+  assert.equal(decision.legacyRelaxedShadowEligible, false);
 });
 
 test("evaluateCandidateGate relaxed without any signals still fails", () => {

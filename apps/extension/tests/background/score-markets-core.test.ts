@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { RerankSupersededError } from "../../src/background/rerank-work-queue";
 import {
   createScoreMarkets,
   type ScoreMarketsDeps,
@@ -28,6 +29,7 @@ function createDeps(
     warnEvents,
     computeSimilarities: async () => [0.91, 0.37],
     bm25Score: () => [0.22, 0.11],
+    stableLexicalScore: () => [0.24, 0.12],
     nlpContextGateBatch: () => [createGate(), createGate()],
     logWarn: (event) => {
       warnEvents.push(event);
@@ -49,6 +51,7 @@ test("score-markets core returns zeroed arrays for empty post text", async () =>
 
   assert.deepEqual(result.similarities, [0]);
   assert.deepEqual(result.bm25Scores, [0]);
+  assert.deepEqual(result.lexicalShadowScores, [0]);
   assert.deepEqual(result.contextGateResults, []);
   assert.equal(result.usedEmbeddings, false);
 });
@@ -71,6 +74,7 @@ test("score-markets core pads shorter result arrays", async () => {
 
   assert.deepEqual(result.similarities, [0.91, 0]);
   assert.deepEqual(result.bm25Scores, [0.22, 0.11]);
+  assert.deepEqual(result.lexicalShadowScores, [0.24, 0.12]);
   assert.equal(result.contextGateResults[0].details, "nlp-pass");
   assert.equal(result.contextGateResults[1].details, "disabled");
   assert.equal(result.usedEmbeddings, true);
@@ -173,4 +177,60 @@ test("score-markets core respects disabled feature flags", async () => {
   assert.equal(embeddingsCalled, 0);
   assert.equal(bm25Called, 0);
   assert.equal(gateCalled, 1);
+});
+
+test("score-markets core forwards the rerank request identity", async () => {
+  let seenRequest: { requestKey?: string } | undefined;
+  const deps = createDeps({
+    rerankMarketPairs: async (_postText, marketTexts, request) => {
+      seenRequest = request;
+      return {
+        scores: marketTexts.map(() => 0.75),
+        metrics: {
+          count: marketTexts.length,
+          elapsedMs: 12,
+          queueWaitMs: 3,
+          model: "test-reranker",
+          dtype: "q8",
+          revision: "a".repeat(40),
+          manifestVersion: "test-models-v1",
+          device: "wasm",
+        },
+      };
+    },
+  });
+  const scoreMarkets = createScoreMarkets(deps);
+
+  const result = await scoreMarkets({
+    type: "score-markets",
+    postText: "AI update",
+    marketTexts: ["AI market"],
+    includeRerank: true,
+    rerankRequestKey: "linkedin:post-123",
+  });
+
+  assert.deepEqual(seenRequest, { requestKey: "linkedin:post-123" });
+  assert.equal(result.usedRerank, true);
+});
+
+test("score-markets core records superseded rerank work as skipped", async () => {
+  const deps = createDeps({
+    rerankMarketPairs: async () => {
+      throw new RerankSupersededError();
+    },
+  });
+  const scoreMarkets = createScoreMarkets(deps);
+
+  const result = await scoreMarkets({
+    type: "score-markets",
+    postText: "AI update",
+    marketTexts: ["AI market"],
+    includeRerank: true,
+    rerankRequestKey: "linkedin:post-123",
+  });
+
+  assert.deepEqual(result.rerankScores, [0]);
+  assert.equal(result.usedRerank, false);
+  assert.ok(deps.warnEvents.includes("scoring.rerank-skipped"));
+  assert.equal(deps.warnEvents.includes("scoring.rerank-failed"), false);
 });

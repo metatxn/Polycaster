@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { sanitizeAnalyticsProperties } from "@/lib/analytics-sanitization";
 import { checkRateLimit } from "@/lib/api-rate-limit";
 import { readJsonBodyWithLimit } from "@/lib/api-request-body";
 import {
@@ -32,22 +33,6 @@ const analyticsEventSchema = z.object({
 const requestSchema = z.object({
   events: z.array(analyticsEventSchema).min(1).max(20),
 });
-
-const SENSITIVE_PROPERTY_KEYS = new Set([
-  "address",
-  "authorization",
-  "body",
-  "challengeToken",
-  "message",
-  "pageText",
-  "postText",
-  "query",
-  "searchQuery",
-  "signature",
-  "token",
-  "url",
-  "walletAddress",
-]);
 
 /**
  * @openapi
@@ -177,11 +162,7 @@ export async function POST(request: NextRequest) {
 function sanitizeAnalyticsEvent(
   event: z.infer<typeof analyticsEventSchema>
 ): ServerPostHogEvent {
-  const properties = Object.fromEntries(
-    Object.entries(event.properties).filter(
-      ([key]) => !SENSITIVE_PROPERTY_KEYS.has(key.toLowerCase())
-    )
-  );
+  const properties = sanitizeAnalyticsProperties(event.properties);
 
   return {
     event: event.event,

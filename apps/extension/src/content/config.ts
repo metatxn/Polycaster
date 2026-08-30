@@ -3,11 +3,14 @@
 // ============================================
 
 import { createLogger } from "@knoww/logger";
+import { canUseProductionReranker } from "../context-promotion";
 import {
   type Config,
   DEFAULT_STREAM_TRADING_SETTINGS,
   DEFAULT_USER_SETTINGS,
   type EnabledSources,
+  mergeStoredUserSettings,
+  type StoredUserSettings,
   type StreamTradingSettings,
   type UserSettings,
 } from "../types/settings";
@@ -100,10 +103,16 @@ const CONFIG: Config = {
   get COOLDOWN_POSTS() {
     return USER_SETTINGS.cooldownPosts ?? DEFAULT_USER_SETTINGS.cooldownPosts;
   },
-  get USE_AI_EXTRACTION() {
+  get USE_AI_GATE_RETRY() {
     return (
-      USER_SETTINGS.aiExtractionEnabled ??
-      DEFAULT_USER_SETTINGS.aiExtractionEnabled
+      USER_SETTINGS.aiGateRetryEnabled ??
+      DEFAULT_USER_SETTINGS.aiGateRetryEnabled
+    );
+  },
+  get USE_AI_CANDIDATE_VALIDATION() {
+    return (
+      USER_SETTINGS.aiCandidateValidationEnabled ??
+      DEFAULT_USER_SETTINGS.aiCandidateValidationEnabled
     );
   },
 };
@@ -131,25 +140,12 @@ async function loadUserSettings(): Promise<UserSettings> {
         { knowwSettings: DEFAULT_USER_SETTINGS },
         (result) => {
           const storedSettings = result.knowwSettings as
-            | Partial<UserSettings>
+            | StoredUserSettings
             | undefined;
-          // Merge with defaults to ensure all properties exist
-          USER_SETTINGS = {
-            ...DEFAULT_USER_SETTINGS,
-            ...(storedSettings || {}),
-            platforms: {
-              ...DEFAULT_USER_SETTINGS.platforms,
-              ...(storedSettings?.platforms || {}),
-            },
-            sources: {
-              ...DEFAULT_USER_SETTINGS.sources,
-              ...(storedSettings?.sources || {}),
-              // Force-align with defaults for sources that are disabled at the code level.
-              // This ensures DEFAULT_USER_SETTINGS is the single source of truth,
-              // even when chrome.storage.sync has a stale value from a previous version.
-              kalshi: DEFAULT_USER_SETTINGS.sources.kalshi,
-            },
-          };
+          USER_SETTINGS = mergeStoredUserSettings(storedSettings, {
+            forceDefaultKalshi: true,
+            productionRerankerPromoted: canUseProductionReranker(),
+          });
 
           if (USER_SETTINGS.debugMode || DEV_MODE) {
             log.debug("settings.loaded", { USER_SETTINGS });
@@ -245,6 +241,13 @@ function isDebugMode(): boolean {
   return USER_SETTINGS.debugMode === true || DEV_MODE;
 }
 
+function isProductionRerankerEnabled(): boolean {
+  return (
+    canUseProductionReranker() &&
+    USER_SETTINGS.productionRerankerEnabled === true
+  );
+}
+
 /**
  * Listen for settings updates from the options page
  */
@@ -256,18 +259,10 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
       sendResponse: (response: { success: boolean }) => void
     ) => {
       if (message.type === "KNOWW_SETTINGS_UPDATED" && message.settings) {
-        USER_SETTINGS = {
-          ...DEFAULT_USER_SETTINGS,
-          ...message.settings,
-          platforms: {
-            ...DEFAULT_USER_SETTINGS.platforms,
-            ...(message.settings.platforms || {}),
-          },
-          sources: {
-            ...DEFAULT_USER_SETTINGS.sources,
-            ...(message.settings.sources || {}),
-          },
-        };
+        USER_SETTINGS = mergeStoredUserSettings(message.settings, {
+          forceDefaultKalshi: true,
+          productionRerankerPromoted: canUseProductionReranker(),
+        });
 
         // Notify other modules that settings have changed
         if (window.KNOWW_SETTINGS_LISTENERS) {
@@ -337,6 +332,7 @@ export const KNOWW_CONFIG = {
   isUsageAnalyticsEnabled,
   getThemeOverride,
   isDebugMode,
+  isProductionRerankerEnabled,
   onSettingsChange,
 };
 

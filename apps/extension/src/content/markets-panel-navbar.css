@@ -1,0 +1,194 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: Content CSS must override arbitrary host-page styles. */
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+.knoww-markets-panel-navbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 10px 14px !important;
+  border-bottom: 1px solid var(--kse-hairline) !important;
+  background: transparent !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-stack-title {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  color: var(--kse-ink) !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-stack-icon {
+  display: flex !important;
+  width: 22px !important;
+  height: 22px !important;
+  flex-shrink: 0 !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-stack-icon
+  img {
+  display: block !important;
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 5px !important;
+  object-fit: cover !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-stack-title
+  > span:last-child {
+  color: var(--kse-ink) !important;
+  font-family:
+    "KnowwMono", "SF Mono", "SFMono-Regular", Consolas, monospace !important;
+  font-size: 10px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-stack-header-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-markets-panel-action {
+  all: initial !important;
+  display: flex !important;
+  width: 26px !important;
+  height: 26px !important;
+  flex-shrink: 0 !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+  border: 1px solid var(--kse-hairline) !important;
+  border-radius: 4px !important;
+  color: var(--kse-ink-2) !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-markets-panel-action:hover {
+  border-color: var(--kse-hairline-2) !important;
+  color: var(--kse-ink) !important;
+  background: var(--kse-control-hover) !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-toggle.knoww-search-active {
+  border-color: var(--kse-hairline-2) !important;
+  color: var(--kse-ink) !important;
+  background: var(--kse-control-active, var(--kse-control-hover)) !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-markets-panel-action
+  svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-markets-panel-action:focus-visible {
+  outline: 2px solid var(--kse-yes) !important;
+  outline-offset: 2px !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-container {
+  display: none !important;
+  padding: 12px !important;
+  border-bottom: 1px solid var(--kse-hairline) !important;
+  background: transparent !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-container.knoww-search-open {
+  display: block !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-input-wrapper {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-input {
+  all: initial !important;
+  display: block !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 10px 36px 10px 12px !important;
+  border: 1px solid var(--kse-hairline) !important;
+  border-radius: 20px !important;
+  color: var(--kse-ink) !important;
+  background: var(--kse-bg-3, var(--kse-control-hover)) !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-input:focus {
+  border-color: var(--kse-hairline-2) !important;
+  outline: none !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-input::placeholder {
+  color: var(--kse-ink-dim) !important;
+  opacity: 1 !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-clear {
+  all: initial !important;
+  position: absolute !important;
+  right: 8px !important;
+  display: flex !important;
+  width: 24px !important;
+  height: 24px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  border: none !important;
+  border-radius: 50% !important;
+  color: var(--kse-ink) !important;
+  background: var(--kse-hairline) !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-clear:hover {
+  background: var(--kse-hairline-2) !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-clear:focus-visible {
+  outline: 2px solid var(--kse-yes) !important;
+  outline-offset: 2px !important;
+}
+
+:is(#knoww-notification-stack, #knoww-site-support-prompt-root)
+  .knoww-search-clear
+  svg {
+  width: 14px !important;
+  height: 14px !important;
+}

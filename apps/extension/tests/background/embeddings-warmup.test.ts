@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test, vi } from "vitest";
+import { CONTEXT_MODEL_MANIFEST } from "../../src/model-manifest";
 
 const mocks = vi.hoisted(() => {
   const dispose = vi.fn();
@@ -18,6 +19,13 @@ const mocks = vi.hoisted(() => {
   const gpuDevice = { destroy: vi.fn() };
   const requestDevice = vi.fn(async () => gpuDevice);
   const requestAdapter = vi.fn(async () => ({ requestDevice }));
+  const tokenizer = vi.fn(() => ({ dispose: vi.fn() }));
+  const model = vi.fn(async () => ({
+    dispose: vi.fn(),
+    logits: { data: new Float32Array([0.75]), dims: [1, 1] },
+  }));
+  const tokenizerFromPretrained = vi.fn(async () => tokenizer);
+  const modelFromPretrained = vi.fn(async () => model);
   const transformersEnv = {
     allowLocalModels: true,
     backends: { onnx: { wasm: {}, webgpu: {} } },
@@ -31,19 +39,23 @@ const mocks = vi.hoisted(() => {
     dispose,
     extractor,
     gpuDevice,
+    model,
+    modelFromPretrained,
     pipeline,
     requestAdapter,
     requestDevice,
+    tokenizer,
+    tokenizerFromPretrained,
     transformersEnv,
   };
 });
 
 vi.mock("@huggingface/transformers", () => ({
   AutoModelForSequenceClassification: {
-    from_pretrained: vi.fn(),
+    from_pretrained: mocks.modelFromPretrained,
   },
   AutoTokenizer: {
-    from_pretrained: vi.fn(),
+    from_pretrained: mocks.tokenizerFromPretrained,
   },
   env: mocks.transformersEnv,
   LogLevel: { WARNING: "warning" },
@@ -64,6 +76,8 @@ beforeEach(() => {
   mocks.requestAdapter.mockResolvedValue({
     requestDevice: mocks.requestDevice,
   });
+  mocks.tokenizerFromPretrained.mockResolvedValue(mocks.tokenizer);
+  mocks.modelFromPretrained.mockResolvedValue(mocks.model);
   mocks.transformersEnv.backends.onnx.webgpu = {};
   vi.stubGlobal("navigator", { hardwareConcurrency: 8 });
 });
@@ -83,6 +97,40 @@ function enableWebGpu(): void {
 function selectedPipelineDevices(): Array<"webgpu" | "wasm" | undefined> {
   return mocks.pipeline.mock.calls.map((call) => call[2]?.device);
 }
+
+test("warmUp loads the embedding model at the pinned revision", async () => {
+  const { warmUp } = await import("../../src/background/embeddings");
+
+  await warmUp();
+
+  assert.equal(
+    mocks.pipeline.mock.calls[0]?.[1],
+    CONTEXT_MODEL_MANIFEST.embedding.id
+  );
+  assert.equal(
+    mocks.pipeline.mock.calls[0]?.[2]?.revision,
+    CONTEXT_MODEL_MANIFEST.embedding.revision
+  );
+});
+
+test("reranking loads the tokenizer and model at the pinned revision", async () => {
+  const { rerankMarketPairs } = await import("../../src/background/embeddings");
+
+  await rerankMarketPairs("AI update", ["Will an AI model launch?"]);
+
+  assert.deepEqual(mocks.tokenizerFromPretrained.mock.calls[0], [
+    CONTEXT_MODEL_MANIFEST.reranker.id,
+    { revision: CONTEXT_MODEL_MANIFEST.reranker.revision },
+  ]);
+  assert.equal(
+    mocks.modelFromPretrained.mock.calls[0]?.[0],
+    CONTEXT_MODEL_MANIFEST.reranker.id
+  );
+  assert.equal(
+    mocks.modelFromPretrained.mock.calls[0]?.[1]?.revision,
+    CONTEXT_MODEL_MANIFEST.reranker.revision
+  );
+});
 
 test("warmUp performs one real inference and shares concurrent work", async () => {
   const { warmUp } = await import("../../src/background/embeddings");

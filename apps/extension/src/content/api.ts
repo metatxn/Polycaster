@@ -4,6 +4,10 @@
 
 import { createLogger } from "@knoww/logger";
 import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
+import {
+  isSearchCacheEntryUsable,
+  shouldCacheSearchResult,
+} from "../search-request-policy";
 import type {
   KeywordExtractionResult,
   KeywordRegexEntry,
@@ -13,11 +17,18 @@ import type {
 } from "../types/market";
 import type { MarketLinkHint } from "../types/platform";
 import { KNOWW_CONFIG } from "./config";
-import {
-  filterNestedMarketsByDisplayPriceCap,
-  isMarketWithinDisplayPriceCap,
-} from "./market-price-filter";
+import { filterNestedMarketsByDisplayPriceCap } from "./market-price-filter";
 import { findMatchingLiveMarket } from "./market-token-resolution";
+import {
+  buildRelevanceMemoryCacheAggregateSample,
+  buildRelevanceSearchAggregateSample,
+  recordRelevanceAggregate,
+} from "./relevance-aggregate-recorder";
+import {
+  capCombinedSearchResults,
+  capPolymarketSearchResults,
+  POLYMARKET_SEARCH_RESULT_LIMIT,
+} from "./retrieval-limits";
 import {
   buildMarketGateText,
   CASE_INSENSITIVE_HIGH_SIGNAL_TOKENS,
@@ -43,7 +54,7 @@ const AI_CACHE_FAILURE_TTL_MS = 60 * 1000; // 1 minute
 const AI_REQUEST_TIMEOUT_MS = 8500; // Must exceed backend AI timeout (7s) + network overhead
 const POLYMARKET_SEARCH_CACHE_TTL_MS = 60 * 1000;
 const POLYMARKET_SEARCH_EMPTY_CACHE_TTL_MS = 30 * 1000;
-const POLYMARKET_SEARCH_FAILURE_CACHE_TTL_MS = 30 * 1000;
+const POLYMARKET_SEARCH_MAX_STALE_AGE_MS = 5 * 60 * 1000;
 const POLYMARKET_SEARCH_MIN_INTERVAL_MS = 900;
 const POLYMARKET_SEARCH_CACHE_MAX_ENTRIES = 120;
 const POLYMARKET_EVENT_REFRESH_MIN_INTERVAL_MS = 8000;
@@ -54,7 +65,6 @@ interface PolymarketSearchCacheEntry {
   markets: Market[];
   cachedAt: number;
   expiresAt: number;
-  degraded: boolean;
 }
 
 const polymarketSearchCache = new Map<string, PolymarketSearchCacheEntry>();
@@ -943,10 +953,16 @@ function setCachedAIExtraction(
 async function extractKeywordsWithAI(
   text: string
 ): Promise<AIExtractionResult | null> {
-  const { log, safeSendMessage } = window.KNOWW_UTILS;
-  const { KNOWW_APP_URL } = window.KNOWW_CONFIG;
+  const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;
+  const { KNOWW_APP_URL, CONFIG } = window.KNOWW_CONFIG;
   const normalizedText = text.trim();
-  if (!normalizedText) return null;
+  if (
+    !normalizedText ||
+    !CONFIG.USE_AI_GATE_RETRY ||
+    !isExtensionContextValid()
+  ) {
+    return null;
+  }
 
   const cachedResult = getCachedAIExtraction(normalizedText);
   if (cachedResult !== undefined) {
@@ -1174,26 +1190,26 @@ function buildPolymarketSearchCacheKey(
 function readPolymarketSearchCache(
   key: string,
   requireFresh: boolean
-): Market[] | null {
+): PolymarketSearchCacheEntry | null {
   const entry = polymarketSearchCache.get(key);
   if (!entry) return null;
-
-  if (requireFresh && entry.expiresAt <= Date.now()) {
+  if (
+    !isSearchCacheEntryUsable(entry, {
+      maximumStaleAgeMs: POLYMARKET_SEARCH_MAX_STALE_AGE_MS,
+      requireFresh,
+    })
+  ) {
+    if (!requireFresh) polymarketSearchCache.delete(key);
     return null;
   }
 
-  return entry.markets;
+  return entry;
 }
 
-function writePolymarketSearchCache(
-  key: string,
-  markets: Market[],
-  degraded = false
-): void {
+function writePolymarketSearchCache(key: string, markets: Market[]): void {
   const now = Date.now();
-  const ttl = degraded
-    ? POLYMARKET_SEARCH_FAILURE_CACHE_TTL_MS
-    : markets.length > 0
+  const ttl =
+    markets.length > 0
       ? POLYMARKET_SEARCH_CACHE_TTL_MS
       : POLYMARKET_SEARCH_EMPTY_CACHE_TTL_MS;
 
@@ -1205,7 +1221,6 @@ function writePolymarketSearchCache(
     markets,
     cachedAt: now,
     expiresAt: now + ttl,
-    degraded,
   });
 
   if (polymarketSearchCache.size > POLYMARKET_SEARCH_CACHE_MAX_ENTRIES) {
@@ -1230,7 +1245,7 @@ function buildKnowwPolymarketSearchUrl(
     url.searchParams.set("tag_slugs", normalizedTags.join(","));
   }
 
-  url.searchParams.set("limit", "8");
+  url.searchParams.set("limit", String(POLYMARKET_SEARCH_RESULT_LIMIT));
   url.searchParams.set("source", "extension");
 
   return url.toString();
@@ -1364,60 +1379,113 @@ function mapRawPolymarketEvents(
     });
   }
 
-  return allEvents
+  const rankedEvents = allEvents
     .filter((event) => event.closed !== true && event.active !== false)
-    .sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0))
-    .slice(0, 8);
+    .sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0));
+  return capPolymarketSearchResults(rankedEvents);
 }
 
 async function fetchKnowwPolymarketSearch(
   query: string,
   matchedTags: string[]
-): Promise<Market[]> {
+): Promise<{ markets: Market[]; degraded: boolean }> {
   const { log, safeSendMessage } = window.KNOWW_UTILS;
   const searchUrl = buildKnowwPolymarketSearchUrl(query, matchedTags);
+  const startedAt = Date.now();
+  let aggregateRecorded = false;
 
-  const searchResp = await safeSendMessage({
-    type: "fetch-json",
-    method: "GET",
-    url: searchUrl,
-  });
-
-  if (!searchResp?.ok || !("data" in searchResp)) {
-    throw new Error(
-      "error" in (searchResp || {})
-        ? (searchResp as { error?: string }).error || "Search request failed"
-        : "Search request failed"
+  const recordNetworkResult = (input: {
+    status?: number;
+    degraded: boolean;
+    failed: boolean;
+    candidateCount: number;
+  }) => {
+    aggregateRecorded = true;
+    recordRelevanceAggregate(
+      buildRelevanceSearchAggregateSample({
+        source: "network",
+        latencyMs: Date.now() - startedAt,
+        ...input,
+      })
     );
+  };
+
+  try {
+    const searchResp = await safeSendMessage({
+      type: "fetch-json",
+      method: "GET",
+      url: searchUrl,
+    });
+
+    if (!searchResp?.ok || !("data" in searchResp)) {
+      const status =
+        searchResp &&
+        "status" in searchResp &&
+        typeof searchResp.status === "number"
+          ? searchResp.status
+          : undefined;
+      recordNetworkResult({
+        status,
+        degraded: false,
+        failed: true,
+        candidateCount: 0,
+      });
+      throw new Error(
+        "error" in (searchResp || {})
+          ? (searchResp as { error?: string }).error || "Search request failed"
+          : "Search request failed"
+      );
+    }
+
+    const responseStatus =
+      "status" in searchResp && typeof searchResp.status === "number"
+        ? searchResp.status
+        : 200;
+    const payload = searchResp.data as KnowwSearchResponsePayload;
+
+    if (responseStatus >= 400) {
+      recordNetworkResult({
+        status: responseStatus,
+        degraded: payload.degraded === true,
+        failed: true,
+        candidateCount: 0,
+      });
+      throw new Error(`Search request failed with ${responseStatus}`);
+    }
+
+    const rawEvents = parsePolymarketEventsPayload(payload);
+    const markets = mapRawPolymarketEvents(rawEvents, "search");
+    recordNetworkResult({
+      status: responseStatus,
+      degraded: payload.degraded === true,
+      failed: false,
+      candidateCount: markets.length,
+    });
+
+    log(
+      "Polymarket Search API:",
+      rawEvents.length,
+      "raw events,",
+      markets.length,
+      "active for:",
+      query
+    );
+
+    if (payload.degraded) {
+      log("Polymarket Search API degraded response for:", query);
+    }
+
+    return { markets, degraded: payload.degraded === true };
+  } catch (error) {
+    if (!aggregateRecorded) {
+      recordNetworkResult({
+        degraded: false,
+        failed: true,
+        candidateCount: 0,
+      });
+    }
+    throw error;
   }
-
-  const responseStatus =
-    "status" in searchResp && typeof searchResp.status === "number"
-      ? searchResp.status
-      : 200;
-
-  if (responseStatus >= 400) {
-    throw new Error(`Search request failed with ${responseStatus}`);
-  }
-
-  const payload = searchResp.data as KnowwSearchResponsePayload;
-  const rawEvents = parsePolymarketEventsPayload(payload);
-  const markets = mapRawPolymarketEvents(rawEvents, "search");
-
-  log(
-    "Polymarket Search API:",
-    rawEvents.length,
-    "raw events,",
-    markets.length,
-    "active for:",
-    query
-  );
-
-  if (payload.degraded) {
-    log("Polymarket Search API degraded response for:", query);
-  }
-
-  return markets;
 }
 
 async function searchPolymarketEventsViaKnoww(
@@ -1429,7 +1497,10 @@ async function searchPolymarketEventsViaKnoww(
 
   const cached = readPolymarketSearchCache(cacheKey, true);
   if (cached) {
-    return cached;
+    recordRelevanceAggregate(
+      buildRelevanceMemoryCacheAggregateSample(cached.markets.length)
+    );
+    return cached.markets;
   }
 
   const inFlight = polymarketSearchInFlight.get(cacheKey);
@@ -1439,16 +1510,32 @@ async function searchPolymarketEventsViaKnoww(
 
   const request = enqueuePolymarketSearch(async () => {
     try {
-      const markets = await fetchKnowwPolymarketSearch(query, matchedTags);
-      writePolymarketSearchCache(cacheKey, markets);
-      return markets;
+      const result = await fetchKnowwPolymarketSearch(query, matchedTags);
+      if (
+        shouldCacheSearchResult({
+          failed: false,
+          degraded: result.degraded,
+        })
+      ) {
+        writePolymarketSearchCache(cacheKey, result.markets);
+      }
+      return result.markets;
     } catch (error) {
       log("Polymarket Search API error:", error);
       const stale = readPolymarketSearchCache(cacheKey, false);
       if (stale) {
-        return stale;
+        recordRelevanceAggregate(
+          buildRelevanceSearchAggregateSample({
+            source: "stale_cache",
+            status: 200,
+            degraded: false,
+            failed: false,
+            latencyMs: 0,
+            candidateCount: stale.markets.length,
+          })
+        );
+        return stale.markets;
       }
-      writePolymarketSearchCache(cacheKey, [], true);
       return [];
     } finally {
       polymarketSearchInFlight.delete(cacheKey);
@@ -1534,7 +1621,10 @@ async function fetchPolymarketEventRefresh(
           : 200;
       if (responseStatus >= 400) return null;
 
-      return parsePolymarketEventDetailPayload(response.data);
+      const refreshedMarket = parsePolymarketEventDetailPayload(response.data);
+      return refreshedMarket
+        ? filterNestedMarketsByDisplayPriceCap(refreshedMarket)
+        : null;
     } catch (error) {
       log("Polymarket event refresh failed:", error);
       return null;
@@ -1804,14 +1894,10 @@ async function resolvePolymarketMarketsFromHints(
       market = await fetchDirectPolymarketMarketByTitle(hint.title);
     }
 
-    if (
-      !market ||
-      market.closed === true ||
-      market.active === false ||
-      !isMarketWithinDisplayPriceCap(market)
-    ) {
-      continue;
-    }
+    if (!market) continue;
+    const displayableMarket = filterNestedMarketsByDisplayPriceCap(market);
+    if (!displayableMarket) continue;
+    market = displayableMarket;
 
     const key = market.id || market.slug || market.title;
     if (!key || seen.has(key)) continue;
@@ -1913,9 +1999,9 @@ async function searchAllMarkets(
   }
 
   // Deduplicate by title similarity (markets from different sources might have similar titles)
-  const deduplicatedMarkets = deduplicateMarkets(allMarkets).filter(
-    isMarketWithinDisplayPriceCap
-  );
+  const deduplicatedMarkets = deduplicateMarkets(allMarkets)
+    .map(filterNestedMarketsByDisplayPriceCap)
+    .filter((market): market is Market => market !== null);
 
   // Sort by volume (highest first)
   deduplicatedMarkets.sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0));
@@ -1936,7 +2022,7 @@ async function searchAllMarkets(
     );
   }
 
-  return deduplicatedMarkets.slice(0, 10);
+  return capCombinedSearchResults(deduplicatedMarkets);
 }
 
 /**
@@ -2315,7 +2401,9 @@ async function validateMarketRelevance(
   const { log, isExtensionContextValid, safeSendMessage } = window.KNOWW_UTILS;
   const { KNOWW_APP_URL, CONFIG } = window.KNOWW_CONFIG;
 
-  if (!CONFIG.USE_AI_EXTRACTION || !isExtensionContextValid()) return null;
+  if (!CONFIG.USE_AI_CANDIDATE_VALIDATION || !isExtensionContextValid()) {
+    return null;
+  }
 
   const marketTags = (market.tags || [])
     .map((t) => t.slug || t.label || "")

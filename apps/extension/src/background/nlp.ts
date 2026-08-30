@@ -139,6 +139,9 @@ const bm25IndexCache = new LRUCache<string, MiniSearch<MarketDoc>>(
   BM25_MARKET_CACHE_SIZE
 );
 const bm25ScoreCache = new LRUCache<string, number[]>(BM25_SCORE_CACHE_SIZE);
+const stableLexicalScoreCache = new LRUCache<string, number[]>(
+  BM25_SCORE_CACHE_SIZE
+);
 const tokenizeCache = new LRUCache<string, NlpTokens>(TOKENIZE_CACHE_SIZE);
 
 function hashText(value: string): number {
@@ -163,6 +166,11 @@ function makeBm25ScoreKey(postText: string, marketTexts: string[]): string {
   return `${hashText(postText).toString(36)}:${makeBm25Key(marketTexts)}`;
 }
 
+interface MarketDoc {
+  id: number;
+  text: string;
+}
+
 function createBm25Index(marketTexts: string[]): MiniSearch<MarketDoc> {
   const index = new MiniSearch<MarketDoc>({
     fields: ["text"],
@@ -171,13 +179,12 @@ function createBm25Index(marketTexts: string[]): MiniSearch<MarketDoc> {
       fuzzy: 0.2,
     },
   });
-  const docs: MarketDoc[] = marketTexts.map((text, i) => ({ id: i, text }));
+  const docs: MarketDoc[] = marketTexts.map((text, id) => ({ id, text }));
   index.addAll(docs);
   return index;
 }
 
 function getBm25Index(marketTexts: string[]): MiniSearch<MarketDoc> {
-  if (marketTexts.length === 0) return createBm25Index([]);
   const key = makeBm25Key(marketTexts);
   const cached = bm25IndexCache.get(key);
   if (cached) return cached;
@@ -233,11 +240,6 @@ export function tokenize(text: string): NlpTokens {
   };
   tokenizeCache.set(text, result);
   return result;
-}
-
-interface MarketDoc {
-  id: number;
-  text: string;
 }
 
 function runContextGate(post: NlpTokens, market: NlpTokens): ContextGateResult {
@@ -329,9 +331,67 @@ export function nlpContextGate(
   return runContextGate(tokenize(postText), tokenize(marketText));
 }
 
+const LEXICAL_TOKEN_RE =
+  /\d{4}-\d{1,2}-\d{1,2}|[$@][\p{L}\p{N}_]+|[+-]?\$?\d[\d,]*(?:\.\d+)?(?:%|[kmb])?|[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
+
+export function tokenizeLexicalText(text: string): string[] {
+  return (
+    text.normalize("NFKC").toLowerCase().match(LEXICAL_TOKEN_RE) ?? []
+  ).map((token) => token.replaceAll(",", ""));
+}
+
+function scoreLexicalDocument(queryTokens: string[], text: string): number {
+  const uniqueQueryTokens = [...new Set(queryTokens)];
+  if (uniqueQueryTokens.length === 0) return 0;
+
+  const documentTokens = tokenizeLexicalText(text);
+  if (documentTokens.length === 0) return 0;
+  const frequencies = new Map<string, number>();
+  for (const token of documentTokens) {
+    frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+  }
+
+  const k1 = 1.2;
+  const b = 0.75;
+  const referenceDocumentLength = 40;
+  const lengthFactor =
+    k1 * (1 - b + b * (documentTokens.length / referenceDocumentLength));
+  let score = 0;
+  for (const token of uniqueQueryTokens) {
+    const termFrequency = frequencies.get(token) ?? 0;
+    if (termFrequency === 0) continue;
+    score += (termFrequency * (k1 + 1)) / (termFrequency + lengthFactor);
+  }
+
+  return score / (uniqueQueryTokens.length * (k1 + 1));
+}
+
 /**
- * BM25 scoring: index market texts then search with post text.
- * Returns an array of scores aligned with the input marketTexts array.
+ * Stable lexical shadow scoring with one tokenizer for queries and
+ * documents. Each candidate is scored independently, so its feature value is
+ * unaffected by the other candidates in the result set.
+ */
+export function stableLexicalScore(
+  postText: string,
+  marketTexts: string[]
+): number[] {
+  if (marketTexts.length === 0) return [];
+
+  const cachedKey = makeBm25ScoreKey(postText, marketTexts);
+  const cached = stableLexicalScoreCache.get(cachedKey);
+  if (cached) return cached;
+
+  const queryTokens = tokenizeLexicalText(postText).slice(0, 40);
+  const scores = marketTexts.map((text) =>
+    scoreLexicalDocument(queryTokens, text)
+  );
+  stableLexicalScoreCache.set(cachedKey, scores);
+  return scores;
+}
+
+/**
+ * Production-compatible MiniSearch BM25 scoring. Its pool-relative
+ * normalization is retained until paired shadow evaluation supports a change.
  */
 export function bm25Score(postText: string, marketTexts: string[]): number[] {
   if (marketTexts.length === 0) return [];
@@ -341,22 +401,20 @@ export function bm25Score(postText: string, marketTexts: string[]): number[] {
   if (cached) return cached;
 
   const index = getBm25Index(marketTexts);
-  const postTokens = tokenize(postText);
-  const query = postTokens.lemmas.slice(0, 20).join(" ");
+  const query = tokenize(postText).lemmas.slice(0, 20).join(" ");
   if (!query.trim()) return new Array(marketTexts.length).fill(0);
 
   const results = index.search(query);
   const scoreMap = new Map<number, number>();
   let maxScore = 0;
   for (const result of results) {
-    if (result.score > maxScore) maxScore = result.score;
+    maxScore = Math.max(maxScore, result.score);
     scoreMap.set(result.id, result.score);
   }
-
   if (maxScore === 0) return new Array(marketTexts.length).fill(0);
 
-  const scores = marketTexts.map((_, i) => {
-    const raw = scoreMap.get(i) ?? 0;
+  const scores = marketTexts.map((_, index) => {
+    const raw = scoreMap.get(index) ?? 0;
     return raw / maxScore;
   });
   bm25ScoreCache.set(cachedKey, scores);

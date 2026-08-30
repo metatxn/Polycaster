@@ -1,9 +1,12 @@
 import { logDebug, logWarn } from "@knoww/logger";
+import { normalizeSiteSupportHostname } from "../site-support";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "../types/settings";
 import { getKnowwAppUrl } from "./extension-session";
 
 const ANALYTICS_QUEUE_KEY = "knoww_analytics_queue_v1";
 const ANALYTICS_INSTALL_ID_KEY = "knoww_analytics_install_id_v1";
+const SITE_SUPPORT_SUBMITTED_HOSTNAMES_KEY =
+  "knoww_site_support_submitted_hostnames_v1";
 const SETTINGS_STORAGE_KEY = "knowwSettings";
 const MAX_BATCH_SIZE = 20;
 const FLUSH_DELAY_MS = 1500;
@@ -44,7 +47,10 @@ async function isAnalyticsEnabled(): Promise<boolean> {
           const settings = result[SETTINGS_STORAGE_KEY] as
             | Partial<UserSettings>
             | undefined;
-          resolve(settings?.usageAnalyticsEnabled === true);
+          resolve(
+            settings?.usageAnalyticsEnabled ??
+              DEFAULT_USER_SETTINGS.usageAnalyticsEnabled
+          );
         }
       );
     } catch {
@@ -192,6 +198,43 @@ export async function queueAnalyticsEvent(
     }
 
     scheduleFlush();
+  });
+}
+
+/**
+ * Sends a support request triggered by an explicit button click. This is kept
+ * separate from optional usage analytics so turning analytics off does not
+ * make a deliberate request appear to succeed while silently dropping it.
+ */
+export async function submitSiteSupportRequest(
+  hostname: string
+): Promise<boolean> {
+  const normalizedHostname = normalizeSiteSupportHostname(hostname);
+  if (!normalizedHostname) return false;
+
+  return runQueueTask(async () => {
+    const submittedHostnames =
+      (await storageGet<string[]>(SITE_SUPPORT_SUBMITTED_HOSTNAMES_KEY)) ?? [];
+    if (submittedHostnames.includes(normalizedHostname)) return true;
+
+    const distinctId = await getOrCreateInstallId();
+    const submitted = await postBatch([
+      {
+        event: "unsupported_site_requested",
+        distinctId,
+        timestamp: new Date().toISOString(),
+        properties: { hostname: normalizedHostname },
+      },
+    ]);
+    if (submitted) {
+      await storageSet({
+        [SITE_SUPPORT_SUBMITTED_HOSTNAMES_KEY]: [
+          ...submittedHostnames,
+          normalizedHostname,
+        ].slice(-100),
+      });
+    }
+    return submitted;
   });
 }
 

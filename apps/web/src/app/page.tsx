@@ -18,6 +18,7 @@ import {
   LandingFooter,
   LandingHeader,
 } from "@/components/landing/landing-chrome";
+import { LandingPageAnalytics } from "@/components/landing/landing-page-analytics";
 import { LandingShell } from "@/components/landing/landing-shell";
 import { TweetOverlayHero } from "@/components/tweet-overlay-hero";
 import { buildPageMetadata } from "@/lib/seo";
@@ -53,21 +54,41 @@ const TICKER = [
 export default function LandingPage() {
   return (
     <LandingShell>
+      <LandingPageAnalytics />
       <TickerBar />
 
       <LandingHeader
         nav={[
-          { label: "Extension", href: "/extension" },
-          { label: "How it works", href: "#how" },
-          { label: "Agent", href: "#agent" },
-          { label: "Markets →", href: "/markets" },
+          {
+            label: "Extension",
+            href: "/extension",
+            analytics: { cta: "nav_extension", destination: "extension_page" },
+          },
+          {
+            label: "How it works",
+            href: "#how",
+            analytics: { cta: "nav_how_it_works", destination: "page_section" },
+          },
+          {
+            label: "Agent",
+            href: "#agent",
+            analytics: { cta: "nav_agent", destination: "page_section" },
+          },
+          {
+            label: "Markets →",
+            href: "/markets",
+            analytics: { cta: "nav_markets", destination: "web_app" },
+          },
         ]}
       />
 
       <main id="content" tabIndex={-1}>
         {/* HERO — heading + right-side artifact preserved per design direction;
             no background grid. */}
-        <section className="relative flex min-h-[calc(100svh-109px)] items-center border-b border-(--kw-fg)/10 overflow-hidden">
+        <section
+          className="relative flex min-h-[calc(100svh-109px)] items-center border-b border-(--kw-fg)/10 overflow-hidden"
+          data-landing-section="hero"
+        >
           {/* Hero aurora — SVG fractal-noise (fbm) clouds tinted with the accent,
               the CSS analogue of the old WebGL shader. Two layers drift in
               opposite directions and blend additively (hero-scoped, no WebGL). */}
@@ -150,6 +171,9 @@ export default function LandingPage() {
                     href={CHROME_STORE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
+                    data-landing-cta="install_extension"
+                    data-landing-location="hero"
+                    data-landing-destination="chrome_web_store"
                     className="inline-flex items-center gap-2.5 bg-(--kw-fg) text-(--kw-bg) px-7 py-4 text-[14px] font-semibold hover:bg-(--kw-fg)/90 transition-colors group text-shadow-none"
                   >
                     <Download className="w-4 h-4" />
@@ -158,6 +182,9 @@ export default function LandingPage() {
                   </a>
                   <Link
                     href="/markets"
+                    data-landing-cta="explore_markets"
+                    data-landing-location="hero"
+                    data-landing-destination="web_app"
                     className="inline-flex items-center gap-2 text-[14px] font-medium text-(--kw-fg)/70 hover:text-(--kw-fg) px-5 py-4 border-b border-(--kw-fg)/20 hover:border-(--kw-fg) transition-colors"
                   >
                     Or explore markets without installing

@@ -6,7 +6,8 @@
  * src/app/extension/page.tsx.
  *
  * Copy accuracy is binding here: matching is a local embedding model with
- * AI-assisted matching and analytics OPTIONAL and off by default; trading
+ * AI-assisted matching is optional and off by default; usage analytics can be
+ * disabled in settings; trading
  * is non-custodial and user-signed. Claims must stay consistent with
  * /privacy and the extension manifest.
  */
@@ -141,8 +142,8 @@ export function MatchingSection() {
         </div>
         <p className="kw-reveal mt-8 max-w-[72ch] text-[14px] leading-[1.6] text-(--kw-fg)/65">
           An optional AI-assisted mode can send short, truncated text excerpts
-          to Knoww APIs for better topic extraction. You control it — and
-          optional usage analytics — from the extension settings.
+          to Knoww APIs for better topic extraction. You control it from the
+          extension settings, where you can also turn off usage analytics.
         </p>
       </div>
     </section>
@@ -187,15 +188,17 @@ export function PermissionsSection() {
               Permissions, and why we ask.
             </h2>
             <p className="mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
-              The extension asks for exactly four Chrome permissions, plus host
-              access on supported sites only. Here is what each one is for.
+              The extension asks for exactly four Chrome API permissions. Host
+              access lets matching run on supported sites and lets a lightweight
+              request prompt appear elsewhere.
             </p>
             <p className="mt-4 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
               What stays in your browser: page text and matching (by default),
-              your settings, and local caches. What reaches knoww.app: market
-              lookups — plus text excerpts or usage events only if you turn on
-              AI-assisted matching or analytics in settings. Knoww does not
-              track your browsing across the web.
+              your settings, and local caches. On unsupported sites, the prompt
+              reads only the current domain; it does not inspect page content.
+              What reaches knoww.app: market lookups, usage events while
+              analytics is enabled, and text excerpts only if you turn on
+              AI-assisted matching. You can turn analytics off in settings.
             </p>
             <Link
               href="/privacy"
@@ -358,7 +361,7 @@ const FAQ: Array<{ q: string; a: ReactNode }> = [
   },
   {
     q: "Does Knoww read my browsing history?",
-    a: "No. It reads the page you’re currently viewing, only on supported sites, and matching runs locally by default. Optional usage analytics (off unless you enable it) records feature events — not page text.",
+    a: "No. Full page matching runs only on supported sites. On other sites, a lightweight request prompt sees only the current domain and does not inspect page content. Usage analytics records feature events and the current domain, not page addresses or page text, and you can turn it off in settings.",
   },
   {
     q: "Do I need an account or a wallet?",

@@ -70,6 +70,8 @@ describe("sidepanel decomposition", () => {
     const handlers = {
       onCredentialsUpdated: vi.fn(),
       onSessionDisconnected: vi.fn(),
+      onShowSiteSupport: (hostname: string) =>
+        callbackOrder.push(`support:${hostname}`),
       onShowView: () => callbackOrder.push("show"),
       onWalletConnected: vi.fn(),
     };
@@ -84,6 +86,18 @@ describe("sidepanel decomposition", () => {
       })
     ).toBe(false);
     expect(callbackOrder).toEqual(["remove", "show"]);
+    expect(
+      listener?.({
+        type: "KNOWW_SHOW_SITE_SUPPORT_REQUEST",
+        hostname: "example.com",
+      } as never)
+    ).toBe(false);
+    expect(callbackOrder).toEqual([
+      "remove",
+      "show",
+      "remove",
+      "support:example.com",
+    ]);
     expect(listener?.({ type: "trading:session-disconnected" })).toBe(false);
     expect(listener?.({ type: "trading:wallet-connected" })).toBe(false);
     expect(listener?.({ type: "trading:credentials-updated" })).toBe(false);

@@ -11,6 +11,7 @@ import {
   renderMarketsSurface,
 } from "./sidepanel/markets";
 import {
+  consumeRequestedSiteSupportHostname,
   installSidepanelMessageListener,
   sendRuntimeMessage,
 } from "./sidepanel/messaging";
@@ -20,6 +21,11 @@ import {
   type PortfolioSidepanelHandle,
 } from "./sidepanel/portfolio";
 import { createPortfolioSetup, SETUP_STYLES } from "./sidepanel/setup";
+import {
+  createSiteSupportSurface,
+  renderSiteSupportSurface,
+  SITE_SUPPORT_STYLES,
+} from "./sidepanel/site-support";
 
 interface SidepanelEventHandle {
   handleClick?(event: Event): boolean;
@@ -96,11 +102,13 @@ function renderSidepanelShell(root: HTMLElement): void {
       ${PORTFOLIO_STYLES}
       ${FUNDING_UI_STYLES}
       ${SETUP_STYLES}
+      ${SITE_SUPPORT_STYLES}
     </style>
-    <div
-      id="knoww-notification-stack"
-      class="knoww-notification-stack knoww-notification-stack-twitter knoww-theme-dark knoww-stack-expanded knoww-sidepanel-stack"
-    >
+    <div data-sidepanel-main>
+      <div
+        id="knoww-notification-stack"
+        class="knoww-notification-stack knoww-notification-stack-twitter knoww-theme-dark knoww-stack-expanded knoww-sidepanel-stack"
+      >
       <div class="knoww-stack-header">
         <div class="knoww-stack-title">
           <span class="knoww-stack-icon" aria-hidden="true">
@@ -127,13 +135,16 @@ function renderSidepanelShell(root: HTMLElement): void {
         <div class="knoww-portfolio-loading">Opening your portfolio...</div>
       </div>
       ${renderMarketsFooter()}
+      </div>
     </div>
+    ${renderSiteSupportSurface()}
   `;
 }
 
 const root = document.getElementById("root");
 if (root) {
   renderSidepanelShell(root);
+  const siteSupport = createSiteSupportSurface(root);
 
   let portfolio!: PortfolioSidepanelHandle;
   let funding!: FundingUiHandle;
@@ -174,7 +185,11 @@ if (root) {
     onSessionDisconnected: portfolio.clearSession,
     onWalletConnected: portfolio.onWalletConnected,
     onShowView: portfolio.showView,
+    onShowSiteSupport: siteSupport.show,
     onCredentialsUpdated: portfolio.onCredentialsUpdated,
+  });
+  void consumeRequestedSiteSupportHostname().then((hostname) => {
+    if (hostname) siteSupport.show(hostname);
   });
   window.addEventListener(
     "pagehide",
@@ -184,6 +199,7 @@ if (root) {
       markets.dispose();
       funding.dispose();
       portfolio.dispose();
+      siteSupport.dispose();
     },
     { once: true }
   );

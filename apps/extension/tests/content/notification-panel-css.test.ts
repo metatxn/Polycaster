@@ -102,6 +102,7 @@ test("market card outcome buttons use theme-aware borders", () => {
 
 test("notification panel defines theme palettes for light and dim modes", () => {
   const css = readInlineCss();
+  const sharedPanelCss = readSource("src/content/markets-panel-navbar.css");
 
   assert.equal(
     /#knoww-notification-stack\.knoww-theme-light\s*\{[^}]*--kse-panel:\s*#[a-fA-F0-9]{6};[^}]*--kse-ink:\s*#[a-fA-F0-9]{6};/.test(
@@ -116,8 +117,8 @@ test("notification panel defines theme palettes for light and dim modes", () => 
     true
   );
   assert.equal(
-    /#knoww-notification-stack\s+\.knoww-search-input\s*\{[^}]*font-family:\s*inherit\s*!important;/.test(
-      css
+    /\.knoww-search-input\s*\{[^}]*font-family:\s*inherit\s*!important;/.test(
+      sharedPanelCss
     ),
     true
   );
@@ -166,14 +167,12 @@ test("notification stack close persists until explicitly reopened", () => {
 
 test("notification stack exposes settings and action-open controls", () => {
   const uiSource = readSource("src/content/ui/notifications.ts");
+  const navbarSource = readSource("src/content/ui/markets-panel-navbar.ts");
   const backgroundSource = readSource("src/background.ts");
 
   assert.equal(/KNOWW_OPEN_EXTENSION/.test(uiSource), true);
   assert.equal(/KNOWW_OPEN_EXTENSION_SETTINGS/.test(uiSource), true);
-  assert.equal(
-    /settingsBtn\.className = "knoww-stack-settings";/.test(uiSource),
-    true
-  );
+  assert.equal(/className: "knoww-stack-settings"/.test(navbarSource), true);
   assert.equal(
     /safeSendMessage\(\{\s*type:\s*"KNOWW_OPEN_EXTENSION_SETTINGS"/.test(
       uiSource

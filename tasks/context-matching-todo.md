@@ -1,0 +1,29 @@
+# Context matching checklist
+
+- [x] Disclose configured and effective thresholds.
+- [x] Split the two remote AI controls.
+- [x] Bound the child-context pilot.
+- [x] Add aggregate relevance counters.
+- [x] Add and run the search proxy capacity check; record its inconclusive transport-error result.
+- [ ] Pass the multi-tab capacity check and then consider raising retrieval limits to 20.
+- [x] Add a true MiniLM shadow path.
+- [x] Bound the reranker queue and supersede stale same-post work.
+- [x] Task 1. Add the evaluation data contract and metrics.
+- [x] Task 2. Add dataset and rollout gates.
+- [x] Task 3. Protect search traffic and stale fallback data.
+- [x] Task 4. Pin model artifacts and version caches.
+- [x] Task 5. Add rerank expiry and a production flag.
+- [x] Task 6. Build bounded post and market documents.
+- [x] Task 7. Normalize lexical scoring and preserve exact tokens.
+- [x] Task 8. Add reciprocal-rank fusion and explicit two-stage reranking.
+- [x] Task 9. Convert gates into evidence and make unknown domain neutral.
+- [x] Task 10. Add typed proposition checks.
+- [x] Task 11. Add calibrated decision artifacts.
+- [x] Task 12. Compare browser-downloadable model packs.
+- [ ] Collect the required consented evaluation dataset.
+- [ ] Collect one week of aggregate and MiniLM shadow telemetry.
+- [ ] Review false-positive and download-size promotion criteria with product.
+- [x] Run the full extension tests, TypeScript, scoped Biome, and deterministic capacity checks.
+- [ ] Run real-browser WebGPU and WASM model-pack checks after the held-out dataset exists.
+- [x] Update the context matching report with measured results and explicit evidence gaps.
+- [x] Leave all changes uncommitted for user review.

@@ -5,6 +5,7 @@ import {
   isMarketWithinDisplayPriceCap,
   MAX_DISPLAY_PRICE_CENTS,
 } from "../../src/content/market-price-filter";
+import { resolveMarketDisplayData } from "../../src/content/ui/cards";
 import type { Market } from "../../src/types/market";
 
 function marketWithPrices(prices: string[]): Market {
@@ -82,6 +83,81 @@ test("removes only nested markets above the price cap", () => {
     ["competitive", "unknown-price"]
   );
   assert.equal(event.markets?.length, 3, "input event must not be mutated");
+});
+
+test("keeps low-probability choices in a named multi-outcome event", () => {
+  const event: Market = {
+    id: "841244",
+    title: "Which company has the best Text-to-Video AI end of September?",
+    source: "polymarket",
+    markets: [
+      {
+        id: "google",
+        groupItemTitle: "Google",
+        active: true,
+        outcomePrices: ["0.865", "0.135"],
+      },
+      {
+        id: "bytedance",
+        groupItemTitle: "ByteDance",
+        active: true,
+        outcomePrices: ["0.058", "0.942"],
+      },
+      {
+        id: "openai",
+        groupItemTitle: "OpenAI",
+        active: true,
+        outcomePrices: ["0.003", "0.997"],
+      },
+    ],
+  };
+
+  const filtered = filterNestedMarketsByDisplayPriceCap(event);
+
+  assert.ok(filtered);
+  assert.deepEqual(
+    filtered.markets?.map((market) => market.groupItemTitle),
+    ["Google", "ByteDance", "OpenAI"]
+  );
+  assert.deepEqual(resolveMarketDisplayData(filtered).outcomes, [
+    "Google",
+    "ByteDance",
+    "OpenAI",
+  ]);
+});
+
+test("keeps a mixed event displayable when at least one active child survives", () => {
+  const event: Market = {
+    id: "event-mixed",
+    title: "Event with eligible and ineligible children",
+    source: "polymarket",
+    markets: [
+      {
+        id: "nearly-resolved",
+        active: true,
+        outcomePrices: ["0.95", "0.05"],
+      },
+      {
+        id: "eligible",
+        active: true,
+        outcomePrices: ["0.65", "0.35"],
+      },
+      {
+        id: "closed",
+        active: true,
+        closed: true,
+        outcomePrices: ["0.55", "0.45"],
+      },
+    ],
+  };
+
+  assert.equal(isMarketWithinDisplayPriceCap(event), true);
+  assert.deepEqual(
+    filterNestedMarketsByDisplayPriceCap(event)?.markets?.map(
+      (market) => market.id
+    ),
+    ["eligible"]
+  );
 });
 
 test("removes an event only when none of its nested markets survive", () => {

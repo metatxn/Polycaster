@@ -116,6 +116,7 @@ const requiredClassicAssets = [
   "icons/icon-128.png",
   "icons/icon-256.png",
   "knoww-inline.css",
+  "markets-panel-navbar.css",
   "manifest.json",
   "offscreen.html",
   "offscreen.js",
@@ -127,6 +128,8 @@ const requiredClassicAssets = [
   "sidepanel.html",
   "sidepanel.js",
   "styles.css",
+  "unsupported-site-prompt.css",
+  "unsupported-site.js",
 ];
 
 const forbiddenPathParts = new Set([

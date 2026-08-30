@@ -5,16 +5,25 @@
 import { createLogger } from "@knoww/logger";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { canUseProductionReranker } from "./context-promotion";
 import {
   type LoadingMessageInput,
   startLoadingMessageUpdates,
 } from "./loading-messages";
+import type { RelevanceAggregateSnapshot } from "./relevance-aggregate-telemetry";
+import { describeRelevanceThreshold } from "./relevance-threshold-policy";
 import { scheduleSettingsSave } from "./settings-auto-save";
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
-import { DEFAULT_USER_SETTINGS, type UserSettings } from "./types/settings";
+import {
+  DEFAULT_USER_SETTINGS,
+  mergeStoredUserSettings,
+  type StoredUserSettings,
+  type UserSettings,
+} from "./types/settings";
 
 const log = createLogger("extension.options");
 const SHOW_KALSHI_SOURCE_SETTINGS = __DEV_MODE__;
+const productionRerankerAvailable = canUseProductionReranker();
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -364,6 +373,11 @@ interface RelevanceTelemetryResponse {
   data?: RelevanceTelemetryExport;
 }
 
+interface RelevanceAggregateResponse {
+  ok: boolean;
+  data?: RelevanceAggregateSnapshot;
+}
+
 function normalizeTelemetryExport(
   data: RelevanceTelemetryExport
 ): RelevanceTelemetryExport {
@@ -401,6 +415,20 @@ function sendTelemetryMessage<T>(
   });
 }
 
+function sendRuntimeTelemetryMessage<T>(message: {
+  type: string;
+}): Promise<T | null> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response: T | undefined) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      resolve(response ?? null);
+    });
+  });
+}
+
 function broadcastSettingsToSupportedTabs(settings: UserSettings): void {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
@@ -427,16 +455,18 @@ function broadcastSettingsToSupportedTabs(settings: UserSettings): void {
 interface ToggleProps {
   id: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
 }
 
-function Toggle({ id, checked, onChange }: ToggleProps) {
+function Toggle({ id, checked, disabled = false, onChange }: ToggleProps) {
   return (
     <label className="toggle">
       <input
         type="checkbox"
         id={id}
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange((e.target as HTMLInputElement).checked)}
       />
       <span className="toggle-slider"></span>
@@ -563,20 +593,11 @@ function OptionsApp() {
           return;
         }
         const storedSettings = result.knowwSettings as
-          | Partial<UserSettings>
+          | StoredUserSettings
           | undefined;
-        const loadedSettings: UserSettings = {
-          ...DEFAULT_USER_SETTINGS,
-          ...(storedSettings || {}),
-          platforms: {
-            ...DEFAULT_USER_SETTINGS.platforms,
-            ...(storedSettings?.platforms || {}),
-          },
-          sources: {
-            ...DEFAULT_USER_SETTINGS.sources,
-            ...(storedSettings?.sources || {}),
-          },
-        };
+        const loadedSettings = mergeStoredUserSettings(storedSettings, {
+          productionRerankerPromoted: productionRerankerAvailable,
+        });
         setSettings(loadedSettings);
         setSettingsLoaded(true);
       }
@@ -620,7 +641,9 @@ function OptionsApp() {
               analyticsEnabled: nextSettings.usageAnalyticsEnabled,
               notificationStackEnabled: nextSettings.showNotificationStack,
               notificationPanelSurface: nextSettings.notificationPanelSurface,
-              aiExtractionEnabled: nextSettings.aiExtractionEnabled,
+              aiGateRetryEnabled: nextSettings.aiGateRetryEnabled,
+              aiCandidateValidationEnabled:
+                nextSettings.aiCandidateValidationEnabled,
               personalizationEnabled: nextSettings.personalizationEnabled,
             },
           });
@@ -719,22 +742,27 @@ function OptionsApp() {
           typeof tab.id === "number" && canInspectTabForDiagnostics(tab.url)
       );
 
-      const tabExports = await Promise.all(
-        inspectableTabs.map(async (tab) => {
-          const response =
-            await sendTelemetryMessage<RelevanceTelemetryResponse>(tab.id, {
-              type: "KNOWW_EXPORT_RELEVANCE_TELEMETRY",
-            });
-          if (!response?.ok || !response.data) return null;
-          const diagnostics = normalizeTelemetryExport(response.data);
-          return {
-            tabId: tab.id,
-            tabTitle: tab.title ?? "",
-            tabUrl: tab.url ?? "",
-            ...diagnostics,
-          };
-        })
-      );
+      const [tabExports, aggregateResponse] = await Promise.all([
+        Promise.all(
+          inspectableTabs.map(async (tab) => {
+            const response =
+              await sendTelemetryMessage<RelevanceTelemetryResponse>(tab.id, {
+                type: "KNOWW_EXPORT_RELEVANCE_TELEMETRY",
+              });
+            if (!response?.ok || !response.data) return null;
+            const diagnostics = normalizeTelemetryExport(response.data);
+            return {
+              tabId: tab.id,
+              tabTitle: tab.title ?? "",
+              tabUrl: tab.url ?? "",
+              ...diagnostics,
+            };
+          })
+        ),
+        sendRuntimeTelemetryMessage<RelevanceAggregateResponse>({
+          type: "relevance-aggregate:export",
+        }),
+      ]);
 
       const tabsWithDiagnostics = tabExports.filter(
         (entry): entry is NonNullable<(typeof tabExports)[number]> =>
@@ -750,8 +778,16 @@ function OptionsApp() {
       );
       const diagnosticCount = eventCount + feedbackCount;
       const respondingTabCount = tabExports.filter(Boolean).length;
+      const aggregate = aggregateResponse?.ok
+        ? aggregateResponse.data
+        : undefined;
+      const aggregateSampleCount =
+        aggregate?.days.reduce(
+          (total, day) => total + day.search.requests + day.pipeline.posts,
+          0
+        ) ?? 0;
 
-      if (diagnosticCount === 0) {
+      if (diagnosticCount === 0 && aggregateSampleCount === 0) {
         stopStatus();
         showStatus(
           respondingTabCount === 0
@@ -772,14 +808,16 @@ function OptionsApp() {
           diagnosticCount,
           eventCount,
           feedbackCount,
+          aggregateSampleCount,
           inspectedTabCount: inspectableTabs.length,
           respondingTabCount,
+          aggregate,
           tabs: tabsWithDiagnostics,
         }
       );
       stopStatus();
       showStatus(
-        `Exported ${eventCount} events and ${feedbackCount} feedback entries.`
+        `Exported ${eventCount} detailed events, ${feedbackCount} feedback entries, and ${aggregateSampleCount} aggregate samples.`
       );
     });
   }, [showStatus, startStatusSequence, version]);
@@ -796,13 +834,16 @@ function OptionsApp() {
           typeof tab.id === "number" && canInspectTabForDiagnostics(tab.url)
       );
 
-      await Promise.all(
-        inspectableTabs.map((tab) =>
+      await Promise.all([
+        ...inspectableTabs.map((tab) =>
           sendTelemetryMessage(tab.id, {
             type: "KNOWW_CLEAR_RELEVANCE_TELEMETRY",
           })
-        )
-      );
+        ),
+        sendRuntimeTelemetryMessage({
+          type: "relevance-aggregate:clear",
+        }),
+      ]);
       stopStatus();
       showStatus("Diagnostics cleared.");
     });
@@ -879,13 +920,10 @@ function OptionsApp() {
       <Section title="Display Settings">
         <SettingRow
           label="Relevance Threshold"
-          description={
-            settings.relevanceThreshold <= 0.3
-              ? "Shows more markets, but some might be loosely related to the post."
-              : settings.relevanceThreshold >= 0.6
-                ? "Shows fewer markets, but they will be highly accurate matches."
-                : "Balanced: Shows a good mix of relevant markets."
-          }
+          description={describeRelevanceThreshold(
+            settings.relevanceThreshold,
+            settings.aiCandidateValidationEnabled
+          )}
         >
           <div className="range-container">
             <input
@@ -971,14 +1009,32 @@ function OptionsApp() {
         <Divider />
 
         <SettingRow
-          label="AI-Assisted Matching"
-          description="When a market scores high but lacks keyword overlap, use AI to verify relevance"
+          label="Improve Uncertain Matches"
+          description="Send post text to Knoww when local matching is uncertain so it can improve the suggestions."
         >
           <Toggle
-            id="ai-extraction-enabled"
-            checked={settings.aiExtractionEnabled}
+            id="ai-gate-retry-enabled"
+            checked={settings.aiGateRetryEnabled}
             onChange={(v) =>
-              setSettings((prev) => ({ ...prev, aiExtractionEnabled: v }))
+              setSettings((prev) => ({ ...prev, aiGateRetryEnabled: v }))
+            }
+          />
+        </SettingRow>
+
+        <Divider />
+
+        <SettingRow
+          label="Verify Suggested Markets"
+          description="Send post text and suggested market details to Knoww to check relevance before showing a market."
+        >
+          <Toggle
+            id="ai-candidate-validation-enabled"
+            checked={settings.aiCandidateValidationEnabled}
+            onChange={(v) =>
+              setSettings((prev) => ({
+                ...prev,
+                aiCandidateValidationEnabled: v,
+              }))
             }
           />
         </SettingRow>
@@ -1054,7 +1110,7 @@ function OptionsApp() {
 
         <SettingRow
           label="Usage Analytics"
-          description="Help us measure extension usage with anonymous product events. Raw page text is not sent."
+          description="Help us measure extension usage with anonymous product events. On by default; you can turn it off at any time. Page addresses and raw text are not sent."
         >
           <Toggle
             id="usage-analytics-enabled"
@@ -1078,11 +1134,33 @@ function OptionsApp() {
           />
         </SettingRow>
 
+        {productionRerankerAvailable && (
+          <>
+            <Divider />
+
+            <SettingRow
+              label="Improve Matching Locally"
+              description="Download a browser model of about 24 MB to improve how Knoww ranks suggested markets. The model runs on this device."
+            >
+              <Toggle
+                id="production-reranker-enabled"
+                checked={settings.productionRerankerEnabled}
+                onChange={(productionRerankerEnabled) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    productionRerankerEnabled,
+                  }))
+                }
+              />
+            </SettingRow>
+          </>
+        )}
+
         <Divider />
 
         <SettingRow
           label="Relevance Diagnostics"
-          description="Export recent local matching decisions from tabs with the content script"
+          description="Export 14 days of local aggregate counters. Debug Mode also includes recent detailed tab decisions."
         >
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <button

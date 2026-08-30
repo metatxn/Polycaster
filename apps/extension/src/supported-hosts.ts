@@ -207,10 +207,26 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
 ];
 
 /**
+ * Minimal host access used only by the unsupported-site support prompt. The
+ * corresponding content script reads the hostname and renders its own CTA; it
+ * does not import or execute the full matching/content pipeline.
+ */
+export const UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS: string[] = [
+  "http://*/*",
+  "https://*/*",
+];
+
+export const UNSUPPORTED_SITE_SUPPORT_EXCLUDE_PATTERNS: string[] = [
+  ...SUPPORTED_MATCH_PATTERNS,
+  "https://knoww.app/*",
+  "https://www.knoww.app/*",
+  "http://localhost/*",
+];
+
+/**
  * API domains the background service worker needs to reach directly.
- * These are added to `host_permissions` in addition to the content-script
- * site patterns so the browser enforces a scoped allowlist instead of
- * the overly broad `<all_urls>`.
+ * These are added to `host_permissions` in addition to the browser-page
+ * patterns above. Runtime routing still keeps API fetches on this allowlist.
  */
 export const API_HOST_PERMISSIONS: string[] = [
   // Polymarket APIs

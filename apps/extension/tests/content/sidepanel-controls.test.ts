@@ -77,20 +77,38 @@ test("settings default to floating and expose a user-facing placement control", 
   );
 });
 
-test("AI-assisted matching defaults off and remains user-configurable", () => {
+test("remote AI matching flows default off and remain independently configurable", () => {
   const settingsSource = readSource("src/types/settings.ts");
   const optionsSource = readSource("src/options.tsx");
+  const configSource = readSource("src/content/config.ts");
+  const injectionSource = readSource("src/content/injection.ts");
+  const apiSource = readSource("src/content/api.ts");
 
-  assert.equal(/aiExtractionEnabled:\s*false/.test(settingsSource), true);
-  assert.equal(/label="AI-Assisted Matching"/.test(optionsSource), true);
+  assert.equal(/aiGateRetryEnabled:\s*false/.test(settingsSource), true);
   assert.equal(
-    /checked=\{settings\.aiExtractionEnabled\}/.test(optionsSource),
+    /aiCandidateValidationEnabled:\s*false/.test(settingsSource),
     true
   );
   assert.equal(
-    /setSettings\(\(prev\) => \(\{ \.\.\.prev, aiExtractionEnabled: v \}\)\)/.test(
-      optionsSource
-    ),
+    /label="Improve Uncertain Matches"/.test(optionsSource) &&
+      /checked=\{settings\.aiGateRetryEnabled\}/.test(optionsSource),
+    true
+  );
+  assert.equal(
+    /label="Verify Suggested Markets"/.test(optionsSource) &&
+      /checked=\{settings\.aiCandidateValidationEnabled\}/.test(optionsSource),
+    true
+  );
+  assert.equal(
+    /USE_AI_GATE_RETRY/.test(configSource) &&
+      /USER_SETTINGS\.aiGateRetryEnabled/.test(configSource) &&
+      /CONFIG\.USE_AI_GATE_RETRY/.test(injectionSource),
+    true
+  );
+  assert.equal(
+    /USE_AI_CANDIDATE_VALIDATION/.test(configSource) &&
+      /USER_SETTINGS\.aiCandidateValidationEnabled/.test(configSource) &&
+      /CONFIG\.USE_AI_CANDIDATE_VALIDATION/.test(apiSource),
     true
   );
 });
@@ -113,13 +131,11 @@ test("production settings hide the Kalshi source toggle", () => {
 
 test("notification stack can move itself into the browser side panel", () => {
   const uiSource = readSource("src/content/ui/notifications.ts");
+  const navbarSource = readSource("src/content/ui/markets-panel-navbar.ts");
   const backgroundSource = readSource("src/background.ts");
   const sidepanelSource = readSidepanelSources();
 
-  assert.equal(
-    /sidebarBtn\.className = "knoww-stack-sidebar";/.test(uiSource),
-    true
-  );
+  assert.equal(/className: "knoww-stack-sidebar"/.test(navbarSource), true);
   assert.equal(/KNOWW_OPEN_EXTENSION_SIDEPANEL/.test(uiSource), true);
   assert.equal(/openSidePanelFromNotificationStack/.test(uiSource), true);
   assert.equal(/ensureNotificationStackLifecyclePort/.test(uiSource), true);

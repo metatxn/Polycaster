@@ -1,8 +1,8 @@
 # Browser extension context-matching model review
 
-**Status:** Findings and recommendations. No implementation changes are included in this report.
+**Status:** Findings, recommendations, and implementation tracking. The staged-review corrections are present in the uncommitted working tree as of 2026-08-30. Evidence-dependent rollout changes remain disabled.
 
-**Reviewed:** 2026-08-29
+**Reviewed:** 2026-08-30
 
 **Scope:** Browser-extension market retrieval, local ranking, context gating, reranking, and final card selection.
 
@@ -16,10 +16,119 @@ The extension has the right broad pieces, but they are connected in a way that l
 - Candidate recall is the first ceiling for posts without a direct market URL. Polymarket search requests only eight events, and the combined search-derived path allows at most ten markets to reach local scoring. Direct-link markets are resolved separately. A better local model cannot recover a search candidate that was never returned.
 - The market representation often omits child outcomes, dates, and resolution details. Those fields frequently distinguish the correct prediction market from a topically similar one.
 - BM25, dense similarity, and hand-written gates use incompatible score scales and fixed thresholds. The current combined score is not a probability, even though the UI displays it as a match percentage.
-- The configured default threshold is `0.3`, but the effective default floor is `0.5` in every scoring mode because the disabled AI validator returns no result and triggers a separate fail-open rule.
+- The configured default threshold is `0.3`, but the effective default floor is `0.5` in every scoring mode because the disabled AI validator returns no result and triggers a separate fail-open rule. The first remediation now discloses this split in settings; matching behavior is unchanged.
 - The checked-in benchmark is too small and too easy to select a replacement model. All tested configurations already achieve a 100 percent Hit@1 rate on 20 hand-written cases.
 
 My recommendation is to keep Arctic Embed S as the default first-stage model, promote MiniLM to a production top-K reranker, and turn Wink from a hard decision-maker into one set of features among several. Fix retrieval breadth, candidate text, lexical normalization, and threshold calibration before changing the default embedding model.
+
+## Implementation verification and remaining gates
+
+The pipeline description and issue register below document the audited baseline. This section records what the current uncommitted implementation changes, what it deliberately leaves inactive, and what evidence is still missing. "Implemented" does not mean "approved for production."
+
+### Staged-review verification and corrections
+
+The staged review was right about the material gaps. The corrections below keep unmeasured ranking changes out of production and make the remaining limits explicit.
+
+| Review finding | Verification | Current result |
+|---|---|---|
+| The new absolute lexical scorer had replaced production BM25 without a paired control | Confirmed. Aggregate telemetry could not attribute changes to that scorer. | MiniSearch is restored as the production-compatible scorer. The absolute scorer now runs in shadow and records paired score direction plus threshold gains and losses. |
+| `minisearch` had become an orphan dependency | Confirmed only while the replacement scorer was live. | Resolved by restoring MiniSearch to the production path. |
+| The calibration fitter only handled perfectly separable classes | Confirmed. Overlapping validation scores caused it to throw. | The fitter now optimizes ordered three-class thresholds for balanced accuracy, fits rerank recovery against relevant and no-match rows, and records accuracy plus a fixed confusion matrix. The bundled artifact remains `null`. |
+| Failed searches created a fresh empty degraded cache entry | Confirmed. One failure could suppress later attempts for 30 seconds. | Failed and degraded responses are no longer written to the result cache. A previous successful entry may still serve as stale fallback for at most five minutes. |
+| Memory-cache telemetry fabricated HTTP 502 for degraded entries | Confirmed. Cache entries do not carry an upstream response status. | Memory-cache samples no longer include a synthetic HTTP status. |
+| Direct event and market detail requests bypassed the shared scheduler | Confirmed for `/api/events/:id` and `/api/markets/slug/:slug`. | Search and both direct-detail routes now share the background capacity scheduler when `source=extension`. |
+| Model SHA-256 values looked runtime-enforced | Confirmed as a documentation risk. | Revisions are runtime-pinned. SHA-256 values are offline reference metadata only; Transformers.js does not verify them in the current loader. |
+| Bounded document support looked fully connected | Partly confirmed. The bounded market document path is live only where nested context is enabled. The structured post builder has no production caller. | The report now distinguishes implemented builders from live inputs. No broad document rollout was made without evaluation data. |
+| RRF and production reranking looked rollout-ready | Overstated. The pure RRF module has no production importer, and the production reranker setting has no live scoring caller. | Both remain inactive until the promotion and browser-runtime gates pass. |
+
+The Kalshi and Manifold relaxed-gate finding is verified. Both adapters set `relaxContextGate`, but the active single-signal recovery requires promoted rerank evidence that the live caller does not supply. The older score-plus-one-signal rule now runs in shadow only: it increments a bounded aggregate counter when it would recover a domain-compatible candidate rejected by the active gate. It does not admit, validate, rank, or display that candidate. See "Kalshi and Manifold shadow decision" below.
+
+### Phase completion
+
+| Task | Repository result | Runtime state |
+|---|---|---|
+| 1. Evaluation contract and metrics | Versioned JSON/JSONL validation supports positives and true no-match cases. Metrics separately report Recall@20/50, MRR, nDCG, Precision@1, no-match rejection accuracy, and per-stratum results. | Offline tool; ready for real data |
+| 2. Dataset and rollout gates | Dataset readiness enforces size, no-match share, split isolation, hard negatives, consent, anonymization, and adjudication. Promotion returns `insufficient_evidence` when requirements are absent. | Active safeguard; the legacy 20-case fixture is rejected |
+| 3. Search protection | One background scheduler now bounds concurrency, pacing, queue wait, attempt duration, overall duration, and retries for extension search and direct-detail requests. Retryable statuses are 429, 502, 503, and 504. Stale fallback is limited to five minutes. Failed or degraded results are not cached. | Active protection; wider live retrieval is not enabled |
+| 4. Model and cache pinning | Arctic S and MiniLM now load exact Hugging Face revisions. The cache namespace includes manifest version, revision, dtype, pooling, and prompt version. Runtime metrics identify the artifact contract. Manifest hashes remain offline reference values, not runtime checks. | Runtime revision pinning active |
+| 5. Rerank expiry and production control | MiniLM work expires after a bounded queue wait. The production setting defaults to off, is separate from debug shadow mode, and cannot be enabled without a matching passed promotion record. Settings disclose the approximate 24 MB download and local inference. | Production reranking locked; shadow remains available |
+| 6. Bounded documents | Stable post and market builders can represent bounded outcomes, child questions, dates, resolution text, aliases, tickers, quotes, image alt text, and article lead text. Exact tokens and direct text remain separate. | Market builder is live only on the bounded nested-context path. The structured post builder is not connected. |
+| 7. Lexical normalization | The absolute lexical shadow scorer uses one query and document tokenizer and preserves tickers, handles, amounts, percentages, signed thresholds, and dates. Production keeps the prior pool-normalized MiniSearch score pending paired evaluation. | Shadow-only experiment with aggregate comparison counters |
+| 8. Rank fusion and two-stage reranking | Pure reciprocal-rank-fusion and fixed-pool reranking policies exist and have unit tests. | Neither policy has a production importer. MiniLM debug scoring cannot reorder displayed cards. |
+| 9. Evidence-aware gate | Gate decisions expose Wink, lexical, specific-entity, domain, and rerank evidence separately. Unknown domain is neutral. A single-signal recovery requires a promoted reranker and calibrated threshold. The historical Kalshi and Manifold rule is counted in shadow. | Active recovery remains unavailable. Shadow telemetry measures potential recovery volume without changing cards. |
+| 10. Typed propositions | Date, direction, entity, numeric-threshold, and outcome checks distinguish compatible, conflict, and unknown. Aggregate counters store only conflict types and counts. | Shadow observation only; conflicts cannot block cards without a valid bundled calibration artifact |
+| 11. Calibration artifacts | A validation-only fitter optimizes ordered direct, adjacent, and no-match thresholds even when score classes overlap. It also fits rerank recovery against relevant and no-match rows. Runtime rejects test-fitted or version-mismatched artifacts. | Bundled artifact is `null`; conservative fallback remains active |
+| 12. Browser model comparison | The benchmark contract pins every candidate, requires identical held-out case hashes, and reports quality, latency, resources, reliability, and cache behavior separately. | Benchmark code ready; real browser runs await the representative dataset |
+
+### TDD and validation record
+
+Every implementation slice started with a focused failing test. The red cases included missing evaluation and calibration modules, an unbounded search policy, unpinned runtime revisions, rerank work starting after expiry, an unlockable production setting, unstable lexical normalization, absent fusion and proposition policies, and model comparisons that could mix different held-out cases. The staged-review corrections added failing cases for production BM25 compatibility, stable lexical shadow output, paired aggregate counters, overlapping calibration classes, failed-result cache policy, cache telemetry without synthetic status, scheduler coverage for direct-detail routes, and the Kalshi and Manifold legacy-relaxation shadow signal.
+
+Final green evidence on 2026-08-30:
+
+- extension Vitest suite: 108 files and 775 tests passed;
+- evaluation, calibration, and browser-model Node tests: 12 passed;
+- search-proxy capacity unit tests: 6 passed;
+- TypeScript `tsc --noEmit`: passed;
+- Biome check for the changed context-matching files: passed;
+- production extension build, bundle assertion, and 49-platform ESM smoke test: passed;
+- `git diff --check`: passed before the final documentation update and is rerun at handoff.
+
+No code was committed.
+
+The isolated Chrome test profile did not have the unpacked extension loaded, so this run did not exercise a live feed, model download, or service-worker network trace. The production bundle assertion and 49-platform ESM smoke test verify packaging and module startup, not end-to-end matching. A live browser pass remains part of the rollout evidence.
+
+The machine's default `pnpm` 11.1.1 shim tried to fetch the repository-pinned pnpm 10.25.0 and stalled under restricted network access. The already-cached exact pnpm 10.25.0 binary ran `test:scoring`, `test:evaluation`, the typecheck, and the production build successfully. This is a local package-manager bootstrap issue, not a failing extension test.
+
+### Capacity result and retrieval decision
+
+The capacity runner was executed against `http://127.0.0.1:8000`. All ten load requests and all five recovery probes ended as `network_error`. This does not prove that the proxy failed under load, because it did not produce usable HTTP latency, status, degradation, or recovery measurements. It also does not approve higher traffic.
+
+The active extension limits therefore remain at the audited values: eight Polymarket search results and ten combined search-derived candidates. The earlier staged wording that called 20 candidates "capacity-approved" was incorrect and was removed. The scheduler, backoff, retry, telemetry, and evaluation support are ready for a new multi-tab probe, but the 20-candidate rollout must wait for a successful measurement.
+
+### Pinned model candidates
+
+| Candidate | Role | Pinned revision | Main ONNX artifact | Current decision |
+|---|---|---|---:|---|
+| Snowflake Arctic Embed S int8 | Embedding | `e596f507467533e48a2e17c007f0e1dacc837b33` | 34,015,111 bytes | Keep as the default first-stage model |
+| MS MARCO MiniLM L6 q8 | Reranker | `a09144355adeed5f58c8ed011d209bf8ee5a1fec` | 23,143,499 bytes | Keep for shadow evaluation; production remains locked |
+| Snowflake Arctic Embed M v1.5 int8 | Embedding candidate | `e58a8f756156a1293d763f17e3aae643474e9b8a` | 110,145,162 bytes | Evaluate as the lowest-risk larger embedding option |
+| Jina Reranker v1 Tiny int8 | Reranker candidate | `aca45de6945b5dc6399abcd2a9c55ded5dc9111f` | 33,424,854 bytes | Experimental until Transformers.js 4.2 browser output and latency are verified |
+| Mixedbread Rerank XSmall q8 | Reranker candidate | `b5c6e9da73abc3711f593f705371cdbe9e0fe422` | 87,245,802 bytes | Experimental; larger download needs a measured quality gain |
+
+The revisions, sizes, and SHA-256 values are recorded in the model manifest and benchmark candidate contract. The extension passes the pinned revisions to Transformers.js and includes them in cache identity. It does not hash model bytes after download, so the SHA-256 values are offline audit references rather than runtime integrity enforcement. Repository metadata and an ONNX layout are necessary checks, but they are not a browser compatibility result. No optional 33 to 110 MB candidate was downloaded for this report.
+
+### Issues still open
+
+1. The required 500 to 1,000 consented, anonymized post snapshots and contemporaneous 20 to 100 candidate snapshots do not exist in this repository.
+2. The required two-labeler adjudication, 30 to 40 percent no-match share, held-out test split, and hard-negative coverage have not been collected.
+3. A week of aggregate retrieval, gate, proposition-shadow, MiniLM-shadow, paired lexical-shadow, and legacy relaxed-gate shadow telemetry is still missing. The options page can export the bounded 14-day snapshot without raw browsing text.
+4. Product has not set the acceptable false-positive, download-size, latency, memory, and failure-rate thresholds used by promotion gates.
+5. The live capacity check is inconclusive because it recorded transport errors instead of HTTP results.
+6. Arctic M, Jina Tiny, and Mixedbread XSmall have not completed cold-cache and warm-cache tests in the extension’s real Transformers.js 4.2 browser runtime on WebGPU and WASM.
+7. No calibration artifact is bundled. The hidden unavailable-validator floor is therefore disclosed but not lowered.
+8. Production MiniLM, reciprocal-rank-fusion ordering, typed proposition blocking, and wider retrieval remain inactive. This is deliberate: enabling them now would turn unmeasured assumptions into user-visible behavior.
+9. The production build passes its repository budget, but webpack still warns about the 4.19 MiB offscreen scoring chunk and 1.06 MiB trading content entry. Optional model weights are downloaded separately, so browser cold-start, storage, and memory measurements remain important.
+10. The active Kalshi and Manifold single-signal relaxation is unreachable because the live caller supplies no promoted rerank evidence. The historical rule is now measured in shadow, but its correctness remains unknown because shadow-eligible candidates are neither remotely validated nor displayed for user feedback.
+11. Runtime model-byte hashing is not implemented. Exact revisions reduce drift, but they do not detect a corrupted or unexpectedly served cached artifact.
+
+The current model recommendation has not changed: Arctic S plus a measured MiniLM top-K reranker remains the most credible standard pack. No alternative model has yet earned promotion on this product’s data.
+
+### Kalshi and Manifold shadow decision
+
+This issue is in the local gate policy, not the Kalshi API or Kalshi model data. Kalshi and Manifold pages compare one short market question with another. Valid pairs often share one specific word or entity, so both adapters set `relaxContextGate`.
+
+Before the staged gate rewrite, a failed two-signal gate could recover when the first-stage score was at least `0.6` and one signal matched. The current rewrite adds two requirements: the signal must count as specific, and a reranker must have a matching passed promotion record plus a score above its calibrated threshold. The production call to `evaluateCandidateGate` does not pass `rerankEvidence`. As a result, `rerankPassed` is always false and the relaxed branch cannot run. Manifold inherits the same behavior because it uses the same adapter flag.
+
+There are three defensible rollout choices:
+
+1. Restore the old high-score relaxation for these two adapters. This recovers recall now, but it also restores a rule that has no no-match calibration.
+2. Keep the current strict behavior until MiniLM promotion and calibration are complete. This minimizes false positives but accepts a known recall regression.
+3. Add a platform-specific shadow comparison first. Measure recovery volume before deciding whether a controlled validation or labeled replay is justified. This is the implemented choice because it observes the disputed rule without changing cards.
+
+The gate now returns `legacyRelaxedShadowEligible` only when the historical rule would have recovered a domain-compatible candidate and the active gate still rejects it. Injection aggregates that result into `legacyRelaxedShadowEligible`; the parser bounds each sample to 0 through 1,000 and the existing snapshot retention remains 14 UTC days. The counter is combined across Kalshi and Manifold because they are the only adapters that set `relaxContextGate`.
+
+This first shadow phase intentionally does not call the remote validator for rejected candidates. Doing so would add network work, latency, and browsing-data processing to a path that currently stops locally. The counter therefore answers “how much recall might this restore?” but not “how many recovered matches are correct?” Correctness still requires a consented labeled replay or a separately approved controlled validation experiment.
 
 ## Scope and method
 
@@ -100,7 +209,8 @@ post DOM
   -> search-source results are merged, deduplicated, sorted by volume, and capped at ten
   -> direct Polymarket-link markets are prepended and can raise the scoring pool above ten
   -> market text is assembled
-  -> Arctic cosine and nonzero BM25 evidence are combined 70/30; without BM25, use Arctic alone
+  -> Arctic cosine and nonzero MiniSearch BM25 evidence are combined 70/30; without BM25, use Arctic alone
+  -> the absolute lexical scorer runs beside BM25 and records aggregate differences without changing the score
   -> ordinary candidates pass Wink overlap and domain compatibility gates
   -> direct Polymarket-link markets bypass those gates and receive a score floor of 0.99
   -> fixed score threshold runs
@@ -114,10 +224,9 @@ MiniLM sits outside that normal path:
 debug mode only
   -> take the top five non-heuristic candidates from hybrid or lexical scoring
   -> score post-market pairs with MiniLM
-  -> attach rerank logits
+  -> attach rerank logits for diagnostics
   -> continue through gates that still use the base first-stage score
-  -> use MiniLM in candidate selection and final ordering
-  -> affect the cards shown to the user
+  -> keep candidate admission, selection, and displayed order on the base score
 ```
 
 ## What the implementation gets right
@@ -222,17 +331,19 @@ The default path relies on `knoww.app/api/search`, which in turn depends on upst
 
 **Recommendation:** First widen and fan out proxy retrieval. If recall remains weak, maintain a small local index of active market embeddings and union its top results with proxy results.
 
-#### R5. Stale search fallback has no maximum age
+#### R5. Stale search fallback had no maximum age [resolved]
 
 **Priority:** P1
 
 **Evidence:** `apps/extension/src/content/api.ts:1174-1185` and `:1440-1452`.
 
-After an upstream failure, the fallback cache read ignores `expiresAt`. The entry can be returned indefinitely until in-memory eviction or extension lifecycle cleanup removes it.
+In the audited baseline, the fallback cache read ignored `expiresAt` after an upstream failure. The entry could be returned indefinitely until in-memory eviction or extension lifecycle cleanup removed it.
 
 **Effect:** Users can see markets that have closed, changed, or become irrelevant long after the normal cache TTL.
 
 **Recommendation:** Add a maximum stale age, record the age in diagnostics, and return no candidates once the stale limit is exceeded.
+
+**Current status:** Resolved in the uncommitted changes. Stale fallback is capped at five minutes.
 
 #### R6. Volume-first deduplication can hide distinct series markets
 
@@ -246,17 +357,19 @@ The extension deduplicates titles with a similarity threshold and keeps the high
 
 **Recommendation:** Prefer stable event IDs, slugs, series IDs, and resolution dates before fuzzy title matching. Include date and threshold tokens in the duplicate key.
 
-#### R7. The degraded flag is not preserved across a successful response contract
+#### R7. The degraded flag was not preserved across a successful response contract [resolved]
 
 **Priority:** P2
 
 **Evidence:** `apps/extension/src/content/api.ts:1188-1209` and `:1394-1452`, plus `apps/web/src/app/api/search/route.ts:126-127` and `:226-241`.
 
-The extension reads and logs `payload.degraded`, but its fetch helper returns only the market array. The paired web route currently sends every degraded payload with HTTP 502, so the extension throws and takes its failure-cache path before this loss matters.
+In the audited baseline, the extension read and logged `payload.degraded`, but its fetch helper returned only the market array. The paired web route sent degraded payloads with HTTP 502, so the extension entered its failure-cache path before this loss mattered.
 
 **Effect:** There is no active TTL bug with the current server. A deployment-skewed or future server that returns `200` with `degraded=true` would lose the flag and could receive a normal success TTL.
 
 **Recommendation:** Preserve `{ markets, degraded }` across the helper boundary as a defensive contract, but do not treat this as a current production blocker.
+
+**Current status:** Resolved in the uncommitted changes. The helper preserves `{ markets, degraded }`, and degraded results are not written to the result cache.
 
 ### Post and market representation
 
@@ -370,17 +483,21 @@ The cross-encoder is loaded and called only when `isDebug` is true. The debug pa
 
 **Recommendation:** Add a production feature flag, lazy-download MiniLM, and rerank a configurable top-K. Start with K=10 after widening retrieval.
 
+**Current status:** A locked production setting and promotion contract exist, but the live scoring caller does not use them. Debug MiniLM remains shadow-only and cannot change displayed cards.
+
 #### K2. MiniLM cannot rescue an ordinary candidate rejected by the base pipeline
 
 **Priority:** P0
 
 **Evidence:** `apps/extension/src/content/injection.ts:1375-1458` and `:1748-1758`.
 
-For non-direct candidates, Wink, domain, and threshold decisions use the base first-stage score from hybrid or lexical scoring. The rerank score affects candidate selection and ordering, but it cannot rescue an earlier gate or threshold rejection. Direct-link candidates take a separate bypass path.
+For non-direct candidates, Wink, domain, and threshold decisions use the base first-stage score from hybrid or lexical scoring. Debug rerank scores are diagnostic only, so they cannot rescue an earlier gate or threshold rejection. Direct-link candidates take a separate bypass path.
 
 **Effect:** A candidate that MiniLM considers strongest can still be rejected because it has one exact noun or a lower mixed score.
 
 **Recommendation:** Treat the rerank score as an input to the decision stage. Calibrate a reranker rescue rule on labeled data rather than comparing raw logits to a hand-picked threshold.
+
+**Current status:** Recovery code requires a matching passed promotion record and calibrated threshold, but the production caller supplies no rerank evidence. The historical Kalshi and Manifold rule runs in shadow-only aggregate telemetry; it cannot change admission or ordering.
 
 #### K3. Mixed rerank and base-score ordering is not a total ordering
 
@@ -394,6 +511,8 @@ The comparator uses rerank scores only when both candidates have them. Otherwise
 
 **Recommendation:** Make the stages explicit. Place the reranked top-K in rerank order, append the untouched tail in base order, and apply a documented base-score safety floor separately.
 
+**Current status:** The explicit two-stage policy exists as a tested pure module. It has no production importer, so it does not affect live ordering.
+
 #### K4. BM25 query and documents use different normalization
 
 **Priority:** P1
@@ -405,6 +524,8 @@ Market documents are indexed as raw text. The post query uses up to 20 unique Wi
 **Effect:** Inflection and tokenization differences reduce exact lexical matches. Prefix and fuzzy matching hide some failures but make them harder to reason about.
 
 **Recommendation:** Index and query the same normalized token representation. Preserve an additional exact field for tickers, years, amounts, hashtags, and multi-word entities.
+
+**Current status:** The normalized absolute scorer implements this recommendation in shadow. Production MiniSearch remains unchanged until the paired counters and labeled evaluation support promotion.
 
 #### K5. Per-pool BM25 normalization overstates weak evidence
 
@@ -418,6 +539,8 @@ Every BM25 score is divided by the maximum score in the current pool. Any nonzer
 
 **Recommendation:** Use reciprocal-rank fusion for the first safe experiment. A later calibrated model can combine raw dense score, BM25 features, entity specificity, date compatibility, and rerank score.
 
+**Current status:** The pool-normalized score remains in production to avoid an unmeasured ranking replacement. The absolute scorer records paired threshold gains and losses in aggregate telemetry. RRF remains offline.
+
 #### K6. Fixed score weights have no domain calibration
 
 **Priority:** P1
@@ -430,41 +553,45 @@ When any BM25 score is nonzero, hybrid mode uses 70 percent embedding and 30 per
 
 **Recommendation:** Measure and calibrate each mode separately. Replace the displayed percentage with a calibrated probability or a non-numeric relevance label.
 
-#### K7. The configured threshold is silently raised to 0.5 in every mode
+#### K7. The default path raises the configured threshold to 0.5 in every mode
 
 **Priority:** P0
 
-**Evidence:** `apps/extension/src/types/settings.ts:164-179`, `apps/extension/src/content/scoring-policy.ts:7-8` and `:771-785`, `apps/extension/src/content/api.ts:2311-2319`, and `apps/extension/src/content/injection.ts:1677-1739`.
+**Evidence:** `apps/extension/src/types/settings.ts:164-179`, `apps/extension/src/relevance-threshold-policy.ts:1-30`, `apps/extension/src/content/scoring-policy.ts:775-788`, `apps/extension/src/content/api.ts:2311-2319`, `apps/extension/src/content/injection.ts:1693-1734`, and `apps/extension/src/options.tsx:881-906`.
 
 The default user threshold is `0.3`. Hybrid mode directly applies `max(0.5, configuredThreshold)`. Lexical and heuristic candidates still enter the validation loop; with AI disabled, the validator returns no result and the unavailable-validator rule rejects scores below `0.5`.
 
-**Effect:** The effective default minimum is `0.5` in every scoring mode. The user setting does not control the behavior it claims to control, and valid candidates between `0.3` and `0.5` are silently removed.
+**Effect:** The effective default minimum is `0.5` in every scoring mode. The user setting does not fully control the matching behavior, and valid candidates between `0.3` and `0.5` are removed. The settings page now explains the effective floor, so this is no longer hidden from the user.
 
-**Recommendation:** Remove the unrelated unavailable-validator floor from the AI-disabled path. Then replace the single raw-score setting with a calibrated product-level sensitivity control, or map sensitivity levels to explicit per-mode thresholds.
+**Recommendation:** Split the fix. First, disclose the configured and effective thresholds without changing matching behavior. That disclosure is present in the current uncommitted changes. Do not lower the unavailable-validator floor until the evaluation set includes real no-match cases and measures false positives by scoring mode. A later change can remove or recalibrate the floor using those results. The final UI should replace the raw score with a product-level sensitivity control or explicit per-mode thresholds.
 
-#### K8. Model revisions are not pinned
+#### K8. Model revisions were not pinned [resolved]
 
 **Priority:** P2
 
 **Evidence:** `apps/extension/src/background/embeddings.ts:128-153` and `:182-229`.
 
-Model IDs and dtypes are fixed, but no Hugging Face revision is passed. The embedding cache namespace includes model ID and dtype, not revision.
+In the audited baseline, model IDs and dtypes were fixed, but no Hugging Face revision was passed. The embedding cache namespace included model ID and dtype, not revision.
 
 **Effect:** An upstream repository change can alter weights or tokenizer files while existing vectors remain cached under the same namespace.
 
 **Recommendation:** Pin a verified commit revision. Include the revision, pooling strategy, prefix version, and dtype in the embedding-cache namespace.
 
-#### K9. Debug reranking changes user-visible selection and is not a shadow test
+**Current status:** Resolved for runtime revision and cache identity. The manifest's SHA-256 values are not checked by the runtime loader.
+
+#### K9. Debug reranking changed user-visible selection and was not a shadow test [resolved]
 
 **Priority:** P1
 
 **Evidence:** `apps/extension/src/content/injection.ts:351-370`, `:1182-1251`, and `:1748-1772`.
 
-Enabling debug mode invokes MiniLM, and the rerank result participates in candidate selection and final sorting.
+In the audited baseline, enabling debug mode invoked MiniLM and the rerank result participated in candidate selection and final sorting.
 
 **Effect:** Debug and normal sessions can show different cards. Telemetry from debug mode therefore describes a different decision pipeline, not a controlled shadow comparison of identical output.
 
 **Recommendation:** Separate diagnostics from feature behavior. Compute and log experimental scores in a true shadow path that cannot change selection, then use a distinct feature flag for user-visible reranking.
+
+**Current status:** Resolved for debug mode. Base-score ordering determines displayed cards. The separate production setting remains locked and unwired.
 
 #### K10. BM25 ignores post lemmas after the first 20 unique terms
 
@@ -490,17 +617,19 @@ Candidate selection keeps at most two markets before optional AI validation. If 
 
 **Recommendation:** Validate a ranked queue until enough cards pass or the latency budget is exhausted. Keep the maximum explicit and include rejection reasons in evaluation data.
 
-#### K12. The reranker queue has no deadline, cancellation, or backlog limit
+#### K12. The reranker queue had no deadline, cancellation, or backlog limit [resolved]
 
 **Priority:** P2
 
 **Evidence:** `apps/extension/src/background/embeddings.ts:631-648`.
 
-Rerank requests share one serialized global promise queue. Every request waits for earlier work, and queued work cannot be cancelled when a post leaves the viewport or a tab becomes irrelevant.
+In the audited baseline, rerank requests shared one serialized global promise queue. Every request waited for earlier work, and queued work could not be cancelled when a post left the viewport or a tab became irrelevant.
 
 **Effect:** The impact is limited while reranking remains debug-only. A production rollout across tabs could accumulate stale work, increase tail latency, and delay the newest visible match.
 
 **Recommendation:** Add a bounded queue, per-request deadlines, latest-only cancellation for superseded posts, and queue-wait telemetry before enabling reranking broadly.
+
+**Current status:** Resolved for the debug shadow path. The queue is bounded, expires stale work, drops superseded requests, and reports queue wait. Production remains disabled.
 
 ### Wink and decision gates
 
@@ -630,17 +759,19 @@ The checked-in harness runs under Node against locally cached model files. It do
 
 **Recommendation:** Add browser runs on one low-end and one typical reference device. Record cold and warm p50 and p95 latency, memory, download bytes, cache size, and fallback rate.
 
-#### O4. Normal telemetry cannot currently calibrate relevance
+#### O4. Normal telemetry could not calibrate relevance [partly resolved]
 
 **Priority:** P1
 
 **Evidence:** `apps/extension/src/content/relevance-telemetry.ts:51-65` and `:146-180`.
 
-Detailed relevance telemetry is enabled only in debug mode, held in memory, capped at 500 events, and available through manual export.
+In the audited baseline, detailed relevance telemetry was enabled only in debug mode, held in memory, capped at 500 events, and available through manual export. Existing per-post counters were also debug-only and could not support a week-long production baseline.
 
 **Effect:** The team lacks a representative labeled stream for threshold and gate calibration.
 
 **Recommendation:** Add an opt-in, privacy-reviewed feedback path. Store compact features and explicit good or bad feedback rather than raw post text whenever possible.
+
+**Current status:** Bounded 14-day aggregate counters now cover retrieval, gates, thresholds, validator outcomes, proposition conflicts, and paired lexical-shadow changes, and the options page exports them. Explicit user labels and a representative week of data are still missing.
 
 #### O5. Gate diagnostics count signals differently from the gate
 
@@ -787,7 +918,11 @@ The embedding tests focus on warm-up and device fallback with mocked outputs. Th
 
 ## Phased implementation plan
 
-### Phase 0. Build evidence before changing the default model
+### Phase 0. Build evidence and check capacity before widening retrieval
+
+Privacy-bounded aggregate counters are implemented for retrieval count, search outcome, gate rejection reason, validator state, scoring mode, proposition conflicts, paired lexical shadow, and final selection. They retain 14 UTC days and can be exported from the options page. They do not persist raw post text. The next step is to collect a representative baseline, not to add more ranking changes.
+
+Load-test the `knoww.app` search proxy at the proposed query count and candidate limit before widening retrieval. Test one active tab and several concurrent tabs. Measure rate-limit responses, latency, empty degraded responses, and recovery time. The background service worker now provides cross-tab request deadlines, bounded retries, pacing, and a capacity guard for search plus direct-detail requests. The live capacity probe is still inconclusive, so the current retrieval limits remain unchanged.
 
 Create a versioned evaluation set with 500 to 1,000 real, consented, and anonymized post snapshots plus contemporaneous market snapshots.
 
@@ -815,20 +950,22 @@ Measure each stage separately:
 
 ### Phase 1. Unlock existing quality and recall
 
-1. Remove the hidden unavailable-validator `0.5` floor from the AI-disabled path.
+1. Disclose the configured threshold and its effective floors without changing matching behavior. Present in the current uncommitted changes.
 2. Split and disclose the two optional remote AI controls.
-3. Raise Polymarket retrieval from 8 to 20 and raise the downstream caps in the same change.
-4. Add a true MiniLM shadow path that records scores without changing card output.
-5. After shadow evaluation, put production MiniLM reranking behind a distinct feature flag.
-6. Use an explicit two-stage rerank ordering rather than the mixed comparator.
-7. Bound the reranker queue and cancel superseded work.
-8. Add a maximum stale-cache age.
-9. Pin model revisions and version embedding caches.
-10. Benchmark the length and language prefilters before they can end retrieval.
+3. Run a bounded child-context pilot on the existing Fox Sports feature-flag path. Cap child count and text length before comparing it with the current title-only path.
+4. Lower or remove the unavailable-validator `0.5` floor only if the evaluation set shows an acceptable false-positive rate for lexical and heuristic matches between `0.3` and `0.5`.
+5. Raise Polymarket retrieval from 8 to 20 and raise downstream caps only after the proxy capacity test passes.
+6. Add a true MiniLM shadow path that records scores without changing card output. Implemented for debug diagnostics.
+7. After shadow evaluation, put production MiniLM reranking behind a distinct feature flag.
+8. Use an explicit two-stage rerank ordering rather than the mixed comparator.
+9. Bound the reranker queue and cancel superseded work. Implemented.
+10. Add a maximum stale-cache age. Implemented with a five-minute cap.
+11. Pin model revisions and version embedding caches. Implemented. Runtime byte hashing remains open.
+12. Benchmark the length and language prefilters before they can end retrieval.
 
 ### Phase 2. Fix the text that models receive
 
-1. Build child-level market documents.
+1. Expand the bounded child-context pilot only after measuring candidate quality, document length, scoring latency, and memory. Keep a hard child-count and text-length cap.
 2. Include outcome names, dates, resolution criteria, aliases, and tickers.
 3. Add bounded quote, image-alt, and article-lead context where available.
 4. Normalize BM25 documents and queries identically.

@@ -8,6 +8,7 @@
     "dev:turbo": "NODE_OPTIONS=\"${NODE_OPTIONS:+$NODE_OPTIONS }--no-network-family-autoselection\" next dev --turbopack --port 8000",
     "build": "next build && node scripts/check-route-css.mjs",
     "css:report": "node scripts/check-route-css.mjs",
+    "capacity:search": "node scripts/search-proxy-capacity.mjs",
     "start": "next start",
     "soak": "node scripts/soak-memory.mjs",
     "soak:assert": "SOAK_ASSERT=1 node scripts/soak-memory.mjs",

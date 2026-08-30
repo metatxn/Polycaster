@@ -9,6 +9,7 @@ import {
   env,
   pipeline,
 } from "@huggingface/transformers";
+import { BROWSER_MODEL_CANDIDATES } from "./lib/browser-model-comparison.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATASETS = [
@@ -27,6 +28,7 @@ const EMBEDDING_CONFIGS = [
     id: "bge-small-mean",
     label: "BGE small mean baseline",
     model: "onnx-community/bge-small-en-v1.5-ONNX",
+    revision: "4a9a46c7b88fa408e650a571a1800243f26309bd",
     dtype: "q4",
     pooling: "mean",
     queryPrefix:
@@ -37,6 +39,7 @@ const EMBEDDING_CONFIGS = [
     id: "bge-small-current-cls",
     label: "BGE small current cls",
     model: "onnx-community/bge-small-en-v1.5-ONNX",
+    revision: "4a9a46c7b88fa408e650a571a1800243f26309bd",
     dtype: "q4",
     pooling: "cls",
     queryPrefix:
@@ -47,6 +50,7 @@ const EMBEDDING_CONFIGS = [
     id: "bge-small-cls-q8",
     label: "BGE small cls q8",
     model: "onnx-community/bge-small-en-v1.5-ONNX",
+    revision: "4a9a46c7b88fa408e650a571a1800243f26309bd",
     dtype: "q8",
     pooling: "cls",
     queryPrefix:
@@ -57,6 +61,7 @@ const EMBEDDING_CONFIGS = [
     id: "snowflake-arctic-s-cls",
     label: "Snowflake Arctic S cls",
     model: "Snowflake/snowflake-arctic-embed-s",
+    revision: "e596f507467533e48a2e17c007f0e1dacc837b33",
     dtype: "q4",
     pooling: "cls",
     queryPrefix: "Represent this sentence for searching relevant passages: ",
@@ -66,6 +71,7 @@ const EMBEDDING_CONFIGS = [
     id: "snowflake-arctic-s-cls-q8",
     label: "Snowflake Arctic S cls q8",
     model: "Snowflake/snowflake-arctic-embed-s",
+    revision: "e596f507467533e48a2e17c007f0e1dacc837b33",
     dtype: "q8",
     pooling: "cls",
     queryPrefix: "Represent this sentence for searching relevant passages: ",
@@ -75,10 +81,21 @@ const EMBEDDING_CONFIGS = [
     id: "snowflake-arctic-s-market-cls",
     label: "Snowflake Arctic S market cls",
     model: "Snowflake/snowflake-arctic-embed-s",
+    revision: "e596f507467533e48a2e17c007f0e1dacc837b33",
     dtype: "q4",
     pooling: "cls",
     queryPrefix:
       "Represent this sentence for searching relevant prediction markets: ",
+  },
+  {
+    type: "embedding",
+    id: "snowflake-arctic-m-v1.5-cls-int8",
+    label: "Snowflake Arctic M v1.5 cls int8",
+    model: "Snowflake/snowflake-arctic-embed-m-v1.5",
+    revision: "e58a8f756156a1293d763f17e3aae643474e9b8a",
+    dtype: "int8",
+    pooling: "cls",
+    queryPrefix: "Represent this sentence for searching relevant passages: ",
   },
 ];
 
@@ -89,6 +106,7 @@ const RERANK_CONFIGS = [
     label: "BGE mean + MiniLM cross-encoder top5 int8",
     firstStageConfigId: "bge-small-mean",
     model: "Xenova/ms-marco-MiniLM-L-6-v2",
+    revision: "a09144355adeed5f58c8ed011d209bf8ee5a1fec",
     dtype: "q8",
     rerankCandidates: 5,
   },
@@ -98,6 +116,27 @@ const RERANK_CONFIGS = [
     label: "Snowflake q8 + MiniLM cross-encoder top5 int8",
     firstStageConfigId: "snowflake-arctic-s-cls-q8",
     model: "Xenova/ms-marco-MiniLM-L-6-v2",
+    revision: "a09144355adeed5f58c8ed011d209bf8ee5a1fec",
+    dtype: "q8",
+    rerankCandidates: 5,
+  },
+  {
+    type: "rerank",
+    id: "snowflake-q8-jina-tiny-top5-int8",
+    label: "Snowflake q8 + Jina tiny cross-encoder top5 int8",
+    firstStageConfigId: "snowflake-arctic-s-cls-q8",
+    model: "jinaai/jina-reranker-v1-tiny-en",
+    revision: "aca45de6945b5dc6399abcd2a9c55ded5dc9111f",
+    dtype: "int8",
+    rerankCandidates: 5,
+  },
+  {
+    type: "rerank",
+    id: "snowflake-q8-mixedbread-xsmall-top5-q8",
+    label: "Snowflake q8 + Mixedbread xsmall cross-encoder top5 q8",
+    firstStageConfigId: "snowflake-arctic-s-cls-q8",
+    model: "mixedbread-ai/mxbai-rerank-xsmall-v1",
+    revision: "b5c6e9da73abc3711f593f705371cdbe9e0fe422",
     dtype: "q8",
     rerankCandidates: 5,
   },
@@ -246,9 +285,6 @@ async function loadDataset(datasetPaths, maxCases) {
     if (!Array.isArray(testCase.markets) || testCase.markets.length === 0) {
       throw new Error(`Case ${testCase.id} needs at least one market`);
     }
-    if (!testCase.markets.some((market) => Number(market.relevance) > 0)) {
-      throw new Error(`Case ${testCase.id} needs at least one relevant market`);
-    }
   }
 
   return { ...dataset, cases };
@@ -293,6 +329,7 @@ function disposeTensors(value) {
 async function embedTexts(texts, config, batchSize) {
   const extractor = await pipeline("feature-extraction", config.model, {
     dtype: config.dtype,
+    revision: config.revision,
   });
 
   try {
@@ -392,10 +429,12 @@ function evaluateCase(testCase, config, vectors, topK) {
 }
 
 async function scorePairs(pairs, config, batchSize) {
-  const tokenizer = await AutoTokenizer.from_pretrained(config.model);
+  const tokenizer = await AutoTokenizer.from_pretrained(config.model, {
+    revision: config.revision,
+  });
   const model = await AutoModelForSequenceClassification.from_pretrained(
     config.model,
-    { dtype: config.dtype }
+    { dtype: config.dtype, revision: config.revision }
   );
 
   try {
@@ -487,11 +526,15 @@ function summarize(config, caseResults, elapsedMs, topK) {
     .map((result) => result.firstRelevantRank)
     .filter((rank) => rank !== null);
 
+  const artifact = BROWSER_MODEL_CANDIDATES.find(
+    (candidate) => candidate.model === config.model
+  )?.artifact;
   return {
     type: config.type,
     id: config.id,
     label: config.label,
     model: config.model,
+    revision: config.revision,
     dtype: config.dtype,
     pooling: config.pooling,
     firstStageConfigId: config.firstStageConfigId,
@@ -502,6 +545,16 @@ function summarize(config, caseResults, elapsedMs, topK) {
     [`ndcgAt${topK}`]: mean(caseResults.map((result) => result.ndcgAtK)),
     meanFirstRelevantRank: mean(ranks),
     elapsedMs,
+    quality: {
+      mrr: mean(caseResults.map((result) => result.reciprocalRank)),
+      recallAt1: mean(caseResults.map((result) => result.recallAt1)),
+      [`recallAt${topK}`]: mean(caseResults.map((result) => result.recallAtK)),
+      [`ndcgAt${topK}`]: mean(caseResults.map((result) => result.ndcgAtK)),
+    },
+    latency: { totalEvaluationMs: elapsedMs },
+    resources: { modelArtifactBytes: artifact?.bytes ?? null },
+    reliability: { completedCases: caseResults.length, failures: 0 },
+    cache: { cacheDirectoryConfigured: true },
     cases: caseResults,
   };
 }

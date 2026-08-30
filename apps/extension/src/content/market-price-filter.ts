@@ -59,12 +59,65 @@ function getMarketPrices(market: Market): Decimal[] {
   return prices;
 }
 
+function isNamedMultiOutcomeEvent(market: Market): boolean {
+  let namedActiveMarketCount = 0;
+
+  for (const nestedMarket of market.markets ?? []) {
+    if (
+      nestedMarket.active === false ||
+      nestedMarket.closed === true ||
+      nestedMarket.archived === true
+    ) {
+      continue;
+    }
+
+    if (nestedMarket.groupItemTitle?.trim() || nestedMarket.question?.trim()) {
+      namedActiveMarketCount += 1;
+      if (namedActiveMarketCount >= 2) return true;
+    }
+  }
+
+  return false;
+}
+
+function isNestedMarketWithinDisplayPriceCap(
+  market: NonNullable<Market["markets"]>[number],
+  isMultiOutcomeEvent: boolean
+): boolean {
+  if (
+    market.active === false ||
+    market.closed === true ||
+    market.archived === true
+  ) {
+    return false;
+  }
+
+  const prices = parseGammaNumberArray(market.outcomePrices);
+
+  // Polymarket represents each choice in a grouped event as a Yes/No child.
+  // The first price is the displayed choice probability; the complementary
+  // No price can legitimately exceed the cap for a low-probability choice.
+  if (isMultiOutcomeEvent) {
+    return prices.length === 0 || isPriceWithinDisplayCap(prices[0]);
+  }
+
+  return prices.every((price) => isPriceWithinDisplayCap(price));
+}
+
 /**
  * Closed or nearly resolved markets have a leading outcome above the display
  * cap. Keep markets without a usable price visible because their price is
  * unknown, not closed.
  */
 export function isMarketWithinDisplayPriceCap(market: Market): boolean {
+  if (market.closed === true || market.active === false) return false;
+  if (market.markets && market.markets.length > 0) {
+    const isMultiOutcomeEvent = isNamedMultiOutcomeEvent(market);
+    return market.markets.some((nestedMarket) =>
+      isNestedMarketWithinDisplayPriceCap(nestedMarket, isMultiOutcomeEvent)
+    );
+  }
+
   return getMarketPrices(market).every((price) =>
     isPriceWithinDisplayCap(price.toString())
   );
@@ -73,14 +126,14 @@ export function isMarketWithinDisplayPriceCap(market: Market): boolean {
 export function filterNestedMarketsByDisplayPriceCap(
   market: Market
 ): Market | null {
+  if (market.closed === true || market.active === false) return null;
   if (!market.markets || market.markets.length === 0) {
     return isMarketWithinDisplayPriceCap(market) ? market : null;
   }
 
+  const isMultiOutcomeEvent = isNamedMultiOutcomeEvent(market);
   const eligibleMarkets = market.markets.filter((nestedMarket) =>
-    parseGammaNumberArray(nestedMarket.outcomePrices).every((price) =>
-      isPriceWithinDisplayCap(price)
-    )
+    isNestedMarketWithinDisplayPriceCap(nestedMarket, isMultiOutcomeEvent)
   );
 
   if (eligibleMarkets.length === 0) return null;

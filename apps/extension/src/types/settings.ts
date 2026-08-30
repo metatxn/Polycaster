@@ -73,10 +73,12 @@ export interface UserSettings {
   cooldownPosts: number;
   showNotificationStack: boolean;
   notificationPanelSurface: "sidebar" | "floating";
-  aiExtractionEnabled: boolean;
+  aiGateRetryEnabled: boolean;
+  aiCandidateValidationEnabled: boolean;
   personalizationEnabled: boolean;
   themeOverride: "auto" | "dark" | "light" | "dim";
   debugMode: boolean;
+  productionRerankerEnabled: boolean;
   /** One-click betting prefs for the streaming Live Markets card. */
   streamTrading: StreamTradingSettings;
 }
@@ -167,17 +169,74 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     polymarket: true,
     kalshi: false, // Disabled for now — re-enable when Kalshi integration is ready
   },
-  usageAnalyticsEnabled: false,
+  usageAnalyticsEnabled: true,
   relevanceThreshold: 0.3,
   cooldownPosts: 4,
   showNotificationStack: true,
   notificationPanelSurface: "floating",
-  aiExtractionEnabled: false,
+  aiGateRetryEnabled: false,
+  aiCandidateValidationEnabled: false,
   personalizationEnabled: true,
   themeOverride: "auto",
   debugMode: false,
+  productionRerankerEnabled: false,
   streamTrading: { ...DEFAULT_STREAM_TRADING_SETTINGS },
 };
+
+export type StoredUserSettings = Omit<
+  Partial<UserSettings>,
+  "platforms" | "sources"
+> & {
+  platforms?: Partial<PlatformSettings>;
+  sources?: Partial<UserSettings["sources"]>;
+  /** Legacy shared control retained only for migration. */
+  aiExtractionEnabled?: boolean;
+};
+
+export function mergeStoredUserSettings(
+  stored?: StoredUserSettings,
+  options: {
+    forceDefaultKalshi?: boolean;
+    productionRerankerPromoted?: boolean;
+  } = {}
+): UserSettings {
+  const {
+    platforms,
+    sources,
+    aiExtractionEnabled: legacyAiEnabled,
+    ...storedSettings
+  } = stored ?? {};
+  const migratedLegacyValue =
+    typeof legacyAiEnabled === "boolean" ? legacyAiEnabled : undefined;
+
+  return {
+    ...DEFAULT_USER_SETTINGS,
+    ...storedSettings,
+    platforms: {
+      ...DEFAULT_USER_SETTINGS.platforms,
+      ...platforms,
+    },
+    sources: {
+      ...DEFAULT_USER_SETTINGS.sources,
+      ...sources,
+      kalshi: options.forceDefaultKalshi
+        ? DEFAULT_USER_SETTINGS.sources.kalshi
+        : (sources?.kalshi ?? DEFAULT_USER_SETTINGS.sources.kalshi),
+    },
+    aiGateRetryEnabled:
+      typeof stored?.aiGateRetryEnabled === "boolean"
+        ? stored.aiGateRetryEnabled
+        : (migratedLegacyValue ?? DEFAULT_USER_SETTINGS.aiGateRetryEnabled),
+    aiCandidateValidationEnabled:
+      typeof stored?.aiCandidateValidationEnabled === "boolean"
+        ? stored.aiCandidateValidationEnabled
+        : (migratedLegacyValue ??
+          DEFAULT_USER_SETTINGS.aiCandidateValidationEnabled),
+    productionRerankerEnabled:
+      options.productionRerankerPromoted === true &&
+      stored?.productionRerankerEnabled === true,
+  };
+}
 
 /**
  * Enabled sources configuration with dynamic getters
@@ -194,5 +253,6 @@ export interface Config {
   POSTS_TO_ANALYZE: number;
   MIN_RELEVANCE_SCORE: number;
   COOLDOWN_POSTS: number;
-  USE_AI_EXTRACTION: boolean;
+  USE_AI_GATE_RETRY: boolean;
+  USE_AI_CANDIDATE_VALIDATION: boolean;
 }

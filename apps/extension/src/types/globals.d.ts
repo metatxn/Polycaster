@@ -123,7 +123,8 @@ declare global {
         POSTS_TO_ANALYZE: number;
         MIN_RELEVANCE_SCORE: number;
         COOLDOWN_POSTS: number;
-        USE_AI_EXTRACTION: boolean;
+        USE_AI_GATE_RETRY: boolean;
+        USE_AI_CANDIDATE_VALIDATION: boolean;
       };
       TAGS_CACHE_DURATION: number;
       DEFAULT_USER_SETTINGS: UserSettings;
@@ -136,6 +137,7 @@ declare global {
       isUsageAnalyticsEnabled: () => boolean;
       getThemeOverride: () => string;
       isDebugMode: () => boolean;
+      isProductionRerankerEnabled: () => boolean;
       onSettingsChange: (callback: (settings: UserSettings) => void) => void;
     };
 

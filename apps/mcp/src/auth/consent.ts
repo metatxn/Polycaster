@@ -123,7 +123,14 @@ function isSameOriginPost(request: Request): boolean {
   }
 }
 
-function consentHeaders(nonce: string): HeadersInit {
+function oauthRedirectOrigin(redirectUri: string): string {
+  const origin = new URL(redirectUri).origin;
+  if (origin === "null") throw new Error("Unsupported OAuth redirect URI.");
+  return origin;
+}
+
+function consentHeaders(nonce: string, redirectUri: string): HeadersInit {
+  const redirectOrigin = oauthRedirectOrigin(redirectUri);
   return {
     "cache-control": "no-store",
     "content-security-policy": [
@@ -131,7 +138,7 @@ function consentHeaders(nonce: string): HeadersInit {
       `script-src 'nonce-${nonce}'`,
       `style-src 'nonce-${nonce}'`,
       "connect-src 'self'",
-      "form-action 'self'",
+      `form-action 'self' ${redirectOrigin}`,
       "frame-ancestors 'none'",
       "base-uri 'none'",
     ].join("; "),
@@ -156,7 +163,10 @@ function consentPage(challenge: WalletChallenge): Response {
 const root=document.getElementById("consent"),form=document.getElementById("consent-form"),allow=document.getElementById("allow"),status=document.getElementById("status");
 allow.addEventListener("click",async()=>{allow.disabled=true;status.textContent="";try{if(!window.ethereum)throw new Error("No browser wallet was found.");const accounts=await window.ethereum.request({method:"eth_requestAccounts"});const address=accounts&&accounts[0];if(!address)throw new Error("No wallet account was selected.");const chainHex=await window.ethereum.request({method:"eth_chainId"});const chainId=Number.parseInt(chainHex,16);const messageResponse=await fetch("/authorize/message",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({challenge:root.dataset.challengeId,wallet_address:address,chain_id:String(chainId)})});if(!messageResponse.ok)throw new Error("Could not create the wallet message.");const data=await messageResponse.json();const bytes=new TextEncoder().encode(data.message);const hex="0x"+Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");const signature=await window.ethereum.request({method:"personal_sign",params:[hex,address]});document.getElementById("wallet-address").value=address;document.getElementById("chain-id").value=String(chainId);document.getElementById("signature").value=signature;const decision=document.getElementById("decision");decision.name="decision";decision.value="allow";form.submit();}catch(error){status.textContent=error instanceof Error?error.message:"Wallet authorization failed.";allow.disabled=false;}});
 </script></body></html>`;
-  return new Response(body, { status: 200, headers: consentHeaders(nonce) });
+  return new Response(body, {
+    status: 200,
+    headers: consentHeaders(nonce, challenge.oauthRequest.redirectUri),
+  });
 }
 
 function localError(message: string, status: number): Response {

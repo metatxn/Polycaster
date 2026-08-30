@@ -36,6 +36,16 @@ describe("parseMcpResponse", () => {
       result: { step: "last" },
     });
   });
+
+  it("does not expose malformed response content in its error", async () => {
+    const response = new Response("<private upstream response>", {
+      headers: { "content-type": "application/json" },
+    });
+
+    await expect(parseMcpResponse(response)).rejects.toThrow(
+      "The server returned invalid JSON."
+    );
+  });
 });
 
 describe("sendMcpRequest", () => {
@@ -83,6 +93,19 @@ describe("sendMcpRequest", () => {
         fetchImpl
       )
     ).rejects.toThrow("Enter an http:// or https:// MCP endpoint.");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects endpoints with embedded credentials", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(
+      sendMcpRequest(
+        "http://user:password@127.0.0.1:8787/mcp",
+        { jsonrpc: "2.0", id: 1, method: "tools/list" },
+        fetchImpl
+      )
+    ).rejects.toThrow("Do not include credentials in the endpoint URL.");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

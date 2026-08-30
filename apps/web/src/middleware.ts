@@ -25,6 +25,10 @@ const IMAGE_OPTIMIZER_ORIGIN = (() => {
 
 const CANONICAL_HOST = "knoww.app";
 const WWW_HOST = "www.knoww.app";
+const LOCAL_MCP_CONNECT_SOURCES = [
+  "http://127.0.0.1:8787",
+  "http://localhost:8787",
+] as const;
 
 /**
  * Security headers applied to all responses.
@@ -106,6 +110,27 @@ function isApiPath(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 
+function securityHeaderValue(
+  key: string,
+  value: string,
+  pathname: string
+): string {
+  const isLocalMcpConsole =
+    pathname === "/mcp-test" || pathname.startsWith("/mcp-test/");
+  if (
+    key !== "Content-Security-Policy" ||
+    process.env.NODE_ENV !== "development" ||
+    !isLocalMcpConsole
+  ) {
+    return value;
+  }
+
+  return value.replace(
+    "connect-src 'self'",
+    `connect-src 'self' ${LOCAL_MCP_CONNECT_SOURCES.join(" ")}`
+  );
+}
+
 export function middleware(request: NextRequest) {
   const requestId = request.headers.get("cf-ray") || crypto.randomUUID();
   const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
@@ -150,7 +175,7 @@ function applyGlobalHeaders(
 ) {
   // Apply security headers to all responses
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
-    response.headers.set(key, value);
+    response.headers.set(key, securityHeaderValue(key, value, pathname));
   }
 
   if (isApiPath(pathname)) {

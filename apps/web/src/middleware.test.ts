@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { middleware } from "./middleware";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("middleware security headers", () => {
   it("does not emit obsolete Permissions-Policy features", () => {
@@ -19,5 +23,25 @@ describe("middleware security headers", () => {
     const response = middleware(request);
 
     expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  });
+
+  it("allows the documented local MCP origins on the test console in development", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const request = new NextRequest("http://localhost:8010/mcp-test");
+    const response = middleware(request);
+
+    const policy = response.headers.get("Content-Security-Policy");
+    expect(policy).toContain("http://127.0.0.1:8787");
+    expect(policy).toContain("http://localhost:8787");
+  });
+
+  it("does not allow local MCP origins on other routes", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const request = new NextRequest("http://localhost:8010/markets");
+    const response = middleware(request);
+
+    const policy = response.headers.get("Content-Security-Policy");
+    expect(policy).not.toContain("http://127.0.0.1:8787");
+    expect(policy).not.toContain("http://localhost:8787");
   });
 });

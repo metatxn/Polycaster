@@ -30,7 +30,12 @@ function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
 }
 
 function parseJsonRpc(value: string): JsonRpcResponse {
-  const parsed: unknown = JSON.parse(value);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("The server returned invalid JSON.");
+  }
   if (!isJsonRpcResponse(parsed)) {
     throw new Error("The server returned an invalid JSON-RPC response.");
   }
@@ -67,6 +72,9 @@ function validateEndpoint(endpoint: string): string {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Enter an http:// or https:// MCP endpoint.");
+  }
+  if (url.username || url.password) {
+    throw new Error("Do not include credentials in the endpoint URL.");
   }
   return url.toString();
 }

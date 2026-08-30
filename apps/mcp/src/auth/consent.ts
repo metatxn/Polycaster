@@ -136,7 +136,7 @@ function consentHeaders(nonce: string): HeadersInit {
       "base-uri 'none'",
     ].join("; "),
     "content-type": "text/html; charset=utf-8",
-    "referrer-policy": "no-referrer",
+    "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
   };

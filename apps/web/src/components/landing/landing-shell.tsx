@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { CursorGlow } from "@/components/cursor-glow";
 import { KW_PAGE_CLASS, useKwTheme } from "@/components/kw-theme";
 import { KW_DARK_THEME_VALUES } from "@/components/kw-theme-state";
+import { captureLandingCtaClick } from "@/components/landing/landing-page-analytics";
 
 // Pre-paint theme stamp. Runs while the HTML is streaming, before first
 // paint of the content below it: reads the next-themes key and corrects
@@ -17,7 +18,13 @@ const THEME_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem("theme");i
  * passed as children stays server-rendered — keep this file free of any
  * content markup so the sections never get pulled back into client JS.
  */
-export function LandingShell({ children }: { children: ReactNode }) {
+export function LandingShell({
+  children,
+  trackLandingCtas = false,
+}: {
+  children: ReactNode;
+  trackLandingCtas?: boolean;
+}) {
   const { colorScheme, theme } = useKwTheme();
 
   return (
@@ -27,6 +34,11 @@ export function LandingShell({ children }: { children: ReactNode }) {
       data-scheme={colorScheme}
       style={{ colorScheme }}
       suppressHydrationWarning
+      onClickCapture={
+        trackLandingCtas
+          ? (event) => captureLandingCtaClick(event.target)
+          : undefined
+      }
     >
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       <a

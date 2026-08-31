@@ -53,7 +53,7 @@ const TICKER = [
 
 export default function LandingPage() {
   return (
-    <LandingShell>
+    <LandingShell trackLandingCtas>
       <LandingPageAnalytics />
       <TickerBar />
 

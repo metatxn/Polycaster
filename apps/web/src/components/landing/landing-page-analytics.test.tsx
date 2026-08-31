@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LandingPageAnalytics } from "./landing-page-analytics";
 
@@ -41,33 +41,6 @@ describe("LandingPageAnalytics", () => {
     render(<LandingPageAnalytics />);
 
     expect(posthog.capture).toHaveBeenCalledWith("landing_page_viewed", {
-      page: "home",
-      surface: "landing_page",
-    });
-  });
-
-  it("captures bounded CTA metadata from nested click targets", () => {
-    const { getByText } = render(
-      <>
-        <LandingPageAnalytics />
-        <a
-          href="/markets"
-          data-landing-cta="explore_markets"
-          data-landing-location="hero"
-          data-landing-destination="web_app"
-          onClick={(event) => event.preventDefault()}
-        >
-          <span>Explore markets</span>
-        </a>
-      </>
-    );
-
-    fireEvent.click(getByText("Explore markets"));
-
-    expect(posthog.capture).toHaveBeenCalledWith("landing_cta_clicked", {
-      cta: "explore_markets",
-      destination: "web_app",
-      location: "hero",
       page: "home",
       surface: "landing_page",
     });

@@ -56,33 +56,6 @@ export function LandingPageAnalytics() {
       surface: "landing_page",
     });
 
-    const captureCta = (event: MouseEvent) => {
-      if (!(event.target instanceof Element)) return;
-
-      const element = event.target.closest<HTMLElement>("[data-landing-cta]");
-      if (!element) return;
-
-      const { landingCta, landingDestination, landingLocation } =
-        element.dataset;
-      if (
-        !isAllowedValue(CTA_IDS, landingCta) ||
-        !isAllowedValue(CTA_LOCATIONS, landingLocation) ||
-        !isAllowedValue(CTA_DESTINATIONS, landingDestination)
-      ) {
-        return;
-      }
-
-      posthog.capture("landing_cta_clicked", {
-        cta: landingCta,
-        destination: landingDestination,
-        location: landingLocation,
-        page: "home",
-        surface: "landing_page",
-      });
-    };
-
-    document.addEventListener("click", captureCta, { capture: true });
-
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -108,10 +81,33 @@ export function LandingPageAnalytics() {
     for (const section of sections) observer.observe(section);
 
     return () => {
-      document.removeEventListener("click", captureCta, { capture: true });
       observer.disconnect();
     };
   }, []);
 
   return null;
+}
+
+export function captureLandingCtaClick(target: EventTarget | null): void {
+  if (!(target instanceof Element)) return;
+
+  const element = target.closest<HTMLElement>("[data-landing-cta]");
+  if (!element) return;
+
+  const { landingCta, landingDestination, landingLocation } = element.dataset;
+  if (
+    !isAllowedValue(CTA_IDS, landingCta) ||
+    !isAllowedValue(CTA_LOCATIONS, landingLocation) ||
+    !isAllowedValue(CTA_DESTINATIONS, landingDestination)
+  ) {
+    return;
+  }
+
+  posthog.capture("landing_cta_clicked", {
+    cta: landingCta,
+    destination: landingDestination,
+    location: landingLocation,
+    page: "home",
+    surface: "landing_page",
+  });
 }

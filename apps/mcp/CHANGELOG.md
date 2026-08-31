@@ -14,6 +14,10 @@
 - PR-only GitHub quality checks with a documented Cloudflare Workers Builds handoff for production deployment.
 - Production-only remote deployment; local and CI checks replace a separate staging Worker.
 
+### Fixed
+
+- The Google consent page sends its own origin on authorization form posts, preventing incorrect 403 responses before sign-in.
+
 ### Security
 
 - Host and Origin allowlists, one-time OIDC state, ID-token signature and claim verification, pre-parse body caps, CSP, HSTS, safe errors, and upstream response validation.

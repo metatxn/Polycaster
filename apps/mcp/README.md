@@ -69,6 +69,7 @@ The implementation includes:
 - Production custom-domain configuration
 - Public liveness and stateful-binding readiness probes
 - Production security headers and full Workers Logs sampling
+- Privacy-safe PostHog analytics for every public route, MCP protocol method, and tool
 - Pre-parse body caps: 1 MiB for MCP and OAuth registration, and 64 KiB for OAuth token forms
 - An HTTP OpenAPI contract, pull-request CI gate, and rollback runbook
 - Strict tool input and output schemas with Zod
@@ -565,6 +566,7 @@ The checked-in Wrangler configuration contains non-secret deployment settings an
 | `MCP_CANONICAL_RESOURCE` | OAuth resource and token audience | `https://mcp.knoww.app/mcp` |
 | `MCP_ALLOWED_HOSTNAMES` | Comma-separated Host allowlist | `mcp.knoww.app` |
 | `MCP_ALLOWED_ORIGIN_HOSTNAMES` | Comma-separated browser Origin allowlist | `mcp.knoww.app,knoww.app,www.knoww.app` |
+| `POSTHOG_HOST` | Public PostHog event-ingestion host | `https://us.i.posthog.com` |
 
 Required production secrets:
 
@@ -572,10 +574,13 @@ Required production secrets:
 |---|---|
 | `GOOGLE_CLIENT_ID` | Identifies the Knoww web OAuth client to Google |
 | `GOOGLE_CLIENT_SECRET` | Authenticates the server-side Google code exchange |
+| `POSTHOG_PROJECT_API_KEY` | Project token used only for public event ingestion |
 
 Configure the Google OAuth client as a **Web application** and add the exact `https://mcp.knoww.app/auth/google/callback` URL under **Authorized redirect URIs**. This server-side flow does not require an Authorized JavaScript origin. If that optional field is populated for another integration, its value is only `https://mcp.knoww.app`; an origin cannot contain a path. The MCP client's own callback URI is separate and remains registered by that MCP client through CIMD or Dynamic Client Registration.
 
-In **Workers & Pages > knoww-mcp > Settings > Variables and Secrets**, add both names above as encrypted secrets. The production Wrangler configuration marks both bindings as required, so a deployment reports a missing configuration instead of silently shipping an unusable login flow. Never place either value in Git, build logs, URLs, or browser code.
+In **Workers & Pages > knoww-mcp > Settings > Variables and Secrets**, add all three names above as encrypted secrets. Reuse the project `585396` PostHog project token for `POSTHOG_PROJECT_API_KEY`; do not use a personal API key. The production Wrangler configuration marks these bindings as required, so a deployment reports missing configuration before traffic changes. Never place their values in Git, build logs, URLs, or browser code.
+
+Analytics uses three bounded events: `mcp_http_request_completed`, `mcp_protocol_request_completed`, and `mcp_tool_called`. Every event includes `product=mcp` and `service=knoww-mcp`. Tool events include the registered tool name, outcome, safe error code, duration, plan, and authentication method. The Worker hashes the OAuth principal before it becomes a PostHog distinct ID and disables person-profile creation. It never sends request bodies, tool arguments, wallet addresses, market queries, response content, authorization headers, Google tokens, or raw errors.
 
 Required Cloudflare bindings:
 
@@ -595,9 +600,10 @@ MCP_AUTH_MODE=dev-bypass
 MCP_CANONICAL_RESOURCE=http://localhost:8787/mcp
 MCP_ALLOWED_HOSTNAMES=localhost,127.0.0.1
 MCP_ALLOWED_ORIGIN_HOSTNAMES=localhost,127.0.0.1
+POSTHOG_HOST=https://us.i.posthog.com
 ```
 
-Local `dev-bypass` does not require Google credentials. Production OAuth does. Keep the two Google bindings in Cloudflare Secrets so Workers Builds can deploy without placing credentials in the repository or build variables.
+Local `dev-bypass` does not require Google or PostHog credentials. Without a local PostHog project token, analytics stays disabled. Production requires all three secrets. Keep them in Cloudflare Secrets so Workers Builds can deploy without placing credentials in the repository or build variables.
 
 ## Project structure
 
@@ -617,7 +623,8 @@ apps/mcp/
     mcp-handler.ts           Stateless MCP transport configuration
     server.ts                MCP server and tool registration
     config.ts                Environment configuration parser
-    context.ts               Request-scoped request ID and verified principal
+    context.ts               Request-scoped request ID, analytics, and verified principal
+    analytics.ts             Request-scoped PostHog batch capture and bounded metadata
     health.ts                Liveness and stateful-binding readiness probes
     quota.ts                 Edge, plan, principal, and tool quota enforcement
     auth/

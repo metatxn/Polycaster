@@ -328,10 +328,10 @@ const KalshiPlatformAdapter = createBasicAdapter({
   bypassEnglishCheck: true,
   // Market-question vs market-question matching rarely shares 2+ meaningful
   // nouns — e.g. "Tech Layoffs Up or Down in 2026?" vs "More tech layoffs in
-  // 2026 than 2025?" only overlaps on `tech`. This flag enables calibrated
+  // 2026 than 2025?" only overlaps on `tech`. This policy enables calibrated
   // single-signal recovery and observes the historical score-only rule in
   // shadow telemetry.
-  relaxContextGate: true,
+  candidateGatePolicy: "short-market-question",
   // Kalshi's grid surfaces ~16 tiles per scan, so raise the per-batch cap
   // above the global default of 5 to cover most of the visible grid.
   maxInjectionsPerBatch: 10,

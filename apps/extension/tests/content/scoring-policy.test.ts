@@ -530,11 +530,7 @@ test("shouldFailOpen keeps the shared score floor behavior", () => {
   assert.equal(shouldFailOpen(0.73), true);
 });
 
-test("evaluateCandidateGate reports legacy relaxed recovery in shadow only", () => {
-  // Mirrors the live Kalshi case "More tech layoffs in 2026..." vs
-  // "Tech Layoffs Up or Down in 2026?". The old relaxed rule would recover
-  // this single-signal pair, while the active gate still rejects it without
-  // promoted rerank evidence.
+test("short-market-question policy reports legacy recovery in shadow only", () => {
   const decision = evaluateCandidateGate({
     postText: "More tech layoffs in 2026 than in 2025?",
     market: createMarket({ title: "Tech Layoffs Up or Down in 2026?" }),
@@ -546,14 +542,14 @@ test("evaluateCandidateGate reports legacy relaxed recovery in shadow only", () 
       sharedEntities: 0,
       details: "nouns=[tech] meaningful=[tech] entities=[] distinct=1",
     }),
-    relaxed: true,
+    candidateGatePolicy: "short-market-question",
   });
 
   assert.equal(decision.pass, false);
   assert.equal(decision.legacyRelaxedShadowEligible, true);
 });
 
-test("evaluateCandidateGate relaxed still rejects single-signal low-score matches", () => {
+test("short-market-question policy rejects single-signal low-score matches", () => {
   // Score below AI_GATE_RETRY_FLOOR (0.6) — relaxation must not lower the
   // quality bar for weak matches.
   const decision = evaluateCandidateGate({
@@ -569,14 +565,14 @@ test("evaluateCandidateGate relaxed still rejects single-signal low-score matche
       sharedEntities: 0,
       details: "nouns=[number] meaningful=[number] entities=[] distinct=1",
     }),
-    relaxed: true,
+    candidateGatePolicy: "short-market-question",
   });
 
   assert.equal(decision.pass, false);
   assert.equal(decision.legacyRelaxedShadowEligible, false);
 });
 
-test("evaluateCandidateGate relaxed without any signals still fails", () => {
+test("short-market-question policy rejects candidates without signals", () => {
   const decision = evaluateCandidateGate({
     postText: "Unrelated topic A",
     market: createMarket({ title: "Unrelated topic B" }),
@@ -588,7 +584,7 @@ test("evaluateCandidateGate relaxed without any signals still fails", () => {
       sharedEntities: 0,
       details: "distinct=0",
     }),
-    relaxed: true,
+    candidateGatePolicy: "short-market-question",
   });
 
   assert.equal(decision.pass, false);

@@ -206,11 +206,6 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://defillama.com/*",
 ];
 
-/**
- * Minimal host access used only by the unsupported-site support prompt. The
- * corresponding content script reads the hostname and renders its own CTA; it
- * does not import or execute the full matching/content pipeline.
- */
 export const UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS: string[] = [
   "http://*/*",
   "https://*/*",

@@ -1,6 +1,7 @@
 import { createLogger } from "@knoww/logger";
 import { workerConfigFromEnv } from "../config";
 import {
+  currentAnalytics,
   currentRequestId,
   type RequestPrincipal,
   requestContext,
@@ -88,6 +89,7 @@ export const mcpOAuthApiHandler = {
     return requestContext.run(
       {
         requestId: currentRequestId(),
+        analytics: currentAnalytics(),
         principal,
         toolRateLimiter: toolLimiterFor(env, principal.plan),
       },

@@ -23,11 +23,6 @@ function json(value: Record<string, unknown>): string {
   return JSON.stringify(value, null, 2);
 }
 
-/**
- * Builds runnable explorer arguments from the first complete live search hit.
- * Search data is upstream-controlled, so every identifier is validated before
- * it reaches an editable request.
- */
 export function liveArgumentsFromSearch(
   response: JsonRpcResponse
 ): Record<string, string> {

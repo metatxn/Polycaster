@@ -67,6 +67,27 @@ test("aggregate recorder drops malformed samples", () => {
   assert.deepEqual(messages, []);
 });
 
+test("aggregate recorder ignores runtime delivery failures", () => {
+  const runtime = {
+    sendMessage() {
+      throw new Error("extension context unavailable");
+    },
+  };
+
+  assert.doesNotThrow(() =>
+    recordRelevanceAggregate(
+      {
+        kind: "search",
+        source: "network",
+        outcome: "success",
+        latencyMs: 120,
+        candidateCount: 8,
+      },
+      runtime
+    )
+  );
+});
+
 test("search aggregate classifies rate limits, degradation, and empty results", () => {
   assert.equal(
     buildRelevanceSearchAggregateSample({

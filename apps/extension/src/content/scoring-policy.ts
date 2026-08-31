@@ -5,6 +5,7 @@ import {
 } from "../relevance-threshold-policy";
 import type { ContextGateResult } from "../types/chrome-messages";
 import type { Market } from "../types/market";
+import type { CandidateGatePolicy } from "../types/platform";
 import { buildMarketContextText } from "./market-context";
 
 export type ScoringMode = "hybrid" | "lexical" | "heuristic";
@@ -509,12 +510,7 @@ export interface GateDecisionInput {
   scoringMode: ScoringMode;
   score: number;
   gate?: ContextGateResult;
-  /**
-   * Enables platform-specific handling for short market-question pairs. The
-   * active single-signal path still requires specific entity and promoted
-   * rerank evidence; the historical score-only path is observed in shadow.
-   */
-  relaxed?: boolean;
+  candidateGatePolicy?: CandidateGatePolicy;
   includeNestedMarketContext?: boolean;
   rerankEvidence?: {
     score: number;
@@ -531,11 +527,6 @@ export interface GateDecisionResult {
   gate: ContextGateResult;
   recoveryGate?: ContextGateResult;
   pass: boolean;
-  /**
-   * True when the historical relaxed score-plus-one-signal rule would have
-   * admitted a domain-compatible candidate that the active gate rejected.
-   * This is observational only and must not be used for admission.
-   */
   legacyRelaxedShadowEligible: boolean;
   retryEligible: boolean;
   usedFallbackGate: boolean;
@@ -845,10 +836,12 @@ export function evaluateCandidateGate({
   scoringMode,
   score,
   gate,
-  relaxed,
+  candidateGatePolicy = "default",
   includeNestedMarketContext = false,
   rerankEvidence,
 }: GateDecisionInput): GateDecisionResult {
+  const usesShortMarketQuestionPolicy =
+    candidateGatePolicy === "short-market-question";
   const gateText = buildMarketGateText(market, {
     includeNestedMarkets: includeNestedMarketContext,
   });
@@ -904,17 +897,14 @@ export function evaluateCandidateGate({
     resolvedGate.meaningfulNouns >= 1 || resolvedGate.sharedEntities >= 1;
   const legacyRelaxedWouldRecover =
     !gatePass &&
-    relaxed === true &&
+    usesShortMarketQuestionPolicy &&
     score >= AI_GATE_RETRY_FLOOR &&
     hasSingleSignal &&
     domainCompatible;
 
-  // The active platform-specific relaxation requires calibrated rerank
-  // evidence. The historical score-plus-one-signal rule above is retained
-  // only as shadow telemetry.
   if (
     !gatePass &&
-    relaxed &&
+    usesShortMarketQuestionPolicy &&
     score >= AI_GATE_RETRY_FLOOR &&
     specificEntityCount > 0 &&
     rerankPassed

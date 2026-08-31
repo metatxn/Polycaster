@@ -22,9 +22,7 @@ export function OAuthCallbackClient() {
       try {
         opener.postMessage(message, window.location.origin);
         delivered = true;
-      } catch {
-        // BroadcastChannel below covers browsers that sever popup openers.
-      }
+      } catch {}
     }
 
     let channel: BroadcastChannel | null = null;

@@ -1,17 +1,3 @@
-/**
- * Sections for the /extension landing page. Server components —
- * mirrors knoww-sections.tsx: zero hydration apart from the ExtensionPopup
- * client island, kw-* token classes, shared SectionLabel/SECTION
- * conventions. The hero lives in the server page at
- * src/app/extension/page.tsx.
- *
- * Copy accuracy is binding here: matching is a local embedding model with
- * AI-assisted matching is optional and off by default; usage analytics can be
- * disabled in settings; trading
- * is non-custodial and user-signed. Claims must stay consistent with
- * /privacy and the extension manifest.
- */
-
 import {
   Cpu,
   Download,

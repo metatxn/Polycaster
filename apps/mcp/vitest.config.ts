@@ -11,6 +11,7 @@ export default defineConfig({
         bindings: {
           GOOGLE_CLIENT_ID: "google-test-client.apps.googleusercontent.com",
           GOOGLE_CLIENT_SECRET: "google-test-secret",
+          POSTHOG_PROJECT_API_KEY: "",
         },
       },
     }),

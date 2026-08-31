@@ -14,6 +14,7 @@
 - An HTTP OpenAPI contract and a deployment and rollback runbook.
 - PR-only GitHub quality checks with a documented Cloudflare Workers Builds handoff for production deployment.
 - Production-only remote deployment; local and CI checks replace a separate staging Worker.
+- Request-scoped PostHog batches for every public route, MCP protocol method, and registered tool, with hashed principals and no request or response content.
 
 ### Fixed
 

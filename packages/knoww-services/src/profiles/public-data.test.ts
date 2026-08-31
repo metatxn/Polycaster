@@ -3,6 +3,7 @@ import {
   fetchClosedPositions,
   fetchPublicProfile,
   fetchWalletActivity,
+  fetchWalletAllTimePnl,
   fetchWalletPortfolioValue,
   fetchWalletPositions,
   summarizeWalletPnl,
@@ -186,6 +187,42 @@ describe("public profile data clients", () => {
     await expect(
       fetchWalletPortfolioValue(WALLET, { fetchImpl: closed.fetchImpl })
     ).resolves.toEqual({ walletAddress: WALLET, value: "42.75" });
+  });
+
+  it("fetches an all-time wallet PnL leaderboard row", async () => {
+    const { calls, fetchImpl } = recordingFetch(() =>
+      jsonResponse([
+        {
+          rank: 2303533,
+          proxyWallet: WALLET.toUpperCase().replace("0X", "0x"),
+          vol: 1083.804636,
+          pnl: -37.906702304018,
+        },
+      ])
+    );
+
+    await expect(fetchWalletAllTimePnl(WALLET, { fetchImpl })).resolves.toEqual(
+      {
+        walletAddress: WALLET,
+        rank: "2303533",
+        totalPnl: "-37.906702304018",
+        volume: "1083.804636",
+      }
+    );
+    expect(calls[0].pathname).toBe("/v1/leaderboard");
+    expect(Object.fromEntries(calls[0].searchParams)).toEqual({
+      category: "OVERALL",
+      timePeriod: "ALL",
+      orderBy: "PNL",
+      user: WALLET,
+      limit: "1",
+      offset: "0",
+    });
+
+    const missing = recordingFetch(() => jsonResponse([]));
+    await expect(
+      fetchWalletAllTimePnl(WALLET, { fetchImpl: missing.fetchImpl })
+    ).resolves.toBeNull();
   });
 
   it("summarizes wallet PnL with Decimal.js-safe strings", () => {

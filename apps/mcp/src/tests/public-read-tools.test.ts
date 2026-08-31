@@ -195,7 +195,7 @@ describe("public read tools", () => {
     ]);
   });
 
-  it("calculates wallet PnL with Decimal.js-safe values", async () => {
+  it("separates all-time PnL from current-position metrics", async () => {
     expectGammaFetch("pnl positions", dataUrl("/positions", `limit=500`), () =>
       jsonResponse([
         POSITION,
@@ -209,6 +209,19 @@ describe("public read tools", () => {
         },
       ])
     );
+    expectGammaFetch(
+      "all-time PnL",
+      dataUrl("/v1/leaderboard", "timePeriod=ALL"),
+      () =>
+        jsonResponse([
+          {
+            rank: "7",
+            proxyWallet: WALLET,
+            vol: 100.5,
+            pnl: 9.25,
+          },
+        ])
+    );
 
     const { message } = await callTool("get_wallet_pnl", 205, {
       walletAddress: WALLET,
@@ -216,15 +229,82 @@ describe("public read tools", () => {
     const result = message.result as ToolCallResult;
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent?.pnl).toEqual({
-      positionCount: 2,
-      initialValue: "7",
-      currentValue: "8",
-      cashPnl: "1",
-      realizedPnl: "0.75",
-      totalPnl: "1.75",
-      roiPercent: "25",
-      winningPositions: 1,
-      losingPositions: 1,
+      walletAddress: WALLET,
+      allTime: {
+        available: true,
+        category: "OVERALL",
+        timePeriod: "ALL",
+        rank: "7",
+        totalPnl: "9.25",
+        volume: "100.5",
+      },
+      currentPositions: {
+        positionCount: 2,
+        initialValue: "7",
+        currentValue: "8",
+        cashPnl: "1",
+        realizedPnl: "0.75",
+        totalPnl: "1.75",
+        roiPercent: "25",
+        winningPositions: 1,
+        losingPositions: 1,
+      },
+    });
+  });
+
+  it("reports all-time PnL when a wallet has no current positions", async () => {
+    expectGammaFetch(
+      "empty current positions",
+      dataUrl("/positions", "limit=500"),
+      () => jsonResponse([])
+    );
+    expectGammaFetch(
+      "all-time leaderboard PnL",
+      dataUrl("/v1/leaderboard", "timePeriod=ALL"),
+      () =>
+        jsonResponse([
+          {
+            rank: "2303533",
+            proxyWallet: WALLET,
+            userName: "tagme",
+            vol: 1083.804636,
+            pnl: -37.906702304018,
+            profileImage: "",
+            xUsername: "",
+            verifiedBadge: false,
+          },
+        ])
+    );
+
+    const { message } = await callTool("get_wallet_pnl", 206, {
+      walletAddress: WALLET,
+    });
+    const result = message.result as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    expect(result.content?.[0]?.text).toBe(
+      "Wallet all-time PnL is -37.906702304018. It currently has 0 open positions."
+    );
+    expect(result.structuredContent?.pnl).toEqual({
+      walletAddress: WALLET,
+      allTime: {
+        available: true,
+        category: "OVERALL",
+        timePeriod: "ALL",
+        rank: "2303533",
+        totalPnl: "-37.906702304018",
+        volume: "1083.804636",
+      },
+      currentPositions: {
+        positionCount: 0,
+        initialValue: "0",
+        currentValue: "0",
+        cashPnl: "0",
+        realizedPnl: "0",
+        totalPnl: "0",
+        roiPercent: "0",
+        winningPositions: 0,
+        losingPositions: 0,
+      },
     });
   });
 });

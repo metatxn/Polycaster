@@ -5,7 +5,11 @@ import {
   type ServiceFetchOptions,
   withUpstreamTimeout,
 } from "../fetch-options";
-import { DATA_API_BASE, GAMMA_API_BASE } from "../markets/public-data";
+import {
+  DATA_API_BASE,
+  fetchTraderLeaderboard,
+  GAMMA_API_BASE,
+} from "../markets/public-data";
 import { decimalValueSchema } from "../validation";
 
 const PUBLIC_DATA_TIMEOUT_MS = 8500;
@@ -264,6 +268,33 @@ export async function fetchWalletPortfolioValue(
     (entry) => entry.user.toLowerCase() === walletAddress.toLowerCase()
   );
   return { walletAddress, value: row?.value ?? "0" };
+}
+
+export async function fetchWalletAllTimePnl(
+  walletAddress: string,
+  options?: ServiceFetchOptions
+) {
+  const rows = await fetchTraderLeaderboard(
+    {
+      category: "OVERALL",
+      timePeriod: "ALL",
+      orderBy: "PNL",
+      walletAddress,
+      limit: 1,
+      offset: 0,
+    },
+    options
+  );
+  const row = rows.find(
+    (entry) => entry.proxyWallet.toLowerCase() === walletAddress.toLowerCase()
+  );
+  if (!row) return null;
+  return {
+    walletAddress,
+    rank: row.rank,
+    totalPnl: row.pnl,
+    volume: row.volume,
+  };
 }
 
 export interface PnlPosition {

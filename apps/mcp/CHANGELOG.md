@@ -18,6 +18,7 @@
 ### Fixed
 
 - The Google consent page sends its own origin on authorization form posts, preventing incorrect 403 responses before sign-in.
+- `get_wallet_pnl` reads all-time PnL from Polymarket's overall leaderboard instead of treating an empty current-position list as zero lifetime PnL.
 
 ### Security
 

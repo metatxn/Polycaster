@@ -3,6 +3,7 @@ import {
   fetchClosedPositions,
   fetchPublicProfile,
   fetchWalletActivity,
+  fetchWalletAllTimePnl,
   fetchWalletPortfolioValue,
   fetchWalletPositions,
   GAMMA_API_BASE,
@@ -34,6 +35,38 @@ const conditionIdSchema = z
   .trim()
   .toLowerCase()
   .regex(CONDITION_ID_PATTERN);
+
+const currentPositionsPnlSchema = z.object({
+  positionCount: z.number().int().nonnegative(),
+  initialValue: z.string(),
+  currentValue: z.string(),
+  cashPnl: z.string(),
+  realizedPnl: z.string(),
+  totalPnl: z.string(),
+  roiPercent: z.string(),
+  winningPositions: z.number().int().nonnegative(),
+  losingPositions: z.number().int().nonnegative(),
+});
+const allTimePnlSchema = z.discriminatedUnion("available", [
+  z.object({
+    available: z.literal(true),
+    category: z.literal("OVERALL"),
+    timePeriod: z.literal("ALL"),
+    rank: z.string(),
+    totalPnl: z.string(),
+    volume: z.string(),
+  }),
+  z.object({
+    available: z.literal(false),
+    category: z.literal("OVERALL"),
+    timePeriod: z.literal("ALL"),
+  }),
+]);
+const walletPnlSchema = z.object({
+  walletAddress: z.string(),
+  allTime: allTimePnlSchema,
+  currentPositions: currentPositionsPnlSchema,
+});
 
 function dataMeta(input?: { truncated?: boolean }) {
   return buildToolMeta({
@@ -393,31 +426,61 @@ function registerWalletPnl(server: McpServer) {
     {
       title: "Get wallet PnL",
       description:
-        "Calculate a public wallet PnL summary from validated position data using Decimal.js. Values are decimal strings.",
+        "Get all-time public wallet PnL from Polymarket's overall leaderboard, plus a Decimal.js summary of current positions. Values are decimal strings.",
       inputSchema,
-      outputSchema: z.object({ pnl: recordSchema, meta: toolMetaSchema }),
+      outputSchema: z.object({ pnl: walletPnlSchema, meta: toolMetaSchema }),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     (args, context) =>
       executePublicRead("get_wallet_pnl", context, async () => {
-        const rows = await fetchWalletPositions(
-          {
-            walletAddress: args.walletAddress,
-            sizeThreshold: "0",
-            limit: 500,
-            offset: 0,
-            sortBy: "CURRENT",
-            sortDirection: "DESC",
-          },
-          { signal: context.mcpReq.signal }
-        );
-        const pnl = summarizeWalletPnl(rows);
+        const [rows, allTimeRow] = await Promise.all([
+          fetchWalletPositions(
+            {
+              walletAddress: args.walletAddress,
+              sizeThreshold: "0",
+              limit: 500,
+              offset: 0,
+              sortBy: "CURRENT",
+              sortDirection: "DESC",
+            },
+            { signal: context.mcpReq.signal }
+          ),
+          fetchWalletAllTimePnl(args.walletAddress, {
+            signal: context.mcpReq.signal,
+          }),
+        ]);
+        const currentPositions = summarizeWalletPnl(rows);
+        const allTime = allTimeRow
+          ? {
+              available: true as const,
+              category: "OVERALL" as const,
+              timePeriod: "ALL" as const,
+              rank: allTimeRow.rank,
+              totalPnl: allTimeRow.totalPnl,
+              volume: allTimeRow.volume,
+            }
+          : {
+              available: false as const,
+              category: "OVERALL" as const,
+              timePeriod: "ALL" as const,
+            };
+        const pnl = {
+          walletAddress: args.walletAddress,
+          allTime,
+          currentPositions,
+        };
         const truncated = rows.length === 500;
+        const positionLabel = `${currentPositions.positionCount} open ${
+          currentPositions.positionCount === 1 ? "position" : "positions"
+        }`;
+        const summary = allTime.available
+          ? `Wallet all-time PnL is ${allTime.totalPnl}. It currently has ${positionLabel}.`
+          : `No all-time PnL data was found for this wallet. It currently has ${positionLabel}.`;
         return {
           content: [
             {
               type: "text" as const,
-              text: `Wallet total PnL is ${pnl.totalPnl} across ${pnl.positionCount} positions.`,
+              text: summary,
             },
           ],
           structuredContent: { pnl, meta: dataMeta({ truncated }) },

@@ -149,11 +149,19 @@ export function gammaUrl(pathname: string, queryContains?: string) {
 }
 
 export const CLOB_ORIGIN = "https://clob.polymarket.com";
+export const DATA_ORIGIN = "https://data-api.polymarket.com";
 
 /** The route table matches any URL, so CLOB routes ride the same stub. */
 export function clobUrl(pathname: string, queryContains?: string) {
   return (url: URL): boolean =>
     url.origin === CLOB_ORIGIN &&
+    url.pathname === pathname &&
+    (queryContains === undefined || url.search.includes(queryContains));
+}
+
+export function dataUrl(pathname: string, queryContains?: string) {
+  return (url: URL): boolean =>
+    url.origin === DATA_ORIGIN &&
     url.pathname === pathname &&
     (queryContains === undefined || url.search.includes(queryContains));
 }

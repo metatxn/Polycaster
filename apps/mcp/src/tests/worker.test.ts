@@ -174,6 +174,21 @@ describe("MCP endpoint (dev bypass)", () => {
       "get_event",
       "get_orderbook",
       "get_price_history",
+      "list_events",
+      "get_market_trades",
+      "get_market_quotes",
+      "get_market_holders",
+      "get_open_interest",
+      "get_event_live_volume",
+      "get_trader_leaderboard",
+      "list_tags",
+      "list_sports_markets",
+      "get_public_profile",
+      "get_wallet_positions",
+      "get_wallet_activity",
+      "get_closed_positions",
+      "get_wallet_pnl",
+      "get_wallet_portfolio_value",
     ]);
     expect(tools[0]?.annotations).toMatchObject({
       readOnlyHint: true,
@@ -657,9 +672,13 @@ describe("search_markets tool (dev bypass)", () => {
     markets: [
       {
         id: "mkt-1",
+        slug: "bitcoin-above-100k-in-2026",
+        conditionId:
+          "0x1111111111111111111111111111111111111111111111111111111111111111",
         question: "Bitcoin above $100k in 2026?",
         outcomes: '["Yes","No"]',
         outcomePrices: '["0.62","0.38"]',
+        clobTokenIds: '["123456789","987654321"]',
       },
       {
         id: "mkt-2",
@@ -734,11 +753,14 @@ describe("search_markets tool (dev bypass)", () => {
         markets: [
           {
             id: "mkt-1",
+            slug: "bitcoin-above-100k-in-2026",
+            conditionId:
+              "0x1111111111111111111111111111111111111111111111111111111111111111",
             question: "Bitcoin above $100k in 2026?",
             totalOutcomes: 2,
             outcomes: [
-              { name: "Yes", price: "0.62" },
-              { name: "No", price: "0.38" },
+              { name: "Yes", price: "0.62", tokenId: "123456789" },
+              { name: "No", price: "0.38", tokenId: "987654321" },
             ],
           },
           {

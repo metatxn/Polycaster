@@ -72,7 +72,7 @@ Create these alerts or equivalent monitors before production receives traffic:
 | P95 request duration | More than 2 seconds for 10 minutes | Hold rollout; roll back if more than 50% above baseline |
 | OAuth failures | More than twice the previous-hour baseline for 10 minutes | Hold and inspect provider errors |
 | Quota denials | More than 5% of MCP requests for 10 minutes | Hold and inspect abuse or quota sizing |
-| Upstream tool failures | More than 5% for one tool over 10 minutes | Hold and inspect Gamma or CLOB status |
+| Upstream tool failures | More than 5% for one tool over 10 minutes | Hold and inspect Gamma, Data API, or CLOB status |
 
 Every alert must point to this runbook and deliver to a channel watched during the release window. Test each delivery channel before deployment, then confirm that production signals reach the alert after deployment.
 
@@ -123,7 +123,7 @@ curl --include --silent --show-error https://mcp.knoww.app/.well-known/oauth-pro
 curl --include --silent --show-error https://mcp.knoww.app/.well-known/oauth-authorization-server
 ```
 
-Complete a Google OAuth flow using dynamic client registration and a Client ID Metadata Document client. Call all five tools, test cancellation, confirm callback replay is rejected, trigger each quota in a controlled test, and locate the requests in Workers Logs by `x-request-id`. Watch health, readiness, 5xx rate, latency, OAuth failures, and tool failures for at least one hour.
+Complete a Google OAuth flow using dynamic client registration and a Client ID Metadata Document client. Call every tool at least once, test cancellation, confirm callback replay is rejected, trigger each quota in a controlled test, and locate the requests in Workers Logs by `x-request-id`. Watch health, readiness, 5xx rate, latency, OAuth failures, and tool failures for at least one hour.
 
 ## Enable Cloudflare production deployments
 

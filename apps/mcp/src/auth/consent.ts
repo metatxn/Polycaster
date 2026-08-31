@@ -457,16 +457,16 @@ export function createConsentHandler(
       try {
         const url = new URL(request.url);
         if (url.pathname === "/authorize" && request.method === "GET") {
-          return handleConsentGet(request, env, config);
+          return await handleConsentGet(request, env, config);
         }
         if (url.pathname === "/authorize" && request.method === "POST") {
-          return handleConsentPost(request, env, config);
+          return await handleConsentPost(request, env, config);
         }
         if (
           url.pathname === "/auth/google/callback" &&
           request.method === "GET"
         ) {
-          return handleGoogleCallback(
+          return await handleGoogleCallback(
             request,
             env,
             config,

@@ -305,7 +305,7 @@ export function McpIntegrationGuide() {
 
         <div className="grid gap-4 md:grid-cols-2">
           <CodeBlock
-            label="apps/mcp/.dev.vars.local"
+            label="apps/mcp/.dev.vars"
             code={LOCAL_OAUTH_SECRETS}
             note="Use the client ID and secret from the same Google Web application. Wrangler does not copy Cloudflare production secrets into local development. Restart the local Worker after creating this ignored file."
           />
@@ -320,19 +320,35 @@ export function McpIntegrationGuide() {
 
         <div className="grid gap-3 md:grid-cols-5">
           <TestStep number="1" tool="search_markets">
-            Search for <InlineCode>bitcoin</InlineCode>.
+            Search for <InlineCode>bitcoin</InlineCode>. The explorer fills the
+            remaining requests from the first live result.
           </TestStep>
           <TestStep number="2" tool="get_event">
-            Copy an event slug from the search result.
+            Review the live event slug, then execute.
           </TestStep>
           <TestStep number="3" tool="get_market">
-            Copy a market slug from that event.
+            Review the live market slug, then execute.
           </TestStep>
           <TestStep number="4" tool="get_orderbook">
-            Copy an outcome token ID from the market.
+            Use the populated outcome token ID.
           </TestStep>
           <TestStep number="5" tool="get_price_history">
-            Reuse that token ID for price samples.
+            Reuse the populated token ID for price samples.
+          </TestStep>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <TestStep number="6" tool="market data getters">
+            Run the populated quotes, trades, holders, open-interest, and live
+            volume requests.
+          </TestStep>
+          <TestStep number="7" tool="discovery getters">
+            Try events, tags, sports markets, and the trader leaderboard with
+            their default arguments.
+          </TestStep>
+          <TestStep number="8" tool="public wallet getters">
+            Paste a public Polymarket proxy wallet address into the profile,
+            position, activity, PnL, closed-position, and portfolio requests.
           </TestStep>
         </div>
 
@@ -498,9 +514,10 @@ export function McpIntegrationGuide() {
             the Worker started with the local environment.
           </TroubleshootingItem>
           <TroubleshootingItem title="A tool returns no market data">
-            Start with <InlineCode>search_markets</InlineCode>, copy identifiers
-            exactly, and remember that an empty price history can be a valid
-            response for a quiet token and time range.
+            Start with <InlineCode>search_markets</InlineCode>. A successful
+            search populates the other request editors with current identifiers.
+            An empty price history can still be a valid response for a quiet
+            token and time range.
           </TroubleshootingItem>
         </div>
 

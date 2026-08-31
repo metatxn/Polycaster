@@ -64,6 +64,7 @@ describe("Google OIDC", () => {
     const [input, init] = fetchImpl.mock.calls[0] ?? [];
     expect(String(input)).toBe("https://oauth2.googleapis.com/token");
     expect(init?.method).toBe("POST");
+    expect(init?.redirect).toBe("manual");
     expect(String(init?.body)).toContain("client_secret=google-test-secret");
     expect(String(input)).not.toContain("google-test-secret");
   });

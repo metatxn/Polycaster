@@ -47,3 +47,13 @@ export class UpstreamPriceHistoryError extends Error {
     this.name = "UpstreamPriceHistoryError";
   }
 }
+
+export class UpstreamPublicDataError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number
+  ) {
+    super(message);
+    this.name = "UpstreamPublicDataError";
+  }
+}

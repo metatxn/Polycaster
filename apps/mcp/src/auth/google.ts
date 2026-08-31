@@ -250,7 +250,10 @@ export async function exchangeGoogleAuthorizationCode(input: {
       }),
       headers: { "content-type": "application/x-www-form-urlencoded" },
       method: "POST",
-      redirect: "error",
+      // Workerd does not implement the Fetch API's `error` redirect mode for
+      // outbound Worker requests. `manual` also prevents Google credentials
+      // from being forwarded if the token endpoint ever redirects.
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
   } catch {

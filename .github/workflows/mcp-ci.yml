@@ -52,9 +52,7 @@ jobs:
           pnpm --filter @knoww/extension test
 
       - name: Check generated Worker bindings
-        run: |
-          pnpm --filter @knoww/mcp cf-typegen
-          git diff --exit-code -- apps/mcp/cloudflare-env.d.ts
+        run: pnpm check:mcp-bindings
 
       - name: Validate release files
         run: |
@@ -62,7 +60,7 @@ jobs:
           git diff --check
 
       - name: Build production Worker bundle
-        run: pnpm --filter @knoww/mcp build
+        run: pnpm build:mcp
 
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level=high

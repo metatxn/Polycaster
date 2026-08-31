@@ -7,6 +7,7 @@
     "dev:ext": "pnpm --filter @knoww/extension dev",
     "build:web": "pnpm --filter @knoww/web build",
     "build:ext": "pnpm --filter @knoww/extension build",
+    "build:mcp": "pnpm --filter @knoww/mcp build",
     "build:ext:dev": "pnpm --filter @knoww/extension build:dev",
     "release:ext": "pnpm --filter @knoww/extension run release",
     "build": "pnpm -r build",
@@ -20,6 +21,8 @@
     "typecheck": "pnpm -r run typecheck",
     "typecheck:ext": "pnpm --filter @knoww/extension typecheck",
     "typecheck:web": "pnpm --filter @knoww/web typecheck",
+    "check:mcp-bindings": "pnpm --filter @knoww/mcp cf-typegen && git diff --exit-code -- apps/mcp/cloudflare-env.d.ts",
+    "verify:mcp": "pnpm check:mcp-bindings && pnpm build:mcp",
     "audit:security": "pnpm audit --audit-level=high",
     "brand:render": "node tooling/brand/render-k-mark.mjs",
     "prepare": "husky"

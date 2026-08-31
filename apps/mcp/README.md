@@ -750,11 +750,17 @@ To test the full browser flow locally, follow [Full Google OAuth on localhost](#
 
 ### `403` with an invalid Host or Origin
 
-Use `http://localhost:8787/mcp` or `http://127.0.0.1:8787/mcp`. Browser requests must send an Origin whose hostname appears in `MCP_ALLOWED_ORIGIN_HOSTNAMES`. Origin-less desktop requests are allowed.
+Use `http://localhost:8787/mcp` for the browser OAuth flow because it exactly matches the configured local resource metadata. Dev-bypass clients may also use `http://127.0.0.1:8787/mcp`. Browser requests must send an Origin whose hostname appears in `MCP_ALLOWED_ORIGIN_HOSTNAMES`. Origin-less desktop requests are allowed.
 
 ### Google reports `redirect_uri_mismatch`
 
 Open the Google Cloud Console web OAuth client and place `https://mcp.knoww.app/auth/google/callback` under **Authorized redirect URIs**. Do not paste that path into **Authorized JavaScript origins**; an origin is only `https://mcp.knoww.app`. Save the client, allow Google's configuration to propagate, then restart the MCP authorization flow so it uses fresh five-minute state.
+
+For local Google OAuth, also add `http://localhost:8787/auth/google/callback` to that same list. Keep the explorer endpoint at `http://localhost:8787/mcp` so it exactly matches the local protected-resource metadata.
+
+### Local `/authorize` reports that Google authentication is not configured
+
+Cloudflare production secrets are not available to `wrangler dev`. Create the ignored `apps/mcp/.dev.vars.local` file described in [Full Google OAuth on localhost](#full-google-oauth-on-localhost), then restart `pnpm --filter @knoww/mcp dev:oauth`. The Worker validates only that both variables are present and never logs their values.
 
 ### Google returns but the client stays disconnected
 

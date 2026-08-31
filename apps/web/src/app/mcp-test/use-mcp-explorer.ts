@@ -24,7 +24,7 @@ import {
 const DEFAULT_ENDPOINT =
   process.env.NODE_ENV === "production"
     ? "https://mcp.knoww.app/mcp"
-    : "http://127.0.0.1:8787/mcp";
+    : "http://localhost:8787/mcp";
 
 type BusyState = "authorize" | "call" | "connect" | null;
 

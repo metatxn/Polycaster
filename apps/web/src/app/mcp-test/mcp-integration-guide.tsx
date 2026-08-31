@@ -47,12 +47,16 @@ node --version
 pnpm --version
 
 pnpm install
-pnpm --filter @knoww/mcp dev
+# Use dev:oauth to test Google sign-in. Use dev for the auth bypass.
+pnpm --filter @knoww/mcp dev:oauth
 
 # In a second terminal
 pnpm --filter @knoww/web dev`;
 
-const LOCAL_CURL = `curl -sS http://127.0.0.1:8787/mcp \\
+const LOCAL_OAUTH_SECRETS = `GOOGLE_CLIENT_ID=replace-with-google-client-id
+GOOGLE_CLIENT_SECRET=replace-with-google-client-secret`;
+
+const LOCAL_CURL = `curl -sS http://localhost:8787/mcp \\
   -H 'Content-Type: application/json' \\
   -H 'Accept: application/json, text/event-stream' \\
   -H 'Mcp-Protocol-Version: 2025-11-25' \\
@@ -284,20 +288,35 @@ export function McpIntegrationGuide() {
         id="local-development"
         eyebrow="Local testing"
         title="Run the MCP server and explorer"
-        intro="The checked-in Wrangler local environment is the only mode that bypasses OAuth. Never copy that setting into a preview or production deployment."
+        intro="The local Worker supports Google OAuth for end-to-end testing. Its default dev command is the only mode that bypasses OAuth."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Fact label="Runtime" value="Node.js 24" mono />
           <Fact label="Package manager" value="pnpm 10.25.0" mono />
-          <Fact label="Local Worker" value="127.0.0.1:8787" mono />
-          <Fact label="Local auth" value="Dev bypass only" />
+          <Fact label="Local Worker" value="localhost:8787" mono />
+          <Fact label="Local auth" value="Google OAuth or dev bypass" />
         </div>
 
         <CodeBlock
           label="Repository root"
           code={LOCAL_COMMANDS}
-          note="Wrangler normally serves the Worker at http://127.0.0.1:8787/mcp. Open the URL printed by the web command, then visit /mcp-test."
+          note="Open http://localhost:8000/mcp-test and keep the server URL set to http://localhost:8787/mcp. OAuth discovery requires that exact canonical resource URL."
         />
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <CodeBlock
+            label="apps/mcp/.dev.vars.local"
+            code={LOCAL_OAUTH_SECRETS}
+            note="Use the client ID and secret from the same Google Web application. Wrangler does not copy Cloudflare production secrets into local development. Restart the local Worker after creating this ignored file."
+          />
+          <Callout icon="info" title="Allow the local Google callback">
+            Add{" "}
+            <InlineCode>http://localhost:8787/auth/google/callback</InlineCode>{" "}
+            to the Google Web application&apos;s Authorized redirect URIs. The
+            MCP explorer callback on port 8000 is registered with the local MCP
+            server and does not belong in Google Cloud Console.
+          </Callout>
+        </div>
 
         <div className="grid gap-3 md:grid-cols-5">
           <TestStep number="1" tool="search_markets">
@@ -475,7 +494,7 @@ export function McpIntegrationGuide() {
           </TroubleshootingItem>
           <TroubleshootingItem title="Local connect fails">
             Confirm Wrangler is listening on port 8787, use
-            <InlineCode>http://127.0.0.1:8787/mcp</InlineCode>, and make sure
+            <InlineCode>http://localhost:8787/mcp</InlineCode>, and make sure
             the Worker started with the local environment.
           </TroubleshootingItem>
           <TroubleshootingItem title="A tool returns no market data">

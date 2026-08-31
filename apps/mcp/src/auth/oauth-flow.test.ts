@@ -204,7 +204,7 @@ describe("MCP Google OAuth flow", () => {
       "form-action 'self' https://accounts.google.com https://agent.example"
     );
     expect(consentResponse.headers.get("cache-control")).toBe("no-store");
-    expect(consentResponse.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(consentResponse.headers.get("referrer-policy")).toBe("same-origin");
     const html = await consentResponse.text();
     expect(html).toContain("Continue with Google");
     expect(html).not.toContain("window.ethereum");

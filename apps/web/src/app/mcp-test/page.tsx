@@ -58,7 +58,7 @@ export default function McpTestPage() {
                 className="size-3.5 text-primary"
                 aria-hidden="true"
               />
-              5 testable tools
+              20 testable tools
             </span>
             <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5">
               <ShieldCheck

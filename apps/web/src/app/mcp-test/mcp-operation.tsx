@@ -133,7 +133,7 @@ export function McpOperation({
                   aria-label={`Arguments for ${tool.name}`}
                   value={argumentsJson}
                   onChange={(event) => onArgumentsChange(event.target.value)}
-                  disabled={!available || busy}
+                  disabled={busy}
                   spellCheck={false}
                   className="min-h-52 resize-y font-mono text-xs leading-5"
                 />
@@ -151,6 +151,15 @@ export function McpOperation({
                   )}
                   {busy ? "Executing" : "Execute"}
                 </Button>
+                {connected && !available && (
+                  <p
+                    role="status"
+                    className="rounded border bg-muted px-3 py-2 text-sm text-muted-foreground"
+                  >
+                    This Worker does not advertise {tool.name}. Restart or
+                    deploy the current MCP Worker, then reconnect.
+                  </p>
+                )}
                 {error && (
                   <p
                     role="alert"

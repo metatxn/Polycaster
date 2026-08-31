@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { exampleArguments, TOOL_CATALOG } from "./mcp-catalog";
 import {
   type JsonRpcResponse,
@@ -9,6 +9,7 @@ import {
   sendMcpRequest,
   toolsFromResponse,
 } from "./mcp-client";
+import { liveArgumentsFromSearch } from "./mcp-live-arguments";
 import {
   beginOAuthAuthorization,
   finishOAuthAuthorization,
@@ -24,7 +25,7 @@ import {
 const DEFAULT_ENDPOINT =
   process.env.NODE_ENV === "production"
     ? "https://mcp.knoww.app/mcp"
-    : "http://127.0.0.1:8787/mcp";
+    : "http://localhost:8787/mcp";
 
 type BusyState = "authorize" | "call" | "connect" | null;
 
@@ -71,6 +72,12 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "The request failed.";
 }
 
+function requestOptions(activeSession: OAuthSession | null) {
+  return activeSession?.accessToken
+    ? { accessToken: activeSession.accessToken }
+    : {};
+}
+
 export function useMcpExplorer() {
   const requestId = useRef(0);
   const oauthTransaction = useRef<OAuthTransaction | null>(null);
@@ -92,6 +99,78 @@ export function useMcpExplorer() {
   const [authPending, setAuthPending] = useState(false);
   const [session, setSession] = useState<OAuthSession | null>(null);
 
+  const nextId = useCallback(() => {
+    requestId.current += 1;
+    return requestId.current;
+  }, []);
+
+  const establishConnection = useCallback(
+    async (targetEndpoint: string, activeSession: OAuthSession | null) => {
+      setBusy("connect");
+      setConnected(false);
+      setConnectionError("");
+      setStatus("Connecting and reading the tool catalog...");
+      try {
+        const initialize = await sendMcpRequest(
+          targetEndpoint,
+          {
+            jsonrpc: "2.0",
+            id: nextId(),
+            method: "initialize",
+            params: {
+              protocolVersion: MCP_PROTOCOL_VERSION,
+              capabilities: {},
+              clientInfo: { name: "knoww-mcp-explorer", version: "1.0.0" },
+            },
+          },
+          requestOptions(activeSession)
+        );
+        const initializeError = responseError(initialize);
+        if (initializeError) throw initializeError;
+
+        const listResponse = await sendMcpRequest(
+          targetEndpoint,
+          {
+            jsonrpc: "2.0",
+            id: nextId(),
+            method: "tools/list",
+            params: {},
+          },
+          requestOptions(activeSession)
+        );
+        const listError = responseError(listResponse);
+        if (listError) throw listError;
+        const discoveredTools = toolsFromResponse(listResponse);
+        setTools(discoveredTools);
+        setConnected(true);
+
+        const serverInfo = initialize.result?.serverInfo as
+          | { name?: string; version?: string }
+          | undefined;
+        const serverName = serverInfo?.name ?? "MCP server";
+        const serverVersion = serverInfo?.version
+          ? ` ${serverInfo.version}`
+          : "";
+        const toolLabel = discoveredTools.length === 1 ? "tool" : "tools";
+        setStatus(
+          `Connected to ${serverName}${serverVersion}. Found ${discoveredTools.length} ${toolLabel}.`
+        );
+      } catch (caught) {
+        setTools([]);
+        setConnected(false);
+        setConnectionError(errorText(caught));
+        setStatus(
+          errorText(caught).includes("HTTP 401")
+            ? "Authorization required. Authorize, then connect again."
+            : "Connection failed."
+        );
+      } finally {
+        setBusy(null);
+      }
+    },
+    [nextId]
+  );
+
   useEffect(() => {
     const completeOAuthCallback = (value: unknown) => {
       const params = parseOAuthCallbackMessage(value);
@@ -101,12 +180,10 @@ export function useMcpExplorer() {
 
       setBusy("authorize");
       void finishOAuthAuthorization(transaction, params)
-        .then((authorizedSession) => {
+        .then(async (authorizedSession) => {
           setSession(authorizedSession);
-          setStatus(
-            "Authorized with markets:read. Connect to discover the tools."
-          );
           setConnectionError("");
+          await establishConnection(transaction.resource, authorizedSession);
         })
         .catch((caught) => {
           setConnectionError(errorText(caught));
@@ -136,77 +213,9 @@ export function useMcpExplorer() {
       oauthPopup.current = null;
       oauthTransaction.current = null;
     };
-  }, []);
+  }, [establishConnection]);
 
-  const nextId = () => {
-    requestId.current += 1;
-    return requestId.current;
-  };
-
-  const requestOptions = () =>
-    session?.accessToken ? { accessToken: session.accessToken } : {};
-
-  const connect = async () => {
-    setBusy("connect");
-    setConnected(false);
-    setConnectionError("");
-    setStatus("Connecting and reading the tool catalog...");
-    try {
-      const initialize = await sendMcpRequest(
-        endpoint,
-        {
-          jsonrpc: "2.0",
-          id: nextId(),
-          method: "initialize",
-          params: {
-            protocolVersion: MCP_PROTOCOL_VERSION,
-            capabilities: {},
-            clientInfo: { name: "knoww-mcp-explorer", version: "1.0.0" },
-          },
-        },
-        requestOptions()
-      );
-      const initializeError = responseError(initialize);
-      if (initializeError) throw initializeError;
-
-      const listResponse = await sendMcpRequest(
-        endpoint,
-        {
-          jsonrpc: "2.0",
-          id: nextId(),
-          method: "tools/list",
-          params: {},
-        },
-        requestOptions()
-      );
-      const listError = responseError(listResponse);
-      if (listError) throw listError;
-      const discoveredTools = toolsFromResponse(listResponse);
-      setTools(discoveredTools);
-      setConnected(true);
-
-      const serverInfo = initialize.result?.serverInfo as
-        | { name?: string; version?: string }
-        | undefined;
-      const serverName = serverInfo?.name ?? "MCP server";
-      const serverVersion = serverInfo?.version ? ` ${serverInfo.version}` : "";
-      const toolLabel = discoveredTools.length === 1 ? "tool" : "tools";
-      setStatus(
-        `Connected to ${serverName}${serverVersion}. Found ${discoveredTools.length} ${toolLabel}.`
-      );
-    } catch (caught) {
-      setTools([]);
-      setConnected(false);
-      setConnectionError(errorText(caught));
-      setStatus(
-        errorText(caught).includes("HTTP 401")
-          ? "Authorization required. Authorize, then connect again."
-          : "Connection failed."
-      );
-    } finally {
-      setBusy(null);
-    }
-  };
+  const connect = () => establishConnection(endpoint, session);
 
   const runTool = async (toolName: string) => {
     setToolErrors((current) => ({ ...current, [toolName]: "" }));
@@ -231,7 +240,7 @@ export function useMcpExplorer() {
           method: "tools/call",
           params: { name: toolName, arguments: args },
         },
-        requestOptions()
+        requestOptions(session)
       );
       setOutputsByTool((current) => ({
         ...current,
@@ -239,7 +248,17 @@ export function useMcpExplorer() {
       }));
       const callError = responseError(response);
       if (callError) throw callError;
-      setStatus(`${toolName} returned a response.`);
+      const liveArguments =
+        toolName === "search_markets" ? liveArgumentsFromSearch(response) : {};
+      const liveArgumentCount = Object.keys(liveArguments).length;
+      if (liveArgumentCount > 0) {
+        setArgumentsByTool((current) => ({ ...current, ...liveArguments }));
+      }
+      setStatus(
+        liveArgumentCount > 0
+          ? `${toolName} returned a response. Live arguments are ready for the other tools.`
+          : `${toolName} returned a response.`
+      );
     } catch (caught) {
       setToolErrors((current) => ({
         ...current,

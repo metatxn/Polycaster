@@ -1,12 +1,7 @@
 #!/bin/sh
 
-# Fix PATH for GUI clients (like Cursor/VS Code)
-export PATH="$HOME/Library/pnpm:$HOME/.nvm/versions/node/v23.4.0/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-# Load NVM if it exists
-if [ -s "$HOME/.nvm/nvm.sh" ]; then
-  \. "$HOME/.nvm/nvm.sh"
-fi
+# Use the same Node.js major version as CI and production builds.
+. "$(dirname "$0")/use-node-24.sh"
 
 echo "🔍 Running pre-commit checks..."
 
@@ -18,6 +13,15 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 echo "✅ Linting passed!"
+
+# Ensure Wrangler configuration and committed Worker bindings agree.
+echo "🔗 Checking generated MCP Worker bindings..."
+pnpm check:mcp-bindings
+if [ $? -ne 0 ]; then
+  echo "❌ MCP Worker bindings are stale. Stage apps/mcp/cloudflare-env.d.ts and retry."
+  exit 1
+fi
+echo "✅ MCP Worker bindings are current!"
 
 # Run formatting check
 echo "🎨 Checking formatting..."

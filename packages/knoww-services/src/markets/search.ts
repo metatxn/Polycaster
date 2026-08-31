@@ -33,12 +33,14 @@ export interface ExactTopOutcome {
 export interface Market {
   id?: string;
   slug?: string;
+  conditionId?: string;
   question?: string;
   active?: boolean;
   closed?: boolean;
   archived?: boolean;
   outcomes?: string | string[];
   outcomePrices?: string | (string | number)[];
+  clobTokenIds?: string | string[];
   groupItemTitle?: string;
 }
 
@@ -104,12 +106,14 @@ const marketSchema = z
   .object({
     id: z.string().min(1).optional(),
     slug: z.string().min(1).optional(),
+    conditionId: z.string().min(1).optional(),
     question: z.string().optional(),
     active: z.boolean().optional(),
     closed: z.boolean().optional(),
     archived: z.boolean().optional(),
     outcomes: gammaStringArraySchema.optional(),
     outcomePrices: gammaProbabilityArraySchema.optional(),
+    clobTokenIds: gammaStringArraySchema.optional(),
     groupItemTitle: z.string().optional(),
   })
   .passthrough()

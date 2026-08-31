@@ -60,8 +60,8 @@ export function McpConnectionBar({
             Server
           </label>
           <p className="mt-1 text-sm text-muted-foreground">
-            Use the local Worker for dev bypass or the production URL with
-            OAuth.
+            Use the local Worker with dev bypass or OAuth, or connect to the
+            production server with OAuth.
           </p>
           <Input
             id="mcp-endpoint"
@@ -73,36 +73,34 @@ export function McpConnectionBar({
           />
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          {!isLocal && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={
-                authorized
-                  ? onDisconnect
-                  : authPending
-                    ? onCancelAuthorization
-                    : onAuthorize
-              }
-              disabled={requestBusy}
-              className="lg:w-36"
-            >
-              {authBusy ? (
-                <LoaderCircle className="animate-spin" aria-hidden="true" />
-              ) : authorized ? (
-                <LogOut aria-hidden="true" />
-              ) : (
-                <KeyRound aria-hidden="true" />
-              )}
-              {authBusy
-                ? "Authorizing"
+          <Button
+            type="button"
+            variant="outline"
+            onClick={
+              authorized
+                ? onDisconnect
                 : authPending
-                  ? "Cancel authorization"
-                  : authorized
-                    ? "Disconnect"
-                    : "Authorize"}
-            </Button>
-          )}
+                  ? onCancelAuthorization
+                  : onAuthorize
+            }
+            disabled={requestBusy}
+            className="lg:w-36"
+          >
+            {authBusy ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : authorized ? (
+              <LogOut aria-hidden="true" />
+            ) : (
+              <KeyRound aria-hidden="true" />
+            )}
+            {authBusy
+              ? "Authorizing"
+              : authPending
+                ? "Cancel authorization"
+                : authorized
+                  ? "Disconnect"
+                  : "Authorize"}
+          </Button>
           <Button
             type="button"
             onClick={onConnect}
@@ -127,10 +125,10 @@ export function McpConnectionBar({
         <ConnectionFact
           label="Authentication"
           value={
-            isLocal
-              ? "Dev bypass"
-              : authorized
-                ? "OAuth authorized"
+            authorized
+              ? "OAuth authorized"
+              : isLocal
+                ? "Dev bypass or OAuth 2.1"
                 : "OAuth 2.1 required"
           }
         />

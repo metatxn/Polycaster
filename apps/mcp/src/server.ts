@@ -3,6 +3,8 @@ import { registerGetEventTool } from "./tools/get-event";
 import { registerGetMarketTool } from "./tools/get-market";
 import { registerGetOrderbookTool } from "./tools/get-orderbook";
 import { registerGetPriceHistoryTool } from "./tools/get-price-history";
+import { registerPublicMarketTools } from "./tools/public-markets";
+import { registerPublicWalletTools } from "./tools/public-wallets";
 import { registerSearchMarketsTool } from "./tools/search-markets";
 
 export const SERVER_INFO = { name: "knoww-mcp", version: "0.1.0" } as const;
@@ -14,5 +16,7 @@ export function createKnowwMcpServer(): McpServer {
   registerGetEventTool(server);
   registerGetOrderbookTool(server);
   registerGetPriceHistoryTool(server);
+  registerPublicMarketTools(server);
+  registerPublicWalletTools(server);
   return server;
 }

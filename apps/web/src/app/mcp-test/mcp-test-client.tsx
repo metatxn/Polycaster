@@ -35,7 +35,8 @@ export function McpTestClient() {
               Tools
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Expand an operation, edit its JSON arguments, and execute it.
+              Run search_markets first to load current identifiers into the
+              other request editors, then review and execute each operation.
             </p>
           </div>
           <span className="font-mono text-xs text-muted-foreground">

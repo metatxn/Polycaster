@@ -3,6 +3,7 @@ export {
   UpstreamMarketError,
   UpstreamOrderbookError,
   UpstreamPriceHistoryError,
+  UpstreamPublicDataError,
   UpstreamSearchError,
 } from "./errors";
 export type { ServiceFetchOptions } from "./fetch-options";
@@ -32,6 +33,25 @@ export type {
 } from "./markets/price-history";
 export { fetchPriceHistoryByTokenId } from "./markets/price-history";
 export type {
+  EventPageParams,
+  MarketTradesParams,
+} from "./markets/public-data";
+export {
+  DATA_API_BASE,
+  fetchEventLiveVolume,
+  fetchEventPage,
+  fetchMarketHolders,
+  fetchMarketPageByTagSlug,
+  fetchMarketQuotes,
+  fetchMarketTrades,
+  fetchOpenInterest,
+  fetchSportsMarketTypes,
+  fetchSportsMetadata,
+  fetchSportsTeams,
+  fetchTags,
+  fetchTraderLeaderboard,
+} from "./markets/public-data";
+export type {
   ExactTopOutcome,
   Market,
   SearchEvent,
@@ -52,3 +72,17 @@ export {
   MAX_SEARCH_LIMIT,
   mergeEvents,
 } from "./markets/search";
+export type {
+  ClosedPositionsParams,
+  PnlPosition,
+  WalletActivityParams,
+  WalletPositionsParams,
+} from "./profiles/public-data";
+export {
+  fetchClosedPositions,
+  fetchPublicProfile,
+  fetchWalletActivity,
+  fetchWalletPortfolioValue,
+  fetchWalletPositions,
+  summarizeWalletPnl,
+} from "./profiles/public-data";

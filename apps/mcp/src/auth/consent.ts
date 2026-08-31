@@ -16,6 +16,7 @@ import {
   buildGoogleAuthorizationUrl,
   createGooglePkce,
   type GoogleAuthenticator,
+  googleAuthenticationLogFields,
 } from "./google";
 import {
   FREE_MCP_PLAN,
@@ -36,6 +37,13 @@ class FormError extends Error {
     message: string
   ) {
     super(message);
+  }
+}
+
+class GoogleConfigurationError extends Error {
+  constructor() {
+    super("Google authentication is not configured for this environment.");
+    this.name = "GoogleConfigurationError";
   }
 }
 
@@ -206,7 +214,7 @@ function assertGoogleConfiguration(env: McpOAuthEnv): void {
     env.GOOGLE_CLIENT_SECRET.length < 1 ||
     env.GOOGLE_CLIENT_SECRET.length > 4096
   ) {
-    throw new Error("Google authentication is not configured.");
+    throw new GoogleConfigurationError();
   }
 }
 
@@ -351,8 +359,9 @@ async function handleGoogleCallback(
       redirectUri: googleRedirectUri(request),
     });
     subject = identity.subject;
-  } catch {
+  } catch (error) {
     log.warn("identity.denied", {
+      ...googleAuthenticationLogFields(error),
       requestId: currentRequestId(),
       reason: "google_verification_failed",
     });
@@ -400,6 +409,11 @@ async function handleGoogleCallback(
  *   get:
  *     summary: Review an MCP authorization request.
  *     tags: [OAuth]
+ *     responses:
+ *       200:
+ *         description: Google sign-in consent page.
+ *       503:
+ *         description: Google authentication is not configured in this environment.
  *   post:
  *     summary: Continue to Google sign-in or deny MCP authorization.
  *     tags: [OAuth]
@@ -418,6 +432,8 @@ async function handleGoogleCallback(
  *         description: Form content type is required.
  *       429:
  *         description: Authorization request quota exceeded.
+ *       503:
+ *         description: Google authentication is not configured in this environment.
  * /auth/google/callback:
  *   get:
  *     summary: Complete Google sign-in and MCP authorization.
@@ -429,6 +445,8 @@ async function handleGoogleCallback(
  *         description: Authorization transaction is invalid or expired.
  *       429:
  *         description: Authorization request quota exceeded.
+ *       503:
+ *         description: Google authentication is not configured in this environment.
  */
 export function createConsentHandler(
   config: WorkerConfig,
@@ -439,16 +457,16 @@ export function createConsentHandler(
       try {
         const url = new URL(request.url);
         if (url.pathname === "/authorize" && request.method === "GET") {
-          return handleConsentGet(request, env, config);
+          return await handleConsentGet(request, env, config);
         }
         if (url.pathname === "/authorize" && request.method === "POST") {
-          return handleConsentPost(request, env, config);
+          return await handleConsentPost(request, env, config);
         }
         if (
           url.pathname === "/auth/google/callback" &&
           request.method === "GET"
         ) {
-          return handleGoogleCallback(
+          return await handleGoogleCallback(
             request,
             env,
             config,
@@ -459,6 +477,13 @@ export function createConsentHandler(
       } catch (error) {
         if (error instanceof FormError) {
           return localError(error.message, error.status);
+        }
+        if (error instanceof GoogleConfigurationError) {
+          log.warn("configuration.invalid", {
+            requestId: currentRequestId(),
+            reason: "google_not_configured",
+          });
+          return localError(error.message, 503);
         }
         throw error;
       }

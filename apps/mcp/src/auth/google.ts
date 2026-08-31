@@ -20,6 +20,17 @@ const googleTokenResponseSchema = z.object({
     .max(16 * 1024),
 });
 
+const googleTokenErrorResponseSchema = z.object({
+  error: z.string().min(1).max(128),
+});
+
+const GOOGLE_OAUTH_ERROR_CODES = new Set<GoogleOAuthError>([
+  "invalid_client",
+  "invalid_grant",
+  "unauthorized_client",
+  "unsupported_grant_type",
+]);
+
 const googleJwks = createRemoteJWKSet(new URL(GOOGLE_JWKS_URI), {
   cacheMaxAge: 60 * 60 * 1000,
   cooldownDuration: 30 * 1000,
@@ -42,6 +53,77 @@ export interface GoogleAuthenticationInput {
 export type GoogleAuthenticator = (
   input: GoogleAuthenticationInput
 ) => Promise<GoogleIdentity>;
+
+export type GoogleAuthenticationStage =
+  | "token_exchange"
+  | "id_token_verification";
+
+export type GoogleAuthenticationFailure =
+  | "request_failed"
+  | "upstream_rejected"
+  | "invalid_response"
+  | "verification_failed";
+
+export type GoogleOAuthError =
+  | "invalid_client"
+  | "invalid_grant"
+  | "unauthorized_client"
+  | "unsupported_grant_type";
+
+interface GoogleAuthenticationErrorInput {
+  googleFailure: GoogleAuthenticationFailure;
+  googleOAuthError?: GoogleOAuthError | "unknown";
+  googleStage: GoogleAuthenticationStage;
+  googleUpstreamStatus?: number;
+}
+
+export interface GoogleAuthenticationLogFields {
+  googleFailure: GoogleAuthenticationFailure | "unexpected_error";
+  googleOAuthError?: GoogleOAuthError | "unknown";
+  googleStage: GoogleAuthenticationStage | "unknown";
+  googleUpstreamStatus?: number;
+}
+
+export class GoogleAuthenticationError extends Error {
+  readonly googleFailure: GoogleAuthenticationFailure;
+  readonly googleOAuthError?: GoogleOAuthError | "unknown";
+  readonly googleStage: GoogleAuthenticationStage;
+  readonly googleUpstreamStatus?: number;
+
+  constructor(input: GoogleAuthenticationErrorInput) {
+    super(
+      input.googleStage === "id_token_verification"
+        ? "Google identity could not be verified."
+        : "Google authentication failed."
+    );
+    this.name = "GoogleAuthenticationError";
+    this.googleFailure = input.googleFailure;
+    this.googleOAuthError = input.googleOAuthError;
+    this.googleStage = input.googleStage;
+    this.googleUpstreamStatus = input.googleUpstreamStatus;
+  }
+}
+
+export function googleAuthenticationLogFields(
+  error: unknown
+): GoogleAuthenticationLogFields {
+  if (!(error instanceof GoogleAuthenticationError)) {
+    return {
+      googleFailure: "unexpected_error",
+      googleStage: "unknown",
+    };
+  }
+  return {
+    googleFailure: error.googleFailure,
+    googleStage: error.googleStage,
+    ...(error.googleOAuthError === undefined
+      ? {}
+      : { googleOAuthError: error.googleOAuthError }),
+    ...(error.googleUpstreamStatus === undefined
+      ? {}
+      : { googleUpstreamStatus: error.googleUpstreamStatus }),
+  };
+}
 
 function toBase64Url(bytes: ArrayBuffer | Uint8Array): string {
   const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -84,6 +166,32 @@ async function readBoundedText(
     offset += chunk.byteLength;
   }
   return new TextDecoder().decode(bytes);
+}
+
+function sanitizeGoogleOAuthError(value: string): GoogleOAuthError | "unknown" {
+  return GOOGLE_OAUTH_ERROR_CODES.has(value as GoogleOAuthError)
+    ? (value as GoogleOAuthError)
+    : "unknown";
+}
+
+async function readGoogleOAuthError(
+  response: Response
+): Promise<GoogleOAuthError | "unknown"> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    return "unknown";
+  }
+  try {
+    const body: unknown = JSON.parse(
+      await readBoundedText(response, TOKEN_RESPONSE_LIMIT_BYTES)
+    );
+    const parsed = googleTokenErrorResponseSchema.safeParse(body);
+    return parsed.success
+      ? sanitizeGoogleOAuthError(parsed.data.error)
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 export async function createGooglePkce(): Promise<{
@@ -129,24 +237,45 @@ export async function exchangeGoogleAuthorizationCode(input: {
   redirectUri: string;
 }): Promise<string> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const response = await fetchImpl(GOOGLE_TOKEN_ENDPOINT, {
-    body: new URLSearchParams({
-      client_id: input.clientId,
-      client_secret: input.clientSecret,
-      code: input.code,
-      code_verifier: input.codeVerifier,
-      grant_type: "authorization_code",
-      redirect_uri: input.redirectUri,
-    }),
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    method: "POST",
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error("Google authentication failed.");
+  let response: Response;
+  try {
+    response = await fetchImpl(GOOGLE_TOKEN_ENDPOINT, {
+      body: new URLSearchParams({
+        client_id: input.clientId,
+        client_secret: input.clientSecret,
+        code: input.code,
+        code_verifier: input.codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: input.redirectUri,
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      method: "POST",
+      // Workerd does not implement the Fetch API's `error` redirect mode for
+      // outbound Worker requests. `manual` also prevents Google credentials
+      // from being forwarded if the token endpoint ever redirects.
+      redirect: "manual",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    throw new GoogleAuthenticationError({
+      googleFailure: "request_failed",
+      googleStage: "token_exchange",
+    });
+  }
+  if (!response.ok) {
+    throw new GoogleAuthenticationError({
+      googleFailure: "upstream_rejected",
+      googleOAuthError: await readGoogleOAuthError(response),
+      googleStage: "token_exchange",
+      googleUpstreamStatus: response.status,
+    });
+  }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
-    throw new Error("Google authentication failed.");
+    throw new GoogleAuthenticationError({
+      googleFailure: "invalid_response",
+      googleStage: "token_exchange",
+    });
   }
   let body: unknown;
   try {
@@ -154,10 +283,18 @@ export async function exchangeGoogleAuthorizationCode(input: {
       await readBoundedText(response, TOKEN_RESPONSE_LIMIT_BYTES)
     );
   } catch {
-    throw new Error("Google authentication failed.");
+    throw new GoogleAuthenticationError({
+      googleFailure: "invalid_response",
+      googleStage: "token_exchange",
+    });
   }
   const parsed = googleTokenResponseSchema.safeParse(body);
-  if (!parsed.success) throw new Error("Google authentication failed.");
+  if (!parsed.success) {
+    throw new GoogleAuthenticationError({
+      googleFailure: "invalid_response",
+      googleStage: "token_exchange",
+    });
+  }
   return parsed.data.id_token;
 }
 
@@ -191,7 +328,10 @@ export async function verifyGoogleIdToken(input: {
     }
     return { subject: payload.sub as string };
   } catch {
-    throw new Error("Google identity could not be verified.");
+    throw new GoogleAuthenticationError({
+      googleFailure: "verification_failed",
+      googleStage: "id_token_verification",
+    });
   }
 }
 

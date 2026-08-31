@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --env local",
+    "dev:oauth": "wrangler dev --env local --env-file .dev.vars --var MCP_AUTH_MODE:oauth-required",
     "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
     "deploy": "wrangler versions upload --env=\"\" --strict",
     "deploy:first-production": "wrangler deploy --env=\"\" --strict",

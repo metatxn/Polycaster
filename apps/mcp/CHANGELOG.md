@@ -10,6 +10,7 @@
 - Liveness and stateful-binding readiness probes.
 - Whole-Worker edge, authentication, free-plan principal, and per-tool quotas.
 - Structured request, authorization, quota, readiness, and tool-failure logs.
+- Safe Google token-exchange and ID-token diagnostic fields, plus a localhost command for exercising the full OAuth flow.
 - An HTTP OpenAPI contract and a deployment and rollback runbook.
 - PR-only GitHub quality checks with a documented Cloudflare Workers Builds handoff for production deployment.
 - Production-only remote deployment; local and CI checks replace a separate staging Worker.

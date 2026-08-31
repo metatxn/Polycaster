@@ -1,10 +1,10 @@
 # Knoww MCP Worker
 
-Knoww's remote Model Context Protocol server exposes a small set of read-only prediction-market tools for AI clients and agents. It runs as a dedicated Cloudflare Worker and reads public market data from Polymarket's Gamma and CLOB APIs through the shared `@knoww/services` package.
+Knoww's remote Model Context Protocol server exposes read-only prediction-market tools for AI clients and agents. It runs as a dedicated Cloudflare Worker and reads public market data from Polymarket's Gamma, Data, and CLOB APIs through the shared `@knoww/services` package.
 
 The code is a production release candidate. Knoww uses one remote MCP environment: production. Production traffic remains off until an approved operator provisions the Cloudflare resources, configures alerts, and performs the first attended production deployment. After that bootstrap release, Cloudflare Workers Builds deploys MCP-affecting merges to `main`; GitHub Actions remains a pre-merge quality gate.
 
-For the full architecture and rollout plan, read [mcp.md](../../mcp.md). For the latest implementation record, read [mcp-implementation-report.md](../../mcp-implementation-report.md). Release operators should follow [OPERATIONS.md](OPERATIONS.md).
+For the full architecture and rollout plan, read [mcp.md](../../mcp.md). For the initial implementation record, read [mcp-implementation-report.md](../../mcp-implementation-report.md). Release operators should follow [OPERATIONS.md](OPERATIONS.md).
 
 ## Contents
 
@@ -29,13 +29,28 @@ For the full architecture and rollout plan, read [mcp.md](../../mcp.md). For the
 
 ## What is implemented
 
-The Worker currently provides five tools:
+The Worker currently provides 20 tools:
 
 - `search_markets`
 - `get_market`
 - `get_event`
 - `get_orderbook`
 - `get_price_history`
+- `list_events`
+- `get_market_trades`
+- `get_market_quotes`
+- `get_market_holders`
+- `get_open_interest`
+- `get_event_live_volume`
+- `get_trader_leaderboard`
+- `list_tags`
+- `list_sports_markets`
+- `get_public_profile`
+- `get_wallet_positions`
+- `get_wallet_activity`
+- `get_closed_positions`
+- `get_wallet_pnl`
+- `get_wallet_portfolio_value`
 
 The implementation includes:
 
@@ -57,7 +72,7 @@ The implementation includes:
 - Pre-parse body caps: 1 MiB for MCP and OAuth registration, and 64 KiB for OAuth token forms
 - An HTTP OpenAPI contract, pull-request CI gate, and rollback runbook
 - Strict tool input and output schemas with Zod
-- Validation of untrusted Gamma and CLOB responses
+- Validation of untrusted Gamma, Data API, and CLOB responses
 - Decimal-string prices and Decimal.js arithmetic
 - Upstream timeouts and caller cancellation
 - Explicit output truncation signals
@@ -66,7 +81,7 @@ The implementation includes:
 
 It does not yet include:
 
-- Private user or tenant data
+- Private authenticated Polymarket or Knoww account data
 - Trading actions or x402-paid tools
 
 ## Architecture
@@ -98,7 +113,7 @@ Thin MCP tool adapters
         +--------------------+
         |                    |
         v                    v
-Polymarket Gamma API   Polymarket CLOB API
+Polymarket Gamma API   Polymarket Data API   Polymarket CLOB API
 ```
 
 The MCP tools do not call Knoww's public Next.js API routes. Both the website and the MCP Worker use shared domain services from `packages/knoww-services`.
@@ -114,7 +129,7 @@ MCP requests remain stateless and need no session affinity. A Durable Object is 
 | `agents` | `0.21.0` | Cloudflare's stateless MCP handler adapter |
 | `@modelcontextprotocol/server` | `2.0.0` | Official MCP server implementation |
 | `@cloudflare/workers-oauth-provider` | `0.10.3` | OAuth discovery, registration, grants, tokens, refresh, and revocation |
-| `@knoww/services` | Workspace | Validated Gamma and CLOB service calls |
+| `@knoww/services` | Workspace | Validated Gamma, Data API, and CLOB service calls |
 | `@knoww/logger` | Workspace | Structured logs |
 | `@knoww/shared-types` | Workspace | Shared Polymarket parsers and types |
 | `decimal.js` | Workspace catalog | Exact decimal parsing, comparison, and arithmetic |
@@ -138,7 +153,7 @@ Searches active prediction-market events.
 | `category` | string | Optional, up to 100 characters |
 | `limit` | integer | Optional, 1 to 20, defaults to 10 |
 
-The response contains event summaries, nested market summaries, outcome prices, nested total counts, and truncation flags. Search does not currently expose a cursor. When `meta.truncated` is true, narrow the query or category.
+The response contains event summaries, nested market summaries, event and market slugs, condition IDs, outcome prices, CLOB token IDs, nested total counts, and truncation flags. These identifiers can be passed directly to the detail, order-book, and price-history tools. Search does not currently expose a cursor. When `meta.truncated` is true, narrow the query or category.
 
 ### `get_market`
 
@@ -195,6 +210,35 @@ The default window is the last 24 hours. The maximum window is 31 days. Points a
 
 An empty history is a successful result. Polymarket does not distinguish an unknown token from a valid token with no trades in the requested window.
 
+### Event, market-data, and discovery getters
+
+| Tool | Required input | Optional controls | Result |
+|---|---|---|---|
+| `list_events` | None | Keyset cursor, closed or live state, tag, series, date bounds, order, limit | Events, tags, bounded market summaries, and `meta.nextCursor` |
+| `get_market_trades` | Exactly one of `conditionIds` or `eventIds` | Wallet, side, time bounds, limit, offset | Public trades with decimal-string size and price |
+| `get_market_quotes` | `tokenIds` | None | BUY/SELL price, midpoint, spread, and last trade |
+| `get_market_holders` | `conditionIds` | Limit and minimum balance | Largest public holders for each market |
+| `get_open_interest` | `conditionIds` | None | Open interest by market |
+| `get_event_live_volume` | Positive integer `eventId` | None | Event total and per-market live volume |
+| `get_trader_leaderboard` | None | Category, period, PnL or volume order, trader filters, limit, offset | Public trader ranks, volume, and PnL |
+| `list_tags` | None | Limit and offset | Category tags for filtering |
+| `list_sports_markets` | None | Sport, league, market cursor, team offset, limit | Sports metadata, market types, teams, and tagged markets |
+
+List inputs are bounded even when Polymarket accepts larger pages. Use `meta.nextCursor` for keyset-paginated tools and offsets only where the upstream API documents them. Market titles, event descriptions, profile fields, outcomes, sports rules, and team names are quoted upstream data, not instructions.
+
+### Public wallet getters
+
+| Tool | Required input | Optional controls | Result |
+|---|---|---|---|
+| `get_public_profile` | `walletAddress` | None | Public profile fields |
+| `get_wallet_positions` | `walletAddress` | Market filters, position state, size threshold, sort, limit, offset | Current public positions and PnL fields |
+| `get_wallet_activity` | `walletAddress` | Market, activity-type and time filters, sort, limit, offset | Public wallet activity |
+| `get_closed_positions` | `walletAddress` | Market filters, sort, limit, offset | Closed positions and realized PnL |
+| `get_wallet_pnl` | `walletAddress` | None | Decimal.js-aggregated PnL summary |
+| `get_wallet_portfolio_value` | `walletAddress` | None | Current total position value |
+
+`walletAddress` is always an explicit public Polymarket proxy wallet address in `0x` plus 40 hexadecimal-character form. Google sign-in authorizes access to Knoww MCP; it does not provide, infer, or prove ownership of a Polymarket wallet. These tools read public on-chain and Polymarket API data only.
+
 ## Response conventions
 
 ### Successful results
@@ -216,7 +260,7 @@ interface KnowwToolMeta {
 }
 ```
 
-`asOf` is an ISO 8601 timestamp. `sources` identifies Polymarket Gamma or CLOB. `truncated` is true when Knoww caps a result. `get_event` also sets it when a failed or capped follow-up fetch leaves the market list incomplete.
+`asOf` is an ISO 8601 timestamp. `sources` identifies Polymarket Gamma, Data API, or CLOB. `truncated` is true when Knoww caps a result. `get_event` also sets it when a failed or capped follow-up fetch leaves the market list incomplete.
 
 Prices, sizes, volume, liquidity, spreads, and other market quantities use canonical decimal strings. Tool code uses Decimal.js for comparisons and arithmetic.
 
@@ -284,6 +328,7 @@ Run these from the repository root.
 | Command | Purpose |
 |---|---|
 | `pnpm --filter @knoww/mcp dev` | Start the local Worker with the development auth bypass |
+| `pnpm --filter @knoww/mcp dev:oauth` | Start the local Worker with the complete Google OAuth flow |
 | `pnpm --filter @knoww/mcp test` | Run the MCP Worker test suite |
 | `pnpm --filter @knoww/mcp typecheck` | Run TypeScript without emitting files |
 | `pnpm --filter @knoww/mcp lint` | Run Biome checks for the MCP package |
@@ -332,11 +377,49 @@ pnpm exec biome check apps/mcp/src apps/mcp/vitest.config.ts
 pnpm --filter @knoww/mcp build
 ```
 
-The current baseline is 97 service tests and 136 MCP tests. The build command performs a Wrangler production dry run and writes its output to `apps/mcp/dist`.
+The current baseline is 97 service tests and 138 MCP tests. The build command performs a Wrangler production dry run and writes its output to `apps/mcp/dist`.
 
 Tests stub upstream fetches with a one-shot route table. They fail when an expected route is unused or code makes an unexpected outbound request.
 
 ## Manual testing
+
+### Full Google OAuth on localhost
+
+The normal `dev` command bypasses OAuth. Use this flow when you need to test the Google exchange, ID-token verification, OAuth grant, and callback locally.
+
+1. In the Google Cloud Web application used by Knoww MCP, add this temporary Authorized redirect URI:
+
+   ```text
+   http://localhost:8787/auth/google/callback
+   ```
+
+2. Create `apps/mcp/.dev.vars` on your machine with the client ID and secret from that same Google client:
+
+   ```text
+   GOOGLE_CLIENT_ID=replace-with-the-google-client-id
+   GOOGLE_CLIENT_SECRET=replace-with-the-google-client-secret
+   ```
+
+   Git ignores `.dev.vars`. Never commit it, paste its contents into an issue, or pass the secret on the command line.
+
+3. Start the OAuth-enabled Worker with Node.js 24:
+
+   ```bash
+   node --version # v24.x
+   pnpm --filter @knoww/mcp dev:oauth
+   ```
+
+4. Start the web application in another terminal, open its `/mcp-test` page, and set the server URL to `http://localhost:8787/mcp`:
+
+   ```bash
+   pnpm --filter @knoww/web dev
+   ```
+
+5. Select **Authorize**, complete Google sign-in, then select **Connect**. The local Worker uses local KV and Durable Object storage. It does not create a production grant or token.
+
+6. Read the Worker terminal for `mcp.oauth.google.identity.denied` if authorization fails. Use the diagnostic table under [Logging and diagnostics](#logging-and-diagnostics) to identify the failed stage.
+
+Remove the localhost callback from the Google client when the team no longer needs live local OAuth testing. Delete `.dev.vars` when you finish working with the credentials.
 
 ### MCP Inspector
 
@@ -357,10 +440,13 @@ Protocol era: Legacy
 After connecting, open the Tools view and call each tool. A useful test flow is:
 
 1. Call `search_markets` with `query: "bitcoin"`.
-2. Copy an event slug into `get_event`.
-3. Copy a market slug into `get_market`.
-4. Copy an outcome token ID into `get_orderbook`.
+2. Use an event slug from the response with `get_event`.
+3. Use a nested market slug with `get_market`.
+4. Use a nested outcome token ID with `get_orderbook`.
 5. Use the same token ID with `get_price_history`.
+6. Run `get_market_quotes`, `get_market_trades`, `get_market_holders`, and `get_open_interest` with the same live identifiers.
+7. Run `list_events`, `list_tags`, `list_sports_markets`, `get_event_live_volume`, and `get_trader_leaderboard` with their defaults or identifiers from earlier responses.
+8. Paste a public Polymarket proxy wallet address into each profile, position, activity, PnL, and portfolio-value getter.
 
 These calls use the live Polymarket APIs and require internet access.
 
@@ -549,6 +635,9 @@ apps/mcp/
       get-event.ts
       get-orderbook.ts
       get-price-history.ts
+      public-markets.ts      Event, market-data, leaderboard, tag, and sports getters
+      public-wallets.ts      Public profile, position, activity, PnL, and value getters
+      public-read.ts         Shared validation, scope, quota, and error mapping
       gamma.ts               Shared Gamma projections and lifecycle rules
       decimal.ts             Decimal-string conversion
       meta.ts                Shared metadata and tool annotations
@@ -556,12 +645,13 @@ apps/mcp/
       helpers.ts             Worker dispatch and upstream fetch stubs
       worker.test.ts         Transport and Worker boundary coverage
       get-*.test.ts          Tool integration coverage
+      public-read-tools.test.ts Public getter catalog and execution coverage
 
 packages/knoww-services/
   src/
     fetch-options.ts         Caller cancellation and upstream timeouts
     validation.ts            Shared Zod and Decimal.js validators
-    markets/                 Gamma and CLOB service implementations
+    markets/                 Gamma, Data API, and CLOB service implementations
 ```
 
 Tool files should remain thin adapters. Provider calls, payload validation, normalization, caching rules, and business logic belong in `@knoww/services`.
@@ -624,9 +714,23 @@ mcp.auth.denied
 mcp.quota.principal.denied
 mcp.health.readiness.failed
 mcp.tools.tool.failed
+mcp.oauth.google.identity.denied
 ```
 
 Tool failure logs contain only the tool name, request ID, normalized error code, and retryability. They do not contain the raw exception message or stack.
+
+Google identity failures add only allowlisted diagnostic fields:
+
+| `googleStage` | `googleFailure` | Other field | Meaning |
+|---|---|---|---|
+| `token_exchange` | `request_failed` | None | The Worker could not reach Google's token endpoint or the request timed out. |
+| `token_exchange` | `upstream_rejected` | `googleOAuthError=invalid_client` | Google rejected the client ID and secret pair. |
+| `token_exchange` | `upstream_rejected` | `googleOAuthError=invalid_grant` | The code was expired, reused, or did not match the redirect URI or PKCE verifier. |
+| `token_exchange` | `invalid_response` | None | Google returned a successful but malformed or unsupported token response. |
+| `id_token_verification` | `verification_failed` | None | Signature, JWKS, issuer, audience, age, nonce, subject, or verified-email validation failed. |
+| `unknown` | `unexpected_error` | None | An unexpected error occurred outside the classified Google boundary. |
+
+`googleUpstreamStatus` is included when Google rejects the token exchange. Logs never include Google's description, the authorization code, PKCE verifier, ID token, access token, email, client secret, or raw exception.
 
 When debugging a request, start with `x-request-id`, then find the matching structured log line.
 
@@ -693,13 +797,21 @@ pnpm --filter @knoww/mcp dev
 
 Running Wrangler without `--env local` selects the production-shaped OAuth configuration. The default local script intentionally uses `dev-bypass`; the full OAuth code flow is exercised by the Workers-native test suite.
 
+To test the full browser flow locally, follow [Full Google OAuth on localhost](#full-google-oauth-on-localhost). Do not change the checked-in local default from `dev-bypass`.
+
 ### `403` with an invalid Host or Origin
 
-Use `http://localhost:8787/mcp` or `http://127.0.0.1:8787/mcp`. Browser requests must send an Origin whose hostname appears in `MCP_ALLOWED_ORIGIN_HOSTNAMES`. Origin-less desktop requests are allowed.
+Use `http://localhost:8787/mcp` for the browser OAuth flow because it exactly matches the configured local resource metadata. Dev-bypass clients may also use `http://127.0.0.1:8787/mcp`. Browser requests must send an Origin whose hostname appears in `MCP_ALLOWED_ORIGIN_HOSTNAMES`. Origin-less desktop requests are allowed.
 
 ### Google reports `redirect_uri_mismatch`
 
 Open the Google Cloud Console web OAuth client and place `https://mcp.knoww.app/auth/google/callback` under **Authorized redirect URIs**. Do not paste that path into **Authorized JavaScript origins**; an origin is only `https://mcp.knoww.app`. Save the client, allow Google's configuration to propagate, then restart the MCP authorization flow so it uses fresh five-minute state.
+
+For local Google OAuth, also add `http://localhost:8787/auth/google/callback` to that same list. Keep the explorer endpoint at `http://localhost:8787/mcp` so it exactly matches the local protected-resource metadata.
+
+### Local `/authorize` reports that Google authentication is not configured
+
+Cloudflare production secrets are not available to `wrangler dev`. Create the ignored `apps/mcp/.dev.vars` file described in [Full Google OAuth on localhost](#full-google-oauth-on-localhost), then restart `pnpm --filter @knoww/mcp dev:oauth`. The Worker validates only that both variables are present and never logs their values.
 
 ### Google returns but the client stays disconnected
 

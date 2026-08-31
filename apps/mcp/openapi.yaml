@@ -142,6 +142,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
     post:
       operationId: completeMcpAuthorization
       summary: Continue to Google sign-in or deny authorization
@@ -175,6 +177,8 @@ paths:
           description: Form content type is required.
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /auth/google/callback:
     get:
       operationId: completeMcpGoogleSignIn
@@ -203,6 +207,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /oauth/token:
     post:
       operationId: exchangeMcpOAuthToken
@@ -365,6 +371,8 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    ServiceUnavailable:
+      description: Google authentication is not configured in this environment.
 externalDocs:
   description: Model Context Protocol 2026-07-28 specification
   url: https://modelcontextprotocol.io/specification/2026-07-28

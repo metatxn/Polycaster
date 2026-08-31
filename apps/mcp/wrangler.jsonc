@@ -91,7 +91,7 @@
     "local": {
       "routes": [],
       "secrets": {
-        "required": []
+        "required": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
       },
       "kv_namespaces": [
         {

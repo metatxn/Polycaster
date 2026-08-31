@@ -1,4 +1,5 @@
 export const OAUTH_CALLBACK_MESSAGE_TYPE = "knoww-mcp-oauth-callback";
+export const OAUTH_CALLBACK_CHANNEL = "knoww-mcp-oauth";
 
 const CALLBACK_FIELDS = ["code", "error", "iss", "state"] as const;
 
@@ -33,4 +34,24 @@ export function parseOAuthCallbackMessage(
     if (typeof source[name] === "string") params.set(name, source[name]);
   }
   return params;
+}
+
+export function listenForOAuthCallbackBroadcast(
+  listener: (value: unknown) => void
+): () => void {
+  if (typeof BroadcastChannel !== "function") return () => {};
+
+  let channel: BroadcastChannel;
+  try {
+    channel = new BroadcastChannel(OAUTH_CALLBACK_CHANNEL);
+  } catch {
+    return () => {};
+  }
+
+  const receive = (event: MessageEvent<unknown>) => listener(event.data);
+  channel.addEventListener("message", receive);
+  return () => {
+    channel.removeEventListener("message", receive);
+    channel.close();
+  };
 }

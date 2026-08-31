@@ -12,9 +12,7 @@ export function getPostHogBrowserHost(
     if (url.protocol === "http:" || url.protocol === "https:") {
       return normalizedHost;
     }
-  } catch {
-    // Relative proxy paths are not reliable in the Cloudflare deployment.
-  }
+  } catch {}
 
   return DEFAULT_POSTHOG_BROWSER_HOST;
 }

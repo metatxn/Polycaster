@@ -1,4 +1,5 @@
 import type {
+  CandidateGatePolicy,
   CardStyles,
   InjectionPoint,
   PlatformAdapter,
@@ -17,7 +18,7 @@ export interface BasicAdapterConfig {
   name: string;
   hostPatterns: RegExp[];
   bypassEnglishCheck?: boolean;
-  relaxContextGate?: boolean;
+  candidateGatePolicy?: CandidateGatePolicy;
   maxInjectionsPerBatch?: number;
   maxActiveNotificationItems?: number;
   maxNotificationItems?: number;
@@ -89,7 +90,7 @@ export function createBasicAdapter(
     name: config.name,
     hostPatterns: config.hostPatterns,
     bypassEnglishCheck: config.bypassEnglishCheck,
-    relaxContextGate: config.relaxContextGate,
+    candidateGatePolicy: config.candidateGatePolicy,
     maxInjectionsPerBatch: config.maxInjectionsPerBatch,
     maxActiveNotificationItems: config.maxActiveNotificationItems,
     maxNotificationItems: config.maxNotificationItems,

@@ -5,6 +5,7 @@ import {
 import { env } from "cloudflare:workers";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import worker from "../index";
+import { KNOWW_MCP_TOOL_NAMES } from "../tool-catalog";
 
 /**
  * The pool loads the top-level wrangler.jsonc vars, so `env` is the
@@ -168,28 +169,7 @@ describe("MCP endpoint (dev bypass)", () => {
       annotations?: Record<string, unknown>;
       inputSchema?: { properties?: Record<string, unknown> };
     }>;
-    expect(tools.map((tool) => tool.name)).toEqual([
-      "search_markets",
-      "get_market",
-      "get_event",
-      "get_orderbook",
-      "get_price_history",
-      "list_events",
-      "get_market_trades",
-      "get_market_quotes",
-      "get_market_holders",
-      "get_open_interest",
-      "get_event_live_volume",
-      "get_trader_leaderboard",
-      "list_tags",
-      "list_sports_markets",
-      "get_public_profile",
-      "get_wallet_positions",
-      "get_wallet_activity",
-      "get_closed_positions",
-      "get_wallet_pnl",
-      "get_wallet_portfolio_value",
-    ]);
+    expect(tools.map((tool) => tool.name)).toEqual(KNOWW_MCP_TOOL_NAMES);
     expect(tools[0]?.annotations).toMatchObject({
       readOnlyHint: true,
       destructiveHint: false,

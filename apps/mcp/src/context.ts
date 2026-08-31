@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { McpAnalytics } from "./analytics";
 import type { McpPlan } from "./auth/scopes";
 
 /**
@@ -16,6 +17,7 @@ export interface RequestPrincipal {
 
 export interface RequestContextValue {
   requestId: string;
+  analytics?: McpAnalytics;
   principal?: RequestPrincipal;
   toolRateLimiter?: RateLimit;
 }
@@ -28,4 +30,8 @@ export function currentRequestId(): string {
 
 export function currentPrincipal(): RequestPrincipal | undefined {
   return requestContext.getStore()?.principal;
+}
+
+export function currentAnalytics(): McpAnalytics | undefined {
+  return requestContext.getStore()?.analytics;
 }

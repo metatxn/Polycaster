@@ -189,7 +189,6 @@ export type StoredUserSettings = Omit<
 > & {
   platforms?: Partial<PlatformSettings>;
   sources?: Partial<UserSettings["sources"]>;
-  /** Legacy shared control retained only for migration. */
   aiExtractionEnabled?: boolean;
 };
 

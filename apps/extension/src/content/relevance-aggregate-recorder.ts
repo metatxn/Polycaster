@@ -225,7 +225,5 @@ export function recordRelevanceAggregate(
     runtime.sendMessage({ type: "relevance-aggregate:record", sample }, () => {
       void runtime.lastError;
     });
-  } catch {
-    // Aggregate diagnostics must never affect matching or page behavior.
-  }
+  } catch {}
 }

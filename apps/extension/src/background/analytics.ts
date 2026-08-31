@@ -201,11 +201,6 @@ export async function queueAnalyticsEvent(
   });
 }
 
-/**
- * Sends a support request triggered by an explicit button click. This is kept
- * separate from optional usage analytics so turning analytics off does not
- * make a deliberate request appear to succeed while silently dropping it.
- */
 export async function submitSiteSupportRequest(
   hostname: string
 ): Promise<boolean> {

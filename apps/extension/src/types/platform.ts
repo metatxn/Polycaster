@@ -55,6 +55,8 @@ export interface MarketLinkHint {
   title?: string;
 }
 
+export type CandidateGatePolicy = "default" | "short-market-question";
+
 /**
  * Context describing the live stream the user is currently watching.
  * Produced by streaming-surface adapters (e.g. Twitch) and used to seed the
@@ -122,14 +124,7 @@ export interface PlatformAdapter {
    */
   getStreamContext?: () => StreamContext | null;
   bypassEnglishCheck?: boolean;
-  /**
-   * When true, the context gate accepts a single shared signal (instead of
-   * the default two) provided the relevance score clears `AI_GATE_RETRY_FLOOR`.
-   * Intended for platforms where both sides of the comparison are short
-   * market questions (e.g. kalshi.com), so most correct matches naturally
-   * share only one meaningful noun.
-   */
-  relaxContextGate?: boolean;
+  candidateGatePolicy?: CandidateGatePolicy;
   /**
    * When true, scoring/gating can include nested Polymarket market labels and
    * questions. Default false preserves the historical behavior for social

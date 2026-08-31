@@ -366,11 +366,6 @@ function scoreLexicalDocument(queryTokens: string[], text: string): number {
   return score / (uniqueQueryTokens.length * (k1 + 1));
 }
 
-/**
- * Stable lexical shadow scoring with one tokenizer for queries and
- * documents. Each candidate is scored independently, so its feature value is
- * unaffected by the other candidates in the result set.
- */
 export function stableLexicalScore(
   postText: string,
   marketTexts: string[]
@@ -389,10 +384,6 @@ export function stableLexicalScore(
   return scores;
 }
 
-/**
- * Production-compatible MiniSearch BM25 scoring. Its pool-relative
- * normalization is retained until paired shadow evaluation supports a change.
- */
 export function bm25Score(postText: string, marketTexts: string[]): number[] {
   if (marketTexts.length === 0) return [];
 

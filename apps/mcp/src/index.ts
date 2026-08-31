@@ -1,10 +1,19 @@
 import { createLogger } from "@knoww/logger";
+import {
+  createMcpAnalytics,
+  MCP_ANALYTICS_EVENTS,
+  mcpRoute,
+} from "./analytics";
 import { oauthProviderFor } from "./auth/provider";
 import { FREE_MCP_PLAN, MARKETS_READ_SCOPE } from "./auth/scopes";
 import type { McpOAuthEnv } from "./auth/types";
 import { boundPublicRequestBody } from "./body-limit";
 import { type WorkerConfig, workerConfigFromEnv } from "./config";
-import { type RequestPrincipal, requestContext } from "./context";
+import {
+  currentAnalytics,
+  type RequestPrincipal,
+  requestContext,
+} from "./context";
 import { handleHealthRequest } from "./health";
 import { dispatchMcpRequest } from "./mcp-handler";
 import {
@@ -129,6 +138,7 @@ async function dispatchDevelopmentRequest(
   return requestContext.run(
     {
       requestId,
+      analytics: currentAnalytics(),
       principal,
       toolRateLimiter: toolLimiterFor(env, principal.plan),
     },
@@ -140,13 +150,10 @@ function dispatchOAuthRequest(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
-  config: WorkerConfig,
-  requestId: string
+  config: WorkerConfig
 ): Promise<Response> {
   const provider = oauthProviderFor(config);
-  return requestContext.run({ requestId }, () =>
-    provider.fetch(request, env as McpOAuthEnv, ctx)
-  );
+  return provider.fetch(request, env as McpOAuthEnv, ctx);
 }
 
 const worker = {
@@ -158,99 +165,125 @@ const worker = {
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();
     const url = new URL(request.url);
-    log.info("request.started", {
-      requestId,
-      method: request.method,
-      path: url.pathname,
+    const analytics = createMcpAnalytics({
+      projectApiKey: env.POSTHOG_PROJECT_API_KEY,
+      host: env.POSTHOG_HOST,
+      waitUntil: (task) => ctx.waitUntil(task),
     });
 
-    try {
-      const config = workerConfigFromEnv(env);
-      const useHsts = new URL(config.canonicalResource).protocol === "https:";
-      const hostname = inboundHostname(request);
-      if (!hostname || !config.allowedHostnames.includes(hostname)) {
-        log.warn("request.denied", { requestId, reason: "invalid_host" });
-        return finalizeResponse(
-          errorResponse(403, "FORBIDDEN", "Forbidden.", requestId),
+    return requestContext.run({ requestId, analytics }, async () => {
+      let authMode: WorkerConfig["authMode"] | "unknown" = "unknown";
+      const complete = (response: Response, useHsts: boolean): Response => {
+        const durationMs = Date.now() - startedAt;
+        log.info("request.finished", {
           requestId,
-          useHsts
-        );
-      }
-
-      let response: Response;
-      if (!(await checkEdgeQuota(request, env))) {
-        log.warn("request.denied", {
-          requestId,
-          path: url.pathname,
-          reason: "edge_rate_limited",
+          status: response.status,
+          durationMs,
         });
-        response = quotaResponse(requestId);
-      } else if (
-        config.authMode === "oauth-required" &&
-        !(await checkAuthRateLimit(request, env))
-      ) {
-        log.warn("auth.denied", { requestId, reason: "rate_limited" });
-        response = errorResponse(
-          429,
-          "RATE_LIMITED",
-          "Too many authentication requests.",
-          requestId,
-          { "retry-after": "60" }
-        );
-      } else {
-        const boundedRequest = await boundPublicRequestBody(request, requestId);
-        if (boundedRequest instanceof Response) {
-          response = boundedRequest;
+        analytics.capture(MCP_ANALYTICS_EVENTS.httpRequestCompleted, {
+          request_id: requestId,
+          route: mcpRoute(url.pathname),
+          http_method: request.method,
+          status: response.status,
+          status_class: `${Math.floor(response.status / 100)}xx`,
+          outcome: response.status < 400 ? "success" : "error",
+          duration_ms: durationMs,
+          auth_mode: authMode,
+        });
+        analytics.flush();
+        return finalizeResponse(response, requestId, useHsts);
+      };
+
+      log.info("request.started", {
+        requestId,
+        method: request.method,
+        path: url.pathname,
+      });
+
+      try {
+        const config = workerConfigFromEnv(env);
+        authMode = config.authMode;
+        const useHsts = new URL(config.canonicalResource).protocol === "https:";
+        const hostname = inboundHostname(request);
+        if (!hostname || !config.allowedHostnames.includes(hostname)) {
+          log.warn("request.denied", { requestId, reason: "invalid_host" });
+          return complete(
+            errorResponse(403, "FORBIDDEN", "Forbidden.", requestId),
+            useHsts
+          );
+        }
+
+        let response: Response;
+        if (!(await checkEdgeQuota(request, env))) {
+          log.warn("request.denied", {
+            requestId,
+            path: url.pathname,
+            reason: "edge_rate_limited",
+          });
+          response = quotaResponse(requestId);
+        } else if (
+          config.authMode === "oauth-required" &&
+          !(await checkAuthRateLimit(request, env))
+        ) {
+          log.warn("auth.denied", { requestId, reason: "rate_limited" });
+          response = errorResponse(
+            429,
+            "RATE_LIMITED",
+            "Too many authentication requests.",
+            requestId,
+            { "retry-after": "60" }
+          );
         } else {
-          const healthResponse = await handleHealthRequest(
-            boundedRequest,
-            env,
+          const boundedRequest = await boundPublicRequestBody(
+            request,
             requestId
           );
-          if (healthResponse) {
-            response = healthResponse;
-          } else if (config.authMode === "dev-bypass") {
-            response = await dispatchDevelopmentRequest(
-              boundedRequest,
-              env,
-              ctx,
-              config,
-              requestId
-            );
+          if (boundedRequest instanceof Response) {
+            response = boundedRequest;
           } else {
-            response = await dispatchOAuthRequest(
+            const healthResponse = await handleHealthRequest(
               boundedRequest,
               env,
-              ctx,
-              config,
               requestId
             );
+            if (healthResponse) {
+              response = healthResponse;
+            } else if (config.authMode === "dev-bypass") {
+              response = await dispatchDevelopmentRequest(
+                boundedRequest,
+                env,
+                ctx,
+                config,
+                requestId
+              );
+            } else {
+              response = await dispatchOAuthRequest(
+                boundedRequest,
+                env,
+                ctx,
+                config
+              );
+            }
           }
         }
-      }
 
-      log.info("request.finished", {
-        requestId,
-        status: response.status,
-        durationMs: Date.now() - startedAt,
-      });
-      return finalizeResponse(response, requestId, useHsts);
-    } catch (error) {
-      log.error("request.failed", {
-        requestId,
-        errorName: error instanceof Error ? error.name : "UnknownError",
-      });
-      return finalizeResponse(
-        errorResponse(
-          500,
-          "INTERNAL_ERROR",
-          "Something went wrong.",
-          requestId
-        ),
-        requestId,
-        url.protocol === "https:"
-      );
-    }
+        return complete(response, useHsts);
+      } catch (error) {
+        log.error("request.failed", {
+          requestId,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        return complete(
+          errorResponse(
+            500,
+            "INTERNAL_ERROR",
+            "Something went wrong.",
+            requestId
+          ),
+          url.protocol === "https:"
+        );
+      }
+    });
   },
 } satisfies ExportedHandler<Env>;
 

@@ -1,6 +1,3 @@
-// Keep the audited production limits until the multi-tab proxy capacity check
-// completes successfully. The evaluation contract can still exercise wider
-// 20-100 candidate snapshots without increasing live search traffic.
 export const POLYMARKET_SEARCH_RESULT_LIMIT = 8;
 export const COMBINED_SEARCH_RESULT_LIMIT = 10;
 

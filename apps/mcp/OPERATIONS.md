@@ -29,6 +29,7 @@ Before deploying, confirm that production namespace IDs `1001` through `1004` do
 2. Are OAuth, principal, or tool quotas rejecting a material share of traffic?
 3. Which upstream-backed tool is failing, and is the failure retryable?
 4. Did latency or error rate change after a new Worker version received traffic?
+5. Which clients, MCP methods, and tools are used, and how many authenticated principals return?
 
 The Worker emits structured events with a request ID. Useful event names include:
 
@@ -44,6 +45,8 @@ mcp.tools.tool.failed
 
 Logs must never include bearer tokens, Google codes or tokens, authorization headers, request bodies, tool output, or raw exceptions.
 
+PostHog receives `mcp_http_request_completed`, `mcp_protocol_request_completed`, and `mcp_tool_called`. The Worker batches them after the response through `waitUntil()`. Delivery failure never changes the MCP response. Dashboard properties are bounded, and authenticated principal IDs are hashed before ingestion. Request bodies, tool arguments, wallet addresses, queries, response bodies, and OAuth material are excluded.
+
 ## Required Cloudflare setup
 
 Complete these items in the intended Cloudflare account before the first production deployment:
@@ -56,10 +59,11 @@ Complete these items in the intended Cloudflare account before the first product
 6. Configure Workers Logs retention and access for the release operator and on-call team.
 7. Configure the alerts in the next section and test their delivery channel.
 8. Create a Google OAuth client of type **Web application** and configure `https://mcp.knoww.app/auth/google/callback` as an exact Authorized redirect URI.
-9. Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to the `knoww-mcp` Worker as encrypted Cloudflare secrets. Do not add the callback path to Authorized JavaScript origins.
-10. Confirm the OAuth consent screen is published for the intended users and requests only `openid email`.
+9. Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `POSTHOG_PROJECT_API_KEY` to the `knoww-mcp` Worker as encrypted Cloudflare secrets. Reuse project `585396`'s project token for PostHog ingestion. Do not use a personal API key in the Worker, and do not add the callback path to Authorized JavaScript origins.
+10. Confirm `POSTHOG_HOST` is `https://us.i.posthog.com`.
+11. Confirm the OAuth consent screen is published for the intended users and requests only `openid email`.
 
-Do not place secret values in `wrangler.jsonc`, this runbook, GitHub Actions, build variables, URLs, or command history. The production Worker requires both Google bindings. Cloudflare Workers Builds must use the secrets already attached to `knoww-mcp`; it must not recreate them on every deployment.
+Do not place secret values in `wrangler.jsonc`, this runbook, GitHub Actions, build variables, URLs, or command history. The production Worker requires the Google bindings and PostHog project token. Cloudflare Workers Builds must use the secrets already attached to `knoww-mcp`; it must not recreate them on every deployment.
 
 ## Alerts and release thresholds
 

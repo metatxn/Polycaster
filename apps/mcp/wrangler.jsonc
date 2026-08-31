@@ -18,9 +18,12 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
-  // Required bindings are configured in Cloudflare, never in this file.
   "secrets": {
-    "required": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
+    "required": [
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "POSTHOG_PROJECT_API_KEY"
+    ]
   },
   "kv_namespaces": [
     {
@@ -85,7 +88,8 @@
     "MCP_AUTH_MODE": "oauth-required",
     "MCP_CANONICAL_RESOURCE": "https://mcp.knoww.app/mcp",
     "MCP_ALLOWED_HOSTNAMES": "mcp.knoww.app",
-    "MCP_ALLOWED_ORIGIN_HOSTNAMES": "mcp.knoww.app,knoww.app,www.knoww.app"
+    "MCP_ALLOWED_ORIGIN_HOSTNAMES": "mcp.knoww.app,knoww.app,www.knoww.app",
+    "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "env": {
     "local": {
@@ -144,7 +148,8 @@
         "MCP_AUTH_MODE": "dev-bypass",
         "MCP_CANONICAL_RESOURCE": "http://localhost:8787/mcp",
         "MCP_ALLOWED_HOSTNAMES": "localhost,127.0.0.1",
-        "MCP_ALLOWED_ORIGIN_HOSTNAMES": "localhost,127.0.0.1"
+        "MCP_ALLOWED_ORIGIN_HOSTNAMES": "localhost,127.0.0.1",
+        "POSTHOG_HOST": "https://us.i.posthog.com"
       }
     }
   }

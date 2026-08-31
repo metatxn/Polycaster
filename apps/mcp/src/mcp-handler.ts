@@ -1,7 +1,12 @@
 import { createLogger } from "@knoww/logger";
 import { createMcpHandler, type StatelessMcpHandler } from "agents/mcp/server";
+import { MCP_ANALYTICS_EVENTS, parseMcpProtocolMessages } from "./analytics";
 import type { WorkerConfig } from "./config";
-import { currentRequestId } from "./context";
+import {
+  currentAnalytics,
+  currentPrincipal,
+  currentRequestId,
+} from "./context";
 import { createKnowwMcpServer } from "./server";
 
 const log = createLogger("mcp");
@@ -33,11 +38,49 @@ function handlerFor(config: WorkerConfig): StatelessMcpHandler {
   return handler;
 }
 
-export function dispatchMcpRequest(
+export async function dispatchMcpRequest(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
   config: WorkerConfig
 ): Promise<Response> {
-  return handlerFor(config)(request, env, ctx);
+  const startedAt = Date.now();
+  const metadataPromise =
+    request.method === "POST"
+      ? request
+          .clone()
+          .json<unknown>()
+          .then(parseMcpProtocolMessages)
+          .catch(() => [])
+      : Promise.resolve([]);
+
+  const captureOutcome = async (status: number) => {
+    const analytics = currentAnalytics();
+    const principal = currentPrincipal();
+    const metadata = await metadataPromise;
+    for (const properties of metadata) {
+      analytics?.capture(
+        MCP_ANALYTICS_EVENTS.protocolRequestCompleted,
+        {
+          request_id: currentRequestId(),
+          ...properties,
+          status,
+          outcome: status < 400 ? "success" : "error",
+          duration_ms: Date.now() - startedAt,
+          auth_method: principal?.authMethod,
+          plan: principal?.plan,
+        },
+        principal?.id
+      );
+    }
+  };
+
+  try {
+    const response = await handlerFor(config)(request, env, ctx);
+    await captureOutcome(response.status);
+    return response;
+  } catch (error) {
+    await captureOutcome(500);
+    throw error;
+  }
 }

@@ -1316,8 +1316,6 @@ async function analyzePostAndFindMarket(
       }
     }
 
-    // MiniLM is diagnostics-only in this phase. Its scores are recorded below
-    // but must not affect gate decisions, candidate admission, or display order.
     if (isDebug && scoringMode !== "heuristic" && marketScores.length > 0) {
       const candidateIndexes = marketScores
         .map((score, index) => ({ index, score }))
@@ -1586,7 +1584,7 @@ async function analyzePostAndFindMarket(
           scoringMode,
           score,
           gate: contextGateResults[i],
-          relaxed: currentPlatform?.relaxContextGate === true,
+          candidateGatePolicy: currentPlatform?.candidateGatePolicy,
           includeNestedMarketContext,
         });
     const gate = gateDecision.gate;

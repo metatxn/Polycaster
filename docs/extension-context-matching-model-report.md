@@ -41,7 +41,7 @@ The staged review was right about the material gaps. The corrections below keep 
 | Bounded document support looked fully connected | Partly confirmed. The bounded market document path is live only where nested context is enabled. The structured post builder has no production caller. | The report now distinguishes implemented builders from live inputs. No broad document rollout was made without evaluation data. |
 | RRF and production reranking looked rollout-ready | Overstated. The pure RRF module has no production importer, and the production reranker setting has no live scoring caller. | Both remain inactive until the promotion and browser-runtime gates pass. |
 
-The Kalshi and Manifold relaxed-gate finding is verified. Both adapters set `relaxContextGate`, but the active single-signal recovery requires promoted rerank evidence that the live caller does not supply. The older score-plus-one-signal rule now runs in shadow only: it increments a bounded aggregate counter when it would recover a domain-compatible candidate rejected by the active gate. It does not admit, validate, rank, or display that candidate. See "Kalshi and Manifold shadow decision" below.
+The Kalshi and Manifold relaxed-gate finding is verified. Both adapters select `candidateGatePolicy: "short-market-question"`, but the active single-signal recovery requires promoted rerank evidence that the live caller does not supply. The older score-plus-one-signal rule now runs in shadow only: it increments a bounded aggregate counter when it would recover a domain-compatible candidate rejected by the active gate. It does not admit, validate, rank, or display that candidate. See "Kalshi and Manifold shadow decision" below.
 
 ### Phase completion
 
@@ -116,7 +116,7 @@ The current model recommendation has not changed: Arctic S plus a measured MiniL
 
 ### Kalshi and Manifold shadow decision
 
-This issue is in the local gate policy, not the Kalshi API or Kalshi model data. Kalshi and Manifold pages compare one short market question with another. Valid pairs often share one specific word or entity, so both adapters set `relaxContextGate`.
+This issue is in the local gate policy, not the Kalshi API or Kalshi model data. Kalshi and Manifold pages compare one short market question with another. Valid pairs often share one specific word or entity, so both adapters select the `short-market-question` policy.
 
 Before the staged gate rewrite, a failed two-signal gate could recover when the first-stage score was at least `0.6` and one signal matched. The current rewrite adds two requirements: the signal must count as specific, and a reranker must have a matching passed promotion record plus a score above its calibrated threshold. The production call to `evaluateCandidateGate` does not pass `rerankEvidence`. As a result, `rerankPassed` is always false and the relaxed branch cannot run. Manifold inherits the same behavior because it uses the same adapter flag.
 
@@ -126,7 +126,7 @@ There are three defensible rollout choices:
 2. Keep the current strict behavior until MiniLM promotion and calibration are complete. This minimizes false positives but accepts a known recall regression.
 3. Add a platform-specific shadow comparison first. Measure recovery volume before deciding whether a controlled validation or labeled replay is justified. This is the implemented choice because it observes the disputed rule without changing cards.
 
-The gate now returns `legacyRelaxedShadowEligible` only when the historical rule would have recovered a domain-compatible candidate and the active gate still rejects it. Injection aggregates that result into `legacyRelaxedShadowEligible`; the parser bounds each sample to 0 through 1,000 and the existing snapshot retention remains 14 UTC days. The counter is combined across Kalshi and Manifold because they are the only adapters that set `relaxContextGate`.
+The gate now returns `legacyRelaxedShadowEligible` only when the historical rule would have recovered a domain-compatible candidate and the active gate still rejects it. Injection aggregates that result into `legacyRelaxedShadowEligible`; the parser bounds each sample to 0 through 1,000 and the existing snapshot retention remains 14 UTC days. The counter is combined across Kalshi and Manifold because they are the only adapters that select the `short-market-question` policy.
 
 This first shadow phase intentionally does not call the remote validator for rejected candidates. Doing so would add network work, latency, and browsing-data processing to a path that currently stops locally. The counter therefore answers “how much recall might this restore?” but not “how many recovered matches are correct?” Correctness still requires a consented labeled replay or a separately approved controlled validation experiment.
 

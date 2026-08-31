@@ -143,7 +143,7 @@ export default function ExtensionPage() {
                 </h1>
 
                 <p className="text-base md:text-[17px] text-(--kw-fg)/70 max-w-[560px] leading-[1.55] mb-8">
-                  The Knoww Chrome extension reads the page you’re on — a post
+                  The Knoww Chrome extension reads the page you’re on - a post
                   on X, a Reddit thread, a news story — and surfaces live
                   Polymarket odds on that exact question, right where you’re
                   reading.

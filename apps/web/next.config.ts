@@ -30,20 +30,6 @@ const nextConfig: NextConfig = {
     };
     return config;
   },
-  async rewrites() {
-    return [
-      {
-        source: "/ingest/static/:path*",
-        destination: "https://us-assets.i.posthog.com/static/:path*",
-      },
-      {
-        source: "/ingest/:path*",
-        destination: "https://us.i.posthog.com/:path*",
-      },
-    ];
-  },
-  // Required to support PostHog trailing slash API requests
-  skipTrailingSlashRedirect: true,
   // Image optimization is delegated to the shared optimizer at
   // `NEXT_PUBLIC_IMAGE_OPTIMIZER_URL` (default: https://images.knoww.app).
   // With a custom loader, Next's built-in `/_next/image` isn't used — so

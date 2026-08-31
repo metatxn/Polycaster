@@ -4,6 +4,8 @@ import {
   buildGoogleAuthorizationUrl,
   createGooglePkce,
   exchangeGoogleAuthorizationCode,
+  GoogleAuthenticationError,
+  googleAuthenticationLogFields,
   verifyGoogleIdToken,
 } from "./google";
 
@@ -101,7 +103,11 @@ describe("Google OIDC", () => {
         keyResolver,
         nonce: "different-nonce",
       })
-    ).rejects.toThrow("Google identity could not be verified");
+    ).rejects.toMatchObject({
+      googleFailure: "verification_failed",
+      googleStage: "id_token_verification",
+      message: "Google identity could not be verified.",
+    });
 
     await expect(
       verifyGoogleIdToken({
@@ -134,16 +140,76 @@ describe("Google OIDC", () => {
     ).rejects.toThrow("Google identity could not be verified");
   });
 
-  it("rejects malformed and failed token responses with a generic error", async () => {
-    await expect(
-      exchangeGoogleAuthorizationCode({
+  it("classifies a rejected token exchange without exposing Google's response", async () => {
+    let failure: unknown;
+    try {
+      await exchangeGoogleAuthorizationCode({
         clientId: CLIENT_ID,
         clientSecret: "google-test-secret",
         code: "rejected-code",
         codeVerifier: "v".repeat(64),
-        fetchImpl: async () => Response.json({ error: "invalid_grant" }),
+        fetchImpl: async () =>
+          Response.json(
+            {
+              error: "invalid_client",
+              error_description: "sensitive upstream detail",
+            },
+            { status: 401 }
+          ),
+        redirectUri: REDIRECT_URI,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(GoogleAuthenticationError);
+    expect(failure).toMatchObject({
+      googleFailure: "upstream_rejected",
+      googleOAuthError: "invalid_client",
+      googleStage: "token_exchange",
+      googleUpstreamStatus: 401,
+      message: "Google authentication failed.",
+    });
+    expect(String(failure)).not.toContain("sensitive upstream detail");
+  });
+
+  it("classifies malformed token responses separately from exchange rejection", async () => {
+    await expect(
+      exchangeGoogleAuthorizationCode({
+        clientId: CLIENT_ID,
+        clientSecret: "google-test-secret",
+        code: "accepted-code",
+        codeVerifier: "v".repeat(64),
+        fetchImpl: async () => Response.json({ access_token: "unused" }),
         redirectUri: REDIRECT_URI,
       })
-    ).rejects.toThrow("Google authentication failed");
+    ).rejects.toMatchObject({
+      googleFailure: "invalid_response",
+      googleStage: "token_exchange",
+    });
+  });
+
+  it("returns an allowlisted diagnostic object and redacts unknown errors", () => {
+    expect(
+      googleAuthenticationLogFields(
+        new GoogleAuthenticationError({
+          googleFailure: "upstream_rejected",
+          googleOAuthError: "invalid_grant",
+          googleStage: "token_exchange",
+          googleUpstreamStatus: 400,
+        })
+      )
+    ).toEqual({
+      googleFailure: "upstream_rejected",
+      googleOAuthError: "invalid_grant",
+      googleStage: "token_exchange",
+      googleUpstreamStatus: 400,
+    });
+    expect(
+      googleAuthenticationLogFields(new Error("secret must not reach logs"))
+    ).toEqual({
+      googleFailure: "unexpected_error",
+      googleStage: "unknown",
+    });
   });
 });

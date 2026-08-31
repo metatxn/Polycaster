@@ -284,6 +284,7 @@ Run these from the repository root.
 | Command | Purpose |
 |---|---|
 | `pnpm --filter @knoww/mcp dev` | Start the local Worker with the development auth bypass |
+| `pnpm --filter @knoww/mcp dev:oauth` | Start the local Worker with the complete Google OAuth flow |
 | `pnpm --filter @knoww/mcp test` | Run the MCP Worker test suite |
 | `pnpm --filter @knoww/mcp typecheck` | Run TypeScript without emitting files |
 | `pnpm --filter @knoww/mcp lint` | Run Biome checks for the MCP package |
@@ -332,11 +333,49 @@ pnpm exec biome check apps/mcp/src apps/mcp/vitest.config.ts
 pnpm --filter @knoww/mcp build
 ```
 
-The current baseline is 97 service tests and 136 MCP tests. The build command performs a Wrangler production dry run and writes its output to `apps/mcp/dist`.
+The current baseline is 97 service tests and 138 MCP tests. The build command performs a Wrangler production dry run and writes its output to `apps/mcp/dist`.
 
 Tests stub upstream fetches with a one-shot route table. They fail when an expected route is unused or code makes an unexpected outbound request.
 
 ## Manual testing
+
+### Full Google OAuth on localhost
+
+The normal `dev` command bypasses OAuth. Use this flow when you need to test the Google exchange, ID-token verification, OAuth grant, and callback locally.
+
+1. In the Google Cloud Web application used by Knoww MCP, add this temporary Authorized redirect URI:
+
+   ```text
+   http://localhost:8787/auth/google/callback
+   ```
+
+2. Create `apps/mcp/.dev.vars.local` on your machine with the client ID and secret from that same Google client:
+
+   ```text
+   GOOGLE_CLIENT_ID=replace-with-the-google-client-id
+   GOOGLE_CLIENT_SECRET=replace-with-the-google-client-secret
+   ```
+
+   Git ignores `.dev.vars.local`. Never commit it, paste its contents into an issue, or pass the secret on the command line.
+
+3. Start the OAuth-enabled Worker with Node.js 24:
+
+   ```bash
+   node --version # v24.x
+   pnpm --filter @knoww/mcp dev:oauth
+   ```
+
+4. Start the web application in another terminal, open its `/mcp-test` page, and set the server URL to `http://localhost:8787/mcp`:
+
+   ```bash
+   pnpm --filter @knoww/web dev
+   ```
+
+5. Select **Authorize**, complete Google sign-in, then select **Connect**. The local Worker uses local KV and Durable Object storage. It does not create a production grant or token.
+
+6. Read the Worker terminal for `mcp.oauth.google.identity.denied` if authorization fails. Use the diagnostic table under [Logging and diagnostics](#logging-and-diagnostics) to identify the failed stage.
+
+Remove the localhost callback from the Google client when the team no longer needs live local OAuth testing. Delete `.dev.vars.local` when you finish working with the credentials.
 
 ### MCP Inspector
 
@@ -624,9 +663,23 @@ mcp.auth.denied
 mcp.quota.principal.denied
 mcp.health.readiness.failed
 mcp.tools.tool.failed
+mcp.oauth.google.identity.denied
 ```
 
 Tool failure logs contain only the tool name, request ID, normalized error code, and retryability. They do not contain the raw exception message or stack.
+
+Google identity failures add only allowlisted diagnostic fields:
+
+| `googleStage` | `googleFailure` | Other field | Meaning |
+|---|---|---|---|
+| `token_exchange` | `request_failed` | None | The Worker could not reach Google's token endpoint or the request timed out. |
+| `token_exchange` | `upstream_rejected` | `googleOAuthError=invalid_client` | Google rejected the client ID and secret pair. |
+| `token_exchange` | `upstream_rejected` | `googleOAuthError=invalid_grant` | The code was expired, reused, or did not match the redirect URI or PKCE verifier. |
+| `token_exchange` | `invalid_response` | None | Google returned a successful but malformed or unsupported token response. |
+| `id_token_verification` | `verification_failed` | None | Signature, JWKS, issuer, audience, age, nonce, subject, or verified-email validation failed. |
+| `unknown` | `unexpected_error` | None | An unexpected error occurred outside the classified Google boundary. |
+
+`googleUpstreamStatus` is included when Google rejects the token exchange. Logs never include Google's description, the authorization code, PKCE verifier, ID token, access token, email, client secret, or raw exception.
 
 When debugging a request, start with `x-request-id`, then find the matching structured log line.
 
@@ -692,6 +745,8 @@ pnpm --filter @knoww/mcp dev
 ```
 
 Running Wrangler without `--env local` selects the production-shaped OAuth configuration. The default local script intentionally uses `dev-bypass`; the full OAuth code flow is exercised by the Workers-native test suite.
+
+To test the full browser flow locally, follow [Full Google OAuth on localhost](#full-google-oauth-on-localhost). Do not change the checked-in local default from `dev-bypass`.
 
 ### `403` with an invalid Host or Origin
 

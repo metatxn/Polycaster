@@ -16,6 +16,7 @@ import {
   buildGoogleAuthorizationUrl,
   createGooglePkce,
   type GoogleAuthenticator,
+  googleAuthenticationLogFields,
 } from "./google";
 import {
   FREE_MCP_PLAN,
@@ -351,8 +352,9 @@ async function handleGoogleCallback(
       redirectUri: googleRedirectUri(request),
     });
     subject = identity.subject;
-  } catch {
+  } catch (error) {
     log.warn("identity.denied", {
+      ...googleAuthenticationLogFields(error),
       requestId: currentRequestId(),
       reason: "google_verification_failed",
     });

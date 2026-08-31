@@ -74,7 +74,6 @@ export const mcpOAuthApiHandler = {
       id: props.principalId,
       plan: props.plan,
       scopes: props.scopes,
-      walletAddress: props.walletAddress,
     };
     const config = workerConfigFromEnv(env);
     if (!(await checkPrincipalQuota(env, principal))) {

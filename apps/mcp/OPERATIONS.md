@@ -8,7 +8,7 @@ This runbook covers the production Worker. Knoww does not run a remote MCP stagi
 |---|---|---|---|
 | Production | `https://mcp.knoww.app/mcp` | `https://mcp.knoww.app/healthz` | `https://mcp.knoww.app/readyz` |
 
-`/healthz` proves that the Worker can execute. `/readyz` also reads the OAuth KV namespace and calls the wallet-challenge Durable Object. Both endpoints return `cache-control: no-store` and an `x-request-id`.
+`/healthz` proves that the Worker can execute. `/readyz` also reads the OAuth KV namespace and calls the one-time authorization-transaction Durable Object. Both endpoints return `cache-control: no-store` and an `x-request-id`.
 
 ## Quotas
 
@@ -42,7 +42,7 @@ mcp.health.readiness.failed
 mcp.tools.tool.failed
 ```
 
-Logs must never include bearer tokens, wallet signatures, authorization headers, request bodies, tool output, or raw exceptions.
+Logs must never include bearer tokens, Google codes or tokens, authorization headers, request bodies, tool output, or raw exceptions.
 
 ## Required Cloudflare setup
 
@@ -55,8 +55,11 @@ Complete these items in the intended Cloudflare account before the first product
 5. Confirm the rate-limit namespace IDs listed above are unique in the account.
 6. Configure Workers Logs retention and access for the release operator and on-call team.
 7. Configure the alerts in the next section and test their delivery channel.
+8. Create a Google OAuth client of type **Web application** and configure `https://mcp.knoww.app/auth/google/callback` as an exact Authorized redirect URI.
+9. Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to the `knoww-mcp` Worker as encrypted Cloudflare secrets. Do not add the callback path to Authorized JavaScript origins.
+10. Confirm the OAuth consent screen is published for the intended users and requests only `openid email`.
 
-Do not place secrets in `wrangler.jsonc`, this runbook, GitHub Actions, or command history. This Worker currently requires no application secret variables.
+Do not place secret values in `wrangler.jsonc`, this runbook, GitHub Actions, build variables, URLs, or command history. The production Worker requires both Google bindings. Cloudflare Workers Builds must use the secrets already attached to `knoww-mcp`; it must not recreate them on every deployment.
 
 ## Alerts and release thresholds
 
@@ -120,7 +123,7 @@ curl --include --silent --show-error https://mcp.knoww.app/.well-known/oauth-pro
 curl --include --silent --show-error https://mcp.knoww.app/.well-known/oauth-authorization-server
 ```
 
-Complete a wallet OAuth flow using dynamic client registration and a Client ID Metadata Document client. Call all five tools, test cancellation, trigger each quota in a controlled test, and locate the requests in Workers Logs by `x-request-id`. Watch health, readiness, 5xx rate, latency, OAuth failures, and tool failures for at least one hour.
+Complete a Google OAuth flow using dynamic client registration and a Client ID Metadata Document client. Call all five tools, test cancellation, confirm callback replay is rejected, trigger each quota in a controlled test, and locate the requests in Workers Logs by `x-request-id`. Watch health, readiness, 5xx rate, latency, OAuth failures, and tool failures for at least one hour.
 
 ## Enable Cloudflare production deployments
 
@@ -206,7 +209,7 @@ After rollback, verify `/healthz`, `/readyz`, OAuth discovery, one authenticated
 
 ## Launch limitations
 
-- Production authentication accepts injected EVM wallets with EOA signatures. EIP-1271 smart-contract wallets are not supported yet.
+- Production authentication requires a Google account with a verified email. Knoww does not expose the Google email or tokens to MCP clients.
 - Version 1 is read-only. It cannot place trades, sign orders, move funds, or make x402 payments.
 - `x402:pay` remains inactive and must not appear in OAuth metadata until paid tools have their own payment-proof and idempotency review.
 - The HTTP endpoint contract is in [`openapi.yaml`](openapi.yaml). MCP tool schemas remain authoritative through protocol discovery.

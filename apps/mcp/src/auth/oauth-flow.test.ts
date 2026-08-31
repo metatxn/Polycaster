@@ -3,20 +3,37 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { workerConfigFromEnv } from "../config";
 import worker from "../index";
+import type { GoogleAuthenticator } from "./google";
+import { createOAuthProvider } from "./provider";
 import { FUTURE_X402_SCOPE, MARKETS_READ_SCOPE } from "./scopes";
-import { buildWalletLoginMessage } from "./wallet";
+import type { McpOAuthEnv } from "./types";
 
 const RESOURCE = "https://mcp.knoww.app/mcp";
 const ORIGIN = "https://mcp.knoww.app";
 const REDIRECT_URI = "https://agent.example/oauth/callback";
-const account = privateKeyToAccount(generatePrivateKey());
+const GOOGLE_SUBJECT = "102030405060708090";
+
+const googleAuthenticator = vi.fn<GoogleAuthenticator>(async () => ({
+  subject: GOOGLE_SUBJECT,
+}));
+const googleProvider = createOAuthProvider(
+  workerConfigFromEnv(env),
+  googleAuthenticator
+);
 
 async function dispatch(request: Request): Promise<Response> {
   const ctx = createExecutionContext();
   const response = await worker.fetch(request, env, ctx);
+  await waitOnExecutionContext(ctx);
+  return response;
+}
+
+async function dispatchGoogleFlow(request: Request): Promise<Response> {
+  const ctx = createExecutionContext();
+  const response = await googleProvider.fetch(request, env as McpOAuthEnv, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }
@@ -32,7 +49,7 @@ function oauthRequest(path: string, init?: RequestInit): Request {
 }
 
 async function registerClient(): Promise<string> {
-  const response = await dispatch(
+  const response = await dispatchGoogleFlow(
     oauthRequest("/oauth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -52,9 +69,9 @@ async function registerClient(): Promise<string> {
 
 function toBase64Url(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+    .replace(/\+/gu, "-")
+    .replace(/\//gu, "_")
+    .replace(/=+$/gu, "");
 }
 
 async function pkceChallenge(verifier: string): Promise<string> {
@@ -81,10 +98,36 @@ function authorizationPath(input: {
   return `/authorize?${query.toString()}`;
 }
 
-function htmlAttribute(html: string, name: string): string {
-  const match = html.match(new RegExp(`${name}="([^"]+)"`));
+function hiddenInputValue(html: string, name: string): string {
+  const pattern = new RegExp(`name="${name}" value="([^"]+)"`);
+  const match = html.match(pattern);
   if (!match?.[1]) throw new Error(`Missing ${name} in consent HTML`);
   return match[1];
+}
+
+async function beginAuthorization(scope = MARKETS_READ_SCOPE): Promise<{
+  clientId: string;
+  consentResponse: Response;
+  transactionId: string;
+}> {
+  const clientId = await registerClient();
+  const consentResponse = await dispatchGoogleFlow(
+    oauthRequest(
+      authorizationPath({
+        clientId,
+        codeChallenge: await pkceChallenge(
+          "oauth-test-verifier-0123456789abcdefghijklmnopqrstuvwxyz"
+        ),
+        scope,
+      })
+    )
+  );
+  const html = await consentResponse.clone().text();
+  return {
+    clientId,
+    consentResponse,
+    transactionId: hiddenInputValue(html, "transaction"),
+  };
 }
 
 describe("MCP OAuth discovery", () => {
@@ -143,52 +186,31 @@ describe("MCP OAuth discovery", () => {
   });
 });
 
-describe("MCP wallet OAuth flow", () => {
-  it("exchanges human wallet consent for a scoped MCP access token", async () => {
-    const clientId = await registerClient();
-    const verifier = "oauth-test-verifier-0123456789abcdefghijklmnopqrstuvwxyz";
-    const challenge = await pkceChallenge(verifier);
+describe("MCP Google OAuth flow", () => {
+  beforeEach(() => {
+    googleAuthenticator.mockClear();
+  });
 
-    const consentResponse = await dispatch(
-      oauthRequest(
-        authorizationPath({
-          clientId,
-          codeChallenge: challenge,
-          scope: MARKETS_READ_SCOPE,
-        })
-      )
-    );
+  it("exchanges Google sign-in for a scoped MCP access token", async () => {
+    const verifier = "oauth-test-verifier-0123456789abcdefghijklmnopqrstuvwxyz";
+    const { clientId, consentResponse, transactionId } =
+      await beginAuthorization();
+
     expect(consentResponse.status).toBe(200);
     expect(consentResponse.headers.get("content-security-policy")).toContain(
       "default-src 'none'"
     );
     expect(consentResponse.headers.get("content-security-policy")).toContain(
-      "form-action 'self' https://agent.example"
+      "form-action 'self' https://accounts.google.com https://agent.example"
     );
     expect(consentResponse.headers.get("cache-control")).toBe("no-store");
-    expect(consentResponse.headers.get("referrer-policy")).toBe("same-origin");
+    expect(consentResponse.headers.get("referrer-policy")).toBe("no-referrer");
     const html = await consentResponse.text();
-    expect(html).toContain("eip6963:announceProvider");
-    expect(html).toContain("eip6963:requestProvider");
-    expect(html).toContain('id="wallet-provider"');
-    expect(html).not.toContain('name="decision" id="decision"');
-    const challengeId = htmlAttribute(html, "data-challenge-id");
-    const issuedAt = htmlAttribute(html, "data-issued-at");
-    const expirationTime = htmlAttribute(html, "data-expiration-time");
+    expect(html).toContain("Continue with Google");
+    expect(html).not.toContain("window.ethereum");
+    expect(html).not.toContain("<script");
 
-    const message = buildWalletLoginMessage({
-      address: account.address,
-      chainId: 137,
-      challengeId,
-      clientName: "Knoww OAuth Test Agent",
-      expirationTime,
-      issuedAt,
-      resource: RESOURCE,
-      scopes: [MARKETS_READ_SCOPE],
-    });
-    const signature = await account.signMessage({ message });
-
-    const approvalResponse = await dispatch(
+    const approvalResponse = await dispatchGoogleFlow(
       oauthRequest("/authorize", {
         method: "POST",
         headers: {
@@ -197,25 +219,50 @@ describe("MCP wallet OAuth flow", () => {
         },
         body: new URLSearchParams({
           decision: "allow",
-          challenge: challengeId,
-          wallet_address: account.address,
-          chain_id: "137",
-          signature,
+          transaction: transactionId,
         }),
       })
     );
     expect(approvalResponse.status).toBe(302);
-    const approvalRedirect = new URL(
+    const googleRedirect = new URL(
       approvalResponse.headers.get("location") ?? ""
     );
-    expect(approvalRedirect.origin + approvalRedirect.pathname).toBe(
-      REDIRECT_URI
+    expect(googleRedirect.origin + googleRedirect.pathname).toBe(
+      "https://accounts.google.com/o/oauth2/v2/auth"
     );
-    expect(approvalRedirect.searchParams.get("state")).toBe("oauth-test-state");
-    const code = approvalRedirect.searchParams.get("code");
+    expect(googleRedirect.searchParams.get("state")).toBe(transactionId);
+    expect(googleRedirect.searchParams.get("nonce")).toBeTruthy();
+    expect(googleRedirect.searchParams.get("code_challenge_method")).toBe(
+      "S256"
+    );
+    expect(googleRedirect.searchParams.get("redirect_uri")).toBe(
+      `${ORIGIN}/auth/google/callback`
+    );
+
+    const callbackResponse = await dispatchGoogleFlow(
+      oauthRequest(
+        `/auth/google/callback?${new URLSearchParams({ code: "google-code", state: transactionId })}`
+      )
+    );
+    expect(callbackResponse.status).toBe(302);
+    expect(googleAuthenticator).toHaveBeenCalledOnce();
+    expect(googleAuthenticator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "google-test-client.apps.googleusercontent.com",
+        clientSecret: "google-test-secret",
+        code: "google-code",
+        redirectUri: `${ORIGIN}/auth/google/callback`,
+      })
+    );
+    const clientRedirect = new URL(
+      callbackResponse.headers.get("location") ?? ""
+    );
+    expect(clientRedirect.origin + clientRedirect.pathname).toBe(REDIRECT_URI);
+    expect(clientRedirect.searchParams.get("state")).toBe("oauth-test-state");
+    const code = clientRedirect.searchParams.get("code");
     expect(code).toBeTruthy();
 
-    const tokenResponse = await dispatch(
+    const tokenResponse = await dispatchGoogleFlow(
       oauthRequest("/oauth/token", {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -241,7 +288,7 @@ describe("MCP wallet OAuth flow", () => {
     expect(tokens.scope).toBe(MARKETS_READ_SCOPE);
     expect(tokens.resource).toBe(RESOURCE);
 
-    const mcpResponse = await dispatch(
+    const mcpResponse = await dispatchGoogleFlow(
       oauthRequest("/mcp", {
         method: "POST",
         headers: {
@@ -266,7 +313,7 @@ describe("MCP wallet OAuth flow", () => {
 
   it("does not grant the reserved x402 scope before paid tools ship", async () => {
     const clientId = await registerClient();
-    const response = await dispatch(
+    const response = await dispatchGoogleFlow(
       oauthRequest(
         authorizationPath({
           clientId,
@@ -284,75 +331,64 @@ describe("MCP wallet OAuth flow", () => {
     expect(redirect.searchParams.get("code")).toBeNull();
   });
 
-  it("returns access_denied without requiring a wallet signature", async () => {
-    const clientId = await registerClient();
-    const consentResponse = await dispatch(
+  it("returns access_denied when Google sign-in is canceled", async () => {
+    const { transactionId } = await beginAuthorization();
+    const response = await dispatchGoogleFlow(
       oauthRequest(
-        authorizationPath({
-          clientId,
-          codeChallenge: await pkceChallenge(
-            "oauth-test-verifier-deny-0123456789abcdefghijklmnopqrstuvwxyz"
-          ),
-          scope: MARKETS_READ_SCOPE,
-        })
+        `/auth/google/callback?${new URLSearchParams({ error: "access_denied", state: transactionId })}`
       )
     );
-    const html = await consentResponse.text();
-    const challengeId = htmlAttribute(html, "data-challenge-id");
 
-    const denialResponse = await dispatch(
-      oauthRequest("/authorize", {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          origin: ORIGIN,
-        },
-        body: new URLSearchParams({
-          challenge: challengeId,
-          decision: "deny",
-        }),
-      })
+    expect(response.status).toBe(302);
+    const redirect = new URL(response.headers.get("location") ?? "");
+    expect(redirect.searchParams.get("error")).toBe("access_denied");
+    expect(redirect.searchParams.get("code")).toBeNull();
+    expect(googleAuthenticator).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid subject returned by the identity boundary", async () => {
+    googleAuthenticator.mockResolvedValueOnce({ subject: "invalid subject" });
+    const { transactionId } = await beginAuthorization();
+    const response = await dispatchGoogleFlow(
+      oauthRequest(
+        `/auth/google/callback?${new URLSearchParams({ code: "google-code", state: transactionId })}`
+      )
     );
 
-    expect(denialResponse.status).toBe(302);
-    const redirect = new URL(denialResponse.headers.get("location") ?? "");
+    expect(response.status).toBe(302);
+    const redirect = new URL(response.headers.get("location") ?? "");
     expect(redirect.searchParams.get("error")).toBe("access_denied");
     expect(redirect.searchParams.get("code")).toBeNull();
   });
 
-  it("returns a safe client error for malformed wallet approval", async () => {
-    const clientId = await registerClient();
-    const consentResponse = await dispatch(
-      oauthRequest(
-        authorizationPath({
-          clientId,
-          codeChallenge: await pkceChallenge(
-            "oauth-test-verifier-invalid-0123456789abcdefghijklmnopqrstuvwxyz"
-          ),
-          scope: MARKETS_READ_SCOPE,
-        })
-      )
+  it("rejects missing, cross-origin, and replayed authorization state", async () => {
+    const missingState = await dispatchGoogleFlow(
+      oauthRequest("/auth/google/callback?code=google-code")
     );
-    const html = await consentResponse.text();
+    expect(missingState.status).toBe(401);
 
-    const response = await dispatch(
+    const { transactionId } = await beginAuthorization();
+    const crossOrigin = await dispatchGoogleFlow(
       oauthRequest("/authorize", {
         method: "POST",
         headers: {
           "content-type": "application/x-www-form-urlencoded",
-          origin: ORIGIN,
+          origin: "https://attacker.example",
         },
         body: new URLSearchParams({
-          challenge: htmlAttribute(html, "data-challenge-id"),
           decision: "allow",
-          wallet_address: "not-an-address",
-          chain_id: "137",
-          signature: "not-a-signature",
+          transaction: transactionId,
         }),
       })
     );
+    expect(crossOrigin.status).toBe(403);
 
-    expect(response.status).toBe(400);
-    expect(await response.text()).not.toContain("stack");
+    const callbackPath = `/auth/google/callback?${new URLSearchParams({ code: "google-code", state: transactionId })}`;
+    const first = await dispatchGoogleFlow(oauthRequest(callbackPath));
+    expect(first.status).toBe(302);
+    const replay = await dispatchGoogleFlow(oauthRequest(callbackPath));
+    expect(replay.status).toBe(401);
+    expect(await replay.text()).not.toContain("stack");
+    expect(googleAuthenticator).toHaveBeenCalledOnce();
   });
 });

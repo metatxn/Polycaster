@@ -4,6 +4,7 @@ import type { WorkerConfig } from "../config";
 import { currentRequestId } from "../context";
 import { mcpOAuthApiHandler } from "./api";
 import { createConsentHandler } from "./consent";
+import { authenticateWithGoogle, type GoogleAuthenticator } from "./google";
 import { ACTIVE_MCP_SCOPES, validateMcpAuthProps } from "./scopes";
 import type { McpOAuthEnv } from "./types";
 
@@ -26,10 +27,19 @@ export function oauthProviderFor(
   let provider = providerCache.get(cacheKey);
   if (provider) return provider;
 
-  provider = new OAuthProvider<McpOAuthEnv>({
+  provider = createOAuthProvider(config);
+  providerCache.set(cacheKey, provider);
+  return provider;
+}
+
+export function createOAuthProvider(
+  config: WorkerConfig,
+  googleAuthenticator: GoogleAuthenticator = authenticateWithGoogle
+): OAuthProvider<McpOAuthEnv> {
+  return new OAuthProvider<McpOAuthEnv>({
     apiRoute: "/mcp",
     apiHandler: mcpOAuthApiHandler,
-    defaultHandler: createConsentHandler(config),
+    defaultHandler: createConsentHandler(config, googleAuthenticator),
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/oauth/token",
     clientRegistrationEndpoint: "/oauth/register",
@@ -83,6 +93,4 @@ export function oauthProviderFor(
       });
     },
   });
-  providerCache.set(cacheKey, provider);
-  return provider;
 }

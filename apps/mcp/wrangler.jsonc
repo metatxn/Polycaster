@@ -18,6 +18,10 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  // Required bindings are configured in Cloudflare, never in this file.
+  "secrets": {
+    "required": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
+  },
   "kv_namespaces": [
     {
       // Wrangler provisions this namespace on the first deployment. OAuth
@@ -28,6 +32,8 @@
   "durable_objects": {
     "bindings": [
       {
+        // Legacy binding and class names are retained to preserve the
+        // existing Durable Object migration. Records are OIDC transactions.
         "name": "MCP_AUTH_CHALLENGES",
         "class_name": "WalletChallengeStore"
       }
@@ -84,6 +90,9 @@
   "env": {
     "local": {
       "routes": [],
+      "secrets": {
+        "required": []
+      },
       "kv_namespaces": [
         {
           "binding": "OAUTH_KV"

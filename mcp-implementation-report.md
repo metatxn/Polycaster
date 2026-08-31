@@ -8,7 +8,7 @@ Plan: [mcp.md](mcp.md)
 
 ## Status
 
-The implementation provides five read-only tools from a dedicated Cloudflare Worker in `apps/mcp`: `search_markets`, `get_market`, `get_event`, `get_orderbook`, and `get_price_history`. Production-shaped requests now pass through an OAuth 2.1 authorization-code flow with wallet-based human consent, S256 PKCE, audience-bound tokens, and `markets:read` enforcement.
+The implementation provides five read-only tools from a dedicated Cloudflare Worker in `apps/mcp`: `search_markets`, `get_market`, `get_event`, `get_orderbook`, and `get_price_history`. Production-shaped requests pass through an OAuth 2.1 authorization-code flow with Google OpenID Connect, S256 PKCE, audience-bound tokens, and `markets:read` enforcement.
 
 The code is a production release candidate. The repository contains one remote MCP environment: production. It has a custom-domain route, layered quotas, health probes, security headers, an MCP-specific PR gate, an HTTP contract, and a rollout and rollback runbook. Production traffic remains off until an approved operator verifies Cloudflare resources and alerts and performs the first attended deployment. After that bootstrap release, Cloudflare Workers Builds owns production deployment from `main`; GitHub Actions remains verification-only. Only the explicit local environment enables the development bypass.
 
@@ -16,12 +16,12 @@ The code is a production release candidate. The repository contains one remote M
 
 | Target | Result |
 |---|---|
-| `apps/mcp` tests | 133/133 across 13 files |
+| `apps/mcp` tests | 136/136 across 13 files |
 | `apps/mcp` typecheck and Biome | Pass |
 | MCP protocol coverage | Legacy `initialize` at 2025-11-25 and modern `server/discover` at 2026-07-28 both pass |
 | Worker dry-run | Pass; the production OAuth bundle builds with no environment-selection warning |
 | Cloudflare build rehearsal | Pass from `/apps/mcp`; frozen workspace install and the exact production deploy command complete in dry-run mode |
-| Browser consent smoke test | Page rendered without console errors; missing-wallet feedback was announced; Lighthouse Accessibility, Best Practices, and Agentic Browsing scored 100 (SEO 75 on the intentionally non-indexable consent page) |
+| Browser consent smoke test | Google consent rendered at desktop and mobile sizes with no console errors, no horizontal overflow, and no client-side script |
 | `packages/knoww-services` tests | 97/97 across 5 files |
 | `packages/knoww-services` typecheck and Biome | Pass |
 | `apps/web` typecheck and affected search-route tests | Pass; 6/6 search-route tests |
@@ -39,7 +39,7 @@ The work is organized as planned implementation slices rather than submitted pul
 3. **Event detail.** Child-event fan-out runs only for `negRisk: true` events. Child and fallback failures degrade the market list without hiding the parent event. Service caps and partial results are explicit through response text, `marketsIncomplete`, and `meta.truncated`.
 4. **Order books.** CLOB snapshots are validated before use, including token identity, price bounds, positive sizes, tick size, minimum order size, and timestamp shape. Bids and asks are sorted locally, depth sums use Decimal.js, and old snapshots are marked stale.
 5. **Price history.** CLOB history points require safe timestamps inside the requested window and prices from 0 to 1. Points are sorted by time and prices become decimal strings. Series over 1,000 points are downsampled with endpoints retained and `meta.truncated` set.
-6. **OAuth and scopes.** `@cloudflare/workers-oauth-provider@0.10.3` owns discovery, client registration, grants, token exchange, refresh rotation, revocation, and audience validation. The browser consent flow verifies an EOA wallet signature against a five-minute challenge stored in a Durable Object and consumed atomically. Access-token scopes are copied into encrypted per-token properties during authorization-code and refresh exchange, then checked before MCP dispatch and again inside every tool.
+6. **OAuth and scopes.** `@cloudflare/workers-oauth-provider@0.10.3` owns discovery, client registration, grants, token exchange, refresh rotation, revocation, and audience validation. The browser consent flow uses Google OpenID Connect with a nonce, S256 PKCE, and five-minute state stored in a Durable Object and consumed atomically. The Worker verifies Google's signed ID token before deriving the MCP principal. Access-token scopes are copied into encrypted per-token properties during authorization-code and refresh exchange, then checked before MCP dispatch and again inside every tool.
 7. **Production controls.** The Worker exposes liveness and stateful-binding readiness probes, applies HSTS and baseline response security headers, rejects oversized MCP, OAuth token, and registration bodies before parsing, and enforces separate authentication, edge, free-plan principal, and per-tool quotas.
 
 All tools are read-only and return the shared error format with retry guidance. Tool failures emit `mcp.tools.tool.failed` with only `toolName`, `requestId`, error `code`, and `retryable`; raw errors, messages, and stacks are not logged or returned. The Worker handler also has a safe `onerror` hook.
@@ -58,8 +58,8 @@ All tools are read-only and return the shared error format with retry guidance. 
 
 - `agents` is pinned to `0.21.0`.
 - `@cloudflare/workers-oauth-provider` is pinned to `0.10.3` and is now used by the Worker.
-- `viem` is added from the workspace catalog for EVM address normalization and EOA message-signature verification.
-- Wrangler defines the production custom domain, OAuth KV binding, wallet-challenge Durable Object, and four rate-limit layers. Deployment must confirm that the resources are provisioned in the intended Cloudflare account and that the configured rate-limit namespace IDs do not collide with another Worker.
+- `jose@6.2.3` verifies Google ID-token signatures and claims against Google's remote JWKS.
+- Wrangler defines the production custom domain, OAuth KV binding, authorization-transaction Durable Object, required Google secrets, and four rate-limit layers. Deployment must confirm that the resources are provisioned in the intended Cloudflare account and that the configured rate-limit namespace IDs do not collide with another Worker.
 - The stale global `nanoid: 3.3.17` override was replaced with a targeted redirect from `3.3.17` to patched `3.3.18`. Consumers that require NanoID 5 now resolve `5.1.16` instead of being forced onto the wrong major.
 - Worker build and deploy scripts pass `--env=""` explicitly, so Wrangler uses the top-level production configuration without warning.
 - The MCP GitHub Actions workflow runs verification on every pull request so its required check is never skipped by path filters. Cloudflare Workers Builds is the sole automatic production deployer after the bootstrap release, preventing duplicate deployments from the same merge.
@@ -82,7 +82,7 @@ The remaining gates require remote Cloudflare access or a product decision. They
 2. **Cloudflare preparation.** Confirm automatic KV provisioning, the Durable Object migration, custom-domain TLS, all four rate-limit bindings, Workers Logs, alerts, and unique production rate-limit namespace IDs.
 3. **Production activation and live verification.** Run the first attended production deployment through the approved Cloudflare identity. Immediately verify health, readiness, OAuth, protocol, all tools, cancellation, quotas, and observability with both CIMD and DCR clients. Capture the version ID and test evidence, then monitor the release thresholds for one hour.
 4. **Production automation.** Connect the existing `knoww-mcp` Worker to this repository using the Workers Builds settings in `apps/mcp/OPERATIONS.md` only after the first deployment passes its observation window.
-5. **Identity scope.** Record EOA-only wallet support in launch communication. Knoww account login and EIP-1271 verification remain future compatibility work, not blockers for an explicitly EOA-only release.
+5. **Google configuration.** Confirm the production OAuth consent screen, exact `https://mcp.knoww.app/auth/google/callback` redirect URI, and both Google secret bindings before live verification.
 
 ## x402 scope assessment
 
@@ -94,8 +94,8 @@ This is a Knoww-defined OAuth scope, not a scope defined by x402 itself. Before 
 
 ## Locked MCP versions
 
-`agents@0.21.0`, `@modelcontextprotocol/server@2.0.0`, `@cloudflare/workers-oauth-provider@0.10.3`, `zod@4.4.3`, `decimal.js@10.6.0`, `viem@2.55.10`, `@cloudflare/vitest-pool-workers@0.21.3`, `vitest@4.1.10`, and `wrangler@4.123.0`.
+`agents@0.21.0`, `@modelcontextprotocol/server@2.0.0`, `@cloudflare/workers-oauth-provider@0.10.3`, `jose@6.2.3`, `zod@4.4.3`, `decimal.js@10.6.0`, `@cloudflare/vitest-pool-workers@0.21.3`, `vitest@4.1.10`, and `wrangler@4.123.0`.
 
 ## Change-set hygiene
 
-This work changes the MCP package, its documentation, Wrangler bindings, the MCP CI workflow, the shared market-search service, and the workspace lockfile entry required by the pinned OAuth dependency. No web or extension source file is changed by the MCP implementation.
+This work changes the MCP package, its documentation, Wrangler bindings, the MCP explorer guidance and callback copy, and the workspace lockfile. Extension source files are unchanged.

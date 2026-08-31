@@ -8,11 +8,10 @@ import type { McpPlan } from "./auth/scopes";
  * the x-request-id header.
  */
 export interface RequestPrincipal {
-  authMethod: "dev-bypass" | "wallet-signature";
+  authMethod: "dev-bypass" | "google-oidc";
   id: string;
   plan: McpPlan;
   scopes: string[];
-  walletAddress?: string;
 }
 
 export interface RequestContextValue {

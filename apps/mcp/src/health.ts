@@ -2,7 +2,7 @@ import { createLogger } from "@knoww/logger";
 
 const log = createLogger("mcp.health");
 const READINESS_PROBE_ID = "knoww-mcp-readiness";
-const INTERNAL_ORIGIN = "https://wallet-challenge.internal";
+const INTERNAL_ORIGIN = "https://authorization-transaction.internal";
 
 function healthResponse(
   status: "ok" | "ready" | "unavailable",

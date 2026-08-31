@@ -33,7 +33,7 @@ Examples:
 The dev suite checks protocol negotiation, tool discovery, input validation,
 method and path handling, and Host and Origin rejection. The oauth suite checks
 the unauthenticated Bearer challenge and OAuth discovery endpoints. It does not
-perform the human wallet-signature step.
+perform the interactive Google sign-in step.
 USAGE
 }
 

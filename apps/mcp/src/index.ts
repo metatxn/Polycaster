@@ -87,7 +87,7 @@ function inboundHostname(request: Request): string | null {
 function isAuthRateLimitedPath(pathname: string): boolean {
   return (
     pathname === "/authorize" ||
-    pathname === "/authorize/message" ||
+    pathname === "/auth/google/callback" ||
     pathname === "/oauth/token" ||
     pathname === "/oauth/register"
   );

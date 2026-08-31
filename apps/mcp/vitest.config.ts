@@ -7,6 +7,12 @@ export default defineConfig({
       // The pool loads the top-level wrangler.jsonc environment, so tests
       // see the production-shaped vars (oauth-required) by default.
       wrangler: { configPath: "./wrangler.jsonc" },
+      miniflare: {
+        bindings: {
+          GOOGLE_CLIENT_ID: "google-test-client.apps.googleusercontent.com",
+          GOOGLE_CLIENT_SECRET: "google-test-secret",
+        },
+      },
     }),
   ],
   test: {

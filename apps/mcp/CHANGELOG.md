@@ -5,7 +5,7 @@
 ### Added
 
 - Five read-only prediction-market tools over stateless Streamable HTTP.
-- OAuth authorization-code flow with S256 PKCE, wallet consent, audience-bound opaque tokens, refresh rotation, and `markets:read` enforcement.
+- OAuth authorization-code flow with S256 PKCE, Google OpenID Connect consent, audience-bound opaque tokens, refresh rotation, and `markets:read` enforcement.
 - Production custom domain with OAuth state isolated from the web application.
 - Liveness and stateful-binding readiness probes.
 - Whole-Worker edge, authentication, free-plan principal, and per-tool quotas.
@@ -16,5 +16,5 @@
 
 ### Security
 
-- Host and Origin allowlists, one-time wallet challenges, pre-parse body caps, CSP, HSTS, safe errors, and upstream response validation.
+- Host and Origin allowlists, one-time OIDC state, ID-token signature and claim verification, pre-parse body caps, CSP, HSTS, safe errors, and upstream response validation.
 - x402 payment access remains disabled. Version 1 cannot trade, sign, relay, settle, or pay.

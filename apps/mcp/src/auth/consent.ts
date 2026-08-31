@@ -2,24 +2,33 @@ import {
   AuthorizationError,
   type AuthRequest,
 } from "@cloudflare/workers-oauth-provider";
+import { createLogger } from "@knoww/logger";
 import type { WorkerConfig } from "../config";
+import { currentRequestId } from "../context";
 import {
-  consumeWalletChallenge,
-  createWalletChallenge,
-  readWalletChallenge,
-  type WalletChallenge,
+  type AuthorizationTransaction,
+  consumeAuthorizationTransaction,
+  createAuthorizationTransaction,
+  readAuthorizationTransaction,
 } from "./challenge-store";
-import { FREE_MCP_PLAN, resolveRequestedScopes } from "./scopes";
-import type { McpOAuthEnv } from "./types";
 import {
-  buildWalletLoginMessage,
-  normalizeClientName,
-  verifyWalletLoginSignature,
-} from "./wallet";
+  authenticateWithGoogle,
+  buildGoogleAuthorizationUrl,
+  createGooglePkce,
+  type GoogleAuthenticator,
+} from "./google";
+import {
+  FREE_MCP_PLAN,
+  resolveRequestedScopes,
+  validateMcpAuthProps,
+} from "./scopes";
+import type { McpOAuthEnv } from "./types";
 
-const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const TRANSACTION_TTL_MS = 5 * 60 * 1000;
 const MAX_FORM_BYTES = 16 * 1024;
-const CHALLENGE_ID_PATTERN = /^[A-Za-z0-9]{8,128}$/;
+const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const MAX_GOOGLE_CODE_LENGTH = 4096;
+const log = createLogger("mcp.oauth.google");
 
 class FormError extends Error {
   constructor(
@@ -40,7 +49,20 @@ function htmlEscape(value: string): string {
 }
 
 function randomId(): string {
-  return crypto.randomUUID().replaceAll("-", "");
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    ""
+  );
+}
+
+function normalizeClientName(value: string | undefined): string {
+  const withoutControls = Array.from(value ?? "Unnamed MCP client", (char) => {
+    const codePoint = char.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127 ? " " : char;
+  }).join("");
+  const normalized = withoutControls.replace(/\s+/gu, " ").trim().slice(0, 100);
+  return normalized || "Unnamed MCP client";
 }
 
 function redirectResponse(location: string): Response {
@@ -135,48 +157,32 @@ function consentHeaders(nonce: string, redirectUri: string): HeadersInit {
     "cache-control": "no-store",
     "content-security-policy": [
       "default-src 'none'",
-      `script-src 'nonce-${nonce}'`,
       `style-src 'nonce-${nonce}'`,
-      "connect-src 'self'",
-      `form-action 'self' ${redirectOrigin}`,
+      `form-action 'self' https://accounts.google.com ${redirectOrigin}`,
       "frame-ancestors 'none'",
       "base-uri 'none'",
     ].join("; "),
     "content-type": "text/html; charset=utf-8",
-    "referrer-policy": "same-origin",
+    "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
   };
 }
 
-function consentPage(challenge: WalletChallenge): Response {
+function consentPage(transaction: AuthorizationTransaction): Response {
   const nonce = randomId();
-  const scopes = challenge.scopes.join(" ");
+  const scopes = transaction.scopes.join(" ");
   const body = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Authorize Knoww MCP</title><style nonce="${nonce}">
-:root{color-scheme:dark}body{margin:0;background:#09090b;color:#fafafa;font:16px/1.5 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}.card{background:#18181b;border:1px solid #3f3f46;border-radius:16px;max-width:520px;padding:32px;margin:20px;box-shadow:0 20px 60px #0008}h1{font-size:1.5rem;margin:0 0 12px}p{color:#d4d4d8}.client{color:#fff;font-weight:650}.scope{background:#27272a;border-radius:8px;padding:10px 12px;font-family:ui-monospace,monospace}.wallet-field{margin-top:22px}.wallet-field[hidden]{display:none}.wallet-field label{display:block;margin-bottom:6px;color:#d4d4d8;font-size:.9rem}.wallet-field select{box-sizing:border-box;width:100%;border:1px solid #52525b;border-radius:8px;background:#27272a;color:#fafafa;padding:10px 12px;font:inherit}.actions{display:flex;gap:12px;justify-content:flex-end;margin-top:28px}button{border:0;border-radius:9px;padding:11px 16px;font:inherit;font-weight:650;cursor:pointer}.deny{background:#3f3f46;color:#fff}.allow{background:#a3e635;color:#17200a}.allow:disabled{cursor:wait;opacity:.65}#status{min-height:24px;color:#a1a1aa}#status[data-error="true"]{color:#fca5a5}
-</style></head><body><main class="card" id="consent" data-challenge-id="${htmlEscape(challenge.id)}" data-client-name="${htmlEscape(challenge.clientName)}" data-issued-at="${htmlEscape(challenge.issuedAt)}" data-expiration-time="${htmlEscape(challenge.expirationTime)}" data-resource="${htmlEscape(challenge.resource)}" data-scopes="${htmlEscape(scopes)}">
-<h1>Authorize Knoww MCP</h1><p><span class="client">${htmlEscape(challenge.clientName)}</span> is requesting access to your Knoww MCP connection.</p><p>Requested permission:</p><div class="scope">${htmlEscape(scopes)}</div><p>Your wallet signature proves account ownership. It does not authorize a trade or payment.</p><p id="status" role="status" aria-live="polite"></p>
-<form id="consent-form" method="post" action="/authorize"><input type="hidden" name="challenge" value="${htmlEscape(challenge.id)}"><input type="hidden" id="decision" value="allow"><input type="hidden" name="wallet_address" id="wallet-address"><input type="hidden" name="chain_id" id="chain-id"><input type="hidden" name="signature" id="signature"><div class="wallet-field" id="wallet-field" hidden><label for="wallet-provider">Wallet</label><select id="wallet-provider"></select></div><div class="actions"><button class="deny" type="submit" name="decision" value="deny">Cancel</button><button class="allow" id="allow" type="button">Connect wallet and authorize</button></div></form>
-</main><script nonce="${nonce}">
-const root=document.getElementById("consent"),form=document.getElementById("consent-form"),allow=document.getElementById("allow"),status=document.getElementById("status"),walletField=document.getElementById("wallet-field"),walletSelect=document.getElementById("wallet-provider");
-const wallets=[],seenProviders=new Set();
-function setStatus(message,isError){status.textContent=message;status.dataset.error=isError?"true":"false";}
-function pageError(message){const error=new Error(message);error.name="AuthorizationPageError";return error;}
-function walletName(provider,index){if(provider&&provider.isMetaMask)return "MetaMask";if(provider&&provider.isCoinbaseWallet)return "Coinbase Wallet";if(provider&&provider.isBraveWallet)return "Brave Wallet";return "Browser wallet "+String(index+1);}
-function renderWallets(){const previous=walletSelect.value;walletSelect.replaceChildren();wallets.forEach((wallet,index)=>{const option=document.createElement("option");option.value=String(index);option.textContent=wallet.name;walletSelect.append(option);});if(previous&&wallets[Number.parseInt(previous,10)])walletSelect.value=previous;walletField.hidden=wallets.length===0;}
-function addWallet(provider,name){if(!provider||typeof provider.request!=="function"||seenProviders.has(provider))return;seenProviders.add(provider);const cleanName=typeof name==="string"&&name.trim()?name.trim().slice(0,80):walletName(provider,wallets.length);wallets.push({name:cleanName,provider});renderWallets();}
-function addLegacyWallets(){const injected=window.ethereum;if(!injected)return;const providers=Array.isArray(injected.providers)?injected.providers:[injected];providers.forEach((provider,index)=>addWallet(provider,walletName(provider,index)));}
-window.addEventListener("eip6963:announceProvider",event=>{const detail=event.detail;if(!detail||typeof detail!=="object")return;addWallet(detail.provider,detail.info&&detail.info.name);});
-addLegacyWallets();
-window.dispatchEvent(new Event("eip6963:requestProvider"));
-async function selectedWallet(){addLegacyWallets();window.dispatchEvent(new Event("eip6963:requestProvider"));await new Promise(resolve=>setTimeout(resolve,150));if(wallets.length===0)throw pageError("No browser wallet was found. Enable a wallet extension for mcp.knoww.app and try again.");const index=Number.parseInt(walletSelect.value||"0",10);return wallets[index]&&wallets[index].provider?wallets[index].provider:wallets[0].provider;}
-allow.addEventListener("click",async()=>{allow.disabled=true;setStatus("Finding browser wallets...",false);try{const provider=await selectedWallet();setStatus("Waiting for wallet connection...",false);const accounts=await provider.request({method:"eth_requestAccounts"});const address=accounts&&accounts[0];if(!address)throw pageError("No wallet account was selected.");const chainHex=await provider.request({method:"eth_chainId"});const chainId=Number.parseInt(chainHex,16);setStatus("Preparing the authorization message...",false);const messageResponse=await fetch("/authorize/message",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({challenge:root.dataset.challengeId,wallet_address:address,chain_id:String(chainId)})});if(!messageResponse.ok)throw pageError("Could not create the wallet message.");const data=await messageResponse.json();const bytes=new TextEncoder().encode(data.message);const hex="0x"+Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");setStatus("Sign the message in your selected wallet...",false);const signature=await provider.request({method:"personal_sign",params:[hex,address]});document.getElementById("wallet-address").value=address;document.getElementById("chain-id").value=String(chainId);document.getElementById("signature").value=signature;const decision=document.getElementById("decision");decision.name="decision";decision.value="allow";setStatus("Finishing authorization...",false);form.submit();}catch(error){const message=error&&error.name==="AuthorizationPageError"?error.message:error&&error.code===4001?"Wallet authorization was canceled.":"Wallet authorization failed. Try again.";setStatus(message,true);allow.disabled=false;}});
-</script></body></html>`;
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#09090b;color:#fafafa;font:16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;min-height:100vh;place-items:center}.card{width:min(540px,calc(100% - 32px));background:#18181b;border:1px solid #3f3f46;border-radius:18px;padding:36px;box-shadow:0 24px 72px #0009}h1{font-size:clamp(1.7rem,5vw,2.25rem);line-height:1.15;margin:0 0 18px}p{color:#d4d4d8;margin:14px 0}.client{color:#fff;font-weight:700}.scope{background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 13px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.privacy{font-size:.9rem;color:#a1a1aa}.actions{display:flex;gap:12px;justify-content:flex-end;margin-top:30px}.button{min-height:48px;border:1px solid transparent;border-radius:9px;padding:11px 16px;font:inherit;font-weight:650;cursor:pointer}.deny{background:#3f3f46;color:#fff}.google{display:inline-flex;align-items:center;gap:12px;background:#fff;border-color:#dadce0;color:#1f1f1f}.google svg{flex:none}.button:focus-visible{outline:3px solid #bef264;outline-offset:3px}@media(max-width:520px){.card{padding:26px 22px}.actions{align-items:stretch;flex-direction:column-reverse}.button{justify-content:center;width:100%}}
+</style></head><body><main class="card">
+<h1>Authorize Knoww MCP</h1><p><span class="client">${htmlEscape(transaction.clientName)}</span> is requesting access to your Knoww MCP connection.</p><p>Requested permission:</p><div class="scope">${htmlEscape(scopes)}</div><p>Sign in with Google to confirm who is approving this connection. Knoww will not share your Google password or Google access token with the MCP client.</p><p class="privacy">Your sign-in identifies your Knoww MCP principal. The requested permission still limits what the client can access.</p>
+<form method="post" action="/authorize"><input type="hidden" name="transaction" value="${htmlEscape(transaction.id)}"><div class="actions"><button class="button deny" type="submit" name="decision" value="deny">Cancel</button><button class="button google" type="submit" name="decision" value="allow"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 18 18"><path fill="#EA4335" d="M17.64 9.205c0-.638-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.797 2.715v2.259h2.909c1.702-1.568 2.684-3.878 2.684-6.614Z"/><path fill="#4285F4" d="M9 18c2.43 0 4.468-.806 5.956-2.181l-2.909-2.259c-.806.54-1.835.859-3.047.859-2.344 0-4.328-1.585-5.037-3.714H.956v2.332A9 9 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.963 10.705A5.42 5.42 0 0 1 3.681 9c0-.592.102-1.168.282-1.705V4.963H.956A9 9 0 0 0 0 9c0 1.45.347 2.824.956 4.037l3.007-2.332Z"/><path fill="#34A853" d="M9 3.581c1.321 0 2.507.454 3.44 1.346l2.581-2.581C13.464.896 11.426 0 9 0A9 9 0 0 0 .956 4.963l3.007 2.332C4.672 5.166 6.656 3.581 9 3.581Z"/></svg>Continue with Google</button></div></form>
+</main></body></html>`;
   return new Response(body, {
     status: 200,
-    headers: consentHeaders(nonce, challenge.oauthRequest.redirectUri),
+    headers: consentHeaders(nonce, transaction.oauthRequest.redirectUri),
   });
 }
 
@@ -187,11 +193,29 @@ function localError(message: string, status: number): Response {
   });
 }
 
+function googleRedirectUri(request: Request): string {
+  return new URL("/auth/google/callback", request.url).toString();
+}
+
+function assertGoogleConfiguration(env: McpOAuthEnv): void {
+  if (
+    typeof env.GOOGLE_CLIENT_ID !== "string" ||
+    env.GOOGLE_CLIENT_ID.length < 10 ||
+    env.GOOGLE_CLIENT_ID.length > 512 ||
+    typeof env.GOOGLE_CLIENT_SECRET !== "string" ||
+    env.GOOGLE_CLIENT_SECRET.length < 1 ||
+    env.GOOGLE_CLIENT_SECRET.length > 4096
+  ) {
+    throw new Error("Google authentication is not configured.");
+  }
+}
+
 async function handleConsentGet(
   request: Request,
   env: McpOAuthEnv,
   config: WorkerConfig
 ): Promise<Response> {
+  assertGoogleConfiguration(env);
   let oauthRequest: AuthRequest;
   try {
     oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
@@ -215,56 +239,20 @@ async function handleConsentGet(
   const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
   if (!client) return localError("Unknown OAuth client.", 400);
 
-  const issuedAt = new Date().toISOString();
-  const challenge: WalletChallenge = {
+  const pkce = await createGooglePkce();
+  const transaction: AuthorizationTransaction = {
+    codeChallenge: pkce.challenge,
+    codeVerifier: pkce.verifier,
     id: randomId(),
     clientName: normalizeClientName(client.clientName),
-    issuedAt,
-    expirationTime: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString(),
+    expirationTime: new Date(Date.now() + TRANSACTION_TTL_MS).toISOString(),
+    nonce: randomId(),
     resource: config.canonicalResource,
     scopes,
     oauthRequest,
   };
-  await createWalletChallenge(env.MCP_AUTH_CHALLENGES, challenge);
-  return consentPage(challenge);
-}
-
-async function handleMessageRequest(
-  request: Request,
-  env: McpOAuthEnv,
-  config: WorkerConfig
-): Promise<Response> {
-  if (!isSameOriginPost(request)) return localError("Forbidden.", 403);
-  const form = await readForm(request);
-  const challengeId = form.get("challenge") ?? "";
-  if (!CHALLENGE_ID_PATTERN.test(challengeId)) {
-    return localError("Invalid or expired challenge.", 401);
-  }
-  const challenge = await readWalletChallenge(
-    env.MCP_AUTH_CHALLENGES,
-    challengeId
-  );
-  if (!challenge || challenge.resource !== config.canonicalResource) {
-    return localError("Invalid or expired challenge.", 401);
-  }
-  try {
-    const message = buildWalletLoginMessage({
-      address: form.get("wallet_address") ?? "",
-      chainId: Number(form.get("chain_id")),
-      challengeId,
-      clientName: challenge.clientName,
-      expirationTime: challenge.expirationTime,
-      issuedAt: challenge.issuedAt,
-      resource: challenge.resource,
-      scopes: challenge.scopes,
-    });
-    return Response.json(
-      { message },
-      { headers: { "cache-control": "no-store" } }
-    );
-  } catch {
-    return localError("Invalid wallet details.", 400);
-  }
+  await createAuthorizationTransaction(env.MCP_AUTH_CHALLENGES, transaction);
+  return consentPage(transaction);
 }
 
 async function handleConsentPost(
@@ -274,80 +262,154 @@ async function handleConsentPost(
 ): Promise<Response> {
   if (!isSameOriginPost(request)) return localError("Forbidden.", 403);
   const form = await readForm(request);
-  const challengeId = form.get("challenge") ?? "";
-  if (!CHALLENGE_ID_PATTERN.test(challengeId)) {
-    return localError("Invalid or expired challenge.", 401);
+  const transactionId = form.get("transaction") ?? "";
+  if (!TRANSACTION_ID_PATTERN.test(transactionId)) {
+    return localError("Invalid or expired authorization request.", 401);
   }
-  const challenge = await consumeWalletChallenge(
-    env.MCP_AUTH_CHALLENGES,
-    challengeId
-  );
-  if (!challenge || challenge.resource !== config.canonicalResource) {
-    return localError("Invalid or expired challenge.", 401);
-  }
+
   if (form.get("decision") === "deny") {
+    const transaction = await consumeAuthorizationTransaction(
+      env.MCP_AUTH_CHALLENGES,
+      transactionId
+    );
+    if (!transaction || transaction.resource !== config.canonicalResource) {
+      return localError("Invalid or expired authorization request.", 401);
+    }
     return oauthErrorRedirect(
-      challenge.oauthRequest,
+      transaction.oauthRequest,
       "access_denied",
       "The user denied the authorization request."
     );
   }
-
-  let message: string;
-  try {
-    message = buildWalletLoginMessage({
-      address: form.get("wallet_address") ?? "",
-      chainId: Number(form.get("chain_id")),
-      challengeId,
-      clientName: challenge.clientName,
-      expirationTime: challenge.expirationTime,
-      issuedAt: challenge.issuedAt,
-      resource: challenge.resource,
-      scopes: challenge.scopes,
-    });
-  } catch {
-    return localError("Invalid wallet details.", 400);
+  if (form.get("decision") !== "allow") {
+    return localError("Invalid authorization decision.", 400);
   }
-  const walletAddress = await verifyWalletLoginSignature({
-    address: form.get("wallet_address") ?? "",
-    message,
-    signature: form.get("signature") ?? "",
-  });
-  if (!walletAddress) return localError("Invalid wallet signature.", 401);
 
-  const principalId = `wallet-${walletAddress.toLowerCase()}`;
+  assertGoogleConfiguration(env);
+  const transaction = await readAuthorizationTransaction(
+    env.MCP_AUTH_CHALLENGES,
+    transactionId
+  );
+  if (!transaction || transaction.resource !== config.canonicalResource) {
+    return localError("Invalid or expired authorization request.", 401);
+  }
+  return redirectResponse(
+    buildGoogleAuthorizationUrl({
+      clientId: env.GOOGLE_CLIENT_ID,
+      codeChallenge: transaction.codeChallenge,
+      nonce: transaction.nonce,
+      redirectUri: googleRedirectUri(request),
+      state: transaction.id,
+    })
+  );
+}
+
+async function handleGoogleCallback(
+  request: Request,
+  env: McpOAuthEnv,
+  config: WorkerConfig,
+  googleAuthenticator: GoogleAuthenticator
+): Promise<Response> {
+  assertGoogleConfiguration(env);
+  const url = new URL(request.url);
+  const state = url.searchParams.get("state") ?? "";
+  if (!TRANSACTION_ID_PATTERN.test(state)) {
+    return localError("Invalid or expired authorization request.", 401);
+  }
+  const transaction = await consumeAuthorizationTransaction(
+    env.MCP_AUTH_CHALLENGES,
+    state
+  );
+  if (!transaction || transaction.resource !== config.canonicalResource) {
+    return localError("Invalid or expired authorization request.", 401);
+  }
+  if (url.searchParams.has("error")) {
+    return oauthErrorRedirect(
+      transaction.oauthRequest,
+      "access_denied",
+      "Google sign-in was canceled."
+    );
+  }
+
+  const code = url.searchParams.get("code") ?? "";
+  if (code.length < 1 || code.length > MAX_GOOGLE_CODE_LENGTH) {
+    return oauthErrorRedirect(
+      transaction.oauthRequest,
+      "access_denied",
+      "Google sign-in could not be completed."
+    );
+  }
+
+  let subject: string;
+  try {
+    const identity = await googleAuthenticator({
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+      code,
+      codeVerifier: transaction.codeVerifier,
+      nonce: transaction.nonce,
+      redirectUri: googleRedirectUri(request),
+    });
+    subject = identity.subject;
+  } catch {
+    log.warn("identity.denied", {
+      requestId: currentRequestId(),
+      reason: "google_verification_failed",
+    });
+    return oauthErrorRedirect(
+      transaction.oauthRequest,
+      "access_denied",
+      "Google sign-in could not be completed."
+    );
+  }
+
+  const props = validateMcpAuthProps({
+    authMethod: "google-oidc",
+    googleSubject: subject,
+    principalId: `google-${subject}`,
+    plan: FREE_MCP_PLAN,
+    scopes: transaction.scopes,
+  });
+  if (!props) {
+    log.warn("identity.denied", {
+      requestId: currentRequestId(),
+      reason: "invalid_google_subject",
+    });
+    return oauthErrorRedirect(
+      transaction.oauthRequest,
+      "access_denied",
+      "Google sign-in could not be completed."
+    );
+  }
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
-    request: challenge.oauthRequest,
-    userId: principalId,
+    request: transaction.oauthRequest,
+    userId: props.principalId,
     metadata: {
-      authMethod: "wallet-signature",
-      clientName: challenge.clientName,
+      authMethod: "google-oidc",
+      clientName: transaction.clientName,
     },
-    scope: challenge.scopes,
-    props: {
-      authMethod: "wallet-signature",
-      principalId,
-      plan: FREE_MCP_PLAN,
-      scopes: challenge.scopes,
-      walletAddress,
-    },
+    scope: transaction.scopes,
+    props,
   });
   return redirectResponse(redirectTo);
 }
 
 /**
  * @openapi
- * /authorize/message:
+ * /authorize:
+ *   get:
+ *     summary: Review an MCP authorization request.
+ *     tags: [OAuth]
  *   post:
- *     summary: Build the wallet message for an active consent challenge.
+ *     summary: Continue to Google sign-in or deny MCP authorization.
  *     tags: [OAuth]
  *     responses:
- *       200:
- *         description: Message that the selected wallet must sign.
+ *       302:
+ *         description: Redirect to Google or back to the MCP client.
  *       400:
- *         description: Invalid wallet or challenge details.
+ *         description: Invalid authorization decision.
  *       401:
- *         description: The challenge is invalid or expired.
+ *         description: Authorization transaction is invalid or expired.
  *       403:
  *         description: Same-origin check failed.
  *       413:
@@ -356,9 +418,21 @@ async function handleConsentPost(
  *         description: Form content type is required.
  *       429:
  *         description: Authorization request quota exceeded.
+ * /auth/google/callback:
+ *   get:
+ *     summary: Complete Google sign-in and MCP authorization.
+ *     tags: [OAuth]
+ *     responses:
+ *       302:
+ *         description: Redirect to the MCP client with a code or OAuth error.
+ *       401:
+ *         description: Authorization transaction is invalid or expired.
+ *       429:
+ *         description: Authorization request quota exceeded.
  */
 export function createConsentHandler(
-  config: WorkerConfig
+  config: WorkerConfig,
+  googleAuthenticator: GoogleAuthenticator = authenticateWithGoogle
 ): ExportedHandler<McpOAuthEnv> {
   return {
     async fetch(request, env) {
@@ -371,10 +445,15 @@ export function createConsentHandler(
           return handleConsentPost(request, env, config);
         }
         if (
-          url.pathname === "/authorize/message" &&
-          request.method === "POST"
+          url.pathname === "/auth/google/callback" &&
+          request.method === "GET"
         ) {
-          return handleMessageRequest(request, env, config);
+          return handleGoogleCallback(
+            request,
+            env,
+            config,
+            googleAuthenticator
+          );
         }
         return localError("Not found.", 404);
       } catch (error) {

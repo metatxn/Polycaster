@@ -57,7 +57,7 @@ export function OAuthCallbackClient() {
           className="mx-auto size-6 animate-spin text-muted-foreground"
           aria-hidden="true"
         />
-        <h1 className="mt-4 text-lg font-semibold">Wallet authorization</h1>
+        <h1 className="mt-4 text-lg font-semibold">MCP authorization</h1>
         <p className="mt-2 text-sm text-muted-foreground" role="status">
           {status}
         </p>

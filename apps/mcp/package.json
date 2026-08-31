@@ -25,7 +25,7 @@
     "@modelcontextprotocol/server": "2.0.0",
     "agents": "0.21.0",
     "decimal.js": "catalog:",
-    "viem": "catalog:",
+    "jose": "6.2.3",
     "zod": "4.4.3"
   },
   "devDependencies": {

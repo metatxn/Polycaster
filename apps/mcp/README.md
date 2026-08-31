@@ -46,7 +46,7 @@ The implementation includes:
 - OAuth 2.1 authorization-code flow with S256 PKCE
 - MCP protected-resource and authorization-server discovery
 - Client ID Metadata Documents, plus rate-limited dynamic registration for compatibility
-- Human wallet login and consent with atomic one-time challenges
+- Google OpenID Connect login with atomic one-time authorization state
 - Audience-bound access and refresh tokens
 - `markets:read` enforcement at the protected route and inside every tool
 - Distributed rate limiting on authorization, token, and registration endpoints
@@ -66,8 +66,6 @@ The implementation includes:
 
 It does not yet include:
 
-- A non-wallet Knoww account login option
-- Smart-contract-wallet signature verification
 - Private user or tenant data
 - Trading actions or x402-paid tools
 
@@ -84,7 +82,7 @@ Cloudflare Worker: /mcp
         v
 Cloudflare Workers OAuth Provider
         |
-        | audience-bound token + markets:read
+        | Google OIDC identity + audience-bound token + markets:read
         v
 agents/mcp/server createMcpHandler
         |
@@ -107,7 +105,7 @@ The MCP tools do not call Knoww's public Next.js API routes. Both the website an
 
 The Worker is separate from `apps/web` so it can have its own authentication secrets, quotas, deployment schedule, rollback path, and logs. Hono is not used because the current Worker has one MCP route and the MCP handler already owns the protocol routing.
 
-MCP requests remain stateless and need no session affinity. A Durable Object is used only to create and atomically consume each five-minute wallet-consent challenge; it does not hold MCP sessions.
+MCP requests remain stateless and need no session affinity. A Durable Object is used only to create and atomically consume each five-minute Google authorization transaction; it does not hold MCP sessions or Google tokens.
 
 ## Core dependencies
 
@@ -120,7 +118,7 @@ MCP requests remain stateless and need no session affinity. A Durable Object is 
 | `@knoww/logger` | Workspace | Structured logs |
 | `@knoww/shared-types` | Workspace | Shared Polymarket parsers and types |
 | `decimal.js` | Workspace catalog | Exact decimal parsing, comparison, and arithmetic |
-| `viem` | Workspace catalog | EVM address normalization and EOA signature verification |
+| `jose` | `6.2.3` | Google ID-token signature and claim verification |
 | `zod` | `4.4.3` | Tool and upstream-response schemas |
 | `wrangler` | `4.123.0` | Local Worker runtime, type generation, build, and deploy |
 | `vitest` | `4.1.10` | Workers-native automated tests |
@@ -259,10 +257,11 @@ Run commands from the repository root.
 
 ```bash
 cd /Users/nareshkatta/Desktop/Soclly/polycaster
+node --version # v24.x
 pnpm install
 ```
 
-The workspace declares `pnpm@10.25.0` in the root `package.json`.
+Use Node.js 24. The workspace declares `pnpm@10.25.0` in the root `package.json`.
 
 ### 2. Start the Worker
 
@@ -333,7 +332,7 @@ pnpm exec biome check apps/mcp/src apps/mcp/vitest.config.ts
 pnpm --filter @knoww/mcp build
 ```
 
-The current baseline is 97 service tests and 133 MCP tests. The build command performs a Wrangler production dry run and writes its output to `apps/mcp/dist`.
+The current baseline is 97 service tests and 136 MCP tests. The build command performs a Wrangler production dry run and writes its output to `apps/mcp/dist`.
 
 Tests stub upstream fetches with a one-shot route table. They fail when an expected route is unused or code makes an unexpected outbound request.
 
@@ -460,9 +459,9 @@ An unauthenticated production request receives `401` with a `resource_metadata` 
 
 The preferred registration path is a Client ID Metadata Document. Dynamic Client Registration remains enabled for compatibility, is rate-limited, and stores registrations for 30 days.
 
-The MCP host opens `/authorize` in the user's browser. The user connects an injected EVM wallet and signs a five-minute, client-specific consent message. Knoww verifies that one-time signature, then the OAuth Provider issues a one-hour access token and a rotating refresh token with a 30-day lifetime. The model never receives a private key or wallet signature, and the signature is never reused as a Bearer credential.
+The MCP host opens `/authorize` in the user's browser. After the user approves the requested scope, Knoww redirects to Google using authorization-code flow, S256 PKCE, a nonce, and five-minute one-time state. The Worker exchanges the Google code on the server and verifies the ID token signature, issuer, audience, expiry, nonce, stable subject, and verified-email claim. It then asks the existing OAuth Provider to issue a one-hour MCP access token and a rotating refresh token with a 30-day lifetime.
 
-The initial login path verifies EOA signatures. Smart-contract wallets need a separately tested EIP-1271 verification path before they can authorize.
+The MCP client and model never receive the Google client secret, Google authorization code, ID token, access token, email, or password. The MCP grant retains Google's stable subject identifier as the principal. Knoww does not add an application database for this flow: the existing OAuth KV binding stores provider grants and tokens, while the existing Durable Object binding stores only short-lived one-time authorization transactions.
 
 Only `markets:read` is active and advertised. `x402:pay` is reserved for a future paid-tool phase but is currently rejected as `invalid_scope`. When it becomes active, it will mean “this client may attempt an x402-gated tool.” It will not authorize Knoww or the model to spend funds. The agent host must enforce its own budget and ask its wallet component to sign each payment proof.
 
@@ -472,7 +471,7 @@ Never enable `dev-bypass` in preview or production.
 
 ## Configuration
 
-The checked-in Wrangler configuration contains non-secret deployment settings only.
+The checked-in Wrangler configuration contains non-secret deployment settings and required secret names only. Secret values belong in Cloudflare Worker secrets.
 
 | Variable | Purpose | Production value |
 |---|---|---|
@@ -481,12 +480,23 @@ The checked-in Wrangler configuration contains non-secret deployment settings on
 | `MCP_ALLOWED_HOSTNAMES` | Comma-separated Host allowlist | `mcp.knoww.app` |
 | `MCP_ALLOWED_ORIGIN_HOSTNAMES` | Comma-separated browser Origin allowlist | `mcp.knoww.app,knoww.app,www.knoww.app` |
 
+Required production secrets:
+
+| Secret | Purpose |
+|---|---|
+| `GOOGLE_CLIENT_ID` | Identifies the Knoww web OAuth client to Google |
+| `GOOGLE_CLIENT_SECRET` | Authenticates the server-side Google code exchange |
+
+Configure the Google OAuth client as a **Web application** and add the exact `https://mcp.knoww.app/auth/google/callback` URL under **Authorized redirect URIs**. This server-side flow does not require an Authorized JavaScript origin. If that optional field is populated for another integration, its value is only `https://mcp.knoww.app`; an origin cannot contain a path. The MCP client's own callback URI is separate and remains registered by that MCP client through CIMD or Dynamic Client Registration.
+
+In **Workers & Pages > knoww-mcp > Settings > Variables and Secrets**, add both names above as encrypted secrets. The production Wrangler configuration marks both bindings as required, so a deployment reports a missing configuration instead of silently shipping an unusable login flow. Never place either value in Git, build logs, URLs, or browser code.
+
 Required Cloudflare bindings:
 
 | Binding | Purpose |
 |---|---|
 | `OAUTH_KV` | Provider-managed clients, grants, authorization codes, and hashed token records |
-| `MCP_AUTH_CHALLENGES` | Durable Object namespace for atomic one-time wallet challenges |
+| `MCP_AUTH_CHALLENGES` | Legacy-named Durable Object namespace for atomic one-time OIDC transactions |
 | `MCP_AUTH_RATE_LIMITER` | Distributed limit for authorization, token, and registration routes |
 | `MCP_EDGE_RATE_LIMITER` | Coarse source limit across all Worker paths before routing |
 | `MCP_FREE_PRINCIPAL_RATE_LIMITER` | Free-plan quota across authenticated MCP requests |
@@ -501,7 +511,7 @@ MCP_ALLOWED_HOSTNAMES=localhost,127.0.0.1
 MCP_ALLOWED_ORIGIN_HOSTNAMES=localhost,127.0.0.1
 ```
 
-This wallet-login implementation does not add a server secret. Any later identity-provider credentials, facilitator keys, or payment configuration must use Cloudflare secrets or secret bindings. Never commit them or place them in this README.
+Local `dev-bypass` does not require Google credentials. Production OAuth does. Keep the two Google bindings in Cloudflare Secrets so Workers Builds can deploy without placing credentials in the repository or build variables.
 
 ## Project structure
 
@@ -526,11 +536,11 @@ apps/mcp/
     quota.ts                 Edge, plan, principal, and tool quota enforcement
     auth/
       api.ts                 Verified OAuth props and route-level scope boundary
-      challenge-store.ts     Atomic one-time wallet challenge Durable Object
-      consent.ts             OAuth authorization and browser consent handlers
+      challenge-store.ts     Atomic one-time OIDC transaction Durable Object
+      consent.ts             OAuth consent and Google callback handlers
+      google.ts              Google authorization, code exchange, and ID-token verification
       provider.ts            Workers OAuth Provider configuration
       scopes.ts              Active and reserved scope definitions
-      wallet.ts              SIWE-style message and EOA signature verification
     errors/
       tool-error.ts          Safe tool error model and logging
     tools/
@@ -567,7 +577,9 @@ Changes to this Worker must preserve these rules:
 - Never accept caller-supplied user or tenant ownership for private data.
 - Derive identity only from the OAuth Provider's verified, encrypted token properties.
 - Never accept extension-session or admin tokens as MCP credentials.
-- Keep wallet consent challenges short-lived and atomically one-time.
+- Keep Google authorization state short-lived and atomically one-time.
+- Verify Google ID-token signatures, issuer, audience, expiry, nonce, subject, and verified email before issuing an MCP grant.
+- Never expose or retain Google codes, Google tokens, or the Google client secret in MCP token properties.
 - Treat OAuth scopes and x402 payment proofs as separate controls.
 - Return money and market quantities as decimal strings.
 - Use Decimal.js for monetary comparisons and arithmetic.
@@ -622,7 +634,7 @@ When debugging a request, start with `x-request-id`, then find the matching stru
 
 The repository now contains the production route, OAuth and quota bindings, probes, PR quality gate, HTTP contract, and rollback commands. GitHub Actions validates every pull request but never deploys. After the bootstrap release, Cloudflare Workers Builds is the only automatic production deployer and runs for MCP-affecting merges to `main`.
 
-There is no remote staging Worker. The first live CIMD, DCR, wallet OAuth, quota, and tool checks run against production immediately after the first attended deployment. Protect `main` so `MCP CI / quality` is required and direct pushes are blocked. Follow [OPERATIONS.md](OPERATIONS.md) for the exact release checks, monitoring thresholds, Cloudflare build settings, and rollback commands.
+There is no remote staging Worker. The first live CIMD, DCR, Google OAuth, quota, and tool checks run against production immediately after the first attended deployment. Protect `main` so `MCP CI / quality` is required and direct pushes are blocked. Follow [OPERATIONS.md](OPERATIONS.md) for the exact release checks, monitoring thresholds, Cloudflare build settings, and rollback commands.
 
 ### Automatic production deployments
 
@@ -685,6 +697,14 @@ Running Wrangler without `--env local` selects the production-shaped OAuth confi
 
 Use `http://localhost:8787/mcp` or `http://127.0.0.1:8787/mcp`. Browser requests must send an Origin whose hostname appears in `MCP_ALLOWED_ORIGIN_HOSTNAMES`. Origin-less desktop requests are allowed.
 
+### Google reports `redirect_uri_mismatch`
+
+Open the Google Cloud Console web OAuth client and place `https://mcp.knoww.app/auth/google/callback` under **Authorized redirect URIs**. Do not paste that path into **Authorized JavaScript origins**; an origin is only `https://mcp.knoww.app`. Save the client, allow Google's configuration to propagate, then restart the MCP authorization flow so it uses fresh five-minute state.
+
+### Google returns but the client stays disconnected
+
+Allow popups for the MCP host and keep the product window open during sign-in. If the client reports a state error, begin authorization again instead of reusing the callback URL. A callback state is valid for five minutes and is consumed once, including when Google returns an error.
+
 ### MCP Inspector cannot connect
 
 Check these items:
@@ -727,6 +747,7 @@ Repository documentation:
 
 - [Architecture and implementation plan](../../mcp.md)
 - [Implementation report](../../mcp-implementation-report.md)
+- [Google OIDC decision record](../../docs/decisions/2026-08-31-mcp-google-oidc.md)
 - [Operations runbook](OPERATIONS.md)
 - [HTTP OpenAPI contract](openapi.yaml)
 - [Changelog](CHANGELOG.md)
@@ -742,6 +763,9 @@ Official documentation:
 - [Cloudflare Workers Rate Limiting binding](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
 - [Cloudflare Workers Builds configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)
 - [Cloudflare Workers build watch paths](https://developers.cloudflare.com/workers/ci-cd/builds/build-watch-paths/)
+- [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)
+- [Google OAuth web-server flow](https://developers.google.com/identity/protocols/oauth2/web-server)
+- [`jose` remote JWKS verification](https://github.com/panva/jose/blob/main/docs/jwks/remote/functions/createRemoteJWKSet.md)
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
 - [MCP TypeScript SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/)
 - [MCP authorization specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)

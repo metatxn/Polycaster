@@ -16,7 +16,10 @@ import {
   type OAuthSession,
   type OAuthTransaction,
 } from "./mcp-oauth";
-import { parseOAuthCallbackMessage } from "./mcp-oauth-callback";
+import {
+  listenForOAuthCallbackBroadcast,
+  parseOAuthCallbackMessage,
+} from "./mcp-oauth-callback";
 
 const DEFAULT_ENDPOINT =
   process.env.NODE_ENV === "production"
@@ -90,9 +93,8 @@ export function useMcpExplorer() {
   const [session, setSession] = useState<OAuthSession | null>(null);
 
   useEffect(() => {
-    const receiveOAuthCallback = (event: MessageEvent<unknown>) => {
-      if (event.origin !== window.location.origin) return;
-      const params = parseOAuthCallbackMessage(event.data);
+    const completeOAuthCallback = (value: unknown) => {
+      const params = parseOAuthCallbackMessage(value);
       const transaction = oauthTransaction.current;
       if (!params || !transaction) return;
       oauthTransaction.current = null;
@@ -117,9 +119,19 @@ export function useMcpExplorer() {
           setBusy(null);
         });
     };
-    window.addEventListener("message", receiveOAuthCallback);
+
+    const receiveWindowCallback = (event: MessageEvent<unknown>) => {
+      if (event.origin !== window.location.origin) return;
+      completeOAuthCallback(event.data);
+    };
+    const stopChannelCallback = listenForOAuthCallbackBroadcast(
+      completeOAuthCallback
+    );
+
+    window.addEventListener("message", receiveWindowCallback);
     return () => {
-      window.removeEventListener("message", receiveOAuthCallback);
+      window.removeEventListener("message", receiveWindowCallback);
+      stopChannelCallback();
       oauthPopup.current?.close();
       oauthPopup.current = null;
       oauthTransaction.current = null;

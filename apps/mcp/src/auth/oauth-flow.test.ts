@@ -168,6 +168,9 @@ describe("MCP wallet OAuth flow", () => {
     expect(consentResponse.headers.get("cache-control")).toBe("no-store");
     expect(consentResponse.headers.get("referrer-policy")).toBe("same-origin");
     const html = await consentResponse.text();
+    expect(html).toContain("eip6963:announceProvider");
+    expect(html).toContain("eip6963:requestProvider");
+    expect(html).toContain('id="wallet-provider"');
     expect(html).not.toContain('name="decision" id="decision"');
     const challengeId = htmlAttribute(html, "data-challenge-id");
     const issuedAt = htmlAttribute(html, "data-issued-at");

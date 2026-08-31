@@ -108,9 +108,9 @@ export function McpIntegrationGuide() {
             Let the host follow MCP protected-resource discovery. Do not ask the
             user to paste an access token.
           </Step>
-          <Step number="4" title="Complete wallet consent">
-            The user connects an injected EVM wallet and signs the one-time
-            consent message. This is a signature, not a transaction.
+          <Step number="4" title="Sign in with Google">
+            The user reviews the requested scope, selects Continue with Google,
+            and completes sign-in in the popup.
           </Step>
           <Step number="5" title="Confirm the permission">
             The only active scope is <InlineCode>markets:read</InlineCode>. It
@@ -140,7 +140,7 @@ export function McpIntegrationGuide() {
         id="authentication"
         eyebrow="Security"
         title="Authentication and authorization"
-        intro="Authentication proves which wallet approved the connection. Authorization limits what the resulting token may do. The controls are separate and both are enforced."
+        intro="Google sign-in proves which person approved the connection. OAuth scopes limit what the resulting MCP token may do. The controls are separate and both are enforced."
       >
         <div className="overflow-hidden rounded-md border">
           <div className="grid bg-muted/40 px-4 py-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase sm:grid-cols-[3rem_13rem_1fr] sm:px-5">
@@ -170,8 +170,8 @@ export function McpIntegrationGuide() {
           />
           <AuthRow
             number="5"
-            name="Wallet consent"
-            detail="The user connects an injected EVM wallet and signs a client-specific challenge. The challenge expires after five minutes and can be used once."
+            name="Google sign-in"
+            detail="Knoww redirects the user to Google with its own nonce, state, and S256 PKCE challenge. The MCP client never receives the Google code, ID token, access token, or client secret."
           />
           <AuthRow
             number="6"
@@ -201,15 +201,16 @@ export function McpIntegrationGuide() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Fact label="Access token" value="1 hour" />
           <Fact label="Refresh token" value="30 days, rotating" />
-          <Fact label="Consent challenge" value="5 minutes, one use" />
+          <Fact label="Sign-in state" value="5 minutes, one use" />
           <Fact label="Active scope" value="markets:read" mono />
         </div>
 
-        <Callout icon="warning" title="Current wallet limits">
-          The production login verifies externally owned account signatures.
-          Smart-contract wallets that require EIP-1271 are not supported yet.
-          The server has no password login, private account data, trading, or
-          x402 payment tools.
+        <Callout icon="info" title="Google stays behind the Knoww boundary">
+          Your product remains an OAuth public client and does not need Google
+          credentials. Knoww exchanges the Google code on the server, verifies
+          the signed ID token and nonce, and keeps only Google&apos;s stable
+          subject identifier in the MCP grant. It does not retain the Google
+          access token or email in the MCP token.
         </Callout>
 
         <p className="text-sm leading-6 text-muted-foreground">
@@ -334,7 +335,7 @@ export function McpIntegrationGuide() {
             Worker liveness.
           </EndpointRow>
           <EndpointRow method="GET" path="/readyz" auth="Public">
-            OAuth state-store and wallet-challenge readiness.
+            OAuth state-store and one-time authorization-state readiness.
           </EndpointRow>
           <EndpointRow
             method="GET"
@@ -351,14 +352,15 @@ export function McpIntegrationGuide() {
             Issuer, authorization, token, registration, and PKCE metadata.
           </EndpointRow>
           <EndpointRow method="GET / POST" path="/authorize" auth="OAuth flow">
-            Begin consent or submit the signed wallet decision.
+            Begin consent or continue to Google sign-in.
           </EndpointRow>
           <EndpointRow
-            method="POST"
-            path="/authorize/message"
-            auth="Active challenge"
+            method="GET"
+            path="/auth/google/callback"
+            auth="Google callback"
           >
-            Build the exact wallet consent message to sign.
+            Verify Google sign-in and complete MCP authorization. Products do
+            not call this endpoint directly.
           </EndpointRow>
           <EndpointRow
             method="POST"
@@ -416,8 +418,8 @@ export function McpIntegrationGuide() {
                 Respect meta.truncated and paginate or narrow the request.
               </li>
               <li>
-                Never log authorization headers, tokens, wallet signatures, or
-                raw tool output.
+                Never log authorization headers, OAuth codes, tokens, or raw
+                tool output.
               </li>
             </ul>
           </ReferenceCard>
@@ -460,10 +462,12 @@ export function McpIntegrationGuide() {
             redirect URI, and compare normalized issuer URLs. Never continue
             after a mismatch.
           </TroubleshootingItem>
-          <TroubleshootingItem title="The wallet cannot authorize">
-            Use an injected EVM wallet backed by an externally owned account.
-            Unlock it, select an EVM network, and restart if the five-minute
-            challenge expired.
+          <TroubleshootingItem title="Google sign-in does not return">
+            Allow the authorization popup and third-party navigation, then
+            restart the flow if its five-minute state expired. Product callback
+            URIs belong to the MCP client; the Google Console redirect URI is
+            the Knoww-owned <InlineCode>/auth/google/callback</InlineCode>{" "}
+            route.
           </TroubleshootingItem>
           <TroubleshootingItem title="A browser request returns 403">
             The Origin may not be allowlisted. Use a desktop or backend MCP

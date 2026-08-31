@@ -1,16 +1,18 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import {
-  consumeWalletChallenge,
-  createWalletChallenge,
-  type WalletChallenge,
+  type AuthorizationTransaction,
+  consumeAuthorizationTransaction,
+  createAuthorizationTransaction,
 } from "./challenge-store";
 
-const challenge: WalletChallenge = {
+const transaction: AuthorizationTransaction = {
+  codeChallenge: "google-code-challenge",
+  codeVerifier: "v".repeat(64),
   id: "0123456789abcdef0123456789abcdef",
   clientName: "Test Agent",
   expirationTime: "2099-01-01T00:05:00.000Z",
-  issuedAt: "2099-01-01T00:00:00.000Z",
+  nonce: "google-nonce",
   resource: "https://mcp.knoww.app/mcp",
   scopes: ["markets:read"],
   oauthRequest: {
@@ -26,28 +28,28 @@ const challenge: WalletChallenge = {
   },
 };
 
-describe("WalletChallengeStore", () => {
-  it("allows a challenge to be consumed exactly once", async () => {
-    await createWalletChallenge(env.MCP_AUTH_CHALLENGES, challenge);
+describe("OAuth authorization transaction store", () => {
+  it("allows an authorization transaction to be consumed exactly once", async () => {
+    await createAuthorizationTransaction(env.MCP_AUTH_CHALLENGES, transaction);
 
     await expect(
-      consumeWalletChallenge(env.MCP_AUTH_CHALLENGES, challenge.id)
-    ).resolves.toEqual(challenge);
+      consumeAuthorizationTransaction(env.MCP_AUTH_CHALLENGES, transaction.id)
+    ).resolves.toEqual(transaction);
     await expect(
-      consumeWalletChallenge(env.MCP_AUTH_CHALLENGES, challenge.id)
+      consumeAuthorizationTransaction(env.MCP_AUTH_CHALLENGES, transaction.id)
     ).resolves.toBeNull();
   });
 
-  it("does not return an expired challenge", async () => {
+  it("does not return an expired authorization transaction", async () => {
     const expired = {
-      ...challenge,
+      ...transaction,
       id: "fedcba9876543210fedcba9876543210",
       expirationTime: "2020-01-01T00:00:00.000Z",
     };
-    await createWalletChallenge(env.MCP_AUTH_CHALLENGES, expired);
+    await createAuthorizationTransaction(env.MCP_AUTH_CHALLENGES, expired);
 
     await expect(
-      consumeWalletChallenge(env.MCP_AUTH_CHALLENGES, expired.id)
+      consumeAuthorizationTransaction(env.MCP_AUTH_CHALLENGES, expired.id)
     ).resolves.toBeNull();
   });
 });

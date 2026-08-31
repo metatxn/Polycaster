@@ -20,8 +20,8 @@ describe("MCP tool quotas", () => {
       {
         requestId: "quota-test",
         principal: {
-          authMethod: "wallet-signature",
-          id: "wallet-test",
+          authMethod: "google-oidc",
+          id: "google-test",
           plan: "free",
           scopes: ["markets:read"],
         },
@@ -30,7 +30,7 @@ describe("MCP tool quotas", () => {
       () => requireToolQuota("search_markets")
     );
 
-    expect(keys).toEqual(["free:wallet-test:search_markets"]);
+    expect(keys).toEqual(["free:google-test:search_markets"]);
   });
 
   it("returns a retryable tool error when the quota is exhausted", async () => {
@@ -39,8 +39,8 @@ describe("MCP tool quotas", () => {
         {
           requestId: "quota-test",
           principal: {
-            authMethod: "wallet-signature",
-            id: "wallet-test",
+            authMethod: "google-oidc",
+            id: "google-test",
             plan: "free",
             scopes: ["markets:read"],
           },
@@ -61,8 +61,8 @@ describe("MCP tool quotas", () => {
         {
           requestId: "quota-test",
           principal: {
-            authMethod: "wallet-signature",
-            id: "wallet-test",
+            authMethod: "google-oidc",
+            id: "google-test",
             plan: "free",
             scopes: ["markets:read"],
           },

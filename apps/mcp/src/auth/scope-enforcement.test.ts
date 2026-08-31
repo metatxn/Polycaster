@@ -22,8 +22,8 @@ describe("tool scope enforcement", () => {
         {
           requestId: "scope-test",
           principal: {
-            authMethod: "wallet-signature",
-            id: "wallet-test",
+            authMethod: "google-oidc",
+            id: "google-test",
             plan: "free",
             scopes: [],
           },
@@ -41,8 +41,8 @@ describe("tool scope enforcement", () => {
         {
           requestId: "scope-test",
           principal: {
-            authMethod: "wallet-signature",
-            id: "wallet-test",
+            authMethod: "google-oidc",
+            id: "google-test",
             plan: "free",
             scopes: [MARKETS_READ_SCOPE],
           },
@@ -57,9 +57,9 @@ describe("tool scope enforcement", () => {
       props: unknown;
     };
     ctx.props = {
-      authMethod: "wallet-signature",
-      principalId: "wallet-0x0000000000000000000000000000000000000001",
-      walletAddress: "0x0000000000000000000000000000000000000001",
+      authMethod: "google-oidc",
+      googleSubject: "102030405060708090",
+      principalId: "google-102030405060708090",
       plan: "free",
       scopes: [],
     };
@@ -94,9 +94,9 @@ describe("tool scope enforcement", () => {
       props: unknown;
     };
     ctx.props = {
-      authMethod: "wallet-signature",
-      principalId: "wallet-0x0000000000000000000000000000000000000001",
-      walletAddress: "0x0000000000000000000000000000000000000001",
+      authMethod: "google-oidc",
+      googleSubject: "102030405060708090",
+      principalId: "google-102030405060708090",
       plan: "free",
       scopes: [MARKETS_READ_SCOPE],
     };
@@ -112,8 +112,6 @@ describe("tool scope enforcement", () => {
 
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("60");
-    expect(keys).toEqual([
-      "free:wallet-0x0000000000000000000000000000000000000001",
-    ]);
+    expect(keys).toEqual(["free:google-102030405060708090"]);
   });
 });

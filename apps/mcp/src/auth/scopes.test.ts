@@ -26,28 +26,28 @@ describe("MCP OAuth scopes", () => {
     );
   });
 
-  it("accepts only provider-issued wallet props with active scopes", () => {
+  it("accepts only provider-issued Google props with active scopes", () => {
     expect(
       validateMcpAuthProps({
-        authMethod: "wallet-signature",
-        principalId: "wallet-0x0000000000000000000000000000000000000001",
-        walletAddress: "0x0000000000000000000000000000000000000001",
+        authMethod: "google-oidc",
+        googleSubject: "102030405060708090",
+        principalId: "google-102030405060708090",
         plan: "free",
         scopes: [MARKETS_READ_SCOPE],
       })
     ).toEqual({
-      authMethod: "wallet-signature",
-      principalId: "wallet-0x0000000000000000000000000000000000000001",
-      walletAddress: "0x0000000000000000000000000000000000000001",
+      authMethod: "google-oidc",
+      googleSubject: "102030405060708090",
+      principalId: "google-102030405060708090",
       plan: "free",
       scopes: [MARKETS_READ_SCOPE],
     });
 
     expect(
       validateMcpAuthProps({
-        authMethod: "wallet-signature",
-        principalId: "wallet-0x0000000000000000000000000000000000000001",
-        walletAddress: "0x0000000000000000000000000000000000000001",
+        authMethod: "google-oidc",
+        googleSubject: "102030405060708090",
+        principalId: "google-102030405060708090",
         plan: "free",
         scopes: [MARKETS_READ_SCOPE, "admin"],
       })
@@ -55,9 +55,9 @@ describe("MCP OAuth scopes", () => {
 
     expect(
       validateMcpAuthProps({
-        authMethod: "wallet-signature",
-        principalId: "wallet-0x0000000000000000000000000000000000000001",
-        walletAddress: "0x0000000000000000000000000000000000000001",
+        authMethod: "google-oidc",
+        googleSubject: "102030405060708090",
+        principalId: "google-102030405060708090",
         plan: "free",
         scopes: [],
       })?.scopes
@@ -67,9 +67,9 @@ describe("MCP OAuth scopes", () => {
   it("rejects unknown plans in provider-issued token properties", () => {
     expect(
       validateMcpAuthProps({
-        authMethod: "wallet-signature",
-        principalId: "wallet-0x0000000000000000000000000000000000000001",
-        walletAddress: "0x0000000000000000000000000000000000000001",
+        authMethod: "google-oidc",
+        googleSubject: "102030405060708090",
+        principalId: "google-102030405060708090",
         plan: "unlimited",
         scopes: [MARKETS_READ_SCOPE],
       })

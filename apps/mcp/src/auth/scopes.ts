@@ -1,5 +1,3 @@
-import { getAddress, isAddress } from "viem";
-
 export const MARKETS_READ_SCOPE = "markets:read" as const;
 export const FREE_MCP_PLAN = "free" as const;
 export type McpPlan = typeof FREE_MCP_PLAN;
@@ -18,9 +16,9 @@ export type ActiveMcpScope = (typeof ACTIVE_MCP_SCOPES)[number];
 const activeScopeSet = new Set<string>(ACTIVE_MCP_SCOPES);
 
 export interface McpAuthProps {
-  authMethod: "wallet-signature";
+  authMethod: "google-oidc";
+  googleSubject: string;
   principalId: string;
-  walletAddress: `0x${string}`;
   plan: McpPlan;
   scopes: ActiveMcpScope[];
 }
@@ -51,11 +49,11 @@ export function hasScope(
 export function validateMcpAuthProps(value: unknown): McpAuthProps | null {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Record<string, unknown>;
-  if (candidate.authMethod !== "wallet-signature") return null;
+  if (candidate.authMethod !== "google-oidc") return null;
   if (candidate.plan !== FREE_MCP_PLAN) return null;
   if (
-    typeof candidate.walletAddress !== "string" ||
-    !isAddress(candidate.walletAddress)
+    typeof candidate.googleSubject !== "string" ||
+    !/^[A-Za-z0-9_-]{1,255}$/.test(candidate.googleSubject)
   ) {
     return null;
   }
@@ -67,14 +65,13 @@ export function validateMcpAuthProps(value: unknown): McpAuthProps | null {
       scopes.push(scope as ActiveMcpScope);
     }
   }
-  const walletAddress = getAddress(candidate.walletAddress);
-  const principalId = `wallet-${walletAddress.toLowerCase()}`;
+  const principalId = `google-${candidate.googleSubject}`;
   if (candidate.principalId !== principalId) return null;
 
   return {
-    authMethod: "wallet-signature",
+    authMethod: "google-oidc",
+    googleSubject: candidate.googleSubject,
     principalId,
-    walletAddress,
     plan: FREE_MCP_PLAN,
     scopes,
   };

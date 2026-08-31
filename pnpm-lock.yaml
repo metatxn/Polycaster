@@ -226,9 +226,9 @@ importers:
       decimal.js:
         specifier: 'catalog:'
         version: 10.6.0
-      viem:
-        specifier: 2.55.10
-        version: 2.55.10(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.4.3)
+      jose:
+        specifier: 6.2.3
+        version: 6.2.3
       zod:
         specifier: 4.4.3
         version: 4.4.3

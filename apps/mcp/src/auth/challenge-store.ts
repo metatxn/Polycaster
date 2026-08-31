@@ -1,112 +1,124 @@
 import { DurableObject } from "cloudflare:workers";
 import type { AuthRequest } from "@cloudflare/workers-oauth-provider";
 
-const RECORD_KEY = "wallet-challenge";
-const INTERNAL_ORIGIN = "https://wallet-challenge.internal";
+const RECORD_KEY = "authorization-transaction";
+const INTERNAL_ORIGIN = "https://authorization-transaction.internal";
 
-export interface WalletChallenge {
+export interface AuthorizationTransaction {
+  codeChallenge: string;
+  codeVerifier: string;
   id: string;
   clientName: string;
   expirationTime: string;
-  issuedAt: string;
+  nonce: string;
   resource: string;
   scopes: string[];
   oauthRequest: AuthRequest;
 }
 
-function challengeStub(
+function transactionStub(
   namespace: DurableObjectNamespace,
-  challengeId: string
+  transactionId: string
 ): DurableObjectStub {
-  return namespace.get(namespace.idFromName(challengeId));
+  return namespace.get(namespace.idFromName(transactionId));
 }
 
-export async function createWalletChallenge(
+export async function createAuthorizationTransaction(
   namespace: DurableObjectNamespace,
-  challenge: WalletChallenge
+  transaction: AuthorizationTransaction
 ): Promise<void> {
-  const response = await challengeStub(namespace, challenge.id).fetch(
-    new Request(`${INTERNAL_ORIGIN}/challenge`, {
+  const response = await transactionStub(namespace, transaction.id).fetch(
+    new Request(`${INTERNAL_ORIGIN}/transaction`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(challenge),
+      body: JSON.stringify(transaction),
     })
   );
   if (!response.ok) {
-    throw new Error("Could not create wallet challenge.");
+    throw new Error("Could not create authorization transaction.");
   }
 }
 
-export async function consumeWalletChallenge(
+export async function consumeAuthorizationTransaction(
   namespace: DurableObjectNamespace,
-  challengeId: string
-): Promise<WalletChallenge | null> {
-  const response = await challengeStub(namespace, challengeId).fetch(
-    new Request(`${INTERNAL_ORIGIN}/challenge`, { method: "DELETE" })
+  transactionId: string
+): Promise<AuthorizationTransaction | null> {
+  const response = await transactionStub(namespace, transactionId).fetch(
+    new Request(`${INTERNAL_ORIGIN}/transaction`, { method: "DELETE" })
   );
   if (response.status === 404 || response.status === 410) return null;
-  if (!response.ok) throw new Error("Could not consume wallet challenge.");
-  return response.json<WalletChallenge>();
+  if (!response.ok) {
+    throw new Error("Could not consume authorization transaction.");
+  }
+  return response.json<AuthorizationTransaction>();
 }
 
-export async function readWalletChallenge(
+export async function readAuthorizationTransaction(
   namespace: DurableObjectNamespace,
-  challengeId: string
-): Promise<WalletChallenge | null> {
-  const response = await challengeStub(namespace, challengeId).fetch(
-    new Request(`${INTERNAL_ORIGIN}/challenge`)
+  transactionId: string
+): Promise<AuthorizationTransaction | null> {
+  const response = await transactionStub(namespace, transactionId).fetch(
+    new Request(`${INTERNAL_ORIGIN}/transaction`)
   );
   if (response.status === 404 || response.status === 410) return null;
-  if (!response.ok) throw new Error("Could not read wallet challenge.");
-  return response.json<WalletChallenge>();
+  if (!response.ok) {
+    throw new Error("Could not read authorization transaction.");
+  }
+  return response.json<AuthorizationTransaction>();
 }
 
+/**
+ * The class name is retained because Durable Object migrations identify the
+ * deployed class by name. Its records now hold Google OIDC transactions.
+ */
 export class WalletChallengeStore extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health" && request.method === "GET") {
       return new Response(null, { status: 204 });
     }
-    if (url.pathname !== "/challenge") {
+    if (url.pathname !== "/transaction") {
       return new Response("Not found", { status: 404 });
     }
 
     if (request.method === "PUT") {
       const existing = await this.ctx.storage.get(RECORD_KEY);
       if (existing !== undefined) {
-        return new Response("Challenge already exists", { status: 409 });
+        return new Response("Transaction already exists", { status: 409 });
       }
-      const challenge = await request.json<WalletChallenge>();
-      const expirationMs = Date.parse(challenge.expirationTime);
+      const transaction = await request.json<AuthorizationTransaction>();
+      const expirationMs = Date.parse(transaction.expirationTime);
       if (!Number.isFinite(expirationMs)) {
-        return new Response("Invalid challenge", { status: 400 });
+        return new Response("Invalid transaction", { status: 400 });
       }
-      await this.ctx.storage.put(RECORD_KEY, challenge);
+      await this.ctx.storage.put(RECORD_KEY, transaction);
       await this.ctx.storage.setAlarm(Math.max(Date.now() + 1, expirationMs));
       return new Response(null, { status: 201 });
     }
 
     if (request.method === "DELETE") {
-      const challenge = await this.ctx.storage.get<WalletChallenge>(RECORD_KEY);
-      if (!challenge) return new Response(null, { status: 404 });
+      const transaction =
+        await this.ctx.storage.get<AuthorizationTransaction>(RECORD_KEY);
+      if (!transaction) return new Response(null, { status: 404 });
 
       await this.ctx.storage.delete(RECORD_KEY);
       await this.ctx.storage.deleteAlarm();
-      if (Date.parse(challenge.expirationTime) <= Date.now()) {
+      if (Date.parse(transaction.expirationTime) <= Date.now()) {
         return new Response(null, { status: 410 });
       }
-      return Response.json(challenge);
+      return Response.json(transaction);
     }
 
     if (request.method === "GET") {
-      const challenge = await this.ctx.storage.get<WalletChallenge>(RECORD_KEY);
-      if (!challenge) return new Response(null, { status: 404 });
-      if (Date.parse(challenge.expirationTime) <= Date.now()) {
+      const transaction =
+        await this.ctx.storage.get<AuthorizationTransaction>(RECORD_KEY);
+      if (!transaction) return new Response(null, { status: 404 });
+      if (Date.parse(transaction.expirationTime) <= Date.now()) {
         await this.ctx.storage.delete(RECORD_KEY);
         await this.ctx.storage.deleteAlarm();
         return new Response(null, { status: 410 });
       }
-      return Response.json(challenge);
+      return Response.json(transaction);
     }
 
     return new Response("Method not allowed", {

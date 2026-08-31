@@ -84,7 +84,7 @@ paths:
   /authorize:
     get:
       operationId: beginMcpAuthorization
-      summary: Begin OAuth authorization and wallet consent
+      summary: Begin OAuth authorization and Google sign-in consent
       tags: [OAuth]
       parameters:
         - name: response_type
@@ -131,7 +131,7 @@ paths:
             format: uri
       responses:
         "200":
-          description: Wallet consent page.
+          description: Google sign-in consent page.
           content:
             text/html:
               schema:
@@ -144,7 +144,7 @@ paths:
           $ref: "#/components/responses/RateLimited"
     post:
       operationId: completeMcpAuthorization
-      summary: Approve or deny wallet consent
+      summary: Continue to Google sign-in or deny authorization
       tags: [OAuth]
       requestBody:
         required: true
@@ -152,24 +152,17 @@ paths:
           application/x-www-form-urlencoded:
             schema:
               type: object
-              required: [challenge, decision]
+              required: [transaction, decision]
               properties:
-                challenge:
+                transaction:
                   type: string
-                  pattern: "^[A-Za-z0-9]{8,128}$"
+                  pattern: "^[A-Za-z0-9_-]{32,128}$"
                 decision:
                   type: string
                   enum: [allow, deny]
-                wallet_address:
-                  type: string
-                chain_id:
-                  type: integer
-                  minimum: 1
-                signature:
-                  type: string
       responses:
         "302":
-          description: Redirect to the registered client with a code or error.
+          description: Redirect to Google or to the registered client with an error.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -182,48 +175,32 @@ paths:
           description: Form content type is required.
         "429":
           $ref: "#/components/responses/RateLimited"
-  /authorize/message:
-    post:
-      operationId: createMcpWalletMessage
-      summary: Build the wallet message for an active consent challenge
+  /auth/google/callback:
+    get:
+      operationId: completeMcpGoogleSignIn
+      summary: Complete Google sign-in and MCP authorization
       tags: [OAuth]
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              type: object
-              required: [challenge, wallet_address, chain_id]
-              properties:
-                challenge:
-                  type: string
-                  pattern: "^[A-Za-z0-9]{8,128}$"
-                wallet_address:
-                  type: string
-                chain_id:
-                  type: integer
-                  minimum: 1
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{32,128}$"
+        - name: code
+          in: query
+          schema:
+            type: string
+            maxLength: 4096
+        - name: error
+          in: query
+          schema:
+            type: string
       responses:
-        "200":
-          description: Message that the selected wallet must sign.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [message]
-                properties:
-                  message:
-                    type: string
-        "400":
-          $ref: "#/components/responses/BadRequest"
+        "302":
+          description: Redirect to the registered client with a code or OAuth error.
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "413":
-          description: Form body exceeds 16 KiB.
-        "415":
-          description: Form content type is required.
         "429":
           $ref: "#/components/responses/RateLimited"
   /oauth/token:

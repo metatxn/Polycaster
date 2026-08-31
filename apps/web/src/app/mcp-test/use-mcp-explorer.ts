@@ -259,13 +259,13 @@ export function useMcpExplorer() {
       "popup,width=560,height=760"
     );
     if (!popup) {
-      setConnectionError("Allow popups to start wallet authorization.");
+      setConnectionError("Allow popups to start Google authorization.");
       return;
     }
     oauthPopup.current = popup;
     setBusy("authorize");
     setAuthPending(true);
-    setStatus("Preparing secure wallet authorization...");
+    setStatus("Preparing secure Google authorization...");
     try {
       const redirectUri = `${window.location.origin}/mcp-test/oauth/callback`;
       const authorization = await beginOAuthAuthorization(
@@ -274,7 +274,7 @@ export function useMcpExplorer() {
       );
       oauthTransaction.current = authorization.transaction;
       popup.location.href = authorization.authorizationUrl;
-      setStatus("Complete wallet authorization in the popup window.");
+      setStatus("Complete Google sign-in in the popup window.");
     } catch (caught) {
       popup.close();
       oauthPopup.current = null;

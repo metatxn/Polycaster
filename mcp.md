@@ -345,9 +345,9 @@ Tokens must be audience-bound to the MCP resource. Do not accept:
 
 ### Authentication and consent
 
-The implemented login path authenticates the person in the browser with an EVM wallet signature. The MCP host opens the page; the human connects the wallet and approves the signature. The consent page shows the MCP client and requested scopes, then the MCP Worker issues its own audience-bound access token to the MCP client.
+The implemented login path authenticates the person through Google OpenID Connect. The MCP host opens the consent page; the human reviews the MCP client and requested scopes, then continues to Google. The Worker uses its own nonce, five-minute one-time state, and S256 PKCE for that upstream exchange before issuing an audience-bound MCP access token.
 
-The wallet signature is bound to a five-minute, atomically consumed challenge, the OAuth client, the MCP resource, and the requested scopes. It proves account ownership only. It never becomes the long-lived MCP credential and is never shown to the model. The initial implementation verifies EOAs; EIP-1271 smart-contract-wallet support remains future work.
+The Worker exchanges the Google code on the server and verifies the ID-token signature, issuer, audience, expiry, nonce, stable subject, and verified-email claim. The MCP client and model never receive the Google client secret, authorization code, ID token, access token, email, or password. The existing OAuth KV and Durable Object bindings hold provider grants and short-lived authorization transactions, so this flow does not add an application database.
 
 ### Required metadata
 
@@ -1063,8 +1063,7 @@ Version 1 is complete when:
 
 The current read-only implementation can proceed while product owners decide:
 
-- Whether to add a Knoww account-login alternative to wallet consent
-- Whether and how to support EIP-1271 smart-contract wallets
+- Whether to add another identity provider or a first-party Knoww login
 - Whether free and paid users receive different quotas
 - Which remote MCP clients Knoww officially supports at launch
 - Whether public trader and whale tools ship in version 1 or the next release

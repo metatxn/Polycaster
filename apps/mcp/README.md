@@ -234,7 +234,7 @@ List inputs are bounded even when Polymarket accepts larger pages. Use `meta.nex
 | `get_wallet_positions` | `walletAddress` | Market filters, position state, size threshold, sort, limit, offset | Current public positions and PnL fields |
 | `get_wallet_activity` | `walletAddress` | Market, activity-type and time filters, sort, limit, offset | Public wallet activity |
 | `get_closed_positions` | `walletAddress` | Market filters, sort, limit, offset | Closed positions and realized PnL |
-| `get_wallet_pnl` | `walletAddress` | None | Decimal.js-aggregated PnL summary |
+| `get_wallet_pnl` | `walletAddress` | None | All-time overall PnL and current-position breakdown |
 | `get_wallet_portfolio_value` | `walletAddress` | None | Current total position value |
 
 `walletAddress` is always an explicit public Polymarket proxy wallet address in `0x` plus 40 hexadecimal-character form. Google sign-in authorizes access to Knoww MCP; it does not provide, infer, or prove ownership of a Polymarket wallet. These tools read public on-chain and Polymarket API data only.

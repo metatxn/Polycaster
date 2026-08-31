@@ -82,6 +82,7 @@ export {
   fetchClosedPositions,
   fetchPublicProfile,
   fetchWalletActivity,
+  fetchWalletAllTimePnl,
   fetchWalletPortfolioValue,
   fetchWalletPositions,
   summarizeWalletPnl,

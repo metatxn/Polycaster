@@ -495,9 +495,9 @@ export const TOOL_CATALOG: ToolDocument[] = [
   },
   {
     name: "get_wallet_pnl",
-    summary: "Calculate wallet PnL",
+    summary: "Read wallet PnL",
     description:
-      "Aggregates validated position values using Decimal.js and returns a decimal-string summary.",
+      "Returns all-time overall PnL and volume, plus a Decimal.js breakdown of current positions.",
     example: { walletAddress: PUBLIC_WALLET_EXAMPLE },
     parameters: [walletParameter],
   },

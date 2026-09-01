@@ -382,6 +382,48 @@ describe("get_event tool (dev bypass)", () => {
 
     const meta = result.structuredContent?.meta as Record<string, unknown>;
     expect(meta.truncated).toBe(true);
+    expect(meta.nextCursor).toEqual(expect.any(String));
+    expect(result.structuredContent?.page).toEqual({
+      returnedResults: 1,
+      totalResults: 2,
+      hasMore: true,
+    });
+  });
+
+  it("continues event markets with the opaque cursor", async () => {
+    expectGammaFetch("first event page", gammaUrl("/events/35908"), () =>
+      Response.json(PARENT_EVENT)
+    );
+    const first = await callTool("get_event", 69, {
+      id: "35908",
+      marketLimit: 1,
+    });
+    const firstResult = first.message.result as ToolCallResult;
+    const cursor = (
+      firstResult.structuredContent?.meta as { nextCursor?: string }
+    )?.nextCursor;
+
+    expectGammaFetch("second event page", gammaUrl("/events/35908"), () =>
+      Response.json(PARENT_EVENT)
+    );
+    const second = await callTool("get_event", 70, {
+      id: "35908",
+      marketLimit: 1,
+      cursor,
+    });
+    const secondResult = second.message.result as ToolCallResult;
+
+    expect(secondResult.structuredContent?.markets).toEqual([
+      MARKET_TWO_SUMMARY,
+    ]);
+    expect(secondResult.structuredContent?.page).toEqual({
+      returnedResults: 1,
+      totalResults: 2,
+      hasMore: false,
+    });
+    expect(secondResult.structuredContent?.meta).not.toHaveProperty(
+      "nextCursor"
+    );
   });
 
   it("serves a later page through marketOffset without truncation", async () => {

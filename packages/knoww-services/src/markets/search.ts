@@ -11,6 +11,7 @@ import {
   gammaProbabilityArraySchema,
   gammaStringArraySchema,
   gammaTimestampSchema,
+  nonNegativeDecimalSchema,
 } from "../validation";
 
 const log = createLogger("services.search");
@@ -38,6 +39,12 @@ export interface Market {
   active?: boolean;
   closed?: boolean;
   archived?: boolean;
+  startDate?: string;
+  endDate?: string;
+  volumeNum?: number;
+  volume?: string | number;
+  liquidityNum?: number;
+  liquidity?: string | number;
   outcomes?: string | string[];
   outcomePrices?: string | (string | number)[];
   clobTokenIds?: string | string[];
@@ -111,6 +118,12 @@ const marketSchema = z
     active: z.boolean().optional(),
     closed: z.boolean().optional(),
     archived: z.boolean().optional(),
+    startDate: gammaTimestampSchema.optional(),
+    endDate: gammaTimestampSchema.optional(),
+    volumeNum: z.number().finite().nonnegative().optional(),
+    volume: nonNegativeDecimalSchema.optional(),
+    liquidityNum: z.number().finite().nonnegative().optional(),
+    liquidity: nonNegativeDecimalSchema.optional(),
     outcomes: gammaStringArraySchema.optional(),
     outcomePrices: gammaProbabilityArraySchema.optional(),
     clobTokenIds: gammaStringArraySchema.optional(),
@@ -369,7 +382,10 @@ export async function fetchPublicSearchEvents(
   const params = new URLSearchParams();
   params.set("q", query);
   params.set("limit", String(limit));
-  params.set("limit_per_type", String(Math.min(limit, 10)));
+  params.set(
+    "limit_per_type",
+    String(options?.fullMarketRecords ? limit : Math.min(limit, 10))
+  );
   params.set("cache", "true");
   params.set("search_tags", "true");
   params.set("optimized", options?.fullMarketRecords ? "false" : "true");

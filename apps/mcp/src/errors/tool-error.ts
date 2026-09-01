@@ -86,6 +86,15 @@ function retryGuidance(error: KnowwToolError): string {
 export type ToolErrorContent = {
   isError: true;
   content: [{ type: "text"; text: string }];
+  _meta: {
+    "app.knoww/error": {
+      code: KnowwToolErrorCode;
+      message: string;
+      retryable: boolean;
+      retryAfterSeconds?: number;
+      requestId: string;
+    };
+  };
 };
 
 /** Renders an error as an MCP tool result with retry guidance for agents. */
@@ -98,6 +107,17 @@ export function toolErrorContent(error: KnowwToolError): ToolErrorContent {
         text: `${error.code}: ${error.message} ${retryGuidance(error)}`,
       },
     ],
+    _meta: {
+      "app.knoww/error": {
+        code: error.code,
+        message: error.message,
+        retryable: error.retryable,
+        ...(error.retryAfterSeconds !== undefined
+          ? { retryAfterSeconds: error.retryAfterSeconds }
+          : {}),
+        requestId: currentRequestId(),
+      },
+    },
   };
 }
 

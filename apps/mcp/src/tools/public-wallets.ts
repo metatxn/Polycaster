@@ -15,6 +15,13 @@ import { currentRequestId } from "../context";
 import { KnowwToolError } from "../errors/tool-error";
 import { buildToolMeta, READ_ONLY_ANNOTATIONS, toolMetaSchema } from "./meta";
 import {
+  buildOffsetPage,
+  cursorInputSchema,
+  pageInfoSchema,
+  paginationFingerprint,
+  resolveOffset,
+} from "./pagination";
+import {
   CONDITION_ID_PATTERN,
   cleanQuotedText,
   executePublicRead,
@@ -68,10 +75,11 @@ const walletPnlSchema = z.object({
   currentPositions: currentPositionsPnlSchema,
 });
 
-function dataMeta(input?: { truncated?: boolean }) {
+function dataMeta(input?: { nextCursor?: string; truncated?: boolean }) {
   return buildToolMeta({
     requestId: currentRequestId(),
     sources: [{ name: "polymarket-data", url: DATA_API_BASE }],
+    ...(input?.nextCursor ? { nextCursor: input.nextCursor } : {}),
     ...(input?.truncated ? { truncated: true } : {}),
   });
 }
@@ -213,6 +221,7 @@ function registerWalletPositions(server: McpServer) {
       title: z.string().trim().min(1).max(100).optional(),
       limit: z.number().int().min(1).max(100).default(50),
       offset: z.number().int().min(0).max(10_000).default(0),
+      cursor: cursorInputSchema,
       sortBy: z
         .enum([
           "CURRENT",
@@ -234,20 +243,50 @@ function registerWalletPositions(server: McpServer) {
     {
       title: "Get wallet positions",
       description:
-        "Get current public Polymarket positions for an explicit proxy wallet address. Google sign-in authorizes Knoww access but does not identify a wallet.",
+        "Get current public Polymarket positions with opaque cursor pagination for an explicit proxy wallet address. Google sign-in authorizes Knoww access but does not identify a wallet.",
       inputSchema,
       outputSchema: z.object({
         positions: z.array(recordSchema),
+        page: pageInfoSchema,
         meta: toolMetaSchema,
       }),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     (args, context) =>
       executePublicRead("get_wallet_positions", context, async () => {
-        const rows = await fetchWalletPositions(args, {
-          signal: context.mcpReq.signal,
+        const fingerprint = paginationFingerprint([
+          args.walletAddress,
+          args.conditionIds ?? [],
+          args.eventIds ?? [],
+          args.sizeThreshold,
+          args.redeemable ?? "",
+          args.mergeable ?? "",
+          args.title ?? "",
+          args.sortBy,
+          args.sortDirection,
+        ]);
+        const offset = resolveOffset({
+          cursor: args.cursor,
+          legacyOffset: args.offset,
+          namespace: "get_wallet_positions",
+          fingerprint,
+          maxOffset: 10_000,
         });
+        const rows = await fetchWalletPositions(
+          { ...args, offset },
+          {
+            signal: context.mcpReq.signal,
+          }
+        );
         const positions = rows.map(projectPosition);
+        const pagination = buildOffsetPage({
+          namespace: "get_wallet_positions",
+          fingerprint,
+          offset,
+          limit: args.limit,
+          returnedResults: positions.length,
+          maxOffset: 10_000,
+        });
         return {
           content: [
             {
@@ -255,7 +294,16 @@ function registerWalletPositions(server: McpServer) {
               text: countText("position", positions.length),
             },
           ],
-          structuredContent: { positions, meta: dataMeta() },
+          structuredContent: {
+            positions,
+            page: pagination.page,
+            meta: dataMeta({
+              ...(pagination.nextCursor
+                ? { nextCursor: pagination.nextCursor }
+                : {}),
+              truncated: pagination.offsetLimitReached,
+            }),
+          },
         };
       })
   );
@@ -288,6 +336,7 @@ function registerWalletActivity(server: McpServer) {
       endTimestamp: z.number().int().nonnegative().optional(),
       limit: z.number().int().min(1).max(100).default(50),
       offset: z.number().int().min(0).max(5000).default(0),
+      cursor: cursorInputSchema,
       sortDirection: z.enum(["ASC", "DESC"]).default("DESC"),
     })
     .superRefine((value, context) => {
@@ -308,19 +357,39 @@ function registerWalletActivity(server: McpServer) {
     {
       title: "Get wallet activity",
       description:
-        "Get bounded public activity for an explicit Polymarket proxy wallet address.",
+        "Get public activity with opaque cursor pagination for an explicit Polymarket proxy wallet address.",
       inputSchema,
       outputSchema: z.object({
         activity: z.array(recordSchema),
+        page: pageInfoSchema,
         meta: toolMetaSchema,
       }),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     (args, context) =>
       executePublicRead("get_wallet_activity", context, async () => {
-        const rows = await fetchWalletActivity(args, {
-          signal: context.mcpReq.signal,
+        const fingerprint = paginationFingerprint([
+          args.walletAddress,
+          args.conditionIds ?? [],
+          args.eventIds ?? [],
+          args.types ?? [],
+          args.startTimestamp ?? "",
+          args.endTimestamp ?? "",
+          args.sortDirection,
+        ]);
+        const offset = resolveOffset({
+          cursor: args.cursor,
+          legacyOffset: args.offset,
+          namespace: "get_wallet_activity",
+          fingerprint,
+          maxOffset: 5000,
         });
+        const rows = await fetchWalletActivity(
+          { ...args, offset },
+          {
+            signal: context.mcpReq.signal,
+          }
+        );
         const activity = rows.map((row) => ({
           proxyWallet: row.proxyWallet,
           timestamp: row.timestamp,
@@ -343,6 +412,14 @@ function registerWalletActivity(server: McpServer) {
             ? { outcome: cleanQuotedText(row.outcome, 200) }
             : {}),
         }));
+        const pagination = buildOffsetPage({
+          namespace: "get_wallet_activity",
+          fingerprint,
+          offset,
+          limit: args.limit,
+          returnedResults: activity.length,
+          maxOffset: 5000,
+        });
         return {
           content: [
             {
@@ -350,7 +427,16 @@ function registerWalletActivity(server: McpServer) {
               text: countText("activity item", activity.length),
             },
           ],
-          structuredContent: { activity, meta: dataMeta() },
+          structuredContent: {
+            activity,
+            page: pagination.page,
+            meta: dataMeta({
+              ...(pagination.nextCursor
+                ? { nextCursor: pagination.nextCursor }
+                : {}),
+              truncated: pagination.offsetLimitReached,
+            }),
+          },
         };
       })
   );
@@ -362,6 +448,7 @@ function registerClosedPositions(server: McpServer) {
       ...walletFilters,
       limit: z.number().int().min(1).max(50).default(25),
       offset: z.number().int().min(0).max(100_000).default(0),
+      cursor: cursorInputSchema,
       sortBy: z
         .enum(["REALIZEDPNL", "TITLE", "PRICE", "AVGPRICE", "TIMESTAMP"])
         .default("REALIZEDPNL"),
@@ -373,19 +460,37 @@ function registerClosedPositions(server: McpServer) {
     {
       title: "Get closed positions",
       description:
-        "Get closed public Polymarket positions and realized PnL for an explicit proxy wallet address.",
+        "Get closed public Polymarket positions and realized PnL with opaque cursor pagination for an explicit proxy wallet address.",
       inputSchema,
       outputSchema: z.object({
         positions: z.array(recordSchema),
+        page: pageInfoSchema,
         meta: toolMetaSchema,
       }),
       annotations: READ_ONLY_ANNOTATIONS,
     },
     (args, context) =>
       executePublicRead("get_closed_positions", context, async () => {
-        const rows = await fetchClosedPositions(args, {
-          signal: context.mcpReq.signal,
+        const fingerprint = paginationFingerprint([
+          args.walletAddress,
+          args.conditionIds ?? [],
+          args.eventIds ?? [],
+          args.sortBy,
+          args.sortDirection,
+        ]);
+        const offset = resolveOffset({
+          cursor: args.cursor,
+          legacyOffset: args.offset,
+          namespace: "get_closed_positions",
+          fingerprint,
+          maxOffset: 100_000,
         });
+        const rows = await fetchClosedPositions(
+          { ...args, offset },
+          {
+            signal: context.mcpReq.signal,
+          }
+        );
         const positions = rows.map((row) => ({
           proxyWallet: row.proxyWallet,
           tokenId: row.asset,
@@ -404,6 +509,14 @@ function registerClosedPositions(server: McpServer) {
             ? { outcome: cleanQuotedText(row.outcome, 200) }
             : {}),
         }));
+        const pagination = buildOffsetPage({
+          namespace: "get_closed_positions",
+          fingerprint,
+          offset,
+          limit: args.limit,
+          returnedResults: positions.length,
+          maxOffset: 100_000,
+        });
         return {
           content: [
             {
@@ -411,7 +524,16 @@ function registerClosedPositions(server: McpServer) {
               text: countText("closed position", positions.length),
             },
           ],
-          structuredContent: { positions, meta: dataMeta() },
+          structuredContent: {
+            positions,
+            page: pagination.page,
+            meta: dataMeta({
+              ...(pagination.nextCursor
+                ? { nextCursor: pagination.nextCursor }
+                : {}),
+              truncated: pagination.offsetLimitReached,
+            }),
+          },
         };
       })
   );

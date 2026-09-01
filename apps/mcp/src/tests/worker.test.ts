@@ -576,6 +576,7 @@ function gammaUrl(pathname: string, queryContains?: string) {
 interface ToolCallResult {
   isError?: boolean;
   content?: Array<{ type: string; text?: string }>;
+  _meta?: Record<string, unknown>;
   structuredContent?: {
     events?: Array<Record<string, unknown>>;
     meta?: Record<string, unknown>;
@@ -689,6 +690,13 @@ describe("search_markets tool (dev bypass)", () => {
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toContain("RATE_LIMITED");
     expect(result.content?.[0]?.text).toContain("Retry after 60 seconds");
+    expect(result._meta).toMatchObject({
+      "app.knoww/error": {
+        code: "RATE_LIMITED",
+        retryable: true,
+        retryAfterSeconds: 60,
+      },
+    });
     expect(keys).toEqual(["free:local-development:search_markets"]);
   });
 

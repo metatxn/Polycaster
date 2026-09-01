@@ -91,14 +91,27 @@ describe("toolErrorContent", () => {
   });
 
   it("surfaces retryAfterSeconds in the retry guidance", () => {
-    const result = toolErrorContent(
-      new KnowwToolError("RATE_LIMITED", "Too many requests.", {
-        retryAfterSeconds: 30,
-      })
+    const result = requestContext.run({ requestId: "request-123" }, () =>
+      toolErrorContent(
+        new KnowwToolError("RATE_LIMITED", "Too many requests.", {
+          retryAfterSeconds: 30,
+        })
+      )
     );
     expect(result.content[0].text).toBe(
       "RATE_LIMITED: Too many requests. Retry after 30 seconds."
     );
+    expect(result).toMatchObject({
+      _meta: {
+        "app.knoww/error": {
+          code: "RATE_LIMITED",
+          message: "Too many requests.",
+          retryable: true,
+          retryAfterSeconds: 30,
+          requestId: "request-123",
+        },
+      },
+    });
   });
 });
 

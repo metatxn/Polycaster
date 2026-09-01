@@ -15,11 +15,14 @@
 - PR-only GitHub quality checks with a documented Cloudflare Workers Builds handoff for production deployment.
 - Production-only remote deployment; local and CI checks replace a separate staging Worker.
 - Request-scoped PostHog batches for every public route, MCP protocol method, and registered tool, with hashed principals and no request or response content.
+- Flat `search_markets` results with bounded word or phrase matching, individual lifetime-volume sorting, enriched market fields, and opaque cursor pagination.
+- Machine-readable tool-error metadata with retryability, retry delay, and request ID fields.
 
 ### Fixed
 
 - The Google consent page sends its own origin on authorization form posts, preventing incorrect 403 responses before sign-in.
 - `get_wallet_pnl` reads all-time PnL from Polymarket's overall leaderboard instead of treating an empty current-position list as zero lifetime PnL.
+- Full-record searches request the caller's complete bounded page size instead of capping nested results at ten.
 
 ### Security
 

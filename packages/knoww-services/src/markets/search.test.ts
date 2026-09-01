@@ -303,13 +303,14 @@ describe("fetchPublicSearchEvents", () => {
       jsonResponse({ events: [] })
     );
 
-    await fetchPublicSearchEvents("bitcoin", 5, {
+    await fetchPublicSearchEvents("bitcoin", 15, {
       fetchImpl,
       fullMarketRecords: true,
     });
 
     const url = new URL(calls[0].url);
     expect(url.searchParams.get("optimized")).toBe("false");
+    expect(url.searchParams.get("limit_per_type")).toBe("15");
   });
 
   it("tags events as search results and passes tags, profiles, and pagination through", async () => {

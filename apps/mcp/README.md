@@ -152,9 +152,18 @@ Searches active prediction-market events.
 | `query` | string | Required, trimmed, 1 to 200 characters |
 | `status` | `"active"` | Optional, defaults to `active` |
 | `category` | string | Optional, up to 100 characters |
+| `resultType` | `"events"` or `"markets"` | Optional, defaults to `events` |
+| `match` | `"contains"`, `"whole_word"`, or `"exact_phrase"` | Optional, defaults to `contains` |
+| `sortBy` | `"relevance"` or `"volume"` | Optional, defaults to `relevance` |
+| `sortOrder` | `"asc"` or `"desc"` | Optional; applies to volume sorting and defaults to `desc` |
+| `cursor` | string | Optional; accepted for flat market results only |
 | `limit` | integer | Optional, 1 to 20, defaults to 10 |
 
-The response contains event summaries, nested market summaries, event and market slugs, condition IDs, outcome prices, CLOB token IDs, nested total counts, and truncation flags. These identifiers can be passed directly to the detail, order-book, and price-history tools. Search does not currently expose a cursor. When `meta.truncated` is true, narrow the query or category.
+The default event response remains unchanged: it contains event summaries, nested market summaries, reusable identifiers, outcome prices, CLOB token IDs, total counts, and truncation flags.
+
+Set `resultType` to `markets` for flat market records without the duplicate event-summary payload. This mode can remove substring matches with `whole_word`, match a bounded multi-word phrase with `exact_phrase`, and sort individual markets by lifetime volume. Each record includes the market status, Polymarket platform, Knoww URL, available dates, lifetime volume and liquidity, outcomes, and parent event. Volume is a canonical decimal string, but `volumeUnit` is `unspecified` because the upstream API does not document its currency.
+
+Flat results include `page.totalResults`, `page.returnedResults`, and `page.hasMore`. Pass `meta.nextCursor` unchanged to continue the same query, filters, and ordering. Search is live rather than snapshot-isolated, so results can move between pages. `page.totalResults` covers the upstream candidates inspected for that call; when `meta.truncated` is true, narrow the query or category because more upstream candidates or nested event summaries may exist.
 
 ### `get_market`
 
@@ -292,7 +301,24 @@ UPSTREAM_UNAVAILABLE
 INTERNAL_ERROR
 ```
 
-The text result tells the caller whether retrying is appropriate. Raw upstream responses, error messages, stack traces, credentials, and request bodies are not returned.
+The text result tells the caller whether retrying is appropriate. Tool errors also include machine-readable metadata:
+
+```ts
+interface KnowwToolErrorResult {
+  isError: true;
+  _meta: {
+    "app.knoww/error": {
+      code: string;
+      message: string;
+      retryable: boolean;
+      retryAfterSeconds?: number;
+      requestId: string;
+    };
+  };
+}
+```
+
+Rate-limited callers can use `retryAfterSeconds` instead of parsing text. Raw upstream responses, internal error messages, stack traces, credentials, and request bodies are not returned.
 
 ## Quick start
 

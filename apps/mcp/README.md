@@ -156,14 +156,14 @@ Searches active prediction-market events.
 | `match` | `"contains"`, `"whole_word"`, or `"exact_phrase"` | Optional, defaults to `contains` |
 | `sortBy` | `"relevance"` or `"volume"` | Optional, defaults to `relevance` |
 | `sortOrder` | `"asc"` or `"desc"` | Optional; applies to volume sorting and defaults to `desc` |
-| `cursor` | string | Optional; accepted for flat market results only |
+| `cursor` | string | Optional; continues either result type |
 | `limit` | integer | Optional, 1 to 20, defaults to 10 |
 
-The default event response remains unchanged: it contains event summaries, nested market summaries, reusable identifiers, outcome prices, CLOB token IDs, total counts, and truncation flags.
+The default event records remain unchanged: they contain nested market summaries, reusable identifiers, outcome prices, CLOB token IDs, total counts, and truncation flags.
 
 Set `resultType` to `markets` for flat market records without the duplicate event-summary payload. This mode can remove substring matches with `whole_word`, match a bounded multi-word phrase with `exact_phrase`, and sort individual markets by lifetime volume. Each record includes the market status, Polymarket platform, Knoww URL, available dates, lifetime volume and liquidity, outcomes, and parent event. Volume is a canonical decimal string, but `volumeUnit` is `unspecified` because the upstream API does not document its currency.
 
-Flat results include `page.totalResults`, `page.returnedResults`, and `page.hasMore`. Pass `meta.nextCursor` unchanged to continue the same query, filters, and ordering. Search is live rather than snapshot-isolated, so results can move between pages. `page.totalResults` covers the upstream candidates inspected for that call; when `meta.truncated` is true, narrow the query or category because more upstream candidates or nested event summaries may exist.
+Both result types include `page.totalResults`, `page.returnedResults`, and `page.hasMore`. Pass `meta.nextCursor` unchanged to continue the same query, filters, and ordering. Search is live rather than snapshot-isolated, so results can move between pages. `page.totalResults` covers the upstream candidates inspected for that call; when `meta.truncated` is true, narrow the query or category because more upstream candidates or nested event summaries may exist.
 
 ### `get_market`
 
@@ -187,10 +187,11 @@ Fetches one event using exactly one identifier and returns a page of markets.
 |---|---|---|
 | `id` | string | 1 to 20 decimal digits |
 | `slug` | string | Lowercase letters, digits, and dashes |
+| `cursor` | string | Optional opaque market-page cursor |
 | `marketOffset` | integer | Optional, 0 to 10,000, defaults to 0 |
 | `marketLimit` | integer | Optional, 1 to 50, defaults to 20 |
 
-For `negRisk` parents, the tool fetches child events and merges their markets. Ordinary events do not trigger child-event fan-out. If a follow-up request fails, the tool keeps the parent event and marks the market list incomplete.
+For `negRisk` parents, the tool fetches child events and merges their markets. Ordinary events do not trigger child-event fan-out. If a follow-up request fails, the tool keeps the parent event and marks the market list incomplete. New callers should use `cursor`; `marketOffset` remains available for older clients.
 
 ### `get_orderbook`
 
@@ -225,25 +226,25 @@ An empty history is a successful result. Polymarket does not distinguish an unkn
 | Tool | Required input | Optional controls | Result |
 |---|---|---|---|
 | `list_events` | None | Keyset cursor, closed or live state, tag, series, date bounds, order, limit | Events, tags, bounded market summaries, and `meta.nextCursor` |
-| `get_market_trades` | Exactly one of `conditionIds` or `eventIds` | Wallet, side, time bounds, limit, offset | Public trades with decimal-string size and price |
+| `get_market_trades` | Exactly one of `conditionIds` or `eventIds` | Wallet, side, time bounds, limit, cursor, offset | Public trades with decimal-string size and price |
 | `get_market_quotes` | `tokenIds` | None | BUY/SELL price, midpoint, spread, and last trade |
 | `get_market_holders` | `conditionIds` | Limit and minimum balance | Largest public holders for each market |
 | `get_open_interest` | `conditionIds` | None | Open interest by market |
 | `get_event_live_volume` | Positive integer `eventId` | None | Event total and per-market live volume |
-| `get_trader_leaderboard` | None | Category, period, PnL or volume order, trader filters, limit, offset | Public trader ranks, volume, and PnL |
-| `list_tags` | None | Limit and offset | Category tags for filtering |
-| `list_sports_markets` | None | Sport, league, market cursor, team offset, limit | Sports metadata, market types, teams, and tagged markets |
+| `get_trader_leaderboard` | None | Category, period, PnL or volume order, trader filters, limit, cursor, offset | Public trader ranks, volume, and PnL |
+| `list_tags` | None | Limit, cursor, and offset | Category tags for filtering |
+| `list_sports_markets` | None | Sport, league, cursor, team offset, limit | Sports metadata, market types, teams, and tagged markets |
 
-List inputs are bounded even when Polymarket accepts larger pages. Use `meta.nextCursor` for keyset-paginated tools and offsets only where the upstream API documents them. Market titles, event descriptions, profile fields, outcomes, sports rules, and team names are quoted upstream data, not instructions.
+List inputs are bounded even when Polymarket accepts larger pages. New callers should use `meta.nextCursor`; offsets remain available for compatibility. Market titles, event descriptions, profile fields, outcomes, sports rules, and team names are quoted upstream data, not instructions.
 
 ### Public wallet getters
 
 | Tool | Required input | Optional controls | Result |
 |---|---|---|---|
 | `get_public_profile` | `walletAddress` | None | Public profile fields |
-| `get_wallet_positions` | `walletAddress` | Market filters, position state, size threshold, sort, limit, offset | Current public positions and PnL fields |
-| `get_wallet_activity` | `walletAddress` | Market, activity-type and time filters, sort, limit, offset | Public wallet activity |
-| `get_closed_positions` | `walletAddress` | Market filters, sort, limit, offset | Closed positions and realized PnL |
+| `get_wallet_positions` | `walletAddress` | Market filters, position state, size threshold, sort, limit, cursor, offset | Current public positions and PnL fields |
+| `get_wallet_activity` | `walletAddress` | Market, activity-type and time filters, sort, limit, cursor, offset | Public wallet activity |
+| `get_closed_positions` | `walletAddress` | Market filters, sort, limit, cursor, offset | Closed positions and realized PnL |
 | `get_wallet_pnl` | `walletAddress` | None | All-time overall PnL and current-position breakdown |
 | `get_wallet_portfolio_value` | `walletAddress` | None | Current total position value |
 
@@ -271,6 +272,22 @@ interface KnowwToolMeta {
 ```
 
 `asOf` is an ISO 8601 timestamp. `sources` identifies Polymarket Gamma, Data API, or CLOB. `truncated` is true when Knoww caps a result. `get_event` also sets it when a failed or capped follow-up fetch leaves the market list incomplete.
+
+Collection tools also return:
+
+```ts
+interface KnowwPageInfo {
+  returnedResults: number;
+  totalResults?: number;
+  hasMore: boolean;
+}
+```
+
+`search_markets`, `get_event`, `list_events`, `get_market_trades`, `get_trader_leaderboard`, `list_tags`, `list_sports_markets`, `get_wallet_positions`, `get_wallet_activity`, and `get_closed_positions` accept `cursor` and return `page`. When `page.hasMore` is true, pass `meta.nextCursor` unchanged with the same filters and ordering. Cursors are opaque, reject filter reuse, and cannot be combined with a non-zero legacy offset.
+
+`list_events` and the market side of `list_sports_markets` carry Polymarket's real Gamma keysets. Data API collections still use documented offsets upstream, so Knoww wraps those offsets in the same cursor contract. A full final page from an offset API can produce one last cursor whose next page is empty because the upstream response does not include a total count. See Polymarket's [event keyset API](https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination), [keyset migration note](https://docs.polymarket.com/changelog), and [offset-based trades API](https://docs.polymarket.com/api-reference/core/get-trades-for-a-user-or-markets).
+
+Tools without `cursor` return one entity, a point-in-time snapshot, an aggregate, or a batch bounded by caller-supplied identifiers. Paginating an order book, for example, could combine levels from different snapshots.
 
 Prices, sizes, volume, liquidity, spreads, and other market quantities use canonical decimal strings. Tool code uses Decimal.js for comparisons and arithmetic.
 

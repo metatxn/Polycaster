@@ -81,6 +81,68 @@ function searchResponse(): Response {
 }
 
 describe("search_markets ranked market results", () => {
+  it("paginates the default event result mode", async () => {
+    const eventResponse = () =>
+      Response.json({
+        events: [
+          searchEvent,
+          {
+            ...searchEvent,
+            id: "evt-war-2",
+            slug: "second-geopolitical-event",
+            title: "Second geopolitical event",
+          },
+        ],
+        tags: [],
+        profiles: [],
+        pagination: { hasMore: false, totalResults: 2 },
+      });
+    expectGammaFetch(
+      "event search first page",
+      gammaUrl("/public-search", "q=war"),
+      eventResponse
+    );
+
+    const first = await callTool("search_markets", 106, {
+      query: "war",
+      limit: 1,
+    });
+    const firstResult = first.message.result as ToolCallResult;
+    expect(firstResult.structuredContent?.events).toHaveLength(1);
+    expect(firstResult.structuredContent?.page).toEqual({
+      returnedResults: 1,
+      totalResults: 2,
+      hasMore: true,
+    });
+    const cursor = (
+      firstResult.structuredContent?.meta as { nextCursor?: string }
+    )?.nextCursor;
+
+    expectGammaFetch(
+      "event search second page",
+      gammaUrl("/public-search", "q=war"),
+      eventResponse
+    );
+    const second = await callTool("search_markets", 107, {
+      query: "war",
+      limit: 1,
+      cursor,
+    });
+    const secondResult = second.message.result as ToolCallResult;
+    expect(
+      (
+        secondResult.structuredContent?.events as
+          | Array<{ id: string }>
+          | undefined
+      )?.map(({ id }) => id)
+    ).toEqual(["evt-war-2"]);
+    expect(secondResult.structuredContent?.page).toEqual({
+      returnedResults: 1,
+      totalResults: 2,
+      hasMore: false,
+    });
+  });
+
   it("filters whole words, ranks individual markets by volume, and enriches results", async () => {
     expectGammaFetch(
       "ranked whole-word search",

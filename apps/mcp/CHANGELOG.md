@@ -17,6 +17,7 @@
 - Request-scoped PostHog batches for every public route, MCP protocol method, and registered tool, with hashed principals and no request or response content.
 - Flat `search_markets` results with bounded word or phrase matching, individual lifetime-volume sorting, enriched market fields, and opaque cursor pagination.
 - Machine-readable tool-error metadata with retryability, retry delay, and request ID fields.
+- A shared opaque cursor and page contract across every collection-returning tool, including wrapped Data API offsets and composite sports pagination.
 
 ### Fixed
 

@@ -765,35 +765,11 @@ export function createNotificationStack(): HTMLElement {
 
   const platformName = window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown";
 
-  // Detect theme - try multiple methods
-  let theme: "dark" | "light" | "dim" = "dark"; // Default to dark for Twitter
-
   const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
-  if (platform && typeof platform.detectTheme === "function") {
-    theme = platform.detectTheme();
-  } else {
-    // Fallback theme detection for Twitter if platform not ready
-    if (platformName === "twitter" || platformName === "unknown") {
-      try {
-        const bodyBg = window.getComputedStyle(document.body).backgroundColor;
-        const rgbMatch = bodyBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-        if (rgbMatch) {
-          const r = parseInt(rgbMatch[1], 10);
-          const g = parseInt(rgbMatch[2], 10);
-          const b = parseInt(rgbMatch[3], 10);
-          if (r === 0 && g === 0 && b === 0) {
-            theme = "dark";
-          } else if (r < 30 && g < 40 && b < 50 && b > r) {
-            theme = "dim";
-          } else if (r > 240 && g > 240 && b > 240) {
-            theme = "light";
-          }
-        }
-      } catch {
-        // Keep default dark theme
-      }
-    }
-  }
+  const theme =
+    platform && typeof platform.detectTheme === "function"
+      ? platform.detectTheme()
+      : detectThemeFromPageBackground();
 
   const themeClass = ` knoww-theme-${theme}`;
   container.className = `knoww-notification-stack knoww-notification-stack-${platformName}${themeClass}`;
@@ -2256,7 +2232,11 @@ export function updateNotificationStack(markets: InjectedMarketEntry[]): void {
   );
 
   if (!notificationStackContainer) {
-    createNotificationStack();
+    // Resurrected by the scanner (a persisted dismissed flag skips the init
+    // open path on page load). Route through the full open path so the
+    // trending fetch, theme sync, and listeners run — a bare create leaves
+    // the panel stuck on the empty state forever.
+    openNotificationStack(log);
   }
 
   const itemsContainer = document.getElementById("knoww-stack-items");
@@ -2390,15 +2370,47 @@ export function updateNotificationStack(markets: InjectedMarketEntry[]): void {
 }
 
 /**
+ * Detect the page theme from the body/root background color. Used when the
+ * platform adapter is not ready or has no detectTheme of its own, so sites
+ * like LinkedIn still get a light panel on a light page. Transparent
+ * backgrounds are skipped — an unstyled body would otherwise read as black.
+ */
+function detectThemeFromPageBackground(): "dark" | "light" | "dim" {
+  try {
+    for (const el of [document.body, document.documentElement]) {
+      if (!el) continue;
+      const match = window
+        .getComputedStyle(el)
+        .backgroundColor.match(
+          /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/
+        );
+      if (!match) continue;
+      const [r, g, b] = [match[1], match[2], match[3]].map((v) =>
+        parseInt(v, 10)
+      );
+      const alpha = match[4] === undefined ? 1 : parseFloat(match[4]);
+      if (alpha === 0) continue;
+      // Twitter "dim" family: dark navy where blue leads red.
+      if (r < 30 && g < 40 && b < 50 && b > r) return "dim";
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b >= 160 ? "light" : "dark";
+    }
+  } catch {
+    // Fall through to the dark default.
+  }
+  return "dark";
+}
+
+/**
  * Update the notification stack theme based on current platform theme
  */
 export function updateNotificationStackTheme(): void {
   if (!notificationStackContainer) return;
 
   const platform = window.KNOWW_PLATFORM?.getCurrentPlatform?.();
-  if (!platform || typeof platform.detectTheme !== "function") return;
-
-  const theme = platform.detectTheme();
+  const theme =
+    platform && typeof platform.detectTheme === "function"
+      ? platform.detectTheme()
+      : detectThemeFromPageBackground();
   const platformName = window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown";
 
   // Remove existing theme classes
@@ -2412,7 +2424,7 @@ export function updateNotificationStackTheme(): void {
   notificationStackContainer.classList.add(`knoww-theme-${theme}`);
   applyPlatformStyleVariables(
     notificationStackContainer,
-    platform.getCardStyles?.(theme)
+    platform?.getCardStyles?.(theme)
   );
 
   // Ensure the platform class is set

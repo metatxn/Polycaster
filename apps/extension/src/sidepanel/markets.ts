@@ -177,14 +177,14 @@ export function renderSnapshotSections(snapshot: NotificationSnapshot): string {
 
 export function renderMarketsHeaderControls(): string {
   return `
-    <button type="button" class="knoww-stack-popout" title="Move to floating panel" aria-label="Move markets panel to floating panel">
+    <button type="button" class="knoww-stack-popout knoww-markets-panel-action" title="Move to floating panel" aria-label="Move markets panel to floating panel">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path><path d="m11 9 3 3-3 3"></path></svg>
     </button>
-    <button type="button" class="knoww-search-toggle" id="knoww-search-toggle" title="Search markets" aria-label="Search markets">
+    <button type="button" class="knoww-search-toggle knoww-markets-panel-action" id="knoww-search-toggle" title="Search markets" aria-label="Search markets">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>
     </button>
-    <button type="button" class="knoww-stack-minimize" id="knoww-stack-minimize" title="Minimize" aria-label="Minimize" aria-expanded="true">${STACK_MINIMIZE_ICON_HTML}</button>
-    <button type="button" class="knoww-stack-close" title="Close sidebar" aria-label="Close markets sidebar">
+    <button type="button" class="knoww-stack-minimize knoww-markets-panel-action" id="knoww-stack-minimize" title="Minimize" aria-label="Minimize" aria-expanded="true">${STACK_MINIMIZE_ICON_HTML}</button>
+    <button type="button" class="knoww-stack-close knoww-markets-panel-action" title="Close sidebar" aria-label="Close markets sidebar">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
     </button>`;
 }

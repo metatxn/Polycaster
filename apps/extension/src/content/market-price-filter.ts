@@ -2,7 +2,7 @@ import { parseGammaNumberArray } from "@knoww/shared-types/polymarket";
 import { Decimal } from "decimal.js";
 import type { Market } from "../types/market";
 
-export const MAX_DISPLAY_PRICE_CENTS = 90;
+export const MAX_DISPLAY_PRICE_CENTS = 95;
 
 const MAX_DISPLAY_PRICE = new Decimal(MAX_DISPLAY_PRICE_CENTS).div(100);
 
@@ -59,38 +59,38 @@ function getMarketPrices(market: Market): Decimal[] {
   return prices;
 }
 
+type NestedMarket = NonNullable<Market["markets"]>[number];
+
+// Closed children still count here (unlike getMarketPrices): the event's
+// shape must not flip to "binary" when a choice is eliminated, or the
+// eliminated child's near-$1 No price would wrongly hide the whole event.
 function isNamedMultiOutcomeEvent(market: Market): boolean {
-  let namedActiveMarketCount = 0;
+  let namedMarketCount = 0;
 
   for (const nestedMarket of market.markets ?? []) {
-    if (
-      nestedMarket.active === false ||
-      nestedMarket.closed === true ||
-      nestedMarket.archived === true
-    ) {
-      continue;
-    }
-
     if (nestedMarket.groupItemTitle?.trim() || nestedMarket.question?.trim()) {
-      namedActiveMarketCount += 1;
-      if (namedActiveMarketCount >= 2) return true;
+      namedMarketCount += 1;
+      if (namedMarketCount >= 2) return true;
     }
   }
 
   return false;
 }
 
-function isNestedMarketWithinDisplayPriceCap(
-  market: NonNullable<Market["markets"]>[number],
+function isNestedMarketDisplayable(market: NestedMarket): boolean {
+  return (
+    market.active !== false &&
+    market.closed !== true &&
+    market.archived !== true
+  );
+}
+
+function nestedMarketExceedsDisplayPriceCap(
+  market: NestedMarket,
   isMultiOutcomeEvent: boolean
 ): boolean {
-  if (
-    market.active === false ||
-    market.closed === true ||
-    market.archived === true
-  ) {
-    return false;
-  }
+  // Archived children are deprecated duplicates whose prices may be stale.
+  if (market.archived === true) return false;
 
   const prices = parseGammaNumberArray(market.outcomePrices);
 
@@ -98,24 +98,35 @@ function isNestedMarketWithinDisplayPriceCap(
   // The first price is the displayed choice probability; the complementary
   // No price can legitimately exceed the cap for a low-probability choice.
   if (isMultiOutcomeEvent) {
-    return prices.length === 0 || isPriceWithinDisplayCap(prices[0]);
+    return prices.length > 0 && !isPriceWithinDisplayCap(prices[0]);
   }
 
-  return prices.every((price) => isPriceWithinDisplayCap(price));
+  return prices.some((price) => !isPriceWithinDisplayCap(price));
 }
 
 /**
- * Closed or nearly resolved markets have a leading outcome above the display
- * cap. Keep markets without a usable price visible because their price is
- * unknown, not closed.
+ * An event stays visible only while none of its markets has crossed the
+ * display cap. A single child above it means the event is effectively
+ * decided, and surfacing the remaining markets invites trades on outcomes
+ * already priced as losers — so the whole event is hidden rather than
+ * trimmed to its runner-ups. Closed children count toward this check (a
+ * closed near-$1 winner is the strongest "decided" signal), while markets
+ * without a usable price stay visible because their price is unknown, not
+ * decided.
  */
 export function isMarketWithinDisplayPriceCap(market: Market): boolean {
   if (market.closed === true || market.active === false) return false;
   if (market.markets && market.markets.length > 0) {
     const isMultiOutcomeEvent = isNamedMultiOutcomeEvent(market);
-    return market.markets.some((nestedMarket) =>
-      isNestedMarketWithinDisplayPriceCap(nestedMarket, isMultiOutcomeEvent)
-    );
+    if (
+      market.markets.some((nestedMarket) =>
+        nestedMarketExceedsDisplayPriceCap(nestedMarket, isMultiOutcomeEvent)
+      )
+    ) {
+      return false;
+    }
+
+    return market.markets.some(isNestedMarketDisplayable);
   }
 
   return getMarketPrices(market).every((price) =>
@@ -126,18 +137,11 @@ export function isMarketWithinDisplayPriceCap(market: Market): boolean {
 export function filterNestedMarketsByDisplayPriceCap(
   market: Market
 ): Market | null {
-  if (market.closed === true || market.active === false) return null;
-  if (!market.markets || market.markets.length === 0) {
-    return isMarketWithinDisplayPriceCap(market) ? market : null;
-  }
+  if (!isMarketWithinDisplayPriceCap(market)) return null;
+  if (!market.markets || market.markets.length === 0) return market;
 
-  const isMultiOutcomeEvent = isNamedMultiOutcomeEvent(market);
-  const eligibleMarkets = market.markets.filter((nestedMarket) =>
-    isNestedMarketWithinDisplayPriceCap(nestedMarket, isMultiOutcomeEvent)
-  );
+  const displayableMarkets = market.markets.filter(isNestedMarketDisplayable);
+  if (displayableMarkets.length === market.markets.length) return market;
 
-  if (eligibleMarkets.length === 0) return null;
-  if (eligibleMarkets.length === market.markets.length) return market;
-
-  return { ...market, markets: eligibleMarkets };
+  return { ...market, markets: displayableMarkets };
 }

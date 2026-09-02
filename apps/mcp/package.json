@@ -16,7 +16,7 @@
     "lint": "biome check",
     "format": "biome format --write",
     "test": "vitest run",
-    "cf-typegen": "wrangler types ./cloudflare-env.d.ts"
+    "cf-typegen": "node ./scripts/generate-worker-types.mjs"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "0.10.3",
@@ -26,15 +26,16 @@
     "@modelcontextprotocol/server": "2.0.0",
     "agents": "0.21.0",
     "decimal.js": "catalog:",
-    "jose": "6.2.3",
+    "jose": "6.2.10",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@cloudflare/vitest-pool-workers": "0.21.3",
-    "@types/node": "26.2.0",
+    "@cloudflare/workers-types": "5.20260820.1",
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@types/node": "24.13.3",
     "typescript": "catalog:",
-    "vitest": "^4.1.10",
-    "wrangler": "4.123.0"
+    "vitest": "^4.1.11",
+    "wrangler": "4.125.0"
   }
 }

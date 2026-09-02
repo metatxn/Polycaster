@@ -34,10 +34,10 @@ minimumReleaseAgeExclude:
   - "wagmi"
 
 catalog:
-  "@biomejs/biome": "2.5.6"
-  "@polymarket/client": "0.2.0"
+  "@biomejs/biome": "2.5.10"
+  "@polymarket/client": "0.8.1"
   "@types/react": "19.2.18"
-  "@types/react-dom": "19.2.4"
+  "@types/react-dom": "19.2.5"
   "decimal.js": "^10.6.0"
   "react": "19.2.8"
   "react-dom": "19.2.8"
@@ -58,7 +58,12 @@ peerDependencyRules:
 
 overrides:
   "typescript": "6.0.3"
+  "@types/node": "24.13.3"
   "viem": "2.55.10"
+  # 1.55.0 statically imports optional x402 peer modules from its ESM graph,
+  # which makes Next 16 Turbopack fail even though Knoww does not use x402.
+  # Keep the last verified SDK until Coinbase restores optional bundling.
+  "@coinbase/cdp-sdk": "1.51.2"
   "axios": "1.18.1"
   # 5.0.1 is the newest published @isaacs/brace-expansion; the previous 5.0.6
   # pin was an unresolvable version carried over from the brace-expansion fork.
@@ -120,13 +125,14 @@ overrides:
   # which still declares ^0.5.16; the override lifts it past the fix.
   "adm-zip": "0.6.0"
 
-allowBuilds:
-  "@reown/appkit": true
-  "bufferutil": true
-  "core-js": true
-  "esbuild": true
-  "onnxruntime-node": true
-  "protobufjs": true
-  "sharp": true
-  "utf-8-validate": true
-  "workerd": true
+onlyBuiltDependencies:
+  - "@reown/appkit"
+  - "bufferutil"
+  - "core-js"
+  - "core-js-pure"
+  - "esbuild"
+  - "onnxruntime-node"
+  - "protobufjs"
+  - "sharp"
+  - "utf-8-validate"
+  - "workerd"

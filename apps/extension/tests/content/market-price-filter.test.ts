@@ -17,17 +17,17 @@ function marketWithPrices(prices: string[]): Market {
   };
 }
 
-test("allows a market whose highest outcome is exactly 90 cents", () => {
-  assert.equal(MAX_DISPLAY_PRICE_CENTS, 90);
+test("allows a market whose highest outcome is exactly 95 cents", () => {
+  assert.equal(MAX_DISPLAY_PRICE_CENTS, 95);
   assert.equal(
-    isMarketWithinDisplayPriceCap(marketWithPrices(["0.9", "0.1"])),
+    isMarketWithinDisplayPriceCap(marketWithPrices(["0.95", "0.05"])),
     true
   );
 });
 
-test("hides markets whose highest outcome is above 90 cents", () => {
+test("hides markets whose highest outcome is above 95 cents", () => {
   assert.equal(
-    isMarketWithinDisplayPriceCap(marketWithPrices(["0.9001", "0.0999"])),
+    isMarketWithinDisplayPriceCap(marketWithPrices(["0.9501", "0.0499"])),
     false
   );
   assert.equal(
@@ -38,7 +38,7 @@ test("hides markets whose highest outcome is above 90 cents", () => {
 
 test("checks all active outcomes and leaves markets without prices visible", () => {
   assert.equal(
-    isMarketWithinDisplayPriceCap(marketWithPrices(["0.2", "0.91"])),
+    isMarketWithinDisplayPriceCap(marketWithPrices(["0.2", "0.96"])),
     false
   );
   assert.equal(
@@ -51,7 +51,7 @@ test("checks all active outcomes and leaves markets without prices visible", () 
   assert.equal(isMarketWithinDisplayPriceCap(marketWithPrices([])), true);
 });
 
-test("removes only nested markets above the price cap", () => {
+test("hides the entire event when any nested market exceeds the cap", () => {
   const event: Market = {
     id: "event-1",
     title: "Event with several markets",
@@ -60,7 +60,7 @@ test("removes only nested markets above the price cap", () => {
       {
         id: "nearly-resolved",
         active: true,
-        outcomePrices: ["0.95", "0.05"],
+        outcomePrices: ["0.96", "0.04"],
       },
       {
         id: "competitive",
@@ -75,14 +75,39 @@ test("removes only nested markets above the price cap", () => {
     ],
   };
 
-  const filtered = filterNestedMarketsByDisplayPriceCap(event);
-
-  assert.ok(filtered);
-  assert.deepEqual(
-    filtered.markets?.map((market) => market.id),
-    ["competitive", "unknown-price"]
-  );
+  // The runner-up markets must NOT surface once one child is effectively
+  // decided — showing them invites trades on outcomes priced as losers.
+  assert.equal(filterNestedMarketsByDisplayPriceCap(event), null);
+  assert.equal(isMarketWithinDisplayPriceCap(event), false);
   assert.equal(event.markets?.length, 3, "input event must not be mutated");
+});
+
+test("hides the entire event when a later nested market exceeds the cap", () => {
+  const event: Market = {
+    id: "event-with-later-decided-market",
+    title: "Event whose last market crossed the cap",
+    source: "polymarket",
+    markets: [
+      {
+        id: "competitive",
+        active: true,
+        outcomePrices: ["0.65", "0.35"],
+      },
+      {
+        id: "unknown-price",
+        active: true,
+        outcomePrices: [],
+      },
+      {
+        id: "nearly-resolved",
+        active: true,
+        outcomePrices: ["0.96", "0.04"],
+      },
+    ],
+  };
+
+  assert.equal(filterNestedMarketsByDisplayPriceCap(event), null);
+  assert.equal(isMarketWithinDisplayPriceCap(event), false);
 });
 
 test("keeps low-probability choices in a named multi-outcome event", () => {
@@ -126,17 +151,43 @@ test("keeps low-probability choices in a named multi-outcome event", () => {
   ]);
 });
 
-test("keeps a mixed event displayable when at least one active child survives", () => {
+test("hides a named multi-outcome event once its leading choice crosses the cap", () => {
   const event: Market = {
-    id: "event-mixed",
-    title: "Event with eligible and ineligible children",
+    id: "event-decided-leader",
+    title: "Which company has the best Text-to-Video AI end of September?",
     source: "polymarket",
     markets: [
       {
-        id: "nearly-resolved",
+        id: "google",
+        groupItemTitle: "Google",
         active: true,
-        outcomePrices: ["0.95", "0.05"],
+        outcomePrices: ["0.96", "0.04"],
       },
+      {
+        id: "bytedance",
+        groupItemTitle: "ByteDance",
+        active: true,
+        outcomePrices: ["0.03", "0.97"],
+      },
+      {
+        id: "openai",
+        groupItemTitle: "OpenAI",
+        active: true,
+        outcomePrices: ["0.01", "0.99"],
+      },
+    ],
+  };
+
+  assert.equal(filterNestedMarketsByDisplayPriceCap(event), null);
+  assert.equal(isMarketWithinDisplayPriceCap(event), false);
+});
+
+test("prunes closed children without hiding an otherwise eligible event", () => {
+  const event: Market = {
+    id: "event-mixed",
+    title: "Event with an already-closed child",
+    source: "polymarket",
+    markets: [
       {
         id: "eligible",
         active: true,
@@ -158,26 +209,61 @@ test("keeps a mixed event displayable when at least one active child survives", 
     ),
     ["eligible"]
   );
+  assert.equal(event.markets?.length, 2, "input event must not be mutated");
 });
 
-test("removes an event only when none of its nested markets survive", () => {
-  const event: Market = {
-    id: "event-2",
-    title: "Event without an eligible market",
+test("keeps an event with an eliminated choice but hides one whose closed child resolved yes", () => {
+  // An eliminated candidate closes near zero — that must not hide the race.
+  const eliminated: Market = {
+    id: "event-eliminated",
+    title: "Two-candidate race with one dropout",
     source: "polymarket",
     markets: [
       {
-        id: "resolved-one",
+        id: "front-runner",
+        groupItemTitle: "Candidate A",
         active: true,
-        outcomePrices: ["0.99", "0.01"],
+        outcomePrices: ["0.6", "0.4"],
       },
       {
-        id: "resolved-two",
+        id: "dropout",
+        groupItemTitle: "Candidate B",
         active: true,
-        outcomePrices: ["0.92", "0.08"],
+        closed: true,
+        outcomePrices: ["0.001", "0.999"],
       },
     ],
   };
 
-  assert.equal(filterNestedMarketsByDisplayPriceCap(event), null);
+  assert.deepEqual(
+    filterNestedMarketsByDisplayPriceCap(eliminated)?.markets?.map(
+      (market) => market.id
+    ),
+    ["front-runner"]
+  );
+
+  // A closed child near $1 means the event is decided even if the event
+  // object has not flipped to closed yet — hide it, long shots included.
+  const decided: Market = {
+    id: "event-decided",
+    title: "Race whose winner already resolved",
+    source: "polymarket",
+    markets: [
+      {
+        id: "winner",
+        groupItemTitle: "Candidate A",
+        active: true,
+        closed: true,
+        outcomePrices: ["0.99", "0.01"],
+      },
+      {
+        id: "long-shot",
+        groupItemTitle: "Candidate B",
+        active: true,
+        outcomePrices: ["0.01", "0.99"],
+      },
+    ],
+  };
+
+  assert.equal(filterNestedMarketsByDisplayPriceCap(decided), null);
 });

@@ -2570,8 +2570,14 @@ async function fetchTrendingMarkets(): Promise<Market[]> {
     .filter((market): market is Market => market !== null)
     .slice(0, TRENDING_CANDIDATE_LIMIT);
 
-  trendingMarketsCache = { markets: result, fetchedAt: now };
-  log("Cached", result.length, "trending markets");
+  // Only cache non-empty results — caching a transient failure would pin the
+  // panel's trending section to the empty state for the full cache TTL.
+  if (result.length > 0) {
+    trendingMarketsCache = { markets: result, fetchedAt: now };
+    log("Cached", result.length, "trending markets");
+  } else {
+    log("Skipped caching empty trending result");
+  }
   return result;
 }
 

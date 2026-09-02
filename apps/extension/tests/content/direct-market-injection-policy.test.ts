@@ -117,9 +117,10 @@ test("structured direct markets remove ineligible nested children before display
     closed: false,
     markets: [
       {
-        id: "nearly-resolved",
+        id: "already-closed",
         active: true,
-        outcomePrices: ["0.95", "0.05"],
+        closed: true,
+        outcomePrices: ["0.55", "0.45"],
       },
       {
         id: "eligible",
@@ -178,7 +179,7 @@ test("an explicit Polymarket link bypasses the normal post cooldown", async () =
   });
   const post = document.createElement("article");
   post.textContent = "A post with one explicit Polymarket link";
-  document.body.append(post);
+  document.body.appendChild(post);
 
   await processVisiblePosts({ itemSelector: "article" });
 
@@ -210,7 +211,7 @@ test("explicit links deferred by the analysis batch limit continue draining", as
     const post = document.createElement("article");
     post.setAttribute("data-post-id", `post-${index}`);
     post.textContent = `English test post number ${index}`;
-    document.body.append(post);
+    document.body.appendChild(post);
   }
 
   await processVisiblePosts({ itemSelector: "article" });
@@ -243,7 +244,7 @@ test("generic posts retain the configured analysis batch cap", async () => {
     const post = document.createElement("article");
     post.setAttribute("data-post-id", `generic-${index}`);
     post.textContent = `English generic post number ${index}`;
-    document.body.append(post);
+    document.body.appendChild(post);
   }
 
   await processVisiblePosts({ itemSelector: "article" });

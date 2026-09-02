@@ -19,13 +19,37 @@ const mixedEvent = {
   closed: false,
   markets: [
     {
-      id: "nearly-resolved",
+      id: "already-closed",
       active: true,
-      closed: false,
-      outcomePrices: ["0.95", "0.05"],
+      closed: true,
+      outcomePrices: ["0.55", "0.45"],
     },
     {
       id: "eligible",
+      active: true,
+      closed: false,
+      outcomePrices: ["0.65", "0.35"],
+    },
+  ],
+};
+
+// One child above the display cap means the event is effectively decided, so
+// the whole event must disappear instead of surfacing its runner-up markets.
+const decidedEvent = {
+  id: "decided-event",
+  title: "Decided Polymarket event",
+  slug: "decided-polymarket-event",
+  active: true,
+  closed: false,
+  markets: [
+    {
+      id: "nearly-resolved",
+      active: true,
+      closed: false,
+      outcomePrices: ["0.96", "0.04"],
+    },
+    {
+      id: "runner-up",
       active: true,
       closed: false,
       outcomePrices: ["0.65", "0.35"],
@@ -84,6 +108,23 @@ test("direct event resolution keeps eligible children from a mixed event", async
     markets[0].markets?.map((market) => market.id),
     ["eligible"]
   );
+});
+
+test("direct event resolution drops an event once any child crosses the cap", async () => {
+  const { api } = await loadApiWithResponse({
+    success: true,
+    event: decidedEvent,
+  });
+
+  const markets = await api.resolvePolymarketMarketsFromHints([
+    {
+      source: "polymarket",
+      url: "https://polymarket.com/event/decided-polymarket-event",
+      title: "Decided Polymarket event",
+    },
+  ]);
+
+  assert.equal(markets.length, 0);
 });
 
 test("generic Polymarket search keeps eligible children from a mixed event", async () => {

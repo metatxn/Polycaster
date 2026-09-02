@@ -65,13 +65,13 @@ test("side panel offers a dedicated switch-to-floating control", () => {
 
   // Dedicated button distinct from the existing close button, mirroring the
   // floating panel's "move to sidebar" affordance.
-  assert.equal(/class="knoww-stack-popout"/.test(sidepanel), true);
+  assert.equal(/class="knoww-stack-popout[\s"]/.test(sidepanel), true);
   assert.equal(/Move to floating panel/.test(sidepanel), true);
 
   // Positioned right after settings and before search (matching the floating
   // panel's switch button placement), not jammed next to close.
   assert.equal(
-    /class="knoww-stack-popout"[\s\S]{0,800}class="knoww-search-toggle"/.test(
+    /class="knoww-stack-popout[\s"][\s\S]{0,800}class="knoww-search-toggle/.test(
       sidepanel
     ),
     true

@@ -18,15 +18,8 @@
     },
     "default_title": "Knoww"
   },
-  "permissions": [
-    "storage",
-    "offscreen",
-    "scripting",
-    "sidePanel"
-  ],
-  "host_permissions": [
-    "__GENERATED_BY_WEBPACK_BUILD__"
-  ],
+  "permissions": ["storage", "offscreen", "scripting", "sidePanel"],
+  "host_permissions": ["__GENERATED_BY_WEBPACK_BUILD__"],
   "side_panel": {
     "default_path": "sidepanel.html"
   },
@@ -52,9 +45,7 @@
         "*.wasm",
         "*.mjs"
       ],
-      "matches": [
-        "__GENERATED_BY_WEBPACK_BUILD__"
-      ]
+      "matches": ["__GENERATED_BY_WEBPACK_BUILD__"]
     }
   ],
   "options_page": "options.html"

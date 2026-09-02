@@ -29,3 +29,17 @@ Do not open files matching:
 - files containing API keys, private keys, tokens, passwords, seed phrases, or credentials
 
 If a task requires environment variable names, inspect only safe examples like `.env.example`, `.env.sample`, or documentation. Never inspect real secret values.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on metatxn/Knoww, driven through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default triage labels, unchanged: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context. A root `CONTEXT-MAP.md` points at one `CONTEXT.md` per app or package, and ADRs live in `docs/decisions/`. See `docs/agents/domain.md`.

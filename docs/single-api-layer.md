@@ -1,174 +1,271 @@
 # Single API layer for multi-platform prediction markets
 
-Status: Proposed
+Status: Accepted design. Decisions settled with the owner on 2026-09-02.
 
-Date: 2026-09-01
+Date: 2026-09-01, updated 2026-09-02
 
 ## Decision summary
 
 Knoww will expose one MCP server and one normalized market contract across
-multiple prediction-market platforms. Polymarket, Kalshi, Limitless, Robinhood,
-and future platforms will connect through adapters instead of defining separate
-public APIs.
+prediction-market platforms. Platforms connect through adapters in
+`@knoww/services` instead of defining separate public APIs.
 
-The main decisions are:
+The settled decisions are:
 
 - Keep one MCP resource at `https://mcp.knoww.app/mcp`.
-- Keep public tool names platform-neutral. A caller uses `search_markets` or
-  `get_market`, not `search_polymarket` or `search_kalshi`.
-- Put platform clients, validation, mapping, and special behavior in dedicated
-  platform directories.
-- Put the normalized market model and aggregation logic below the MCP layer so
-  the web app, HTTP API, and MCP server use the same implementation.
-- Use Privy social login as the Knoww identity flow for the web app and MCP.
-- Continue using Reown on the web app for MetaMask, Coinbase Wallet, and other
-  injected wallets. Disable Reown social login.
-- Keep Knoww OAuth as the protocol-facing authorization server for MCP. Privy
-  authenticates the person during that OAuth flow, but a Privy token is not an
-  MCP access token.
-- Treat market reads and trading as separate capabilities. A platform can
-  support reads without supporting account creation or order execution.
-- Use per-platform delegation for trading. Privy does not replace Kalshi,
-  Polymarket, Limitless, or Robinhood authorization.
+- Put the normalized market model, adapters, and aggregation in
+  `@knoww/services`. The MCP server is the first consumer. The web app and the
+  extension adopt the same services later, without a rewrite, but no web or
+  extension search path changes in this build.
+- Support two platforms: Polymarket (market data and trading, refactoring the
+  code that exists) and Kalshi (market data only). Limitless and Robinhood are
+  out of scope; see "Platforms not in scope".
+- Name tools by what they cover. Tools whose concept exists on more than one
+  platform use neutral names with a `platform` filter. Tools that belong to
+  one platform's data model get a platform prefix. The 20 tools that exist
+  today keep their names and response shapes forever as permanent aliases.
+- Normalize prices to decimal strings in the 0 to 1 range, map every platform
+  status onto one seven-state enum that includes `resolving`, and add canonical
+  `platform:sourceId` identifiers to responses without removing any current
+  field.
+- Search by live fan-out to every enabled platform, 20 markets per page, on the
+  opaque cursor format the MCP tools already use. There is no indexed catalog.
+- Never merge markets across platforms. A search returns every matching
+  market from every platform as its own result.
+- Keep Google OpenID Connect as the login for read-only MCP grants. Add Privy
+  social login for MCP grants that include account or order scopes. Knoww OAuth
+  remains the authorization server that issues every MCP token.
+- Trade on Polymarket only, through a Privy server wallet per MCP client that
+  the user's embedded wallet authorizes as a Polymarket Session Key. A Session
+  Key can create and cancel orders and cannot withdraw funds.
+- Charge a builder-code taker fee on every Polymarket order placed through
+  MCP from day one. Subscription tiers and x402 come later; the codebase keeps
+  the plug point.
 
-This document is the proposed target architecture. It does not approve a
-production migration or trading launch by itself.
+This document is the target architecture. Production trading still depends on
+the Polymarket compatibility test and the Kalshi conversation described below.
 
 ## Goals
 
-- Let users and agents discover markets from all supported platforms through a
+- Let users and agents discover markets from Polymarket and Kalshi through a
   single API.
 - Provide stable identifiers and a consistent response format.
 - Preserve platform-specific rules where normalization would lose meaning.
-- Reuse the same market core in the web app and MCP server.
-- Add platforms without adding large switch statements to MCP tools.
+- Build the market core once, in `@knoww/services`, so the web app and the
+  extension can consume it later.
+- Add platforms without adding switch statements to MCP tools.
 - Support read-only platforms and trading-capable platforms in the same
   registry.
 - Give social-login users an embedded wallet and a controlled path to agentic
-  trading.
+  trading on Polymarket.
 - Keep venue credentials, wallet keys, and trading authority out of the MCP
   client and model context.
+- Never break an MCP client that already calls one of the 20 existing tools.
 
 ## Non-goals
 
 - Pretending every platform has the same order, settlement, or account model.
-- Merging markets solely because their titles look similar.
+- Merging markets across platforms, whether by title, embedding, or a curated
+  table.
+- Indexing or caching platform catalogs in a Knoww database.
+- Kalshi account, portfolio, or order tools of any kind in this build.
+- Replacing Google OIDC for read-only MCP access.
+- Linking an existing injected-wallet web user to a Privy identity in this
+  build. That is a named roadmap decision; see "Existing wallet users".
 - Using a connected blockchain network as proof of jurisdiction or eligibility.
-- Supporting Robinhood through scraped or reverse-engineered private APIs.
-- Enabling unrestricted withdrawals, transfers, or trades through a broad
-  session permission.
-- Removing Reown from the existing external-wallet web flow.
+- Enabling withdrawals, transfers, or redemptions through an MCP tool.
+- Removing Reown from the existing injected-wallet web flow.
+- Adapters for Limitless, Robinhood, or any third platform.
 
 ## System architecture
 
 ```mermaid
 flowchart LR
-    PM[Polymarket APIs] --> PA[Polymarket adapter]
-    KA[Kalshi APIs] --> KAA[Kalshi adapter]
-    LI[Limitless APIs] --> LA[Limitless adapter]
-    RH[Robinhood API if supported] --> RA[Robinhood adapter]
+    PM[Polymarket Gamma, CLOB, Data APIs] --> PA[Polymarket adapter]
+    KA[Kalshi public market data API] --> KAA[Kalshi adapter]
 
-    PA --> MC[Knoww market core]
+    PA --> MC["Market core in @knoww/services"]
     KAA --> MC
-    LA --> MC
-    RA --> MC
 
-    MC --> IDX[Normalized catalog and cache]
-    IDX --> MCP[Knoww MCP tools]
-    IDX --> HTTP[Knoww HTTP API]
-    IDX --> WEB[Knoww web app]
+    MC --> MCP[Knoww MCP tools]
+    MC -. later .-> WEB[Knoww web app]
+    MC -. later .-> EXT[Knoww extension]
 
-    PR[Privy identity] --> OA[Knoww OAuth server]
+    GO[Google OIDC] --> OA[Knoww OAuth server]
+    PR[Privy social login] --> OA
     OA --> MCP
     PR --> WLT[Embedded owner wallet]
-    WLT --> DEL[Per-platform delegation]
-    DEL --> TRADE[Trading adapters]
+    WLT -- authorizes Session Key --> SW[Privy server wallet per MCP client]
+    SW --> TRADE[Polymarket trading adapter]
 ```
 
-The MCP Worker should not become the only place where aggregation exists. MCP
-is one consumer of the market core. The web app and future products should use
-the same normalized service.
+The MCP Worker is one consumer of the market core, not the place where
+aggregation lives. Web and extension code call the Polymarket clients directly
+today; they keep doing so until they are moved onto the shared services in a
+later effort.
 
 ## Platform support and constraints
 
-| Platform | Public market data | Trading authorization | Initial status |
+| Platform | Public market data | Account and trading | Status in this build |
 | --- | --- | --- | --- |
-| Polymarket | Public Gamma, CLOB, and Data APIs | Wallet signatures, CLOB credentials, and eligible session-key delegation | Existing adapter to refactor |
-| Kalshi | Public market, event, trade, and order-book endpoints | Kalshi account with RSA-PSS API request signing | Read adapter next |
-| Limitless | Public REST and WebSocket market data | Privy identity plus scoped HMAC tokens; partner subaccounts and delegated signing are available to approved integrations | Read adapter after Kalshi; assess partner API for trading |
-| Robinhood | Prediction markets are available in Robinhood products, but no supported public prediction-market API has been verified | Unknown until Robinhood publishes or grants supported access | Disabled and marked unavailable |
+| Polymarket | Gamma, CLOB, and Data APIs, no auth | Owner wallet plus CLOB Session Key delegation | Refactor the existing code into the adapter; trading via MCP is committed scope |
+| Kalshi | `https://api.elections.kalshi.com/trade-api/v2`, no auth, cursor pagination | RSA-signed requests with a key pair tied to a KYC'd account; no delegate credential exists | Market data adapter only |
 
-Polymarket documents public market data across its Gamma, CLOB, and Data APIs.
-Kalshi documents unauthenticated market data separately from its RSA-signed
-account requests. Limitless documents public market data and a partner API that
-can derive scoped HMAC credentials from a Privy identity token. In Robinhood's
-Q1 2026 earnings discussion, the company described broader API access as future
-work and called reverse-engineered integrations unsupported. Knoww should not
-promise Robinhood support until it has a documented or contracted API.
+### Kalshi terms
 
-## Public MCP and HTTP contract
+Kalshi's Developer Agreement (v1.1 is the revision reviewed; whether it is
+current is unconfirmed) prohibits caching, aggregating, or storing API data,
+facilitating trading for other members, and sublicensing access. API use is
+"expressly limited to facilitating a member's own trading". An MCP server that
+redistributes Kalshi market data to third-party agents needs Kalshi's written
+authorization.
 
-### Platform-neutral tools
+The owner is opening a conversation with Kalshi in parallel with the adapter
+work. The adapter is the same code either way. Until authorization lands:
 
-The initial common tools should be:
+- the Kalshi adapter runs with caching disabled; every call goes upstream;
+- Kalshi is exposed through MCP only, not the web app;
+- the platform registry can disable Kalshi through configuration without a
+  deploy.
 
-- `list_platforms`
-- `search_markets`
-- `get_market`
-- `get_event`
-- `get_orderbook`
-- `get_price_history`
-- `get_market_trades`
-- `compare_markets`
+The conversation should ask for written authorization to redistribute market
+data, whether Kalshi offers or plans a scoped delegate credential, and whether
+any fee or revenue-share arrangement exists for third parties. Kalshi has no
+documented equivalent of Polymarket's builder codes.
 
-Account tools should also avoid wallet-only naming because a Kalshi or
-Robinhood account is not a blockchain wallet:
+### Platforms not in scope
+
+Limitless and Robinhood were in earlier drafts and are removed. Robinhood
+routes its event contracts through Kalshi's exchange, so the Kalshi adapter
+covers most of that catalog. Limitless requires partner approval for trading
+and is a small venue. Neither gets an adapter until the owner schedules it. The
+adapter contract is the only part of this design written with them in mind.
+
+## Public MCP contract
+
+### Naming policy
+
+Tool names are the public API. Two names can share one handler, so aliases
+are free and removing them earns nothing.
+
+- A tool whose concept exists on more than one supported platform gets a
+  neutral name and a `platform` filter: `search_markets`, `get_market`.
+- A tool that belongs to one platform's data model gets that platform's prefix:
+  `polymarket_get_market_holders`, `kalshi_*` when a Kalshi-only concept
+  appears.
+- Account and order tools get neutral names because a future platform
+  partnership could support them. In this build only `platform: "polymarket"`
+  is accepted.
+- Every one of the 20 existing tools keeps its name, input schema, and response
+  shape permanently. Where the canonical name differs, the old name is an
+  alias. `tools/list` advertises both, and each alias description starts with
+  "Alias of <canonical name>". Documentation presents the canonical name.
+- Canonical IDs are added to responses. No existing response field is removed
+  or renamed.
+
+The alias table in code is the source of truth. Contract tests assert that
+every legacy name still resolves.
+
+### Tool disposition
+
+Cross-platform tools, neutral names, `platform` filter optional:
+
+| Tool | Notes |
+| --- | --- |
+| `list_platforms` | New. Health, enabled state, and capabilities per platform |
+| `search_markets` | Existing name. Fans out to every enabled platform |
+| `list_events` | Existing name. Kalshi events map onto the same shape |
+| `get_market` | Existing name. Accepts canonical IDs; Polymarket slug, condition ID, and token ID inputs stay supported |
+| `get_event` | Existing name. Takes one platform's event ID only; see "No cross-platform merging" |
+| `get_orderbook` | Existing name |
+| `get_price_history` | Existing name |
+| `get_market_trades` | Existing name |
+
+Polymarket-specific tools, prefixed canonical names, legacy names as permanent
+aliases:
+
+| Canonical name | Alias |
+| --- | --- |
+| `polymarket_get_market_quotes` | `get_market_quotes` |
+| `polymarket_get_market_holders` | `get_market_holders` |
+| `polymarket_get_open_interest` | `get_open_interest` |
+| `polymarket_get_event_live_volume` | `get_event_live_volume` |
+| `polymarket_get_trader_leaderboard` | `get_trader_leaderboard` |
+| `polymarket_list_tags` | `list_tags` |
+| `polymarket_list_sports_markets` | `list_sports_markets` |
+| `polymarket_get_public_profile` | `get_public_profile` |
+| `polymarket_get_wallet_positions` | `get_wallet_positions` |
+| `polymarket_get_wallet_activity` | `get_wallet_activity` |
+| `polymarket_get_closed_positions` | `get_closed_positions` |
+| `polymarket_get_wallet_pnl` | `get_wallet_pnl` |
+| `polymarket_get_wallet_portfolio_value` | `get_wallet_portfolio_value` |
+
+The `get_wallet_*` tools read public Data API records for any address. They are
+not the same as the account tools below, which read the authenticated
+principal's own account.
+
+Account and order tools, added in the trading phase, `platform` required:
 
 - `get_account_positions`
 - `get_account_activity`
-- `get_account_orders`
+- `get_account_orders` (orders placed through this connection only; see
+  "Account read visibility")
 - `get_account_pnl`
 - `get_account_portfolio_value`
+- `preview_order`
+- `place_order`
+- `cancel_order`
 
-Existing `get_wallet_*` tools can remain as Polymarket compatibility tools for
-one deprecation window. New integrations should use account-neutral tools.
-
-When a feature cannot be represented honestly across platforms, keep it as a
-platform extension and prefix its name, for example
-`polymarket_get_market_holders`. Do this only for genuinely platform-specific
-concepts.
+There is no `compare_markets` tool.
 
 ### Search request
 
 ```json
 {
   "query": "Federal Reserve rate cut",
-  "platforms": ["polymarket", "kalshi", "limitless"],
+  "platforms": ["polymarket", "kalshi"],
   "status": "active",
-  "category": "economics",
   "closesBefore": "2026-12-31T23:59:59Z",
-  "sortBy": "relevance",
   "limit": 20,
   "cursor": "opaque-cursor"
 }
 ```
 
-`platforms` is optional. Omitting it searches every enabled read adapter. A
-`chain` filter may also be optional, but it must not replace `platforms`.
-Kalshi and Robinhood are not chain-native venues.
+`platforms` is optional. Omitting it searches every enabled platform. `limit`
+defaults to 20 and cannot exceed 20. `status` takes a canonical status value.
+There is no `chain` filter; Kalshi is not a chain venue and the platform filter
+is the only routing input.
+
+### Search response
+
+Every result is one platform's market. A query for "fed rates" returns the
+Polymarket markets and the Kalshi markets that match, each tagged with its
+platform and canonical ID, and Knoww makes no claim that any two of them are
+the same contract.
+
+```json
+{
+  "markets": [
+    { "id": "polymarket:0xbd31dc8a...", "platform": "polymarket", "title": "Fed decision in September?" },
+    { "id": "kalshi:KXFED-26SEP-C25", "platform": "kalshi", "title": "Fed funds rate above 4.25% after the September meeting?" }
+  ],
+  "partial": false,
+  "platformErrors": [],
+  "nextCursor": "opaque-composite-cursor"
+}
+```
 
 ### Canonical identifiers
 
-Every market and event needs a Knoww identifier that includes its source:
+Every market and event carries a Knoww identifier that includes its source:
 
 ```text
-polymarket:0xbd31dc8a...
-kalshi:KXFED-26SEP-C25
-limitless:btc-above-100k-september-2026
-robinhood:<source-id>
+polymarket:<conditionId>
+kalshi:<market ticker>
 ```
 
-A tool should accept the canonical identifier returned by search:
+Events follow the same rule with the platform's event identifier. A tool
+accepts the canonical identifier returned by search:
 
 ```json
 {
@@ -176,29 +273,45 @@ A tool should accept the canonical identifier returned by search:
 }
 ```
 
-The response should also include `sourceMarketId` and `sourceEventId`. A bare
-source ID is not safe because two platforms can use the same slug or number.
+The response also includes `sourceMarketId` and `sourceEventId`. A bare source
+ID is not safe because two platforms can use the same slug or number.
 
-The current Polymarket `slug`, `conditionId`, and `tokenId` inputs should remain
-available during migration. They should be documented as Polymarket-only and
-deprecated after clients can use canonical IDs.
+The current Polymarket `slug`, `conditionId`, and `tokenId` inputs stay
+supported. Documentation presents canonical IDs as the preferred input.
 
 ### Canonical market model
 
-The common model should contain fields that retain the same meaning across
+The common model contains fields that keep the same meaning on both
 platforms:
 
 ```ts
+type PlatformId = "polymarket" | "kalshi";
+type DecimalString = string;
+
+interface DecimalAmount {
+  value: DecimalString;
+  unit: string; // the platform's own settlement unit, for example "USD" or the collateral token symbol
+}
+
+interface CanonicalOutcome {
+  id: string; // platform:sourceOutcomeId
+  sourceOutcomeId: string;
+  label: string; // "Yes", "No", or the named outcome
+  price?: DecimalString; // 0 to 1, the platform's last or mid price
+  bestBid?: DecimalString; // 0 to 1
+  bestAsk?: DecimalString; // 0 to 1
+  isWinner?: boolean; // present only when status is "resolved"
+}
+
 interface CanonicalMarket {
   schemaVersion: "1";
   id: string;
-  platform: "polymarket" | "kalshi" | "limitless" | "robinhood";
+  platform: PlatformId;
   sourceMarketId: string;
   sourceEventId?: string;
-  canonicalEventId?: string;
   title: string;
   description?: string;
-  status: "unopened" | "active" | "paused" | "closed" | "resolved" | "unknown";
+  status: MarketStatus;
   outcomes: CanonicalOutcome[];
   openTime?: string;
   closeTime?: string;
@@ -206,8 +319,6 @@ interface CanonicalMarket {
   volume?: DecimalAmount;
   liquidity?: DecimalAmount;
   openInterest?: DecimalAmount;
-  collateral?: AssetReference;
-  chain?: ChainReference;
   resolutionRules?: string;
   resolutionSource?: string;
   sourceUrl?: string;
@@ -217,17 +328,55 @@ interface CanonicalMarket {
 }
 ```
 
-All money, quantities, probabilities, and prices must remain decimal strings.
-Knoww must use Decimal.js for calculations. The model must preserve the source
-unit when a platform does not define a comparable currency.
+There is no `canonicalEventId` field. Cross-platform grouping does not exist.
 
-`platformDetails` should be a discriminated union. It can retain fields such as
-Polymarket condition IDs, Kalshi tickers, or Limitless venue contracts without
-adding them to every market.
+#### Price unit
+
+Every price and probability is a decimal string between 0 and 1. Polymarket is
+native to this range. Kalshi's current API returns fixed-point dollar strings
+in the same range, so the mapper validates and passes them through. Money and
+quantities keep the platform's own unit in `DecimalAmount.unit`. Knoww uses
+Decimal.js for every calculation.
+
+#### Status
+
+```ts
+type MarketStatus =
+  | "unopened"
+  | "active"
+  | "paused"
+  | "closed"
+  | "resolving"
+  | "resolved"
+  | "unknown";
+```
+
+`resolving` covers the band between trading close and final settlement where
+an outcome is proposed, determined, disputed, or amended. An agent needs to
+know a market is in its dispute window before treating a price as free money.
+
+| Canonical | Kalshi | Polymarket |
+| --- | --- | --- |
+| `unopened` | `initialized` | not yet accepting orders and not closed |
+| `active` | `active` | active and accepting orders |
+| `paused` | `inactive` | active but not accepting orders |
+| `closed` | `closed` | closed, no resolution proposed |
+| `resolving` | `determined`, `disputed`, `amended` | closed with a proposed or disputed UMA resolution |
+| `resolved` | `finalized` | resolved |
+| `unknown` | anything else | anything else |
+
+The exact Gamma flag combinations for each Polymarket row are pinned in
+fixtures, as is every Kalshi status string. A mapper that meets an unlisted
+value returns `unknown` and logs it; it never guesses.
+
+`platformDetails` is a discriminated union on `platform`. It keeps Polymarket
+condition and token IDs, Kalshi tickers, and other fields that do not belong on
+every market.
 
 ### Capabilities
 
-Every adapter and market should declare what it supports:
+Every adapter declares what it supports, and every market carries the
+declaration of its platform:
 
 ```ts
 interface MarketCapabilities {
@@ -236,6 +385,7 @@ interface MarketCapabilities {
   priceHistory: boolean;
   publicTrades: boolean;
   accountPositions: boolean;
+  accountOrders: boolean;
   createOrder: boolean;
   cancelOrder: boolean;
   redeem: boolean;
@@ -243,62 +393,81 @@ interface MarketCapabilities {
 }
 ```
 
-`list_platforms` should return adapter health, enabled environments, data
-freshness, and capabilities. An agent can then avoid calling a tool that the
-selected platform cannot support.
+| Capability | Polymarket | Kalshi |
+| --- | --- | --- |
+| marketData, orderbook, priceHistory, publicTrades | true | true |
+| accountPositions, accountOrders | true (trading phase) | false |
+| createOrder, cancelOrder | true (trading phase) | false |
+| redeem, withdrawals | false | false |
 
-## Market matching across platforms
+`redeem` and `withdrawals` are false on both platforms because no MCP tool
+performs them. `list_platforms` returns adapter health, enabled state, and
+capabilities so an agent can avoid calling a tool the platform cannot serve.
 
-Two markets are not equivalent merely because they ask a similar question.
-They may use different resolution sources, cutoff times, time zones, eligibility
-rules, or settlement wording.
+## No cross-platform merging
 
-Knoww should keep every venue contract as a separate market and optionally
-group comparable markets under a `canonicalEventId`. Automated matching should
-store a confidence score and the factors used for the match. Low-confidence or
-high-value matches need review.
+Both platforms often list markets about the same real-world event. Polymarket
+might list "Fed decision in September?" and Kalshi might list "Fed funds rate
+above 4.25% after the September meeting?". Markets with near-identical titles
+routinely resolve on different sources, deadlines, thresholds, and
+definitions. If Knoww merged two markets that were not the same contract and
+an agent traded the "cheaper" one, the agent would hold a contract that
+resolves differently than it believes. That is a losing trade Knoww caused,
+not a display bug.
 
-The comparison layer must show venue-specific rules before presenting price
-differences. It must never imply that a cross-venue trade is risk-free solely
-because titles match.
+So Knoww never merges. Concretely:
+
+- `search_markets` returns each platform's markets as separate results.
+- `get_event` takes one platform's event ID and returns that platform's event.
+- There is no `compare_markets` tool and no canonical event group.
+- An agent that wants to compare venues searches both and reads the resolution
+  rules itself. Knoww makes no claim that anything matches.
+
+If curated matching is ever wanted, it gets its own design document. It is not
+part of this layer.
 
 ## Adapter contracts
 
-Read and trading adapters should be separate. This lets Knoww add public Kalshi
-data without pretending that Privy can place Kalshi orders.
+Market data and trading adapters are separate interfaces. Kalshi implements
+only the first.
 
 ```ts
 interface MarketDataAdapter {
   readonly platform: PlatformId;
   capabilities(): Promise<PlatformCapabilities>;
   searchMarkets(input: ProviderSearchInput): Promise<ProviderMarketPage>;
+  listEvents(input: ProviderListEventsInput): Promise<ProviderEventPage>;
   getMarket(sourceMarketId: string): Promise<ProviderMarket>;
   getEvent(sourceEventId: string): Promise<ProviderEvent>;
   getOrderbook(sourceMarketId: string): Promise<ProviderOrderbook>;
   getPriceHistory(input: ProviderPriceHistoryInput): Promise<ProviderPriceHistory>;
+  getMarketTrades(input: ProviderTradesInput): Promise<ProviderTradePage>;
 }
 
 interface TradingAdapter {
   readonly platform: PlatformId;
-  connectionStatus(principalId: string): Promise<PlatformConnectionStatus>;
+  connectionStatus(principalId: string, clientId: string): Promise<PlatformConnectionStatus>;
+  getAccountPositions(input: AccountReadInput): Promise<AccountPositions>;
+  getAccountActivity(input: AccountReadInput): Promise<AccountActivityPage>;
+  getAccountOrders(input: AccountReadInput): Promise<AccountOrderPage>;
   previewOrder(input: CanonicalOrderIntent): Promise<OrderDraft>;
   placeOrder(input: PlaceDraftInput): Promise<OrderResult>;
   cancelOrder(input: CancelOrderInput): Promise<OrderResult>;
-  redeem(input: RedeemInput): Promise<RedeemResult>;
 }
 ```
 
 The registry, not request input, owns provider base URLs. A user-controlled URL
 must never reach a server-side fetch.
 
-## Proposed repository structure
+## Repository structure
 
 ```text
 apps/mcp/src/
   auth/
-    oauth/
-    privy/
-    scopes.ts
+    google-oidc/        read-only grants, unchanged
+    privy/              grants that include account or order scopes
+    scopes.ts           active scopes plus the reserved x402:pay
+    entitlements.ts     plan check at tool dispatch; every principal is "free" today
     principal.ts
   core/
     errors/
@@ -306,17 +475,13 @@ apps/mcp/src/
     policy/
   platforms/
     polymarket/
-      index.ts
-      tools.ts
+      index.ts          registers the adapter
+      tools.ts          polymarket_* tools
     kalshi/
       index.ts
-      tools.ts
-    limitless/
-      index.ts
-      tools.ts
-    robinhood/
-      index.ts
+      tools.ts          kalshi_* tools, empty until a Kalshi-only concept appears
   tools/
+    aliases.ts          legacy name -> canonical name table
     list-platforms.ts
     search-markets.ts
     get-market.ts
@@ -326,15 +491,16 @@ apps/mcp/src/
     get-account-positions.ts
     preview-order.ts
     place-order.ts
+    cancel-order.ts
   platform-registry.ts
 
 packages/knoww-services/src/markets/
   core/
-    types.ts
+    types.ts            PlatformId, CanonicalMarket, CanonicalOutcome, MarketStatus
     errors.ts
-    adapter.ts
+    adapter.ts          MarketDataAdapter, TradingAdapter
     mapper.ts
-    aggregator.ts
+    aggregator.ts       fan-out, interleave, composite cursor
     pagination.ts
   platforms/
     polymarket/
@@ -348,53 +514,63 @@ packages/knoww-services/src/markets/
       schemas.ts
       mapper.ts
       market-data.ts
-      trading.ts
-    limitless/
-      client.ts
-      schemas.ts
-      mapper.ts
-      market-data.ts
-      trading.ts
-    robinhood/
-      client.ts
-      schemas.ts
-      mapper.ts
+  fixtures/
+    polymarket-status.json
+    kalshi-status.json
 ```
 
-Platform HTTP clients, response schemas, and normalization belong in
-`@knoww/services`. The folders under `apps/mcp/src/platforms` should contain
-MCP-specific registration and any platform-only tools.
+Platform HTTP clients, response schemas, and normalization live in
+`@knoww/services`. The folders under `apps/mcp/src/platforms` hold MCP
+registration and platform-only tools.
 
-The common MCP tools must not import Gamma, CLOB, Kalshi, or Limitless response
-types. They should depend only on canonical types and adapter interfaces.
+The cross-platform MCP tools must not import Gamma, CLOB, or Kalshi response
+types. They depend only on canonical types and adapter interfaces.
+
+Today only `apps/mcp` and one file in `apps/web` import `@knoww/services`. The
+extension has its own Polymarket client code. "Plug and play for web and
+extension" means those surfaces adopt the shared package in a later effort; it
+is not wired in this build.
 
 ## Aggregation, search, and pagination
 
 ### Live fan-out
 
-For the first two platforms, `search_markets` can query enabled adapters in
-parallel and merge the results. This has no database requirement, but it has
-limits:
+`search_markets` queries every enabled adapter in parallel and interleaves
+the results. There is no Knoww index.
 
-- response time follows the slowest provider;
-- global sorting is approximate;
-- provider cursors must be packed into one opaque composite cursor;
-- rate limits differ by provider; and
-- stable cross-platform deduplication is difficult.
+- Each adapter is asked for `ceil(limit / enabledPlatforms)` results, so with
+  two platforms each returns up to 10.
+- Results are interleaved round-robin across platforms, each in its own
+  platform's order. Global relevance ranking is approximate by design.
+- A page may hold fewer than 20 markets when one platform runs out. `nextCursor`
+  is null only when every platform is exhausted.
+- Response time follows the slowest adapter, bounded by that adapter's timeout.
 
-### Indexed catalog
+An indexed catalog is not planned. If search quality ever demands one, it is a
+separate design document, and it would also need Kalshi's written
+authorization because their agreement bars storing their data.
 
-A production cross-platform search should ingest normalized markets into a
-Knoww catalog. The catalog makes global relevance ranking, category mapping,
-deduplication, filtering, and stable pagination possible. Live price and
-order-book requests can still call the provider directly.
+### Composite cursor
 
-The index must record source timestamps and `fetchedAt`. Search responses should
-state when data is stale.
+Each platform's own cursor is packed into one opaque composite cursor using the
+format the MCP tools already use:
+
+```json
+{
+  "v": 1,
+  "per": {
+    "polymarket": "<polymarket cursor or null when exhausted>",
+    "kalshi": "<kalshi cursor or null when exhausted>"
+  }
+}
+```
+
+The cursor is opaque to clients. A platform that failed on the previous page
+keeps its cursor unchanged so the next page retries it.
 
 ### Partial failures
 
-One provider outage should not fail a global search:
+One platform outage does not fail a search:
 
 ```json
 {
@@ -410,66 +586,81 @@ One provider outage should not fail a global search:
 }
 ```
 
-Each adapter needs its own timeout, retry policy, cache, circuit breaker, and
-rate-limit budget.
+Each adapter has its own timeout, retry policy, circuit breaker, and rate-limit
+budget. Polymarket responses may be cached under the existing rules. Kalshi
+responses are not cached until Kalshi authorizes it.
 
-## Privy implementation
+## Identity and authorization
 
-### Identity boundaries
-
-There are three separate identities or authorities:
+### Two login paths, one authorization server
 
 | Layer | Purpose | Credential accepted |
 | --- | --- | --- |
-| Privy | Authenticate a Knoww user and expose verified linked accounts | Privy access or identity token, verified by Knoww |
+| Google OIDC | Authenticate the person approving a grant that requests only `markets:read` | Google ID token, verified by Knoww, discarded after use |
+| Privy | Authenticate the person approving a grant that includes account or order scopes, and expose their embedded owner wallet | Privy access or identity token, verified by Knoww |
 | Knoww OAuth | Authorize an MCP client to call Knoww tools | Knoww access token bound to the MCP resource |
-| Platform authorization | Act on a Polymarket, Kalshi, Limitless, or future account | Platform-specific delegation or account credentials |
+| Polymarket Session Key | Act on a Polymarket account | Signature from the per-client Privy server wallet |
 
-Knoww must never accept a Privy access token as the MCP bearer token. MCP access
-tokens must be issued for the canonical MCP resource and validated for that
-audience. Knoww must also avoid forwarding MCP tokens to Privy or a market
-platform.
+Nothing changes for read-only clients. The Google OIDC decision record stays
+accepted and its flow stays as it is.
+
+A grant that requests any account or order scope goes through Privy social
+login instead, and carries `markets:read` as well. The two paths produce
+distinct principals, `google-<subject>` and `privy-<did>`. Knoww never links
+them to each other, and never links either by email address.
+
+Knoww must never accept a Privy access token as the MCP bearer token. MCP
+access tokens are issued for the canonical MCP resource and validated for that
+audience. Knoww never forwards MCP tokens to Privy or to a platform.
 
 ### Shared Privy application
 
-The web app and MCP authorization page should use the same Privy application
-and authentication configuration. The Privy DID in the verified `sub` claim is
-the stable Knoww principal. Email is display and recovery information, not the
-database key.
+The web app and the MCP authorization page use the same Privy application and
+authentication configuration. The Privy DID in the verified `sub` claim is the
+stable Knoww principal for trading grants. Email is display and recovery
+information, not the database key.
 
-The backend must verify the token signature, issuer, audience, and expiration.
-If identity tokens are enabled, Knoww can use the verified linked-account data
-to locate the user's embedded wallet. Tokens must not appear in URLs, logs,
-analytics, MCP arguments, or model context.
+The backend verifies the token signature, issuer, audience, and expiration.
+Tokens must not appear in URLs, logs, analytics, MCP arguments, or model
+context.
 
 ### Web login and wallet behavior
 
-The web app should use two deliberately separate paths:
+The web app runs two separate paths:
 
 - Privy handles Google and other approved social login methods. Social users
-  receive a Privy embedded EVM wallet.
+  receive a Privy embedded EVM wallet, created with the `users-without-wallets`
+  setting for Ethereum so a user who already has a wallet in the same Privy
+  identity does not get a second one.
 - Reown handles MetaMask, Coinbase Wallet, and other injected wallets. Reown
-  email and social login remain disabled.
+  email and social login stay disabled.
 
-This proposal does not link an external Reown wallet account to a Privy social
-account. Under the selected social-only MCP policy, a wallet-only web user must
-sign in through Privy before using MCP. Automatic account linking based on an
-email address is forbidden.
+Privy social login in the web app is on the trading-critical path. The
+delegation ceremony below happens in the web app with the user's Privy session
+present, so Privy in web ships before the first agent order.
 
-For automatic embedded-wallet creation, use the current chain-specific Privy
-configuration. The intended behavior is `users-without-wallets` for Ethereum so
-a social user receives one wallet without creating an extra wallet for users
-who already have one in the same Privy identity.
+### Existing wallet users
 
-### MCP authorization flow
+Every current Knoww trader logged in with an injected wallet, and their funded
+Polymarket accounts belong to those wallets. Under this design an MCP trading
+user is a Privy social principal with an embedded wallet, so an existing
+trader cannot trade through an agent without funding that second account.
 
-The user experiences one initial authorization journey:
+This is accepted for v1. Wallet-to-Privy linking is a named roadmap decision,
+not an open question. It should be cheap: Polymarket lets any EOA authorize a
+Session Key, so an injected-wallet user could sign the same ceremony from
+MetaMask in the web app and authorize a Knoww server wallet without moving to
+Privy. Session Keys work only with Deposit Wallets today, so that work starts by
+checking which wallet type each existing user holds.
+
+### MCP authorization flow for trading grants
 
 1. The MCP client requests `https://mcp.knoww.app/mcp`.
 2. The MCP server returns the OAuth protected-resource challenge.
 3. The client starts authorization with Knoww and sends PKCE, state, redirect
-   URI, requested scope, and the MCP `resource` value.
-4. The Knoww authorization page opens Privy social login.
+   URI, requested scopes, and the MCP `resource` value.
+4. Because the scopes include an account or order scope, the Knoww
+   authorization page opens Privy social login.
 5. Knoww verifies the Privy token and resolves the Privy DID.
 6. The page shows the MCP client's name and requested Knoww scopes.
 7. The user approves the request.
@@ -479,127 +670,176 @@ The user experiences one initial authorization journey:
 10. Knoww issues its own MCP access and refresh tokens, bound to the MCP
     resource and client.
 
-Privy supplies the login session inside the flow. Knoww OAuth remains because
-MCP clients require OAuth discovery, client registration or metadata, PKCE,
-resource indicators, access-token issuance, refresh, revocation, and scope
-handling.
+The user sees one page. The Knoww authorization page hosts the Privy login and
+the consent step. Knoww OAuth stays because MCP clients need OAuth discovery,
+client registration or metadata, PKCE, resource indicators, token issuance,
+refresh, revocation, and scope handling.
 
 ### Number of user approvals
 
 | Action | User interaction |
 | --- | --- |
-| First MCP connection | One Privy login and Knoww consent journey |
-| Read public markets | No additional approval while the MCP grant remains valid |
-| First trade on a platform | One platform connection and delegation setup |
-| Routine order inside an approved policy | No per-order wallet prompt unless the user's policy requires it |
-| Policy change, new platform, or broader scope | Step-up consent |
-| Withdrawal, transfer, or other sensitive action | Interactive owner approval |
-
-The user should not see two separate login pages for Privy and Knoww. The Knoww
-authorization page hosts the Privy login and consent experience.
+| First MCP connection with read scopes | One Google login and Knoww consent page |
+| First MCP connection with trading scopes | One Privy login and Knoww consent page |
+| Read public markets | None while the grant is valid |
+| First trade from a client | One Session Key ceremony in the web app |
+| Routine order inside the approved policy | None, unless the user's policy requires confirmation |
+| Policy change or broader scope | Step-up consent |
+| Session Key renewal after 180 days | Repeat the web ceremony |
+| Deposit, withdrawal, transfer, redemption | Web action signed by the owner wallet; not an MCP tool |
 
 ### Social user moving from web to MCP
 
-For a user who first joined through the web app:
-
 1. Privy creates the user and embedded owner wallet during web onboarding.
 2. The web backend stores the Knoww principal keyed by Privy DID.
-3. The user connects Knoww MCP from an agent or MCP client.
+3. The user connects Knoww MCP from an agent with trading scopes.
 4. Privy recognizes the existing social account during the Knoww authorization
    flow.
 5. Knoww resolves the same Privy DID and embedded wallet.
-6. The MCP client receives a Knoww token with `markets:read`.
-7. The user can call read-only tools immediately.
-8. On the first trading request, Knoww opens a trusted setup page for the
-   selected platform.
-9. The user approves the platform-specific account or session delegation.
-10. Future operations remain within that platform's policy and Knoww scopes.
+6. The MCP client receives a Knoww token with `markets:read` and the requested
+   account and order scopes.
+7. The user can call read tools immediately.
+8. On the first `preview_order`, Knoww returns an actionable error that points
+   to the web ceremony page for this client.
+9. In the web app, Knoww creates a Privy server wallet for this principal and
+   client, and the user's embedded wallet signs the Polymarket Session Key
+   authorization for that server wallet's address.
+10. Future orders from that client run within Knoww's trading policy and the
+    Session Key's limits.
 
-### Privy wallets and MCP session keys
+### Server wallets and Session Keys
 
-The user's embedded Privy wallet is the owner wallet. It should not become an
-unrestricted backend signer for an agent.
+The user's embedded Privy wallet is the owner wallet. It never becomes a
+backend signer for an agent.
 
-For Polymarket automation, the proposed model is a separate Privy server wallet
-for each Knoww principal, MCP client, and Polymarket account. The owner wallet
-authorizes that server-wallet address as a CLOB-only Polymarket Session Key.
-Knoww stores the public binding and lets Privy protect the signing key.
+For each combination of Knoww principal, MCP client, and Polymarket account,
+Knoww creates one Privy server wallet. The owner wallet authorizes that server
+wallet's address as a Polymarket Session Key with the `CLOB` scope only. The
+Session Key can create and cancel orders and cannot withdraw funds. Knoww
+stores the public binding and lets Privy protect the signing key.
 
-Two policy layers should apply:
+Two policy layers apply:
 
 1. Privy wallet policy restricts typed-data signing to the intended chain,
    verifying contracts, message types, and allowed operations.
 2. Knoww trading policy restricts markets, maximum order size, cumulative
    exposure, price and slippage bounds, time windows, and daily loss.
 
+Session Key management requires a Polymarket Builder API key and initial
+approval from Polymarket. The same builder code carries the taker fee described
+under "Monetization", so one approval covers both.
+
 A Polymarket compatibility test must prove Deposit Wallet ownership, EIP-712
-signing, correct exchange contracts, CLOB credentials, session-key visibility,
-revocation, and expiry before production use.
+signing, correct exchange contracts, CLOB credentials, Session Key visibility,
+revocation, and expiry before production use. Polymarket should also confirm
+the Session Key count and rate limits per account before the one-wallet-per-
+client rule becomes fixed.
 
-Session authority does not automatically cover redemption, approvals,
-transfers, bridging, or withdrawals. These operations require a separate
-platform capability and an interactive owner approval unless the team approves
-a narrower audited delegation later.
+Redemption, approvals, transfers, and withdrawals are outside Session Key
+authority and outside MCP. They remain web actions signed by the owner wallet.
 
-### Platform-specific trading authorization
+### Session Key lifecycle
 
-Privy is not a universal exchange credential.
+- Revoking an MCP client's OAuth grant cascades. In the same operation Knoww
+  disables the client's server wallet and revokes its Polymarket Session Key.
+  A revoked agent cannot keep trading.
+- Session Keys expire at exactly 180 days with no shorter option. Renewal means
+  the user repeats the web ceremony. When an expired or revoked key is used,
+  the agent receives a specific error ("authorization expired, renew at
+  knoww.app/...") rather than a generic failure.
+- The web app shows each client's Session Key state and expiry date, and lets
+  the user revoke it.
 
-#### Polymarket
+### Account read visibility
 
-- Privy embedded wallet acts as the user-controlled owner wallet.
-- A separate Privy server wallet may act as the authorized CLOB Session Key.
-- Knoww uses `preview_order` followed by `place_order` with an immutable draft.
-- Cancellation is limited to orders created by the applicable delegation.
-- Redemption and funds movement remain interactive owner actions initially.
+Polymarket's CLOB shows open orders only to the credential that created them.
+The web app derives the user's own CLOB credentials in the browser from a
+wallet signature, and the server never sees them. The MCP path trades through
+the server wallet's Session Key, which the server does hold. The isolation runs
+both ways, per Polymarket's documentation and the trading authorization
+decision record.
 
-#### Kalshi
+Consequences:
 
-- The user needs an eligible Kalshi account.
-- Kalshi API requests use an API key ID and RSA-PSS signatures.
-- Knoww needs a trusted account-connection flow and protected credential store.
-- Privy login identifies the Knoww user but does not authorize Kalshi orders.
+- `get_account_orders` returns orders placed through this connection only, and
+  the tool description says so.
+- Positions, trade history, activity, and P&L come from the public Data API
+  keyed by wallet address, so `get_account_positions`, `get_account_activity`,
+  `get_account_pnl`, and `get_account_portfolio_value` are complete regardless
+  of which credential traded.
+- Because Knoww holds the Session Key, the web app can later show agent-placed
+  orders through a Knoww endpoint, so the user gets one full picture in the web
+  UI.
+- An agent can never see or cancel an order the user placed by hand on the web
+  app. No design fixes this without Knoww holding the user's personal CLOB
+  credentials, which it will not do.
 
-#### Limitless
+### Kalshi has no delegation
 
-- Limitless documents Privy identity tokens for deriving scoped API tokens.
-- Approved partners can use HMAC credentials, create subaccounts, and use
-  delegated signing.
-- Knoww should request only the scopes needed for the selected operations.
-- HMAC secrets remain on the backend and never enter the browser or MCP client.
+Kalshi authentication is a single RSA key pair tied to the KYC'd account.
+Whoever holds the key holds full account authority; there is no scoped or
+restricted delegate credential. Delegated trading would mean Knoww storing the
+user's full key, which Kalshi's agreement prohibits. Kalshi portfolio and order
+reads also need the user's key.
 
-#### Robinhood
-
-- Keep the adapter disabled until Robinhood provides supported API access.
-- Do not use browser session cookies, scraping, or undocumented endpoints.
-- Reassess account, trading, and compliance requirements when an official API
-  becomes available.
+So there is nothing to build. Kalshi tools in this build are market data only,
+and Kalshi account or trading tools wait for the partnership conversation.
 
 ### MCP scopes
 
-Use action scopes that remain stable as platforms are added:
+Scopes name an action class and stay stable as platforms are added. A separate
+delegation record says which platform, account, MCP client, wallet, and policy
+may perform the action.
+
+Active today:
 
 - `markets:read`
+
+Added in the trading phase:
+
 - `accounts:read`
 - `orders:read`
 - `orders:create`
 - `orders:cancel`
-- `positions:redeem`
-- `funds:deposit`
-- `funds:withdraw`
 
-The OAuth scope permits the action class. A separate platform delegation record
-specifies which platform, account, MCP client, wallet, and policy may perform
-it. Adding a new platform always requires explicit delegation even if the MCP
-client already has `orders:create`.
+Reserved, not issued:
+
+- `x402:pay`, already reserved in `apps/mcp/src/auth/scopes.ts` for a later,
+  separately reviewed paid tool slice.
+- `positions:redeem`, for a later audited redemption path.
+
+There is no `funds:*` scope. Deposits and withdrawals are web actions signed by
+the owner wallet, never MCP tools.
 
 When a tool lacks a scope, return `403 Forbidden` with
 `error="insufficient_scope"` and the minimum required scope. A scope does not
-replace account ownership, platform eligibility, policy checks, or confirmation.
+replace account ownership, platform eligibility, policy checks, or
+confirmation.
+
+## Monetization
+
+Knoww attaches its Polymarket builder code to every order placed through MCP,
+from the first order. The builder code carries a taker fee, which
+`preview_order` discloses in its fee breakdown. Trading tools are gated by
+auth, scopes, and policy, never by a paywall; the taker fee is how they earn.
+
+Reads are free within rate limits. Subscription tiers come later. x402 is
+deferred, and the codebase keeps the plug point so adding paid tiers touches
+configuration rather than architecture:
+
+- `apps/mcp/src/auth/scopes.ts` already reserves `x402:pay` and carries a
+  `plan` field on every principal, with `free` as the only value.
+- Tool dispatch consults one entitlements interface before running any tool.
+  Its result is allow, deny with a reason, or payment required. Today every
+  principal is on the free plan and the check always allows.
+- No tool handler reads `plan` directly.
+
+Kalshi has no builder-code equivalent. Any fee arrangement there belongs to
+the partnership conversation.
 
 ## Order execution contract
 
-Mutating tools should use an immutable two-step flow:
+Mutating tools use an immutable two-step flow:
 
 ```text
 preview_order -> place_order
@@ -611,9 +851,10 @@ preview_order -> place_order
 - platform and account;
 - exact outcome and source outcome identifier;
 - side, quantity, price, order type, and expiration;
-- current order book, fees, and expected slippage;
+- current order book, platform fees, the builder taker fee, and expected
+  slippage;
 - collateral, available balance, and maximum exposure;
-- eligibility and platform capability; and
+- eligibility, Session Key state, and platform capability; and
 - a canonical draft hash with a short expiration.
 
 `place_order` accepts only `draftId` and `idempotencyKey`. It must not accept a
@@ -621,38 +862,42 @@ second free-form version of the trade. Immediately before signing, the server
 reloads the market and rejects the draft if status, price bounds, outcome,
 minimum size, tick size, fees, eligibility, or policy has changed.
 
+`cancel_order` accepts an order ID returned by `place_order` or
+`get_account_orders`. It can only reach orders the same Session Key created.
+
 Every monetary calculation uses Decimal.js. Every mutation uses a unique
 idempotency key and an append-only audit record.
 
 ## Data and credential storage
 
-Live public reads can start without a new database. Reliable global search and
-all mutating operations need durable storage.
+Live public reads need no new database. Mutating operations need durable
+storage.
 
-Recommended records include:
+Records include:
 
-- Knoww principal keyed by Privy DID;
+- Knoww principal keyed by Privy DID for trading grants, and by Google subject
+  for read-only grants;
 - verified social and embedded-wallet references;
 - MCP client registration and consent;
 - OAuth grants, refresh-token families, and revocation state;
-- platform account connections;
-- platform delegation scope, status, expiry, and revocation;
+- Session Key bindings: server wallet ID, public address, Polymarket account,
+  MCP client, status, and expiry;
 - Privy wallet IDs and public addresses, not private keys;
-- protected references to Kalshi or Limitless credentials;
 - order drafts and canonical hashes;
 - idempotency keys and operation state;
-- upstream order IDs and transaction hashes;
+- upstream order IDs;
 - trading policies and counters; and
 - append-only security and trading audit events.
 
-A relational or transactional database should enforce uniqueness and operation
-state. Privy, a KMS, or a dedicated signing service should hold signing keys.
-Platform secrets must not be stored in Workers KV, browser storage, source code,
-logs, analytics, MCP arguments, or model context.
+No Kalshi credential of any kind is stored in this build.
 
-Privy does not make balances interchangeable across chains. Polygon, Base, and
-future Solana assets remain separate. Funding across chains needs explicit
-bridge or routing flows, fee previews, supported-asset checks, and user consent.
+A relational or transactional database enforces uniqueness and operation
+state. Privy holds signing keys. Platform secrets must not be stored in Workers
+KV, browser storage, source code, logs, analytics, MCP arguments, or model
+context.
+
+Trading is on Polymarket on Polygon. Cross-chain funding, bridging, and
+routing are out of scope.
 
 ## Security requirements
 
@@ -672,41 +917,31 @@ after schema validation.
 
 ### Required controls
 
-- Validate MCP and HTTP inputs with strict schemas and size limits.
+- Validate MCP inputs with strict schemas and size limits.
 - Validate every upstream response before normalization.
 - Use fixed allowlisted provider hosts and reject redirects to untrusted hosts.
 - Require PKCE, exact redirect URI matching, state validation, and MCP resource
   audience binding.
-- Bind consent and delegation to the Privy principal, MCP client, platform, and
+- Bind consent and delegation to the principal, MCP client, platform, and
   account.
 - Use short-lived access tokens and rotate refresh tokens.
 - Protect auth, search, and trading endpoints with separate rate limits.
 - Do not expose internal errors or stack traces.
 - Use generic client errors and structured server logs with request IDs.
 - Treat all quoted upstream content as data, not instructions.
-- Require reauthentication for delegation changes, revocation, withdrawals, and
-  other sensitive actions.
+- Require reauthentication for delegation changes and revocation.
 - Enforce geographic, regulatory, and platform eligibility at execution time.
 - Record every mutation and authorization change in an append-only audit log.
-- Provide an immediate way to revoke a client, platform connection, or session
-  signer.
+- Provide an immediate way to revoke a client, its server wallet, and its
+  Session Key in one operation.
 
 ## Chain and platform filtering
 
-Platform and chain are different concepts.
-
-- Polygon may prioritize Polymarket.
-- Base may prioritize Limitless.
-- Kalshi and Robinhood should not disappear because an EVM or Solana wallet is
-  connected.
-- A connected chain can seed a removable UI filter. It must not become a hard
-  routing or eligibility rule.
-- Geographic eligibility comes from the platform and compliance checks, not a
-  wallet network.
-
-The default web experience may show all supported markets. A user's selected
-platforms, region, account connections, and connected chain can then refine the
-list explicitly.
+Platform and chain are different concepts. Kalshi is not a chain venue, and a
+connected EVM wallet must not hide it. A connected chain can seed a removable
+UI filter in the web app; it must not become a routing or eligibility rule.
+Geographic eligibility comes from the platform and compliance checks, not a
+wallet network.
 
 ## Reliability and observability
 
@@ -715,123 +950,162 @@ Each adapter needs:
 - a documented timeout and retry policy;
 - per-provider rate-limit accounting;
 - a circuit breaker;
-- cache and staleness rules;
+- cache and staleness rules (caching off for Kalshi until authorized);
 - structured logs tagged with platform, operation, and request ID;
-- latency, error-rate, partial-result, and freshness metrics; and
+- latency, error-rate, and partial-result metrics; and
 - a health result exposed through `list_platforms`.
 
-Do not use `console.log`. Logs must not contain access tokens, HMAC secrets,
-private keys, complete signed payloads, or user PII.
+Do not use `console.log`. Logs must not contain access tokens, private keys,
+complete signed payloads, or user PII.
 
 ## Testing strategy
 
-Every read adapter must pass the same contract suite:
+Both market data adapters pass the same contract suite:
 
 - canonical ID construction;
 - market and outcome normalization;
-- status mapping;
+- status mapping against the pinned fixtures, including `resolving` and the
+  `unknown` fallback;
+- price unit validation (Kalshi dollar strings, Polymarket prices, both 0 to 1);
 - decimal precision;
-- pagination and cursor handling;
+- per-platform pagination and composite cursor packing;
 - timeout and rate-limit translation;
 - malformed upstream responses;
 - partial provider failures; and
 - prompt-like text in upstream fields.
 
-Trading adapters also need:
+The MCP layer also tests:
 
-- sandbox or demo execution where the platform provides it;
+- every legacy tool name resolves through the alias table to its handler with
+  an unchanged response shape;
+- canonical IDs are present and no existing field is missing;
+- the entitlements check allows every principal on the free plan and is
+  consulted on every tool.
+
+The Polymarket trading adapter also needs:
+
 - signature and credential tests;
+- Session Key ceremony, revocation cascade, and expiry error tests;
 - draft expiry and revalidation;
 - idempotent retry behavior;
 - policy denial tests;
 - partial-fill and cancellation tests;
-- revocation tests; and
+- builder code present on every placed order; and
 - proof that secrets never reach responses or logs.
 
-New HTTP endpoints must include OpenAPI annotations, input validation, rate
-limiting, bounded responses, and consistent error shapes.
-
-## Migration plan
+## Delivery plan
 
 ### Phase 0: freeze contracts
 
-1. Define `PlatformId`, canonical market and event types, capability types, and
-   common errors.
-2. Define the adapter contracts and composite cursor format.
-3. Add contract fixtures without changing production behavior.
+1. Define `PlatformId`, `CanonicalMarket`, `CanonicalOutcome`, `MarketStatus`,
+   `MarketCapabilities`, and common errors in `@knoww/services`.
+2. Define `MarketDataAdapter`, `TradingAdapter`, and the composite cursor.
+3. Pin status-mapping fixtures for both platforms.
 
 ### Phase 1: isolate Polymarket
 
-1. Move Gamma, CLOB, Data API, and profile code into Polymarket directories.
-2. Implement the read adapter around existing behavior.
-3. Route current MCP tools through the registry.
-4. Keep all current tool names and responses compatible.
+1. Move Gamma, CLOB, Data API, and profile code into the Polymarket adapter
+   directories in `@knoww/services`.
+2. Implement the Polymarket market data adapter around existing behavior.
+3. Route every current MCP tool through the platform registry.
+4. Add the alias table and the `polymarket_*` canonical names.
+5. Add canonical IDs to responses. All 20 tools keep their names and shapes.
 
-### Phase 2: add multi-platform reads
+### Phase 2: Kalshi market data and cross-platform search
 
-1. Add `list_platforms`.
-2. Add namespaced canonical IDs.
-3. Add the Kalshi read adapter.
-4. Add the Limitless read adapter.
-5. Add partial-result handling and composite cursors.
-6. Keep Robinhood disabled.
+1. Add the Kalshi market data adapter with caching disabled, behind a
+   configuration toggle.
+2. Add `list_platforms`.
+3. Turn `search_markets`, `list_events`, `get_market`, `get_event`,
+   `get_orderbook`, `get_price_history`, and `get_market_trades` into
+   cross-platform tools with a `platform` filter.
+4. Ship fan-out, composite cursors, and the partial-failure envelope.
 
-### Phase 3: add the indexed catalog
+Milestone: an MCP client can search across Polymarket and Kalshi in one call
+and fetch any result as a normalized market with a canonical ID, with all 20
+existing tools still working under their current names.
 
-1. Ingest normalized markets and events.
-2. Add source freshness and change tracking.
-3. Add canonical-event grouping and review tools.
-4. Move web and MCP search to the common catalog.
+### Phase 3: Privy in the web app and trading grants
 
-### Phase 4: replace Google-specific identity with Privy
-
-1. Configure one Privy application for the web and MCP authorization page.
+1. Configure one Privy application for the web app and the MCP authorization
+   page.
 2. Add Privy social login and embedded Ethereum wallet creation to the web app.
-3. Disable Reown social and email login while retaining injected wallets.
-4. Replace Google-specific MCP principal fields with provider-neutral fields
-   keyed by Privy DID.
-5. Verify Privy tokens on the backend and issue separate Knoww OAuth tokens.
-6. Migrate or expire existing Google-only grants deliberately. Do not silently
-   merge users by email.
+   Reown stays for injected wallets; Reown social and email login stay off.
+3. Add the Privy path to Knoww OAuth for grants that request account or order
+   scopes. Leave the Google OIDC path untouched.
+4. Build the Session Key ceremony page and the client management page (state,
+   expiry, revoke).
 
-### Phase 5: add delegated trading
+### Phase 4: delegated Polymarket trading
 
-1. Implement platform connection and revocation pages.
-2. Add database records for delegation, policy, drafts, idempotency, and audit.
-3. Validate the Privy server-wallet and Polymarket Session Key path.
-4. Ship `preview_order` before `place_order`.
-5. Start with small limits and mandatory confirmation.
-6. Add policy-based unattended orders only after audit and monitoring.
-7. Evaluate Limitless partner subaccounts and Kalshi credential connections
-   separately.
+1. Add database records for delegation, policy, drafts, idempotency, and audit.
+2. Run the Polymarket compatibility test for the server-wallet Session Key
+   path.
+3. Ship the account read tools, then `preview_order`, then `place_order` and
+   `cancel_order`, with the builder code on every order.
+4. Wire the revocation cascade and the expiry error.
+5. Add the entitlements check at tool dispatch with everyone on the free plan.
+6. Start with small limits and mandatory confirmation. Add policy-based
+   unattended orders only after audit and monitoring.
 
-## Decisions still required
+### Later, not scheduled
 
-- Whether the normalized catalog uses D1, Postgres, or a separate search store.
-- Whether the HTTP market API is internal first or public from the first
-  release.
-- The exact canonical event matching process and review threshold.
-- Platform-specific data redistribution and attribution rights.
+- Wallet-to-Privy linking so existing injected-wallet traders can authorize a
+  Knoww server wallet.
+- Subscription tiers and x402 per-call payment for reads above the free limit.
+- Kalshi account and trading tools, if the partnership yields a delegate
+  credential.
+- Web app and extension adoption of the shared market services.
+- Limitless or Robinhood adapters.
+- Curated cross-platform matching, only with its own design document.
+
+## Decisions settled on 2026-09-02
+
+- Consumer order: MCP first; web and extension later.
+- Platforms: Polymarket full, Kalshi market data only; Limitless and Robinhood
+  removed.
+- Kalshi: build the adapter now, open the conversation with Kalshi in parallel.
+- Contract: 0 to 1 decimal prices, seven statuses with `resolving`, additive
+  canonical IDs.
+- Search: live fan-out, 20 per page, existing opaque cursor format, no catalog.
+- Merging: never; `get_event` is per platform; no `compare_markets`.
+- Naming: neutral names with a platform filter, prefixed platform-specific
+  names, the 20 existing names as permanent aliases.
+- Identity: Google OIDC for read grants, Privy for trading grants, no linking.
+- Trading: Polymarket only, per-client Privy server wallet as a CLOB Session
+  Key; Privy in web ships before the first agent order; existing wallet users
+  wait for the linking roadmap item.
+- Account reads: `get_account_orders` shows this connection's orders only;
+  portfolio tools are complete.
+- Lifecycle: grant revocation cascades to the Session Key; 180-day expiry
+  handled by repeating the web ceremony with an actionable error.
+- Monetization: builder-code taker fee from day one; subscriptions and x402
+  later behind the entitlements plug point.
+
+## Open items
+
+These are facts to obtain or numbers to tune, not design decisions.
+
+- Kalshi's written authorization, the current revision of its Developer
+  Agreement, and whether a delegate credential or fee arrangement exists.
+- Polymarket's approval of the Builder API key, and its Session Key count and
+  rate limits per account.
+- Free-tier read rate limits, sized at build time against what the knoww.app
+  search proxy tolerates.
+- Maximum order size, exposure, daily loss, and confirmation rules for the
+  first trading release.
 - Which Privy social providers are enabled at launch.
-- Whether embedded wallets are created for all Privy users or only users without
-  a wallet in the same Privy identity.
-- How legacy Google MCP principals and grants expire or migrate.
-- Maximum trading limits, loss limits, and confirmation rules.
-- Whether Knoww receives approved Polymarket Session Key and Limitless partner
-  access.
-- Whether Robinhood offers Knoww a supported market-data or trading API.
+- Which wallet types existing web traders hold, for the linking roadmap item.
 
 ## Related repository documents
 
-- `docs/decisions/2026-08-31-mcp-google-oidc.md`
-- `docs/decisions/2026-08-31-mcp-trading-authorization.md`
+- `docs/decisions/2026-08-31-mcp-google-oidc.md` stays accepted. It governs
+  read-only MCP grants.
+- `docs/decisions/2026-08-31-mcp-trading-authorization.md` stays accepted. This
+  document selects its Session Key path with Privy server wallets as the
+  Session Key holders.
 - `docs/ARCHITECTURE.md`
 - `docs/API.md`
-
-If this proposal is accepted, it supersedes Google as the selected MCP login
-provider in the first two decision records. Their OAuth security requirements
-and Polymarket authorization analysis remain useful until replacement ADRs are
-accepted.
 
 ## Official references
 
@@ -847,5 +1121,6 @@ accepted.
 - [Polymarket Session Keys](https://docs.polymarket.com/trading/session-keys)
 - [Kalshi public market data](https://docs.kalshi.com/getting_started/quick_start_market_data)
 - [Kalshi authenticated requests](https://docs.kalshi.com/getting_started/quick_start_authenticated_requests)
-- [Limitless programmatic API](https://docs.limitless.exchange/developers/programmatic-api)
-- [Robinhood Q1 2026 earnings transcript](https://investors.robinhood.com/static-files/c2119020-41a1-4008-b9ae-db1b9fd6fb5e)
+- [Kalshi pagination](https://docs.kalshi.com/getting_started/pagination)
+- [Kalshi rate limits](https://docs.kalshi.com/getting_started/rate_limits)
+- [Kalshi Developer Agreement](https://kalshi.com/developer-agreement) ([v1.1 PDF](https://kalshi-public-docs.s3.amazonaws.com/Kalshi-Developer-Agreement.pdf))

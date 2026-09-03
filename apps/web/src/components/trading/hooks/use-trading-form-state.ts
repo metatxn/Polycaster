@@ -56,6 +56,7 @@ export function useTradingFormState({
   onOrderError,
   initialSide,
   initialShares,
+  preparedTradeTicket,
 }: Partial<TradingFormProps> & {
   outcomes: TradingFormProps["outcomes"];
   selectedOutcomeIndex: number;
@@ -114,6 +115,38 @@ export function useTradingFormState({
   const [allowPartialFill, setAllowPartialFill] = useState<boolean>(true);
   const [isUpdatingAllowance, setIsUpdatingAllowance] = useState(false);
   const [hasUserEditedPrice, setHasUserEditedPrice] = useState(false);
+  const appliedPreparedTradeRevisionRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (
+      !preparedTradeTicket ||
+      preparedTradeTicket.revision ===
+        appliedPreparedTradeRevisionRef.current ||
+      preparedTradeTicket.outcomeIndex !== selectedOutcomeIndex
+    ) {
+      return;
+    }
+
+    setSide(preparedTradeTicket.side);
+    setOrderType(preparedTradeTicket.orderType);
+    if (preparedTradeTicket.amountUsd !== undefined) {
+      setMarketBuyAmount(preparedTradeTicket.amountUsd);
+    }
+    if (preparedTradeTicket.shares !== undefined) {
+      setShares(preparedTradeTicket.shares);
+    }
+    if (preparedTradeTicket.limitPrice !== undefined) {
+      setHasUserEditedPrice(true);
+      setLimitPrice(
+        normalizeLimitPrice(preparedTradeTicket.limitPrice, tickSize)
+      );
+    }
+    if (preparedTradeTicket.allowPartialFill !== undefined) {
+      setAllowPartialFill(preparedTradeTicket.allowPartialFill);
+    }
+
+    appliedPreparedTradeRevisionRef.current = preparedTradeTicket.revision;
+  }, [preparedTradeTicket, selectedOutcomeIndex, tickSize]);
 
   // Expiration settings for Limit orders
   const [expirationType, setExpirationType] = useState<"GTC" | "GTD">("GTC");
@@ -187,12 +220,13 @@ export function useTradingFormState({
     if (
       side === "SELL" &&
       previousSideRef.current === "BUY" &&
-      maxSellShares > 0
+      maxSellShares > 0 &&
+      preparedTradeTicket?.revision !== appliedPreparedTradeRevisionRef.current
     ) {
       setShares(maxSellShares);
     }
     previousSideRef.current = side;
-  }, [side, maxSellShares]);
+  }, [side, maxSellShares, preparedTradeTicket?.revision]);
 
   // Also cap shares if they exceed position when on SELL
   useEffect(() => {

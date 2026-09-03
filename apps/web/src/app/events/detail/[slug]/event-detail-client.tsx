@@ -6,6 +6,7 @@ import {
   resolveNegRisk,
 } from "@knoww/shared-types/polymarket";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Decimal from "decimal.js";
 import { ChevronLeft } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -50,13 +51,22 @@ import {
 } from "@/lib/sports-live-game-cache";
 import type { EventCategoryCrumb } from "@/lib/tag-slugs";
 import { applyLiveTradingOutcomeQuotes } from "@/lib/trading-outcome-quotes";
-import type { OutcomeData, TradingSide } from "@/types/market";
+import type {
+  OutcomeData,
+  PreparedTradeTicket,
+  TradingSide,
+} from "@/types/market";
 import { CandidateTicker } from "./candidate-ticker";
 import {
   CANDIDATE_PALETTE,
   isLiveSportsEventForChart,
   toDisplayPercentagePointChange,
 } from "./chart-range";
+import {
+  EVENT_WEB_MCP_MAX_DEPTH,
+  type EventWebMcpOrderBookLevel,
+  type EventWebMcpSnapshot,
+} from "./event-webmcp";
 import { FieldTiles } from "./field-tiles";
 import { HeaderSection } from "./header-section";
 import { MatchupOutcomes } from "./matchup-outcomes";
@@ -77,8 +87,38 @@ import {
 import { OutcomesTable } from "./outcomes-table";
 import { isTeamMatchupEvent, TeamMatchupHero } from "./team-matchup-hero";
 import { useChartRangeHistory } from "./use-chart-range-history";
+import { useEventWebMcp } from "./use-event-webmcp";
 
 const log = createLogger("event-detail");
+
+function toWebMcpOrderBookLevels(
+  levels: Array<{ price: string; size: string }>,
+  side: "bids" | "asks"
+): EventWebMcpOrderBookLevel[] {
+  const normalized = levels.flatMap((level) => {
+    try {
+      const price = new Decimal(level.price);
+      const size = new Decimal(level.size);
+      if (
+        !price.isFinite() ||
+        !size.isFinite() ||
+        price.lte(0) ||
+        size.lte(0)
+      ) {
+        return [];
+      }
+      return [{ price: price.toString(), size: size.toString() }];
+    } catch {
+      return [];
+    }
+  });
+
+  normalized.sort((left, right) => {
+    const comparison = new Decimal(left.price).comparedTo(right.price);
+    return side === "bids" ? -comparison : comparison;
+  });
+  return normalized.slice(0, EVENT_WEB_MCP_MAX_DEPTH);
+}
 
 // Lazy load heavy components - they're code-split into separate chunks
 const MarketPriceChart = dynamic(
@@ -153,6 +193,8 @@ export default function EventDetailClient({
   const [chartTimeRange, setChartTimeRange] = useState<TimeRange>(() =>
     isLiveSportsEventForChart(initialEvent) ? "1H" : "ALL"
   );
+  const [preparedTradeTicket, setPreparedTradeTicket] =
+    useState<PreparedTradeTicket>();
   const chartTimeRangeTouchedRef = useRef(false);
   const liveSportsChartDefaultAppliedRef = useRef(
     isLiveSportsEventForChart(initialEvent)
@@ -1167,6 +1209,130 @@ export default function EventDetailClient({
     [closedMarkets, event?.title]
   );
 
+  const eventWebMcpSnapshot = useMemo<EventWebMcpSnapshot | null>(() => {
+    const selectedOutcome = tradingOutcomes[selectedOutcomeIndex];
+    if (!event || !selectedMarket || !selectedOutcome) return null;
+
+    const markets = allMarkets.map((market) => {
+      const parsedMarket = getGammaYesNoMarketFields(market);
+      const yesPrice = Number.parseFloat(parsedMarket.yesPrice || "0");
+      const noPrice = Number.parseFloat(parsedMarket.noPrice || "0");
+      return {
+        id: market.id,
+        question: market.question,
+        label: getMarketShortLabel(market, event.title),
+        status:
+          market.closed === true ? ("closed" as const) : ("open" as const),
+        outcomes: [
+          {
+            index: 0,
+            name: parsedMarket.outcomes[0] || "Yes",
+            price: yesPrice,
+            probability: new Decimal(yesPrice).mul(100).toNumber(),
+          },
+          {
+            index: 1,
+            name: parsedMarket.outcomes[1] || "No",
+            price: noPrice,
+            probability: new Decimal(noPrice).mul(100).toNumber(),
+          },
+        ],
+      };
+    });
+    const spread =
+      bestBid !== undefined && bestAsk !== undefined
+        ? new Decimal(bestAsk).minus(bestBid).toNumber()
+        : undefined;
+    const bids = toWebMcpOrderBookLevels(orderBook?.bids ?? [], "bids");
+    const asks = toWebMcpOrderBookLevels(orderBook?.asks ?? [], "asks");
+
+    return {
+      event: {
+        id: event.id,
+        slug: event.slug,
+        title: event.title,
+        status: event.closed === true ? "closed" : "open",
+        ...(event.endDate ? { endDate: event.endDate } : {}),
+        ...(event.volume ? { volume: event.volume } : {}),
+        ...(event.liquidity ? { liquidity: event.liquidity } : {}),
+      },
+      markets,
+      selected: {
+        marketId: selectedMarket.id,
+        marketLabel: selectedMarket.groupItemTitle || event.title,
+        outcomeIndex: selectedOutcomeIndex,
+        outcomeName: selectedOutcome.name,
+        outcomePrice: selectedOutcome.price,
+      },
+      chartRange: chartTimeRange,
+      orderBook: {
+        ...(bestBid !== undefined ? { bestBid } : {}),
+        ...(bestAsk !== undefined ? { bestAsk } : {}),
+        ...(spread !== undefined ? { spread } : {}),
+        tickSize,
+        minOrderSize,
+        isLive: isConnected,
+        bids,
+        asks,
+      },
+      observedAt: new Date().toISOString(),
+    };
+  }, [
+    allMarkets,
+    bestAsk,
+    bestBid,
+    chartTimeRange,
+    event,
+    isConnected,
+    minOrderSize,
+    orderBook,
+    selectedMarket,
+    selectedOutcomeIndex,
+    tickSize,
+    tradingOutcomes,
+  ]);
+
+  const handleWebMcpSelectMarket = useCallback(
+    (marketId: string, outcomeIndex: number) => {
+      setSelectedMarketId(marketId);
+      setSelectedOutcomeIndex(outcomeIndex);
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById("event-trading-ticket")
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    },
+    []
+  );
+  const handleWebMcpSetChartRange = useCallback(
+    (range: TimeRange) => {
+      handleChartTimeRangeChange(range);
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById("event-price-chart")
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    },
+    [handleChartTimeRangeChange]
+  );
+  const handleWebMcpPrepareTrade = useCallback((draft: PreparedTradeTicket) => {
+    setSelectedMarketId(draft.marketId);
+    setSelectedOutcomeIndex(draft.outcomeIndex);
+    setPreparedTradeTicket(draft);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById("event-trading-ticket")
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, []);
+
+  useEventWebMcp({
+    snapshot: eventWebMcpSnapshot,
+    selectMarket: handleWebMcpSelectMarket,
+    setChartRange: handleWebMcpSetChartRange,
+    prepareTrade: handleWebMcpPrepareTrade,
+  });
+
   // Loading state - AFTER all hooks
   if (loading) {
     return (
@@ -1525,7 +1691,7 @@ export default function EventDetailClient({
 
                 {/* Chart — data-nosnippet: canvas + chart-error text add
                     nothing to a search snippet */}
-                <Card data-nosnippet>
+                <Card id="event-price-chart" data-nosnippet>
                   {/* Legend is now rendered as a floating overlay inside the
                   MarketPriceChart itself — dropping the CardHeader saves
                   the ~48px of vertical padding that used to sit above the
@@ -1600,7 +1766,10 @@ export default function EventDetailClient({
               </div>
 
               {/* Trading Panel - Sticky on desktop, spans both rows so it sticks alongside comments too */}
-              <div className="lg:col-span-1 lg:row-span-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
+              <div
+                id="event-trading-ticket"
+                className="lg:col-span-1 lg:row-span-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto"
+              >
                 {selectedMarket && tradingFormOutcomes.length > 0 && (
                   <ErrorBoundary name="Trading Form">
                     <TradingForm
@@ -1632,6 +1801,7 @@ export default function EventDetailClient({
                       isLiveData={isConnected}
                       initialSide={initialSide}
                       initialShares={initialShares}
+                      preparedTradeTicket={preparedTradeTicket}
                       conditionId={selectedMarket.conditionId}
                       disableSticky
                     />

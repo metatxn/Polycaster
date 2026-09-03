@@ -1,4 +1,9 @@
-import type { OrderBook, OutcomeData, TradingSide } from "@/types/market";
+import type {
+  OrderBook,
+  OutcomeData,
+  PreparedTradeTicket,
+  TradingSide,
+} from "@/types/market";
 
 /**
  * Props for the TradingForm component
@@ -44,6 +49,8 @@ export interface TradingFormProps {
   initialSide?: TradingSide;
   /** Initial number of shares */
   initialShares?: number;
+  /** Validated draft used to prefill the form without submitting it */
+  preparedTradeTicket?: PreparedTradeTicket;
   /** Condition ID for the market (required for split/merge) */
   conditionId?: string;
   /** Disable internal sticky wrapper when parent already handles sticky */

@@ -14,7 +14,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -53,8 +53,16 @@ import {
 import { useBreakingEvents } from "@/hooks/use-breaking-events";
 import { useNewEvents } from "@/hooks/use-new-events";
 import { usePaginatedEvents } from "@/hooks/use-paginated-events";
+import { fetchSearchResults } from "@/hooks/use-search";
 import { useTrendingEvents } from "@/hooks/use-trending-events";
 import { PRIORITY_EVENT_CARD_COUNT } from "@/lib/lcp-images";
+import type {
+  MarketsEndWithin,
+  MarketsStatus,
+  MarketsWebMcpEvent,
+  MarketsWebMcpFilterUpdate,
+} from "./markets/markets-webmcp";
+import { useMarketsWebMcp } from "./markets/use-markets-webmcp";
 
 // Tab categories
 const TAB_CATEGORIES = [
@@ -268,11 +276,67 @@ interface EventWithDates {
   endDate?: string;
 }
 
+interface MarketsWebMcpEventSource extends EventWithDates {
+  slug?: string;
+  active?: boolean;
+  closed?: boolean;
+  live?: boolean;
+  ended?: boolean;
+  volume?: string | number;
+  volume24hr?: string | number;
+  liquidity?: string | number;
+  markets?: unknown[];
+}
+
+function toMarketsWebMcpEvent(
+  event: MarketsWebMcpEventSource
+): MarketsWebMcpEvent {
+  return {
+    id: event.id,
+    ...(event.slug ? { slug: event.slug } : {}),
+    title: event.title,
+    active: Boolean(event.active),
+    closed: Boolean(event.closed),
+    live: Boolean(event.live),
+    ended: Boolean(event.ended),
+    ...(event.volume !== undefined ? { volume: event.volume } : {}),
+    ...(event.volume24hr !== undefined ? { volume24hr: event.volume24hr } : {}),
+    ...(event.liquidity !== undefined ? { liquidity: event.liquidity } : {}),
+    marketCount: event.markets?.length ?? 0,
+  };
+}
+
+function getEndWithinPreset(
+  start: Date | null,
+  end: Date | null
+): MarketsEndWithin {
+  if (!start && !end) return "all";
+  if (!start || !end) return "custom";
+
+  const durationDays = (end.getTime() - start.getTime()) / 86_400_000;
+  if (durationDays <= 1.1) return "24h";
+  if (durationDays >= 6.5 && durationDays <= 7.5) return "7d";
+  if (durationDays >= 28 && durationDays <= 31.5) return "30d";
+  return "custom";
+}
+
+function getDateRange(endWithin: Exclude<MarketsEndWithin, "custom">) {
+  if (endWithin === "all") return { start: null, end: null };
+
+  const end = new Date();
+  const durationDays = endWithin === "24h" ? 1 : endWithin === "7d" ? 7 : 30;
+  return {
+    start: new Date(end.getTime() - durationDays * 86_400_000),
+    end,
+  };
+}
+
 interface HomeContentProps {
   initialData?: InitialHomeData | null;
 }
 
 export function HomeContent({ initialData }: HomeContentProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const viewParam = searchParams.get("view") as ViewMode | null;
 
@@ -320,6 +384,13 @@ export function HomeContent({ initialData }: HomeContentProps) {
     filters,
     hasActiveFilters,
     clearAllFilters,
+    setVolume24hr,
+    setVolumeWeekly,
+    setVolumeWindow,
+    setLiquidity,
+    setStatus,
+    setTagSlugs,
+    setDateRange,
     serverFilterParams,
     apiQueryParams,
   } = useEventFilters();
@@ -423,11 +494,14 @@ export function HomeContent({ initialData }: HomeContentProps) {
   } = useBreakingEvents(20, serverFilterParams, viewMode === "breaking", true);
 
   // Wrap view mode changes in startTransition for non-blocking UI updates
-  const handleQuickCategoryClick = (mode: ViewMode) => {
-    startTransition(() => {
-      setViewMode(mode);
-    });
-  };
+  const handleQuickCategoryClick = useCallback(
+    (mode: ViewMode) => {
+      startTransition(() => {
+        setViewMode(mode);
+      });
+    },
+    []
+  );
 
   // Get current events - server handles most filtering, client-side date filter as fallback
   // Use initialData for first render to eliminate loading state
@@ -543,6 +617,138 @@ export function HomeContent({ initialData }: HomeContentProps) {
   // Use ref to hold latest fetchMore to avoid recreating IntersectionObserver on each render
   const fetchMoreRef = useRef(currentData.fetchMore);
   fetchMoreRef.current = currentData.fetchMore;
+  const currentDataRef = useRef(currentData);
+  currentDataRef.current = currentData;
+
+  const marketsWebMcpSnapshot = useMemo(
+    () => ({
+      viewMode,
+      filters: {
+        volume24hr: filters.volume24hr,
+        volumeWeekly: filters.volumeWeekly,
+        volumeWindow: filters.volumeWindow,
+        liquidity: filters.liquidity,
+        status: filters.status.filter(
+          (status): status is MarketsStatus =>
+            status === "active" || status === "live" || status === "ended"
+        ),
+        tagSlug: filters.tagSlugs[0] ?? null,
+        endWithin: getEndWithinPreset(
+          filters.dateRange.start,
+          filters.dateRange.end
+        ),
+      },
+      pagination: {
+        loadedCount: currentData.events.length,
+        hasMore: currentData.hasMore,
+        isLoading: currentData.isLoading,
+        isLoadingMore: currentData.isFetchingMore,
+      },
+      events: currentData.events.map(toMarketsWebMcpEvent),
+      ...(currentData.dataUpdatedAt
+        ? { dataUpdatedAt: new Date(currentData.dataUpdatedAt).toISOString() }
+        : {}),
+      observedAt: new Date().toISOString(),
+    }),
+    [
+      currentData.dataUpdatedAt,
+      currentData.events,
+      currentData.hasMore,
+      currentData.isFetchingMore,
+      currentData.isLoading,
+      filters.dateRange.end,
+      filters.dateRange.start,
+      filters.liquidity,
+      filters.status,
+      filters.tagSlugs,
+      filters.volume24hr,
+      filters.volumeWeekly,
+      filters.volumeWindow,
+      viewMode,
+    ]
+  );
+
+  const applyWebMcpFilters = useCallback(
+    (update: MarketsWebMcpFilterUpdate) => {
+      if (update.viewMode !== undefined) {
+        handleQuickCategoryClick(update.viewMode);
+      }
+      if (update.volume24hr !== undefined) {
+        setVolume24hr(update.volume24hr);
+      }
+      if (update.volumeWeekly !== undefined) {
+        setVolumeWeekly(update.volumeWeekly);
+      }
+      if (update.volumeWindow !== undefined) {
+        setVolumeWindow(update.volumeWindow);
+      }
+      if (update.liquidity !== undefined) {
+        setLiquidity(update.liquidity);
+      }
+      if (update.status !== undefined) {
+        setStatus(update.status);
+      }
+      if (update.tagSlug !== undefined) {
+        setTagSlugs(update.tagSlug ? [update.tagSlug] : []);
+      }
+      if (update.endWithin !== undefined) {
+        setDateRange(getDateRange(update.endWithin));
+      }
+    },
+    [
+      handleQuickCategoryClick,
+      setDateRange,
+      setLiquidity,
+      setStatus,
+      setTagSlugs,
+      setVolume24hr,
+      setVolumeWeekly,
+      setVolumeWindow,
+    ]
+  );
+
+  const resetWebMcpFilters = useCallback(() => {
+    clearAllFilters();
+    handleQuickCategoryClick("categories");
+  }, [clearAllFilters, handleQuickCategoryClick]);
+
+  const searchWebMcpEvents = useCallback(
+    async (query: string, limit: number, tagSlug?: string) => {
+      const result = await fetchSearchResults(query, limit, tagSlug);
+      return {
+        events: result.events.map((event) => ({
+          ...toMarketsWebMcpEvent(event),
+          ...(event.topOutcome ? { topOutcome: event.topOutcome } : {}),
+        })),
+        totalResults: result.pagination.totalResults,
+        hasMore: result.pagination.hasMore,
+      };
+    },
+    []
+  );
+
+  const loadMoreWebMcpMarkets = useCallback(async () => {
+    const beforeCount = currentDataRef.current.events.length;
+    await fetchMoreRef.current();
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve())
+    );
+    const latest = currentDataRef.current;
+    return {
+      beforeCount,
+      afterCount: latest.events.length,
+      hasMore: latest.hasMore,
+    };
+  }, []);
+
+  useMarketsWebMcp({
+    snapshot: marketsWebMcpSnapshot,
+    applyFilters: applyWebMcpFilters,
+    resetFilters: resetWebMcpFilters,
+    openEvent: (path) => router.push(path),
+    loadMore: loadMoreWebMcpMarkets,
+    searchEvents: searchWebMcpEvents,
+  });
 
   // Infinite scroll - Re-attach only when element or fetch state changes
   useEffect(() => {

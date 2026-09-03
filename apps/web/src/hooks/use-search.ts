@@ -64,7 +64,7 @@ export interface SearchResponse {
   };
 }
 
-async function fetchSearchResults(
+export async function fetchSearchResults(
   query: string,
   limit = 10,
   tagSlug?: string

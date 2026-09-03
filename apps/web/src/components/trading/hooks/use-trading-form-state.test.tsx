@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PreparedTradeTicket } from "@/types/market";
 import { useTradingFormState } from "./use-trading-form-state";
 
 const clobClientState = vi.hoisted(() => ({
@@ -139,6 +140,74 @@ describe("useTradingFormState", () => {
       allowanceRaw: "0",
       decimals: 6,
     });
+  });
+
+  it("applies each prepared trade ticket once without submitting it", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(
+      ({
+        preparedTradeTicket,
+      }: {
+        preparedTradeTicket?: PreparedTradeTicket;
+      }) =>
+        useTradingFormState({
+          outcomes: [
+            {
+              name: "Portugal",
+              price: 0.86,
+              probability: 86,
+              tokenId: "12345678901234567890",
+            },
+          ],
+          selectedOutcomeIndex: 0,
+          orderBook: DEFAULT_ORDER_BOOK,
+          preparedTradeTicket,
+        }),
+      {
+        wrapper,
+        initialProps: {
+          preparedTradeTicket: undefined as PreparedTradeTicket | undefined,
+        },
+      }
+    );
+
+    rerender({
+      preparedTradeTicket: {
+        revision: 1,
+        marketId: "market-1",
+        outcomeIndex: 0,
+        side: "SELL",
+        orderType: "LIMIT",
+        shares: 7,
+        limitPrice: 0.427,
+      },
+    });
+
+    await waitFor(() => {
+      expect(result.current.side).toBe("SELL");
+      expect(result.current.orderType).toBe("LIMIT");
+      expect(result.current.shares).toBe(7);
+      expect(result.current.limitPrice).toBe(0.43);
+    });
+    expect(clobClientState.createOrder).not.toHaveBeenCalled();
+
+    rerender({
+      preparedTradeTicket: {
+        revision: 1,
+        marketId: "market-1",
+        outcomeIndex: 0,
+        side: "BUY",
+        orderType: "MARKET",
+        amountUsd: 25,
+      },
+    });
+    expect(result.current.side).toBe("SELL");
+    expect(result.current.orderType).toBe("LIMIT");
   });
 
   it("approves the current ticket amount and order scope instead of the default amount", async () => {

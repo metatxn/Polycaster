@@ -494,14 +494,11 @@ export function HomeContent({ initialData }: HomeContentProps) {
   } = useBreakingEvents(20, serverFilterParams, viewMode === "breaking", true);
 
   // Wrap view mode changes in startTransition for non-blocking UI updates
-  const handleQuickCategoryClick = useCallback(
-    (mode: ViewMode) => {
-      startTransition(() => {
-        setViewMode(mode);
-      });
-    },
-    []
-  );
+  const handleQuickCategoryClick = useCallback((mode: ViewMode) => {
+    startTransition(() => {
+      setViewMode(mode);
+    });
+  }, []);
 
   // Get current events - server handles most filtering, client-side date filter as fallback
   // Use initialData for first render to eliminate loading state

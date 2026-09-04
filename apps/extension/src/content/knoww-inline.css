@@ -6851,3 +6851,46 @@
 .knoww-x-pnl-negative {
   color: rgb(244, 33, 46) !important;
 }
+/* Install-onboarding guide shown on the first market in the dedicated X demo. */
+.knoww-onboarding-demo-card {
+  position: relative;
+  border-color: rgba(53, 230, 161, 0.72) !important;
+  box-shadow:
+    0 0 0 3px rgba(53, 230, 161, 0.13),
+    0 16px 36px rgba(0, 0, 0, 0.22) !important;
+}
+
+.knoww-onboarding-demo-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: -1px -1px 10px;
+  border-bottom: 1px solid rgba(53, 230, 161, 0.28);
+  background: rgba(8, 40, 29, 0.94);
+  color: #d9fbed;
+  padding: 9px 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  pointer-events: none;
+}
+
+.knoww-onboarding-demo-guide__badge {
+  color: #53edb1;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.knoww-onboarding-demo-guide__instruction {
+  color: rgba(217, 251, 237, 0.72);
+  font-size: 11px;
+}
+
+@media (max-width: 520px) {
+  .knoww-onboarding-demo-guide {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+}

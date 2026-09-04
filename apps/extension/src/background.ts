@@ -15,6 +15,7 @@ import {
   POLYMARKET_API,
   RELAYER_API_HOST,
 } from "@knoww/shared-types/polymarket";
+import { getAddress } from "viem";
 import {
   flushAnalyticsQueue,
   queueAnalyticsEvent,
@@ -71,8 +72,13 @@ import {
   extractDerivedCredentials,
   tradingOpNeedsCredentials,
 } from "./background/trading-credential-mediation";
+import { readSetupComplete } from "./content/trading/setup-flow-storage";
 import { TRADING_WARM_ELIGIBLE_STORAGE_KEY } from "./content/trading-warm-flag";
 import { canUseProductionReranker } from "./context-promotion";
+import {
+  ONBOARDING_DEMO_STATE_KEY,
+  ONBOARDING_DEMO_URL,
+} from "./onboarding-state";
 import {
   createSearchRequestScheduler,
   isCapacityManagedExtensionRequest,
@@ -159,6 +165,17 @@ let cachedNotificationPanelSurface:
   | undefined;
 let lastFocusedWindowId: number | undefined;
 const activeTabIdsByWindowId = new Map<number, number>();
+
+interface OnboardingDemoState {
+  tabId: number;
+  windowId?: number;
+  openedAt: string;
+  injectedAt?: string;
+  clickedAt?: string;
+  marketId?: string;
+}
+
+let onboardingDemoStateTask: Promise<unknown> = Promise.resolve();
 
 function getSidePanelApi(): ChromeSidePanelApi | undefined {
   return (chrome as typeof chrome & { sidePanel?: ChromeSidePanelApi })
@@ -319,6 +336,155 @@ function notifyRequestedSidePanelView(view?: SidePanelView): void {
       void chrome.runtime.lastError;
     }
   );
+}
+
+function isOnboardingPageSender(sender: chrome.runtime.MessageSender): boolean {
+  return sender.url === chrome.runtime.getURL("onboarding.html");
+}
+
+function readOnboardingDemoState(): Promise<OnboardingDemoState | null> {
+  return new Promise((resolve) => {
+    chrome.storage.session.get(ONBOARDING_DEMO_STATE_KEY, (result) => {
+      const stored = result[ONBOARDING_DEMO_STATE_KEY] as
+        | Partial<OnboardingDemoState>
+        | undefined;
+      resolve(
+        stored && typeof stored.tabId === "number"
+          ? (stored as OnboardingDemoState)
+          : null
+      );
+    });
+  });
+}
+
+function writeOnboardingDemoState(state: OnboardingDemoState): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.storage.session.set({ [ONBOARDING_DEMO_STATE_KEY]: state }, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    });
+  });
+}
+
+function runOnboardingDemoStateTask<T>(task: () => Promise<T>): Promise<T> {
+  const nextTask = onboardingDemoStateTask.then(task, task);
+  onboardingDemoStateTask = nextTask.then(
+    () => undefined,
+    () => undefined
+  );
+  return nextTask;
+}
+
+function toOnboardingWalletAddress(address: string | null): string | undefined {
+  if (!address) return undefined;
+  try {
+    return getAddress(address);
+  } catch {
+    return undefined;
+  }
+}
+
+async function getOnboardingWalletAddress(): Promise<string | undefined> {
+  const session = await getExtensionSessionInfo();
+  return toOnboardingWalletAddress(session.address);
+}
+
+async function openOnboardingDemo(windowId?: number): Promise<chrome.tabs.Tab> {
+  const existing = await readOnboardingDemoState();
+  let tab: chrome.tabs.Tab | undefined;
+
+  if (existing) {
+    try {
+      const candidate = await chrome.tabs.get(existing.tabId);
+      if (
+        candidate.url?.startsWith("https://x.com/polymarket") &&
+        (typeof windowId !== "number" || candidate.windowId === windowId)
+      ) {
+        tab = await chrome.tabs.update(existing.tabId, { active: true });
+      }
+    } catch {
+      tab = undefined;
+    }
+  }
+
+  if (!tab) {
+    tab = await chrome.tabs.create({
+      url: ONBOARDING_DEMO_URL,
+      active: true,
+      ...(typeof windowId === "number" ? { windowId } : {}),
+    });
+  }
+
+  if (typeof tab.id !== "number") {
+    throw new Error("Chrome did not return an onboarding demo tab.");
+  }
+  if (typeof tab.windowId === "number") {
+    await chrome.windows
+      .update(tab.windowId, { focused: true })
+      .catch(() => {});
+  }
+
+  await writeOnboardingDemoState({
+    ...(existing ?? {}),
+    tabId: tab.id,
+    ...(typeof tab.windowId === "number" ? { windowId: tab.windowId } : {}),
+    openedAt: new Date().toISOString(),
+  });
+
+  const walletAddress = await getOnboardingWalletAddress();
+  await queueAnalyticsEvent({
+    event: "onboarding_demo_opened",
+    properties: {
+      destination: "x.com/polymarket",
+      ...(walletAddress ? { wallet_address: walletAddress } : {}),
+    },
+  });
+
+  return tab;
+}
+
+async function markOnboardingDemoMilestone(
+  milestone: "injected" | "clicked",
+  tabId: number,
+  marketId?: string
+): Promise<{ accepted: boolean; showGuide: boolean }> {
+  return runOnboardingDemoStateTask(async () => {
+    const state = await readOnboardingDemoState();
+    if (!state || state.tabId !== tabId) {
+      return { accepted: false, showGuide: false };
+    }
+
+    const timestampKey = milestone === "injected" ? "injectedAt" : "clickedAt";
+    const showGuide =
+      milestone === "injected" &&
+      !state.clickedAt &&
+      (!state.marketId || state.marketId === marketId);
+    if (state[timestampKey]) {
+      return { accepted: false, showGuide };
+    }
+
+    const nextState: OnboardingDemoState = {
+      ...state,
+      [timestampKey]: new Date().toISOString(),
+      ...(marketId ? { marketId } : {}),
+    };
+    await writeOnboardingDemoState(nextState);
+
+    const walletAddress = await getOnboardingWalletAddress();
+    await queueAnalyticsEvent({
+      event:
+        milestone === "injected"
+          ? "onboarding_demo_market_injected"
+          : "onboarding_demo_market_clicked",
+      properties: {
+        destination: "x.com/polymarket",
+        ...(marketId ? { market_id: marketId } : {}),
+        ...(walletAddress ? { wallet_address: walletAddress } : {}),
+      },
+    });
+
+    return { accepted: true, showGuide };
+  });
 }
 
 function sendSiteSupportPromptMessage(
@@ -1277,6 +1443,135 @@ chrome.runtime.onMessage.addListener(
     if (msg?.type === "trading:signing-response" && sender.tab) {
       chrome.runtime.sendMessage(message).catch(() => {});
       return false;
+    }
+
+    if (msg?.type === "KNOWW_START_ONBOARDING_SETUP") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      const windowId = sender.tab?.windowId;
+      if (
+        senderReject ||
+        !isOnboardingPageSender(sender) ||
+        typeof windowId !== "number"
+      ) {
+        sendResponse({
+          ok: false,
+          error: "Setup must be started from the Knoww onboarding page.",
+        } as BackgroundResponse);
+        return true;
+      }
+
+      const openPromise = openKnowwSidePanel({ windowId });
+      void persistNotificationPanelSurface("sidebar");
+      void setRequestedSidePanelView("portfolio");
+      void openPromise
+        .then(async () => {
+          notifyRequestedSidePanelView("portfolio");
+          const demoTab = await openOnboardingDemo(windowId);
+          portfolioSigningTabId = demoTab.id;
+          sendResponse({
+            ok: true,
+            data: { demoTabId: demoTab.id },
+          } as BackgroundResponse);
+        })
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_OPEN_ONBOARDING_DEMO") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject || !isOnboardingPageSender(sender)) {
+        sendResponse(
+          (senderReject ?? {
+            ok: false,
+            error: "This action must come from the Knoww onboarding page.",
+          }) as BackgroundResponse
+        );
+        return true;
+      }
+
+      void openOnboardingDemo(sender.tab?.windowId)
+        .then((tab) => {
+          sendResponse({
+            ok: true,
+            data: { demoTabId: tab.id },
+          } as BackgroundResponse);
+        })
+        .catch((error) => {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          } as BackgroundResponse);
+        });
+      return true;
+    }
+
+    if (msg?.type === "KNOWW_GET_EXTENSION_ONBOARDING_STATUS") {
+      const senderReject = checkAuthorizedSender(sender.id, chrome.runtime.id);
+      if (senderReject || !isOnboardingPageSender(sender)) {
+        sendResponse(
+          (senderReject ?? {
+            ok: false,
+            error: "This request must come from the Knoww onboarding page.",
+          }) as BackgroundResponse
+        );
+        return true;
+      }
+
+      void (async () => {
+        const session = await getExtensionSessionInfo();
+        const walletAddress = toOnboardingWalletAddress(session.address);
+        const [hasCredentials, setupComplete] =
+          !__STORE_BUILD__ && walletAddress
+            ? await Promise.all([
+                hasClobCredentials(walletAddress),
+                readSetupComplete(walletAddress),
+              ])
+            : [false, false];
+        sendResponse({
+          ok: true,
+          data: {
+            loggedIn: session.loggedIn,
+            address: walletAddress ?? null,
+            hasCredentials,
+            tradingReady: hasCredentials && setupComplete,
+            storeBuild: __STORE_BUILD__,
+          },
+        } as BackgroundResponse);
+      })().catch(() => {
+        sendResponse({
+          ok: false,
+          error: "Failed to read onboarding status.",
+        } as BackgroundResponse);
+      });
+      return true;
+    }
+
+    if (
+      (msg?.type === "KNOWW_ONBOARDING_DEMO_MARKET_INJECTED" ||
+        msg?.type === "KNOWW_ONBOARDING_DEMO_MARKET_CLICKED") &&
+      typeof sender.tab?.id === "number"
+    ) {
+      const milestone = msg.type.endsWith("INJECTED") ? "injected" : "clicked";
+      void markOnboardingDemoMilestone(
+        milestone,
+        sender.tab.id,
+        typeof msg.marketId === "string" ? msg.marketId : undefined
+      )
+        .then((result) => {
+          sendResponse({ ok: true, data: result } as BackgroundResponse);
+        })
+        .catch(() => {
+          sendResponse({
+            ok: false,
+            error: "Failed to record onboarding demo progress.",
+          } as BackgroundResponse);
+        });
+      return true;
     }
 
     if (msg?.type === "KNOWW_OPEN_EXTENSION_SETTINGS") {
@@ -2823,7 +3118,9 @@ chrome.runtime.onInstalled.addListener((details) => {
         reason: details.reason,
       },
     });
-    chrome.runtime.openOptionsPage();
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL("onboarding.html"),
+    });
     return;
   }
 
@@ -2834,4 +3131,13 @@ chrome.runtime.onInstalled.addListener((details) => {
       previousVersion: details.previousVersion || null,
     },
   });
+
+  if (
+    details.reason === chrome.runtime.OnInstalledReason.UPDATE &&
+    __DEV_MODE__
+  ) {
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL("onboarding.html"),
+    });
+  }
 });

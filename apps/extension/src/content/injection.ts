@@ -20,6 +20,7 @@ import {
   filterNestedMarketsByDisplayPriceCap,
   isMarketWithinDisplayPriceCap,
 } from "./market-price-filter";
+import { registerOnboardingDemoMarket } from "./onboarding-demo";
 import {
   appendUniquePostEntries,
   partitionViewportBatch,
@@ -2284,6 +2285,7 @@ function injectMarketCards(
       cardVisibilityObserver?.observe(card);
 
       const source = market.source || "polymarket";
+      registerOnboardingDemoMarket(card, market.id);
       void window.KNOWW_ANALYTICS?.track("market_card_impression", {
         marketId: market.id,
         source,

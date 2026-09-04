@@ -42,7 +42,7 @@ function trackApiKeyEvent(
     posthog.capture({
       distinctId: address,
       event,
-      properties: { wallet_address: address, method },
+      properties: { product: "web", wallet_address: address, method },
     });
     posthog.flush().catch(() => {});
   } catch {

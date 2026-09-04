@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, m } from "framer-motion";
+import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConnection } from "wagmi";
@@ -224,6 +225,11 @@ export default function PortfolioPage() {
         negRisk
       );
       if (result.success) {
+        posthog.capture("position_redeemed", {
+          product: "web",
+          surface: "lost_position",
+          neg_risk: negRisk,
+        });
         setClosedConditionIds((current) => {
           const next = new Set(current);
           next.add(conditionId);
@@ -269,6 +275,13 @@ export default function PortfolioPage() {
       );
 
       if (result.success) {
+        posthog.capture("position_redeemed", {
+          product: "web",
+          surface: "winning_position",
+          market_title: position.market.title,
+          outcome: position.outcome,
+          neg_risk: position.negRisk ?? false,
+        });
         toast.success("Winnings redeemed successfully");
         refetchTrades();
         refetchPositions();

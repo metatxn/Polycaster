@@ -1,5 +1,6 @@
 "use client";
 
+import posthog from "posthog-js";
 import {
   createContext,
   type ReactNode,
@@ -7,8 +8,9 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
 } from "react";
-import { createPublicClient, http, type PublicClient } from "viem";
+import { createPublicClient, getAddress, http, type PublicClient } from "viem";
 import {
   type UseWalletClientReturnType,
   useConnection,
@@ -71,10 +73,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // EOA address
   const eoaAddress = address || null;
+  const wasConnectedRef = useRef(isConnected);
 
   useEffect(() => {
     if (!isConnected || !address) return;
     void closeWalletModal();
+  }, [isConnected, address]);
+
+  useEffect(() => {
+    if (isConnected && address) {
+      const walletAddress = getAddress(address);
+      posthog.identify(walletAddress, { wallet_address: walletAddress });
+      if (!wasConnectedRef.current) {
+        posthog.capture("wallet_connected", {
+          product: "web",
+          wallet_address: walletAddress,
+        });
+      }
+    }
+    wasConnectedRef.current = isConnected;
   }, [isConnected, address]);
 
   // Connect wallet via AppKit modal (lazily initialized on first use)

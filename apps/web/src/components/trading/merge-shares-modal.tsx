@@ -4,6 +4,7 @@ import { createLogger } from "@knoww/logger";
 import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
 import { AnimatePresence, m } from "framer-motion";
 import { AlertCircle, ArrowRight, Loader2, X } from "lucide-react";
+import posthog from "posthog-js";
 
 const log = createLogger("merge-modal");
 
@@ -41,6 +42,7 @@ export function MergeSharesModal({
   conditionId,
   yesTokenId,
   noTokenId,
+  marketTitle,
   negRisk = false,
   onSuccess,
 }: MergeSharesModalProps) {
@@ -157,6 +159,13 @@ export function MergeSharesModal({
       } else {
         setLocalError(result.error || "Merge failed");
       }
+    } else {
+      posthog.capture("position_merge_succeeded", {
+        product: "web",
+        market_title: marketTitle,
+        amount: numericAmount,
+        neg_risk: negRisk,
+      });
     }
   }, [
     proxyAddress,
@@ -165,6 +174,7 @@ export function MergeSharesModal({
     numericAmount,
     mergePositions,
     negRisk,
+    marketTitle,
   ]);
 
   const displayError = localError || error;

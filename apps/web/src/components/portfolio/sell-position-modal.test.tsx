@@ -10,6 +10,11 @@ const toastMock = vi.hoisted(() => ({
 
 const sellHookMock = vi.hoisted(() => ({
   executeSell: vi.fn(),
+  shouldFail: false,
+}));
+
+const posthogMock = vi.hoisted(() => ({
+  capture: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -27,20 +32,20 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("posthog-js", () => ({
-  default: {
-    capture: vi.fn(),
-  },
+  default: posthogMock,
 }));
 
 vi.mock("@/hooks/use-sell-position", () => ({
   useSellPosition: ({
     onSellSuccess,
+    onSellError,
   }: {
     onSellSuccess?: (result: {
       shares: number;
       estimatedProceeds: number;
       estimatedPrice: number;
     }) => void;
+    onSellError?: (error: Error) => void;
   }) => ({
     shares: 2,
     setShares: vi.fn(),
@@ -57,6 +62,10 @@ vi.mock("@/hooks/use-sell-position", () => ({
     handleSharesChange: vi.fn(),
     setMaxShares: vi.fn(),
     executeSell: sellHookMock.executeSell.mockImplementation(async () => {
+      if (sellHookMock.shouldFail) {
+        onSellError?.(new Error("Order rejected"));
+        return;
+      }
       onSellSuccess?.({
         shares: 2,
         estimatedProceeds: 1.24,
@@ -92,6 +101,8 @@ describe("SellPositionModal", () => {
   beforeEach(() => {
     toastMock.success.mockClear();
     sellHookMock.executeSell.mockClear();
+    sellHookMock.shouldFail = false;
+    posthogMock.capture.mockClear();
   });
 
   it("shows a success toast after a market sell order succeeds", async () => {
@@ -112,5 +123,67 @@ describe("SellPositionModal", () => {
         description: "Estimated proceeds: $1.24.",
       });
     });
+    expect(posthogMock.capture).toHaveBeenCalledWith(
+      "order_attempted",
+      expect.objectContaining({
+        product: "web",
+        side: "SELL",
+        order_type: "MARKET",
+        surface: "portfolio_quick_sell",
+        shares: 2,
+        order_value: 1.24,
+      })
+    );
+    expect(posthogMock.capture).toHaveBeenCalledWith(
+      "order_succeeded",
+      expect.objectContaining({
+        product: "web",
+        side: "SELL",
+        order_type: "MARKET",
+        surface: "portfolio_quick_sell",
+        shares: 2,
+        order_value: 1.24,
+      })
+    );
+    expect(posthogMock.capture).toHaveBeenCalledWith(
+      "sell_succeeded",
+      expect.objectContaining({
+        product: "web",
+        side: "SELL",
+        order_type: "MARKET",
+        surface: "portfolio_quick_sell",
+      })
+    );
+  });
+
+  it("tracks a failed quick-sell attempt without recording a success", async () => {
+    sellHookMock.shouldFail = true;
+
+    render(
+      createElement(SellPositionModal, {
+        open: true,
+        onOpenChange: vi.fn(),
+        position,
+      })
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /quick sell \(market order\)/i })
+    );
+
+    await waitFor(() => {
+      expect(posthogMock.capture).toHaveBeenCalledWith(
+        "order_failed",
+        expect.objectContaining({
+          product: "web",
+          surface: "portfolio_quick_sell",
+          failure_stage: "submission",
+        })
+      );
+    });
+    expect(posthogMock.capture).not.toHaveBeenCalledWith(
+      "order_succeeded",
+      expect.anything()
+    );
   });
 });

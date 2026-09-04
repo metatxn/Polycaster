@@ -16,4 +16,12 @@ describe("PortfolioPage redeem actions", () => {
     expect(source).not.toMatch(/!position\.conditionId \|\| isRedeemingCtf/);
     expect(source).toMatch(/redeemingPositionIds/);
   });
+
+  it("tracks successful resolved-position redemptions", () => {
+    const source = readSource("src/app/portfolio/page.tsx");
+
+    expect(source).toContain('posthog.capture("position_redeemed"');
+    expect(source).toContain('surface: "lost_position"');
+    expect(source).toContain('surface: "winning_position"');
+  });
 });

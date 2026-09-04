@@ -8,7 +8,7 @@ import {
   useKwTheme,
 } from "@/components/kw-theme";
 
-const LAST_UPDATED = "April 10, 2026";
+const LAST_UPDATED = "September 4, 2026";
 
 const SECTIONS = [
   { id: "overview", title: "Overview", roman: "i" },
@@ -221,9 +221,11 @@ export default function PrivacyClient() {
               <ul>
                 <li>
                   <strong>Wallet information</strong>: if you connect a wallet
-                  in the Web App, we and our wallet connectivity providers may
-                  receive your public wallet address and related connection
-                  metadata.
+                  in the Web App or Extension, we and our wallet connectivity
+                  providers may receive your public wallet address and related
+                  connection metadata. When usage analytics is enabled, Knoww
+                  may use that address to recognize your wallet across the Web
+                  App and Extension and provide a more personal experience.
                 </li>
                 <li>
                   <strong>Comments and other submitted content</strong>: if you
@@ -249,11 +251,14 @@ export default function PrivacyClient() {
                   wallet connectivity providers.
                 </li>
                 <li>
-                  <strong>Product analytics and diagnostics</strong>: the Web
-                  App may capture feature-usage events, wallet-related action
-                  metadata, market identifiers/titles, and client error or
-                  exception diagnostics through analytics tooling when enabled
-                  in our deployment configuration.
+                  <strong>Personalized experience and diagnostics</strong>: the
+                  Web App may capture feature-usage events, your connected
+                  public wallet address, wallet-related action metadata, market
+                  identifiers/titles, and client error or exception diagnostics
+                  through analytics tooling when enabled in our deployment
+                  configuration. We use this information to remember the
+                  connected wallet across Knoww, tailor the experience, and
+                  understand whether features work as intended.
                 </li>
                 <li>
                   <strong>
@@ -298,11 +303,14 @@ export default function PrivacyClient() {
                 <li>
                   <strong>Extension usage analytics</strong>: usage analytics is
                   enabled by default and can be turned off in Extension
-                  settings. While enabled, we may collect product events such as
-                  extension startup, supported-site detection, market card
-                  impressions and clicks, trading panel opens, settings changes,
-                  platform name, and host. These events do not include page
-                  addresses or raw page text.
+                  settings. While enabled, we may collect your connected public
+                  wallet address and events such as extension startup,
+                  supported-site detection, market card impressions and clicks,
+                  trading panel opens, settings changes, platform name, and
+                  host. We use this information to give you a more personal
+                  experience across Knoww and understand whether features work
+                  as intended. These events do not include page addresses or raw
+                  page text.
                 </li>
                 <li>
                   <strong>Website support requests</strong>: if you select
@@ -339,9 +347,10 @@ export default function PrivacyClient() {
                   performance.
                 </li>
                 <li>
-                  <strong>Measure product usage</strong>: understand which
-                  features, supported sites, and flows are used so we can
-                  prioritize improvements.
+                  <strong>Provide a more personal experience</strong>: recognize
+                  a connected wallet across the Web App and Extension,
+                  understand which features and supported sites are used, and
+                  tailor the experience based on those interactions.
                 </li>
                 <li>
                   <strong>Match markets to content</strong>: analyze text,
@@ -389,9 +398,11 @@ export default function PrivacyClient() {
                 </li>
                 <li>
                   <strong>Analytics providers</strong>: Knoww uses analytics
-                  tooling (currently including PostHog) for Web App product
-                  analytics, client diagnostics, and Extension analytics if
-                  enabled.
+                  tooling (currently including PostHog) to provide a more
+                  personal experience, understand feature usage, and diagnose
+                  client errors. When usage analytics is enabled, these tools
+                  may receive your connected public wallet address and related
+                  interaction metadata from the Web App or Extension.
                 </li>
                 <li>
                   <strong>AI providers</strong>: if AI-assisted matching is
@@ -458,10 +469,11 @@ export default function PrivacyClient() {
                   ranking.
                 </li>
                 <li>
-                  While usage analytics is enabled, the Extension sends product
-                  events used to measure product adoption and feature usage.
-                  These events may include host, platform, and feature
-                  interaction metadata, but not page addresses or raw page text.
+                  While usage analytics is enabled, the Extension sends events
+                  used to provide a more personal experience and understand
+                  feature usage. These events may include your connected public
+                  wallet address, host, platform, and feature interaction
+                  metadata, but not page addresses or raw page text.
                 </li>
               </ul>
 

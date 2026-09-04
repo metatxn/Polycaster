@@ -5,6 +5,7 @@ import { qk } from "@/lib/query-keys";
 import { TradingOnboarding } from "./trading-onboarding";
 
 const wagmiState = vi.hoisted(() => ({
+  address: "0x0000000000000000000000000000000000000001",
   isConnected: true,
 }));
 
@@ -37,6 +38,10 @@ const proxyWalletState = vi.hoisted(() => ({
   usdcBalance: 5,
 }));
 
+const posthogMock = vi.hoisted(() => ({
+  capture: vi.fn(),
+}));
+
 vi.mock("@knoww/logger", () => ({
   createLogger: () => ({
     debug: vi.fn(),
@@ -48,6 +53,7 @@ vi.mock("@knoww/logger", () => ({
 
 vi.mock("wagmi", () => ({
   useConnection: () => ({
+    address: wagmiState.address,
     isConnected: wagmiState.isConnected,
   }),
 }));
@@ -74,6 +80,10 @@ vi.mock("@/lib/approvals", () => ({
 
 vi.mock("@/lib/wallet-modal", () => ({
   openWalletModalStrict: vi.fn(async () => undefined),
+}));
+
+vi.mock("posthog-js", () => ({
+  default: posthogMock,
 }));
 
 describe("TradingOnboarding", () => {
@@ -124,6 +134,46 @@ describe("TradingOnboarding", () => {
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: qk.wallet.allUsdcAllowances(),
       });
+    });
+    expect(posthogMock.capture).toHaveBeenCalledWith(
+      "trading_token_approval_succeeded",
+      {
+        product: "web",
+        surface: "onboarding",
+        wallet_address: "0x0000000000000000000000000000000000000001",
+        wallet_mode: "deposit",
+      }
+    );
+  });
+
+  it("tracks a newly deployed trading account", async () => {
+    relayerState.hasDeployedSafe = false;
+    relayerState.proxyAddress = null;
+    proxyWalletState.isDeployed = false;
+    proxyWalletState.proxyAddress = null;
+    relayerState.deploySafe.mockResolvedValue({ success: true });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TradingOnboarding />
+      </QueryClientProvider>
+    );
+
+    const deployButton = await screen.findByRole("button", {
+      name: /sign/i,
+    });
+    fireEvent.click(deployButton);
+
+    await waitFor(() => {
+      expect(posthogMock.capture).toHaveBeenCalledWith(
+        "trading_account_created",
+        {
+          product: "web",
+          surface: "onboarding",
+          wallet_address: "0x0000000000000000000000000000000000000001",
+          wallet_mode: "deposit",
+        }
+      );
     });
   });
 

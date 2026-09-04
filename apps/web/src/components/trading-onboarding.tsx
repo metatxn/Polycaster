@@ -6,7 +6,9 @@ import { formatTradingOnboardingError } from "@knoww/shared-types/trading-errors
 import { useQueryClient } from "@tanstack/react-query";
 import Decimal from "decimal.js";
 import { Key, Loader2, Wallet, X, Zap } from "lucide-react";
+import posthog from "posthog-js";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getAddress } from "viem";
 import { useConnection } from "wagmi";
 import { useClobCredentials } from "@/hooks/use-clob-credentials";
 import { useProxyWallet } from "@/hooks/use-proxy-wallet";
@@ -127,7 +129,7 @@ export function TradingOnboarding({
   onSkip,
   onClose,
 }: TradingOnboardingProps) {
-  const { isConnected } = useConnection();
+  const { address, isConnected } = useConnection();
   const queryClient = useQueryClient();
   const {
     mode: walletMode,
@@ -311,6 +313,12 @@ export function TradingOnboarding({
     try {
       const result = await deploySafe();
       if (result.success) {
+        posthog.capture("trading_account_created", {
+          product: "web",
+          surface: "onboarding",
+          ...(address ? { wallet_address: getAddress(address) } : {}),
+          wallet_mode: walletMode,
+        });
         updateStepStatus("deploy", "completed");
         setCurrentStep(2);
         await forceRefreshProxyWallet();
@@ -325,6 +333,7 @@ export function TradingOnboarding({
       );
     }
   }, [
+    address,
     deploySafe,
     updateStepStatus,
     forceRefreshProxyWallet,
@@ -353,6 +362,12 @@ export function TradingOnboarding({
             queryKey: qk.wallet.allUsdcAllowances(),
           }),
         ]);
+        posthog.capture("trading_token_approval_succeeded", {
+          product: "web",
+          surface: "onboarding",
+          ...(address ? { wallet_address: getAddress(address) } : {}),
+          wallet_mode: walletMode,
+        });
         updateStepStatus("approve", "completed");
         setHasUsdcApproval(true);
         setCurrentStep(3);
@@ -367,11 +382,13 @@ export function TradingOnboarding({
       );
     }
   }, [
+    address,
     approveUsdcForTrading,
     approvalAmount,
     isApprovalAmountValid,
     queryClient,
     updateStepStatus,
+    walletMode,
   ]);
 
   const handleDeriveCredentials = useCallback(async () => {

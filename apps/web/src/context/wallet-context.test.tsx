@@ -15,6 +15,11 @@ const walletModalMock = vi.hoisted(() => ({
   openWalletModal: vi.fn(async () => undefined),
 }));
 
+const posthogMock = vi.hoisted(() => ({
+  capture: vi.fn(),
+  identify: vi.fn(),
+}));
+
 vi.mock("wagmi", () => ({
   useConnection: () => ({
     address: wagmiState.address,
@@ -32,6 +37,10 @@ vi.mock("@/lib/rpc", () => ({
 }));
 
 vi.mock("@/lib/wallet-modal", () => walletModalMock);
+
+vi.mock("posthog-js", () => ({
+  default: posthogMock,
+}));
 
 describe("WalletProvider", () => {
   beforeEach(() => {
@@ -63,5 +72,39 @@ describe("WalletProvider", () => {
     await waitFor(() => {
       expect(walletModalMock.closeWalletModal).toHaveBeenCalledTimes(1);
     });
+    expect(posthogMock.identify).toHaveBeenCalledWith(
+      "0x0000000000000000000000000000000000000001",
+      {
+        wallet_address: "0x0000000000000000000000000000000000000001",
+      }
+    );
+    expect(posthogMock.capture).toHaveBeenCalledWith("wallet_connected", {
+      product: "web",
+      wallet_address: "0x0000000000000000000000000000000000000001",
+    });
+  });
+
+  it("identifies a wallet restored with the initial session", async () => {
+    wagmiState.address = "0x0000000000000000000000000000000000000001";
+    wagmiState.isConnected = true;
+
+    render(
+      <WalletProvider>
+        <div />
+      </WalletProvider>
+    );
+
+    await waitFor(() => {
+      expect(posthogMock.identify).toHaveBeenCalledWith(
+        "0x0000000000000000000000000000000000000001",
+        {
+          wallet_address: "0x0000000000000000000000000000000000000001",
+        }
+      );
+    });
+    expect(posthogMock.capture).not.toHaveBeenCalledWith(
+      "wallet_connected",
+      expect.anything()
+    );
   });
 });

@@ -206,6 +206,15 @@ export const SUPPORTED_MATCH_PATTERNS: string[] = [
   "https://defillama.com/*",
 ];
 
+/**
+ * First-party route used only while the extension connects a wallet during
+ * onboarding. Keep it separate from supported discovery sites so it does not
+ * appear in the user's platform settings.
+ */
+export const ONBOARDING_WALLET_SETUP_MATCH_PATTERNS: string[] = [
+  "https://knoww.app/extension/connect",
+];
+
 export const UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS: string[] = [
   "http://*/*",
   "https://*/*",

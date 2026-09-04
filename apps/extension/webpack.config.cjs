@@ -77,13 +77,20 @@ function buildWarMatches(hostsSource) {
     hostsSource,
     "SUPPORTED_MATCH_PATTERNS"
   );
+  const onboardingWalletSetupPatterns = extractStringArray(
+    hostsSource,
+    "ONBOARDING_WALLET_SETUP_MATCH_PATTERNS"
+  );
 
   // Chrome is stricter for web_accessible_resources.matches than for
   // host_permissions/content-script matches: path-scoped patterns like
   // `https://www.bbc.com/news/*` are rejected there. Normalize every site
   // pattern to an origin-wide form (`scheme://host/*`) before injecting it
   // into the manifest.
-  const normalizedPatterns = sitePatterns.map((pattern) => {
+  const normalizedPatterns = [
+    ...sitePatterns,
+    ...onboardingWalletSetupPatterns,
+  ].map((pattern) => {
     const match = pattern.match(/^(\*|https?|file|ftp):\/\/([^/]+)(?:\/.*)?$/);
     if (!match) {
       throw new Error(

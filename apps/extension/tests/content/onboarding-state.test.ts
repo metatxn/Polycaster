@@ -57,12 +57,15 @@ describe("extension onboarding state", () => {
 
   it("recognizes only the dedicated wallet setup URL", () => {
     expect(
-      isOnboardingWalletSetupUrl("https://x.com/home?knoww_onboarding=wallet")
+      isOnboardingWalletSetupUrl("https://knoww.app/extension/connect")
     ).toBe(true);
     expect(isOnboardingWalletSetupUrl("https://x.com/polymarket")).toBe(false);
     expect(
+      isOnboardingWalletSetupUrl("https://not-knoww.example/extension/connect")
+    ).toBe(false);
+    expect(
       isOnboardingWalletSetupUrl(
-        "https://not-x.example/home?knoww_onboarding=wallet"
+        "https://knoww.app/extension/connect?unexpected=value"
       )
     ).toBe(false);
     expect(isOnboardingWalletSetupUrl("not a URL")).toBe(false);

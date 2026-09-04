@@ -95,7 +95,8 @@ describe("install-time extension onboarding", () => {
     expect(setupRoute).not.toContain("openOnboardingDemo");
     expect(setupRoute).not.toContain("demoTabId");
     expect(demoRoute).toContain("openOnboardingDemo");
-    expect(onboardingState).toContain(
+    expect(onboardingState).toContain('"https://knoww.app/extension/connect"');
+    expect(onboardingState).not.toContain(
       "https://x.com/home?knoww_onboarding=wallet"
     );
     expect(contentMain).toContain("isOnboardingWalletSetupUrl");

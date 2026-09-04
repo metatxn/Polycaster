@@ -94,6 +94,7 @@ import {
   OPEN_SITE_SUPPORT_PROMPT_MESSAGE,
 } from "./site-support";
 import {
+  ONBOARDING_WALLET_SETUP_MATCH_PATTERNS,
   SUPPORTED_MATCH_PATTERNS,
   UNSUPPORTED_SITE_SUPPORT_EXCLUDE_PATTERNS,
   UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS,
@@ -128,6 +129,7 @@ import {
 // require <all_urls> and load on every site), we register them only
 // for supported platforms via chrome.scripting.
 const CONTENT_SCRIPT_ID = "knoww-content";
+const ONBOARDING_WALLET_SETUP_SCRIPT_ID = "knoww-onboarding-wallet-setup";
 const UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID = "knoww-unsupported-site-support";
 const MAX_IMAGE_PROXY_BYTES = 512 * 1024;
 const SETTINGS_STORAGE_KEY = "knowwSettings";
@@ -821,7 +823,11 @@ function forwardToPortfolioSigningTab(
 async function registerContentScripts(): Promise<void> {
   try {
     const existing = await chrome.scripting.getRegisteredContentScripts({
-      ids: [CONTENT_SCRIPT_ID, UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID],
+      ids: [
+        CONTENT_SCRIPT_ID,
+        ONBOARDING_WALLET_SETUP_SCRIPT_ID,
+        UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID,
+      ],
     });
     const existingIds = new Set(existing.map((script) => script.id));
     const registrations: chrome.scripting.RegisteredContentScript[] = [
@@ -830,6 +836,12 @@ async function registerContentScripts(): Promise<void> {
         matches: SUPPORTED_MATCH_PATTERNS,
         js: ["content.js"],
         css: ["markets-panel-navbar.css"],
+        runAt: "document_end",
+      },
+      {
+        id: ONBOARDING_WALLET_SETUP_SCRIPT_ID,
+        matches: ONBOARDING_WALLET_SETUP_MATCH_PATTERNS,
+        js: ["content.js"],
         runAt: "document_end",
       },
       {

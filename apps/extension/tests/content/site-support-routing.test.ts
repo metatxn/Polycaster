@@ -14,6 +14,12 @@ describe("unsupported-site toolbar routing", () => {
     expect(hosts).toContain("UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS");
     expect(hosts).toContain('"http://*/*"');
     expect(hosts).toContain('"https://*/*"');
+    expect(hosts).toContain("ONBOARDING_WALLET_SETUP_MATCH_PATTERNS");
+    expect(hosts).toContain('"https://knoww.app/extension/connect"');
+    expect(background).toContain(
+      'const ONBOARDING_WALLET_SETUP_SCRIPT_ID = "knoww-onboarding-wallet-setup"'
+    );
+    expect(background).toContain("id: ONBOARDING_WALLET_SETUP_SCRIPT_ID");
     expect(background).toContain(
       'const UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID = "knoww-unsupported-site-support"'
     );
@@ -33,6 +39,7 @@ describe("unsupported-site toolbar routing", () => {
     expect(webpack).toContain(
       "buildUnsupportedSiteSupportWebAccessibleResources(hostsSource)"
     );
+    expect(webpack).toContain('"ONBOARDING_WALLET_SETUP_MATCH_PATTERNS"');
     const unsupportedResources = webpack.slice(
       webpack.indexOf(
         "function buildUnsupportedSiteSupportWebAccessibleResources"

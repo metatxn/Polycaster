@@ -3,7 +3,7 @@ export const ONBOARDING_STORAGE_KEY = "knoww_extension_onboarding_v1";
 export const ONBOARDING_DEMO_STATE_KEY = "knoww_onboarding_demo_v1";
 export const ONBOARDING_DEMO_URL = "https://x.com/polymarket";
 export const ONBOARDING_WALLET_SETUP_URL =
-  "https://x.com/home?knoww_onboarding=wallet";
+  "https://knoww.app/extension/connect";
 export const ONBOARDING_METAMASK_INSTALL_URL =
   "https://chromewebstore.google.com/detail/metamask/nkbihfbeogaeaoehlefnkodbefgpgknn";
 
@@ -38,7 +38,7 @@ export function isOnboardingWalletSetupUrl(value: string): boolean {
     return (
       candidate.origin === setupUrl.origin &&
       candidate.pathname === setupUrl.pathname &&
-      candidate.searchParams.get("knoww_onboarding") === "wallet"
+      candidate.search === setupUrl.search
     );
   } catch {
     return false;

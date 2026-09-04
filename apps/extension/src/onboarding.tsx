@@ -320,7 +320,7 @@ function OnboardingApp() {
     }
 
     setActionState("opening");
-    setNotice("Opening Knoww beside X…");
+    setNotice("Opening wallet setup…");
     try {
       if (!progressRef.current.welcomeCompletedAt) {
         await persistProgress({
@@ -334,9 +334,7 @@ function OnboardingApp() {
         throw new Error(response.error || "Setup could not be opened");
       }
       setNotice(
-        __STORE_BUILD__
-          ? "Connect your wallet in the Knoww panel."
-          : "Continue through account, API-key, and approval setup in the Knoww panel."
+        "Connect your wallet in the Knoww panel. Return here when it is connected."
       );
       await refreshStatus();
     } catch {

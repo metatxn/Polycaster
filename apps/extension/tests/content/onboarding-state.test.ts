@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isOnboardingWalletSetupUrl,
   parseOnboardingProgress,
   resolveOnboardingStage,
 } from "../../src/onboarding-state";
@@ -52,6 +53,19 @@ describe("extension onboarding state", () => {
         storeBuild: true,
       })
     ).toBe("ready");
+  });
+
+  it("recognizes only the dedicated wallet setup URL", () => {
+    expect(
+      isOnboardingWalletSetupUrl("https://x.com/home?knoww_onboarding=wallet")
+    ).toBe(true);
+    expect(isOnboardingWalletSetupUrl("https://x.com/polymarket")).toBe(false);
+    expect(
+      isOnboardingWalletSetupUrl(
+        "https://not-x.example/home?knoww_onboarding=wallet"
+      )
+    ).toBe(false);
+    expect(isOnboardingWalletSetupUrl("not a URL")).toBe(false);
   });
 
   it("parses only valid persisted progress fields", () => {

@@ -3,6 +3,7 @@
 // ============================================
 
 import { createLogger } from "@knoww/logger";
+import { isOnboardingWalletSetupUrl } from "../onboarding-state";
 import type {
   KalshiCategoriesCache,
   PolymarketTagsCache,
@@ -77,6 +78,11 @@ export function observeFirstMountedTradingCard(
   const { fetchPolymarketTags } = window.KNOWW_API;
   const { watchFeed } = window.KNOWW_INJECTION;
   const { initNotificationStack } = window.KNOWW_UI;
+
+  if (isOnboardingWalletSetupUrl(window.location.href)) {
+    injectMetamaskBridge();
+    return;
+  }
 
   // Load user settings first (before doing anything else)
   await loadUserSettings();

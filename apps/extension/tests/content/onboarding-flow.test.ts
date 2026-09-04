@@ -76,6 +76,33 @@ describe("install-time extension onboarding", () => {
     expect(onboarding).not.toContain("Trading extension");
   });
 
+  it("keeps wallet setup separate from the final X demonstration", () => {
+    const onboarding = readSource("src/onboarding.tsx");
+    const onboardingState = readSource("src/onboarding-state.ts");
+    const background = readSource("src/background.ts");
+    const contentMain = readSource("src/content/main.ts");
+    const setupRouteStart = background.indexOf(
+      'if (msg?.type === "KNOWW_START_ONBOARDING_SETUP")'
+    );
+    const demoRouteStart = background.indexOf(
+      'if (msg?.type === "KNOWW_OPEN_ONBOARDING_DEMO")'
+    );
+    const setupRoute = background.slice(setupRouteStart, demoRouteStart);
+    const demoRoute = background.slice(demoRouteStart);
+
+    expect(setupRoute).toContain("openOnboardingWalletSetup");
+    expect(setupRoute).toContain("clearOnboardingDemoState");
+    expect(setupRoute).not.toContain("openOnboardingDemo");
+    expect(setupRoute).not.toContain("demoTabId");
+    expect(demoRoute).toContain("openOnboardingDemo");
+    expect(onboardingState).toContain(
+      "https://x.com/home?knoww_onboarding=wallet"
+    );
+    expect(contentMain).toContain("isOnboardingWalletSetupUrl");
+    expect(onboarding).toContain("Opening wallet setup…");
+    expect(onboarding).not.toContain("Opening Knoww beside X…");
+  });
+
   it("records the conversion milestones without page URLs", () => {
     const onboarding = readSource("src/onboarding.tsx");
     const background = readSource("src/background.ts");

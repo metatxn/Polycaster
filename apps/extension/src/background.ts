@@ -76,8 +76,10 @@ import { readSetupComplete } from "./content/trading/setup-flow-storage";
 import { TRADING_WARM_ELIGIBLE_STORAGE_KEY } from "./content/trading-warm-flag";
 import { canUseProductionReranker } from "./context-promotion";
 import {
+  isOnboardingWalletSetupUrl,
   ONBOARDING_DEMO_STATE_KEY,
   ONBOARDING_DEMO_URL,
+  ONBOARDING_WALLET_SETUP_URL,
 } from "./onboarding-state";
 import {
   createSearchRequestScheduler,
@@ -357,6 +359,15 @@ function readOnboardingDemoState(): Promise<OnboardingDemoState | null> {
   });
 }
 
+function clearOnboardingDemoState(): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.storage.session.remove(ONBOARDING_DEMO_STATE_KEY, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    });
+  });
+}
+
 function writeOnboardingDemoState(state: OnboardingDemoState): Promise<void> {
   return new Promise((resolve) => {
     chrome.storage.session.set({ [ONBOARDING_DEMO_STATE_KEY]: state }, () => {
@@ -387,6 +398,34 @@ function toOnboardingWalletAddress(address: string | null): string | undefined {
 async function getOnboardingWalletAddress(): Promise<string | undefined> {
   const session = await getExtensionSessionInfo();
   return toOnboardingWalletAddress(session.address);
+}
+
+async function openOnboardingWalletSetup(
+  windowId: number
+): Promise<chrome.tabs.Tab> {
+  const tabs = await chrome.tabs.query({ windowId });
+  const existing = tabs.find((tab) =>
+    isOnboardingWalletSetupUrl(tab.url || "")
+  );
+  const tab =
+    typeof existing?.id === "number"
+      ? await chrome.tabs.update(existing.id, { active: true })
+      : await chrome.tabs.create({
+          url: ONBOARDING_WALLET_SETUP_URL,
+          active: true,
+          windowId,
+        });
+
+  if (!tab || typeof tab.id !== "number") {
+    throw new Error("Chrome did not return an onboarding wallet setup tab.");
+  }
+  rememberActiveTab(tab.id, tab.windowId);
+  if (typeof tab.windowId === "number") {
+    await chrome.windows
+      .update(tab.windowId, { focused: true })
+      .catch(() => {});
+  }
+  return tab;
 }
 
 async function openOnboardingDemo(windowId?: number): Promise<chrome.tabs.Tab> {
@@ -1461,16 +1500,22 @@ chrome.runtime.onMessage.addListener(
       }
 
       const openPromise = openKnowwSidePanel({ windowId });
+      const setupTabPromise = openOnboardingWalletSetup(windowId);
       void persistNotificationPanelSurface("sidebar");
-      void setRequestedSidePanelView("portfolio");
-      void openPromise
-        .then(async () => {
+      const requestedViewPromise = setRequestedSidePanelView("portfolio");
+      const clearDemoStatePromise = clearOnboardingDemoState();
+      void Promise.all([
+        openPromise,
+        setupTabPromise,
+        requestedViewPromise,
+        clearDemoStatePromise,
+      ])
+        .then(([, setupTab]) => {
+          portfolioSigningTabId = setupTab.id;
           notifyRequestedSidePanelView("portfolio");
-          const demoTab = await openOnboardingDemo(windowId);
-          portfolioSigningTabId = demoTab.id;
           sendResponse({
             ok: true,
-            data: { demoTabId: demoTab.id },
+            data: { setupTabId: setupTab.id },
           } as BackgroundResponse);
         })
         .catch((error) => {

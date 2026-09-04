@@ -416,9 +416,7 @@ function OnboardingApp() {
           <span className="brand-mark" aria-hidden="true" />
           <span>Knoww</span>
         </div>
-        <span className="build-label">
-          {__STORE_BUILD__ ? "Market discovery" : "Trading extension"}
-        </span>
+        <span className="build-label">Market discovery extension</span>
       </header>
 
       <div className="onboarding-layout">

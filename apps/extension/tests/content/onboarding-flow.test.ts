@@ -72,6 +72,8 @@ describe("install-time extension onboarding", () => {
     );
     expect(sidepanelSetup).toContain("data-install-metamask");
     expect(sidepanelSetup).toContain('event: "wallet_install_clicked"');
+    expect(onboarding).toContain("Market discovery extension");
+    expect(onboarding).not.toContain("Trading extension");
   });
 
   it("records the conversion milestones without page URLs", () => {

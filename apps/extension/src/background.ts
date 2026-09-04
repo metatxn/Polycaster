@@ -76,10 +76,8 @@ import { readSetupComplete } from "./content/trading/setup-flow-storage";
 import { TRADING_WARM_ELIGIBLE_STORAGE_KEY } from "./content/trading-warm-flag";
 import { canUseProductionReranker } from "./context-promotion";
 import {
-  isOnboardingWalletSetupUrl,
   ONBOARDING_DEMO_STATE_KEY,
   ONBOARDING_DEMO_URL,
-  ONBOARDING_WALLET_SETUP_URL,
 } from "./onboarding-state";
 import {
   createSearchRequestScheduler,
@@ -94,7 +92,7 @@ import {
   OPEN_SITE_SUPPORT_PROMPT_MESSAGE,
 } from "./site-support";
 import {
-  ONBOARDING_WALLET_SETUP_MATCH_PATTERNS,
+  getOnboardingWalletSetupMatchPatterns,
   SUPPORTED_MATCH_PATTERNS,
   UNSUPPORTED_SITE_SUPPORT_EXCLUDE_PATTERNS,
   UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS,
@@ -405,15 +403,14 @@ async function getOnboardingWalletAddress(): Promise<string | undefined> {
 async function openOnboardingWalletSetup(
   windowId: number
 ): Promise<chrome.tabs.Tab> {
+  const setupUrl = `${getKnowwAppUrl()}/extension/connect`;
   const tabs = await chrome.tabs.query({ windowId });
-  const existing = tabs.find((tab) =>
-    isOnboardingWalletSetupUrl(tab.url || "")
-  );
+  const existing = tabs.find((tab) => tab.url === setupUrl);
   const tab =
     typeof existing?.id === "number"
       ? await chrome.tabs.update(existing.id, { active: true })
       : await chrome.tabs.create({
-          url: ONBOARDING_WALLET_SETUP_URL,
+          url: setupUrl,
           active: true,
           windowId,
         });
@@ -840,7 +837,7 @@ async function registerContentScripts(): Promise<void> {
       },
       {
         id: ONBOARDING_WALLET_SETUP_SCRIPT_ID,
-        matches: ONBOARDING_WALLET_SETUP_MATCH_PATTERNS,
+        matches: getOnboardingWalletSetupMatchPatterns(__DEV_MODE__),
         js: ["content.js"],
         runAt: "document_end",
       },

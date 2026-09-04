@@ -55,9 +55,12 @@ describe("extension onboarding state", () => {
     ).toBe("ready");
   });
 
-  it("recognizes only the dedicated wallet setup URL", () => {
+  it("recognizes only the dedicated production and local wallet setup URLs", () => {
     expect(
       isOnboardingWalletSetupUrl("https://knoww.app/extension/connect")
+    ).toBe(true);
+    expect(
+      isOnboardingWalletSetupUrl("http://localhost:8000/extension/connect")
     ).toBe(true);
     expect(isOnboardingWalletSetupUrl("https://x.com/polymarket")).toBe(false);
     expect(
@@ -67,6 +70,9 @@ describe("extension onboarding state", () => {
       isOnboardingWalletSetupUrl(
         "https://knoww.app/extension/connect?unexpected=value"
       )
+    ).toBe(false);
+    expect(
+      isOnboardingWalletSetupUrl("http://localhost:3000/extension/connect")
     ).toBe(false);
     expect(isOnboardingWalletSetupUrl("not a URL")).toBe(false);
   });

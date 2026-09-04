@@ -72,14 +72,16 @@ function buildHostPermissions(hostsSource, devMode, storeBuild) {
   return unique;
 }
 
-function buildWarMatches(hostsSource) {
+function buildWarMatches(hostsSource, devMode) {
   const sitePatterns = extractStringArray(
     hostsSource,
     "SUPPORTED_MATCH_PATTERNS"
   );
   const onboardingWalletSetupPatterns = extractStringArray(
     hostsSource,
-    "ONBOARDING_WALLET_SETUP_MATCH_PATTERNS"
+    devMode
+      ? "ONBOARDING_WALLET_SETUP_DEVELOPMENT_MATCH_PATTERNS"
+      : "ONBOARDING_WALLET_SETUP_PRODUCTION_MATCH_PATTERNS"
   );
 
   // Chrome is stricter for web_accessible_resources.matches than for
@@ -397,7 +399,7 @@ module.exports = (_env, argv) => {
                 );
                 if (manifest.web_accessible_resources?.[0]?.matches) {
                   manifest.web_accessible_resources[0].matches =
-                    buildWarMatches(hostsSource);
+                    buildWarMatches(hostsSource, devMode);
                 }
                 manifest.web_accessible_resources ??= [];
                 manifest.web_accessible_resources.push(

@@ -1934,20 +1934,36 @@ function addSubmitButton(
     ]);
     pauseLivePanelRefresh();
 
-    try {
-      let effectiveSize = shares;
-      // On a partial fill the walked size *is* the order — snapping it up to
-      // the full position would sign more than the ticket quoted.
-      if (
-        side === "SELL" &&
-        positionSize > 0 &&
-        !isPartialFill(marketSlippage)
-      ) {
-        const diff = Math.abs(shares - positionSize);
-        if (diff < positionSize * 0.01 || shares >= positionSize) {
-          effectiveSize = positionSize;
-        }
+    let effectiveSize = shares;
+    // On a partial fill the walked size *is* the order — snapping it up to
+    // the full position would sign more than the ticket quoted.
+    if (side === "SELL" && positionSize > 0 && !isPartialFill(marketSlippage)) {
+      const diff = Math.abs(shares - positionSize);
+      if (diff < positionSize * 0.01 || shares >= positionSize) {
+        effectiveSize = positionSize;
       }
+    }
+    const successProperties = {
+      product: "extension",
+      surface: "trading_panel",
+      market_id: opts.market.id,
+      market_title: opts.market.title || "Untitled Market",
+      outcome_name: getTrackedOutcomeName(opts),
+      side,
+      order_type: panelState.orderMode === "market" ? "MARKET" : "LIMIT",
+      clob_order_type: clobOrderType,
+      shares: effectiveSize,
+      order_value: cost,
+    };
+    trackPanelAnalytics("order_attempted", successProperties);
+
+    try {
+      const trackSuccessfulOrder = () => {
+        trackPanelAnalytics("order_succeeded", successProperties);
+        if (side === "SELL") {
+          trackPanelAnalytics("sell_succeeded", successProperties);
+        }
+      };
       trackPanelAnalytics("market_order_submitted", {
         marketId: opts.market.id,
         marketTitle: opts.market.title || "Untitled Market",
@@ -1986,6 +2002,7 @@ function addSubmitButton(
           shares: effectiveSize,
           totalCost: cost,
         });
+        trackSuccessfulOrder();
         await TradingService.refreshBalance().catch(() => {});
         if (opts.yesTokenId && opts.noTokenId) {
           await TradingService.getOutcomeBalances(
@@ -2029,6 +2046,7 @@ function addSubmitButton(
               shares: effectiveSize,
               totalCost: cost,
             });
+            trackSuccessfulOrder();
           }
           showToast(panel, message, type);
           rerender();
@@ -2117,6 +2135,10 @@ function addSubmitButton(
         shares,
         totalCost: cost,
         errorMessage: err instanceof Error ? err.message : String(err),
+      });
+      trackPanelAnalytics("order_failed", {
+        ...successProperties,
+        failure_stage: "submission",
       });
       showToast(
         panel,

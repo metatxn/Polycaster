@@ -10,6 +10,8 @@
  * Split/Merge accessible via "..." dropdown menu.
  */
 
+import { getAddress } from "viem";
+
 import {
   type LoadingMessageInput,
   startLoadingMessageSequence,
@@ -78,9 +80,19 @@ function trackPanelAnalytics(
   event: string,
   properties: Record<string, string | number | boolean | null | undefined> = {}
 ): void {
+  let walletAddress: string | undefined;
+  const connectedAddress = TradingService.getContext().address;
+  if (connectedAddress) {
+    try {
+      walletAddress = getAddress(connectedAddress);
+    } catch {
+      walletAddress = undefined;
+    }
+  }
   void window.KNOWW_ANALYTICS?.track(event, {
     feature: "trading_panel",
     ...properties,
+    ...(walletAddress ? { wallet_address: walletAddress } : {}),
   });
 }
 

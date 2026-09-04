@@ -292,6 +292,7 @@ export function renderSplitForm(
       return;
     const panel = panelState.activePanel;
     const properties = {
+      product: "extension",
       marketId: opts.market.id,
       marketTitle: opts.market.title || "Untitled Market",
       amount: canonicalAmount,
@@ -504,6 +505,7 @@ export function renderMergeForm(
       return;
     const panel = panelState.activePanel;
     const properties = {
+      product: "extension",
       marketId: opts.market.id,
       marketTitle: opts.market.title || "Untitled Market",
       amount: canonicalAmount,

@@ -1,4 +1,5 @@
 import { resolvePreferredTradingWalletMode } from "@knoww/shared-types/polymarket";
+import { getAddress } from "viem";
 import {
   pollUntil,
   resolvePortfolioApprovalPollAddress,
@@ -31,12 +32,21 @@ import {
   type LoadingMessageInput,
   startLoadingMessageSequence,
 } from "../loading-messages";
+import { ONBOARDING_METAMASK_INSTALL_URL } from "../onboarding-state";
 import {
   readStoredWalletMode,
   sendRuntimeMessage,
   writeStoredWalletMode,
 } from "./messaging";
 import { escapeHtml, type TradingWalletMode } from "./shared";
+
+function getAnalyticsWalletAddress(address: string): string | undefined {
+  try {
+    return getAddress(address);
+  } catch {
+    return undefined;
+  }
+}
 
 export const SETUP_STYLES = `
       /* ---- Wallets / sign-in ---- */
@@ -1059,6 +1069,20 @@ export function createPortfolioSetup(
       }
     }
 
+    if (payload?.alreadyDeployed !== true) {
+      const walletAddress = getAnalyticsWalletAddress(ownerAddress);
+      void sendRuntimeMessage({
+        type: "analytics:track",
+        event: "trading_account_created",
+        properties: {
+          product: "extension",
+          surface: "portfolio_sidepanel",
+          ...(walletAddress ? { wallet_address: walletAddress } : {}),
+          walletMode,
+        },
+      });
+    }
+
     dependencies.invalidatePortfolio();
     portfolioTradingError = null;
     stopLoading();
@@ -1422,10 +1446,13 @@ export function createPortfolioSetup(
         <button type="button" class="knoww-portfolio-open primary" data-refresh-portfolio-wallets>
           Find wallets
         </button>
-        <button type="button" class="knoww-portfolio-open" data-open-portfolio>
-          Open portfolio
+        <button type="button" class="knoww-portfolio-open" data-install-metamask>
+          Install MetaMask
         </button>
       </div>
+      <span class="knoww-pf-empty-sub">
+        No browser wallet yet? Install MetaMask, refresh this page, then choose Find wallets.
+      </span>
     `;
     }
 
@@ -1587,6 +1614,19 @@ export function createPortfolioSetup(
     if (target?.closest("[data-refresh-portfolio-wallets]")) {
       portfolioWallets = null;
       void dependencies.reloadPortfolio();
+      return true;
+    }
+    if (target?.closest("[data-install-metamask]")) {
+      void sendRuntimeMessage({
+        type: "analytics:track",
+        event: "wallet_install_clicked",
+        properties: {
+          provider: "metamask",
+          product: "extension",
+          surface: "portfolio_sidepanel",
+        },
+      });
+      void chrome.tabs.create({ url: ONBOARDING_METAMASK_INSTALL_URL });
       return true;
     }
     const deploy = target?.closest<HTMLElement>(

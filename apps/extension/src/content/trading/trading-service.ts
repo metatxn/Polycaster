@@ -14,6 +14,7 @@ import {
   resolvePreferredTradingWalletMode,
 } from "@knoww/shared-types/polymarket";
 import type { OrderBook } from "@knoww/shared-types/slippage";
+import { getAddress } from "viem";
 
 const log = createLogger("trading-service");
 const WALLET_MODE_STORAGE_KEY = "knoww_trading_wallet_mode";
@@ -315,7 +316,18 @@ function trackTradingAnalytics(
   properties: Record<string, string | number | boolean | null | undefined> = {}
 ): void {
   if (typeof window.KNOWW_ANALYTICS?.track === "function") {
-    void window.KNOWW_ANALYTICS.track(event, properties);
+    let walletAddress: string | undefined;
+    if (ctx.address) {
+      try {
+        walletAddress = getAddress(ctx.address);
+      } catch {
+        walletAddress = undefined;
+      }
+    }
+    void window.KNOWW_ANALYTICS.track(event, {
+      ...properties,
+      ...(walletAddress ? { wallet_address: walletAddress } : {}),
+    });
   }
 }
 
@@ -459,7 +471,7 @@ async function applyConnectedWalletAccounts(
     return;
   }
 
-  const address = accounts[0];
+  const address = getAddress(accounts[0]);
   const storedWalletMode = await readStoredWalletMode(address);
   const initialWalletMode = resolvePreferredTradingWalletMode({
     storedMode: storedWalletMode,
@@ -473,6 +485,7 @@ async function applyConnectedWalletAccounts(
   });
   broadcastWalletConnected(address);
   trackTradingAnalytics(analyticsEvent, {
+    product: "extension",
     hasMultipleWallets: walletUuid !== undefined,
   });
 
@@ -725,7 +738,8 @@ export const TradingService = {
       trackTradingAnalytics(
         result.method === "create"
           ? "trading_api_key_created"
-          : "trading_api_key_derived"
+          : "trading_api_key_derived",
+        { product: "extension" }
       );
       update({
         hasCredentials: true,
@@ -1127,6 +1141,13 @@ export const TradingService = {
       });
       // Refresh so downstream UI (balances, allowances) reflects the new wallet.
       await this.refreshBalance();
+      if (!result.alreadyDeployed) {
+        trackTradingAnalytics("trading_account_created", {
+          product: "extension",
+          surface: "trading_service",
+          walletMode: ctx.walletMode,
+        });
+      }
       return {
         txHash: result.txHash,
         alreadyDeployed: result.alreadyDeployed,
@@ -1182,6 +1203,12 @@ export const TradingService = {
       // allowance re-renders a clickable Approve (double-submit window) until
       // the refreshed allowance lands.
       await this.refreshBalance();
+      trackTradingAnalytics("trading_token_approval_succeeded", {
+        product: "extension",
+        surface: "trading_service",
+        walletMode: ctx.walletMode,
+        alreadyApproved: result.alreadyApproved === true,
+      });
       update({ state: "ready" });
       return result.txHash;
     } catch (err) {

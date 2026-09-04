@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import { getAddress } from "viem";
 import type { TradingSetupAllowanceReadStatus } from "../content/trading/setup-flow";
 import { hasDeployedTradingWallet } from "../content/trading/setup-gates";
 import { startLoadingMessageSequence } from "../loading-messages";
@@ -21,6 +22,14 @@ import {
   type SidePanelView,
   type TradingWalletMode,
 } from "./shared";
+
+function getAnalyticsWalletAddress(address: string): string | undefined {
+  try {
+    return getAddress(address);
+  } catch {
+    return undefined;
+  }
+}
 
 export const PORTFOLIO_STYLES = `
       * {
@@ -1492,6 +1501,16 @@ export function createPortfolioSidepanel(
 
     const result = await cancelPortfolioOpenOrder(ownerAddress, orderId);
     if (result.ok) {
+      const walletAddress = getAnalyticsWalletAddress(ownerAddress);
+      void sendRuntimeMessage({
+        type: "analytics:track",
+        event: "order_cancelled",
+        properties: {
+          product: "extension",
+          surface: "portfolio_sidepanel",
+          ...(walletAddress ? { wallet_address: walletAddress } : {}),
+        },
+      });
       // Reload so the cancelled order disappears and any BUY collateral it was
       // reserving is reflected back in the cash/positions figures.
       await loadPortfolio(true);

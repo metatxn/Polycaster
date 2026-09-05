@@ -181,6 +181,8 @@ type UnifiedSdkPaginator<TItem> = AsyncIterable<
 };
 
 export interface UnifiedSdkTradingClient {
+  fetchOrder?(request: { orderId: string }): Promise<unknown>;
+  listAccountTrades?(request: { id: string }): UnifiedSdkPaginator<unknown>;
   createMarketOrder(request: UnifiedSdkMarketOrderRequest): Promise<unknown>;
   createLimitOrder(request: UnifiedSdkLimitOrderRequest): Promise<unknown>;
   postOrder(order: unknown): Promise<unknown>;
@@ -226,6 +228,8 @@ export interface LegacyClobBalanceAllowanceRequest {
 }
 
 export interface LegacyClobCompatibleClient {
+  fetchOrder(request: { orderId: string }): Promise<unknown>;
+  fetchTrade(request: { id: string }): Promise<unknown>;
   createMarketOrder(
     request: LegacyClobOrderRequest,
     options?: unknown
@@ -770,6 +774,22 @@ export function adaptUnifiedSecureClientForLegacyClob(
     async getOpenOrders(options) {
       if (!client.listOpenOrders) return [];
       return collectUnifiedPaginator(client.listOpenOrders(), options?.limit);
+    },
+
+    async fetchOrder(request) {
+      if (!client.fetchOrder) throw new Error("Order reads unavailable");
+      return client.fetchOrder(request);
+    },
+
+    async fetchTrade(request) {
+      if (!client.listAccountTrades) throw new Error("Trade reads unavailable");
+      for await (const page of client.listAccountTrades(request)) {
+        const trade = pageItems(page).find(
+          (entry) => isRecord(entry) && entry.id === request.id
+        );
+        if (trade) return trade;
+      }
+      throw new Error("Trade not available yet");
     },
 
     async updateBalanceAllowance(request) {

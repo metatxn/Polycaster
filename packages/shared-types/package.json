@@ -16,6 +16,7 @@
     "./contracts": "./src/contracts.ts",
     "./crypto": "./src/crypto.ts",
     "./orders": "./src/orders.ts",
+    "./product-analytics": "./src/product-analytics.ts",
     "./polymarket": "./src/polymarket.ts",
     "./polymarket-unified": "./src/polymarket-unified.ts",
     "./relayer": "./src/relayer.ts",

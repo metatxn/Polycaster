@@ -20,6 +20,50 @@ test("accepts one canonical lazy WAR owner with exact normalized matches", () =>
   );
 });
 
+test.each(["content-trading.js", "content-wallet.js"])(
+  "allows only the declared onboarding origin for %s",
+  (runtimeChunk) => {
+    const entry = {
+      resources: ["platforms/*.js", runtimeChunk],
+      matches: [...canonicalEntry.matches, "https://knoww.app/*"],
+    };
+    const setupPatterns = ["https://knoww.app/extension/connect"];
+    assert.deepEqual(
+      validateLazyWarContract(
+        [entry],
+        supportedPatterns,
+        runtimeChunk,
+        setupPatterns
+      ),
+      []
+    );
+    for (const origin of [
+      "http://localhost/*",
+      "https://unexpected.example/*",
+      "https://*.knoww.app/*",
+    ]) {
+      assert.match(
+        validateLazyWarContract(
+          [{ ...entry, matches: [...entry.matches, origin] }],
+          supportedPatterns,
+          runtimeChunk,
+          setupPatterns
+        ).join("\n"),
+        /unexpected match/
+      );
+    }
+    assert.match(
+      validateLazyWarContract(
+        [{ ...entry, matches: canonicalEntry.matches }],
+        supportedPatterns,
+        runtimeChunk,
+        setupPatterns
+      ).join("\n"),
+      /missing match https:\/\/knoww.app\/\*/
+    );
+  }
+);
+
 test("rejects duplicate or split content-trading WAR ownership", () => {
   assert.match(
     validateLazyWarContract(

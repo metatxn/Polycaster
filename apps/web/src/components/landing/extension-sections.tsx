@@ -161,6 +161,11 @@ const PERMISSIONS = [
     name: "sidePanel",
     why: "Shows the market side panel next to the page.",
   },
+  {
+    icon: Cpu,
+    name: "alarms",
+    why: "Schedules order-status checks for trade analytics in trading-enabled builds, while analytics is enabled.",
+  },
 ];
 
 export function PermissionsSection() {
@@ -174,7 +179,7 @@ export function PermissionsSection() {
               Permissions, and why we ask.
             </h2>
             <p className="mt-6 max-w-[52ch] text-base leading-[1.6] text-(--kw-fg)/80">
-              The extension asks for exactly four Chrome API permissions. Host
+              The extension asks for exactly five Chrome API permissions. Host
               access lets matching run on supported sites and lets a lightweight
               request prompt appear elsewhere.
             </p>

@@ -16,7 +16,8 @@ function ownersOf(entries, resource) {
 export function validateLazyWarContract(
   webAccessibleResources,
   supportedMatchPatterns,
-  runtimeChunk = "content-trading.js"
+  runtimeChunk = "content-trading.js",
+  walletSetupMatchPatterns = []
 ) {
   const failures = [];
   if (!Array.isArray(webAccessibleResources)) {
@@ -24,6 +25,9 @@ export function validateLazyWarContract(
   }
   if (!Array.isArray(supportedMatchPatterns)) {
     return ["supported match patterns must be an array"];
+  }
+  if (!Array.isArray(walletSetupMatchPatterns)) {
+    return ["wallet setup match patterns must be an array"];
   }
 
   const platformOwners = ownersOf(webAccessibleResources, "platforms/*.js");
@@ -63,7 +67,10 @@ export function validateLazyWarContract(
   }
 
   const expectedMatches = [];
-  for (const pattern of supportedMatchPatterns) {
+  for (const pattern of [
+    ...supportedMatchPatterns,
+    ...walletSetupMatchPatterns,
+  ]) {
     const normalized = normalizedWarMatch(pattern);
     if (!normalized) {
       failures.push(

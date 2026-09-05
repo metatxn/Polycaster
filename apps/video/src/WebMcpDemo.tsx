@@ -2,8 +2,8 @@ import {
   AbsoluteFill,
   Audio,
   Easing,
-  Sequence,
   interpolate,
+  Sequence,
   staticFile,
   useCurrentFrame,
 } from "remotion";
@@ -821,6 +821,7 @@ const EventTools: React.FC = () => {
               }}
             >
               <svg height="255" viewBox="0 0 800 255" width="100%">
+                <title>One-week market price chart</title>
                 <polyline
                   fill="none"
                   points="0,202 82,181 162,188 238,132 316,156 402,96 492,112 582,71 660,88 800,32"

@@ -2,11 +2,11 @@ import "./index.css";
 import "./fonts";
 import { Composition } from "remotion";
 import { KnowwOnboarding } from "./KnowwOnboarding";
-import { KnowwWebMcpDemo, WEBMCP_DEMO_DURATION } from "./WebMcpDemo";
 import {
   KnowwWebMcpInAppDemo,
   WEBMCP_IN_APP_DEMO_DURATION,
 } from "./KnowwWebMcpInAppDemo";
+import { KnowwWebMcpDemo, WEBMCP_DEMO_DURATION } from "./WebMcpDemo";
 
 const FPS = 30;
 const DURATION = 2700; // 90s

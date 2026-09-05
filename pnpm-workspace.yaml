@@ -93,10 +93,9 @@ overrides:
   "defu": "6.1.7"
   "protobufjs": "7.6.5"
   "uuid": "11.1.1"
-  # CVE-2026-18446 host confusion via backslash authority introducer: patched
-  # in 3.1.5 / 4.1.2 only (4.1.1 is still vulnerable, so bumping the major
-  # would not help). Release-age gate waived above.
-  "fast-uri": "3.1.5"
+  # 3.1.6 fixes the host-normalization advisories affecting 3.1.5 and stays
+  # within Ajv's supported 3.x range. Release-age gate waived above.
+  "fast-uri": "3.1.6"
   "ws": "8.21.2"
   "shell-quote": "1.10.0"
   "esbuild": "0.28.1"

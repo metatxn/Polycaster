@@ -2,6 +2,20 @@ const completeKey = (address: string) =>
   `knoww:setup-complete:${address.toLowerCase()}`;
 const dismissedKey = (address: string) =>
   `knoww:setup-dismissed:${address.toLowerCase()}`;
+const milestonesKey = (address: string) =>
+  `knoww:setup-milestones:${address.toLowerCase()}`;
+
+export interface SetupMilestones {
+  tradingWalletDeployed: boolean;
+  hasCredentials: boolean;
+  hasApproval: boolean;
+}
+
+const EMPTY_SETUP_MILESTONES: SetupMilestones = {
+  tradingWalletDeployed: false,
+  hasCredentials: false,
+  hasApproval: false,
+};
 
 function storageGet(key: string): Promise<unknown> {
   return new Promise((resolve) => {
@@ -47,4 +61,31 @@ export async function writeSetupDismissed(
   dismissed: boolean
 ): Promise<void> {
   await storageSet(dismissedKey(address), dismissed);
+}
+
+export async function readSetupMilestones(
+  address: string
+): Promise<SetupMilestones> {
+  const stored = await storageGet(milestonesKey(address));
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+    return { ...EMPTY_SETUP_MILESTONES };
+  }
+
+  const milestones = stored as Partial<SetupMilestones>;
+  return {
+    tradingWalletDeployed: milestones.tradingWalletDeployed === true,
+    hasCredentials: milestones.hasCredentials === true,
+    hasApproval: milestones.hasApproval === true,
+  };
+}
+
+export async function writeSetupMilestones(
+  address: string,
+  milestones: SetupMilestones
+): Promise<void> {
+  await storageSet(milestonesKey(address), {
+    tradingWalletDeployed: milestones.tradingWalletDeployed === true,
+    hasCredentials: milestones.hasCredentials === true,
+    hasApproval: milestones.hasApproval === true,
+  });
 }

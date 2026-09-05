@@ -27,6 +27,7 @@ import {
   readSetupDismissed,
   writeSetupComplete,
   writeSetupDismissed,
+  writeSetupMilestones,
 } from "../content/trading/setup-flow-storage";
 import {
   type LoadingMessageInput,
@@ -1558,6 +1559,15 @@ export function createPortfolioSetup(
         } else {
           await writeSetupComplete(data.ownerAddress, false);
         }
+        if (!ownsReconciliation()) return;
+      }
+
+      if (data.approvalReadStatus !== "degraded") {
+        await writeSetupMilestones(data.ownerAddress, {
+          tradingWalletDeployed: data.hasTradingWallet,
+          hasCredentials: data.hasTradingCredentials,
+          hasApproval: data.hasApproval,
+        });
         if (!ownsReconciliation()) return;
       }
 

@@ -123,3 +123,39 @@ test("reauthorizes when the stored extension session belongs to a different addr
     "Sign in to Knoww",
   ]);
 });
+
+test("coalesces concurrent authorization requests for the same wallet", async () => {
+  const existingAddress = "0x1111111111111111111111111111111111111111";
+  const requestedAddress = "0x2222222222222222222222222222222222222222";
+  const harness = installChromeRuntimeHarness(existingAddress);
+  (globalThis as { __DEV_MODE__?: boolean }).__DEV_MODE__ = false;
+  mocks.getChainId.mockResolvedValue("0x89");
+  mocks.signMessage.mockResolvedValue(`0x${"1".repeat(130)}`);
+  const { ExtensionSession } = await import(
+    "../../src/content/trading/extension-session"
+  );
+
+  await Promise.all(
+    Array.from({ length: 4 }, () =>
+      ExtensionSession.ensureAuthorized(requestedAddress)
+    )
+  );
+
+  assert.equal(mocks.signMessage.mock.calls.length, 1);
+  assert.equal(
+    harness.messages.filter(
+      (message) =>
+        message.type === "fetch-json" &&
+        message.url?.endsWith("/api/extension/session/challenge")
+    ).length,
+    1
+  );
+  assert.equal(
+    harness.messages.filter(
+      (message) =>
+        message.type === "fetch-json" &&
+        message.url?.endsWith("/api/extension/session/verify")
+    ).length,
+    1
+  );
+});

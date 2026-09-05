@@ -39,8 +39,15 @@ if (!__STORE_BUILD__) {
   configureStreamTradingRuntimePort({ load: loadTradingRuntime });
 }
 const portfolioMessageDispatcher = createPortfolioMessageDispatcher();
+const contentUiWindow = window as typeof window & {
+  KNOWW_CONTENT_UI_MESSAGE_LISTENER_INSTALLED?: boolean;
+};
 
-if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+if (
+  typeof chrome !== "undefined" &&
+  chrome.runtime?.onMessage &&
+  !contentUiWindow.KNOWW_CONTENT_UI_MESSAGE_LISTENER_INSTALLED
+) {
   chrome.runtime.onMessage.addListener(
     (
       message: NotificationUiMessage,
@@ -55,6 +62,7 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
       return portfolioMessageDispatcher.dispatch(message, sendResponse);
     }
   );
+  contentUiWindow.KNOWW_CONTENT_UI_MESSAGE_LISTENER_INSTALLED = true;
 }
 
 export const KNOWW_UI = {

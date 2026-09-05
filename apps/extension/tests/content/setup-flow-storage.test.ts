@@ -5,8 +5,10 @@ import {
   markSetupComplete,
   readSetupComplete,
   readSetupDismissed,
+  readSetupMilestones,
   writeSetupComplete,
   writeSetupDismissed,
+  writeSetupMilestones,
 } from "../../src/content/trading/setup-flow-storage";
 
 // Minimal in-memory chrome.storage.local stub.
@@ -57,8 +59,34 @@ test("dismissed flag round-trips per address", async () => {
   assert.equal(await readSetupDismissed(ADDR), false);
 });
 
+test("setup milestones round-trip per address and default to incomplete", async () => {
+  installChromeStub();
+  assert.deepEqual(await readSetupMilestones(ADDR), {
+    tradingWalletDeployed: false,
+    hasCredentials: false,
+    hasApproval: false,
+  });
+
+  await writeSetupMilestones(ADDR, {
+    tradingWalletDeployed: true,
+    hasCredentials: false,
+    hasApproval: true,
+  });
+
+  assert.deepEqual(await readSetupMilestones(ADDR.toLowerCase()), {
+    tradingWalletDeployed: true,
+    hasCredentials: false,
+    hasApproval: true,
+  });
+});
+
 test("reads default false when chrome is unavailable", async () => {
   // no stub installed
   assert.equal(await readSetupComplete(ADDR), false);
   assert.equal(await readSetupDismissed(ADDR), false);
+  assert.deepEqual(await readSetupMilestones(ADDR), {
+    tradingWalletDeployed: false,
+    hasCredentials: false,
+    hasApproval: false,
+  });
 });

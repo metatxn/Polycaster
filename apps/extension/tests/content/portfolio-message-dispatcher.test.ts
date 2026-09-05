@@ -675,4 +675,5 @@ test("the lazy runtime factory owns signing lifecycle while core keeps one dispa
     ui,
     /handleNotificationMessage[\s\S]*portfolioMessageDispatcher\.dispatch/
   );
+  assert.match(ui, /KNOWW_CONTENT_UI_MESSAGE_LISTENER_INSTALLED/);
 });

@@ -23,15 +23,18 @@ interface RuntimeResponse<T = unknown> {
 interface OnboardingStatus {
   loggedIn: boolean;
   address: string | null;
+  tradingWalletDeployed: boolean;
   hasCredentials: boolean;
+  hasApproval: boolean;
   tradingReady: boolean;
-  storeBuild: boolean;
 }
 
 interface OnboardingSnapshot {
   stage: OnboardingStage;
   address: string | null;
+  tradingWalletDeployed: boolean;
   hasCredentials: boolean;
+  hasApproval: boolean;
 }
 
 type ActionState = "idle" | "opening" | "error";
@@ -142,60 +145,300 @@ function getPreviewSnapshot(): OnboardingSnapshot {
       stage === "trading" || stage === "ready"
         ? "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"
         : null,
+    tradingWalletDeployed: stage === "trading" || stage === "ready",
     hasCredentials: stage === "ready",
+    hasApproval: stage === "ready",
   };
+}
+
+function StepIcon({ index }: { index: number }) {
+  if (index === 0) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m4 12 5 5L20 6" />
+      </svg>
+    );
+  }
+  if (index === 1) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="2.5" y="6" width="19" height="13" rx="2" />
+        <path d="M2.5 10h19M17 14.5h1.5" />
+      </svg>
+    );
+  }
+  if (index === 2) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="8" cy="8" r="4.5" />
+        <path d="m11.5 11.5 8.5 8.5M16 19l2-2" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="2.5" />
+      <circle cx="12" cy="12" r="7" />
+      <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
+    </svg>
+  );
 }
 
 function ProgressRail({ stage }: { stage: OnboardingStage }) {
   const activeIndex = STAGE_INDEX[stage];
+  const progressLabel =
+    activeIndex === 0 ? "0 of 4 complete" : `${activeIndex} of 4 complete`;
 
   return (
-    <ol className="progress-rail" aria-label="Setup progress">
-      {PROGRESS_STEPS.map((step, index) => {
-        const status =
-          index < activeIndex
-            ? "complete"
-            : index === activeIndex
-              ? "active"
-              : "upcoming";
-        return (
-          <li
-            className={`progress-step progress-step--${status}`}
-            key={step.label}
-          >
-            <span className="progress-marker" aria-hidden="true">
-              {status === "complete" ? "✓" : index + 1}
-            </span>
-            <span>
-              <strong>{step.label}</strong>
-              <small>{step.detail}</small>
-            </span>
-          </li>
-        );
-      })}
-    </ol>
+    <>
+      <div className="progress-summary">
+        <span>Progress</span>
+        <span>{progressLabel}</span>
+      </div>
+      <div className="progress-track" aria-hidden="true">
+        <span className={`progress-fill progress-fill--${activeIndex}`} />
+      </div>
+      <ol className="progress-rail" aria-label="Setup progress">
+        {PROGRESS_STEPS.map((step, index) => {
+          const status =
+            index < activeIndex
+              ? "complete"
+              : index === activeIndex
+                ? "active"
+                : "upcoming";
+          return (
+            <li
+              className={`progress-step progress-step--${status}`}
+              key={step.label}
+              aria-current={status === "active" ? "step" : undefined}
+            >
+              <span className="progress-marker">
+                <StepIcon index={index} />
+              </span>
+              <span className="progress-copy">
+                <strong>
+                  <span className="progress-index">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  {step.label}
+                </strong>
+                <small>{step.detail}</small>
+              </span>
+              <span className="progress-check" aria-hidden="true">
+                ✓
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </>
   );
 }
 
-function SetupChecklist({ complete }: { complete: boolean }) {
+function FeatureIcon({ kind }: { kind: "radar" | "trade" | "portfolio" }) {
+  if (kind === "radar") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="4" />
+        <path d="m12 12 6-4" />
+      </svg>
+    );
+  }
+  if (kind === "trade") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z" />
+      </svg>
+    );
+  }
   return (
-    <ul className="setup-checklist" aria-label="Trading setup checklist">
-      {["Trading account", "API keys", "Token approval"].map((item) => (
-        <li key={item}>
-          <span className={complete ? "check check--complete" : "check"}>
-            {complete ? "✓" : "·"}
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 19h18M6 19V9M11 19V5M16 19v-7" />
+    </svg>
+  );
+}
+
+function FeatureList() {
+  const features = __STORE_BUILD__
+    ? [
+        {
+          kind: "radar" as const,
+          label: "Radar",
+          detail:
+            "Live markets matched to the post or article in front of you.",
+        },
+        {
+          kind: "portfolio" as const,
+          label: "Portfolio",
+          detail: "Read-only positions and P&L in the same panel.",
+        },
+      ]
+    : [
+        {
+          kind: "radar" as const,
+          label: "Radar",
+          detail:
+            "Live markets matched to the post, article, or box score in front of you.",
+        },
+        {
+          kind: "trade" as const,
+          label: "One-click trade",
+          detail: "Take Yes or No straight from the inline panel.",
+        },
+        {
+          kind: "portfolio" as const,
+          label: "Portfolio",
+          detail: "Open positions, resting orders, and P&L in the same panel.",
+        },
+      ];
+
+  return (
+    <ul className="feature-list">
+      {features.map((feature) => (
+        <li key={feature.label}>
+          <span className="feature-icon">
+            <FeatureIcon kind={feature.kind} />
           </span>
-          {item}
+          <strong>{feature.label}</strong>
+          <span>{feature.detail}</span>
         </li>
       ))}
     </ul>
   );
 }
 
+function SetupChecklist({ snapshot }: { snapshot: OnboardingSnapshot }) {
+  const milestones = [
+    {
+      label: "Trading account",
+      complete: snapshot.tradingWalletDeployed,
+    },
+    { label: "API keys", complete: snapshot.hasCredentials },
+    { label: "Token approval", complete: snapshot.hasApproval },
+  ];
+
+  return (
+    <ul className="setup-checklist" aria-label="Trading setup checklist">
+      {milestones.map((milestone) => (
+        <li
+          className={milestone.complete ? "is-complete" : undefined}
+          key={milestone.label}
+        >
+          <span className="check">{milestone.complete ? "✓" : "·"}</span>
+          <span>{milestone.label}</span>
+          <small>{milestone.complete ? "Complete" : "Complete in panel"}</small>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function WalletOptions() {
+  return (
+    <div className="wallet-options">
+      <div className="wallet-option">
+        <span className="wallet-option-mark" aria-hidden="true">
+          B
+        </span>
+        <span>
+          <strong>Browser wallets</strong>
+          <small>MetaMask, Coinbase Wallet, Rabby</small>
+        </span>
+        <span className="wallet-option-kind">Extension</span>
+      </div>
+      <div className="wallet-option">
+        <span className="wallet-option-mark" aria-hidden="true">
+          W
+        </span>
+        <span>
+          <strong>Mobile wallet</strong>
+          <small>Scan from any WalletConnect wallet</small>
+        </span>
+        <span className="wallet-option-kind">QR</span>
+      </div>
+    </div>
+  );
+}
+
+function SetupFacts() {
+  return (
+    <dl className="setup-facts">
+      <div>
+        <dt>Network</dt>
+        <dd>Polygon · 137</dd>
+      </div>
+      <div>
+        <dt>Signature</dt>
+        <dd>Read-only · no gas</dd>
+      </div>
+    </dl>
+  );
+}
+
+function LivePreview() {
+  return (
+    <div className="live-preview">
+      <div className="live-preview-bar">
+        <span className="live-preview-label">
+          <span className="status-pulse" /> Live preview
+        </span>
+        <span className="live-preview-sites">
+          x.com · reddit · bsky · bloomberg
+        </span>
+      </div>
+      <div className="preview-post">
+        <div className="preview-post-meta">
+          <span className="preview-avatar">K</span>
+          <span>
+            <strong>Knoww market</strong>
+            <small>Matched to what you are reading</small>
+          </span>
+        </div>
+        <h3>Will the Fed cut rates at its next meeting?</h3>
+        <div className="preview-outcomes" aria-hidden="true">
+          <span className="preview-outcome">
+            Yes <strong>60¢</strong>
+          </span>
+          <span className="preview-outcome preview-outcome--no">
+            No <strong>40¢</strong>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageNotice({
+  notice,
+  error,
+  fallback,
+}: {
+  notice: string;
+  error: boolean;
+  fallback: string;
+}) {
+  return (
+    <p
+      className={`action-notice${error ? " action-notice--error" : ""}`}
+      aria-live="polite"
+    >
+      {!error && <span className="status-pulse" aria-hidden="true" />}
+      {notice || fallback}
+    </p>
+  );
+}
+
 function OnboardingApp() {
   const [snapshot, setSnapshot] = React.useState<OnboardingSnapshot>(() =>
     hasExtensionRuntime()
-      ? { stage: "welcome", address: null, hasCredentials: false }
+      ? {
+          stage: "welcome",
+          address: null,
+          tradingWalletDeployed: false,
+          hasCredentials: false,
+          hasApproval: false,
+        }
       : getPreviewSnapshot()
   );
   const [loading, setLoading] = React.useState(hasExtensionRuntime());
@@ -228,7 +471,9 @@ function OnboardingApp() {
         statusResponse.ok === true &&
         status?.loggedIn === true &&
         address !== null;
+      const tradingWalletDeployed = status?.tradingWalletDeployed === true;
       const hasCredentials = status?.hasCredentials === true;
+      const hasApproval = status?.hasApproval === true;
       const tradingReady = status?.tradingReady === true;
 
       const walletCheckResult = loggedIn ? "connected" : "not_connected";
@@ -268,8 +513,15 @@ function OnboardingApp() {
         });
       }
 
-      setSnapshot({ stage, address, hasCredentials });
+      setSnapshot({
+        stage,
+        address,
+        tradingWalletDeployed,
+        hasCredentials,
+        hasApproval,
+      });
       setActionState("idle");
+      setNotice("");
       setLoading(false);
     } catch {
       setActionState("error");
@@ -314,7 +566,12 @@ function OnboardingApp() {
     if (!hasExtensionRuntime()) {
       setSnapshot((current) => ({
         ...current,
-        stage: current.stage === "welcome" ? "wallet" : "trading",
+        stage:
+          current.stage === "welcome"
+            ? "wallet"
+            : current.stage === "wallet"
+              ? "trading"
+              : "ready",
       }));
       return;
     }
@@ -382,30 +639,21 @@ function OnboardingApp() {
     if (hasExtensionRuntime()) void chrome.runtime.openOptionsPage();
   };
 
-  const content = {
-    welcome: {
-      eyebrow: "Installed",
-      title: "Bring live markets into what you read.",
-      body: "Connect your wallet to activate Knoww. Then we'll guide you through the remaining setup and show your first injected Polymarket market on X.",
-    },
-    wallet: {
-      eyebrow: "Wallet check",
-      title: "Connect your wallet to Knoww.",
-      body: "Your wallet is your Knoww login. Continue with MetaMask, another supported EOA wallet, or WalletConnect.",
-    },
-    trading: {
-      eyebrow: "Wallet connected",
-      title: "Finish your trading setup.",
-      body: "The Knoww panel will create your Polymarket trading account, prepare API keys, and request token approval. Follow each prompt in your wallet.",
-    },
-    ready: {
-      eyebrow: "Setup complete",
-      title: __STORE_BUILD__ ? "Knoww is ready." : "You're ready to trade.",
-      body: __STORE_BUILD__
-        ? "Browse normally and Knoww will surface relevant markets when available. Your Chrome Web Store build includes market discovery and a read-only portfolio."
-        : "Your wallet and Polymarket trading setup are ready. Open the demo page and Knoww will point out an injected market.",
-    },
-  }[snapshot.stage];
+  const closeOnboarding = () => {
+    if (!hasExtensionRuntime()) {
+      window.close();
+      return;
+    }
+    chrome.tabs.getCurrent((tab) => {
+      if (typeof tab?.id === "number") void chrome.tabs.remove(tab.id);
+    });
+  };
+
+  const activeIndex = STAGE_INDEX[snapshot.stage];
+  const activeStep = PROGRESS_STEPS[activeIndex];
+  const extensionVersion = hasExtensionRuntime()
+    ? chrome.runtime.getManifest().version
+    : "preview";
 
   return (
     <main className="onboarding-shell">
@@ -414,13 +662,25 @@ function OnboardingApp() {
           <span className="brand-mark" aria-hidden="true" />
           <span>Knoww</span>
         </div>
-        <span className="build-label">Market discovery extension</span>
+        <div className="build-meta">
+          <span className="build-label">
+            <span className="build-dot" /> Market discovery extension
+          </span>
+          <span className="version-label">v{extensionVersion}</span>
+        </div>
       </header>
 
       <div className="onboarding-layout">
         <aside className="progress-panel">
-          <p className="progress-kicker">From installed to useful</p>
+          <p className="progress-kicker">
+            <span className="status-pulse" /> Setup
+            <span>· from installed to useful</span>
+          </p>
           <h2>Four short steps. No guessing.</h2>
+          <p className="progress-intro">
+            Wire up your wallet and trading account once. After that, Knoww
+            surfaces live markets on whatever you are reading.
+          </p>
           <ProgressRail stage={snapshot.stage} />
           <p className="privacy-note">
             Knoww uses your public wallet address to identify your account and
@@ -428,97 +688,209 @@ function OnboardingApp() {
           </p>
         </aside>
 
-        <section className="stage-panel" aria-busy={loading}>
-          <div className="stage-count">
-            Step {Math.min(STAGE_INDEX[snapshot.stage] + 1, 4)} of 4
+        <section
+          className="stage-panel"
+          aria-busy={loading}
+          aria-label={loading ? "Knoww onboarding" : undefined}
+          aria-labelledby={loading ? undefined : "onboarding-stage-title"}
+        >
+          <div className="stage-progress" aria-hidden="true">
+            <span
+              className={`stage-progress-fill stage-progress-fill--${activeIndex}`}
+            />
           </div>
-          {loading ? (
-            <div className="loading-state" role="status">
-              <span className="loading-dot" /> Checking your setup…
+          <div className="stage-panel-inner">
+            <div className="stage-meta">
+              <span>Step {String(activeIndex + 1).padStart(2, "0")} / 04</span>
+              <span className="stage-phase">
+                <span className="status-pulse" /> {activeStep.label}
+              </span>
             </div>
-          ) : (
-            <>
-              <p className="eyebrow">{content.eyebrow}</p>
-              <h1>{content.title}</h1>
-              <p className="stage-copy">{content.body}</p>
 
-              {snapshot.address && (
-                <div className="wallet-chip">
-                  <span className="wallet-status-dot" />
-                  <span>Connected</span>
-                  <code>{formatAddress(snapshot.address)}</code>
-                </div>
-              )}
-
-              {snapshot.stage === "trading" && (
-                <SetupChecklist complete={false} />
-              )}
-              {snapshot.stage === "ready" && !__STORE_BUILD__ && (
-                <SetupChecklist complete={snapshot.hasCredentials} />
-              )}
-
-              <div className="actions">
-                {snapshot.stage === "ready" ? (
-                  <button
-                    className="primary-action"
-                    type="button"
-                    onClick={openDemo}
-                  >
-                    See Knoww on X <span aria-hidden="true">↗</span>
-                  </button>
-                ) : (
-                  <button
-                    className="primary-action"
-                    type="button"
-                    onClick={startSetup}
-                    disabled={actionState === "opening"}
-                  >
-                    {snapshot.stage === "welcome"
-                      ? "Connect wallet"
-                      : snapshot.stage === "wallet"
-                        ? "Continue with a wallet"
-                        : "Finish trading setup"}
-                    <span aria-hidden="true">→</span>
-                  </button>
+            {loading ? (
+              <div className="loading-state" role="status">
+                <span className="loading-dot" /> Checking your setup…
+              </div>
+            ) : (
+              <div className="stage-content">
+                {snapshot.stage === "welcome" && (
+                  <>
+                    <div className="stage-intro">
+                      <h1 id="onboarding-stage-title">
+                        Knoww is installed. Here is what it does.
+                      </h1>
+                      <p>
+                        {__STORE_BUILD__
+                          ? "Knoww reads the page you are on and surfaces the prediction markets that price what is being discussed."
+                          : "Knoww reads the page you are on, finds the prediction markets that price what is being discussed, and lets you trade without leaving the tab."}
+                      </p>
+                    </div>
+                    <FeatureList />
+                    <div className="actions">
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={startSetup}
+                        disabled={actionState === "opening"}
+                      >
+                        Start setup <span aria-hidden="true">→</span>
+                      </button>
+                      <span className="duration-note">About 2 minutes</span>
+                    </div>
+                    {notice && (
+                      <StageNotice
+                        notice={notice}
+                        error={actionState === "error"}
+                        fallback=""
+                      />
+                    )}
+                  </>
                 )}
 
                 {snapshot.stage === "wallet" && (
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={installMetaMask}
-                  >
-                    Install MetaMask <span aria-hidden="true">↗</span>
-                  </button>
+                  <>
+                    <div className="stage-intro">
+                      <h1 id="onboarding-stage-title">
+                        Connect your wallet to Knoww.
+                      </h1>
+                      <p>
+                        Your wallet is your Knoww login. Continue with a
+                        supported browser wallet or WalletConnect.
+                      </p>
+                    </div>
+                    <WalletOptions />
+                    <div className="actions">
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={startSetup}
+                        disabled={actionState === "opening"}
+                      >
+                        Continue with a wallet <span aria-hidden="true">→</span>
+                      </button>
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        onClick={installMetaMask}
+                      >
+                        Install MetaMask <span aria-hidden="true">↗</span>
+                      </button>
+                    </div>
+                    <SetupFacts />
+                    <p className="support-note">
+                      Already have a wallet? Continue and select it in the Knoww
+                      panel. If not, install MetaMask and return to this tab.
+                      Setup resumes where you left off.
+                    </p>
+                    <StageNotice
+                      notice={notice}
+                      error={actionState === "error"}
+                      fallback="Awaiting connection in the Knoww panel"
+                    />
+                  </>
+                )}
+
+                {snapshot.stage === "trading" && (
+                  <>
+                    <div className="stage-intro">
+                      <h1 id="onboarding-stage-title">
+                        Finish your trading setup.
+                      </h1>
+                      <p>
+                        Knoww creates your Polymarket trading account and API
+                        keys, then asks you to set a USDC allowance. Complete
+                        each prompt in the panel.
+                      </p>
+                    </div>
+                    {snapshot.address && (
+                      <div className="wallet-chip">
+                        <span className="wallet-status-dot" />
+                        <span>Wallet connected</span>
+                        <code>{formatAddress(snapshot.address)}</code>
+                      </div>
+                    )}
+                    <SetupChecklist snapshot={snapshot} />
+                    <div className="actions">
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={startSetup}
+                        disabled={actionState === "opening"}
+                      >
+                        Continue in Knoww panel{" "}
+                        <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                    <p className="support-note">
+                      Your wallet signs only the account setup and allowance
+                      requests. Knoww never receives your private key.
+                    </p>
+                    <StageNotice
+                      notice={notice}
+                      error={actionState === "error"}
+                      fallback="Waiting for trading setup in the Knoww panel"
+                    />
+                  </>
                 )}
 
                 {snapshot.stage === "ready" && (
-                  <button
-                    className="text-action"
-                    type="button"
-                    onClick={openSettings}
-                  >
-                    Extension settings
-                  </button>
+                  <>
+                    <div className="stage-intro">
+                      <h1 id="onboarding-stage-title">
+                        Try it on a live post.
+                      </h1>
+                      <p>
+                        {__STORE_BUILD__
+                          ? "Open a post about news, sports, or crypto. Knoww matches it to a relevant market and adds it to the page."
+                          : "Open a post about news, sports, or crypto. Knoww matches it to a market and adds the trading panel inline."}
+                      </p>
+                    </div>
+                    {snapshot.address && (
+                      <div className="wallet-chip">
+                        <span className="wallet-status-dot" />
+                        <span>Setup complete</span>
+                        <code>{formatAddress(snapshot.address)}</code>
+                      </div>
+                    )}
+                    <LivePreview />
+                    <div className="actions">
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={openDemo}
+                      >
+                        Open x.com and try it <span aria-hidden="true">↗</span>
+                      </button>
+                    </div>
+                    <StageNotice
+                      notice={notice}
+                      error={actionState === "error"}
+                      fallback="Radar active · scanning open tabs"
+                    />
+                  </>
                 )}
               </div>
+            )}
 
-              {snapshot.stage === "wallet" && (
-                <p className="support-note">
-                  Already have a wallet? Continue and select it in the Knoww
-                  panel. If not, install MetaMask, then return here.
-                </p>
-              )}
-              {notice && (
-                <p
-                  className={`action-notice${actionState === "error" ? " action-notice--error" : ""}`}
-                  aria-live="polite"
+            <div className="stage-footer">
+              <button
+                className="text-action"
+                type="button"
+                onClick={openSettings}
+              >
+                Extension settings <span aria-hidden="true">↗</span>
+              </button>
+              {snapshot.stage !== "ready" && (
+                <button
+                  className="text-action"
+                  type="button"
+                  onClick={closeOnboarding}
                 >
-                  {notice}
-                </p>
+                  Skip for now
+                </button>
               )}
-            </>
-          )}
+            </div>
+          </div>
         </section>
       </div>
 

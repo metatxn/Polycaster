@@ -76,6 +76,34 @@ describe("install-time extension onboarding", () => {
     expect(onboarding).not.toContain("Trading extension");
   });
 
+  it("uses the supplied compact onboarding design without replacing real setup actions", () => {
+    const onboarding = readSource("src/onboarding.tsx");
+    const styles = readSource("src/onboarding.css");
+
+    for (const content of [
+      "0 of 4 complete",
+      "Knoww is installed. Here is what it does.",
+      "Browser wallets",
+      "Polygon · 137",
+      "Live preview",
+      "Open x.com and try it",
+    ]) {
+      expect(onboarding).toContain(content);
+    }
+    for (const className of [
+      "progress-summary",
+      "stage-progress",
+      "feature-list",
+      "wallet-options",
+      "live-preview",
+    ]) {
+      expect(`${onboarding}\n${styles}`).toContain(className);
+    }
+    expect(onboarding).toContain('type: "KNOWW_START_ONBOARDING_SETUP"');
+    expect(onboarding).toContain('type: "KNOWW_OPEN_ONBOARDING_DEMO"');
+    expect(onboarding).not.toContain("Agent-assisted");
+  });
+
   it("keeps wallet setup separate from the final X demonstration", () => {
     const onboarding = readSource("src/onboarding.tsx");
     const onboardingState = readSource("src/onboarding-state.ts");
@@ -127,5 +155,35 @@ describe("install-time extension onboarding", () => {
       expect(analyticsSources).toContain(event);
     }
     expect(analyticsSources).not.toContain("page_url");
+  });
+
+  it("shows each trading milestone independently for returning users", () => {
+    const onboarding = readSource("src/onboarding.tsx");
+    const background = readSource("src/background.ts");
+    const setup = readSource("src/sidepanel/setup.ts");
+
+    for (const milestone of [
+      "tradingWalletDeployed",
+      "hasCredentials",
+      "hasApproval",
+    ]) {
+      expect(onboarding).toContain(milestone);
+      expect(background).toContain(milestone);
+    }
+    expect(background).toContain("readSetupMilestones");
+    expect(setup).toContain("writeSetupMilestones");
+  });
+
+  it("clears wallet instructions after a successful status refresh", () => {
+    const onboarding = readSource("src/onboarding.tsx");
+    const refreshStart = onboarding.indexOf(
+      "const refreshStatus = React.useCallback"
+    );
+    const refreshEnd = onboarding.indexOf("React.useEffect", refreshStart);
+    const refreshStatus = onboarding.slice(refreshStart, refreshEnd);
+
+    expect(refreshStatus).toMatch(
+      /setSnapshot\([^;]+;[\s\S]*?setActionState\("idle"\);[\s\S]*?setNotice\(""\);/
+    );
   });
 });

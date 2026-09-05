@@ -61,7 +61,15 @@ describe("Task 16 review regressions", () => {
     await expect(
       setup.reconcileLoadedData(setupData("0xccc", true), () => true)
     ).resolves.toBe(true);
-    expect(writes).toEqual([]);
+    expect(writes).toEqual([
+      {
+        "knoww:setup-milestones:0xccc": {
+          tradingWalletDeployed: true,
+          hasCredentials: true,
+          hasApproval: true,
+        },
+      },
+    ]);
     expect(setup.renderSurface(setupData("0xccc", true)).mode).toBe("complete");
   });
 
@@ -186,7 +194,16 @@ describe("Task 16 review regressions", () => {
     await expect(stale).resolves.toBe(false);
     await expect(newer).resolves.toBe(true);
 
-    expect(writes).toEqual([{ "knoww:setup-complete:0xbbb": true }]);
+    expect(writes).toEqual([
+      { "knoww:setup-complete:0xbbb": true },
+      {
+        "knoww:setup-milestones:0xbbb": {
+          tradingWalletDeployed: true,
+          hasCredentials: true,
+          hasApproval: true,
+        },
+      },
+    ]);
     expect(setup.renderSurface(setupData("0xbbb", true)).mode).toBe("complete");
   });
 

@@ -72,7 +72,10 @@ import {
   extractDerivedCredentials,
   tradingOpNeedsCredentials,
 } from "./background/trading-credential-mediation";
-import { readSetupComplete } from "./content/trading/setup-flow-storage";
+import {
+  readSetupComplete,
+  readSetupMilestones,
+} from "./content/trading/setup-flow-storage";
 import { TRADING_WARM_ELIGIBLE_STORAGE_KEY } from "./content/trading-warm-flag";
 import { canUseProductionReranker } from "./context-promotion";
 import {
@@ -1579,20 +1582,35 @@ chrome.runtime.onMessage.addListener(
       void (async () => {
         const session = await getExtensionSessionInfo();
         const walletAddress = toOnboardingWalletAddress(session.address);
-        const [hasCredentials, setupComplete] =
+        const [hasCredentials, setupComplete, milestones] =
           !__STORE_BUILD__ && walletAddress
             ? await Promise.all([
                 hasClobCredentials(walletAddress),
                 readSetupComplete(walletAddress),
+                readSetupMilestones(walletAddress),
               ])
-            : [false, false];
+            : [
+                false,
+                false,
+                {
+                  tradingWalletDeployed: false,
+                  hasCredentials: false,
+                  hasApproval: false,
+                },
+              ];
+        const tradingWalletDeployed =
+          setupComplete || milestones.tradingWalletDeployed;
+        const hasApproval = setupComplete || milestones.hasApproval;
         sendResponse({
           ok: true,
           data: {
             loggedIn: session.loggedIn,
             address: walletAddress ?? null,
             hasCredentials,
-            tradingReady: hasCredentials && setupComplete,
+            tradingWalletDeployed,
+            hasApproval,
+            tradingReady:
+              hasCredentials && tradingWalletDeployed && hasApproval,
             storeBuild: __STORE_BUILD__,
           },
         } as BackgroundResponse);

@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
     reactCompiler: true,
   },
   poweredByHeader: false,
+  // Shared packages export TypeScript, including the browser analytics entry.
+  transpilePackages: ["@knoww/shared-types"],
   // Turbopack configuration for development
   turbopack: {
     resolveExtensions: [".mdx", ".tsx", ".ts", ".jsx", ".js", ".mjs", ".json"],

@@ -1,3 +1,4 @@
+import { analyticsEventUuid } from "@knoww/shared-types/product-analytics";
 import { PostHog } from "posthog-node";
 
 let posthogClient: PostHog | null = null;
@@ -59,8 +60,16 @@ export async function captureServerEvents(
     posthog.capture({
       distinctId: event.distinctId,
       event: event.event,
-      properties: event.properties,
+      properties: {
+        ...event.properties,
+        environment: event.properties?.environment ?? process.env.NODE_ENV,
+      },
       timestamp: event.timestamp ? new Date(event.timestamp) : undefined,
+      uuid: analyticsEventUuid(
+        event.event,
+        event.distinctId,
+        event.properties?.$insert_id
+      ),
     });
   }
   await posthog.flush();

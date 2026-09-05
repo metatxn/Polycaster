@@ -10,7 +10,13 @@ import {
   useMemo,
   useRef,
 } from "react";
-import { createPublicClient, getAddress, http, type PublicClient } from "viem";
+import {
+  createPublicClient,
+  getAddress,
+  http,
+  isAddress,
+  type PublicClient,
+} from "viem";
 import {
   type UseWalletClientReturnType,
   useConnection,
@@ -74,6 +80,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // EOA address
   const eoaAddress = address || null;
   const wasConnectedRef = useRef(isConnected);
+  const analyticsWalletRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isConnected || !address) return;
@@ -83,13 +90,54 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isConnected && address) {
       const walletAddress = getAddress(address);
+      const persistedId = posthog.get_distinct_id();
+      const previousWallet =
+        analyticsWalletRef.current ??
+        (persistedId && isAddress(persistedId)
+          ? getAddress(persistedId)
+          : null);
+      if (previousWallet && previousWallet !== walletAddress) {
+        posthog.reset();
+      }
       posthog.identify(walletAddress, { wallet_address: walletAddress });
+      posthog.register({
+        product: "web",
+        analytics_version: 2,
+        wallet_address: walletAddress,
+      });
+      if (analyticsWalletRef.current !== walletAddress) {
+        posthog.capture("wallet_session_ready", {
+          product: "web",
+          wallet_address: walletAddress,
+          connection_mode: wasConnectedRef.current
+            ? "restored_or_switched"
+            : "connected",
+        });
+      }
       if (!wasConnectedRef.current) {
         posthog.capture("wallet_connected", {
           product: "web",
           wallet_address: walletAddress,
         });
+      } else if (
+        analyticsWalletRef.current &&
+        analyticsWalletRef.current !== walletAddress
+      ) {
+        posthog.capture("wallet_switched", {
+          product: "web",
+          wallet_address: walletAddress,
+        });
       }
+      analyticsWalletRef.current = walletAddress;
+    } else if (analyticsWalletRef.current) {
+      posthog.capture("wallet_disconnected", {
+        wallet_address: analyticsWalletRef.current,
+        product: "web",
+      });
+      posthog.reset();
+      posthog.unregister("wallet_address");
+      posthog.register({ product: "web", analytics_version: 2 });
+      analyticsWalletRef.current = null;
     }
     wasConnectedRef.current = isConnected;
   }, [isConnected, address]);

@@ -119,12 +119,12 @@ describe("SellPositionModal", () => {
     );
 
     await waitFor(() => {
-      expect(toastMock.success).toHaveBeenCalledWith("Sell order filled", {
+      expect(toastMock.success).toHaveBeenCalledWith("Sell order submitted", {
         description: "Estimated proceeds: $1.24.",
       });
     });
     expect(posthogMock.capture).toHaveBeenCalledWith(
-      "order_attempted",
+      "trade_button_clicked",
       expect.objectContaining({
         product: "web",
         side: "SELL",
@@ -134,7 +134,7 @@ describe("SellPositionModal", () => {
         order_value: 1.24,
       })
     );
-    expect(posthogMock.capture).toHaveBeenCalledWith(
+    expect(posthogMock.capture).not.toHaveBeenCalledWith(
       "order_succeeded",
       expect.objectContaining({
         product: "web",
@@ -145,7 +145,7 @@ describe("SellPositionModal", () => {
         order_value: 1.24,
       })
     );
-    expect(posthogMock.capture).toHaveBeenCalledWith(
+    expect(posthogMock.capture).not.toHaveBeenCalledWith(
       "sell_succeeded",
       expect.objectContaining({
         product: "web",
@@ -173,7 +173,7 @@ describe("SellPositionModal", () => {
 
     await waitFor(() => {
       expect(posthogMock.capture).toHaveBeenCalledWith(
-        "order_failed",
+        "trade_form_submission_failed",
         expect.objectContaining({
           product: "web",
           surface: "portfolio_quick_sell",

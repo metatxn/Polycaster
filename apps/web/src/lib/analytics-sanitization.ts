@@ -3,6 +3,13 @@ import { getAddress } from "viem";
 const SENSITIVE_PROPERTY_KEYS = new Set([
   "address",
   "authorization",
+  "apikey",
+  "apisecret",
+  "apipassphrase",
+  "privatekey",
+  "seedphrase",
+  "password",
+  "credentials",
   "body",
   "challengetoken",
   "message",

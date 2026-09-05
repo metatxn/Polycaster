@@ -20,6 +20,7 @@ import {
   type ClobBalanceAllowanceClient,
   type ClobBalanceAllowanceTarget,
   type ClobOrderType,
+  getClobPostOrderError,
   syncClobBalanceAllowance,
   TRADING_SIDES,
   type TradingSide,
@@ -33,6 +34,7 @@ import {
   type LegacyClobCompatibleClient,
   type UnifiedSdkTradingClient,
 } from "@knoww/shared-types/polymarket-unified";
+import { assertOrderCancelled } from "@knoww/shared-types/product-analytics";
 import {
   buildClobOrderPreflightPlan,
   buildPusdAutoWrapTransactions,
@@ -42,9 +44,14 @@ import {
   planPusdAutoWrap,
 } from "@knoww/shared-types/trading";
 import { isWalletRejectionError } from "@knoww/shared-types/trading-errors";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Address } from "viem";
 import { useConnection, useWalletClient } from "wagmi";
+import {
+  captureTradingEvent,
+  pollConfirmedOrders,
+  rememberAcceptedOrder,
+} from "@/lib/order-analytics";
 
 const log = createLogger("clob-client");
 
@@ -275,6 +282,18 @@ export function useClobClient() {
       hasViemWalletProvider(walletClient)
     );
   }, [isConnected, hasCredentials, hasProxyWallet, proxyAddress, walletClient]);
+
+  useEffect(() => {
+    if (!canTrade || !address) return;
+    const poll = () => {
+      void getReadOnlyClient()
+        .then((client) => pollConfirmedOrders(address, client))
+        .catch(() => {});
+    };
+    poll();
+    const timer = setInterval(poll, 30_000);
+    return () => clearInterval(timer);
+  }, [canTrade, address, getReadOnlyClient]);
 
   /**
    * Estimate the taker fee a BUY would incur, in pUSD base units.
@@ -570,6 +589,21 @@ export function useClobClient() {
       if (!address) throw new Error("Wallet not connected");
       if (!canTrade) throw new Error("Trading setup incomplete");
 
+      const analytics = {
+        surface: "trading_service",
+        attempt_id: crypto.randomUUID(),
+        side: params.side,
+        order_type:
+          params.orderType === "GTC" || params.orderType === "GTD"
+            ? "LIMIT"
+            : "MARKET",
+        clob_order_type: params.orderType,
+        token_id: params.tokenId,
+        condition_id: params.conditionId,
+        requested_shares: params.size,
+        requested_amount: params.amount,
+      };
+      captureTradingEvent("order_attempted", address, analytics);
       setIsLoading(true);
       const activeStepRef: { current: ClobOperationStep } = {
         current: "checking",
@@ -583,6 +617,7 @@ export function useClobClient() {
       let requiredConditionalRaw: bigint | null = null;
       let sellBalanceBeforePostRaw: bigint | null = null;
       let didPostOrder = false;
+      let confirmedRejection = false;
 
       try {
         const client = await getClient();
@@ -782,7 +817,11 @@ export function useClobClient() {
 
           didPostOrder = true;
           const response = await client.postOrder(order, params.orderType);
+          confirmedRejection = !!getClobPostOrderError(response);
           assertClobPostOrderSuccess(response);
+          void rememberAcceptedOrder(response, address, analytics).then(() =>
+            pollConfirmedOrders(address, client)
+          );
           return { success: true, order: response };
         }
 
@@ -805,9 +844,20 @@ export function useClobClient() {
 
         didPostOrder = true;
         const response = await client.postOrder(order, params.orderType);
+        confirmedRejection = !!getClobPostOrderError(response);
         assertClobPostOrderSuccess(response);
+        void rememberAcceptedOrder(response, address, analytics).then(() =>
+          pollConfirmedOrders(address, client)
+        );
         return { success: true, order: response };
       } catch (err) {
+        captureTradingEvent(
+          didPostOrder && !confirmedRejection
+            ? "order_submission_unknown"
+            : "order_failed",
+          address,
+          { ...analytics, failure_stage: activeStepRef.current }
+        );
         if (
           didPostOrder &&
           params.side === Side.SELL &&
@@ -1040,11 +1090,25 @@ export function useClobClient() {
       setIsLoading(true);
       setError(null);
 
+      if (address)
+        captureTradingEvent("order_cancel_attempted", address, {
+          order_id: orderId,
+        });
       try {
         const client = await getClient();
         const response = await client.cancelOrder({ orderId });
+        assertOrderCancelled(response, orderId);
+        if (address)
+          captureTradingEvent("order_cancelled", address, {
+            order_id: orderId,
+            $insert_id: `cancel:${address}:${orderId}`,
+          });
         return { success: true, response };
       } catch (err) {
+        if (address)
+          captureTradingEvent("order_cancel_failed", address, {
+            order_id: orderId,
+          });
         const error =
           err instanceof Error ? err : new Error("Failed to cancel order");
         setError(error);
@@ -1053,7 +1117,7 @@ export function useClobClient() {
         setIsLoading(false);
       }
     },
-    [canTrade, getClient]
+    [canTrade, getClient, address]
   );
 
   /**

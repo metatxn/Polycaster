@@ -431,7 +431,7 @@ describe("TradingForm", () => {
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
     expect(posthog.capture).toHaveBeenCalledWith(
-      "order_attempted",
+      "trade_button_clicked",
       expect.objectContaining({
         product: "web",
         surface: "trading_form",
@@ -447,7 +447,7 @@ describe("TradingForm", () => {
         total_cost: 1.06,
       })
     );
-    expect(posthog.capture).toHaveBeenCalledWith(
+    expect(posthog.capture).not.toHaveBeenCalledWith(
       "order_succeeded",
       expect.objectContaining({
         product: "web",
@@ -459,9 +459,9 @@ describe("TradingForm", () => {
       })
     );
     expect(toast.success).toHaveBeenCalledWith(
-      "Order filled",
+      "Order submitted",
       expect.objectContaining({
-        description: "Bought 6 YES at market.",
+        description: "Check your portfolio for confirmed fills.",
       })
     );
   });
@@ -484,7 +484,7 @@ describe("TradingForm", () => {
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
     expect(posthog.capture).toHaveBeenCalledWith(
-      "order_attempted",
+      "trade_button_clicked",
       expect.objectContaining({
         product: "web",
         surface: "trading_form",
@@ -494,7 +494,7 @@ describe("TradingForm", () => {
       })
     );
     expect(posthog.capture).toHaveBeenCalledWith(
-      "order_failed",
+      "trade_form_submission_failed",
       expect.objectContaining({
         product: "web",
         surface: "trading_form",
@@ -594,7 +594,7 @@ describe("TradingForm", () => {
     );
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
-    expect(posthog.capture).toHaveBeenCalledWith(
+    expect(posthog.capture).not.toHaveBeenCalledWith(
       "order_succeeded",
       expect.objectContaining({
         product: "web",
@@ -602,7 +602,7 @@ describe("TradingForm", () => {
         order_type: "MARKET",
       })
     );
-    expect(posthog.capture).toHaveBeenCalledWith(
+    expect(posthog.capture).not.toHaveBeenCalledWith(
       "sell_succeeded",
       expect.objectContaining({
         product: "web",

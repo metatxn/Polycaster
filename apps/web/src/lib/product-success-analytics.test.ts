@@ -16,8 +16,8 @@ describe("product success analytics", () => {
     expect(
       readSource("src/components/trading/merge-shares-modal.tsx")
     ).toContain('posthog.capture("position_merge_succeeded"');
-    expect(readSource("src/hooks/use-open-orders.ts")).toContain(
-      'posthog.capture("order_cancelled"'
+    expect(readSource("src/hooks/use-clob-client.ts")).toContain(
+      'captureTradingEvent("order_cancelled"'
     );
   });
 });

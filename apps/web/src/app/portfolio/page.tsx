@@ -213,6 +213,11 @@ export default function PortfolioPage() {
     // steal it and its `finally` re-enable the first row mid-flight, allowing
     // duplicate concurrent redeems of the same condition.
     if (!tradingAddress || closingConditionIds.has(conditionId)) return;
+    posthog.capture("position_redeem_submitted", {
+      product: "web",
+      condition_id: conditionId,
+      surface: "lost_position",
+    });
     setClosingConditionIds((current) => {
       const next = new Set(current);
       next.add(conditionId);
@@ -228,6 +233,7 @@ export default function PortfolioPage() {
         posthog.capture("position_redeemed", {
           product: "web",
           surface: "lost_position",
+          condition_id: conditionId,
           neg_risk: negRisk,
         });
         setClosedConditionIds((current) => {
@@ -240,9 +246,17 @@ export default function PortfolioPage() {
         refetchPositions();
         refreshProxyWallet();
       } else {
+        posthog.capture("position_redeem_failed", {
+          product: "web",
+          condition_id: conditionId,
+        });
         toast.error("Failed to close position");
       }
     } catch {
+      posthog.capture("position_redeem_failed", {
+        product: "web",
+        condition_id: conditionId,
+      });
       toast.error("Failed to close position");
     } finally {
       setClosingConditionIds((current) => {
@@ -267,6 +281,11 @@ export default function PortfolioPage() {
       next.add(position.id);
       return next;
     });
+    posthog.capture("position_redeem_submitted", {
+      product: "web",
+      condition_id: position.conditionId,
+      surface: "winning_position",
+    });
     try {
       const result = await redeemPositions(
         position.conditionId,
@@ -278,6 +297,7 @@ export default function PortfolioPage() {
         posthog.capture("position_redeemed", {
           product: "web",
           surface: "winning_position",
+          condition_id: position.conditionId,
           market_title: position.market.title,
           outcome: position.outcome,
           neg_risk: position.negRisk ?? false,
@@ -289,9 +309,17 @@ export default function PortfolioPage() {
         refetchUserDetails();
         refreshProxyWallet();
       } else {
+        posthog.capture("position_redeem_failed", {
+          product: "web",
+          condition_id: position.conditionId,
+        });
         toast.error(result.error || "Failed to redeem winnings");
       }
     } catch {
+      posthog.capture("position_redeem_failed", {
+        product: "web",
+        condition_id: position.conditionId,
+      });
       toast.error("Failed to redeem winnings");
     } finally {
       setRedeemingPositionIds((current) => {

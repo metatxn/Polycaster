@@ -2,7 +2,6 @@
 
 import { createLogger } from "@knoww/logger";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import posthog from "posthog-js";
 import { useConnection } from "wagmi";
 import { qk } from "@/lib/query-keys";
 
@@ -360,9 +359,7 @@ export function useCancelOrder() {
         }
       }
     },
-    onSuccess: () => {
-      posthog.capture("order_cancelled", { product: "web" });
-    },
+    onSuccess: () => {},
     onSettled: () => {
       // Refetch to ensure server state is synced
       queryClient.invalidateQueries({ queryKey: qk.orders.all() });

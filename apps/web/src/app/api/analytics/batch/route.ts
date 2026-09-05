@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { getAddress, isAddress } from "viem";
 import { z } from "zod";
 import { sanitizeAnalyticsProperties } from "@/lib/analytics-sanitization";
 import { checkRateLimit } from "@/lib/api-rate-limit";
@@ -25,7 +26,13 @@ const primitiveSchema = z.union([
 
 const analyticsEventSchema = z.object({
   event: z.string().min(1).max(64),
-  distinctId: z.string().uuid(),
+  distinctId: z.union([
+    z.string().uuid(),
+    z
+      .string()
+      .refine((value) => isAddress(value))
+      .transform((value) => getAddress(value)),
+  ]),
   timestamp: z.string().datetime(),
   properties: z.record(z.string().min(1).max(64), primitiveSchema).default({}),
 });
@@ -66,8 +73,12 @@ const requestSchema = z.object({
  *                     event:
  *                       type: string
  *                     distinctId:
- *                       type: string
- *                       format: uuid
+ *                       description: Anonymous installation UUID or connected EOA wallet address, normalized to EIP-55 checksum.
+ *                       oneOf:
+ *                         - type: string
+ *                           format: uuid
+ *                         - type: string
+ *                           pattern: '^0x[0-9a-fA-F]{40}$'
  *                     timestamp:
  *                       type: string
  *                       format: date-time
@@ -171,6 +182,7 @@ function sanitizeAnalyticsEvent(
     properties: {
       ...properties,
       source: "knoww_extension",
+      product: "extension",
     },
   };
 }

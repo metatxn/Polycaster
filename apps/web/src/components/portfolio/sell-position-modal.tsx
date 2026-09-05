@@ -81,11 +81,9 @@ export function SellPositionModal({
           unrealized_pnl: position.unrealizedPnl,
         };
         posthog.capture("sell_position_submitted", successProperties);
-        posthog.capture("order_succeeded", successProperties);
-        posthog.capture("sell_succeeded", successProperties);
       }
       lastOrderAttemptProperties.current = null;
-      toast.success("Sell order filled", {
+      toast.success("Sell order submitted", {
         description: `Estimated proceeds: ${formatCurrency(result.estimatedProceeds)}.`,
       });
       onSellSuccess?.();
@@ -93,7 +91,7 @@ export function SellPositionModal({
     },
     onSellError: (err) => {
       if (lastOrderAttemptProperties.current) {
-        posthog.capture("order_failed", {
+        posthog.capture("trade_form_submission_failed", {
           ...lastOrderAttemptProperties.current,
           failure_stage: "submission",
         });
@@ -150,7 +148,7 @@ export function SellPositionModal({
       order_value: sellEstimate.estimatedProceeds,
     };
     lastOrderAttemptProperties.current = orderProperties;
-    posthog.capture("order_attempted", orderProperties);
+    posthog.capture("trade_button_clicked", orderProperties);
     await executeSell();
   };
 

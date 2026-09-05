@@ -7,6 +7,21 @@ afterEach(() => {
 });
 
 describe("middleware security headers", () => {
+  it("allows managed PostHog proxy scripts and event requests", () => {
+    const response = middleware(new NextRequest("https://knoww.app/"));
+    const directives = response.headers
+      .get("Content-Security-Policy")!
+      .split(";")
+      .map((directive) => directive.trim().split(/\s+/));
+
+    expect(directives.find(([name]) => name === "script-src")).toContain(
+      "https://a.knoww.app"
+    );
+    expect(directives.find(([name]) => name === "connect-src")).toContain(
+      "https://*.knoww.app"
+    );
+  });
+
   it("does not emit obsolete Permissions-Policy features", () => {
     const request = new NextRequest("https://knoww.app/");
     const response = middleware(request);

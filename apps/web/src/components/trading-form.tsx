@@ -1059,6 +1059,10 @@ export function TradingForm(props: TradingFormProps) {
                 }`}
                 onClick={async () => {
                   if (needsApproval) {
+                    posthog.capture("trading_token_approval_requested", {
+                      product: "web",
+                      surface: "trading_form",
+                    });
                     const approved = await handleSetAllowance();
                     if (approved) {
                       posthog.capture("trading_token_approval_succeeded", {
@@ -1070,6 +1074,11 @@ export function TradingForm(props: TradingFormProps) {
                       });
                       toast.success("Approval confirmed", {
                         description: "You can place the order now.",
+                      });
+                    } else {
+                      posthog.capture("trading_token_approval_failed", {
+                        product: "web",
+                        surface: "trading_form",
                       });
                     }
                     return;
@@ -1094,11 +1103,11 @@ export function TradingForm(props: TradingFormProps) {
                     potential_win: calculations.potentialWin,
                   };
 
-                  posthog.capture("order_attempted", orderProperties);
+                  posthog.capture("trade_button_clicked", orderProperties);
 
                   const success = await handleSubmit();
                   if (!success) {
-                    posthog.capture("order_failed", {
+                    posthog.capture("trade_form_submission_failed", {
                       ...orderProperties,
                       failure_stage: "submission",
                     });
@@ -1106,10 +1115,6 @@ export function TradingForm(props: TradingFormProps) {
                   }
 
                   posthog.capture("order_submitted", orderProperties);
-                  posthog.capture("order_succeeded", orderProperties);
-                  if (submittedSide === "SELL") {
-                    posthog.capture("sell_succeeded", orderProperties);
-                  }
 
                   const outcomeLabel = submittedOutcome ?? "shares";
                   if (submittedOrderType === "LIMIT") {
@@ -1118,9 +1123,8 @@ export function TradingForm(props: TradingFormProps) {
                       description: `Resting on the book to ${intent} ${submittedShares} ${outcomeLabel} at ${formatCents(submittedPrice)}.`,
                     });
                   } else {
-                    const verb = submittedSide === "BUY" ? "Bought" : "Sold";
-                    toast.success("Order filled", {
-                      description: `${verb} ${submittedShares} ${outcomeLabel} at market.`,
+                    toast.success("Order submitted", {
+                      description: "Check your portfolio for confirmed fills.",
                     });
                   }
                   // Failures: inline error banner (already friendly-formatted)

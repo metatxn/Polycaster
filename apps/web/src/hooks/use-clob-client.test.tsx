@@ -306,6 +306,19 @@ describe("useClobClient", () => {
     });
   });
 
+  it("does not report cancellation success when the exchange refuses it", async () => {
+    legacyClient.cancelOrder.mockResolvedValue({
+      canceled: [],
+      notCanceled: { "order-1": "Already matched" },
+    });
+    const { result } = renderHook(() => useClobClient());
+    await act(async () => {
+      await expect(result.current.cancelOrder("order-1")).rejects.toThrow(
+        "did not confirm cancellation"
+      );
+    });
+  });
+
   it("passes scoped approval requests through to the relayer client", async () => {
     const approvalScope = {
       side: "BUY" as const,

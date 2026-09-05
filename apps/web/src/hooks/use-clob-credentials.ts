@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useWalletClient } from "wagmi";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
+import { captureTradingEvent } from "@/lib/order-analytics";
 import { getViemWalletClient } from "@/lib/viem-wallet-client";
 import { closeWalletModal } from "@/lib/wallet-modal";
 
@@ -356,11 +357,14 @@ export function useClobCredentials() {
     const inFlight = credentialDerivationPromises.get(cacheKey);
     if (inFlight) return inFlight;
 
+    captureTradingEvent("trading_api_key_requested", address);
+
     setIsDerivingCredentials(true);
     setError(null);
 
     const derivation = deriveCredentialsViaApi()
       .catch((err) => {
+        captureTradingEvent("trading_api_key_failed", address);
         const error =
           err instanceof Error
             ? err

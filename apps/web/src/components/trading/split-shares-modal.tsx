@@ -146,6 +146,11 @@ export function SplitSharesModal({
     }
 
     setLocalError(null);
+    posthog.capture("position_split_submitted", {
+      product: "web",
+      condition_id: conditionId,
+      amount: numericAmount,
+    });
     const result = await splitPosition(
       conditionId,
       numericAmount,
@@ -154,6 +159,10 @@ export function SplitSharesModal({
     );
 
     if (!result.success) {
+      posthog.capture("position_split_failed", {
+        product: "web",
+        condition_id: conditionId,
+      });
       if (isWalletRejectionError(result.error)) {
         setLocalError("Transaction cancelled");
       } else {
@@ -165,6 +174,7 @@ export function SplitSharesModal({
         market_title: marketTitle,
         amount: numericAmount,
         neg_risk: negRisk,
+        condition_id: conditionId,
       });
     }
   }, [

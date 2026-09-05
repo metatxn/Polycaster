@@ -4,6 +4,7 @@ import {
   createOrDeriveClobApiKey,
 } from "@knoww/shared-types/polymarket";
 import { type NextRequest, NextResponse } from "next/server";
+import { getAddress } from "viem";
 import { z } from "zod";
 import { CLOB_BASE_URL } from "@/constants/polymarket";
 import { checkRateLimit } from "@/lib/api-rate-limit";
@@ -34,15 +35,24 @@ const l1AuthSchema = z.object({
 function trackApiKeyEvent(
   address: string,
   event: string,
-  method: string
+  method: string,
+  hostname: string
 ): void {
   if (!isPostHogServerConfigured()) return;
   try {
     const posthog = getPostHogClient();
     posthog.capture({
-      distinctId: address,
+      distinctId: getAddress(address),
       event,
-      properties: { product: "web", wallet_address: address, method },
+      properties: {
+        product: "web",
+        analytics_version: 2,
+        environment: ["knoww.app", "www.knoww.app"].includes(hostname)
+          ? "production"
+          : "development",
+        wallet_address: getAddress(address),
+        method,
+      },
     });
     posthog.flush().catch(() => {});
   } catch {
@@ -142,7 +152,8 @@ export async function POST(request: NextRequest) {
         result.method === "derive"
           ? "trading_api_key_derived"
           : "trading_api_key_created",
-        result.method
+        result.method,
+        request.nextUrl.hostname
       );
       return NextResponse.json({
         success: true,

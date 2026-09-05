@@ -18,6 +18,10 @@ const walletModalMock = vi.hoisted(() => ({
 const posthogMock = vi.hoisted(() => ({
   capture: vi.fn(),
   identify: vi.fn(),
+  reset: vi.fn(),
+  register: vi.fn(),
+  unregister: vi.fn(),
+  get_distinct_id: vi.fn(() => "anonymous-id"),
 }));
 
 vi.mock("wagmi", () => ({
@@ -50,6 +54,53 @@ describe("WalletProvider", () => {
     wagmiState.walletClient = null;
     wagmiState.isWalletClientLoading = false;
     vi.clearAllMocks();
+    posthogMock.get_distinct_id.mockReturnValue("anonymous-id");
+  });
+
+  it("resets the previous identity when switching or disconnecting wallets", () => {
+    wagmiState.address = "0x0000000000000000000000000000000000000001";
+    wagmiState.isConnected = true;
+    const { rerender } = render(
+      <WalletProvider>
+        <div />
+      </WalletProvider>
+    );
+    wagmiState.address = "0x0000000000000000000000000000000000000002";
+    rerender(
+      <WalletProvider>
+        <div />
+      </WalletProvider>
+    );
+    expect(posthogMock.reset).toHaveBeenCalledTimes(1);
+    expect(posthogMock.identify).toHaveBeenLastCalledWith(wagmiState.address, {
+      wallet_address: wagmiState.address,
+    });
+    wagmiState.isConnected = false;
+    wagmiState.address = undefined;
+    rerender(
+      <WalletProvider>
+        <div />
+      </WalletProvider>
+    );
+    expect(posthogMock.reset).toHaveBeenCalledTimes(2);
+    expect(posthogMock.unregister).toHaveBeenCalledWith("wallet_address");
+  });
+
+  it("resets a different wallet persisted before this component mounted", () => {
+    posthogMock.get_distinct_id.mockReturnValue(
+      "0x0000000000000000000000000000000000000002"
+    );
+    wagmiState.address = "0x0000000000000000000000000000000000000001";
+    wagmiState.isConnected = true;
+    render(
+      <WalletProvider>
+        <div />
+      </WalletProvider>
+    );
+    expect(posthogMock.reset).toHaveBeenCalledOnce();
+    expect(posthogMock.identify).toHaveBeenCalledWith(wagmiState.address, {
+      wallet_address: wagmiState.address,
+    });
   });
 
   it("closes the wallet modal after wagmi reports a connected account", async () => {
@@ -105,6 +156,14 @@ describe("WalletProvider", () => {
     expect(posthogMock.capture).not.toHaveBeenCalledWith(
       "wallet_connected",
       expect.anything()
+    );
+    expect(posthogMock.capture).toHaveBeenCalledWith(
+      "wallet_session_ready",
+      expect.objectContaining({
+        product: "web",
+        wallet_address: wagmiState.address,
+        connection_mode: "restored_or_switched",
+      })
     );
   });
 });

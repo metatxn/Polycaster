@@ -310,22 +310,46 @@ export function TradingOnboarding({
       return;
     }
     updateStepStatus("deploy", "in_progress");
+    posthog.capture("trading_account_creation_attempted", {
+      product: "web",
+      wallet_mode: walletMode,
+    });
     try {
       const result = await deploySafe();
       if (result.success) {
-        posthog.capture("trading_account_created", {
-          product: "web",
-          surface: "onboarding",
-          ...(address ? { wallet_address: getAddress(address) } : {}),
-          wallet_mode: walletMode,
-        });
+        const alreadyDeployed =
+          "alreadyDeployed" in result && result.alreadyDeployed === true;
+        posthog.capture(
+          alreadyDeployed ? "trading_account_ready" : "trading_account_created",
+          {
+            product: "web",
+            surface: "onboarding",
+            ...(address ? { wallet_address: getAddress(address) } : {}),
+            wallet_mode: walletMode,
+            account_kind: "trading_wallet",
+            already_deployed: alreadyDeployed,
+            ...(address
+              ? {
+                  $insert_id: `trading-wallet:${getAddress(address)}:${walletMode}`,
+                }
+              : {}),
+          }
+        );
         updateStepStatus("deploy", "completed");
         setCurrentStep(2);
         await forceRefreshProxyWallet();
       } else {
+        posthog.capture("trading_account_creation_failed", {
+          product: "web",
+          wallet_mode: walletMode,
+        });
         updateStepStatus("deploy", "error", result.error);
       }
     } catch (err) {
+      posthog.capture("trading_account_creation_failed", {
+        product: "web",
+        wallet_mode: walletMode,
+      });
       updateStepStatus(
         "deploy",
         "error",
@@ -351,6 +375,10 @@ export function TradingOnboarding({
       return;
     }
     updateStepStatus("approve", "in_progress");
+    posthog.capture("trading_token_approval_requested", {
+      product: "web",
+      wallet_mode: walletMode,
+    });
     try {
       const result = await approveUsdcForTrading(approvalAmount);
       if (result.success) {
@@ -372,9 +400,17 @@ export function TradingOnboarding({
         setHasUsdcApproval(true);
         setCurrentStep(3);
       } else {
+        posthog.capture("trading_token_approval_failed", {
+          product: "web",
+          wallet_mode: walletMode,
+        });
         updateStepStatus("approve", "error", result.error);
       }
     } catch (err) {
+      posthog.capture("trading_token_approval_failed", {
+        product: "web",
+        wallet_mode: walletMode,
+      });
       updateStepStatus(
         "approve",
         "error",
@@ -476,6 +512,25 @@ export function TradingOnboarding({
   }, [hasCredentials, steps, updateStepStatus]);
 
   const allStepsComplete = steps.every((s) => s.status === "completed");
+  const analyticsStateRef = useRef("");
+  useEffect(() => {
+    const state = {
+      product: "web",
+      ...(address ? { wallet_address: getAddress(address) } : {}),
+      wallet_mode: walletMode,
+      wallet_connected: isConnected,
+      account_ready: steps[1].status === "completed",
+      approval_ready: steps[2].status === "completed",
+      api_keys_ready: steps[3].status === "completed",
+      setup_complete: allStepsComplete,
+      stage: steps.find((step) => step.status !== "completed")?.id ?? "ready",
+    };
+    const signature = JSON.stringify(state);
+    if (analyticsStateRef.current !== signature) {
+      analyticsStateRef.current = signature;
+      posthog.capture("trading_setup_state", state);
+    }
+  }, [address, walletMode, isConnected, steps, allStepsComplete]);
 
   // Fire onComplete exactly once on the incomplete → complete transition.
   useEffect(() => {

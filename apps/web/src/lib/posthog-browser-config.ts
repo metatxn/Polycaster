@@ -1,4 +1,4 @@
-export const DEFAULT_POSTHOG_BROWSER_HOST = "https://us.i.posthog.com";
+export const DEFAULT_POSTHOG_BROWSER_HOST = "https://a.knoww.app";
 
 export function getPostHogBrowserHost(
   configuredHost: string | undefined
@@ -6,6 +6,11 @@ export function getPostHogBrowserHost(
   const normalizedHost = configuredHost?.trim().replace(/\/+$/, "");
 
   if (!normalizedHost) return DEFAULT_POSTHOG_BROWSER_HOST;
+
+  // Existing US ingestion settings should use the managed proxy after deployment.
+  if (normalizedHost === "https://us.i.posthog.com") {
+    return DEFAULT_POSTHOG_BROWSER_HOST;
+  }
 
   try {
     const url = new URL(normalizedHost);

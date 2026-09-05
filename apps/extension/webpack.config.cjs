@@ -361,6 +361,9 @@ module.exports = (_env, argv) => {
       new webpack.DefinePlugin({
         __DEV_MODE__: JSON.stringify(devMode),
         __STORE_BUILD__: JSON.stringify(storeBuild),
+        // Match the object ProvidePlugin supplies for direct process uses.
+        // A typeof check alone should not pull in the shim.
+        "typeof process": JSON.stringify("object"),
         "process.env.NODE_DEBUG": JSON.stringify(""),
         "process.env.NODE_ENV": JSON.stringify(
           isProduction ? "production" : "development"
@@ -540,6 +543,7 @@ module.exports = (_env, argv) => {
       new webpack.DefinePlugin({
         __DEV_MODE__: JSON.stringify(devMode),
         __STORE_BUILD__: JSON.stringify(storeBuild),
+        "typeof process": JSON.stringify("object"),
         "process.env.NODE_DEBUG": JSON.stringify(""),
         "process.env.NODE_ENV": JSON.stringify(
           isProduction ? "production" : "development"

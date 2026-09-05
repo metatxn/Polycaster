@@ -324,10 +324,18 @@ function trackTradingAnalytics(
         walletAddress = undefined;
       }
     }
-    void window.KNOWW_ANALYTICS.track(event, {
-      ...properties,
-      ...(walletAddress ? { wallet_address: walletAddress } : {}),
-    });
+    try {
+      void Promise.resolve(
+        window.KNOWW_ANALYTICS.track(event, {
+          ...properties,
+          ...(walletAddress
+            ? { wallet_address: properties.wallet_address ?? walletAddress }
+            : {}),
+        })
+      ).catch(() => {});
+    } catch {
+      /* Analytics cannot interrupt a wallet operation. */
+    }
   }
 }
 
@@ -1071,6 +1079,21 @@ export const TradingService = {
 
     update({ state: "placing-order", error: null });
 
+    const analytics = {
+      wallet_address: getAddress(ctx.address),
+      attempt_id: crypto.randomUUID(),
+      side: params.side,
+      order_type:
+        params.orderType === "GTC" || params.orderType === "GTD"
+          ? "LIMIT"
+          : "MARKET",
+      clob_order_type: params.orderType,
+      token_id: params.tokenId,
+      requested_shares: params.size,
+      requested_amount: params.amount,
+    };
+    trackTradingAnalytics("order_attempted", analytics);
+
     try {
       const result = await runWithAuthRetry(ctx.address, () =>
         sendMsg(
@@ -1089,6 +1112,12 @@ export const TradingService = {
       await this.refreshBalance();
       return result;
     } catch (err) {
+      const rejected =
+        err instanceof Error && err.message.startsWith("CLOB rejected order:");
+      trackTradingAnalytics(
+        rejected ? "order_failed" : "order_submission_unknown",
+        analytics
+      );
       update({
         state: "ready",
         error: err instanceof Error ? err.message : String(err),
@@ -1117,6 +1146,11 @@ export const TradingService = {
     }
 
     update({ state: "deploying", error: null });
+    const analytics = {
+      wallet_address: getAddress(ctx.address),
+      wallet_mode: ctx.walletMode,
+    };
+    trackTradingAnalytics("trading_account_creation_attempted", analytics);
 
     try {
       const result = await runWithAuthRetry(ctx.address, () =>
@@ -1146,6 +1180,9 @@ export const TradingService = {
           product: "extension",
           surface: "trading_service",
           walletMode: ctx.walletMode,
+          account_kind: "trading_wallet",
+          ...analytics,
+          $insert_id: `trading-wallet:${analytics.wallet_address}:${analytics.wallet_mode}`,
         });
       }
       return {
@@ -1153,6 +1190,7 @@ export const TradingService = {
         alreadyDeployed: result.alreadyDeployed,
       };
     } catch (err) {
+      trackTradingAnalytics("trading_account_creation_failed", analytics);
       // "error" (not "ready" — the vault isn't deployed) so the wizard's
       // inline error branch and the error toast actually render; the next
       // "Create vault" click resets to "deploying" and clears the error.
@@ -1178,6 +1216,11 @@ export const TradingService = {
     }
 
     update({ state: "approving", error: null });
+    const analytics = {
+      wallet_address: getAddress(ctx.address),
+      wallet_mode: ctx.walletMode,
+    };
+    trackTradingAnalytics("trading_token_approval_requested", analytics);
 
     try {
       const result = await runWithAuthRetry(ctx.address, () =>
@@ -1204,6 +1247,7 @@ export const TradingService = {
       // the refreshed allowance lands.
       await this.refreshBalance();
       trackTradingAnalytics("trading_token_approval_succeeded", {
+        ...analytics,
         product: "extension",
         surface: "trading_service",
         walletMode: ctx.walletMode,
@@ -1212,6 +1256,7 @@ export const TradingService = {
       update({ state: "ready" });
       return result.txHash;
     } catch (err) {
+      trackTradingAnalytics("trading_token_approval_failed", analytics);
       update({
         state: "error",
         error: err instanceof Error ? err.message : String(err),

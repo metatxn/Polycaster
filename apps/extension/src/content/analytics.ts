@@ -1,11 +1,18 @@
 type AnalyticsValue = string | number | boolean | null | undefined;
 
 type AnalyticsProperties = Record<string, AnalyticsValue>;
+let pageUrl = "";
+let pageViewId = "";
 
 function getPageContext(): AnalyticsProperties {
+  if (pageUrl !== window.location.href) {
+    pageUrl = window.location.href;
+    pageViewId = crypto.randomUUID();
+  }
   const platformName = window.KNOWW_PLATFORM?.getPlatformName?.() || "unknown";
 
   return {
+    page_view_id: pageViewId,
     host: window.location.hostname,
     platform: platformName,
   };

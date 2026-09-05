@@ -1,10 +1,13 @@
 import { logDebug, logWarn } from "@knoww/logger";
+import { getAddress } from "viem";
 import { normalizeSiteSupportHostname } from "../site-support";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "../types/settings";
 import { getKnowwAppUrl } from "./extension-session";
 
 const ANALYTICS_QUEUE_KEY = "knoww_analytics_queue_v1";
 const ANALYTICS_INSTALL_ID_KEY = "knoww_analytics_install_id_v1";
+const ANALYTICS_IDENTITY_KEY = "knoww_analytics_identity_v2";
+type AnalyticsIdentity = { anonymousId: string; walletAddress?: string };
 const SITE_SUPPORT_SUBMITTED_HOSTNAMES_KEY =
   "knoww_site_support_submitted_hostnames_v1";
 const SETTINGS_STORAGE_KEY = "knowwSettings";
@@ -34,7 +37,7 @@ function getStorageArea(): typeof chrome.storage.local {
   return chrome.storage.local;
 }
 
-async function isAnalyticsEnabled(): Promise<boolean> {
+export async function isAnalyticsEnabled(): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       chrome.storage.sync.get(
@@ -113,6 +116,31 @@ async function getOrCreateInstallId(): Promise<string> {
   return created;
 }
 
+function walletAddress(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    return getAddress(value);
+  } catch {
+    return undefined;
+  }
+}
+
+async function getIdentity(): Promise<AnalyticsIdentity> {
+  return (
+    (await storageGet<AnalyticsIdentity>(ANALYTICS_IDENTITY_KEY)) ?? {
+      anonymousId: await getOrCreateInstallId(),
+    }
+  );
+}
+
+export async function resetAnalyticsIdentity(): Promise<void> {
+  await runQueueTask(async () => {
+    await storageSet({
+      [ANALYTICS_IDENTITY_KEY]: { anonymousId: crypto.randomUUID() },
+    });
+  });
+}
+
 function scheduleFlush(): void {
   if (flushTimer) return;
 
@@ -180,15 +208,70 @@ export async function queueAnalyticsEvent(
   }
 
   await runQueueTask(async () => {
-    const distinctId = await getOrCreateInstallId();
+    const installId = await getOrCreateInstallId();
+    let identity = await getIdentity();
+    const explicitWallet = walletAddress(input.properties?.wallet_address);
+    const connects =
+      input.event === "wallet_connected" || input.event === "wallet_switched";
     const queue = await getQueue();
+
+    if (
+      connects &&
+      explicitWallet &&
+      explicitWallet !== identity.walletAddress
+    ) {
+      // Never merge two connected wallets through a shared browser identity.
+      if (identity.walletAddress)
+        identity = { anonymousId: crypto.randomUUID() };
+      queue.push({
+        event: "$identify",
+        distinctId: explicitWallet,
+        timestamp: input.timestamp ?? new Date().toISOString(),
+        properties: {
+          $anon_distinct_id: identity.anonymousId,
+          $insert_id: crypto.randomUUID(),
+          wallet_address: explicitWallet,
+          product: "extension",
+          analytics_version: 2,
+          $process_person_profile: true,
+          $is_identified: true,
+        },
+      });
+      identity.walletAddress = explicitWallet;
+      await storageSet({ [ANALYTICS_IDENTITY_KEY]: identity });
+    }
+    const address = explicitWallet ?? identity.walletAddress;
+    const distinctId = address ?? identity.anonymousId;
 
     queue.push({
       event: input.event,
       distinctId,
       timestamp: input.timestamp ?? new Date().toISOString(),
-      properties: sanitizeProperties(input.properties),
+      properties: sanitizeProperties({
+        ...input.properties,
+        product: "extension",
+        analytics_version: 2,
+        install_id: installId,
+        environment:
+          typeof __DEV_MODE__ !== "undefined" && __DEV_MODE__
+            ? "development"
+            : "production",
+        $process_person_profile: !!address,
+        $is_identified: !!address,
+        build_flavor:
+          typeof __STORE_BUILD__ !== "undefined" && __STORE_BUILD__
+            ? "store"
+            : "full",
+        $insert_id: input.properties?.$insert_id ?? crypto.randomUUID(),
+        ...(address ? { wallet_address: address } : {}),
+      }),
     });
+
+    if (input.event === "wallet_disconnected") {
+      await storageSet({
+        [ANALYTICS_IDENTITY_KEY]: { anonymousId: crypto.randomUUID() },
+      });
+    }
 
     await setQueue(queue);
 
@@ -212,7 +295,8 @@ export async function submitSiteSupportRequest(
       (await storageGet<string[]>(SITE_SUPPORT_SUBMITTED_HOSTNAMES_KEY)) ?? [];
     if (submittedHostnames.includes(normalizedHostname)) return true;
 
-    const distinctId = await getOrCreateInstallId();
+    const identity = await getIdentity();
+    const distinctId = identity.walletAddress ?? identity.anonymousId;
     const submitted = await postBatch([
       {
         event: "unsupported_site_requested",

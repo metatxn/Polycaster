@@ -1955,15 +1955,9 @@ function addSubmitButton(
       shares: effectiveSize,
       order_value: cost,
     };
-    trackPanelAnalytics("order_attempted", successProperties);
+    trackPanelAnalytics("trade_button_clicked", successProperties);
 
     try {
-      const trackSuccessfulOrder = () => {
-        trackPanelAnalytics("order_succeeded", successProperties);
-        if (side === "SELL") {
-          trackPanelAnalytics("sell_succeeded", successProperties);
-        }
-      };
       trackPanelAnalytics("market_order_submitted", {
         marketId: opts.market.id,
         marketTitle: opts.market.title || "Untitled Market",
@@ -1993,7 +1987,7 @@ function addSubmitButton(
       const isLimitOrder = clobOrderType === "GTC" || clobOrderType === "GTD";
 
       if (isLimitOrder) {
-        trackPanelAnalytics("market_order_succeeded", {
+        trackPanelAnalytics("limit_order_submitted", {
           marketId: opts.market.id,
           marketTitle: opts.market.title || "Untitled Market",
           outcomeName: getTrackedOutcomeName(opts),
@@ -2002,7 +1996,6 @@ function addSubmitButton(
           shares: effectiveSize,
           totalCost: cost,
         });
-        trackSuccessfulOrder();
         await TradingService.refreshBalance().catch(() => {});
         if (opts.yesTokenId && opts.noTokenId) {
           await TradingService.getOutcomeBalances(
@@ -2035,18 +2028,6 @@ function addSubmitButton(
           if (panelState.settleTimer) {
             clearTimeout(panelState.settleTimer);
             panelState.settleTimer = null;
-          }
-          if (type === "success") {
-            trackPanelAnalytics("market_order_succeeded", {
-              marketId: opts.market.id,
-              marketTitle: opts.market.title || "Untitled Market",
-              outcomeName: getTrackedOutcomeName(opts),
-              side,
-              orderType: clobOrderType,
-              shares: effectiveSize,
-              totalCost: cost,
-            });
-            trackSuccessfulOrder();
           }
           showToast(panel, message, type);
           rerender();
@@ -2096,13 +2077,16 @@ function addSubmitButton(
             balanceChanged(prevYes, newYes) || balanceChanged(prevNo, newNo);
 
           if (collateralChanged || positionChanged) {
-            finishSettling("Order filled!", "success");
+            finishSettling(
+              "Balances updated. Check your portfolio for fills.",
+              "success"
+            );
 
             // Show a success overlay
             const overlay = el("div", "knoww-tp-success-overlay");
             overlay.innerHTML = `
               <div class="knoww-tp-success-icon">${I.check}</div>
-              <div class="knoww-tp-success-text">Order Placed Successfully</div>
+              <div class="knoww-tp-success-text">Balances updated</div>
             `;
             panel.appendChild(overlay);
 
@@ -2136,7 +2120,7 @@ function addSubmitButton(
         totalCost: cost,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
-      trackPanelAnalytics("order_failed", {
+      trackPanelAnalytics("trade_form_submission_failed", {
         ...successProperties,
         failure_stage: "submission",
       });

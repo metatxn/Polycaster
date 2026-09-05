@@ -19,7 +19,9 @@ describe("product success analytics", () => {
     expect(service).toContain(
       'trackTradingAnalytics("trading_token_approval_succeeded"'
     );
-    expect(service).toContain("wallet_address: walletAddress");
+    expect(service).toContain(
+      "wallet_address: properties.wallet_address ?? walletAddress"
+    );
     expect(sidepanel).toContain('event: "trading_account_created"');
     expect(sidepanel).toContain("wallet_address: walletAddress");
   });
@@ -29,9 +31,11 @@ describe("product success analytics", () => {
     const portfolio = readSource("src/sidepanel/portfolio.ts");
     const tradingPanel = readSource("src/content/trading/trading-panel.ts");
 
-    expect(orderView).toContain('trackPanelAnalytics("order_succeeded"');
-    expect(orderView).toContain('trackPanelAnalytics("sell_succeeded"');
-    expect(orderView.match(/trackSuccessfulOrder\(\);/g)).toHaveLength(2);
+    expect(orderView).not.toContain('trackPanelAnalytics("order_succeeded"');
+    expect(orderView).not.toContain('trackPanelAnalytics("sell_succeeded"');
+    expect(readSource("src/background/order-analytics.ts")).toContain(
+      "createOrderAnalyticsTracker"
+    );
     expect(tradingPanel).toContain("wallet_address: walletAddress");
     expect(portfolio).toContain('event: "order_cancelled"');
   });
@@ -39,8 +43,12 @@ describe("product success analytics", () => {
   it("tracks order attempts and failures with canonical dashboard fields", () => {
     const orderView = readSource("src/content/trading/panel/order-view.ts");
 
-    expect(orderView).toContain('trackPanelAnalytics("order_attempted"');
-    expect(orderView).toContain('trackPanelAnalytics("order_failed"');
+    expect(readSource("src/content/trading/trading-service.ts")).toContain(
+      'trackTradingAnalytics("order_attempted"'
+    );
+    expect(readSource("src/content/trading/trading-service.ts")).toContain(
+      '"order_failed" : "order_submission_unknown"'
+    );
     expect(orderView).toContain('surface: "trading_panel"');
     expect(orderView).toContain("market_title:");
     expect(orderView).toContain("outcome_name:");

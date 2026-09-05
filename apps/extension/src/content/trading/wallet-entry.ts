@@ -87,6 +87,20 @@ interface WalletUiMessage {
 
 let activeRuntime: TradingRuntime | null = null;
 
+function trackWallet(event: string, address: string): void {
+  try {
+    void Promise.resolve(
+      window.KNOWW_ANALYTICS?.track(event, {
+        wallet_address: address,
+        build_flavor: "store",
+        capability: "market_discovery",
+      })
+    ).catch(() => {});
+  } catch {
+    /* Analytics cannot interrupt connection or authentication. */
+  }
+}
+
 export function createTradingRuntime(): TradingRuntime {
   if (activeRuntime) return activeRuntime;
 
@@ -112,6 +126,7 @@ export function createTradingRuntime(): TradingRuntime {
       throw new Error("Wallet connection was cancelled.");
     }
     cachedAddress = address;
+    trackWallet("wallet_connected", address);
     await ensurePolygonChain();
     await ExtensionSession.ensureAuthorized(address);
     return address;
@@ -128,6 +143,7 @@ export function createTradingRuntime(): TradingRuntime {
       await sendAuthLogout();
     }
     cachedAddress = address;
+    trackWallet("wallet_switched", address);
     await ensurePolygonChain();
     await ExtensionSession.ensureAuthorized(address);
     return address;
@@ -273,6 +289,7 @@ export function createTradingRuntime(): TradingRuntime {
             address = accounts?.[0] ?? null;
             if (address) {
               cachedAddress = address;
+              trackWallet("wallet_connected", address);
               await ensurePolygonChain();
             }
           }

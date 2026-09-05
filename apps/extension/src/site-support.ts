@@ -1,4 +1,5 @@
 import { SUPPORTED_MATCH_PATTERNS } from "./supported-hosts";
+import { isWebmailUrl } from "./webmail";
 
 export const SIDEPANEL_SITE_SUPPORT_REQUEST_KEY =
   "knoww_sidepanel_site_support_request";
@@ -75,6 +76,7 @@ export function getUnsupportedSiteHostname(
   urlString: string | undefined,
   patterns: readonly string[] = SUPPORTED_MATCH_PATTERNS
 ): string | null {
+  if (isWebmailUrl(urlString)) return null;
   const hostname = getRequestableSiteHostname(urlString);
   if (!hostname || isSupportedSiteUrl(urlString, patterns)) return null;
   return hostname;

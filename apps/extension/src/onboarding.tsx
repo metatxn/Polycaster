@@ -446,6 +446,7 @@ function OnboardingApp() {
   const [notice, setNotice] = React.useState("");
   const progressRef = React.useRef<OnboardingProgress>({});
   const refreshInFlightRef = React.useRef(false);
+  const analyticsStateRef = React.useRef("");
 
   const persistProgress = React.useCallback(
     async (patch: Partial<OnboardingProgress>) => {
@@ -492,6 +493,24 @@ function OnboardingApp() {
         hasCredentials: tradingReady,
         storeBuild: __STORE_BUILD__,
       });
+
+      if (statusResponse.ok === true) {
+        const observedState = {
+          ...(address ? { wallet_address: address } : {}),
+          wallet_connected: loggedIn,
+          account_ready: tradingWalletDeployed,
+          api_keys_ready: hasCredentials,
+          approval_ready: hasApproval,
+          setup_complete: __STORE_BUILD__ ? stage === "ready" : tradingReady,
+          stage,
+          capability: __STORE_BUILD__ ? "market_discovery" : "trading",
+        };
+        const signature = JSON.stringify(observedState);
+        if (analyticsStateRef.current !== signature) {
+          analyticsStateRef.current = signature;
+          await trackEvent("trading_setup_state", observedState);
+        }
+      }
 
       if (stage === "trading" && !progressRef.current.tradingStartedAt) {
         await persistProgress({ tradingStartedAt: new Date().toISOString() });

@@ -1,6 +1,7 @@
 import { parseGammaStringArray } from "@knoww/shared-types/polymarket";
 import { Decimal } from "decimal.js";
 import { startLoadingMessageSequence } from "../../loading-messages";
+import { openTrackedDestination } from "../../outbound-analytics";
 import type {
   InjectedMarketEntry,
   Market,
@@ -1112,10 +1113,16 @@ function setupSearchFunctionality(
 
     const searchQuery = query; // Capture query for this search request
     searchTimeout = setTimeout(async () => {
+      const searchId = crypto.randomUUID();
+      void window.KNOWW_ANALYTICS?.track("extension_search_query_submitted", {
+        search_id: searchId,
+        queryLength: searchQuery.length,
+      });
       try {
         const { searchPolymarketEvents } = window.KNOWW_API;
         const events = await searchPolymarketEvents(searchQuery, []);
-        void window.KNOWW_ANALYTICS?.track("extension_search_query_submitted", {
+        void window.KNOWW_ANALYTICS?.track("extension_search_results_loaded", {
+          search_id: searchId,
           queryLength: searchQuery.length,
           resultCount: events.length,
         });
@@ -1135,17 +1142,18 @@ function setupSearchFunctionality(
         resultsContainer.innerHTML = "";
 
         events.slice(0, 5).forEach((event) => {
-          const resultItem = createSearchResultItem(event);
+          const resultItem = createSearchResultItem(event, searchId);
           resultsContainer.appendChild(resultItem);
         });
       } catch (e) {
+        void window.KNOWW_ANALYTICS?.track("extension_search_failed", {
+          search_id: searchId,
+          queryLength: searchQuery.length,
+        });
         if (currentSearchQuery !== searchQuery) {
           return;
         }
         stopSearchStatus();
-        void window.KNOWW_ANALYTICS?.track("extension_search_failed", {
-          query: searchQuery,
-        });
         log("Search error:", e);
         resultsContainer.innerHTML =
           '<div class="knoww-search-empty">Search failed. Try again.</div>';
@@ -1172,7 +1180,10 @@ function setupSearchFunctionality(
 /**
  * Create a search result item
  */
-function createSearchResultItem(market: Market): HTMLElement {
+function createSearchResultItem(
+  market: Market,
+  searchId?: string
+): HTMLElement {
   const { KNOWW_APP_URL } = window.KNOWW_CONFIG;
 
   const marketSource = market.source || "polymarket";
@@ -1278,10 +1289,11 @@ function createSearchResultItem(market: Market): HTMLElement {
     }
 
     void window.KNOWW_ANALYTICS?.track("extension_search_result_clicked", {
+      search_id: searchId,
       marketId: market.id,
       source: marketSource,
     });
-    window.open(marketUrl, "_blank", "noopener,noreferrer");
+    openTrackedDestination(marketUrl, "_blank", "noopener,noreferrer");
   };
 
   return item;
@@ -1433,7 +1445,11 @@ export function createNotificationItem(
     item.setAttribute("aria-label", `Markets for ${market.title || "market"}`);
     item.onclick = (e) => {
       if (__STORE_BUILD__) {
-        window.open(buildKnowwUrl(market), "_blank", "noopener,noreferrer");
+        openTrackedDestination(
+          buildKnowwUrl(market),
+          "_blank",
+          "noopener,noreferrer"
+        );
         return;
       }
       // Don't toggle when interacting with the betting controls themselves.
@@ -1484,7 +1500,7 @@ export function createNotificationItem(
       } else {
         const marketUrl = buildMarketUrl(market);
         log("Opening scrolled-out market directly:", marketUrl);
-        window.open(marketUrl, "_blank", "noopener,noreferrer");
+        openTrackedDestination(marketUrl, "_blank", "noopener,noreferrer");
       }
       window.KNOWW_PREFERENCES?.recordClick(market);
       return;
@@ -1613,7 +1629,7 @@ export function scrollToMarket(
     if (market) {
       const url = buildMarketUrl(market);
       if (url) {
-        window.open(url, "_blank", "noopener,noreferrer");
+        openTrackedDestination(url, "_blank", "noopener,noreferrer");
         return;
       }
     }
@@ -1904,7 +1920,7 @@ function createTrendingMarketItem(market: Market, index: number): HTMLElement {
       marketSlug: market.slug || market.id,
     });
     const marketUrl = buildMarketUrl(market);
-    window.open(marketUrl, "_blank", "noopener,noreferrer");
+    openTrackedDestination(marketUrl, "_blank", "noopener,noreferrer");
     window.KNOWW_PREFERENCES?.recordClick(market);
   };
   item.addEventListener("keydown", (e) => {
@@ -2681,7 +2697,7 @@ export function focusNotificationStackMarket(marketId: string): boolean {
         marketSlug: trendingMarket.slug || trendingMarket.id,
       }
     );
-    window.open(
+    openTrackedDestination(
       buildMarketUrl(trendingMarket),
       "_blank",
       "noopener,noreferrer"

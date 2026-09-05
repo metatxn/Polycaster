@@ -999,6 +999,17 @@ export function createPortfolioSetup(
     ]);
 
     const walletMode = await resolvePreferredPortfolioWalletMode(ownerAddress);
+    const analyticsProperties = {
+      product: "extension",
+      surface: "portfolio_sidepanel",
+      wallet_address: getAnalyticsWalletAddress(ownerAddress),
+      wallet_mode: walletMode,
+    };
+    void sendRuntimeMessage({
+      type: "analytics:track",
+      event: "trading_account_creation_attempted",
+      properties: analyticsProperties,
+    });
     const response = await sendRuntimeMessage({
       type: "trading:deploy-safe",
       address: ownerAddress,
@@ -1006,6 +1017,11 @@ export function createPortfolioSetup(
     });
 
     if (response.ok === false) {
+      void sendRuntimeMessage({
+        type: "analytics:track",
+        event: "trading_account_creation_failed",
+        properties: analyticsProperties,
+      });
       stopLoading();
       dependencies.invalidatePortfolio();
       portfolioTradingError =
@@ -1061,6 +1077,11 @@ export function createPortfolioSetup(
         sleep,
       });
       if (!deployed) {
+        void sendRuntimeMessage({
+          type: "analytics:track",
+          event: "trading_account_confirmation_pending",
+          properties: analyticsProperties,
+        });
         stopLoading();
         dependencies.invalidatePortfolio();
         portfolioTradingError =
@@ -1080,6 +1101,8 @@ export function createPortfolioSetup(
           surface: "portfolio_sidepanel",
           ...(walletAddress ? { wallet_address: walletAddress } : {}),
           walletMode,
+          account_kind: "trading_wallet",
+          $insert_id: `trading-wallet:${walletAddress}:${walletMode}`,
         },
       });
     }

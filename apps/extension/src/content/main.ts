@@ -9,6 +9,7 @@ import type {
   PolymarketTagsCache,
 } from "../types/market";
 import type { UserSettings } from "../types/settings";
+import { isWebmailUrl } from "../webmail";
 import { startDiscoveryWarmup } from "./discovery-warmup";
 import { loadPlatformAdapter } from "./platform-loader";
 import { prefetchTradingRuntime } from "./trading-loader";
@@ -65,6 +66,7 @@ export function observeFirstMountedTradingCard(
 }
 
 (async function main(): Promise<void> {
+  if (isWebmailUrl(window.location.href)) return;
   const { log, safeSendMessage } = window.KNOWW_UTILS;
   const {
     CONFIG,

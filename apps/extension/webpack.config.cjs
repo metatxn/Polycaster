@@ -406,6 +406,9 @@ module.exports = (_env, argv) => {
                   buildUnsupportedSiteSupportWebAccessibleResources(hostsSource)
                 );
                 if (storeBuild) {
+                  manifest.permissions = manifest.permissions.filter(
+                    (permission) => permission !== "alarms"
+                  );
                   // Drop the "prediction market" framing that flags CWS
                   // review; the store build surfaces relevant markets and
                   // shows read-only portfolio data, it does not trade.

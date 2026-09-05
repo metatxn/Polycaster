@@ -1,5 +1,6 @@
 import { isPriceCentsWithinDisplayCap } from "../content/market-price-filter";
 import { startLoadingMessageSequence } from "../loading-messages";
+import { openTrackedDestination } from "../outbound-analytics";
 import { type RuntimeResponse, sendRuntimeMessage } from "./messaging";
 import { escapeHtml } from "./shared";
 
@@ -219,7 +220,7 @@ export function installMarkets(
   ports: MarketsPorts = {
     send: sendRuntimeMessage,
     closeWindow: () => window.close(),
-    open: (...args) => void window.open(...args),
+    open: (...args) => void openTrackedDestination(...args),
   }
 ): MarketsHandle {
   let searchTimer: ReturnType<typeof setTimeout> | null = null;

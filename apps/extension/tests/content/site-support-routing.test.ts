@@ -101,7 +101,12 @@ describe("unsupported-site toolbar routing", () => {
 
     expect(analytics).not.toContain("page_url");
     expect(analytics).not.toContain("page_path");
-    expect(analytics).not.toContain("window.location.href");
+    const emittedContext = analytics.slice(
+      analytics.indexOf("return {"),
+      analytics.indexOf("function isAnalyticsEnabled")
+    );
+    expect(emittedContext).not.toContain("window.location.href");
+    expect(emittedContext).not.toContain("pageUrl");
     expect(analytics).not.toContain("window.location.pathname");
   });
 });

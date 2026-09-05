@@ -3,6 +3,7 @@ import {
   parseGammaStringArray,
 } from "@knoww/shared-types/polymarket";
 import { Decimal } from "decimal.js";
+import { openTrackedDestination } from "../../outbound-analytics";
 import type { Market, NestedMarket } from "../../types/market";
 import { escapeHtml } from "../html-escape";
 import { setCspSafeImageSrc } from "../image-proxy";
@@ -68,7 +69,7 @@ async function openTradingPanel(
               : undefined,
         } satisfies MultiOutcomeItem)
       : buildKnowwUrl(market, outcomeIndex, "BUY");
-    window.open(url, "_blank", "noopener,noreferrer");
+    openTrackedDestination(url, "_blank", "noopener,noreferrer");
     return;
   }
 
@@ -1052,7 +1053,7 @@ export function createInlineMarketCard(
         if (marketSource === "kalshi") {
           const url = buildKalshiUrl(market);
           log(`Opening Kalshi (${outcomes[capturedIdx]}):`, url);
-          window.open(url, "_blank", "noopener,noreferrer");
+          openTrackedDestination(url, "_blank", "noopener,noreferrer");
           window.KNOWW_PREFERENCES?.recordClick(market);
           return;
         }
@@ -1143,7 +1144,7 @@ export function createInlineMarketCard(
           );
         } else {
           const url = buildKnowwUrlForOutcome(market, option);
-          window.open(url, "_blank", "noopener,noreferrer");
+          openTrackedDestination(url, "_blank", "noopener,noreferrer");
           log(`Opening Knoww (${option.name}):`, url);
         }
         window.KNOWW_PREFERENCES?.recordClick(market);
@@ -1255,7 +1256,7 @@ export function createInlineMarketCard(
           );
         } else {
           const url = buildKnowwUrl(market, option.index, "BUY");
-          window.open(url, "_blank", "noopener,noreferrer");
+          openTrackedDestination(url, "_blank", "noopener,noreferrer");
           log(`Opening Knoww (${option.name}):`, url);
         }
         window.KNOWW_PREFERENCES?.recordClick(market);
@@ -1337,7 +1338,7 @@ export function createInlineMarketCard(
       source: marketSource,
       action: "view_market",
     });
-    window.open(marketUrl, "_blank", "noopener,noreferrer");
+    openTrackedDestination(marketUrl, "_blank", "noopener,noreferrer");
     window.KNOWW_PREFERENCES?.recordClick(market);
   };
 

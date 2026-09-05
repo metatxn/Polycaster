@@ -10,6 +10,7 @@ import {
   type LegacyClobCompatibleClient,
   type UnifiedSdkTradingClient,
 } from "@knoww/shared-types/polymarket-unified";
+import { assertOrderCancelled } from "@knoww/shared-types/product-analytics";
 
 export type ClobApiCredentials = {
   apiKey: string;
@@ -145,4 +146,5 @@ export async function cancelClobOrder(
 
   const reason = cancelRejectionReason(result, input.orderId);
   if (reason) throw new Error(reason);
+  assertOrderCancelled(result, input.orderId);
 }

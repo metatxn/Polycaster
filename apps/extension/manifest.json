@@ -18,7 +18,7 @@
     },
     "default_title": "Knoww"
   },
-  "permissions": ["storage", "offscreen", "scripting", "sidePanel"],
+  "permissions": ["storage", "offscreen", "scripting", "sidePanel", "alarms"],
   "host_permissions": ["__GENERATED_BY_WEBPACK_BUILD__"],
   "side_panel": {
     "default_path": "sidepanel.html"

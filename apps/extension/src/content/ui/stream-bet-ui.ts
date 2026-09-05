@@ -2,6 +2,7 @@ import {
   type LoadingMessageInput,
   startLoadingMessageUpdates,
 } from "../../loading-messages";
+import { openTrackedDestination } from "../../outbound-analytics";
 import type { Market } from "../../types/market";
 import type { StreamBetHydrateArgs } from "../trading-runtime-types";
 import {
@@ -504,7 +505,11 @@ export function buildStreamBetting(
       seg.onclick = (e) => {
         e.stopPropagation();
         if (isKalshi) {
-          window.open(buildKalshiUrl(market), "_blank", "noopener,noreferrer");
+          openTrackedDestination(
+            buildKalshiUrl(market),
+            "_blank",
+            "noopener,noreferrer"
+          );
           return;
         }
         selectedIdx = i;
@@ -846,7 +851,11 @@ export function buildStreamBetting(
         btn.textContent = "Trade on Kalshi";
         btn.onclick = (e) => {
           e.stopPropagation();
-          window.open(buildKalshiUrl(market), "_blank", "noopener,noreferrer");
+          openTrackedDestination(
+            buildKalshiUrl(market),
+            "_blank",
+            "noopener,noreferrer"
+          );
         };
         break;
       case "connect":

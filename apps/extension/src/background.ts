@@ -19,6 +19,7 @@ import { getAddress } from "viem";
 import {
   flushAnalyticsQueue,
   queueAnalyticsEvent,
+  resetAnalyticsIdentity,
   submitSiteSupportRequest,
 } from "./background/analytics";
 import {
@@ -124,6 +125,7 @@ import {
   type StoredUserSettings,
   type UserSettings,
 } from "./types/settings";
+import { isWebmailUrl, WEBMAIL_HOST_EXCLUDE_PATTERNS } from "./webmail";
 
 // ── Programmatic content script registration ──
 // Instead of declaring content_scripts in manifest.json (which would
@@ -563,9 +565,10 @@ async function showUnsupportedSiteSupportPrompt(
   tabId: number,
   options: { reveal: boolean }
 ): Promise<void> {
-  if (await sendSiteSupportPromptMessage(tabId, options.reveal)) return;
-
   try {
+    const tab = await chrome.tabs.get(tabId);
+    if (isWebmailUrl(tab.url)) return;
+    if (await sendSiteSupportPromptMessage(tabId, options.reveal)) return;
     await injectUnsupportedSiteSupportPrompt(tabId);
     if (options.reveal) {
       await sendSiteSupportPromptMessage(tabId, true);
@@ -834,6 +837,7 @@ async function registerContentScripts(): Promise<void> {
       {
         id: CONTENT_SCRIPT_ID,
         matches: SUPPORTED_MATCH_PATTERNS,
+        excludeMatches: WEBMAIL_HOST_EXCLUDE_PATTERNS,
         js: ["content.js"],
         css: ["markets-panel-navbar.css"],
         runAt: "document_end",
@@ -847,7 +851,10 @@ async function registerContentScripts(): Promise<void> {
       {
         id: UNSUPPORTED_SITE_SUPPORT_SCRIPT_ID,
         matches: UNSUPPORTED_SITE_SUPPORT_MATCH_PATTERNS,
-        excludeMatches: UNSUPPORTED_SITE_SUPPORT_EXCLUDE_PATTERNS,
+        excludeMatches: [
+          ...UNSUPPORTED_SITE_SUPPORT_EXCLUDE_PATTERNS,
+          ...WEBMAIL_HOST_EXCLUDE_PATTERNS,
+        ],
         js: ["unsupported-site.js"],
         css: ["markets-panel-navbar.css", "unsupported-site-prompt.css"],
         runAt: "document_idle",
@@ -1299,13 +1306,23 @@ function broadcastTradingCredentialsUpdated(address: string): void {
   );
 }
 
+// Reconcile recorded orders without loading trading code in the store build.
+if (!__STORE_BUILD__) {
+  const poll = () => {
+    void import(/* webpackMode: "eager" */ "./background/order-analytics")
+      .then((module) => module.pollConfirmedOrders())
+      .catch(() => {});
+  };
+  void chrome.alarms.create("knoww-confirmed-orders", { periodInMinutes: 1 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === "knoww-confirmed-orders") poll();
+  });
+  poll();
+}
+
 /**
- * Mediate CLOB credentials between content, the SW store, and the offscreen
- * trading handler. The offscreen document can't reach the TRUSTED_CONTEXTS-only
- * session store, so the SW:
- *   - injects creds into credential-bearing ops before forwarding;
- *   - persists creds from the derive response and relays a method-only result.
- * Content never sends or receives the raw credentials.
+ * Mediate credentials between content, trusted session storage, and offscreen.
+ * Content receives only the derivation result, never raw credentials.
  */
 function forwardToOffscreen(
   message: unknown,
@@ -1337,6 +1354,44 @@ function forwardToOffscreen(
         payload,
         tabId
       );
+
+      if (
+        !__STORE_BUILD__ &&
+        msg.type === "trading:place-order" &&
+        msg.address &&
+        result?.ok &&
+        "data" in result
+      ) {
+        const order = message as {
+          side?: string;
+          orderType?: string;
+          tokenId?: string;
+          size?: number;
+          amount?: number;
+        };
+        try {
+          const observer = await import(
+            /* webpackMode: "eager" */ "./background/order-analytics"
+          );
+          void observer
+            .rememberAcceptedOrder(result.data, msg.address, {
+              surface: "trading_service",
+              side: order.side,
+              token_id: order.tokenId,
+              clob_order_type: order.orderType,
+              order_type:
+                order.orderType === "GTC" || order.orderType === "GTD"
+                  ? "LIMIT"
+                  : "MARKET",
+              requested_shares: order.size,
+              requested_amount: order.amount,
+            })
+            .then(() => observer.pollConfirmedOrders())
+            .catch(() => {});
+        } catch {
+          /* Telemetry cannot change the order response. */
+        }
+      }
 
       if (
         msg.type === "trading:derive-credentials" &&
@@ -2702,6 +2757,7 @@ chrome.runtime.onMessage.addListener(
         } finally {
           await clearCachedTradingCredentials();
           await clearExtensionAccessToken();
+          await resetAnalyticsIdentity();
           await chrome.storage.local
             .remove(TRADING_WARM_ELIGIBLE_STORAGE_KEY)
             .catch(() => {});
@@ -3144,6 +3200,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 chrome.action.onClicked.addListener((tab) => {
   if (typeof tab.id !== "number") return;
+  if (isWebmailUrl(tab.url)) return;
 
   const unsupportedHostname = getUnsupportedSiteHostname(tab.url);
   if (unsupportedHostname) {

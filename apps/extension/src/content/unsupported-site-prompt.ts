@@ -2,6 +2,7 @@ import {
   normalizeSiteSupportHostname,
   OPEN_SITE_SUPPORT_PROMPT_MESSAGE,
 } from "../site-support";
+import { isWebmailUrl } from "../webmail";
 import {
   createMarketsPanelNavbar,
   type MarketsPanelNavbar,
@@ -176,6 +177,7 @@ function renderPrompt(hostname: string): {
 export async function mountUnsupportedSitePrompt(
   options: UnsupportedSitePromptOptions = {}
 ): Promise<HTMLElement | null> {
+  if (isWebmailUrl(window.location.href)) return null;
   if (document.getElementById("knoww-site-support-prompt-root")) return null;
 
   const hostname = normalizeSiteSupportHostname(
@@ -187,6 +189,9 @@ export async function mountUnsupportedSitePrompt(
   const send = options.send ?? sendRuntimeMessage;
   const now = options.now ?? Date.now;
   let state = await readState(storage);
+  // Navigation or another mount can finish while storage is loading.
+  if (isWebmailUrl(window.location.href)) return null;
+  if (document.getElementById("knoww-site-support-prompt-root")) return null;
   if (
     state.requestedHostnames.includes(hostname) ||
     (!options.ignoreDismissal &&
@@ -307,12 +312,50 @@ export async function mountUnsupportedSitePrompt(
   return root;
 }
 
+let disposePreviousInstallation: (() => void) | undefined;
+
 export function installUnsupportedSitePrompt(
   options: UnsupportedSitePromptInstallerOptions = {}
-): void {
+): () => void {
+  disposePreviousInstallation?.();
   document.getElementById("knoww-notification-stack")?.remove();
-
   const { runtimeMessages, ...promptOptions } = options;
+
+  let active = true;
+  let previousUrl = window.location.href;
+  const updateRoute = () => {
+    if (!active) return;
+    const currentUrl = window.location.href;
+    if (currentUrl === previousUrl) return;
+    previousUrl = currentUrl;
+    if (isWebmailUrl(currentUrl)) {
+      document.getElementById("knoww-site-support-prompt-root")?.remove();
+      return;
+    }
+    void mountUnsupportedSitePrompt(promptOptions);
+  };
+  // Unlike popstate, currententrychange also covers pushState/replaceState.
+  const navigation = (window as Window & { navigation?: EventTarget })
+    .navigation;
+  navigation?.addEventListener("currententrychange", updateRoute);
+  window.addEventListener("popstate", updateRoute);
+  window.addEventListener("hashchange", updateRoute);
+  const observer = new MutationObserver(updateRoute);
+  if (!navigation) {
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  }
+  const dispose = () => {
+    active = false;
+    observer.disconnect();
+    navigation?.removeEventListener("currententrychange", updateRoute);
+    window.removeEventListener("popstate", updateRoute);
+    window.removeEventListener("hashchange", updateRoute);
+  };
+  disposePreviousInstallation = dispose;
+
   const messages: RuntimeMessagePort = runtimeMessages ?? {
     addListener(listener) {
       chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -321,6 +364,7 @@ export function installUnsupportedSitePrompt(
     },
   };
   messages.addListener((message, sendResponse) => {
+    if (!active) return;
     if (message?.type !== OPEN_SITE_SUPPORT_PROMPT_MESSAGE) return;
     sendResponse({ ok: true, surface: "unsupported-site-prompt" });
     void mountUnsupportedSitePrompt({
@@ -329,5 +373,9 @@ export function installUnsupportedSitePrompt(
     });
   });
 
+  if (isWebmailUrl(window.location.href)) {
+    document.getElementById("knoww-site-support-prompt-root")?.remove();
+  }
   void mountUnsupportedSitePrompt(promptOptions);
+  return dispose;
 }

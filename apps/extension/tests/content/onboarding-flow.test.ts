@@ -13,7 +13,7 @@ describe("install-time extension onboarding", () => {
     );
 
     expect(installHandler).toContain(
-      'chrome.runtime.getURL("onboarding.html")'
+      '`${getKnowwAppUrl()}/extension/connect`'
     );
     expect(installHandler).toContain("chrome.tabs.create");
     expect(installHandler).not.toContain("chrome.runtime.openOptionsPage()");
@@ -29,7 +29,7 @@ describe("install-time extension onboarding", () => {
       "details.reason === chrome.runtime.OnInstalledReason.UPDATE &&\n    __DEV_MODE__"
     );
     expect(
-      installHandler.match(/chrome\.runtime\.getURL\("onboarding\.html"\)/g)
+      installHandler.match(/getKnowwAppUrl\(\)/g)
     ).toHaveLength(2);
   });
 
@@ -122,6 +122,8 @@ describe("install-time extension onboarding", () => {
     expect(setupRoute).toContain("clearOnboardingDemoState");
     expect(setupRoute).not.toContain("openOnboardingDemo");
     expect(setupRoute).not.toContain("demoTabId");
+    expect(setupRoute).not.toContain("openKnowwSidePanel");
+    expect(onboarding).toContain("<InlineSetup");
     expect(demoRoute).toContain("openOnboardingDemo");
     expect(onboardingState).toContain(
       '"http://localhost:8000/extension/connect"'

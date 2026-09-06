@@ -739,6 +739,14 @@ async function main() {
     }
   }
 
+  const walletBundle = await readFile(
+    path.join(distDir, STORE_BUILD ? "content-wallet.js" : "content-trading.js"),
+    "utf8"
+  );
+  if (!/isGlobalCoreDisabled\(\)\{try\{return(?:!0|true)\}/.test(walletBundle)) {
+    failures.push("WalletConnect must compile with global Core sharing disabled");
+  }
+
   for (const filePath of files) {
     const relativePath = relativeDistPath(filePath);
     const pathParts = relativePath.split("/");

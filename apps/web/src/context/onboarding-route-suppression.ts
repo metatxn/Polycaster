@@ -3,6 +3,7 @@ export function isOnboardingSuppressedPath(pathname: string | null): boolean {
 
   return (
     pathname === "/" ||
+    pathname === "/extension/connect" ||
     pathname === "/agent" ||
     pathname.startsWith("/agent/") ||
     pathname === "/privacy" ||

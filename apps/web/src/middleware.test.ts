@@ -7,6 +7,12 @@ afterEach(() => {
 });
 
 describe("middleware security headers", () => {
+  it("allows packaged extension frames only on the extension setup page", () => {
+    const setup = middleware(new NextRequest("https://knoww.app/extension/connect"));
+    const home = middleware(new NextRequest("https://knoww.app/"));
+    expect(setup.headers.get("Content-Security-Policy")).toContain("frame-src 'self' chrome-extension:");
+    expect(home.headers.get("Content-Security-Policy")).not.toContain("chrome-extension:");
+  });
   it("allows managed PostHog proxy scripts and event requests", () => {
     const response = middleware(new NextRequest("https://knoww.app/"));
     const directives = response.headers

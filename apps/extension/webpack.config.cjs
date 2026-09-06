@@ -282,6 +282,7 @@ module.exports = (_env, argv) => {
       offscreen: "./src/offscreen/offscreen.ts",
       content: "./src/content/index.ts",
       onboarding: "./src/onboarding.tsx",
+      "onboarding-host": "./src/onboarding-host.ts",
       options: "./src/options.tsx",
       sidepanel: "./src/sidepanel.ts",
       "unsupported-site": "./src/unsupported-site.ts",
@@ -359,6 +360,7 @@ module.exports = (_env, argv) => {
         },
       },
       new webpack.DefinePlugin({
+        "process.env.DISABLE_GLOBAL_CORE": JSON.stringify("true"),
         __DEV_MODE__: JSON.stringify(devMode),
         __STORE_BUILD__: JSON.stringify(storeBuild),
         // Match the object ProvidePlugin supplies for direct process uses.
@@ -405,6 +407,10 @@ module.exports = (_env, argv) => {
                     buildWarMatches(hostsSource, devMode);
                 }
                 manifest.web_accessible_resources ??= [];
+                manifest.web_accessible_resources.push({
+                  resources: ["onboarding.html"],
+                  matches: ["https://knoww.app/*", ...(devMode ? ["http://localhost/*"] : [])],
+                });
                 manifest.web_accessible_resources.push(
                   buildUnsupportedSiteSupportWebAccessibleResources(hostsSource)
                 );
@@ -541,6 +547,7 @@ module.exports = (_env, argv) => {
         cryptoShimPath
       ),
       new webpack.DefinePlugin({
+        "process.env.DISABLE_GLOBAL_CORE": JSON.stringify("true"),
         __DEV_MODE__: JSON.stringify(devMode),
         __STORE_BUILD__: JSON.stringify(storeBuild),
         "typeof process": JSON.stringify("object"),

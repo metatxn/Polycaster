@@ -9,10 +9,14 @@ const walletConnect = vi.hoisted(() => ({
     resolve(): void;
   }>,
   cleanupError: null as Error | null,
+  initGate: null as Promise<void> | null,
   connectReject: null as ((reason: unknown) => void) | null,
   connectResolve: null as ((session: unknown) => void) | null,
   listeners: new Map<string, (...args: unknown[]) => void>(),
   provider: null as Record<string, unknown> | null,
+  storages: [] as Array<{
+    setItem(key: string, value: unknown): Promise<void>;
+  }>,
   warnings: [] as Array<{ event: string; details: unknown }>,
 }));
 
@@ -26,7 +30,14 @@ vi.mock("@knoww/logger", () => ({
 
 vi.mock("@walletconnect/universal-provider", () => ({
   default: {
-    init: async () => walletConnect.provider,
+    init: async (options: {
+      storage: { setItem(key: string, value: unknown): Promise<void> };
+    }) => {
+      walletConnect.storages.push(options.storage);
+      const provider = walletConnect.provider;
+      await walletConnect.initGate;
+      return provider;
+    },
   },
 }));
 
@@ -40,6 +51,8 @@ function providerMock(name: string): ReturnType<typeof vi.fn> {
 
 beforeEach(() => {
   walletConnect.cleanupError = null;
+  walletConnect.initGate = null;
+  walletConnect.storages.length = 0;
   walletConnect.clientDisconnectRequests.length = 0;
   walletConnect.connectReject = null;
   walletConnect.connectResolve = null;
@@ -58,6 +71,10 @@ beforeEach(() => {
         })
     ),
     client: {
+      core: {
+        relayer: { transportClose: vi.fn(async () => {}) },
+        heartbeat: { stop: vi.fn() },
+      },
       disconnect: vi.fn(
         (request: unknown) =>
           new Promise<void>((resolve, reject) => {
@@ -101,6 +118,133 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("cancel and reconnect do not wait for an abandoned approval promise", async () => {
+  const { WalletConnectBridge } = await import(
+    "../../src/content/trading/walletconnect-bridge"
+  );
+  void WalletConnectBridge.connect().catch(() => {});
+  await vi.waitFor(() =>
+    assert.equal(providerMock("connect").mock.calls.length, 1)
+  );
+  let cancelled = false;
+  void WalletConnectBridge.cancel().then(() => {
+    cancelled = true;
+  });
+  await vi.waitFor(() => assert.equal(cancelled, true), { timeout: 250 });
+  void WalletConnectBridge.connect({ forceNew: true }).catch(() => {});
+  await vi.waitFor(
+    () => assert.equal(providerMock("connect").mock.calls.length, 2),
+    { timeout: 250 }
+  );
+  assert.equal(WalletConnectBridge.getState().status, "pairing");
+  assert.equal(walletConnect.storages.length, 2);
+});
+
+test("retired transport closes only after the abandoned attempt settles", async () => {
+  const { WalletConnectBridge } = await import(
+    "../../src/content/trading/walletconnect-bridge"
+  );
+  const attempt = WalletConnectBridge.connect();
+  void attempt.catch(() => {});
+  await vi.waitFor(() => assert.ok(walletConnect.connectReject));
+  const client = walletConnect.provider?.client as {
+    core: { relayer: { transportClose: ReturnType<typeof vi.fn> }; heartbeat: { stop: ReturnType<typeof vi.fn> } };
+  };
+  await WalletConnectBridge.cancel();
+  assert.equal(client.core.relayer.transportClose.mock.calls.length, 0);
+  walletConnect.connectReject?.(new Error("expired"));
+  await assert.rejects(attempt, /expired/);
+  await vi.waitFor(() => assert.equal(client.core.relayer.transportClose.mock.calls.length, 1));
+  assert.equal(client.core.heartbeat.stop.mock.calls.length, 1);
+});
+
+test("cancelled initialization does not block a replacement provider", async () => {
+  let finishInit!: () => void;
+  walletConnect.initGate = new Promise<void>((resolve) => { finishInit = resolve; });
+  const { WalletConnectBridge } = await import(
+    "../../src/content/trading/walletconnect-bridge"
+  );
+  const oldAttempt = WalletConnectBridge.connect();
+  void oldAttempt.catch(() => {});
+  await vi.waitFor(() => assert.equal(walletConnect.storages.length, 1));
+  let cancelled = false;
+  void WalletConnectBridge.cancel().then(() => { cancelled = true; });
+  await vi.waitFor(() => assert.equal(cancelled, true), { timeout: 250 });
+  walletConnect.initGate = null;
+  walletConnect.provider = { ...walletConnect.provider };
+  void WalletConnectBridge.connect({ forceNew: true }).catch(() => {});
+  await vi.waitFor(() => assert.equal(providerMock("connect").mock.calls.length, 1));
+  assert.equal(walletConnect.storages.length, 2);
+  finishInit();
+  await assert.rejects(oldAttempt, /superseded/);
+  assert.equal(providerMock("connect").mock.calls.length, 1);
+});
+
+test("account refresh does not clear a pending QR", async () => {
+  const { WalletConnectBridge } = await import(
+    "../../src/content/trading/walletconnect-bridge"
+  );
+  void WalletConnectBridge.connect().catch(() => {});
+  await vi.waitFor(() =>
+    assert.equal(providerMock("connect").mock.calls.length, 1)
+  );
+  walletConnect.listeners.get("display_uri")?.("test-pairing-uri");
+  if (walletConnect.provider)
+    walletConnect.provider.session = {
+      namespaces: { eip155: { accounts: [] } },
+    };
+  assert.deepEqual(await WalletConnectBridge.getAccounts(), []);
+  assert.equal(WalletConnectBridge.getState().qrUri, "test-pairing-uri");
+  await WalletConnectBridge.cancel();
+});
+
+test("retired provider events, storage writes, and late approval cannot replace the new session", async () => {
+  const { WalletConnectBridge } = await import(
+    "../../src/content/trading/walletconnect-bridge"
+  );
+  const oldAttempt = WalletConnectBridge.connect();
+  void oldAttempt.catch(() => {});
+  await vi.waitFor(() =>
+    assert.equal(providerMock("connect").mock.calls.length, 1)
+  );
+  const oldProvider = walletConnect.provider;
+  const oldListeners = new Map(walletConnect.listeners);
+  const resolveOld = walletConnect.connectResolve;
+  await WalletConnectBridge.cancel();
+  walletConnect.provider = { ...oldProvider, session: null };
+  const newAttempt = WalletConnectBridge.connect({ forceNew: true });
+  await vi.waitFor(() =>
+    assert.equal(providerMock("connect").mock.calls.length, 2)
+  );
+  const newAddress = "0x0000000000000000000000000000000000000002";
+  const newSession = {
+    topic: "new-topic",
+    namespaces: { eip155: { accounts: [`eip155:137:${newAddress}`] } },
+  };
+  if (walletConnect.provider) walletConnect.provider.session = newSession;
+  walletConnect.connectResolve?.(newSession);
+  assert.deepEqual(await newAttempt, [newAddress]);
+  oldListeners.get("display_uri")?.("obsolete-pairing-uri");
+  oldListeners.get("accountsChanged")?.([ADDRESS]);
+  oldListeners.get("disconnect")?.();
+  await walletConnect.storages[0]?.setItem("late-session", "obsolete");
+  assert.equal(vi.mocked(chrome.storage.local.set).mock.calls.length, 0);
+  const oldSession = {
+    topic: "old-topic",
+    namespaces: { eip155: { accounts: [`eip155:137:${ADDRESS}`] } },
+  };
+  if (oldProvider) oldProvider.session = oldSession;
+  resolveOld?.(oldSession);
+  await vi.waitFor(() =>
+    assert.equal(walletConnect.clientDisconnectRequests.length, 1)
+  );
+  walletConnect.clientDisconnectRequests[0]?.resolve();
+  await assert.rejects(oldAttempt, /superseded/);
+  assert.deepEqual(await WalletConnectBridge.getAccounts(), [newAddress]);
+  assert.equal(WalletConnectBridge.getState().status, "connected");
+  assert.equal(WalletConnectBridge.getState().qrUri, null);
+});
+
 test("provider cleanup rejection keeps the dispatcher cancelled record authoritative", async () => {
   const { WalletConnectBridge } = await import(
     "../../src/content/trading/walletconnect-bridge"
@@ -139,7 +283,7 @@ test("provider cleanup rejection keeps the dispatcher cancelled record authorita
   assert.equal(stateResponse.mock.calls[0]?.[0].data.status, "idle");
 });
 
-test("failed abort retains the pending attempt so forceNew retries cleanup", async () => {
+test("failed abort does not keep the abandoned approval as the active attempt", async () => {
   const { WalletConnectBridge } = await import(
     "../../src/content/trading/walletconnect-bridge"
   );
@@ -151,17 +295,21 @@ test("failed abort retains the pending attempt so forceNew retries cleanup", asy
   walletConnect.cleanupError = new Error("relay cleanup failed");
 
   const failedCancellation = WalletConnectBridge.cancel();
+  const cancellationRejected = assert.rejects(
+    failedCancellation,
+    /relay cleanup failed/
+  );
   await vi.waitFor(() => {
     assert.equal(providerMock("cleanupPendingPairings").mock.calls.length, 1);
   });
   walletConnect.connectReject?.(new Error("stale approval rejected"));
-  await assert.rejects(failedCancellation, /relay cleanup failed/);
+  await cancellationRejected;
   walletConnect.cleanupError = null;
   const retry = WalletConnectBridge.connect({ forceNew: true });
   void retry.catch(() => {});
 
   await vi.waitFor(() => {
-    assert.equal(providerMock("cleanupPendingPairings").mock.calls.length, 2);
+    assert.equal(providerMock("connect").mock.calls.length, 2);
   });
 });
 
@@ -237,19 +385,13 @@ test("delayed stale topic cleanup cannot erase a newer connected session", async
   await vi.waitFor(() => {
     assert.equal(providerMock("connect").mock.calls.length, 1);
   });
-  let cancelSettled = false;
-  const cancellation = WalletConnectBridge.cancel().then(() => {
-    cancelSettled = true;
-  });
+  const resolveStale = walletConnect.connectResolve;
+  const cancellation = WalletConnectBridge.cancel();
+  await cancellation;
   const newerConnection = WalletConnectBridge.connect({ forceNew: true });
   void newerConnection.catch(() => {});
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(cancelSettled, false);
-  assert.equal(
-    providerMock("connect").mock.calls.length,
-    1,
-    "pinned no-op abort must not allow a concurrent second approval"
+  await vi.waitFor(() =>
+    assert.equal(providerMock("connect").mock.calls.length, 2)
   );
 
   const staleSession = {
@@ -259,15 +401,14 @@ test("delayed stale topic cleanup cannot erase a newer connected session", async
     },
   };
   if (walletConnect.provider) walletConnect.provider.session = staleSession;
-  walletConnect.connectResolve?.(staleSession);
+  resolveStale?.(staleSession);
   await vi.waitFor(() => {
     assert.equal(walletConnect.clientDisconnectRequests.length, 1);
   });
-  assert.equal(cancelSettled, false);
   assert.equal(
     providerMock("connect").mock.calls.length,
-    1,
-    "new approval must also wait for stale-topic cleanup"
+    2,
+    "the replacement approval can start while stale cleanup is pending"
   );
   if (walletConnect.provider) walletConnect.provider.session = null;
   walletConnect.clientDisconnectRequests[0]?.resolve();
@@ -316,7 +457,7 @@ test("forceNew retries a retained stale topic cleanup before starting a new appr
   walletConnect.clientDisconnectRequests[0]?.reject(
     new Error("stale topic disconnect failed")
   );
-  await assert.rejects(cancellation, /cleanup failed/i);
+  await cancellation;
   await assert.rejects(staleConnection, /cleanup failed/i);
 
   const newerConnection = WalletConnectBridge.connect({ forceNew: true });
@@ -375,7 +516,7 @@ test("a stale session without a topic remains safely quarantined", async () => {
   if (walletConnect.provider) walletConnect.provider.session = topiclessSession;
   walletConnect.connectResolve?.(topiclessSession);
 
-  await assert.rejects(cancellation, /no cleanup topic/i);
+  await cancellation;
   await assert.rejects(staleConnection, /no cleanup topic/i);
   await assert.rejects(
     WalletConnectBridge.connect({ forceNew: true }),

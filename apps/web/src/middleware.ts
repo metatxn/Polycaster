@@ -115,6 +115,12 @@ function securityHeaderValue(
   value: string,
   pathname: string
 ): string {
+  if (key === "Content-Security-Policy" && pathname === "/extension/connect") {
+    return value.replace(
+      "frame-src 'self'",
+      "frame-src 'self' chrome-extension:"
+    );
+  }
   const isLocalMcpConsole =
     pathname === "/mcp-test" || pathname.startsWith("/mcp-test/");
   if (

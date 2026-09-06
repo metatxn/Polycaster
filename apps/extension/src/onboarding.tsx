@@ -1,6 +1,8 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { getAddress } from "viem";
+import { OnboardingActionButton } from "./onboarding-action-button";
+import { InlineSetup } from "./onboarding-inline-setup";
 import {
   ONBOARDING_DEMO_URL,
   ONBOARDING_METAMASK_INSTALL_URL,
@@ -13,6 +15,8 @@ import {
 } from "./onboarding-state";
 
 const REFRESH_INTERVAL_MS = 2500;
+const EMBEDDED =
+  window.parent !== window && window.location.search === "?embedded=1";
 
 interface RuntimeResponse<T = unknown> {
   ok?: boolean;
@@ -327,7 +331,7 @@ function SetupChecklist({ snapshot }: { snapshot: OnboardingSnapshot }) {
         >
           <span className="check">{milestone.complete ? "✓" : "·"}</span>
           <span>{milestone.label}</span>
-          <small>{milestone.complete ? "Complete" : "Complete in panel"}</small>
+          <small>{milestone.complete ? "Complete" : "Pending"}</small>
         </li>
       ))}
     </ul>
@@ -467,6 +471,8 @@ function OnboardingApp() {
         type: "KNOWW_GET_EXTENSION_ONBOARDING_STATUS",
       });
       const status = statusResponse.data;
+      if (!statusResponse.ok || !status)
+        throw new Error("Setup status unavailable");
       const address = toAnalyticsAddress(status?.address ?? null) ?? null;
       const loggedIn =
         statusResponse.ok === true &&
@@ -556,6 +562,17 @@ function OnboardingApp() {
     let active = true;
 
     void (async () => {
+      if (EMBEDDED) {
+        const response = await sendRuntimeMessage({
+          type: "KNOWW_START_ONBOARDING_SETUP",
+        });
+        if (!response.ok) {
+          setLoading(false);
+          setActionState("error");
+          setNotice("Open setup from the Knoww extension to continue.");
+          return;
+        }
+      }
       const storedProgress = await readProgress();
       if (!active) return;
       progressRef.current = storedProgress;
@@ -603,19 +620,21 @@ function OnboardingApp() {
           welcomeCompletedAt: new Date().toISOString(),
         });
       }
+      if (EMBEDDED) {
+        await refreshStatus();
+        return;
+      }
       const response = await sendRuntimeMessage({
         type: "KNOWW_START_ONBOARDING_SETUP",
       });
       if (response.ok !== true) {
         throw new Error(response.error || "Setup could not be opened");
       }
-      setNotice(
-        "Connect your wallet in the Knoww panel. Return here when it is connected."
-      );
+      setNotice("Continue setup on the Knoww page that just opened.");
       await refreshStatus();
     } catch {
       setActionState("error");
-      setNotice("Knoww couldn't open the setup panel. Try again.");
+      setNotice("Knoww couldn't open setup. Try again.");
     }
   };
 
@@ -654,18 +673,17 @@ function OnboardingApp() {
     window.open(ONBOARDING_DEMO_URL, "_blank", "noopener,noreferrer");
   };
 
-  const openSettings = () => {
-    if (hasExtensionRuntime()) void chrome.runtime.openOptionsPage();
+  const openSettings = async () => {
+    if (hasExtensionRuntime()) await chrome.runtime.openOptionsPage();
   };
 
-  const closeOnboarding = () => {
+  const closeOnboarding = async () => {
     if (!hasExtensionRuntime()) {
       window.close();
       return;
     }
-    chrome.tabs.getCurrent((tab) => {
-      if (typeof tab?.id === "number") void chrome.tabs.remove(tab.id);
-    });
+    const tab = await chrome.tabs.getCurrent();
+    if (typeof tab?.id === "number") await chrome.tabs.remove(tab.id);
   };
 
   const activeIndex = STAGE_INDEX[snapshot.stage];
@@ -746,14 +764,14 @@ function OnboardingApp() {
                     </div>
                     <FeatureList />
                     <div className="actions">
-                      <button
+                      <OnboardingActionButton
                         className="primary-action"
                         type="button"
                         onClick={startSetup}
                         disabled={actionState === "opening"}
                       >
                         Start setup <span aria-hidden="true">→</span>
-                      </button>
+                      </OnboardingActionButton>
                       <span className="duration-note">About 2 minutes</span>
                     </div>
                     {notice && (
@@ -777,34 +795,37 @@ function OnboardingApp() {
                         supported browser wallet or WalletConnect.
                       </p>
                     </div>
-                    <WalletOptions />
-                    <div className="actions">
-                      <button
-                        className="primary-action"
-                        type="button"
-                        onClick={startSetup}
-                        disabled={actionState === "opening"}
-                      >
-                        Continue with a wallet <span aria-hidden="true">→</span>
-                      </button>
-                      <button
-                        className="secondary-action"
-                        type="button"
-                        onClick={installMetaMask}
-                      >
-                        Install MetaMask <span aria-hidden="true">↗</span>
-                      </button>
-                    </div>
+                    {!EMBEDDED && <WalletOptions />}
+                    {!EMBEDDED && (
+                      <div className="actions">
+                        <OnboardingActionButton
+                          className="primary-action"
+                          type="button"
+                          onClick={startSetup}
+                          disabled={actionState === "opening"}
+                        >
+                          Continue with a wallet{" "}
+                          <span aria-hidden="true">→</span>
+                        </OnboardingActionButton>
+                        <OnboardingActionButton
+                          className="secondary-action"
+                          type="button"
+                          onClick={installMetaMask}
+                        >
+                          Install MetaMask <span aria-hidden="true">↗</span>
+                        </OnboardingActionButton>
+                      </div>
+                    )}
                     <SetupFacts />
                     <p className="support-note">
-                      Already have a wallet? Continue and select it in the Knoww
-                      panel. If not, install MetaMask and return to this tab.
+                      Select your wallet below. If you need to install MetaMask,
+                      return to this tab and refresh it after installation.
                       Setup resumes where you left off.
                     </p>
                     <StageNotice
                       notice={notice}
                       error={actionState === "error"}
-                      fallback="Awaiting connection in the Knoww panel"
+                      fallback="Choose a wallet to continue setup"
                     />
                   </>
                 )}
@@ -818,7 +839,7 @@ function OnboardingApp() {
                       <p>
                         Knoww creates your Polymarket trading account and API
                         keys, then asks you to set a USDC allowance. Complete
-                        each prompt in the panel.
+                        each step below and review the prompts in your wallet.
                       </p>
                     </div>
                     {snapshot.address && (
@@ -829,17 +850,18 @@ function OnboardingApp() {
                       </div>
                     )}
                     <SetupChecklist snapshot={snapshot} />
-                    <div className="actions">
-                      <button
-                        className="primary-action"
-                        type="button"
-                        onClick={startSetup}
-                        disabled={actionState === "opening"}
-                      >
-                        Continue in Knoww panel{" "}
-                        <span aria-hidden="true">→</span>
-                      </button>
-                    </div>
+                    {!EMBEDDED && (
+                      <div className="actions">
+                        <OnboardingActionButton
+                          className="primary-action"
+                          type="button"
+                          onClick={startSetup}
+                          disabled={actionState === "opening"}
+                        >
+                          Continue setup <span aria-hidden="true">→</span>
+                        </OnboardingActionButton>
+                      </div>
+                    )}
                     <p className="support-note">
                       Your wallet signs only the account setup and allowance
                       requests. Knoww never receives your private key.
@@ -847,10 +869,16 @@ function OnboardingApp() {
                     <StageNotice
                       notice={notice}
                       error={actionState === "error"}
-                      fallback="Waiting for trading setup in the Knoww panel"
+                      fallback="Complete the remaining setup steps below"
                     />
                   </>
                 )}
+
+                {EMBEDDED &&
+                  (snapshot.stage === "wallet" ||
+                    snapshot.stage === "trading") && (
+                    <InlineSetup onProgress={refreshStatus} />
+                  )}
 
                 {snapshot.stage === "ready" && (
                   <>
@@ -873,13 +901,13 @@ function OnboardingApp() {
                     )}
                     <LivePreview />
                     <div className="actions">
-                      <button
+                      <OnboardingActionButton
                         className="primary-action"
                         type="button"
                         onClick={openDemo}
                       >
                         Open x.com and try it <span aria-hidden="true">↗</span>
-                      </button>
+                      </OnboardingActionButton>
                     </div>
                     <StageNotice
                       notice={notice}
@@ -892,21 +920,21 @@ function OnboardingApp() {
             )}
 
             <div className="stage-footer">
-              <button
+              <OnboardingActionButton
                 className="text-action"
                 type="button"
                 onClick={openSettings}
               >
                 Extension settings <span aria-hidden="true">↗</span>
-              </button>
+              </OnboardingActionButton>
               {snapshot.stage !== "ready" && (
-                <button
+                <OnboardingActionButton
                   className="text-action"
                   type="button"
                   onClick={closeOnboarding}
                 >
                   Skip for now
-                </button>
+                </OnboardingActionButton>
               )}
             </div>
           </div>
@@ -926,3 +954,18 @@ function OnboardingApp() {
 const container = document.getElementById("root");
 if (!container) throw new Error("Onboarding root element was not found.");
 createRoot(container).render(<OnboardingApp />);
+if (EMBEDDED) {
+  document.documentElement.classList.add("onboarding-embedded");
+  const reportHeight = () =>
+    window.parent.postMessage(
+      {
+        type: "knoww:onboarding-height",
+        height: container.scrollHeight,
+      },
+      __DEV_MODE__ && document.referrer.startsWith("http://localhost:8000/")
+        ? "http://localhost:8000"
+        : "https://knoww.app"
+    );
+  new ResizeObserver(reportHeight).observe(container);
+  reportHeight();
+}

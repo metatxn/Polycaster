@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isOnboardingSuppressedPath } from "./onboarding-route-suppression.ts";
 
+test("does not overlay web onboarding on extension setup", () => {
+  assert.equal(isOnboardingSuppressedPath("/extension/connect"), true);
+});
+
 test("suppresses onboarding on the agent dashboard route", () => {
   assert.equal(isOnboardingSuppressedPath("/agent"), true);
 });

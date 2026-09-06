@@ -80,6 +80,7 @@ import {
 import { TRADING_WARM_ELIGIBLE_STORAGE_KEY } from "./content/trading-warm-flag";
 import { canUseProductionReranker } from "./context-promotion";
 import {
+  isEmbeddedOnboardingSender,
   ONBOARDING_DEMO_STATE_KEY,
   ONBOARDING_DEMO_URL,
 } from "./onboarding-state";
@@ -346,7 +347,8 @@ function notifyRequestedSidePanelView(view?: SidePanelView): void {
 }
 
 function isOnboardingPageSender(sender: chrome.runtime.MessageSender): boolean {
-  return sender.url === chrome.runtime.getURL("onboarding.html");
+  return sender.url === chrome.runtime.getURL("onboarding.html") ||
+    isEmbeddedOnboardingSender(sender.url, sender.tab?.url, chrome.runtime.getURL("onboarding.html"), __DEV_MODE__);
 }
 
 function readOnboardingDemoState(): Promise<OnboardingDemoState | null> {
@@ -823,7 +825,15 @@ function forwardToPortfolioSigningTab(
   });
 }
 
-async function registerContentScripts(): Promise<void> {
+let registrationInFlight: Promise<void> | null = null;
+function registerContentScripts(): Promise<void> {
+  registrationInFlight ??= performContentScriptRegistration().finally(() => {
+    registrationInFlight = null;
+  });
+  return registrationInFlight;
+}
+
+async function performContentScriptRegistration(): Promise<void> {
   try {
     const existing = await chrome.scripting.getRegisteredContentScripts({
       ids: [
@@ -845,7 +855,7 @@ async function registerContentScripts(): Promise<void> {
       {
         id: ONBOARDING_WALLET_SETUP_SCRIPT_ID,
         matches: getOnboardingWalletSetupMatchPatterns(__DEV_MODE__),
-        js: ["content.js"],
+        js: ["content.js", "onboarding-host.js"],
         runAt: "document_end",
       },
       {
@@ -1566,20 +1576,19 @@ chrome.runtime.onMessage.addListener(
         return true;
       }
 
-      const openPromise = openKnowwSidePanel({ windowId });
+      if (isEmbeddedOnboardingSender(sender.url, sender.tab?.url, chrome.runtime.getURL("onboarding.html"), __DEV_MODE__)) {
+        portfolioSigningTabId = sender.tab?.id;
+        sendResponse({ ok: true } as BackgroundResponse);
+        return true;
+      }
       const setupTabPromise = openOnboardingWalletSetup(windowId);
-      void persistNotificationPanelSurface("sidebar");
-      const requestedViewPromise = setRequestedSidePanelView("portfolio");
       const clearDemoStatePromise = clearOnboardingDemoState();
       void Promise.all([
-        openPromise,
         setupTabPromise,
-        requestedViewPromise,
         clearDemoStatePromise,
       ])
-        .then(([, setupTab]) => {
+        .then(([setupTab]) => {
           portfolioSigningTabId = setupTab.id;
-          notifyRequestedSidePanelView("portfolio");
           sendResponse({
             ok: true,
             data: { setupTabId: setupTab.id },
@@ -3239,7 +3248,8 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  void registerContentScripts().then(() => refreshOpenUnsupportedSitePrompts());
+  const scriptsReady = registerContentScripts();
+  void scriptsReady.then(() => refreshOpenUnsupportedSitePrompts());
   if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
     void queueAnalyticsEvent({
       event: "extension_installed",
@@ -3247,9 +3257,9 @@ chrome.runtime.onInstalled.addListener((details) => {
         reason: details.reason,
       },
     });
-    void chrome.tabs.create({
-      url: chrome.runtime.getURL("onboarding.html"),
-    });
+    void scriptsReady.then(() => chrome.tabs.create({
+      url: `${getKnowwAppUrl()}/extension/connect`,
+    }));
     return;
   }
 
@@ -3265,8 +3275,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     details.reason === chrome.runtime.OnInstalledReason.UPDATE &&
     __DEV_MODE__
   ) {
-    void chrome.tabs.create({
-      url: chrome.runtime.getURL("onboarding.html"),
-    });
+    void scriptsReady.then(() => chrome.tabs.create({
+      url: `${getKnowwAppUrl()}/extension/connect`,
+    }));
   }
 });

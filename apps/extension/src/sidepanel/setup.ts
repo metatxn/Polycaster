@@ -40,6 +40,10 @@ import {
   writeStoredWalletMode,
 } from "./messaging";
 import { escapeHtml, type TradingWalletMode } from "./shared";
+import {
+  walletConnectProgress,
+  withWalletConnectTimeout,
+} from "./walletconnect-progress";
 
 function getAnalyticsWalletAddress(address: string): string | undefined {
   try {
@@ -567,6 +571,8 @@ export interface PortfolioSetupSurfaceRender {
 }
 
 export interface PortfolioSetupDependencies {
+  onActionStateChange?(label: string | null): void;
+  analyticsSurface?: "portfolio_sidepanel" | "extension_onboarding";
   root: HTMLElement;
   getPortfolioData(): SetupPortfolioData | null;
   reloadPortfolio(): Promise<void>;
@@ -577,6 +583,7 @@ export interface PortfolioSetupDependencies {
 }
 
 export interface PortfolioSetupHandle {
+  isBusy(): boolean;
   resolvePreferredWalletMode(address: string): Promise<TradingWalletMode>;
   reauthSession(address: string): Promise<{ ok: boolean; error?: string }>;
   getSessionAddress(): Promise<string | null>;
@@ -616,6 +623,28 @@ function showPortfolioLoading(
 export function createPortfolioSetup(
   dependencies: PortfolioSetupDependencies
 ): PortfolioSetupHandle {
+  const analyticsSurface =
+    dependencies.analyticsSurface ?? "portfolio_sidepanel";
+  let actionInFlight = false;
+  let actionGeneration = 0;
+  function runAction(action: () => Promise<void>, label = "Working..."): void {
+    if (actionInFlight) return;
+    actionInFlight = true;
+    const generation = ++actionGeneration;
+    dependencies.onActionStateChange?.(label);
+    void action()
+      .catch(() => {
+        if (generation !== actionGeneration) return;
+        portfolioConnectError = "Setup did not finish. Please try again.";
+        portfolioTradingError = portfolioConnectError;
+        dependencies.renderPortfolio();
+      })
+      .finally(() => {
+        if (generation !== actionGeneration) return;
+        actionInFlight = false;
+        dependencies.onActionStateChange?.(null);
+      });
+  }
   let portfolioConnectError: string | null = null;
   let portfolioTradingError: string | null = null;
   let portfolioSetupDismissed = false;
@@ -627,6 +656,7 @@ export function createPortfolioSetup(
   let portfolioWalletConnectToken = 0;
   let portfolioWalletConnectQr: string | null = null;
   let portfolioWalletConnectError: string | null = null;
+  let portfolioWalletConnectPhase = "Preparing mobile-wallet connection...";
   let reconciliationGeneration = 0;
   let reconciliationQueue: Promise<void> = Promise.resolve();
   async function hasPortfolioLegacySafe(
@@ -873,11 +903,12 @@ export function createPortfolioSetup(
             ? `<div class="knoww-pf-wc-qr">${qr}</div>`
             : error
               ? `<div class="knoww-pf-wc-status is-error">${escapeHtml(error)}</div>`
-              : `<div class="knoww-pf-wc-status"><span class="knoww-pf-wc-spinner" aria-hidden="true"></span>Creating your QR...</div>`
+              : `<div class="knoww-pf-wc-status"><span class="knoww-pf-wc-spinner" aria-hidden="true"></span>${escapeHtml(portfolioWalletConnectPhase)}</div>`
         }
       </div>
       <span class="knoww-pf-wc-hint">Works with MetaMask, Rainbow, Trust &amp; any WalletConnect wallet.</span>
       <div class="knoww-portfolio-actions">
+        ${error ? '<button type="button" class="knoww-portfolio-open primary" data-walletconnect-retry>Retry connection</button>' : ""}
         <button type="button" class="knoww-portfolio-open" data-walletconnect-cancel>
           Back to wallets
         </button>
@@ -895,84 +926,120 @@ export function createPortfolioSetup(
     portfolioWalletConnectQr = null;
     portfolioWalletConnectError = null;
     portfolioConnectError = null;
+    portfolioWalletConnectPhase = walletConnectProgress("initializing", false);
     if (container) container.innerHTML = renderPortfolioWalletConnect();
-
-    // Kick off the WalletConnect session in the content script (same rail the
-    // trading panel uses). The pairing URI is generated there and polled below.
-    await sendRuntimeMessage({
-      type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
-      walletUuid: WALLETCONNECT_WALLET_UUID,
-    });
-
-    const deadline = Date.now() + 180_000; // WalletConnect pairing TTL ~3 min.
-    while (
-      portfolioWalletConnectActive &&
-      portfolioWalletConnectToken === token
-    ) {
-      // A finished connection resolves the Knoww session — load and exit.
-      const sessionAddress = await getPortfolioSessionAddress();
-      if (sessionAddress) {
-        portfolioWalletConnectActive = false;
-        portfolioConnectError = null;
-        portfolioTradingError = null;
-        dependencies.invalidatePortfolio();
-        await dependencies.reloadPortfolio();
-        return;
-      }
-
-      const response = await sendRuntimeMessage({
-        type: "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE",
-      });
-      if (portfolioWalletConnectToken !== token) return;
-
-      if (response.ok === false) {
-        portfolioWalletConnectError =
-          response.error || "Could not prepare the WalletConnect QR code.";
-        portfolioWalletConnectQr = null;
-        if (container) container.innerHTML = renderPortfolioWalletConnect();
-        portfolioWalletConnectActive = false;
-        return;
-      }
-
-      const payload = response.data as
-        | {
-            data?: { status?: string; error?: string; qrSvg?: string | null };
-          }
-        | undefined;
-      const wc = payload?.data;
-
-      if (wc?.error) {
-        portfolioWalletConnectError = wc.error;
-        portfolioWalletConnectQr = null;
-      } else if (
-        typeof wc?.qrSvg === "string" &&
-        wc.qrSvg !== portfolioWalletConnectQr
-      ) {
-        portfolioWalletConnectQr = wc.qrSvg;
-        portfolioWalletConnectError = null;
-      }
-
+    const current = () =>
+      portfolioWalletConnectActive && portfolioWalletConnectToken === token;
+    let deadline = Date.now() + 20_000;
+    let pairingReady = false;
+    const bounded = <T>(work: Promise<T>) =>
+      withWalletConnectTimeout(work, Math.min(10_000, deadline - Date.now()));
+    try {
+      const started = await bounded(
+        sendRuntimeMessage({
+          type: "KNOWW_CONNECT_PORTFOLIO_WALLET",
+          walletUuid: WALLETCONNECT_WALLET_UUID,
+        })
+      );
+      if (!current()) return;
       if (
-        container &&
-        container ===
-          dependencies.root.querySelector("[data-sidepanel-portfolio]")
+        started.ok === false ||
+        (started.data as { success?: boolean } | undefined)?.success === false
       ) {
-        container.innerHTML = renderPortfolioWalletConnect();
+        throw new Error(
+          "Could not start the mobile-wallet connection. Please retry."
+        );
       }
+      while (current()) {
+        if (Date.now() >= deadline)
+          throw new Error(
+            pairingReady
+              ? "Wallet approval timed out. Please retry."
+              : "The QR code could not be prepared in time. Please retry."
+          );
+        // A finished connection resolves the Knoww session — load and exit.
+        const sessionAddress = await bounded(getPortfolioSessionAddress());
+        if (!current()) return;
+        if (sessionAddress) {
+          portfolioWalletConnectActive = false;
+          portfolioConnectError = null;
+          portfolioTradingError = null;
+          dependencies.invalidatePortfolio();
+          await dependencies.reloadPortfolio();
+          return;
+        }
 
-      if (Date.now() > deadline) {
-        portfolioWalletConnectError =
-          "The connection request timed out. Go back and try again.";
-        if (container) container.innerHTML = renderPortfolioWalletConnect();
-        portfolioWalletConnectActive = false;
-        return;
+        const response = await bounded(
+          sendRuntimeMessage({
+            type: "KNOWW_GET_PORTFOLIO_WALLETCONNECT_STATE",
+          })
+        );
+        if (!current()) return;
+
+        if (response.ok === false) {
+          throw new Error(
+            "Could not read the mobile-wallet connection state. Please retry."
+          );
+        }
+
+        const payload = response.data as
+          | {
+              data?: { status?: string; error?: string; qrSvg?: string | null };
+            }
+          | undefined;
+        const wc = payload?.data;
+
+        if (wc?.error) {
+          throw new Error(
+            "Could not prepare the wallet connection or QR code. Please retry."
+          );
+        } else if (
+          typeof wc?.qrSvg === "string" &&
+          wc.qrSvg !== portfolioWalletConnectQr
+        ) {
+          portfolioWalletConnectQr = wc.qrSvg;
+          portfolioWalletConnectError = null;
+        }
+        if (
+          !pairingReady &&
+          (portfolioWalletConnectQr || wc?.status === "connected")
+        ) {
+          pairingReady = true;
+          deadline = Date.now() + 180_000;
+        }
+        portfolioWalletConnectPhase = walletConnectProgress(
+          wc?.status ?? "initializing",
+          Boolean(portfolioWalletConnectQr)
+        );
+        dependencies.onActionStateChange?.(portfolioWalletConnectPhase);
+
+        if (
+          container &&
+          container ===
+            dependencies.root.querySelector("[data-sidepanel-portfolio]")
+        ) {
+          container.innerHTML = renderPortfolioWalletConnect();
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 700));
       }
-
-      await new Promise((resolve) => setTimeout(resolve, 700));
+    } catch (error) {
+      if (!current()) return;
+      portfolioWalletConnectError =
+        error instanceof Error
+          ? error.message
+          : "Wallet connection failed. Please retry.";
+      portfolioWalletConnectQr = null;
+      portfolioWalletConnectActive = false;
+      if (container) container.innerHTML = renderPortfolioWalletConnect();
+      void sendRuntimeMessage({ type: "KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT" });
     }
   }
 
   function cancelPortfolioWalletConnect(): void {
+    actionGeneration++;
+    actionInFlight = false;
+    dependencies.onActionStateChange?.(null);
     portfolioWalletConnectActive = false;
     portfolioWalletConnectToken++;
     portfolioWalletConnectQr = null;
@@ -1001,7 +1068,7 @@ export function createPortfolioSetup(
     const walletMode = await resolvePreferredPortfolioWalletMode(ownerAddress);
     const analyticsProperties = {
       product: "extension",
-      surface: "portfolio_sidepanel",
+      surface: analyticsSurface,
       wallet_address: getAnalyticsWalletAddress(ownerAddress),
       wallet_mode: walletMode,
     };
@@ -1098,7 +1165,7 @@ export function createPortfolioSetup(
         event: "trading_account_created",
         properties: {
           product: "extension",
-          surface: "portfolio_sidepanel",
+          surface: analyticsSurface,
           ...(walletAddress ? { wallet_address: walletAddress } : {}),
           walletMode,
           account_kind: "trading_wallet",
@@ -1614,6 +1681,11 @@ export function createPortfolioSetup(
   }
 
   function reset(): void {
+    if (portfolioWalletConnectActive) {
+      void sendRuntimeMessage({ type: "KNOWW_CANCEL_PORTFOLIO_WALLETCONNECT" });
+    }
+    actionGeneration++;
+    actionInFlight = false;
     reconciliationGeneration++;
     portfolioOwnerAddressValue = null;
     portfolioConnectError = null;
@@ -1633,11 +1705,22 @@ export function createPortfolioSetup(
     );
     if (portfolioConnect) {
       const walletUuid = portfolioConnect.dataset.walletUuid;
-      if (walletUuid) void connectPortfolioWallet(walletUuid);
+      if (walletUuid)
+        runAction(
+          () => connectPortfolioWallet(walletUuid),
+          "Connecting wallet. Check your wallet for a request..."
+        );
       return true;
     }
     if (target?.closest("[data-connect-portfolio-walletconnect]")) {
-      void connectPortfolioWalletConnect();
+      runAction(connectPortfolioWalletConnect, "Connecting mobile wallet...");
+      return true;
+    }
+    if (target?.closest("[data-walletconnect-retry]")) {
+      runAction(
+        connectPortfolioWalletConnect,
+        "Preparing mobile-wallet connection..."
+      );
       return true;
     }
     if (target?.closest("[data-walletconnect-cancel]")) {
@@ -1645,8 +1728,9 @@ export function createPortfolioSetup(
       return true;
     }
     if (target?.closest("[data-refresh-portfolio-wallets]")) {
+      if (actionInFlight) return true;
       portfolioWallets = null;
-      void dependencies.reloadPortfolio();
+      runAction(() => dependencies.reloadPortfolio(), "Finding wallets...");
       return true;
     }
     if (target?.closest("[data-install-metamask]")) {
@@ -1656,10 +1740,12 @@ export function createPortfolioSetup(
         properties: {
           provider: "metamask",
           product: "extension",
-          surface: "portfolio_sidepanel",
+          surface: analyticsSurface,
         },
       });
-      void chrome.tabs.create({ url: ONBOARDING_METAMASK_INSTALL_URL });
+      runAction(async () => {
+        await chrome.tabs.create({ url: ONBOARDING_METAMASK_INSTALL_URL });
+      }, "Opening MetaMask installation...");
       return true;
     }
     const deploy = target?.closest<HTMLElement>(
@@ -1667,7 +1753,11 @@ export function createPortfolioSetup(
     );
     if (deploy) {
       const ownerAddress = deploy.dataset.ownerAddress;
-      if (ownerAddress) void deployPortfolioTradingWallet(ownerAddress);
+      if (ownerAddress)
+        runAction(
+          () => deployPortfolioTradingWallet(ownerAddress),
+          "Creating trading account. Check your wallet..."
+        );
       return true;
     }
     const enable = target?.closest<HTMLElement>(
@@ -1675,7 +1765,11 @@ export function createPortfolioSetup(
     );
     if (enable) {
       const ownerAddress = enable.dataset.ownerAddress;
-      if (ownerAddress) void enablePortfolioTrading(ownerAddress);
+      if (ownerAddress)
+        runAction(
+          () => enablePortfolioTrading(ownerAddress),
+          "Setting up API keys. Check your wallet..."
+        );
       return true;
     }
     const approve = target?.closest<HTMLElement>("[data-setup-approve]");
@@ -1685,7 +1779,11 @@ export function createPortfolioSetup(
         "[data-setup-approve-input]"
       );
       const amount = (input?.value || "").trim() || SETUP_APPROVAL_DEFAULT;
-      if (ownerAddress) void approvePortfolioTrading(ownerAddress, amount);
+      if (ownerAddress)
+        runAction(
+          () => approvePortfolioTrading(ownerAddress, amount),
+          "Approving tokens. Check your wallet..."
+        );
       return true;
     }
     if (target?.closest("[data-setup-add-funds]")) {
@@ -1710,20 +1808,27 @@ export function createPortfolioSetup(
       "[data-portfolio-switch-wallet]"
     );
     if (switchButton) {
-      void switchPortfolioWallet(switchButton);
+      runAction(
+        () => switchPortfolioWallet(switchButton),
+        "Switching wallet..."
+      );
       return true;
     }
     const disconnect = target?.closest<HTMLButtonElement>(
       "[data-portfolio-disconnect]"
     );
     if (disconnect) {
-      void disconnectPortfolioWallet(disconnect);
+      runAction(
+        () => disconnectPortfolioWallet(disconnect),
+        "Disconnecting wallet..."
+      );
       return true;
     }
     return false;
   }
 
   return {
+    isBusy: () => actionInFlight,
     resolvePreferredWalletMode: resolvePreferredPortfolioWalletMode,
     reauthSession: reauthPortfolioSession,
     getSessionAddress: getPortfolioSessionAddress,

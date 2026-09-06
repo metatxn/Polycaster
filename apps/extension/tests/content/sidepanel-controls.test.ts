@@ -499,10 +499,7 @@ test("side panel exposes a compact portfolio view without charts", () => {
     ),
     true
   );
-  assert.equal(
-    /portfolioWalletConnectError\s*=\s*response\.error/.test(sidepanelSource),
-    true
-  );
+  assert.equal(/data-walletconnect-retry/.test(sidepanelSource), true);
   assert.equal(
     /KNOWW_GET_PORTFOLIO_TRADING_STATUS/.test(backgroundSource),
     true

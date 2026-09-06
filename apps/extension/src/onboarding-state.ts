@@ -12,6 +12,19 @@ export const ONBOARDING_METAMASK_INSTALL_URL =
 export type OnboardingStage = "welcome" | "wallet" | "trading" | "ready";
 export type WalletCheckResult = "connected" | "not_connected";
 
+export function isEmbeddedOnboardingSender(
+  senderUrl: string | undefined,
+  tabUrl: string | undefined,
+  onboardingUrl: string,
+  development: boolean
+): boolean {
+  return (
+    senderUrl === `${onboardingUrl}?embedded=1` &&
+    (tabUrl === ONBOARDING_WALLET_SETUP_PRODUCTION_URL ||
+      (development && tabUrl === ONBOARDING_WALLET_SETUP_DEVELOPMENT_URL))
+  );
+}
+
 export interface OnboardingProgress {
   startedAt?: string;
   welcomeCompletedAt?: string;

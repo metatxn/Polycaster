@@ -42,6 +42,10 @@ type KeyValueStorage = {
 };
 
 class ChromeWalletConnectStorage implements KeyValueStorage {
+  private retired = false;
+  retire(): void {
+    this.retired = true;
+  }
   private key(key: string): string {
     return `${STORAGE_PREFIX}${key}`;
   }
@@ -73,16 +77,19 @@ class ChromeWalletConnectStorage implements KeyValueStorage {
   }
 
   async setItem<T = unknown>(key: string, value: T): Promise<void> {
+    if (this.retired) return;
     await chrome.storage.local.set({ [this.key(key)]: value });
   }
 
   async removeItem(key: string): Promise<void> {
+    if (this.retired) return;
     await chrome.storage.local.remove(this.key(key));
   }
 }
 
 type WalletConnectBridgeSharedState = {
   providerPromise: Promise<UniversalProvider> | null;
+  providerStorage?: ChromeWalletConnectStorage;
   connectPromise: Promise<string[]> | null;
   // Monotonic id for the in-flight connect attempt. Bumped whenever an attempt
   // is superseded (forceNew re-entry or an explicit cancel) so the stale
@@ -199,6 +206,8 @@ function syncAccountsFromSession(provider: UniversalProvider): string[] {
   return accounts;
 }
 
+const initializedProviders = new WeakSet<Promise<UniversalProvider>>();
+
 async function getProvider(): Promise<UniversalProvider> {
   const shared = getSharedState();
   if (shared.providerPromise) return shared.providerPromise;
@@ -211,7 +220,9 @@ async function getProvider(): Promise<UniversalProvider> {
   }
 
   emit({ status: "initializing", qrUri: null, error: null });
-  shared.providerPromise = UniversalProvider.init({
+  const storage = new ChromeWalletConnectStorage();
+  shared.providerStorage = storage;
+  const providerPromise = UniversalProvider.init({
     projectId,
     metadata: {
       name: "Knoww",
@@ -219,17 +230,24 @@ async function getProvider(): Promise<UniversalProvider> {
       url: getWalletConnectMetadataUrl(),
       icons: ["https://knoww.app/logo-256x256.png"],
     },
-    storage: new ChromeWalletConnectStorage(),
+    storage,
     customStoragePrefix: "knoww",
     disableProviderPing: true,
   })
     .then((provider) => {
+      initializedProviders.add(providerPromise);
       if (!shared.attachedProviders.has(provider)) {
         shared.attachedProviders.add(provider);
         provider.on("display_uri", (uri: string) => {
+          if (shared.providerPromise !== providerPromise) return;
           emit({ status: "pairing", qrUri: uri, error: null });
         });
         provider.on("accountsChanged", (accounts: unknown) => {
+          if (
+            shared.providerPromise !== providerPromise ||
+            shared.connectPromise
+          )
+            return;
           shared.connectedAccounts = normalizeAccounts(accounts);
           emit({
             status: shared.connectedAccounts.length > 0 ? "connected" : "idle",
@@ -238,9 +256,15 @@ async function getProvider(): Promise<UniversalProvider> {
           });
         });
         provider.on("session_update", () => {
+          if (
+            shared.providerPromise !== providerPromise ||
+            shared.connectPromise
+          )
+            return;
           syncAccountsFromSession(provider);
         });
         provider.on("disconnect", () => {
+          if (shared.providerPromise !== providerPromise) return;
           shared.connectedAccounts = [];
           emit({ status: "idle", qrUri: null, error: null });
         });
@@ -248,21 +272,26 @@ async function getProvider(): Promise<UniversalProvider> {
       return provider;
     })
     .catch((error) => {
-      shared.providerPromise = null;
+      if (shared.providerPromise === providerPromise)
+        shared.providerPromise = null;
       throw error;
     });
 
-  return shared.providerPromise;
+  shared.providerPromise = providerPromise;
+  return providerPromise;
 }
 
 async function getSessionAccounts(publish = true): Promise<string[]> {
+  const shared = getSharedState();
+  const generation = shared.connectGeneration;
+  if (publish && shared.connectPromise) return [];
   const provider = await getProvider();
+  if (generation !== shared.connectGeneration || (publish && shared.connectPromise)) return [];
   if (!provider.session) return [];
   const accounts = normalizeAccounts(
     provider.session.namespaces.eip155?.accounts ?? []
   );
   if (publish) {
-    const shared = getSharedState();
     shared.connectedAccounts = accounts;
     emit({
       status: accounts.length > 0 ? "connected" : "idle",
@@ -328,7 +357,7 @@ async function polygonRpcRequest<T>(
   }
 }
 
-async function disconnectExistingSession(provider: UniversalProvider) {
+async function disconnectExistingSession(provider: UniversalProvider, generation: number) {
   try {
     if (provider.session) {
       await provider.disconnect();
@@ -336,13 +365,15 @@ async function disconnectExistingSession(provider: UniversalProvider) {
   } catch (error) {
     log.warn("disconnect_existing.failed", { error });
   }
+  if (getSharedState().connectGeneration !== generation) return;
   getSharedState().connectedAccounts = [];
   emit({ status: "idle", qrUri: null, error: null });
 }
 
-async function purgeWalletConnectStorage(): Promise<void> {
+async function purgeWalletConnectStorage(generation: number): Promise<void> {
   try {
     const all = await chrome.storage.local.get(null);
+    if (getSharedState().connectGeneration !== generation) return;
     const keys = Object.keys(all).filter((key) =>
       key.startsWith(STORAGE_PREFIX)
     );
@@ -362,16 +393,44 @@ async function purgeWalletConnectStorage(): Promise<void> {
 async function abortPendingConnect(): Promise<void> {
   const shared = getSharedState();
   const pendingConnect = shared.connectPromise;
+  const pendingProvider = shared.providerPromise;
   shared.connectGeneration++;
+  if (pendingConnect) {
+    shared.connectPromise = null;
+    shared.providerPromise = null;
+    shared.providerStorage?.retire();
+    // Retire synchronously so a racing retry cannot receive old storage writes.
+    // Persisted pairing records can remain until SDK expiry; do not purge shared
+    // keys here because the replacement Core may already be using them.
+    shared.connectedAccounts = [];
+    // A late approval is handled by the old attempt's generation check. Its
+    // provider and storage must not publish into the replacement attempt.
+    void pendingConnect.catch(() => {});
+  }
   let cleanupFailure: unknown;
   try {
     await retryRetainedStaleSessionCleanup();
   } catch (error) {
     cleanupFailure = error;
   }
-  if (shared.providerPromise) {
+  if (pendingProvider) {
+    if (pendingConnect && !initializedProviders.has(pendingProvider)) {
+      // An SDK initialization cannot be cancelled. Let it finish off the retry
+      // path; the generation check prevents it from starting a pairing.
+      void Promise.allSettled([pendingConnect]).then(async () => {
+        try {
+          await closeRetiredProvider(await pendingProvider);
+        } catch (error) {
+          log.warn("connect.retired_initialization_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+      if (cleanupFailure) throw cleanupFailure;
+      return;
+    }
     try {
-      const provider = await getProvider();
+      const provider = await pendingProvider;
       await provider.abortPairingAttempt();
       await provider.cleanupPendingPairings();
     } catch (error) {
@@ -380,28 +439,38 @@ async function abortPendingConnect(): Promise<void> {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-  }
-
-  // UniversalProvider 2.23.10 does not actually cancel a pending approval:
-  // abortPairingAttempt is a no-op and cleanupPendingPairings only removes
-  // relay subscriptions. Quarantine reconnects behind the captured attempt so
-  // a late approval cannot race a newer provider.connect and publish last.
-  if (pendingConnect) {
-    try {
-      await pendingConnect;
-    } catch (error) {
-      if (
-        error instanceof StaleSessionCleanupError &&
-        shared.staleSessionCleanup
-      ) {
-        cleanupFailure ??= error;
-      }
+    if (pendingConnect) {
+      void Promise.allSettled([pendingConnect]).then(async () => {
+        try {
+          const provider = await pendingProvider;
+          if (shared.staleSessionCleanup?.provider !== provider) {
+            await closeRetiredProvider(provider);
+          }
+        } catch (error) {
+          log.warn("connect.retired_provider_close_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
     }
   }
 
   if (cleanupFailure) throw cleanupFailure;
-  if (shared.connectPromise === pendingConnect) {
-    shared.connectPromise = null;
+}
+
+const closedRetiredProviders = new WeakSet<UniversalProvider>();
+
+async function closeRetiredProvider(provider: UniversalProvider): Promise<void> {
+  if (closedRetiredProviders.has(provider)) return;
+  closedRetiredProviders.add(provider);
+  try {
+    await provider.client.core.relayer.transportClose();
+  } catch (error) {
+    log.warn("connect.retired_transport_close_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    provider.client.core.heartbeat.stop();
   }
 }
 
@@ -439,10 +508,11 @@ async function retryRetainedStaleSessionCleanup(): Promise<void> {
       topic: descriptor.topic,
       reason: { code: 6000, message: "User disconnected" },
     })
-    .then(() => {
+    .then(async () => {
       if (shared.staleSessionCleanup === descriptor) {
         shared.staleSessionCleanup = null;
       }
+      await closeRetiredProvider(descriptor.provider);
     })
     .catch((error: unknown) => {
       log.warn("connect.stale_session_cleanup_failed", {
@@ -467,7 +537,7 @@ async function cleanupSupersededSession(
   generation: number
 ): Promise<void> {
   const shared = getSharedState();
-  if (shared.connectGeneration === generation || provider.session !== session) {
+  if (shared.connectGeneration === generation) {
     return;
   }
   const topic =
@@ -502,6 +572,7 @@ export const WalletConnectBridge = {
   async connect(options: { forceNew?: boolean } = {}): Promise<string[]> {
     const shared = getSharedState();
     const forceNew = options.forceNew === true;
+    await retryRetainedStaleSessionCleanup();
 
     if (shared.connectPromise) {
       // A non-forced caller (silent reconnect) joins the in-flight attempt.
@@ -518,7 +589,8 @@ export const WalletConnectBridge = {
       try {
         if (forceNew) {
           const provider = await getProvider();
-          await disconnectExistingSession(provider);
+          assertCurrentConnectGeneration(shared, generation);
+          await disconnectExistingSession(provider, generation);
           assertCurrentConnectGeneration(shared, generation);
           if (provider.session) {
             // provider.disconnect() failed and left the session attached —
@@ -529,7 +601,7 @@ export const WalletConnectBridge = {
             // and let a fresh, sessionless provider initialize.
             shared.providerPromise = null;
             shared.connectedAccounts = [];
-            await purgeWalletConnectStorage();
+            await purgeWalletConnectStorage(generation);
             assertCurrentConnectGeneration(shared, generation);
           }
         }
@@ -593,8 +665,10 @@ export const WalletConnectBridge = {
   // Used when the user dismisses the QR so the pending attempt and its relay
   // subscription are released immediately instead of lingering.
   async cancel(): Promise<void> {
+    const generation = getSharedState().connectGeneration + 1;
     await abortPendingConnect();
-    emit({ status: "idle", qrUri: null, error: null });
+    if (getSharedState().connectGeneration === generation)
+      emit({ status: "idle", qrUri: null, error: null });
   },
 
   async getAccounts(): Promise<string[]> {

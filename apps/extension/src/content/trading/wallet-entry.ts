@@ -176,7 +176,11 @@ export function createTradingRuntime(): TradingRuntime {
       try {
         qrSvg = renderWalletConnectQrSvg(wcState.qrUri);
       } catch {
-        qrSvg = null;
+        return {
+          status: "error",
+          error: "The wallet QR code could not be rendered. Please retry.",
+          qrSvg: null,
+        };
       }
     }
     return { status: wcState.status, error: wcState.error, qrSvg };
